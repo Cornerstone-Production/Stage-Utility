@@ -78,12 +78,22 @@ the day's services. Open a service for its own page, described after it.
 busiest service on each of the last eight **days** that type recorded, the
 average across them, and the change against the days before.
 
+The change is **absolute**, not a percentage — *+71 vs prior 8*, or *+1.2 dB vs
+prior 8* under the sound measure — because that is the number you can act on:
+seventy more people is a van, six percent is a conversation. It is green when it
+rises and red when it falls.
+
+It is the difference between the two figures it is derived from, both rounded to
+the precision the tile prints — whole people, tenths of a decibel — so it can
+never disagree with the number above it.
+
 The comparison uses whatever prior days there are, up to eight, and says how
-many — *+6% vs prior 3*. Below **three** prior days it reads *no prior window
-yet* instead: one or two readings are not an average, and a percentage off them
-is noise wearing a direction. Because the count is always on the label, a thin
-comparison is visible as one rather than passed off as a full eight. The tiles
-sort busiest first.
+many. Below **three** prior days it reads *no prior window yet* instead: one or
+two readings are not an average, and a change off them is noise wearing a
+direction. Because the count is always on the label, a thin comparison is
+visible as one rather than passed off as a full eight. The tiles sort busiest
+first, and the first type seen in that order takes the first colour in the
+palette.
 
 The switch at the top right chooses what is plotted:
 
@@ -108,10 +118,21 @@ number for that reason.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
 or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
-each day's highest reading; a **dot** marks every individual recording, so a week
-that stood for three services still looks like three. A recording with nothing
-under the current measure is not plotted at all, because a service nobody counted
-is not a service of nobody, and one with no meter running is not a silent one.
+each day's highest reading, and every line is the same weight: they are peers,
+not a measurement and its references. A recording with nothing under the current
+measure is not plotted at all, because a service nobody counted is not a service
+of nobody, and one with no meter running is not a silent one.
+
+Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
+change figure, its line, its legend swatch and its milestones. The colour is
+assigned per service type the first time it is seen and then persisted, so it
+does not follow the sort order — it does not change when you switch measure or
+range, when a quiet type has a loud week, or when a type misses a week.
+
+**Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
+tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
+and the figures above the plot together; its legend entry stays, dimmed, and
+clicking it brings the type back. The choice is remembered per browser.
 
 The sound measure reads each recording's peak from the **SPL summary**, which
 this page already loads — not from the per-item records. Recordings made before
@@ -121,8 +142,12 @@ point per recording across up to 52 weeks, and reading a full record for each
 would be hundreds of files to answer one number apiece.
 
 **Milestones** are marked under that chart: a small triangle, a dashed guide up
-the plot, a short label where there is room for one, and the full label on hover.
-They come from two places, and draw alike:
+the plot, and the label where there is room for the whole of it. Where two marks
+are close enough that their labels would touch, the **later** one keeps its
+words and the earlier shows only its triangle — a truncated stub beside a full
+label reads as one broken label and names neither mark. Hovering or tabbing to
+any mark shows its label whatever it did at rest, so nothing is lost. They come
+from two places, and draw alike:
 
 - **Your own list**, in Settings → Advanced → Data → History milestones. A date,
   a label, and optionally one service type. "Moved to two services", "new
@@ -134,9 +159,9 @@ They come from two places, and draw alike:
 
 A milestone scoped to **one service type** draws only while that type's line is
 on, in that line's colour. One that applies to everything stays neutral — a
-colour would claim a series it has not got. The legend under the chart is the
-switch: clicking a service type takes its line off, and its milestones with it.
-That choice is remembered per browser, like the range.
+colour would claim a series it has not got. Hiding a service type takes its
+milestones with it. The legend names the triangles — *▲ milestone · hover for
+the label* — so the marks under the axis are not an unexplained row.
 
 Each mark is focusable as well as hoverable, and carries its full label as its
 accessible name: the triangle is a few pixels of glyph holding the only copy of
@@ -158,23 +183,35 @@ If the milestone list cannot be read at all, the card says *milestones
 unavailable* and the reason is logged. The derived series-change marks still
 draw.
 
-The **calendar** shades a day by how many services were recorded on it, in four
-steps, with everything at four or more on the darkest. There is no dot and no
-count in the cell: the day number sits alone and the shade carries the rest,
-with the count on the cell's tooltip and its accessible name. Today is outlined
-in the accent and the selected day carries a heavier accent ring; neither fills
-the cell, so the shade still shows underneath.
+The **calendar** shades a day **green** by how many services were recorded on it,
+in four steps, with everything at four or more on the darkest. There is no dot
+and no count in the cell: the day number sits alone and the shade carries the
+rest, with the count on the cell's tooltip and its accessible name. Today is
+outlined in the accent and the selected day carries a heavier accent ring;
+neither fills the cell, so the shade still shows underneath — and neither shares
+a colour with the shade, so the accent means "the day you are looking at" and
+nothing else. One sentence under the grid says what the shade is, in place of a
+row of tinted swatches repeating the grid above it.
 
-The **list** beside it is the selected day's services. Each row carries the start
-time and service type, the plan title, the series and how many items ran, then
-four figures:
+The **list** beside it is the **whole month the calendar is showing**, grouped by
+day, newest first — paging the calendar pages the list. Clicking a day scrolls
+to that day's group and rings it; it does not hide the rest of the month.
+
+A column header is drawn once, under the first day's label, then a row per
+service: the start time with the service type under it, the plan title with its
+series and item count under that, and four figures. Each figure's caption sits
+under its value.
 
 | | |
 |---|---|
-| Peak attendance | the most people in the room at once |
+| Peak | the most people in the room at once |
 | Ran | what the service ran; **Running**, counting up, while it is still recording |
-| vs plan | its difference against the planned total — absent while recording, where most of a plan not yet run reads as a service running short |
-| Peak *metric* | the loudest reading on the primary Smaart metric |
+| vs plan | its difference against the planned total — a dash while recording, where most of a plan not yet run reads as a service running short |
+| Peak dB | the loudest reading on the primary Smaart metric, captioned with the metric it read |
+
+A figure a row has nothing for is a dash in its own column, never a closed gap:
+the header is drawn once per group, and a row that slid its columns left would
+misname every figure to the right of the missing one.
 
 They are the service page's own figures, picked out of the same derivation, so a
 row and the page it opens cannot quote different numbers for one recording. A
@@ -192,17 +229,17 @@ history could not be read", or *sound unavailable* on the Trends card — rather
 than showing the copy for a history that is genuinely empty. The reason is on a
 `[history]` line on the server log, one per thing that failed.
 
-Below the list is an **Overview** of how the services themselves ran — how many,
-their average length, average start against the scheduled time, and average
-per-item overrun — plus the average sound level, which Trends does not plot.
-Right-click it (or tap and hold) to pick the Smaart metric it reports — only
-metrics with a level to report are offered, so a meter that recorded peaks and
-no energy average is not offered as a choice that would come back blank. It carries no attendance figure and no attendance
-chart: Trends, at the top of the page, plots attendance over a chosen range, and
-two charts of the same quantity over different windows disagreed with each
-other.
+**Export** is a button in the Recorded services header. It opens a date range —
+blank for all dates — and a list of sheets, and downloads them as one `.xlsx`.
+It reads only, so it is offered on the shared `/history` link too.
 
-The shared `/history` link shows the same figures; it carries no Delete.
+The page carries no Overview card. Every figure it blended across a service type
+— average length, average start against schedule, average per-item overrun, peak
+and level — is on the service page's own KPI row, against the service it belongs
+to, where it means something specific rather than something all-time.
+
+A row is a summary that opens the service page; Delete lives on that page's
+header, not on the row. The shared `/history` link shows the same figures.
 
 ### The service page
 
@@ -280,8 +317,10 @@ service average.
 Sound plots the **recorded samples**: `spl.csv` holds a reading per second, and
 the chart reads them bucketed (see
 [`/api/spl/history/:key/series`](../reference/api.md)). The solid line is each
-bucket's loudest reading, with its gradient; the dashed line is each bucket's
-energy average. Its y axis is chosen to frame the levels, never anchored at 0 dB.
+bucket's loudest reading, with its gradient; the dashed line is that bucket's
+**Leq** — its equivalent continuous level, energy-averaged across the bucket
+rather than an arithmetic mean of decibels. It is named `Leq` in the legend, in
+the strip and in Customize for that reason. Its y axis is chosen to frame the levels, never anchored at 0 dB.
 While a service is recording the series follows the recorder's own broadcast
 rather than a timer of its own: a re-read the moment a new item goes live, and
 otherwise at most one every ten seconds. Between items the line grows by about a
@@ -295,9 +334,11 @@ flat across the time it ran. A read that FAILS is not that: the chart says
 step as the whole answer, and the server logs the reason on a `[spl-series]`
 line.
 
-Either way an item's peak mark is a tick on the top edge of its block rather than
-at the loudest instant, because the instant is not in the per-item record; hover
-the block and the strip says what it peaked at.
+Either way an item's peak mark is a tick through the middle of its block rather
+than at the loudest instant, because the instant is not in the per-item record.
+It is drawn the full height of the block in the primary line's colour, named
+**Item peak** in the legend, and switched under Chart in Customize. Hover the
+block and the strip says what it peaked at.
 
 **The item lane** is two rows under the axis: pre-service items outlined above,
 in-service items filled below, each spanning the time it actually ran. A block is

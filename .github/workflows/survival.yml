@@ -20,7 +20,16 @@ on:
       - "install.sh"
       - "install.ps1"
       - ".github/workflows/survival.yml"
+  # The same paths on a pull request: three full VMs for a change that cannot
+  # reach the updater is ten minutes of nothing.
   pull_request:
+    paths:
+      - "scripts/survival/**"
+      - "main/services/update/**"
+      - "main/services/updater.ts"
+      - "install.sh"
+      - "install.ps1"
+      - ".github/workflows/survival.yml"
   workflow_dispatch:
 
 permissions:

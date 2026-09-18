@@ -85,23 +85,30 @@ export interface TypeTrend {
   recent: DayPeak[];
   /** Mean of `recent`, rounded. Null when `recent` is empty. */
   average: number | null;
-  /** Mean of the up-to-`TREND_WINDOW` days before `recent`, rounded. Null when
-   *  there are fewer than `MIN_PRIOR_DAYS` of them — see `change`. */
+  /**
+   * Mean of the up-to-`TREND_WINDOW` days before `recent`, rounded. Null when
+   * there are fewer than `MIN_PRIOR_DAYS` of them.
+   *
+   * Below that floor the "average" is one or two readings and a change off it
+   * is noise wearing a direction; above it the tile compares against whatever
+   * it HAS, up to eight, and says how many — a thin comparison is labelled, not
+   * hidden and not dressed up as a full one.
+   */
   priorAverage: number | null;
   /**
-   * Fractional change of `average` against `priorAverage`.
+   * The same two means, UNROUNDED.
    *
-   * Null until there are `MIN_PRIOR_DAYS` prior days to average. Below that the
-   * "average" is one or two readings and a percentage off it is noise wearing a
-   * direction; above it the tile compares against whatever it HAS, up to eight,
-   * and says how many — a thin comparison is labelled, not hidden and not
-   * dressed up as a full one.
+   * The tile rounds them to the precision it prints — whole people, tenths of a
+   * decibel — and takes the change as the difference of those two rounded
+   * numbers, so what it shows is always exactly the difference between the two
+   * figures it is derived from. A change taken from unrounded means prints "+1"
+   * beside two numbers that are equal on screen, which is the bug the old
+   * percentage had.
    *
-   * Computed from the ROUNDED averages, which are the two numbers on screen: a
-   * percentage derived from unrounded means can print "+1%" beside two numbers
-   * that are equal.
+   * Null on exactly the same condition as their rounded pair.
    */
-  change: number | null;
+  averageRaw: number | null;
+  priorAverageRaw: number | null;
   /** How many days the change is measured against. Zero when there is none. */
   priorCount: number;
 }
@@ -190,9 +197,8 @@ export function typeTrends(
     const priorMean = prior.length >= MIN_PRIOR_DAYS ? mean(prior.map((d) => d.v)) : null;
     const rounded = average == null ? null : Math.round(average);
     const priorRounded = priorMean == null ? null : Math.round(priorMean);
-    /** Both windows have a number, and the prior one is something a percentage
-     *  can be taken against. Narrows for the type checker as well as reading
-     *  once. */
+    /** Both windows have a number, and the prior one is something to compare
+     *  against. Narrows for the type checker as well as reading once. */
     const comparable = rounded != null && priorRounded != null && priorRounded > 0;
     out.push({
       serviceTypeId: key || null,
@@ -200,12 +206,12 @@ export function typeTrends(
       recent,
       average: rounded,
       priorAverage: priorRounded,
-      // A prior average of ZERO is not something to divide by, and it is not
-      // something to claim a comparison against either. `change` already
-      // refused it; `priorCount` did not, so a tile could read "no prior window
-      // yet" beside a count of 8 — a label for a comparison that was not made.
-      // One condition, read by both.
-      change: comparable ? (rounded - priorRounded) / priorRounded : null,
+      // A prior average of ZERO is not something to claim a comparison
+      // against. One condition, read by all three, so a tile cannot read "no
+      // prior window yet" beside a count of 8 — a label for a comparison that
+      // was not made.
+      averageRaw: comparable ? average : null,
+      priorAverageRaw: comparable ? priorMean : null,
       priorCount: comparable ? prior.length : 0,
     });
   }

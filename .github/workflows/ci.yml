@@ -1,18 +1,20 @@
 name: CI
 
 on:
-  push:
-    branches: [main, beta]
-  pull_request:
-  # Lets a specific commit be verified on demand — and lets release.yml verify
-  # the version-bump commit it just pushed.
+  # Pull requests only. A push to beta or main is gated by release.yml, which
+  # runs the same four steps over the merged tree before it tags, and marks the
+  # commit it pushes with a `build` status. Running this workflow on the push as
+  # well was the same suite over the same tree a second time (and, via the
+  # dispatch release.yml used to make, a third).
   #
-  # A push made with GITHUB_TOKEN triggers no workflows at all, so the release
-  # bump landed on `beta` with nothing running against it. The release PR's head
-  # IS that commit, so its check list showed only default-setup CodeQL: "all
-  # checks green" on the release PR meant the test suite had not run on the tree
-  # being released. (`[skip ci]` in the bump message was not the cause and
-  # removing it would not have helped.)
+  # The release PR (head beta, base main) is skipped below: its head is a beta
+  # commit that release.yml has already verified and marked, and the merge to
+  # main is verified again by release.yml before the stable tag is cut.
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  # Lets a specific commit be verified on demand.
   workflow_dispatch:
 
 # Least privilege, stated rather than inherited: the repository default is
@@ -22,6 +24,7 @@ permissions:
 
 jobs:
   build:
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

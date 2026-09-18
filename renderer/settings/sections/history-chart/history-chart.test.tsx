@@ -245,16 +245,22 @@ describe("the plot", () => {
     );
   });
 
-  test("a peak mark sits on the block's top edge, clear of its label", () => {
-    // A full-height tick drew straight through the item's own title —
-    // "Trem|ble", "What a|God" — which names the item worse than no mark.
+  test("a peak mark runs the full height of its block", () => {
+    // It was a 4px nub on the top edge, kept short so it would not cross the
+    // item's own title. What that produced was an unexplained coloured chip.
+    // It is full height and drawn UNDER the label instead, and named in the
+    // legend — see the legend test below.
     render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
     const g = document.querySelector("[data-lane-row='service']") as SVGGElement;
     const rect = g.querySelector("[data-lane-segment]") as SVGRectElement;
     const mark = g.querySelector("[data-peak-mark]") as SVGLineElement;
     const top = Number(rect.getAttribute("y"));
     assert.equal(Number(mark.getAttribute("y1")), top);
-    assert.equal(Number(mark.getAttribute("y2")) - top, 4, "the mark reaches down into the label");
+    assert.equal(
+      Number(mark.getAttribute("y2")) - top,
+      Number(rect.getAttribute("height")),
+      "the mark does not span the block",
+    );
   });
 
   test("the time axis is ticked through the service, not only at its ends", () => {
@@ -381,16 +387,20 @@ describe("the legend", () => {
     assert.equal(document.querySelectorAll("[data-series-toggle]").length, 0);
   });
 
-  test("a dashed series gets a dashed swatch, a solid one a dot", () => {
-    // Two identical dots said the two lines were drawn alike when one is a
-    // dashed reference.
+  test("every swatch is the LINE it stands for, dashed when the line is", () => {
+    // A filled dot for the solid series and a rule for the dashed one were two
+    // different kinds of mark for two lines, and on the trend chart — where
+    // every series is a solid line of the same weight — a row of dots said
+    // nothing about which line was which. Both are now rules; only the dashing
+    // differs, which is the only thing that differs on the plot.
     render(chart({
       series: [series(), series({ id: "avg", label: "Avg", role: "secondary", fill: false, dashed: true })],
       onToggleSeries: () => {},
     }));
     const solid = document.querySelector("[data-series-toggle='occupancy'] span") as HTMLElement;
     const dashed = document.querySelector("[data-series-toggle='avg'] span") as HTMLElement;
-    assert.ok(solid.className.includes("rounded-full"), `solid swatch: ${solid.className}`);
+    assert.ok(solid.className.includes("border-t-2"), `solid swatch: ${solid.className}`);
+    assert.ok(!solid.className.includes("border-dashed"), "the solid series got a dashed rule");
     assert.ok(dashed.className.includes("border-dashed"), `dashed swatch: ${dashed.className}`);
     assert.ok(!dashed.className.includes("rounded-full"), "the dashed series got a dot");
   });

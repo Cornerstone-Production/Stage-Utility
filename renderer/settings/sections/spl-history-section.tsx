@@ -7,6 +7,7 @@ import { combineLeq } from "@main/services/spl-leq";
 import {
   CustomizePopover,
   HistoryChart,
+  addDefaultOnce,
   hasStoredChoice,
   readStoredKeys,
   seedStoredKeys,
@@ -138,11 +139,35 @@ const DEFAULT_FIGURES = ["peak", "loudest", "message"];
  *  screen is a view preference, not a recording setting. */
 const SOUND_SERIES = [
   { key: "max", label: "Peak" },
-  { key: "avg", label: "Average" },
+  // "Leq", not "Average": the line IS the bucket's equivalent continuous level,
+  // energy-averaged the way spl-leq.ts computes it. Labelled "Average" it read
+  // as an arithmetic mean of decibels — a different, and lower, number — and
+  // nothing on the page said which of the two was drawn.
+  { key: "avg", label: "Leq" },
 ] as const;
-const SERIES_KEYS = SOUND_SERIES.map((s) => s.key);
+/**
+ * The lane's per-item peak tick, offered beside the two lines.
+ *
+ * SEPARATE from SOUND_SERIES because it is not a line and, unlike the two that
+ * are, it draws in BOTH modes — the raw sample series and the per-item step —
+ * so it is offered in both. It shares their storage entry: all three are "what
+ * is on the sound chart", one per-browser choice.
+ */
+const PEAK_MARKS_KEY = "peaks";
+const PEAK_MARKS_OPTION = { key: PEAK_MARKS_KEY, label: "Item peaks" } as const;
+const SERIES_KEYS = [...SOUND_SERIES.map((s) => s.key), PEAK_MARKS_KEY];
 const SERIES_STORAGE_KEY = "spl:visibleSeries";
-const DEFAULT_SERIES = ["max", "avg"];
+const DEFAULT_SERIES = ["max", "avg", PEAK_MARKS_KEY];
+/**
+ * A browser holding a stored `["max","avg"]` from before the peak ticks were
+ * switchable would never see the new default — a stored list wins, and it
+ * cannot contain a key that did not exist when it was written.
+ *
+ * Module scope, like attendance's, so it lands BEFORE the first `useStoredKeys`
+ * read. In an effect it would run after, and the first paint would show the
+ * ticks off. ONCE, so an operator who then unticks it keeps it unticked.
+ */
+addDefaultOnce(SERIES_STORAGE_KEY, PEAK_MARKS_KEY);
 
 /**
  * Which Smaart metrics this browser surfaces — the table's columns, the
@@ -335,6 +360,21 @@ export function SplDetail({
     for (const it of timeline?.items ?? []) m.set(it.itemId, it.preService ?? false);
     return m;
   }, [timeline]);
+  /**
+   * The planned length of each item, from the TIMELINE record.
+   *
+   * The sound record does not carry one — `SplItemHistory` has a title, a
+   * sequence and per-metric stats and nothing from the plan — so the lane's
+   * PLANNED figure read "—" on every segment of the sound chart while the
+   * identical lane on the attendance chart filled it in. Keyed by `itemId`
+   * alone, like `preById` above: a planned length is a property of the plan
+   * item, not of one run of it.
+   */
+  const plannedById = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const it of timeline?.items ?? []) m.set(it.itemId, it.plannedLengthSec);
+    return m;
+  }, [timeline]);
 
   const primaryKey = shownMetrics[0] ?? null;
   const live = detail.endedAt == null;
@@ -460,7 +500,7 @@ export function SplDetail({
       },
       {
         id: "avg",
-        label: `${raw.metric} average`,
+        label: `${raw.metric} Leq`,
         color: "var(--color-fg-muted)",
         role: "secondary",
         dashed: true,
@@ -507,7 +547,7 @@ export function SplDetail({
       startedAt: it.startedAt,
       endedAt: it.endedAt,
       preService: preById.get(it.itemId) ?? false,
-      plannedSec: null,
+      plannedSec: plannedById.get(it.itemId) ?? null,
       actualSec: it.endedAt ? Math.round((Date.parse(it.endedAt) - Date.parse(it.startedAt)) / 1000) : null,
       peakLabel: st?.max != null ? dB(st.max) : null,
     };
@@ -543,6 +583,7 @@ export function SplDetail({
         series={series}
         items={laneItems}
         window={serviceWindowOf({ timeline, attendance })}
+        peakMarks={seriesKeys.includes(PEAK_MARKS_KEY)}
         yScale={{ kind: "db" }}
         figures={figures}
         live={live}
@@ -565,13 +606,26 @@ export function SplDetail({
           <CustomizePopover
             label="Customize sound"
             groups={[
-              { id: "lines", label: "Chart", options: hasRaw ? SOUND_SERIES.map((s) => ({ ...s })) : [] },
+              {
+                id: "lines",
+                label: "Chart",
+                // The two LINES only exist on the raw sample series. The peak
+                // ticks are drawn in both modes, so they are offered in both —
+                // an option that vanished on an old record would read as the
+                // marks being unexplainable rather than switchable.
+                options: [...(hasRaw ? SOUND_SERIES.map((s) => ({ ...s })) : []), { ...PEAK_MARKS_OPTION }],
+              },
               { id: "figures", label: "Figures", options: SOUND_FIGURES.map((f) => ({ ...f })) },
               { id: "metrics", label: "Smaart metrics", options: allKeys.map((k) => ({ key: k, label: k })) },
             ]}
-            selected={[...(hasRaw ? seriesKeys : []), ...figureKeys, ...shownMetrics]}
+            selected={[
+              ...(hasRaw ? seriesKeys : seriesKeys.filter((k) => k === PEAK_MARKS_KEY)),
+              ...figureKeys,
+              ...shownMetrics,
+            ]}
             onToggle={(key) => {
-              if (hasRaw && SERIES_KEYS.includes(key as (typeof SERIES_KEYS)[number])) return toggleSeries(key);
+              if (key === PEAK_MARKS_KEY) return toggleSeries(key);
+              if (hasRaw && SERIES_KEYS.includes(key)) return toggleSeries(key);
               if (FIGURE_KEYS.includes(key as (typeof FIGURE_KEYS)[number])) return toggleFigure(key);
               return toggleMetric(key);
             }}

@@ -61,6 +61,23 @@ peak mark for the sound chart (a 3px tick in the series colour).
 > peaked at N" — and on the top edge rather than through the middle, because a
 > full-height tick struck through the item's own label.
 >
+> **Reversed on the maintainer's review.** A 4px nub on a block's top edge, in
+> a colour, with nothing on the page naming it, was an unexplained chip. It is
+> the FULL height of the block, drawn under the label rather than shortened to
+> dodge it, named **Item peak** in the legend, and switchable under Chart in
+> Customize.
+>
+> **The lane's PLANNED figure.** The plan to fill it in on the sound chart said
+> to pass `it.plannedLengthSec` the way the attendance section does.
+> `SplItemHistory` has no such field — it is a title, a sequence and per-metric
+> stats — so the section takes it from the TIMELINE record it is already given,
+> keyed by `itemId` like the existing `preService` lookup.
+>
+> **The dashed line is a Leq, and now says so.** It was labelled "Average",
+> which names an arithmetic mean of decibels; the line is the bucket's energy
+> average, which is a different and higher number. The arithmetic was always
+> right and the label was always wrong.
+>
 > The same gap decides what the sound LINE is: a step, each item's Leq held flat
 > across the time it ran, not a sampled curve. And it has no gradient fill — a
 > fill runs to the axis floor, and a dB axis has no floor that means anything.
@@ -111,6 +128,20 @@ KEPT, below Trends — this section describes what leads, not what the page is
 allowed to contain, and removing a working view is not a decision a silence
 makes.
 
+> **Reversed on the maintainer's review of the built page.** The whole-tab v4
+> mockup is the spec for this page, and it has neither. The Overview card is
+> REMOVED: its figures were an all-time blend across one service type, and every
+> one of them is on the service page's own KPI row against the service it
+> belongs to. `OverviewBlend` is deleted with it; `computeOverview` stays,
+> because Home's Recent services card calls it. `spl:getTrendPrefs` /
+> `spl:setTrendPrefs` lose their last renderer caller and are listed in
+> `api-channels.test.ts` with the reason — the stored choice is the operator's
+> own and is not deleted to tidy up.
+>
+> Export is a shipped feature and is MOVED, not removed: a button in the
+> Recorded services header opening the same range-and-sheets builder in a
+> popover.
+
 > **Trimmed after review.** The Overview kept its own average attendance, its
 > peak, and an attendance chart, over a different window than Trends and with a
 > different average — two charts of one quantity on one screen that disagreed.
@@ -128,9 +159,12 @@ makes.
 > The SPL line is the one real loss and is named rather than implied. The
 > chart component itself still serves Home's Recent services card.
 
-**Calendar.** Shade is the number of services that day in four steps. No dots,
-no counts; the shade alone carries it. The day number is centred in its cell.
-Today is outlined in the accent; the selected day carries the accent ring.
+**Calendar.** Shade is the number of services that day in four steps, in GREEN
+— the accent rings today and the selected day on the same grid, so shading with
+it too gave one colour two meanings. No dots, no counts; the shade alone carries
+it. Cells are square. The day number is centred in its cell. Today is outlined
+in the accent; the selected day carries the accent ring. One sentence under the
+grid says what the shade is, in place of the row of tinted swatches.
 
 **List.** Grouped by day. Each row: time and service type, plan title and
 series with item count, then peak attendance, ran, versus plan, and the peak on
@@ -140,16 +174,75 @@ church metering LCeq is not told it peaked at an LAeq it never recorded. The row
 figures are picked out of `serviceKpis` by key rather than derived again, so a
 week reads at a glance and a row cannot disagree with the page it opens.
 
+> **The list is the MONTH, not the day.** The mockup's list is the whole
+> visible month grouped by day, newest first, headed "Showing Sep 2026 · 9
+> services". A list of one day means paging the calendar a day at a time to
+> read a month, with the calendar right beside it. The calendar owns the
+> visible month and reports it through `onMonthChange`; picking a day scrolls
+> to that day's group and rings it rather than filtering the list. There is no
+> "Selected: …" summary card under the calendar — the same two facts are the
+> list's header.
+>
+> **The column header IS built**, contrary to an earlier note here that said it
+> could not be. The objection was real — `serviceRowFigures` drops `vs plan` on
+> a live recording and whenever the plan total is unknown, so a fixed header can
+> name a column a given row has nothing for — but the answer is a dash in that
+> column, not the absence of a header. One `ROW_GRID` track list is read by the
+> header and by every row, and `ROW_COLUMNS` picks the figures BY KEY: taken in
+> order, a live row slid Peak dB under the "VS PLAN" heading.
+>
+> Row shape: the time big with the service type under it, the title with
+> "series · N items" under it, then Peak (green), Ran, vs plan (coloured) and
+> Peak dB, each caption UNDER its value, and a chevron at the right. The level's
+> caption is the metric it read. Below `sm` the figure columns drop and the row
+> stacks.
+>
+> The "8:00 early" chip beside the time is DROPPED rather than folded into the
+> vs-plan caption: a start against schedule and a duration against plan are not
+> the same measurement, and it is already one of the six KPIs on the service
+> page's header. The delete control stays visible rather than moving behind
+> hover — this page is driven on a tablet beside a console, where hover is not
+> a gesture.
+
 > **Corrected during PR 3.** The row needs the FULL SPL record for a peak;
 > `spl:getSummary`, which the list already held, carries a service-level Leq per
-> metric and no peak at all. The selected day's records are fetched — one to
-> four, not a year of them. Everything else on this page, Trends included, is
+> metric and no peak at all. The visible MONTH's records are fetched — a dozen
+> or so, not a year of them. Everything else on this page, Trends included, is
 > computed from records the list already loads, and no route was added for
 > trend data.
 
 **Trends.** A card with one tile per service type: a sparkline of peak
 attendance over the last eight recordings, the average, and the change against
 the eight before.
+
+> **The card is the mockup, and only the mockup.** A title, a one-line
+> subtitle, the tiles, the chart, the legend. In particular there is NO at-rest
+> stat strip between the tiles and the plot: Services / Average peak / Busiest
+> was a fourth summary of the same recordings, blended across service types,
+> which is the statistic the per-type tiles exist to avoid. The strip element
+> stays for hover, empty at rest, with a reserved height so the chart does not
+> jump when the pointer enters the plot.
+>
+> **The tile's change is ABSOLUTE** — "+71 vs prior 8", or "+1.2 dB" under the
+> sound measure — green up and red down, not a percentage and not the series
+> colour. Seventy more people is a van; six percent is a conversation. It is the
+> difference of the two means rounded to the precision the tile prints, so it
+> cannot disagree with the number above it; sound prints a tenth of a decibel
+> on both for that reason.
+>
+> **A colour per service type, assigned busiest-first and then frozen.** The
+> palette is green, blue, orange, neutral, and the first type in the tiles'
+> own busiest-first sort takes the first colour. Assigning over sorted ids gave
+> a church its midweek service in green and its weekend in the third colour.
+>
+> **The y axis frames the data** (`{ kind: "count", banded: true }`) rather than
+> running from zero: three types between 900 and 1,600 on a 0–2,000 axis are
+> three flat lines in the top fifth of the plot. Opt-in, because a single
+> service's attendance chart must keep its zero floor.
+>
+> **Every line is 2px and there are no scatter dots.** The lines are peers, not
+> a measurement and its references, and one mark per recording under a line
+> that summarises them read as noise nobody could name.
 
 > **Extended after review: sound.** A switch on the card plots either peak
 > attendance or the peak LEVEL on the operator's primary Smaart metric, with the
@@ -173,7 +266,7 @@ the eight before.
 > **Relaxed after review.** The comparison uses whatever prior days there are,
 > up to eight, and the tile says how many: "vs prior 3". Below THREE it still
 > reads "no prior window yet", because one or two readings are not an average
-> and a percentage off them is noise wearing a direction. The count being on the
+> and a change off them is noise wearing a direction. The count being on the
 > label is what makes a thin comparison safe to show at all.
 >
 > The floor was four for one round and left every tile on the three-month

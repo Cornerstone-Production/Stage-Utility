@@ -160,6 +160,16 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 /** Everything a rendered node says, whitespace flattened. */
 const text = (el: HTMLElement) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 
+/**
+ * The day the page has SELECTED, off the calendar cell that carries the ring.
+ *
+ * The list shows the whole visible month, so "which rows are present" no longer
+ * says which day is selected — it says which month is up. The selection is the
+ * ringed cell and the ringed group, and this is the cell.
+ */
+const selectedDay = (el: HTMLElement) =>
+  el.querySelector("button[data-selected]")?.getAttribute("data-date") ?? null;
+
 describe("History: a service still in its arrival ramp", () => {
   let ServiceHistorySection: typeof import("./service-history-section.js").ServiceHistorySection;
 
@@ -261,9 +271,13 @@ describe("History: a service still in its arrival ramp", () => {
     await settle();
     await settle();
 
+    // Asserted on the SELECTION, not on which rows are present. The list shows
+    // the whole visible month now, so yesterday's row is on screen either way;
+    // what moves is which day is selected — the ringed calendar cell and the
+    // ringed group in the list.
     const txt = text(view.container);
-    assert.ok(txt.includes("Sunday Gathering"), `today's arriving row is not on the selected day: ${txt}`);
-    assert.ok(!txt.includes("Midweek"), `the page stayed on yesterday's service: ${txt}`);
+    assert.ok(txt.includes("Sunday Gathering"), `today's arriving row is not in the list at all: ${txt}`);
+    assert.equal(selectedDay(view.container), TODAY, `the selection stayed on yesterday: ${txt}`);
   });
 
   test("(f) but a day the operator picked is not taken away from them", async (t) => {
@@ -283,9 +297,12 @@ describe("History: a service still in its arrival ramp", () => {
     await settle();
     await settle();
 
+    // Again on the SELECTION. Today's ramp appearing in the list is fine and
+    // expected — the list is the month. What must not happen is the page
+    // moving the operator off the day they chose.
     const txt = text(view.container);
-    assert.ok(txt.includes("Midweek"), `a day the operator picked was switched away from: ${txt}`);
-    assert.ok(!txt.includes("Sunday Gathering"), `today's row appeared on a day the operator had picked: ${txt}`);
+    assert.ok(txt.includes("Midweek"), `yesterday's service left the list entirely: ${txt}`);
+    assert.equal(selectedDay(view.container), "2026-09-02", `a day the operator picked was switched away from: ${txt}`);
   });
 
   test("(c) a service-timeline:history push for the same key collapses to one normal row", async (t) => {

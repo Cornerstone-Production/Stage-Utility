@@ -120,6 +120,8 @@ describe("IPC channel wiring", () => {
       ["spl:listHistory", "superseded by the service-timeline list; route kept for the HTTP API"],
       ["spl:setVisibleMetrics", "the History metric choice is a per-browser preference now (spl:visibleMetrics in localStorage); the server setting is READ once to seed it — spl:getVisibleMetrics still has a caller — and the route stays for the documented HTTP API"],
       ["spl:deleteHistory", "History deletes all three records via serviceTimeline:delete"],
+      ["spl:getTrendPrefs", "the Overview card these gated is gone from All services; the stored choice is the operator's own and is not deleted to tidy up, and the route stays for the documented HTTP API"],
+      ["spl:setTrendPrefs", "same — nothing writes it now; see spl:getTrendPrefs"],
       ["attendance:deleteHistory", "same — see deleteServiceRecords"],
       ["stage:setNdiEnabled", "NDI schema is dormant on this branch; the UI ships with the native app"],
       ["stage:getRemoteUrl", "the remote URL is read from stage:getState instead"],

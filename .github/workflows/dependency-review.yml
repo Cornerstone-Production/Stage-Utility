@@ -6,7 +6,14 @@
 
 name: Dependency review
 
-on: pull_request
+# Only when the dependency graph can have changed: the action has nothing to
+# say about a PR that leaves the manifest and lockfile alone.
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/dependency-review.yml"
 
 permissions:
   contents: read
