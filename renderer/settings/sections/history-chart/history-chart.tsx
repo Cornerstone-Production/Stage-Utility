@@ -27,6 +27,7 @@ import { formatClock } from "../../../lib/clock-format";
 import { fmtDur } from "../overview-data";
 import {
   areaPathD,
+  dateTicks,
   linePathD,
   nearestIndex,
   niceAxis,
@@ -50,6 +51,25 @@ const GAP_MS = 3 * 60_000;
 const NARROW_PX = 600;
 
 const LANE_FONT = "500 11px \"IBM Plex Mono\", ui-monospace, monospace";
+
+/**
+ * A dated mark under the x axis: a triangle, a dashed guide up the plot, and a
+ * label when there is room for one.
+ *
+ * ONLY the Trends chart passes these. A single service's chart never carries a
+ * milestone — "we moved to two services" is a statement about the history, not
+ * about the 9 o'clock on the 13th, and drawing it across one morning's plot
+ * would read as something that happened during that service.
+ */
+export interface ChartMilestone {
+  id: string;
+  /** Epoch ms. */
+  t: number;
+  label: string;
+  /** The operator's own entry, or one derived from a series title changing.
+   *  Both draw identically; the hover label says which. */
+  kind: "operator" | "series";
+}
 
 export interface HistoryChartProps {
   /** Drawn back to front; the primary series draws last and on top. */
@@ -76,6 +96,17 @@ export interface HistoryChartProps {
   onToggleSeries?: (id: string) => void;
   /** Test seam: the wall clock the live edge and a live item's block run to. */
   nowMs?: number;
+  /**
+   * What the x axis counts. `clock` (the default) is one service, labelled in
+   * times of day; `date` is weeks or a year of recordings, labelled in dates.
+   *
+   * Not inferred from the domain's width: a very long single service and a very
+   * short trend range overlap, and an axis that guesses would relabel itself on
+   * a record somebody had corrected the times of.
+   */
+  xAxis?: "clock" | "date";
+  /** Dated marks under the axis. See ChartMilestone. */
+  milestones?: ChartMilestone[];
 }
 
 const PAD_L = 44;
@@ -85,6 +116,8 @@ const PLOT_H = 150;
 const AXIS_H = 16;
 const LANE_ROW_H = 16;
 const LANE_GAP = 3;
+/** The milestone band: a 6px triangle, then the label under it. */
+const MARK_BAND_H = 24;
 
 export function HistoryChart({
   series,
@@ -98,6 +131,8 @@ export function HistoryChart({
   emptyNote,
   onToggleSeries,
   nowMs,
+  xAxis = "clock",
+  milestones,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -105,6 +140,10 @@ export function HistoryChart({
   const [width, setWidth] = useState(640);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverRow, setHoverRow] = useState<"plot" | "pre" | "service" | null>(null);
+  /** Which milestone the pointer is on, if any. Its own state rather than part
+   *  of `hoverX`: the marks sit BELOW the plot, where the plot's own pointer
+   *  handler has already decided there is nothing under the cursor. */
+  const [hoverMark, setHoverMark] = useState<string | null>(null);
 
   // 1 unit = 1 px: the SVG's viewBox tracks the measured container width rather
   // than a fixed 600, so a measured label width in CSS px can be compared
@@ -132,7 +171,13 @@ export function HistoryChart({
   const plotX1 = W - PAD_R;
   const plotY0 = PAD_T;
   const plotY1 = PAD_T + PLOT_H;
-  const laneY0 = plotY1 + AXIS_H;
+  const marks = milestones ?? [];
+  // The milestone band sits between the axis and the item lane, so a chart that
+  // has both keeps them apart. A chart with no milestones loses the band
+  // entirely rather than carrying 24px of empty height.
+  const markY0 = plotY1 + AXIS_H;
+  const markBandH = marks.length ? MARK_BAND_H : 0;
+  const laneY0 = markY0 + markBandH;
 
   /** What is actually drawn. `series` is the whole offering — see ChartSeries.on. */
   const shown = useMemo(() => series.filter((s) => s.on !== false), [series]);
@@ -156,7 +201,45 @@ export function HistoryChart({
   const project = (p: ChartPoint) => ({ x: xOf(p.t), y: yOf(p.v) });
 
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
-  const axisTicks = useMemo(() => timeTicks(domainStart, domainEnd), [domainStart, domainEnd]);
+  const axisTicks = useMemo(
+    () => (xAxis === "date" ? dateTicks(domainStart, domainEnd) : timeTicks(domainStart, domainEnd)),
+    [domainStart, domainEnd, xAxis],
+  );
+  const axisText = (t: number) =>
+    xAxis === "date"
+      ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : formatClock(new Date(t).toISOString());
+
+  /**
+   * Which ticks get a LABEL. The tick itself always draws.
+   *
+   * Two rules, and the second one was missing. A label that would hang off
+   * either end of the plot is dropped — that one was here from the start. A
+   * label that would touch the previous one it kept is dropped too, which is
+   * the rule a 600px-wide trend chart needs: ten "Aug 24"-sized labels across
+   * 540px of plot ran together into "Jul 13 Jul 20 Jul" with no gap at all.
+   * Seen in Chrome at 600; jsdom measures every box as 0 and could not.
+   *
+   * Greedy from the left, so the labels that survive are evenly spread rather
+   * than clustered at whichever end happened to be walked first.
+   */
+  const labelledTicks = useMemo(() => {
+    const kept = new Set<number>();
+    let lastRight = -Infinity;
+    for (const t of axisTicks) {
+      const x = xOf(t);
+      const half = measure(axisText(t)) / 2;
+      if (x - half < plotX0 - 2 || x + half > plotX1 + 2) continue;
+      // 6px of air. Two labels that merely abut still read as one word.
+      if (x - half < lastRight + 6) continue;
+      kept.add(t);
+      lastRight = x + half;
+    }
+    return kept;
+    // `xOf` and `axisText` are fresh closures every render; what they depend on
+    // is the domain, the plot's width and which axis this is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [axisTicks, domainStart, domainEnd, plotX0, plotX1, xAxis, measure]);
   const segments = useMemo(
     () =>
       Number.isFinite(domainStart)
@@ -445,9 +528,8 @@ export function HistoryChart({
             would hang off either edge is dropped; its tick stays. */}
         {axisTicks.map((t) => {
           const x = xOf(t);
-          const label = formatClock(new Date(t).toISOString());
-          const halfLabel = measure(label) / 2;
-          const fits = x - halfLabel >= plotX0 - 2 && x + halfLabel <= plotX1 + 2;
+          const label = axisText(t);
+          const fits = labelledTicks.has(t);
           return (
             <g key={t} data-axis-tick={t}>
               <line
@@ -476,7 +558,7 @@ export function HistoryChart({
         {/* A domain too short for even one tick still says when it was. */}
         {axisTicks.length === 0 && (
           <text x={plotX0} y={plotY1 + 14} data-axis-label="start" className="fill-fg-subtle font-mono text-[11px] tabular-nums">
-            {formatClock(new Date(domainStart).toISOString())}
+            {axisText(domainStart)}
           </text>
         )}
 
@@ -534,6 +616,60 @@ export function HistoryChart({
                   strokeWidth={3}
                   vectorEffect="non-scaling-stroke"
                 />
+              )}
+            </g>
+          );
+        })}
+
+        {/* Milestones. A dashed guide up the plot, a triangle under the axis,
+            and a label only when one fits in the gap to the next mark — a
+            label is never clipped and never overprints its neighbour. The
+            <title> carries the full one, so hovering answers for the marks that
+            could not be labelled as well as the ones that could. */}
+        {marks.map((m, i) => {
+          const x = xOf(m.t);
+          if (!Number.isFinite(x) || x < plotX0 || x > plotX1) return null;
+          const nextX = i + 1 < marks.length ? xOf(marks[i + 1].t) : plotX1;
+          const room = Math.max(0, Math.min(nextX, plotX1) - x - 6);
+          const label = fitLabel(m.label, room, measure);
+          const hovered = hoverMark === m.id;
+          return (
+            <g
+              key={m.id}
+              data-milestone={m.id}
+              data-milestone-kind={m.kind}
+              onPointerEnter={() => setHoverMark(m.id)}
+              onPointerLeave={() => setHoverMark((cur) => (cur === m.id ? null : cur))}
+            >
+              <title>{m.label}</title>
+              <line
+                x1={x}
+                y1={plotY0}
+                x2={x}
+                y2={plotY1}
+                stroke={hovered ? "var(--color-accent)" : "var(--color-line-strong)"}
+                strokeWidth={1}
+                strokeDasharray="3 4"
+                pointerEvents="none"
+                vectorEffect="non-scaling-stroke"
+              />
+              <path
+                d={`M${x - 4},${markY0 + 6}L${x + 4},${markY0 + 6}L${x},${markY0}Z`}
+                fill={hovered ? "var(--color-accent)" : "var(--color-fg-muted)"}
+              />
+              {/* A generous hit area over the triangle: 8px of glyph is not
+                  something a finger, or a hurried pointer, reliably lands on. */}
+              <rect x={x - 9} y={markY0} width={18} height={MARK_BAND_H} fill="transparent" />
+              {(hovered || label) && (
+                <text
+                  x={x + 6}
+                  y={markY0 + 15}
+                  data-milestone-label={m.id}
+                  className="fill-fg-muted text-[11px]"
+                  pointerEvents="none"
+                >
+                  {hovered ? m.label : label}
+                </text>
               )}
             </g>
           );
@@ -606,6 +742,26 @@ export function HistoryChart({
       </div>
     </div>
   );
+}
+
+/**
+ * The most of `text` that fits in `room` px, or "" when even an ellipsis does
+ * not.
+ *
+ * Nothing is ever clipped, which is the same rule the item lane's labels
+ * follow: a label cut off by the next milestone's guide reads as a different
+ * word. The full label is always in the <title> and appears on hover, so
+ * returning "" loses nothing an operator cannot get at.
+ */
+export function fitLabel(text: string, room: number, measure: (t: string) => number): string {
+  const trimmed = text.trim();
+  if (!trimmed || room <= 0) return "";
+  if (measure(trimmed) <= room) return trimmed;
+  for (let n = trimmed.length - 1; n >= 3; n--) {
+    const candidate = `${trimmed.slice(0, n).trimEnd()}\u2026`;
+    if (measure(candidate) <= room) return candidate;
+  }
+  return "";
 }
 
 function fmt(s: ChartSeries, v: number): string {
