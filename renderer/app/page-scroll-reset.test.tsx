@@ -292,7 +292,7 @@ describe("a tab opens at the top", () => {
     ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     assert.match(
       shell,
-      /data-scroll-restoration-id=\{PAGE_SCROLLER_ID\}[\s\S]{0,400}?scrollPaddingTop:\s*"calc\(var\(--su-history-header-h/,
+      /data-scroll-restoration-id=\{PAGE_SCROLLER_ID\}[\s\S]{0,400}?scrollPaddingTop:\s*"calc\(var\(--su-history-header-inset/,
       "the one scrolling pane must reserve the sticky header's height as scroll padding",
     );
   });

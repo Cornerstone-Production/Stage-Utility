@@ -323,19 +323,19 @@ describe("History service header", () => {
     // nobody writes still parses. jsdom reports 0 for every height, so this
     // asserts the property is SET, not what it is set to.
     const root = document.documentElement;
-    root.style.removeProperty("--su-history-header-h");
-    assert.equal(root.style.getPropertyValue("--su-history-header-h"), "", "not set before mounting");
+    root.style.removeProperty("--su-history-header-inset");
+    assert.equal(root.style.getPropertyValue("--su-history-header-inset"), "", "not set before mounting");
 
     const view = mount();
     assert.notEqual(
-      root.style.getPropertyValue("--su-history-header-h"),
+      root.style.getPropertyValue("--su-history-header-inset"),
       "",
       "the header must publish its height, or every anchor jump lands under it",
     );
 
     view.unmount();
     assert.equal(
-      root.style.getPropertyValue("--su-history-header-h"),
+      root.style.getPropertyValue("--su-history-header-inset"),
       "",
       "a stale height would push the NEXT page's anchors down by a header that is gone",
     );

@@ -108,18 +108,18 @@ export function Shell() {
     <main
       data-scroll-restoration-id={PAGE_SCROLLER_ID}
       // The app's one scroller, so it is the one element that can hold the
-      // scroll padding a sticky page header needs. `--su-history-header-h` is
-      // published by whichever header is mounted and is absent otherwise, in
-      // which case this is 0 and nothing changes.
+      // scroll padding a sticky page header needs.
+      // `--su-history-header-inset` is how much of this pane's top the header
+      // covers, published by whichever header is mounted and absent otherwise —
+      // in which case this is 0.75rem and nothing meaningfully changes.
       //
-      // Scroll PADDING, not only the cards' own scroll margin: a margin covers
-      // the elements that carry it, and the browser also scrolls for things
-      // nobody set one on — a focused input three rows down an Edit times
-      // table, a find-in-page hit, a `scrollIntoView` from a control. Each of
-      // those landed under the header. The per-card margins stay: they are what
-      // puts a card's whole heading in view rather than its first pixel, and
-      // they are what a page whose header is NOT the History one would need.
-      style={{ scrollPaddingTop: "calc(var(--su-history-header-h, 0px) + 0.75rem)" }}
+      // Scroll PADDING, and ONLY this: a scroll MARGIN covers the elements that
+      // carry one, and the browser also scrolls for things nobody set one on —
+      // a focused input three rows down an Edit times table, a find-in-page
+      // hit, a `scrollIntoView` from a control. Each of those landed under the
+      // header. The section cards carry no margin of their own, because the two
+      // would add and overshoot by a header's height.
+      style={{ scrollPaddingTop: "calc(var(--su-history-header-inset, 0px) + 0.75rem)" }}
       className={cn(
         "flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3",
         // `sm:pt-4` is the air between the band and the page. With no band

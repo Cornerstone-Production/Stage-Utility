@@ -247,20 +247,30 @@ export function useSectionNav(ids: readonly string[], headerBottom = 150): strin
 }
 
 /**
- * The custom property a section card's `scroll-margin-top` is read from.
+ * How much of the scroller's top the sticky header covers, in px.
  *
- * The nav's links are real anchors and the header is sticky, so a jump has to
- * be pushed down by the header's OWN height. A fixed `scroll-mt-40` was wrong
- * in a browser at both widths tested — the header is 184px at 1280 and 220px at
- * 600, against 160px of margin — and put each card's heading behind the header
- * it had just jumped past. jsdom reports every height as 0 and could not have
- * caught it.
+ * The header's BOTTOM EDGE measured against the scrolling pane's own top — not
+ * its height. The pane carries 16px of padding above its content and a
+ * `position: sticky` element inside it pins BELOW that padding, so the header's
+ * bottom sits 16px further down than its height says. Reading the height put
+ * every scroll target 16px too high: measured in Chrome at 1280, a focused
+ * field landed at y=240 against a header bottom of 244. And the padding is
+ * conditional (`sm:pt-4`, dropped on a phone and on a full-bleed console), so
+ * it cannot be added as a constant either — the same measurement gave 0px of
+ * pane padding at 600.
+ *
+ * Read by the one scrolling pane's `scroll-padding-top` (shell.tsx), which is
+ * what pushes ANY scroll target clear: an anchor jump, a focused input in the
+ * Edit times table, a find-in-page hit, a `scrollIntoView`. The section cards
+ * carry no scroll margin of their own — scroll padding on the scroller already
+ * covers them, and both would add up and overshoot by a header's height.
+ *
+ * jsdom reports every geometry as 0 and could not have caught any of it; a
+ * fixed `scroll-mt-40` (160px, against a header 184px tall at 1280 and 220px at
+ * 600) shipped here first and parked each card's heading behind the header it
+ * had just jumped past.
  */
-export const HEADER_HEIGHT_VAR = "--su-history-header-h";
-
-/** `scroll-margin-top` for anything the header's nav jumps to. The fallback is
- *  only ever used before the header has measured itself once. */
-export const SECTION_SCROLL_MARGIN = `calc(var(${HEADER_HEIGHT_VAR}, 12rem) + 0.75rem)`;
+export const HEADER_INSET_VAR = "--su-history-header-inset";
 
 export interface ServiceHeaderProps {
   timeline: ServiceTimeline;
@@ -317,14 +327,18 @@ export function ServiceHeader({
   /**
    * The header's own geometry, measured.
    *
-   * Two consumers, one measurement: the cards' `scroll-margin-top` (published
-   * as a custom property, because it has to reach elements this component does
-   * not render) and the section nav's `rootMargin`. Both were fixed numbers
-   * first and both were wrong in a real browser — the header is 184px tall at
-   * 1280 and 220px at 600, against a 160px margin and a 150px root inset, so an
-   * anchor jump parked a card's heading behind the header and the nav named
-   * Attendance while Sound filled the screen. jsdom reports 0 for every height
-   * and cannot see either.
+   * Two consumers, one measurement: the scrolling pane's `scroll-padding-top`
+   * (published as a custom property, because it has to reach an element this
+   * component does not render) and the section nav's `rootMargin`. Both were
+   * fixed numbers first and both were wrong in a real browser — the header is
+   * 184px tall at 1280 and 220px at 600, against a 160px margin and a 150px
+   * root inset, so an anchor jump parked a card's heading behind the header and
+   * the nav named Attendance while Sound filled the screen.
+   *
+   * The INSET is measured against the pane rather than taken as the header's
+   * height, because a sticky element in this pane pins below the pane's own top
+   * padding — see HEADER_INSET_VAR. `rootMargin` wants the viewport-relative
+   * bottom, which is the same edge read against a different origin.
    *
    * A ResizeObserver rather than a one-shot measure: the action group wraps to
    * a second line on a narrow window, and the KPI sub-lines come and go with
@@ -339,14 +353,17 @@ export function ServiceHeader({
     const root = document.documentElement;
     const write = () => {
       const r = el.getBoundingClientRect();
-      root.style.setProperty(HEADER_HEIGHT_VAR, `${Math.round(r.height)}px`);
+      // The app's one scroller, by the name the router knows it by.
+      const pane = el.closest<HTMLElement>("[data-scroll-restoration-id]");
+      const paneTop = pane ? pane.getBoundingClientRect().top : 0;
+      root.style.setProperty(HEADER_INSET_VAR, `${Math.max(0, Math.round(r.bottom - paneTop))}px`);
       setBottom(Math.round(r.bottom));
     };
     write();
     const drop = () => {
-      // Leaving a stale height behind would push the NEXT page's anchors down
-      // by the height of a header no longer on screen.
-      root.style.removeProperty(HEADER_HEIGHT_VAR);
+      // Leaving a stale inset behind would push the NEXT page's scroll targets
+      // down by the height of a header no longer on screen.
+      root.style.removeProperty(HEADER_INSET_VAR);
     };
     if (typeof ResizeObserver === "undefined") return drop;
     const obs = new ResizeObserver(write);
