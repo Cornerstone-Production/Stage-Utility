@@ -54,6 +54,14 @@ export interface StatStripProps {
    * on every tick.
    */
   announce?: boolean;
+  /**
+   * Draw out of flow, over the top of the plot.
+   *
+   * For a chart with NO at-rest figures, where the strip is empty until the
+   * pointer arrives: in flow it is either a void the height of a figure or a
+   * chart that jumps down under the cursor. Only the Trends card passes it.
+   */
+  overlay?: boolean;
 }
 
 /** 20px mono value over an 11px uppercase label, with a hairline before every
@@ -85,7 +93,7 @@ function Figure({ label, value, color, sub, first }: { label: string; value: str
   );
 }
 
-export function StatStrip({ figures, hover, live, right, announce = true }: StatStripProps) {
+export function StatStrip({ figures, hover, live, right, announce = true, overlay = false }: StatStripProps) {
   // Hover wins over live: the operator moved the pointer there to ask about that
   // instant, and a strip that kept answering "now" while the cursor sat on 9:42
   // answered a question nobody asked.
@@ -119,7 +127,17 @@ export function StatStrip({ figures, hover, live, right, announce = true }: Stat
       // shape so it made no difference there, but the service header's KPIs
       // carry a second line on some figures and not others, and bottom-aligning
       // dropped "Peak SPL A Fast" a whole line below the five beside it.
-      className="flex items-start gap-0 overflow-x-auto"
+      className={cn(
+        "flex items-start gap-0 overflow-x-auto",
+        // OVERLAID, not in flow. A strip with no at-rest figures — the Trends
+        // card, which shows none — is zero-high at rest, so reserving its
+        // height left a 44px void between the tiles and the plot, and NOT
+        // reserving it pushed the chart down by a figure's height the moment
+        // the pointer entered. Out of flow it costs nothing at rest and moves
+        // nothing on hover. `pointer-events-none` so it cannot eat the pointer
+        // it exists to report on.
+        overlay && "pointer-events-none absolute inset-x-0 top-0 z-10 rounded-md bg-bg/90 backdrop-blur-sm",
+      )}
       data-history-strip={mode}
       // The strip is the section's live summary: a pointer move must be
       // announced, or a screen reader hears only the at-rest figures forever.

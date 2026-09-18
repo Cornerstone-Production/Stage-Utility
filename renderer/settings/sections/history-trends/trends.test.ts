@@ -86,6 +86,20 @@ describe("a day's peak", () => {
   });
 });
 
+/**
+ * The change a tile prints, as an ABSOLUTE difference, or null when there is no
+ * comparison to make.
+ *
+ * One expression, here, so every case below reads the figure the same way the
+ * card does. The tile rounds both means to the precision it prints and
+ * subtracts those; these fixtures are all whole numbers, so the raw difference
+ * is the same thing.
+ */
+function delta(tile: { averageRaw: number | null; priorAverageRaw: number | null }): number | null {
+  if (tile.averageRaw == null || tile.priorAverageRaw == null) return null;
+  return tile.averageRaw - tile.priorAverageRaw;
+}
+
 describe("a service type's trend tile", () => {
   test("the change is this window's average against the eight DAYS before it", () => {
     // Sixteen Sundays: the first eight average 100, the last eight 120. A 20%
@@ -96,8 +110,8 @@ describe("a service type's trend tile", () => {
     assert.equal(tile.average, 120, "the average is over the RECENT window, not the whole history");
     assert.equal(tile.priorAverage, 100);
     assert.equal(tile.priorCount, 8);
-    assert.ok(tile.change != null);
-    assert.equal(Math.round(tile.change * 1000) / 1000, 0.2, "120 against 100 is +20%");
+    assert.ok(delta(tile) != null);
+    assert.equal(delta(tile), 20, "120 against 100 is +20 people");
   });
 
   test("a day's several services count once, at the busiest", () => {
@@ -115,7 +129,7 @@ describe("a service type's trend tile", () => {
     assert.equal(tile.recent.length, 8, "eight DAYS, not twenty-four recordings");
     assert.equal(tile.average, 1200, "the day's busiest, not the mean of its three services");
     assert.equal(tile.priorAverage, 1000);
-    assert.equal(Math.round((tile.change as number) * 100) / 100, 0.2);
+    assert.equal(delta(tile), 200, "1,200 against 1,000");
   });
 
   test("more than sixteen days still compares eight against the eight before", () => {
@@ -125,7 +139,7 @@ describe("a service type's trend tile", () => {
     const [tile] = typeTrends(weekly("weekend", peaks));
     assert.equal(tile.average, 300);
     assert.equal(tile.priorCount, 8);
-    assert.equal(Math.round((tile.change as number) * 100) / 100, 0.5, "300 against 200 is +50%");
+    assert.equal(delta(tile), 100, "300 against 200 is +100");
   });
 
   test("the tile compares against the prior days it HAS, once there are four", () => {
@@ -137,7 +151,7 @@ describe("a service type's trend tile", () => {
     // One line per case, so two branches adding different ones merge cleanly.
     const at = (n: number) => {
       const [tile] = typeTrends(weekly("weekend", Array(n).fill(100)));
-      return [n, tile.change, tile.priorCount, tile.priorAverage];
+      return [n, delta(tile), tile.priorCount, tile.priorAverage];
     };
     assert.deepEqual(
       [1, 2, 8, 9, 11, 12, 15, 16, 20].map(at),
@@ -166,7 +180,7 @@ describe("a service type's trend tile", () => {
     // comparison that was never made. One condition, read by both.
     const [tile] = typeTrends(weekly("weekend", [...Array(4).fill(0), ...Array(8).fill(150)]));
     assert.equal(tile.priorAverage, 0, "the window is there and its average really is zero");
-    assert.equal(tile.change, null, "nothing is divisible by it");
+    assert.equal(delta(tile), null, "a zero prior window is not something to compare against");
     assert.equal(tile.priorCount, 0, "so nothing was compared against, and the label must not claim otherwise");
   });
 
@@ -178,15 +192,15 @@ describe("a service type's trend tile", () => {
     assert.equal(twelve.priorCount, 4);
     assert.equal(twelve.priorAverage, 100);
     assert.equal(twelve.average, 150);
-    assert.equal(Math.round((twelve.change as number) * 100) / 100, 0.5, "150 against 100 is +50%");
+    assert.equal(delta(twelve), 50, "150 against 100 is +50");
   });
 
   test("the floor is where MIN_PRIOR_DAYS says, not a number typed twice", () => {
     // Pins the constant to the behaviour, so moving one moves both.
     const below = typeTrends(weekly("weekend", Array(TREND_WINDOW + MIN_PRIOR_DAYS - 1).fill(100)))[0];
     const atFloor = typeTrends(weekly("weekend", Array(TREND_WINDOW + MIN_PRIOR_DAYS).fill(100)))[0];
-    assert.equal(below.change, null);
-    assert.equal(atFloor.change, 0);
+    assert.equal(delta(below), null);
+    assert.equal(delta(atFloor), 0);
     assert.equal(atFloor.priorCount, MIN_PRIOR_DAYS);
   });
 
@@ -197,7 +211,7 @@ describe("a service type's trend tile", () => {
     // that says it cannot tell yet.
     const [one] = typeTrends(weekly("weekend", [250]));
     assert.equal(one.average, 250, "one recording still has an average — itself");
-    assert.equal(one.change, null, "with nothing before it, there is no change to show");
+    assert.equal(delta(one), null, "with nothing before it, there is no change to show");
     assert.equal(one.priorCount, 0);
     assert.deepEqual(typeTrends([]), [], "no recordings at all is no tile, not an empty one");
   });
@@ -339,7 +353,7 @@ describe("the sound measure", () => {
     assert.equal(tile.average, 100);
     assert.equal(tile.priorAverage, 94);
     assert.equal(tile.priorCount, 4, "the relaxed floor applies to sound too");
-    assert.ok((tile.change as number) > 0);
+    assert.ok((delta(tile) as number) > 0);
   });
 
   test("a type with no SPL records keeps its tile, with nothing in it", () => {

@@ -119,6 +119,31 @@ export interface HistoryChartProps {
   xAxis?: "clock" | "date";
   /** Dated marks under the axis. See ChartMilestone. */
   milestones?: ChartMilestone[];
+  /**
+   * A right-click on a legend entry, or on the plot itself.
+   *
+   * `id` is the series the entry names, or null for the plot — where a 2px line
+   * is not something a pointer reliably lands on, so the menu is offered for
+   * the chart as a whole and lists every series rather than guessing which one
+   * was aimed at.
+   */
+  onSeriesContextMenu?: (id: string | null, e: React.MouseEvent) => void;
+  /**
+   * Whether an item's `peakLabel` draws its tick on the lane. Default true.
+   *
+   * A chart whose items carry no `peakLabel` never draws one whatever this
+   * says, so only the sound chart has anything to turn off.
+   */
+  peakMarks?: boolean;
+  /**
+   * Draw the stat strip OVER the plot instead of above it.
+   *
+   * For a chart with no at-rest figures: in flow an empty strip is either a
+   * void the height of a figure between whatever is above the chart and the
+   * plot, or a chart that jumps down under the cursor the moment the pointer
+   * arrives. See StatStrip.overlay. Only the Trends card passes it.
+   */
+  stripOverlay?: boolean;
 }
 
 const PAD_L = 44;
@@ -145,6 +170,9 @@ export function HistoryChart({
   nowMs,
   xAxis = "clock",
   milestones,
+  peakMarks = true,
+  onSeriesContextMenu,
+  stripOverlay = false,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -223,6 +251,13 @@ export function HistoryChart({
   });
 
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
+  /** Which marks get WORDS. The rest are a triangle and a hover — see
+   *  keepMilestoneLabels. */
+  const labelledMarks = keepMilestoneLabels(drawnMarks, {
+    xOf: (i) => xOf(drawnMarks[i].t),
+    measure,
+    plotX1,
+  });
   const axisTicks = useMemo(
     () => (xAxis === "date" ? dateTicks(domainStart, domainEnd) : timeTicks(domainStart, domainEnd)),
     [domainStart, domainEnd, xAxis],
@@ -338,6 +373,88 @@ export function HistoryChart({
     );
   }
 
+  /**
+   * The legend, built once and rendered in BOTH branches.
+   *
+   * The empty branch used to drop it, and the legend is the only way a series
+   * comes back: switching every series off left a note saying there was
+   * nothing to draw and no control anywhere on the page that could undo it.
+   */
+  const legend = (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption2 text-fg-muted">
+      {series.map((s) => {
+        const on = s.on !== false;
+        // The swatch IS the line — a 2px rule in the series colour, dashed when
+        // the line is. A filled dot for the solid series and a rule for the
+        // dashed one were two different kinds of mark for two lines, and on the
+        // trend chart, where every series is a solid line of the same weight, a
+        // row of identical dots said nothing about which line was which.
+        const swatch = (
+          <span
+            className={cn("inline-block w-3.5 border-t-2", s.dashed && "border-dashed")}
+            style={{ borderColor: s.color }}
+          />
+        );
+        if (!onToggleSeries) {
+          return (
+            <span key={s.id} className="inline-flex items-center gap-1.5">{swatch}{s.label}</span>
+          );
+        }
+        return (
+          <button
+            key={s.id}
+            type="button"
+            data-series-toggle={s.id}
+            aria-pressed={on}
+            onClick={() => onToggleSeries(s.id)}
+            onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(s.id, e) : undefined}
+            className={cn(
+              "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
+              "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
+              // An off series stays legible — it is a control, not a disabled
+              // one — but reads as off at a glance.
+              !on && "opacity-45 line-through decoration-1",
+            )}
+          >
+            {swatch}
+            {s.label}
+          </button>
+        );
+      })}
+      {/* The lane's peak tick, NAMED. It shipped as an unlabelled coloured chip
+          on an item block, and the first thing anybody asked about the sound
+          chart was what it was. The swatch is the mark: a vertical bar in the
+          primary series' colour, the same thing drawn on the lane. */}
+      {peakMarks && items.some((it) => it.peakLabel) && (
+        <span data-legend-peak-mark className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block h-2.5 w-[3px] rounded-[1px]"
+            style={{ background: shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)" }}
+          />
+          Item peak
+        </span>
+      )}
+      {(hasPre || hasPost) && (
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block size-2.5 rounded-[2px] border border-line-strong"
+            style={{ backgroundImage: "repeating-linear-gradient(45deg, var(--color-line) 0 1px, transparent 1px 3px)" }}
+          />
+          Before / after service
+        </span>
+      )}
+      {/* What the triangles under the axis are. Each is 8px of glyph carrying
+          the only copy of a sentence; without this the chart had a row of
+          unexplained marks on it. Pushed to the right end, away from the series
+          entries, because it names a mark rather than a line. */}
+      {marks.length > 0 && (
+        <span data-legend-milestones className="ml-auto text-fg-subtle">
+          ▲ milestone · hover for the label
+        </span>
+      )}
+    </div>
+  );
+
   if (!all.length) {
     return (
       // THE REF GOES ON BOTH BRANCHES.
@@ -350,16 +467,20 @@ export function HistoryChart({
       // middle of a 1,256px card, for the rest of the page's life.
       <div className="flex flex-col gap-3" ref={hostRef}>
         <StatStrip figures={figures} hover={null} live={null} right={customize} />
-        <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted">
+        <div
+          className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted"
+          onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
+        >
           {emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}
         </div>
+        {legend}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3" ref={hostRef}>
-      <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} />
+    <div className={cn("flex flex-col gap-3", stripOverlay && "relative")} ref={hostRef}>
+      <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} overlay={stripOverlay} />
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -379,6 +500,7 @@ export function HistoryChart({
           setHoverX(null);
           setHoverRow(null);
         }}
+        onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
       >
         <defs>
           {/* 45° hatch for the time outside the service window. A pattern, not a
@@ -465,7 +587,7 @@ export function HistoryChart({
                   d={linePathD(run, project)}
                   fill="none"
                   stroke={s.color}
-                  strokeWidth={s.role === "primary" ? 1.8 : 1.2}
+                  strokeWidth={s.width ?? (s.role === "primary" ? 1.8 : 1.2)}
                   strokeDasharray={s.dashed ? "4 3" : undefined}
                   strokeLinejoin="round"
                   strokeLinecap="round"
@@ -475,29 +597,6 @@ export function HistoryChart({
             </g>
           );
         })}
-
-        {/* One mark per underlying reading, where the line's own nodes are a
-            summary of several — see ChartSeries.dots. Drawn after the lines so
-            a dot is never hidden under the line it belongs to. */}
-        {shown.filter((s) => s.dots?.length).map((s) => (
-          <g key={`dots-${s.id}`} data-series-dots={s.id}>
-            {(s.dots ?? []).map((p, i) => (
-              <circle
-                key={`${p.t}-${i}`}
-                data-series-dot={s.id}
-                cx={xOf(p.t)}
-                cy={yOf(p.v)}
-                r={2.5}
-                fill={s.color}
-                // The plot's own background shows through a dot sitting on the
-                // line, so a cluster reads as several rather than as a blob.
-                stroke="var(--color-bg)"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-          </g>
-        ))}
 
         {/* The stretch that just arrived, drawn in over 200ms on top of the line
             it is already part of.
@@ -518,7 +617,7 @@ export function HistoryChart({
               d={linePathD(tail, project)}
               fill="none"
               stroke={s.color}
-              strokeWidth={s.role === "primary" ? 1.8 : 1.2}
+              strokeWidth={s.width ?? (s.role === "primary" ? 1.8 : 1.2)}
               strokeLinecap="round"
               pathLength={1}
               vectorEffect="non-scaling-stroke"
@@ -610,6 +709,25 @@ export function HistoryChart({
                 vectorEffect="non-scaling-stroke"
                 strokeDasharray={outline ? "3 2" : undefined}
               />
+              {/* Sound only: this item's loudest reading, marked on its block.
+                  FULL segment height, in the series colour. It was a 4px nub on
+                  the top edge, drawn to keep it off the item's own label, and
+                  what that produced was an unexplained blue chip nobody could
+                  identify. Drawn BEFORE the label instead, so the text reads
+                  over the tick rather than the tick being shortened to dodge it,
+                  and named "Item peak" in the legend below. */}
+              {peakMarks && seg.item.peakLabel && w > 8 && (
+                <line
+                  data-peak-mark={seg.item.itemId}
+                  x1={(seg.x0 + seg.x1) / 2}
+                  y1={y}
+                  x2={(seg.x0 + seg.x1) / 2}
+                  y2={y + LANE_ROW_H}
+                  stroke={shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
+                  strokeWidth={3}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
               {label.kind !== "none" && (
                 <text
                   x={seg.x0 + 6}
@@ -623,22 +741,6 @@ export function HistoryChart({
                   {label.text}
                 </text>
               )}
-              {/* Sound only: this item's loudest reading, marked on its block. */}
-              {seg.item.peakLabel && w > 8 && (
-                <line
-                  data-peak-mark={seg.item.itemId}
-                  // The TOP EDGE, not the full height. A full-height tick drew
-                  // straight through the item's own label — "Trem|ble",
-                  // "What a|God" — which is worse than not marking it at all.
-                  x1={(seg.x0 + seg.x1) / 2}
-                  y1={y}
-                  x2={(seg.x0 + seg.x1) / 2}
-                  y2={y + 4}
-                  stroke={shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
-                  strokeWidth={3}
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
             </g>
           );
         })}
@@ -648,11 +750,10 @@ export function HistoryChart({
             label is never clipped and never overprints its neighbour. The
             <title> carries the full one, so hovering answers for the marks that
             could not be labelled as well as the ones that could. */}
-        {drawnMarks.map((m, i) => {
+        {drawnMarks.map((m) => {
           const x = xOf(m.t);
-          const nextX = i + 1 < drawnMarks.length ? xOf(drawnMarks[i + 1].t) : plotX1;
-          const room = Math.max(0, Math.min(nextX, plotX1) - x - 6);
-          const label = fitLabel(m.label, room, measure);
+          // Whole label or none — see keepMilestoneLabels.
+          const label = labelledMarks.has(m.id) ? m.label : "";
           const active = hoverMark === m.id;
           // A scoped mark takes its series' colour, so which line it is about is
           // readable without hovering it. An unscoped one stays neutral: a
@@ -700,18 +801,20 @@ export function HistoryChart({
               <rect x={x - 9} y={markY0} width={18} height={MARK_BAND_H} fill="transparent" />
               {(active || label) && (
                 <text
-                  x={x + 6}
+                  x={x + MARK_LABEL_OFFSET}
                   y={markY0 + 15}
                   data-milestone-label={m.id}
                   className="fill-fg-muted text-[11px]"
                   pointerEvents="none"
                 >
-                  {/* The hovered label is fitted to the SAME room, against the
-                      plot's right edge rather than the next mark — a long label
-                      on the last mark ran off the end of the SVG and was clipped
-                      by the viewBox, which is the one thing the lane's own label
-                      rule forbids. */}
-                  {active ? fitLabel(m.label, Math.max(room, plotX1 - x - 6), measure) : label}
+                  {/* A hovered mark shows its label whether or not it won one at
+                      rest — that is what hovering it is for — but fitted to the
+                      plot's right edge, because a long label on the last mark
+                      ran off the end of the SVG and was clipped by the viewBox,
+                      which is the one thing the lane's own label rule forbids. */}
+                  {active
+                    ? fitLabel(m.label, Math.max(0, plotX1 - x - MARK_LABEL_OFFSET), measure)
+                    : label}
                 </text>
               )}
             </g>
@@ -734,55 +837,7 @@ export function HistoryChart({
         )}
       </svg>
 
-      {/* The legend IS the quick toggle. It lists every series the section
-          offers, drawn or not, and clicking one is the same action as ticking
-          it in Customize — `onToggleSeries` is wired to the same handler, so
-          the two can never disagree. Without a handler it is a plain legend. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption2 text-fg-muted">
-        {series.map((s) => {
-          const on = s.on !== false;
-          const swatch = s.dashed
-            // The swatch is the LINE: a dashed series gets a dashed rule, not
-            // the same filled dot as the solid one beside it. Two identical
-            // dots said the two lines were drawn alike when one is a dashed
-            // reference.
-            ? <span className="inline-block w-3 border-t border-dashed" style={{ borderColor: s.color }} />
-            : <span className="size-2.5 rounded-full" style={{ background: s.color }} />;
-          if (!onToggleSeries) {
-            return (
-              <span key={s.id} className="inline-flex items-center gap-1.5">{swatch}{s.label}</span>
-            );
-          }
-          return (
-            <button
-              key={s.id}
-              type="button"
-              data-series-toggle={s.id}
-              aria-pressed={on}
-              onClick={() => onToggleSeries(s.id)}
-              className={cn(
-                "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
-                "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
-                // An off series stays legible — it is a control, not a
-                // disabled one — but reads as off at a glance.
-                !on && "opacity-45 line-through decoration-1",
-              )}
-            >
-              {swatch}
-              {s.label}
-            </button>
-          );
-        })}
-        {(hasPre || hasPost) && (
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block size-2.5 rounded-[2px] border border-line-strong"
-              style={{ backgroundImage: "repeating-linear-gradient(45deg, var(--color-line) 0 1px, transparent 1px 3px)" }}
-            />
-            Before / after service
-          </span>
-        )}
-      </div>
+      {legend}
     </div>
   );
 }
@@ -790,6 +845,50 @@ export function HistoryChart({
 /** How much air two axis labels need between them. Two that merely abut read as
  *  one word. */
 export const AXIS_LABEL_GAP = 6;
+
+/** How far a milestone's label sits right of its triangle, and how much air two
+ *  of them need between them. */
+export const MARK_LABEL_OFFSET = 6;
+export const MARK_LABEL_GAP = 8;
+
+/**
+ * Which milestones get a label. The triangle always draws.
+ *
+ * ALL OR NOTHING, and the LATER mark wins. Two marks a week apart on a
+ * sixteen-week axis used to give the earlier one an ellipsised stub — "Wor…"
+ * sitting against "Worth the Risk" — which reads as one broken label rather
+ * than as two marks, and names neither of them.
+ *
+ * So a mark is labelled only when its label fits WHOLE in the room before the
+ * next LABELLED mark, and the walk runs right to left so that the later of two
+ * colliding marks is the one that keeps its words. Later, because the right
+ * edge of this chart is the recent end: on a season of history the thing that
+ * happened most recently is the one being read.
+ *
+ * Dropping a label frees the room before it, so a run of three close marks can
+ * still label its last — not none of them.
+ *
+ * The full label is on the mark's `<title>` and its accessible name either way,
+ * so a dropped label is one hover or one tab away, never lost.
+ *
+ * Pure and exported for the same reason `keepAxisLabels` is: as a closure
+ * inside the component it could only be checked through a render that measures
+ * every string as zero, which is to say not at all.
+ */
+export function keepMilestoneLabels(
+  marks: readonly { id: string; label: string }[],
+  opts: { xOf: (index: number) => number; measure: (s: string) => number; plotX1: number },
+): Set<string> {
+  const kept = new Set<string>();
+  let nextLabelledX = opts.plotX1;
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const room = nextLabelledX - opts.xOf(i) - MARK_LABEL_OFFSET - MARK_LABEL_GAP;
+    if (opts.measure(marks[i].label) > room) continue;
+    kept.add(marks[i].id);
+    nextLabelledX = opts.xOf(i);
+  }
+  return kept;
+}
 
 /**
  * Which ticks get a LABEL. The tick itself always draws.

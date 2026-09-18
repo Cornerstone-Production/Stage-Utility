@@ -5,16 +5,16 @@ import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Trash2Icon, ClockIcon, DownloadIcon, EllipsisIcon } from "lucide-react";
+import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
-import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { Popover as PopoverPrimitive } from "radix-ui";
+
+import { confirm, EmptyState, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
-import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
-import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
 import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
@@ -22,17 +22,12 @@ import { useStoredKeysVersion } from "./history-chart";
 import { TrendsCard } from "./history-trends/trends-card";
 import type { TrendRecording } from "./history-trends/trends";
 import {
-  computeOverview,
   summarize,
   fmtDur,
   fmtDelta,
   fmtTime,
-  shortDay,
+
   isCountedItem,
-  trendColor,
-  type OverviewData,
-  type Trend,
-  type TrendTone,
 } from "./overview-data";
 
 function fmtDate(iso: string): string {
@@ -44,6 +39,96 @@ function fmtDay(day: string): string {
   const d = new Date(`${day}T00:00:00`);
   if (Number.isNaN(d.getTime())) return day;
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+/**
+ * A row's surface, now that the list is a CARD.
+ *
+ * Recessed, not another `su-card`. The rows carried the page's own card
+ * treatment while they sat flat on the page, which was right then — the one
+ * column an operator reads down should not be the only thing not on a surface.
+ * Inside a card, a card inside a card flattens the nesting instead, and the
+ * recessed fill is what the Stat tiles and the time editor already use for the
+ * same reason. Both row shapes — the normal one and the arrival-only one — read
+ * it, so they cannot drift apart.
+ */
+const ROW_SURFACE =
+  "flex items-center gap-1 rounded-lg border border-line bg-fill/40 pr-1.5 transition-colors hover:bg-fill";
+
+/**
+ * The grid every row in the Recorded services list shares WITH ITS HEADER.
+ *
+ * One string, used by both, because the header only means anything if it sits
+ * over the columns it names. Two declarations of the same track list is how a
+ * heading ends up one column left of its figures.
+ *
+ * Below `sm` the four figure columns and the chevron are dropped and the row
+ * stacks: six 88px columns do not fit a phone, and a squashed "1,1…" is worse
+ * than a figure you open the service to read.
+ */
+const ROW_GRID =
+  "grid grid-cols-[1fr_1fr] items-center gap-x-3 gap-y-1 "
+  + "sm:grid-cols-[104px_minmax(0,1fr)_repeat(4,84px)_20px] sm:gap-y-0";
+
+/**
+ * The four figure columns, in order, with the heading each one carries.
+ *
+ * Keyed, not positional. `serviceRowFigures` drops `vs plan` on a live
+ * recording and whenever the plan total is unknown, so taking the figures in
+ * order slid Peak dB under the "VS PLAN" heading on exactly the rows an
+ * operator is most likely to be looking at.
+ *
+ * `caption` is what goes UNDER the value when the figure has no `sub` of its
+ * own. For the level it is the METRIC — "LAeq", "SPL A Fast" — because which
+ * meter reading this is matters more on a row than repeating the heading above
+ * it; `serviceRowFigures` labels it "Peak <metric>", and the heading has
+ * already said "peak".
+ */
+const ROW_COLUMNS: {
+  key: string;
+  heading: string;
+  color?: string;
+  caption: (label?: string) => string;
+}[] = [
+  { key: "attendance", heading: "Peak", color: "var(--color-green-9)", caption: () => "peak" },
+  { key: "actual", heading: "Ran", caption: (label) => label ?? "ran" },
+  { key: "vs-plan", heading: "vs plan", caption: () => "vs plan" },
+  { key: "level", heading: "Peak dB", caption: (label) => label?.replace(/^Peak\s+/i, "") ?? "dB" },
+];
+
+/** The column heading row, drawn once per day group. 10px uppercase, over the
+ *  same tracks the rows use — see ROW_GRID. */
+function ServiceRowHeader() {
+  return (
+    <div
+      data-row-header
+      aria-hidden
+      className={cn(ROW_GRID, "max-sm:hidden px-3 pb-0.5 text-[10px] uppercase tracking-wider text-fg-subtle")}
+    >
+      <span>When</span>
+      <span>Service</span>
+      {ROW_COLUMNS.map((c) => (
+        <span key={c.key}>{c.heading}</span>
+      ))}
+      <span />
+    </div>
+  );
+}
+
+/** "September 2026" from a `YYYY-MM`. The list's header names the month the
+ *  calendar beside it is showing, in the same words the calendar uses. */
+function fmtMonth(ym: string | null): string {
+  if (!ym) return "all dates";
+  const d = new Date(`${ym}-01T00:00:00`);
+  if (Number.isNaN(d.getTime())) return ym;
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+/** The anchor a calendar day scrolls to. One definition, read by the element
+ *  that carries the id and by the scroll that looks it up — two spellings is
+ *  how a control that "works" scrolls to nothing. */
+function dayGroupId(day: string): string {
+  return `history-day-${day}`;
 }
 
 
@@ -248,35 +333,18 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // An explicit Overview scope, which STICKS. Without it the scope was derived from
-  // selectedKey — but opening a service hides the overview, and going back cleared
-  // the selection, so the scope snapped straight back to the day's newest service.
-  // On a day with a morning weekend service and an evening event you could never
-  // get the weekend overview to stay up. Null = follow the old derivation.
-  const [overviewType, setOverviewType] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
   const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
   // Baptism sessions (cross-linked to a service by time overlap).
   const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
-  // Attendance records for all services — for the Overview card's avg in-room.
+  // Attendance records for all services — the day rows and the Trends card are
+  // both built from these.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
-  /** One level per service — the SPL trend line's data. A summary, not the
-   *  archive: see splHistoryStore.summary(). */
+  /** One level per service — the sound measure on Trends, and each day row's
+   *  peak. A summary, not the archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
-  /**
-   * The Overview's level preference. Only `metric` is read now — `shown` gated a
-   * trend line on a chart this page no longer draws, and then a figure that has
-   * no reason to be hidden. It is not deleted: it is the operator's own stored
-   * choice, and deleting somebody's data to tidy something up is not a thing
-   * this repo does. Nothing writes it any more. Same treatment as
-   * settings.splVisibleMetrics, for the same reason.
-   */
-  const [splTrend, setSplTrend] = useState<{ shown: boolean; metric: string | null }>({
-    shown: false,
-    metric: null,
-  });
 
   // A live-updating mirror of selectedKey for the service-timeline:history
   // handler below, which subscribes once (empty deps) and would otherwise only
@@ -320,18 +388,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     if (expTo) params.set("to", expTo);
     params.set("include", [...expSheets].join(","));
     window.location.assign(`/api/history/export?${params.toString()}`);
-  }
-
-  /** Persist a trend-line preference and apply it immediately. Optimistic, then
-   *  reconciled with what the server actually stored — the same shape every other
-   *  setting in this app is written with. */
-  function saveSplTrend(patch: { shown?: boolean; metric?: string | null }) {
-    setSplTrend((prev) => ({ ...prev, ...patch }));
-    invoke<{ shown: boolean; metric: string | null }>("spl:setTrendPrefs", patch)
-      .then((p) => setSplTrend(p))
-      .catch(() => {
-        toast.error("Could not save the SPL trend setting");
-      });
   }
 
   /**
@@ -395,11 +451,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .catch((e) => {
         setSplList([]);
         noteFailure("spl", "the sound summary", e);
-      });
-    invoke<{ shown: boolean; metric: string | null }>("spl:getTrendPrefs")
-      .then((p) => setSplTrend(p))
-      .catch(() => {
-        /* the chart draws without the line; the toggle is still offered */
       });
   }, [reload, noteFailure, noteLoaded]);
 
@@ -590,44 +641,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     };
   }, [selectedKey, reloadKey]);
 
-  // The service type the overview reflects — derived, not user-picked. It follows
-  // whatever you've selected (a drilled-in service, else the selected calendar
-  // day's service), and defaults to the most recent service's type (rows is sorted
-  // newest-first; `day` auto-selects the newest day, so this lands on "most recent"
-  // out of the box). Keeps each type's averages separate without a manual filter.
-  const activeType = useMemo<string | null>(() => {
-    if (overviewType) return overviewType;
-    if (selectedKey) {
-      const s = rows.find((x) => x.serviceKey === selectedKey);
-      if (s) return s.serviceTypeId;
-    }
-    if (day) {
-      const s = rows.find((x) => x.serviceDate === day);
-      if (s) return s.serviceTypeId;
-    }
-    return rows[0]?.serviceTypeId ?? null;
-  }, [overviewType, selectedKey, day, rows]);
-  /** Every service type in the history, for the Overview scope picker. Only worth
-   *  showing when there is more than one — a single-type church should not see a
-   *  control with one option in it. */
-  const serviceTypes = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const s of rows) {
-      if (s.serviceTypeId && !seen.has(s.serviceTypeId)) {
-        seen.set(s.serviceTypeId, s.serviceTypeName ?? s.serviceTypeId);
-      }
-    }
-    return [...seen].map(([id, name]) => ({ id, name }));
-  }, [rows]);
-
-  const activeTypeName = useMemo<string | null>(() => {
-    if (!activeType) return null;
-    const s = rows.find((x) => x.serviceTypeId === activeType);
-    return s?.serviceTypeName ?? activeType;
-  }, [rows, activeType]);
-
-  // All services — the calendar and day list stay global so you can navigate to any
-  // service; only the overview scopes to activeType (below).
+  // The calendar and the day list are GLOBAL — every service type, so you can
+  // navigate to any of them. Nothing on this page scopes to one type any more:
+  // the Overview card did, and the Trends card answers the per-type question
+  // better, with a line each instead of a picker.
   const filtered = rows;
 
   const days = useMemo(() => {
@@ -650,19 +667,65 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const pickDay = (d: string) => {
     setDayPicked(true);
     setDay(d);
+    // Scroll to the day's group rather than filtering the list down to it. In a
+    // frame, because the group may not be rendered yet — picking a day in a
+    // month the list has not drawn is a state change first and a scroll second.
+    //
+    // Guarded, not assumed: jsdom has no scrollIntoView and a Pi's browser is
+    // not a place to find out. A day that cannot be scrolled to is still
+    // selected and still ringed.
+    requestAnimationFrame(() => {
+      const el = document.getElementById(dayGroupId(d));
+      el?.scrollIntoView?.({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    });
   };
 
-  const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
+  /**
+   * The month the calendar is showing, `YYYY-MM`. The calendar owns which month
+   * is up — it is the thing with the chevrons — and reports it here, because
+   * the list beside it shows that month rather than one day.
+   */
+  const [viewMonth, setViewMonth] = useState<string | null>(null);
 
   /**
-   * The SPL record behind each of the SELECTED DAY's rows, so a row's peak
+   * The VISIBLE MONTH's services, newest first, grouped by day.
+   *
+   * Not the selected day's. A list that showed one day meant paging the
+   * calendar to read a month, and the calendar is right there — the month is
+   * the unit an operator actually reads. Picking a day now scrolls to its
+   * group and rings it rather than hiding the other fifteen services.
+   *
+   * `filtered` is already newest-first, so the groups come out newest-first and
+   * so do the services within each one.
+   */
+  const monthGroups = useMemo(() => {
+    const month = viewMonth ?? day?.slice(0, 7) ?? null;
+    if (!month) return [];
+    const byDay = new Map<string, HistoryRow[]>();
+    for (const s of filtered) {
+      if (!s.serviceDate.startsWith(`${month}-`)) continue;
+      const list = byDay.get(s.serviceDate);
+      if (list) list.push(s);
+      else byDay.set(s.serviceDate, [s]);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .map(([date, services]) => ({ date, services }));
+  }, [filtered, viewMonth, day]);
+
+  /** Every service in the visible month, flat — the header's count, and what
+   *  the per-row SPL fetch below asks for. */
+  const monthServices = useMemo(() => monthGroups.flatMap((g) => g.services), [monthGroups]);
+
+  /**
+   * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
    * level is the same figure the service page's header quotes.
    *
-   * Per day rather than for the whole history on purpose: `spl:getSummary`
+   * Per month rather than for the whole history on purpose: `spl:getSummary`
    * (already loaded, above) carries a service-level Leq per metric and no PEAK
    * at all, so a row built from it would be labelled "Peak" and be showing an
    * energy average. The full record is the only thing that has the peak, and a
-   * day is one to four of them — not a year of them.
+   * month is a dozen or so of them — not a year of them.
    *
    * A FAILED read and a service that recorded no sound are told apart. Both
    * used to land as `null`, which `servicePeakLevel` reads as "no sound
@@ -672,11 +735,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    */
   type RowSpl = ServiceSplHistory | null | "error";
   const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
-  // The key list, as a stable string: `dayServices` is a fresh array every
-  // render and would refetch the day's SPL on each one.
-  const dayKeys = dayServices.map((s) => s.serviceKey).join("|");
+  // The key list, as a stable string: `monthServices` is a fresh array every
+  // render and would refetch the month's SPL on each one.
+  const monthKeys = monthServices.map((s) => s.serviceKey).join("|");
   useEffect(() => {
-    const keys = dayKeys ? dayKeys.split("|") : [];
+    const keys = monthKeys ? monthKeys.split("|") : [];
     // Nothing to fetch, and nothing to clear: every lookup is by serviceKey, so
     // a map left over from the previous day can only ever miss. Clearing it here
     // would be a setState in an effect body — a cascading render — to no end.
@@ -700,7 +763,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     return () => {
       cancelled = true;
     };
-  }, [dayKeys, reloadKey]);
+  }, [monthKeys, reloadKey]);
 
   // Per-day service counts for the calendar (respects the type filter).
   const dateCounts = useMemo(() => {
@@ -709,33 +772,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     return m;
   }, [filtered]);
 
-  // Small summary shown beneath the calendar for the selected day: how many
-  // services + their average peak in-room (scoped to the active type filter).
-  const daySummary = useMemo(() => {
-    if (!day) return null;
-    const count = dayServices.length;
-    const occ = attList.filter((a) => a.serviceDate === day && a.peakOccupancy > 0);
-    const avg = occ.length ? Math.round(occ.reduce((s, a) => s + a.peakOccupancy, 0) / occ.length) : null;
-    return { count, avg };
-  }, [day, dayServices, attList]);
-
-  // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
-  // picking a past date shows how things looked as of then; scoped to the type
-  // filter so a Youth service's numbers don't blend into Sunday's.
-  // Produces the blend's lead stat, the instrument strip, and the attendance
-  // trend chart series — plus honest trend indicators (latest vs prior window).
-  //
-  // The chart INCLUDES the service recording right now (its point climbs through
-  // the morning); every computed stat — average, peak, trend direction — is taken
-  // over finished services only, so a partial peak can't drag the headline number
-  // down and then "recover" by noon. See overview-scope.ts.
-  // Delegates to the shared derivation - Home shows the same headline figures,
-  // and two implementations is how two screens come to disagree about one number.
-  const overview = useMemo<OverviewData>(
-    () =>
-      computeOverview(list, attList, day, activeType, activeTypeName, { splList, splMetric: splTrend.metric }),
-    [list, attList, day, activeType, activeTypeName, splList, splTrend.metric],
-  );
 
   async function deleteService(key: string, title: string) {
     // Names all three, because it deletes all three. It always meant to: the
@@ -1345,116 +1381,84 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     <div className="flex flex-col gap-3">
       {/* Trends LEADS the page. It is the defining view of the tab: what a month
           of Sundays did, per service type, with the dates that explain a step
-          marked under the axis. Everything below it — the Overview blend, the
-          calendar and the day list — answers a narrower question. */}
+          marked under the axis. Below it, the calendar and the recorded-services
+          list answer the narrower question of one day.
+          There is no Overview card between them any more. Its five figures were
+          an all-time blend across a service type, and every one of them — start,
+          length, overrun, peak, level — is on the service page's own KPI row
+          against the service it belongs to, where it means something specific.
+          Export moved into the Recorded services header; it is not removed. */}
       <TrendsCard recordings={trendRecordings} soundUnavailable={loadFailed.has("spl")} />
 
-      {/* Export builder — a collapsed disclosure so it never crowds the overview.
-          Read-only, so it's available on the public /history page too. */}
-      <Collapsible label="Export" summary="date range · pick sheets" className="su-card px-4 py-2.5">
-        <div className="flex flex-col gap-3 pt-1">
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
-              From
-              <input
-                type="date"
-                value={expFrom}
-                onChange={(e) => setExpFrom(e.target.value)}
-                className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
-              To
-              <input
-                type="date"
-                value={expTo}
-                onChange={(e) => setExpTo(e.target.value)}
-                className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
-              />
-            </label>
-            <span className="self-end pb-1.5 text-caption2 text-fg-subtle">Blank = all dates.</span>
-          </div>
-          {/* Each option is a whole selectable row rather than a bare control in a
-              column: the hint sits under its label instead of trailing off it, and
-              the target is big enough to hit on a tablet next to a console. */}
-          <div className="flex flex-col gap-1">
-            {EXPORT_SHEETS.map((s) => {
-              const on = expSheets.has(s.id);
-              return (
-                <label
-                  key={s.id}
-                  className={cn(
-                    "flex cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
-                    on ? "border-accent/40 bg-accent/8" : "border-transparent hover:bg-fill",
-                  )}
-                >
-                  <Checkbox checked={on} onCheckedChange={() => toggleSheet(s.id)} className="mt-0.5" />
-                  <span className="min-w-0">
-                    <span className="block text-footnote text-fg">{s.label}</span>
-                    <span className="block text-caption2 text-fg-subtle">{s.hint}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          <div>
-            <Button variant="accent" size="small" disabled={expSheets.size === 0} onClick={downloadExport}>
-              <DownloadIcon className="size-3.5" /> Download .xlsx
-            </Button>
-          </div>
-        </div>
-      </Collapsible>
-      {/* Overview blend — full width. Lead stat + real trend chart, then a divided
-          instrument strip. Scoped to the active service type (from the selection /
-          most-recent), labeled so the numbers are never a silent blend of types. */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
-            Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
-          </span>
-          {serviceTypes.length > 1 && (
-            <Select value={overviewType ?? ""} onValueChange={(v) => setOverviewType(v || null)}>
-              <SelectTrigger aria-label="Overview service type" className="h-6 px-1.5 text-caption2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Follow selection</SelectItem>
-                {serviceTypes.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-        <OverviewBlend overview={overview} onSplTrend={saveSplTrend} />
-      </div>
-
-      {/* Calendar (sticky) + selected-day detail. */}
+      {/* Calendar (sticky) beside the month's services. The calendar decides
+          which month both of them are about. There is no "Selected: …" summary
+          card under it any more: the same two facts are the list's own header,
+          and the day's services are one scroll away rather than hidden behind
+          the other fifteen. */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
         <div className="sm:sticky sm:top-0 flex flex-col gap-3">
-          <HistoryCalendar counts={dateCounts} selected={day} onPick={pickDay} />
-          {day && daySummary && (
-            <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
-              Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
-              {" · "}
-              <span className="font-mono tabular-nums text-fg">{daySummary.count}</span>
-              {` service${daySummary.count === 1 ? "" : "s"}`}
-              {daySummary.avg != null && (
-                <>
-                  {" · "}
-                  <span className="font-mono tabular-nums text-fg">{daySummary.avg.toLocaleString()}</span>
-                  {" avg"}
-                </>
-              )}
-            </div>
-          )}
+          <HistoryCalendar
+            counts={dateCounts}
+            selected={day}
+            onPick={pickDay}
+            onMonthChange={setViewMonth}
+          />
         </div>
 
-        <div className="min-w-0 flex flex-col gap-2">
-          {/* The day heading — the list is grouped by day, and this is the one
-              group the calendar has selected. */}
-          {day && <span className="text-body font-semibold text-fg">{fmtDay(day)}</span>}
-          {dayServices.map((row) => {
+        {/* A CARD, like Trends above it and the calendar beside it — same
+            border, radius and padding. It was flat on the page, so the one
+            column an operator reads down was the only thing on the tab that did
+            not sit on a surface. */}
+        <section data-services-card className="su-card min-w-0 flex flex-col gap-2 px-4 py-3.5">
+          {/* The card's own header: what the list is, what it is showing, and
+              the Export control. Export used to be a full-width disclosure of
+              its own above the calendar — a builder for a thing you do twice a
+              year, given the width of the page. It is the same builder, behind
+              a button, beside the list it exports. */}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h3 className="text-body font-semibold text-fg">Recorded services</h3>
+            <div className="flex items-center gap-3">
+              <span data-list-showing className="text-caption2 text-fg-subtle">
+                Showing {fmtMonth(viewMonth ?? day?.slice(0, 7) ?? null)} · {monthServices.length}
+                {` service${monthServices.length === 1 ? "" : "s"}`}
+              </span>
+              <ExportPopover
+                from={expFrom}
+                to={expTo}
+                sheets={expSheets}
+                onFrom={setExpFrom}
+                onTo={setExpTo}
+                onToggleSheet={toggleSheet}
+                onDownload={downloadExport}
+              />
+            </div>
+          </div>
+          {monthGroups.map((group, gi) => (
+            <div
+              key={group.date}
+              id={dayGroupId(group.date)}
+              data-day-group={group.date}
+              // The SELECTED day's group is ringed, which is what clicking a
+              // calendar cell now does — with a scroll to it. It used to filter
+              // the list down to that day, which meant paging the calendar to
+              // read a month with the month right there beside it.
+              className={cn(
+                "flex scroll-mt-4 flex-col gap-2 rounded-xl",
+                day === group.date && "bg-accent/6 ring-1 ring-accent/35 p-2 -m-2",
+              )}
+            >
+              <span className="text-caption1 text-fg-muted">{fmtDay(group.date)}</span>
+              {/* The column header, ONCE for the whole list, under the first
+                  day label — the mockup's shape. Repeating it under every day
+                  made the column names the loudest thing in a month of
+                  services: eight repetitions of "WHEN SERVICE PEAK RAN VS PLAN
+                  PEAK DB" between nine rows.
+                  The row's figures vary (a live recording has no `vs plan`), so
+                  a row that has nothing for a column prints a dash under the
+                  heading rather than closing the gap and sliding the rest
+                  left — see ROW_COLUMNS. */}
+              {gi === 0 && <ServiceRowHeader />}
+              {group.services.map((row) => {
             // Attendance-only rows (arrival ramp, no timeline record yet) have no
             // items and no rundown to summarize — a separate, simpler card.
             if (!row.timeline) {
@@ -1465,7 +1469,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 ? `${fmtTime(row.startsAt)} · arriving · ${lastOccupancy.toLocaleString()} in the room`
                 : `${fmtTime(row.startsAt)} · no items recorded`;
               return (
-                <div key={row.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
+                <div key={row.serviceKey} className={ROW_SURFACE}>
                   <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(row.serviceKey)}>
                     <div className="flex flex-col min-w-0">
                       <span className="text-body font-medium text-fg truncate">{row.planTitle ?? row.serviceKey}</span>
@@ -1474,18 +1478,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     <span className="shrink-0 whitespace-nowrap text-caption1 text-fg-subtle tabular-nums">
                       recording since <span className="font-mono text-accent">{fmtTime(att.startedAt)}</span>
                     </span>
+                    <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-fg-faint" />
                   </button>
-                  {!readOnly && (
-                    <Tooltip label="Delete recording">
-                      <button
-                        className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
-                        onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
-                        aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
-                      >
-                        <Trash2Icon className="size-4" />
-                      </button>
-                    </Tooltip>
-                  )}
                 </div>
               );
             }
@@ -1512,294 +1506,190 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
             const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
+            // FIXED columns, so the header above the group lines up with every
+            // row under it. The figures are picked by key rather than taken in
+            // order: a live recording has no `vs plan`, and closing the gap
+            // slid Peak dB under the "VS PLAN" heading. A column with nothing
+            // in it prints a dash.
+            const byKey = new Map(shownFigures.map((f) => [f.key, f]));
             return (
-              // su-card, like every other top-level box on this page (Export, the
-              // Overview, the calendar, the selected-day summary). These rows had
-              // their own `bg-gray-2` + `rounded-lg` treatment, so the one column
-              // an operator actually reads down was the one thing that did not
-              // match the surface around it. The recessed grey is still right for
-              // the Stat tiles and the time editor — those sit INSIDE a card, and
-              // giving them the parent's surface would flatten the nesting.
-              <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
+              <div key={s.serviceKey} className={ROW_SURFACE}>
                 <button
                   data-history-row={s.serviceKey}
-                  className="flex flex-1 min-w-0 flex-col gap-2 px-3 py-2.5 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                  className={cn(ROW_GRID, "min-w-0 flex-1 px-3 py-2.5 text-left")}
                   onClick={() => setSelectedKey(s.serviceKey)}
                 >
-                  <div className="flex min-w-0 flex-col">
-                    {/* Time and service type, then the plan title, then the
-                        series and how many items ran. The time is mono so a
-                        column of rows lines up on the colon. */}
-                    <span className="flex items-baseline gap-2 text-caption2 text-fg-subtle">
-                      <span className="font-mono tabular-nums text-fg-muted">{started.value}</span>
-                      {s.serviceTypeName && <span className="truncate">{s.serviceTypeName}</span>}
-                      {started.sub && <span className="truncate text-warn-11">{started.sub}</span>}
+                  {/* WHEN: the time, big, with the service type under it. Mono,
+                      so a column of rows lines up on the colon, and in the
+                      operator's own 12- or 24-hour format.
+                      The "8:00 early" chip that used to sit beside it is gone:
+                      it is not in the mockup, and it is one of the six KPIs on
+                      the service page's own header, where it has the room to
+                      say what it is measured against. */}
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
+                      {started.value}
+                    </span>
+                    <span className="flex min-w-0 items-baseline gap-1.5">
+                      <span className="truncate text-[11px] text-fg-subtle">{s.serviceTypeName ?? ""}</span>
                       {live && <RecordingPill />}
                     </span>
-                    <span className="truncate text-body font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
-                    {under && <span className="truncate text-caption2 text-fg-subtle">{under}</span>}
-                  </div>
-                  {/* The row's figures, on the stat strip's vocabulary at the
-                      row's scale: an 11px uppercase label over a mono value.
-                      `shrink-0` and a scroller, like the strip — a squashed
-                      "1,1\u2026" is worse than one you have to scroll to. */}
-                  <span className="flex shrink-0 items-start gap-0 overflow-x-auto sm:justify-end">
-                    {shownFigures.map((f, fi) => (
-                      <span
-                        key={f.key}
-                        data-row-figure={f.key}
-                        className={cn("flex shrink-0 flex-col gap-0.5 px-3 last:pr-0", fi > 0 && "border-l border-line")}
-                      >
-                        <span className="whitespace-nowrap text-[10px] uppercase tracking-wider text-fg-subtle">{f.label}</span>
-                        <span
-                          className="whitespace-nowrap font-mono text-footnote tabular-nums"
-                          style={{ color: f.color ?? "var(--color-fg)" }}
-                        >
-                          {f.value}
-                        </span>
-                        {/* WHY there is no number. The row stripped this, so a
-                            "—" under Peak level had no reason beside it and an
-                            operator whose own Customize had hidden every metric
-                            was told nothing at all. */}
-                        {f.sub && (
-                          <span data-row-figure-note className="whitespace-nowrap text-[10px] text-fg-subtle">
-                            {f.sub}
-                          </span>
-                        )}
-                      </span>
-                    ))}
                   </span>
+                  {/* SERVICE: the plan title, then its series and item count. */}
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
+                    {under && <span className="truncate text-[11px] text-fg-subtle">{under}</span>}
+                  </span>
+                  {ROW_COLUMNS.map((col) => {
+                    const f = byKey.get(col.key);
+                    return (
+                      <span key={col.key} data-row-figure={col.key} className="flex min-w-0 flex-col">
+                        <span
+                          className="truncate font-mono text-footnote tabular-nums"
+                          style={{ color: f?.color ?? col.color ?? "var(--color-fg)" }}
+                        >
+                          {f?.value ?? "—"}
+                        </span>
+                        {/* The caption UNDER the value, the way the mockup has
+                            it. `sub` wins when there is one: it is the only
+                            thing that says WHY there is no number — "no sound
+                            recorded", "sound unavailable" — and a bare dash
+                            sends an operator to look at a meter that is fine. */}
+                        <span
+                          data-row-figure-note
+                          className="truncate text-[10px] uppercase tracking-wider text-fg-subtle"
+                        >
+                          {f?.sub ?? col.caption(f?.label)}
+                        </span>
+                      </span>
+                    );
+                  })}
+                  {/* The row opens a page. Nothing on it said so — the whole
+                      card was clickable and looked like a read-only summary. */}
+                  <ChevronRightIcon aria-hidden className="size-4 self-center justify-self-end text-fg-faint" />
                 </button>
-                {!readOnly && (
-                  <Tooltip label="Delete recording">
-                    <button
-                      className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
-                      onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                      aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-                    >
-                      <Trash2Icon className="size-4" />
-                    </button>
-                  </Tooltip>
-                )}
               </div>
             );
-          })}
-          {dayServices.length === 0 && <p className="text-caption1 text-fg-subtle">No services on this day.</p>}
-        </div>
+              })}
+            </div>
+          ))}
+          {monthGroups.length === 0 && (
+            <p className="text-caption1 text-fg-subtle">No services recorded in this month.</p>
+          )}
+        </section>
       </div>
     </div>
   );
 }
 
-/** "+12%" / "−12%" — the sign+magnitude spelling every percentage trend uses.
- *  `fallback` covers "there's a direction but no percentage" (a zero prior
- *  mean — `computeTrend` already turns that case into `pct: null`). */
-function fmtTrendPct(pct: number | null, fallback = ""): string {
-  return pct != null ? `${pct >= 0 ? "+" : "−"}${Math.round(Math.abs(pct) * 100)}%` : fallback;
-}
-
 /**
- * "vs the prior 4 recordings" — the tail every trend readout in the Overview
- * ends with.
+ * The Export builder, behind a button in the Recorded services header.
  *
- * "recordings", not the service type's own name. The name is a PROPER NOUN and
- * pluralising it produced "vs the prior 2 The Salt Companys", which is what was
- * on screen. The scope is already named on the heading above the card, so
- * repeating it in the tail bought nothing even when it read correctly.
+ * Unchanged in what it does — a date range, a set of sheets, and a download of
+ * the same `/api/history/export.xlsx`. It was a full-width disclosure of its
+ * own above the calendar, which gave a thing done twice a year the width of
+ * the page and put it between the trends and the services. Beside the list it
+ * exports is where it belongs.
+ *
+ * Read-only safe, so it is offered on the public /history page too — exporting
+ * reads; it does not touch a record.
  */
-function vsPrior(priorCount: number): string {
-  return `vs the prior ${priorCount} recording${priorCount === 1 ? "" : "s"}`;
-}
-
-/**
- * Real triangle glyph (▲/▼) + trailing text, in a semantic status color.
- *
- * The one spelling of "direction + color + words": the attendance trend, the
- * SPL delta beneath it, and this instrument strip's own cell were three
- * copies of the same markup, and `SplDelta`'s arrow shipped hard-coded to
- * `trendColor("neutral")` in one of the three while the other two still took
- * a `tone`.
- *
- * `dir` is optional so a caller can render NO arrow at all — `SplDelta.dir`
- * has a third state, "flat", for exactly that: a change too small to be a
- * real direction, drawn with no glyph rather than an uncoloured, misleading
- * one (this block is never coloured by tone, so a wrong arrow here has
- * nothing else to soften it).
- */
-function TrendChip({
-  dir,
-  tone,
-  text,
-  className,
+function ExportPopover({
+  from,
+  to,
+  sheets,
+  onFrom,
+  onTo,
+  onToggleSheet,
+  onDownload,
 }: {
-  dir?: "up" | "down";
-  tone: TrendTone;
-  text: string;
-  className?: string;
+  from: string;
+  to: string;
+  sheets: Set<string>;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+  onToggleSheet: (id: string) => void;
+  onDownload: () => void;
 }) {
   return (
-    <span className={cn("flex items-center gap-1.5 text-caption1", trendColor(tone), className)}>
-      {dir && <span aria-hidden="true">{dir === "up" ? "▲" : "▼"}</span>}
-      {text && <span>{text}</span>}
-    </span>
-  );
-}
-
-/** The Overview blend: a lead stat (avg attendance) with a colored trend line, a
- *  real attendance trend chart, and a divided instrument stat strip below.
- *
- *  Exported for its own tests: the History section around it fetches, and the
- *  parts worth guarding — the right-click menu against the chart's hover, and
- *  whether the SPL summary is there at all — are in this component alone. */
-export function OverviewBlend({
-  overview,
-  onSplTrend,
-}: {
-  overview: OverviewData;
-  /** Writes the metric choice. The card reads the CHOSEN metric back through
-   *  `overview.splMetric`, which is derived from it, so the preference itself is
-   *  not a prop — one direction each way. */
-  onSplTrend: (patch: { metric?: string | null }) => void;
-}) {
-  /** Where the chart's right-click (or long-press) menu is, or null. */
-  const [chartMenu, setChartMenu] = useState<{ x: number; y: number } | null>(null);
-  const chartTrigger = useContextMenuTrigger((pt) => setChartMenu(pt));
-  // A mouse user already has the right-click; the corner button only appears
-  // where a touch has no other way in.
-  const isCoarse = useCoarsePointer();
-  /**
-   * The one thing the menu still offers: which Smaart metric the level below is
-   * read from. The list comes from the data in scope — see
-   * OverviewData.splMetrics — so it offers exactly the metrics there is
-   * something to report for, and there is no menu at all when there are none.
-   *
-   * The "Sound summary" toggle that used to sit above it is gone. It gated a
-   * trend LINE on an attendance chart this card no longer draws, and after the
-   * trim it gated the level block instead — a switch whose only visible effect
-   * was to hide a figure, advertised by a sentence of prose above the timings
-   * telling the operator to right-click. The prose went with it; the figure
-   * shows whenever there is one.
-   */
-  const chartMenuItems: ContextMenuItem[] = overview.splMetrics.length > 0
-    ? [
-      {
-        label: "Metric",
-        items: overview.splMetrics.map((m) => ({
-          label: m,
-          checked: overview.splMetric === m,
-          onSelect: () => {
-            onSplTrend({ metric: m });
-            setChartMenu(null);
-          },
-        })),
-      },
-    ]
-    : [];
-
-  /** The level renders when there IS one. No dash and no sentence when there is
-   *  not — a dash reads as a measured silence, and prose explaining an absence
-   *  is bigger than the thing it explains. */
-  const showsLevel = overview.avgSpl != null;
-
-  // TIMINGS ONLY. Attendance moved out of this card entirely: Trends, at the
-  // top of the page, plots it per service type over a chosen range with
-  // milestones under it, and this card plotted the same quantity over a
-  // different window with a different average — two charts of attendance on one
-  // screen that did not agree. Peak attendance went with it for the same reason;
-  // a day-list row carries each service's own peak.
-  const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
-    { k: "Services", v: overview.services },
-    { k: "Avg length", v: overview.avgLength },
-    { k: "Avg start", v: overview.avgStart, accent: overview.avgStartEarly ? "text-ok-11" : overview.avgStartLate ? "text-warn-11" : undefined },
-    { k: "Avg overrun", v: overview.avgOverrun, trend: overview.overrunTrend, trendLabel: overview.overrunTrend ? (overview.overrunTrend.tone === "bad" ? "worse" : overview.overrunTrend.tone === "good" ? "better" : "steady") : undefined },
-  ];
-  return (
-    <div className="su-card px-5 py-5 flex flex-col">
-      <div
-        className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8"
-        onContextMenu={chartTrigger.onContextMenu}
-        onPointerDown={chartTrigger.onPointerDown}
-        onPointerMove={chartTrigger.onPointerMove}
-        onPointerUp={chartTrigger.onPointerUp}
-        onPointerCancel={chartTrigger.onPointerCancel}
-        onClickCapture={chartTrigger.onClickCapture}
-        style={chartTrigger.style}
+    <PopoverPrimitive.Root>
+      <PopoverPrimitive.Trigger
+        aria-label="Export"
+        className={cn(
+          "touch-target inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-field px-2 py-0.5",
+          "text-caption2 text-fg-muted hover:bg-fill hover:text-fg",
+          "focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus",
+          "data-[state=open]:border-focus data-[state=open]:text-fg",
+        )}
       >
-        {/* The level, and nothing about attendance. Trends owns attendance over
-            time; this card owns how the services themselves RAN, plus how loud
-            they were, which Trends does not plot. */}
-        {showsLevel && overview.avgSpl != null ? (
-          <div className="shrink-0" data-testid="spl-summary">
-            <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg SPL</div>
-            <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-              <span>{overview.avgSpl.toFixed(1)}</span>
-              <span className="text-caption1 font-normal text-fg-muted">dB</span>
+        <DownloadIcon className="size-3" /> Export
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="end"
+          sideOffset={6}
+          aria-label="Export"
+          className={cn(
+            "z-50 w-80 overflow-hidden rounded-md border border-line-strong bg-popover shadow-md backdrop-blur-xl",
+            "data-[state=open]:animate-in data-[state=closed]:animate-out",
+            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          )}
+        >
+          <div className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] flex-col gap-3 overflow-y-auto p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+                From
+                <input
+                  type="date"
+                  value={from}
+                  onChange={(e) => onFrom(e.target.value)}
+                  className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+                To
+                <input
+                  type="date"
+                  value={to}
+                  onChange={(e) => onTo(e.target.value)}
+                  className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
+                />
+              </label>
+              <span className="self-end pb-1.5 text-caption2 text-fg-subtle">Blank = all dates.</span>
             </div>
-            {overview.splDelta && (
-              // NEUTRAL, always — see SplDelta. A louder weekend is not a worse
-              // one, so this never goes red. Decibels, not a percentage: a
-              // percentage of a logarithmic quantity says nothing about how loud
-              // it was. The sign comes from `dir`, never recomputed from `db` —
-              // one fact, one place to read it, so the glyph and the sign cannot
-              // disagree about which way a level moved.
-              <TrendChip
-                dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
-                tone="neutral"
-                text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount)}`}
-                className="mt-2"
-              />
-            )}
-          </div>
-        ) : overview.splMetric ? (
-          // A metric was CHOSEN and produced nothing. That is worth a word —
-          // unlike "no metrics at all", which needs none, because there is
-          // nothing the operator asked for and did not get. Reached when every
-          // recording carrying the metric in scope is still running, so there is
-          // no settled level to average yet.
-          <div data-testid="spl-no-level" className="text-caption1 text-fg-subtle">
-            No level on {overview.splMetric} in this scope.
-          </div>
-        ) : null}
-        {isCoarse && chartMenuItems.length > 0 && (
-          <button
-            type="button"
-            aria-label="Overview options"
-            className="grid size-11 shrink-0 place-items-center self-start rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              setChartMenu({ x: r.right, y: r.bottom });
-            }}
-          >
-            <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
-              <EllipsisIcon className="size-4" />
-            </span>
-          </button>
-        )}
-        {chartMenu && chartMenuItems.length > 0 && (
-          <ContextMenu
-            x={chartMenu.x}
-            y={chartMenu.y}
-            items={chartMenuItems}
-            onClose={() => setChartMenu(null)}
-          />
-        )}
-      </div>
-      {/* Wrapping grid so the readouts never collide: 2 cols on mobile, 3 at sm,
-          all at lg. Value + trend can wrap within a cell rather than overrun. */}
-      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-4">
-        {strip.map((s) => (
-          <div key={s.k} className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
-            <div className={`mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 font-mono tabular-nums text-lg ${s.accent ?? "text-fg"}`}>
-              <span>{s.v}</span>
-              {s.trend && (
-                <TrendChip dir={s.trend.dir} tone={s.trend.tone} text={s.trendLabel ?? fmtTrendPct(s.trend.pct)} />
-              )}
+            {/* Each option is a whole selectable row rather than a bare control
+                in a column: the hint sits under its label instead of trailing
+                off it, and the target is big enough to hit on a tablet next to
+                a console. */}
+            <div className="flex flex-col gap-1">
+              {EXPORT_SHEETS.map((s) => {
+                const on = sheets.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
+                      on ? "border-accent/40 bg-accent/8" : "border-transparent hover:bg-fill",
+                    )}
+                  >
+                    <Checkbox checked={on} onCheckedChange={() => onToggleSheet(s.id)} className="mt-0.5" />
+                    <span className="min-w-0">
+                      <span className="block text-footnote text-fg">{s.label}</span>
+                      <span className="block text-caption2 text-fg-subtle">{s.hint}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <div>
+              <Button variant="accent" size="small" disabled={sheets.size === 0} onClick={onDownload}>
+                <DownloadIcon className="size-3.5" /> Download .xlsx
+              </Button>
             </div>
           </div>
-        ))}
-      </div>
-    </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   );
 }
 

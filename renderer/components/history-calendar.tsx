@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "./ui/tooltip";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -14,7 +14,20 @@ import { cn } from "../lib/cn";
  *  under a number is a second mark saying what the shade already says, and a
  *  count printed in the cell turns a glanceable grid into a table. */
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+/** Single letters, the way a month grid is normally headed. Two-letter
+ *  abbreviations pushed the cells apart and read as words rather than as a
+ *  ruler over the columns. Not a bare array of strings — "T" and "S" each
+ *  appear twice, and a duplicate React key on seven siblings is how this
+ *  component already lost a month of day cells once. */
+const DOW = [
+  { key: "sun", label: "S" },
+  { key: "mon", label: "M" },
+  { key: "tue", label: "T" },
+  { key: "wed", label: "W" },
+  { key: "thu", label: "T" },
+  { key: "fri", label: "F" },
+  { key: "sat", label: "S" },
+];
 
 function ymd(y: number, m: number, d: number): string {
   return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -36,25 +49,41 @@ export function shadeStep(count: number): 0 | 1 | 2 | 3 | 4 {
   return Math.min(4, Math.round(count)) as 1 | 2 | 3 | 4;
 }
 
-/** Accent mix per step. Step 1 is deliberately visible on its own — one service
- *  is the common case and must not read as an empty day. */
+/** Mix per step. Step 1 is deliberately visible on its own — one service is the
+ *  common case and must not read as an empty day. */
 export const SHADE_PCT = [0, 16, 30, 46, 64] as const;
 
-/** The accent tint for a step, or undefined for step 0. A `color-mix` on the
- *  theme's own accent, so light and dark both work and there is no literal. */
+/**
+ * GREEN, not the accent.
+ *
+ * The accent is what a SELECTED day and TODAY are ringed in on this same grid,
+ * so shading the fill with it too gave one colour two meanings a cell wide
+ * apart: "this many services ran" and "this is the day you are looking at".
+ * Green is the colour attendance is already drawn in across the tab.
+ */
 function shadeStyle(step: number): { backgroundColor: string } | undefined {
   if (step <= 0) return undefined;
-  return { backgroundColor: `color-mix(in srgb, var(--color-accent) ${SHADE_PCT[step]}%, transparent)` };
+  return { backgroundColor: `color-mix(in srgb, var(--color-green-9) ${SHADE_PCT[step]}%, transparent)` };
 }
 
 export function HistoryCalendar({
   counts,
   selected,
   onPick,
+  onMonthChange,
 }: {
   counts: Map<string, number>;
   selected: string | null;
   onPick: (date: string) => void;
+  /**
+   * The month now on screen, as `YYYY-MM`.
+   *
+   * The list beside this calendar shows that month's services, so which month
+   * is displayed is no longer private to this component. Reported on mount as
+   * well as on every change, because the opening month is derived here — from
+   * the selected day, else today — and the list cannot guess it.
+   */
+  onMonthChange?: (ym: string) => void;
 }) {
   const today = useMemo(() => {
     const d = new Date();
@@ -86,6 +115,19 @@ export function HistoryCalendar({
     }
     return min ?? today;
   }, [counts, today]);
+
+  // Tell the page which month is up — on mount and on every change. An effect
+  // rather than a call inside `step`, so the opening month (derived above, from
+  // the selection or from today) is reported too; the list beside this
+  // calendar cannot derive it for itself.
+  const ym = `${view.y}-${String(view.m + 1).padStart(2, "0")}`;
+  useEffect(() => {
+    onMonthChange?.(ym);
+    // `onMonthChange` is a fresh closure on every render of the page above; the
+    // month is what this is about, and re-firing on each render would set state
+    // up there in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ym]);
 
   const idx = (v: { y: number; m: number }) => v.y * 12 + v.m;
   const canPrev = idx(view) > idx(earliest);
@@ -126,7 +168,9 @@ export function HistoryCalendar({
       </div>
       <div className="grid grid-cols-7 gap-1 text-center">
         {DOW.map((d) => (
-          <div key={d} className="pb-1 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">{d}</div>
+          <div key={d.key} className="pb-1 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
+            {d.label}
+          </div>
         ))}
         {cells.map((d, i) => {
           if (d == null) return <div key={`b${i}`} />;
@@ -158,7 +202,11 @@ export function HistoryCalendar({
                 className={cn(
                   // `justify-center`: the day number is centred in its cell, with
                   // nothing else in it to share the space with.
-                  "flex h-9 w-full items-center justify-center rounded-lg font-mono text-[13px] tabular-nums transition",
+                  // SQUARE. A fixed 36px row in a column whose width follows the
+                  // page gave a grid of landscape cells at 320px and portrait
+                  // ones at 240 — the shade is read as an area, and an area
+                  // that changes shape with the window is read as two areas.
+                  "flex aspect-square w-full items-center justify-center rounded-lg font-mono text-[13px] tabular-nums transition",
                   hasData ? "text-fg" : "cursor-default text-fg-faint",
                   hasData && !isSel && "hover:brightness-125",
                   // Today is OUTLINED in the accent; the selected day carries the
@@ -176,19 +224,14 @@ export function HistoryCalendar({
           );
         })}
       </div>
-      {/* The key to the shade, since the cells carry no count of their own. The
-          steps ARE the counts, so they are labelled as such rather than
-          "Fewer … More" — with four of them, "3" is a fact and "more" is a
-          guess. */}
-      <div className="mt-3 flex items-center gap-1.5 text-[10px] text-fg-subtle">
-        <span>Services</span>
-        {([1, 2, 3, 4] as const).map((s) => (
-          <span key={s} className="flex items-center gap-1">
-            <span className="h-2.5 w-4 rounded-sm" style={shadeStyle(s)} />
-            <span className="font-mono tabular-nums">{s === 4 ? "4+" : s}</span>
-          </span>
-        ))}
-      </div>
+      {/* What the shade MEANS, in a sentence. The four swatches and their
+          numbers were a scale nobody reads off a calendar — the question a
+          shaded grid raises is "what is the shade", not "which of these four
+          is this cell", and a row of tints under a grid of tints is the same
+          picture twice. The exact count is on the cell's own tooltip. */}
+      <p className="mt-3 text-[10px] text-fg-subtle">
+        Shade is how many services ran that day. Today is outlined.
+      </p>
     </div>
   );
 }

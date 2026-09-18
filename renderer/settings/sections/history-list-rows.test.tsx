@@ -133,11 +133,11 @@ const SPL = {
 } as unknown as ServiceSplHistory;
 
 /** The real api.ts, routed by URL — the same approach history-arriving does. */
-function installFetch(): void {
+function installFetch(opts: { extra?: ServiceTimeline[] } = {}): void {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
     const url = String(input);
     const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
-    if (url === "/api/service-timeline") return ok([NINE, ELEVEN]);
+    if (url === "/api/service-timeline") return ok([NINE, ELEVEN, ...(opts.extra ?? [])]);
     if (url === "/api/attendance/history") return ok(ATT);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
@@ -179,12 +179,21 @@ async function renderList(readOnly = false) {
   return view;
 }
 
-/** `{ "Peak attendance": "1,196", … }` for one row, read off the DOM. */
-function figuresOf(row: Element): Record<string, string> {
-  const out: Record<string, string> = {};
+/**
+ * `{ attendance: { value: "1,196", caption: "peak" }, … }` for one row, keyed
+ * by COLUMN.
+ *
+ * Keyed by the column rather than by the caption, because the caption is no
+ * longer the column's name: the value leads and the caption under it says what
+ * the figure is about — the metric for the level, the reason when there is no
+ * number. The column heading is drawn once per day group instead.
+ */
+function figuresOf(row: Element): Record<string, { value: string; caption: string }> {
+  const out: Record<string, { value: string; caption: string }> = {};
   for (const f of row.querySelectorAll("[data-row-figure]")) {
-    const [label, value] = [...f.children].map((c) => (c.textContent ?? "").trim());
-    out[label] = value;
+    const key = f.getAttribute("data-row-figure") ?? "";
+    const [value, caption] = [...f.children].map((c) => (c.textContent ?? "").trim());
+    out[key] = { value, caption };
   }
   return out;
 }
@@ -208,17 +217,16 @@ describe("the All services day list", () => {
       const kpis = new Map(serviceKpis(record, att, spl).map((k) => [k.key, k]));
       const drawn = figuresOf(rows[i]);
       // The identity, figure by figure: each drawn value is the header's own.
-      assert.equal(drawn["Peak attendance"], kpis.get("attendance")!.value, "Peak attendance must be the header's");
-      assert.equal(drawn["Ran"], kpis.get("actual")!.value, "Ran must be the header's Actual");
-      const levelLabel = kpis.get("level")!.label;
-      assert.equal(drawn[levelLabel], kpis.get("level")!.value, "the peak level must be the header's");
+      assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "Peak must be the header's");
+      assert.equal(drawn.actual.value, kpis.get("actual")!.value, "Ran must be the header's Actual");
+      assert.equal(drawn.level.value, kpis.get("level")!.value, "the peak level must be the header's");
       // And the row's own extra: versus plan, which the header carries as a
       // sub-line of Actual.
       const vsPlan = serviceRowFigures(record, att, spl).figures.find((f) => f.key === "vs-plan");
-      assert.equal(drawn["vs plan"], vsPlan!.value, "vs plan must come from the same derivation");
+      assert.equal(drawn["vs-plan"].value, vsPlan!.value, "vs plan must come from the same derivation");
       // The one figure that has been wrong before: attendance is people in the
       // ROOM, not the cumulative door count.
-      assert.equal(drawn["Peak attendance"], att!.peakOccupancy.toLocaleString());
+      assert.equal(drawn.attendance.value, att!.peakOccupancy.toLocaleString());
     }
   });
 
@@ -232,18 +240,21 @@ describe("the All services day list", () => {
     }
   });
 
-  test("the read-only view offers the same figures and no Delete", async () => {
-    // The other half of renderer/app/shared-history-readonly.test.ts, from this
-    // side: read-only must remove the destructive control and NOTHING ELSE. A
-    // gate written one line too wide would take the figures with it, and the
-    // shared /history link would go back to being a list of bare titles.
+  test("no row carries a Delete, open or read-only, and read-only changes nothing else", async () => {
+    // Delete lives on the service page's header, once, behind a confirm. The
+    // list matches the mockup: a row is a summary with a chevron, on either
+    // side of the read-only gate. The second half is the other half of
+    // renderer/app/shared-history-readonly.test.ts, from this side: read-only
+    // must remove destructive controls and NOTHING ELSE — a gate written one
+    // line too wide would take the figures with it, and the shared /history
+    // link would go back to being a list of bare titles.
     installFetch();
     const open = await renderList(false);
     const openFigures = figuresOf(open.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!);
     assert.deepEqual(
-      [...open.container.querySelectorAll("button[aria-label^='Delete recording']")].length,
-      2,
-      "the operator's own list keeps a Delete per row",
+      [...open.container.querySelectorAll("button[aria-label^='Delete recording']")].map((b) => b.getAttribute("aria-label")),
+      [],
+      "a list row must not carry Delete; it lives on the service page header",
     );
     cleanup();
 
@@ -264,8 +275,12 @@ describe("the level figure on a row", () => {
     const view = await renderList();
     const drawn = figuresOf(view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!);
     // The loudest reading on the record, not an energy average and not a dash.
-    assert.ok(
-      Object.entries(drawn).some(([label, value]) => /^Peak LAeq 10$/.test(label) && value === "102 dB"),
+    // The loudest reading, with the METRIC as its caption — which meter reading
+    // this is matters more on a row than repeating the heading above it, and
+    // the heading has already said "peak".
+    assert.deepEqual(
+      drawn.level,
+      { value: "102 dB", caption: "LAeq 10" },
       `the row did not show the recorded peak as a dB figure: ${JSON.stringify(drawn)}`,
     );
   });
@@ -278,9 +293,8 @@ describe("the level figure on a row", () => {
     const view = await renderList();
     const row = view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!;
     const drawn = figuresOf(row);
-    assert.equal(drawn["Peak level"], "—", `expected no level for the 9 o'clock: ${JSON.stringify(drawn)}`);
-    const notes = [...row.querySelectorAll("[data-row-figure-note]")].map((n) => n.textContent?.trim());
-    assert.deepEqual(notes, ["no sound recorded"], "a dash with no reason beside it");
+    assert.equal(drawn.level.value, "—", `expected no level for the 9 o'clock: ${JSON.stringify(drawn)}`);
+    assert.equal(drawn.level.caption, "no sound recorded", "a dash with no reason under it");
   });
 
   test("a FAILED read says so, rather than borrowing the sentence for silence", async () => {
@@ -300,8 +314,11 @@ describe("the level figure on a row", () => {
       };
       const view = await renderList();
       const row = view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!;
-      const notes = [...row.querySelectorAll("[data-row-figure-note]")].map((n) => n.textContent?.trim());
-      assert.deepEqual(notes, ["sound unavailable"], "a failed read must not read as a service that recorded nothing");
+      assert.equal(
+        figuresOf(row).level.caption,
+        "sound unavailable",
+        "a failed read must not read as a service that recorded nothing",
+      );
       assert.deepEqual(
         warned.filter((l) => l.startsWith("[history] could not read the sound record")).length,
         2,
@@ -388,5 +405,179 @@ describe("a history load that failed, rather than came back empty", () => {
     );
     // The rest of the page is unaffected: the timings loaded fine.
     assert.ok(view.container.querySelectorAll("[data-history-row]").length > 0, "the day list went too");
+  });
+});
+
+describe("what the All services page is made of", () => {
+  // The page composition itself, because two of the three things here are a
+  // REMOVAL and a MOVE: a removal nothing asserts comes back on the next merge,
+  // and a shipped feature moved behind a button is one refactor away from being
+  // a shipped feature that is gone.
+
+  test("there is no Overview card, and Export is in the Recorded services header", async () => {
+    installFetch();
+    const view = await renderList();
+    const text = view.container.textContent ?? "";
+
+    // GONE. Its five figures were an all-time blend across one service type;
+    // every one of them is on the service page's own KPI row instead.
+    assert.ok(!text.includes("Avg length"), "the Overview card is still on the page");
+    assert.ok(!text.includes("Avg start"), "the Overview card is still on the page");
+    assert.equal(
+      view.container.querySelector('[aria-label="Overview service type"]'),
+      null,
+      "the Overview scope picker is still there",
+    );
+
+    // MOVED, not removed. Export is a shipped feature.
+    assert.ok(text.includes("Recorded services"), "the list card has no title");
+    const exportTrigger = view.container.querySelector('[aria-label="Export"]');
+    assert.ok(exportTrigger, "Export is gone from the page entirely");
+    assert.equal(exportTrigger.closest("[data-history-row]"), null, "Export landed inside a service row");
+    // In the HEADER, beside the title — not floating somewhere else on the page.
+    const header = [...view.container.querySelectorAll("h3")]
+      .find((h) => h.textContent?.trim() === "Recorded services")?.parentElement;
+    assert.ok(header?.contains(exportTrigger), "Export is not in the Recorded services header");
+  });
+
+  test("the list is a CARD, with its title, count and Export inside it", async () => {
+    // It was flat on the page while Trends above it and the calendar beside it
+    // were cards, so the one column an operator reads down was the only thing
+    // on the tab not sitting on a surface.
+    //
+    // WHAT THIS CANNOT SEE: the border, the radius and the padding. They come
+    // from `.su-card` in styles.css, and jsdom loads no stylesheet. Measured in
+    // Chrome instead — 1px border, 14px radius, the same box Trends draws — and
+    // what is asserted here is that the class is on the element and that the
+    // three header pieces are inside it rather than floating above it.
+    installFetch();
+    const view = await renderList();
+    const card = view.container.querySelector("[data-services-card]");
+    assert.ok(card, "the list is not wrapped in a card at all");
+    assert.ok(card.className.includes("su-card"), `the wrapper is not the app's card: ${card.className}`);
+    for (const [what, sel] of [
+      ["the title", "h3"],
+      ["the Showing line", "[data-list-showing]"],
+      ["Export", "[aria-label='Export']"],
+    ] as const) {
+      assert.ok(card.querySelector(sel), `${what} is not inside the card`);
+    }
+    // And the rows are RECESSED inside it, not cards of their own: a card
+    // inside a card flattens the nesting it is there to create.
+    const rows = [...view.container.querySelectorAll("[data-history-row]")]
+      .map((r) => r.parentElement?.className ?? "");
+    assert.ok(rows.length > 0, "no rows, so this asserts nothing");
+    assert.deepEqual(rows.filter((c) => c.includes("su-card")), [], "a row is still a card inside the card");
+  });
+
+  test("the header names the MONTH it is showing and counts the month's services", async () => {
+    installFetch();
+    const view = await renderList();
+    const showing = view.container.querySelector("[data-list-showing]")?.textContent ?? "";
+    // The month, not the day. A list of one day meant paging the calendar to
+    // read a month with the calendar sitting right beside it.
+    assert.match(showing, /^Showing September 2026 · 2 services$/, `the header still names a day: "${showing}"`);
+  });
+
+  test("the list is the whole visible month, grouped by day, newest first", async () => {
+    // Both fixtures are on the 13th, so a second day is added here — a list
+    // that filtered to one day would show one group and one row.
+    const EARLIER = timeline("weekend:plan-0:0900", "Sunday 9:00", "09:00:00", "10:20:00");
+    const earlier = { ...EARLIER, serviceDate: "2026-09-06", serviceTimeStartsAt: iso("09:00:00") };
+    installFetch({ extra: [earlier] });
+    const view = await renderList();
+
+    const groups = [...view.container.querySelectorAll("[data-day-group]")]
+      .map((g) => g.getAttribute("data-day-group"));
+    assert.deepEqual(groups, ["2026-09-13", "2026-09-06"], "the month's days, newest first");
+    assert.equal(
+      view.container.querySelectorAll("[data-history-row]").length,
+      3,
+      "every service in the month is listed, not just the selected day's",
+    );
+    // The column header is drawn ONCE for the list, under the first day label.
+    // Under every day it was eight repetitions of "WHEN SERVICE PEAK RAN VS
+    // PLAN PEAK DB" between nine rows — the loudest thing on the card.
+    const headers = [...view.container.querySelectorAll("[data-row-header]")];
+    assert.equal(headers.length, 1, "the column header repeats per day group");
+    assert.equal(
+      headers[0].closest("[data-day-group]")?.getAttribute("data-day-group"),
+      "2026-09-13",
+      "the one header is not in the FIRST group",
+    );
+  });
+
+  test("picking a calendar day rings its group instead of hiding the others", async () => {
+    const EARLIER = timeline("weekend:plan-0:0900", "Sunday 9:00", "09:00:00", "10:20:00");
+    const earlier = { ...EARLIER, serviceDate: "2026-09-06", serviceTimeStartsAt: iso("09:00:00") };
+    installFetch({ extra: [earlier] });
+    const view = await renderList();
+
+    const cell = view.container.querySelector<HTMLButtonElement>('button[data-date="2026-09-06"]');
+    assert.ok(cell, "no calendar cell for the earlier day");
+    await act(async () => {
+      cell.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    assert.equal(
+      view.container.querySelector("button[data-selected]")?.getAttribute("data-date"),
+      "2026-09-06",
+      "the calendar did not follow the click",
+    );
+    // THE POINT: the other day's rows are still there.
+    assert.equal(
+      view.container.querySelectorAll("[data-history-row]").length,
+      3,
+      "picking a day filtered the list down to it",
+    );
+    // And the picked group is the one that carries the ring, so the click did
+    // something visible rather than nothing at all.
+    const ringed = [...view.container.querySelectorAll("[data-day-group]")]
+      .filter((g) => g.className.includes("ring-accent"))
+      .map((g) => g.getAttribute("data-day-group"));
+    assert.deepEqual(ringed, ["2026-09-06"], "the picked day's group is not marked");
+  });
+});
+
+describe("a row's columns", () => {
+  test("a LIVE row, which has no vs-plan, dashes that column and keeps Peak dB in its own", async () => {
+    // Taken in ORDER rather than by key, a live recording — `serviceRowFigures`
+    // drops `vs plan` while one is running — slid Peak dB one column left,
+    // under the "VS PLAN" heading. The heading is drawn once per day group, so
+    // a row that closes a gap lies about every column to its right, and it does
+    // it on exactly the rows an operator is most likely to be looking at.
+    const LIVE = {
+      ...timeline("weekend:plan-1:1300", "Sunday 1:00", "13:00:00", "14:00:00"),
+      endedAt: null,
+    } as unknown as ServiceTimeline;
+    installFetch({ extra: [LIVE] });
+    const view = await renderList();
+
+    const live = view.container.querySelector(`[data-history-row="${LIVE.serviceKey}"]`);
+    assert.ok(live, "the live recording did not render");
+    const drawn = figuresOf(live);
+    assert.deepEqual(
+      Object.keys(drawn),
+      ["attendance", "actual", "vs-plan", "level"],
+      "a row dropped a column instead of dashing it",
+    );
+    assert.equal(drawn["vs-plan"].value, "—", "a live row has no vs plan, and the column must say so");
+    // And the level is in the LEVEL column, not shifted into vs-plan's.
+    assert.equal(drawn.level.caption, "no sound recorded", `Peak dB landed in the wrong column: ${JSON.stringify(drawn)}`);
+  });
+
+  test("the header names the same columns, in the same order, as the rows carry", async () => {
+    // A heading one column left of its figures is the failure. Asserted as the
+    // two lists rather than as a screenshot, because jsdom lays out nothing.
+    installFetch();
+    const view = await renderList();
+    const headings = [...(view.container.querySelector("[data-row-header]")?.children ?? [])]
+      .map((c) => (c.textContent ?? "").trim());
+    assert.deepEqual(headings, ["When", "Service", "Peak", "Ran", "vs plan", "Peak dB", ""]);
+    const row = view.container.querySelector("[data-history-row]")!;
+    // Two leading cells (When, Service), four figures, then the chevron — the
+    // same seven tracks the heading spans.
+    assert.equal(row.children.length, headings.length);
   });
 });

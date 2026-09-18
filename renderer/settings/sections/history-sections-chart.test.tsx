@@ -341,6 +341,92 @@ test("the sound chart plots the real sample series when the route has one", asyn
   }
 });
 
+test("the item peak tick is full height, named in the legend, and switchable", async () => {
+  // It shipped as a 4px nub on the top edge of an item block in the series
+  // colour, with nothing on the page naming it — the first question anybody
+  // asked about the sound chart was what the blue chip was.
+  //
+  // Height is asserted off the drawn attributes, which is the one thing about
+  // it jsdom CAN see: the tick is an SVG <line> with explicit coordinates, not
+  // a styled box.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: false });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL,
+        timeline: TIMELINE,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const mark = document.querySelector("[data-peak-mark]") as SVGLineElement;
+    assert.ok(mark, "no peak mark");
+    const height = Number(mark.getAttribute("y2")) - Number(mark.getAttribute("y1"));
+    // LANE_ROW_H. A 4px nub is the bug.
+    assert.equal(height, 16, `the peak tick is ${height}px tall, not the segment's full 16`);
+
+    const named = document.querySelector("[data-legend-peak-mark]") as HTMLElement;
+    assert.ok(named, "the legend does not name the peak mark");
+    assert.equal(named.textContent, "Item peak", `the legend reads ${named.textContent}`);
+
+    // And it is a choice, not a fixture.
+    fireEvent.click(screen.getByLabelText("Customize sound"));
+    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    fireEvent.click(popover.getByText("Item peaks"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0, "unticking Item peaks left the tick drawn");
+    assert.equal(document.querySelectorAll("[data-legend-peak-mark]").length, 0, "the legend still names a mark that is off");
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the dashed sound series is named Leq, never Average", async () => {
+  // It is the bucket's ENERGY average — a Leq, the same number spl-leq.ts
+  // computes. "Average" reads as an arithmetic mean of decibels, which is a
+  // different and lower figure, and nothing on the page said which was drawn.
+  //
+  // Read off what the component PUT in the DOM, in both places the name shows:
+  // the legend entry and the Customize row. A rename in one of the two is the
+  // failure this exists for.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: true });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL,
+        timeline: TIMELINE,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const legend = document.querySelector("[data-series-toggle='avg']") as HTMLElement;
+    assert.ok(legend, "no legend entry for the dashed series");
+    assert.equal(legend.textContent, "LAeq Leq", `the legend reads ${legend.textContent}`);
+
+    fireEvent.click(screen.getByLabelText("Customize sound"));
+    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    assert.ok(popover.getByText("Leq"), "Customize does not offer Leq");
+    assert.equal(popover.queryAllByText("Average").length, 0, "Customize still says Average");
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("a 404 falls back to the per-item step, one run per item", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });

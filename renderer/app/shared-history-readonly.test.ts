@@ -113,13 +113,15 @@ describe("the shared /history link", () => {
     }
   });
 
-  it("the day list's Delete stays gated too", async () => {
-    // The other destructive control, and the one the header does not own: a
-    // Delete per day-list row. This counted `{!readOnly &&` in the section's
-    // source and asserted the number 2 — a bare count, which cannot tell an add
-    // plus a remove from no change, and which says nothing about what actually
+  it("the day list carries no recording control on either side of the gate", async () => {
+    // A list row is a summary that opens the service page; Delete lives on that
+    // page's header (guarded above) and nowhere on the list, matching the
+    // mockup. This once counted `{!readOnly &&` in the section's source and
+    // asserted the number 2 — a bare count, which cannot tell an add plus a
+    // remove from no change, and which says nothing about what actually
     // renders. The list is RENDERED, read-only and not, and the exact set of
-    // controls is compared.
+    // controls is compared: a Delete that grows back on a row shows up here
+    // as a named entry, not as a changed number.
     const { installDom } = await import("../test-dom.js");
     const teardown = installDom();
     try {
@@ -180,10 +182,8 @@ describe("the shared /history link", () => {
       // adding different controls conflict instead of merging silently.
       assert.deepEqual(
         await rowControls(false),
-        [
-          "Delete recording for Evening",
-        ],
-        "the operator's own list keeps its Delete",
+        [],
+        "a list row must not carry Delete; it lives on the service page header",
       );
       assert.deepEqual(
         await rowControls(true),

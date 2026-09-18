@@ -13,12 +13,17 @@ export function Sparkline({
   width = 120,
   height = 28,
   label,
+  /** The service type's own colour — the SAME one its line, its legend entry
+   *  and its milestones take. A tile drawn in a colour its line does not use is
+   *  a tile that belongs to nothing. */
+  color = "var(--color-green-9)",
 }: {
   values: number[];
   width?: number;
   height?: number;
   /** Named for a screen reader, which cannot read a line. */
   label: string;
+  color?: string;
 }) {
   const finite = values.filter((v) => Number.isFinite(v));
   if (!finite.length) return null;
@@ -49,7 +54,7 @@ export function Sparkline({
         data-sparkline=""
         d={finite.length === 1 ? `M0,${y(finite[0]).toFixed(1)}L${width},${y(finite[0]).toFixed(1)}` : d}
         fill="none"
-        stroke="var(--color-green-9)"
+        stroke={color}
         strokeWidth={1.5}
         strokeLinejoin="round"
         strokeLinecap="round"
@@ -57,7 +62,7 @@ export function Sparkline({
       />
       {/* The newest recording, marked: a tile is read right-to-left, and which
           end is "now" is otherwise a guess. */}
-      <circle cx={x(last)} cy={y(finite[last])} r={2} fill="var(--color-green-9)" />
+      <circle cx={x(last)} cy={y(finite[last])} r={2} fill={color} />
     </svg>
   );
 }

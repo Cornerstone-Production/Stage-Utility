@@ -159,24 +159,33 @@ export function useStoredKeys(
   storageKey: string,
   allowed: readonly string[] | null,
   fallback: string[],
-): [string[], (key: string) => Error | null, () => void] {
+): [string[], (key: string) => Error | null, () => void, (keys: string[]) => Error | null] {
   const [keys, setKeys] = useState<string[]>(() => readStoredKeys(storageKey, allowed, fallback));
-  const toggle = useCallback(
-    (key: string): Error | null => {
-      const next = keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key];
+  /**
+   * Replace the whole selection at once.
+   *
+   * Not a loop of `toggle`. Every call in one tick computes its next list from
+   * the SAME `keys` closure, so the last write wins and the rest are lost — a
+   * "Show all" over three hidden series brought one of them back. The one
+   * caller that changes more than one key at a time uses this instead.
+   */
+  const replace = useCallback(
+    (next: string[]): Error | null => {
       setKeys(next);
       try {
         localStorage.setItem(storageKey, JSON.stringify(next));
-        // Everything else in this tab reading the same entry, including this
-        // hook mounted a second time elsewhere on the page. Announced AFTER the
-        // write so a listener re-reading sees the new value.
         notifyStoredKeys(storageKey);
         return null;
       } catch (err) {
         return err instanceof Error ? err : new Error(String(err));
       }
     },
-    [keys, storageKey],
+    [storageKey],
+  );
+  const toggle = useCallback(
+    (key: string): Error | null =>
+      replace(keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]),
+    [keys, replace],
   );
 
   /** The current `allowed`/`fallback`, for the subscription below. Both are
@@ -214,5 +223,5 @@ export function useStoredKeys(
     // render and re-fire any effect that depends on it, forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
-  return [keys, toggle, reload];
+  return [keys, toggle, reload, replace];
 }

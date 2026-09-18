@@ -10,7 +10,8 @@ export interface ChartPoint {
   v: number;
 }
 
-/** A drawn line. `role` picks the weight (1.8px primary / 1.2px secondary). */
+/** A drawn line. `role` picks the weight (1.8px primary / 1.2px secondary)
+ *  unless `width` overrides it. */
 export interface ChartSeries {
   id: string;
   label: string;
@@ -51,24 +52,37 @@ export interface ChartSeries {
    */
   runs?: ChartPoint[][];
   /**
-   * Points marked individually, in the series colour, with no line through them.
+   * Stroke width in px, overriding the one `role` picks.
    *
-   * For a line whose nodes are a SUMMARY of several readings: the trend chart's
-   * line runs through each day's busiest service, and these are the services
-   * themselves. Without them a church with three Sunday services would see one
-   * point a week and no way to tell it stood for three.
-   *
-   * Not `points`, because `points` is what the line and the hover readout are
-   * built from and those must stay the summary.
+   * For a chart whose lines are PEERS. The trend chart draws one line per
+   * service type and none of them is the subject: drawing the busiest at 1.8
+   * and the rest at 1.2 said the 9:45 service was the thing being measured and
+   * the others were reference lines against it, which is not what it is.
    */
-  dots?: ChartPoint[];
+  width?: number;
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
 }
 
 /** What the y axis counts. `db` never floors at zero — 0 dB is not a floor a
  *  sound chart has, and filling to it draws a 60 dB-tall block under every line. */
-export type YScale = { kind: "count" } | { kind: "db" };
+export type YScale =
+  /**
+   * A count.
+   *
+   * `banded` scales to the DATA — a round step below the quietest reading to a
+   * round step above the loudest — instead of running from zero. For the trend
+   * chart, where three service types between 900 and 1,600 drew as three lines
+   * in the top fifth of a 0–2,000 plot and a hundred-person week looked like
+   * nothing. It never bands BELOW zero, and it collapses to zero when the data
+   * genuinely reaches down there, because a count's floor is real.
+   *
+   * The default is still zero-anchored, which is right for a single service's
+   * attendance: the curve starts at an empty room and the gradient fills to a
+   * floor that means something.
+   */
+  | { kind: "count"; banded?: boolean }
+  | { kind: "db" };
 
 /** A y axis, resolved: the drawn range and the ticks on it. */
 export interface Axis {
@@ -109,6 +123,7 @@ export function niceAxis(values: number[], scale: YScale): Axis {
     const hi = lo + Math.ceil((rough - lo) / 10) * 10;
     return { lo, hi, ticks: [lo, (lo + hi) / 2, hi] };
   }
+  if (scale.banded && finite.length) return bandedCountAxis(finite);
   const dataMax = Math.max(1, ...finite);
   let step = niceStep(dataMax / 2);
   let hi = 2 * step;
@@ -117,6 +132,78 @@ export function niceAxis(values: number[], scale: YScale): Axis {
     hi = 2 * step;
   }
   return { lo: 0, hi, ticks: [0, step, hi] };
+}
+
+/**
+ * Every step the banded axis will consider, as mantissas over the decades.
+ *
+ * The 1·2·5 ladder the rest of this file uses, plus 2.5 and 4. Both earn their
+ * place: without 4 there is no step that frames 800–1,600 in two intervals —
+ * the mockup's own numbers, and the shape a church with three service types
+ * actually has — and the axis falls back to 500 and a band from 500 to 2,000.
+ */
+const BAND_MANTISSAS = [1, 2, 2.5, 4, 5] as const;
+
+/** How many intervals a banded axis may have. Two is the fewest that puts a
+ *  gridline between the ends; six is the most before the plot is more rule
+ *  than line. */
+const BAND_MIN_INTERVALS = 2;
+const BAND_MAX_INTERVALS = 6;
+
+/**
+ * A count axis framed on the data.
+ *
+ * Every step on the ladder that lands an acceptable number of intervals across
+ * the rounded data range is a candidate, and the TIGHTEST band wins: highest
+ * floor, then lowest ceiling, then the fewest gridlines. Tightest, because the
+ * whole point is that three service types between 900 and 1,600 say nothing
+ * drawn on a 0–2,000 axis — they are three flat lines in the top fifth of it,
+ * and a hundred-person week is invisible.
+ *
+ * Never below zero, and it takes zero happily when the data reaches down there:
+ * a count's floor is real, unlike a decibel's. A spread too wide for any step
+ * to both frame it and clear zero gets zero rather than a wall of gridlines.
+ *
+ * Fractional steps are refused. These are counts of people; an axis labelled
+ * 2.5 / 5 / 7.5 is measuring something else. A fractional MANTISSA is fine once
+ * it is multiplied up — 2.5 × 100 is 250, which is a perfectly good step.
+ */
+function bandedCountAxis(finite: number[]): Axis {
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  // A flat series has no range to frame. Give it one, so the line sits in the
+  // middle of the plot rather than along an edge — the same reason the
+  // sparkline draws a flat series down the middle.
+  const span = max - min || Math.max(1, Math.abs(max) * 0.2);
+  // A flat series is SEARCHED as if it spanned that much, so the rounding below
+  // has something to round outwards to. Rounding a single value gives lo === hi
+  // for every step that divides it, which is no axis at all.
+  const flat = max === min;
+  const from = flat ? min - span / 2 : min;
+  const to = flat ? max + span / 2 : max;
+  const base = Math.pow(10, Math.floor(Math.log10(Math.max(span, 1) / BAND_MAX_INTERVALS)));
+  const candidates: Axis[] = [];
+  for (const decade of [base / 10, base, base * 10, base * 100]) {
+    for (const m of BAND_MANTISSAS) {
+      const step = m * decade;
+      if (step <= 0 || !Number.isInteger(step)) continue;
+      const lo = Math.max(0, Math.floor(from / step) * step);
+      const hi = Math.ceil(to / step) * step;
+      const intervals = Math.round((hi - lo) / step);
+      if (intervals < BAND_MIN_INTERVALS || intervals > BAND_MAX_INTERVALS) continue;
+      candidates.push({ lo, hi, ticks: Array.from({ length: intervals + 1 }, (_, i) => lo + i * step) });
+    }
+  }
+  if (!candidates.length) {
+    const hi = Math.max(1, Math.ceil(max));
+    return { lo: 0, hi, ticks: [0, hi / 2, hi] };
+  }
+  candidates.sort((a, b) =>
+    b.lo - a.lo
+    || a.hi - b.hi
+    // Same band: the fewest gridlines across it.
+    || a.ticks.length - b.ticks.length);
+  return candidates[0];
 }
 
 export const TEN_MINUTES_MS = 10 * 60_000;
