@@ -335,6 +335,21 @@ export function SplDetail({
     for (const it of timeline?.items ?? []) m.set(it.itemId, it.preService ?? false);
     return m;
   }, [timeline]);
+  /**
+   * The planned length of each item, from the TIMELINE record.
+   *
+   * The sound record does not carry one — `SplItemHistory` has a title, a
+   * sequence and per-metric stats and nothing from the plan — so the lane's
+   * PLANNED figure read "—" on every segment of the sound chart while the
+   * identical lane on the attendance chart filled it in. Keyed by `itemId`
+   * alone, like `preById` above: a planned length is a property of the plan
+   * item, not of one run of it.
+   */
+  const plannedById = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const it of timeline?.items ?? []) m.set(it.itemId, it.plannedLengthSec);
+    return m;
+  }, [timeline]);
 
   const primaryKey = shownMetrics[0] ?? null;
   const live = detail.endedAt == null;
@@ -507,7 +522,7 @@ export function SplDetail({
       startedAt: it.startedAt,
       endedAt: it.endedAt,
       preService: preById.get(it.itemId) ?? false,
-      plannedSec: null,
+      plannedSec: plannedById.get(it.itemId) ?? null,
       actualSec: it.endedAt ? Math.round((Date.parse(it.endedAt) - Date.parse(it.startedAt)) / 1000) : null,
       peakLabel: st?.max != null ? dB(st.max) : null,
     };
