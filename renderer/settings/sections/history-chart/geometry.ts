@@ -50,6 +50,18 @@ export interface ChartSeries {
    * series, because hover reads the nearest sample from it.
    */
   runs?: ChartPoint[][];
+  /**
+   * Points marked individually, in the series colour, with no line through them.
+   *
+   * For a line whose nodes are a SUMMARY of several readings: the trend chart's
+   * line runs through each day's busiest service, and these are the services
+   * themselves. Without them a church with three Sunday services would see one
+   * point a week and no way to tell it stood for three.
+   *
+   * Not `points`, because `points` is what the line and the hover readout are
+   * built from and those must stay the summary.
+   */
+  dots?: ChartPoint[];
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
 }
@@ -145,6 +157,37 @@ export function timeTicks(startMs: number, endMs: number): number[] {
   const step = endMs - startMs < TICK_FINE_DOMAIN_MS ? TICK_FINE_MS : TICK_COARSE_MS;
   const out: number[] = [];
   for (let t = Math.ceil(startMs / step) * step; t <= endMs; t += step) out.push(t);
+  return out;
+}
+
+/**
+ * Where a DATE axis is labelled.
+ *
+ * The Trends chart's domain is weeks or a year, not one service, so the
+ * clock-anchored ticks above would produce four hundred of them. Anchored on
+ * the week instead: at most ~13 labels across a year, and every tick is a
+ * Sunday-to-Saturday boundary an operator can place a service against.
+ *
+ * The step widens with the domain so the count stays readable: weekly up to
+ * ~14 weeks, fortnightly to ~30, then monthly-ish (4 weeks). Local midnight,
+ * because a week boundary is a calendar thing and a UTC one lands on Saturday
+ * evening in Chicago.
+ */
+export function dateTicks(startMs: number, endMs: number): number[] {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
+  const WEEK = 7 * 24 * 60 * 60_000;
+  const weeks = (endMs - startMs) / WEEK;
+  const stepWeeks = weeks <= 14 ? 1 : weeks <= 30 ? 2 : 4;
+  const out: number[] = [];
+  // Start on the first local midnight at or after the domain start, then step
+  // in whole days so a daylight-saving shift cannot drift the ticks by an hour.
+  const cursor = new Date(startMs);
+  cursor.setHours(0, 0, 0, 0);
+  if (cursor.getTime() < startMs) cursor.setDate(cursor.getDate() + 1);
+  while (cursor.getTime() <= endMs) {
+    out.push(cursor.getTime());
+    cursor.setDate(cursor.getDate() + stepWeeks * 7);
+  }
   return out;
 }
 

@@ -106,18 +106,84 @@ mode as built in the per-item edits PR, with its edit bar above the table.
 Order on the page: Trends, then the calendar beside the list. Trends is the
 defining view of the tab and leads.
 
+The Overview blend and the Export disclosure are not mentioned here and were
+KEPT, below Trends — this section describes what leads, not what the page is
+allowed to contain, and removing a working view is not a decision a silence
+makes.
+
+> **Trimmed after review.** The Overview kept its own average attendance, its
+> peak, and an attendance chart, over a different window than Trends and with a
+> different average — two charts of one quantity on one screen that disagreed.
+> It is the TIMING card now (services, average length, average start, average
+> overrun) plus the sound level, which Trends does not plot. What went, and
+> where it went:
+>
+> | Dropped | Covered by |
+> |---|---|
+> | the average-attendance lead stat | a Trends tile per service type |
+> | Peak attendance | a Trends tile, and each day-list row's own peak |
+> | the attendance trend chart | the Trends chart, over a chosen range |
+> | the SPL trend LINE on that chart | nothing — the average level and its dB delta stay, the per-date line does not |
+>
+> The SPL line is the one real loss and is named rather than implied. The
+> chart component itself still serves Home's Recent services card.
+
 **Calendar.** Shade is the number of services that day in four steps. No dots,
 no counts; the shade alone carries it. The day number is centred in its cell.
 Today is outlined in the accent; the selected day carries the accent ring.
 
 **List.** Grouped by day. Each row: time and service type, plan title and
-series with item count, then peak attendance, ran, versus plan, peak LAeq.
-Rows are the same object as the KPIs on the service page, so a week reads at
-a glance.
+series with item count, then peak attendance, ran, versus plan, and the peak on
+the operator's PRIMARY Smaart metric — not LAeq, which this said. The service
+page's own header has named the metric it actually read since PR 2, because a
+church metering LCeq is not told it peaked at an LAeq it never recorded. The row
+figures are picked out of `serviceKpis` by key rather than derived again, so a
+week reads at a glance and a row cannot disagree with the page it opens.
+
+> **Corrected during PR 3.** The row needs the FULL SPL record for a peak;
+> `spl:getSummary`, which the list already held, carries a service-level Leq per
+> metric and no peak at all. The selected day's records are fetched — one to
+> four, not a year of them. Everything else on this page, Trends included, is
+> computed from records the list already loads, and no route was added for
+> trend data.
 
 **Trends.** A card with one tile per service type: a sparkline of peak
 attendance over the last eight recordings, the average, and the change against
-the eight before. Below it, one chart across the chosen range for all types
+the eight before.
+
+> **Extended after review: sound.** A switch on the card plots either peak
+> attendance or the peak LEVEL on the operator's primary Smaart metric, with the
+> same per-day maximum, the same window and the same change rule, on a dB axis.
+> The levels come from the SPL SUMMARY — which gained a `max` per metric for
+> this — rather than from the per-item records: one point per recording across
+> 52 weeks would otherwise mean reading hundreds of files to answer one number
+> each, and the summary was already loaded by this page.
+
+> **Read literally during PR 3, per DAY.** The window is eight DAYS, not eight
+> recordings: a church with three Sunday services plots three points a week
+> within two hours of each other, and a line through them was a sawtooth in
+> which a week-to-week trend was invisible. The line runs through each day's
+> BUSIEST service and a dot marks each recording; the tile averages the same
+> per-day figure, so the two halves of the card quote the same kind of number.
+>
+> "The eight before" was read as requiring a FULL eight, which meant no change
+> figure until a type had recorded sixteen days — four months in. The tile was
+> right and useless for a season.
+>
+> **Relaxed after review.** The comparison uses whatever prior days there are,
+> up to eight, and the tile says how many: "vs prior 3". Below THREE it still
+> reads "no prior window yet", because one or two readings are not an average
+> and a percentage off them is noise wearing a direction. The count being on the
+> label is what makes a thin comparison safe to show at all.
+>
+> The floor was four for one round and left every tile on the three-month
+> archive reading "no prior window yet" — its busiest type has eleven recorded
+> days, which is eight recent and three prior, one short. A floor nothing real
+> clears is a figure nobody ever sees. The alternative — splitting whatever is available
+> in half — makes the average and the compared window two different things,
+> and a tile whose average is over five recordings and whose change is over two
+> is harder to read than one that says it cannot tell yet. A type with fewer
+> than two recordings then needs no special case; it falls out of the same rule. Below it, one chart across the chosen range for all types
 using PR 1's module, with milestone marks under the axis: a small triangle,
 a dashed guide up the plot, a short label when there is room, the full label
 on hover. Milestones are an operator list (date, label, optional service type)

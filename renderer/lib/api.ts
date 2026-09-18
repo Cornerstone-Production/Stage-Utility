@@ -293,6 +293,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
 
+    case "history:listMilestones":
+      return apiFetch<T>("/api/history/milestones");
+    case "history:saveMilestone":
+      return post<T>("/api/history/milestones", p);
+    case "history:deleteMilestone":
+      return del<T>(`/api/history/milestones/${encodeURIComponent(String(p.id ?? ""))}`);
+
     case "baptism:get":
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":

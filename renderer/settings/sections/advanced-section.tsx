@@ -28,6 +28,7 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
+import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { BarConfigurator } from "../../app/bar-configurator";
 import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
@@ -1311,6 +1312,10 @@ export function AdvancedSection({
             Data archive
           </p>
           <DataArchivePanel />
+          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+            History milestones
+          </p>
+          <HistoryMilestonesPanel />
         </div>
       </div>
 

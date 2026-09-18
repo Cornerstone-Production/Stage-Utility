@@ -1,10 +1,19 @@
 // The Overview blend: what it draws, and what it must NOT draw.
 //
-// Two things reported from screenshots. The SPL line had no summary of its own,
-// so one attendance figure sat above a chart with two series in it and the green
-// line read as bolted on; and right-clicking the chart opened the menu with the
-// chart's tooltip still tracking the pointer underneath it, drawn through the
-// menu it had just opened.
+// It is the TIMING card now — services, average length, average start, average
+// overrun — plus the sound summary. Attendance left it entirely: Trends, at the
+// top of All services, plots attendance per service type over a chosen range,
+// and this card plotted the same quantity over a different window with a
+// different average. Two charts of attendance on one screen that disagreed.
+//
+// What went with the attendance chart, and where the coverage went:
+//
+//   the lead attendance stat, Peak attendance   Trends, and the day-list rows
+//   the two series legend dots                  gone with the chart they keyed
+//   the SPL TREND LINE                          gone; the level summary stays
+//   hover suppressed while the menu is open     attendance-trend-chart.test.tsx,
+//                                               which still owns that chart for
+//                                               Home's card
 //
 // Both are absences as much as presences — a summary that appears when there is
 // no level to report is as wrong as one that never appears — so the tests below
@@ -18,9 +27,8 @@
 // a later one. `t.after()` runs regardless of how the test ends.
 //
 // jsdom lays nothing out and loads no stylesheet, so what these CANNOT see is
-// where anything ended up. The menu opening on top of the chart, the tooltip it
-// suppresses, and the summary's type against the attendance block above it were
-// driven in headless Chrome against a seeded history instead.
+// where anything ended up. The menu's position over the card, and the summary's
+// type, were driven in headless Chrome against a seeded history instead.
 
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
@@ -71,21 +79,21 @@ function overviewData(over: Partial<OverviewData> = {}): OverviewData {
 /** Everything the card says, with its line breaks flattened. */
 const text = (el: HTMLElement) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/** The chart's hover tooltip — its only z-10 overlay. */
-const tooltip = (c: HTMLElement) => c.querySelector<HTMLElement>("div.z-10");
-
-/** The SPL summary block itself, present only while the line is on AND there
- *  is a level to report — see the `data-testid` in OverviewBlend. */
+/** The SPL summary block itself, present exactly when there IS a level to
+ *  report — see the `data-testid` in OverviewBlend. */
 const splSummary = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="spl-summary"]');
 
-function show(over: Partial<OverviewData> = {}, shown = true) {
-  return render(
-    <OverviewBlend
-      overview={overviewData(over)}
-      splTrend={{ shown, metric: "LAeq 10" }}
-      onSplTrend={() => {}}
-    />,
-  );
+function show(over: Partial<OverviewData> = {}) {
+  return render(<OverviewBlend overview={overviewData(over)} onSplTrend={() => {}} />);
+}
+
+/** Every sentence on the card — anything with a space and a lower-case word,
+ *  which is prose rather than a label or a figure. */
+function prose(el: HTMLElement): string[] {
+  return [...el.querySelectorAll("div, p, span")]
+    .map((n) => (n.textContent ?? "").trim())
+    .filter((t) => /[a-z]/.test(t) && /\s/.test(t) && !/^[A-Z][a-z]+ [a-z]+$/.test(t))
+    .filter((t) => /\.|right-click|switched off|is off/i.test(t));
 }
 
 describe("the SPL summary under the lead stat", () => {
@@ -98,40 +106,31 @@ describe("the SPL summary under the lead stat", () => {
     // dB, NOT a percentage. A percentage of a logarithmic quantity says nothing
     // about how loud it was, which is why this does not reuse the attendance
     // line's "+12%" shape.
+    // dB, and "recordings" — not the service type's own name, which is a proper
+    // noun and pluralised into "vs the prior 4 The Salt Companys".
     assert.ok(
-      txt.includes("+20.0 dB vs the prior 4 Weekends"),
-      `the comparison is not a dB delta phrased like the attendance one: ${txt}`,
+      txt.includes("+20.0 dB vs the prior 4 recordings"),
+      `the comparison is not a dB delta, phrased for a proper noun: ${txt}`,
     );
   });
 
-  test("both labels wear their series' colour, or neither does", (t) => {
-    // The dots are the chart's legend — it has none of its own — so they only
-    // mean anything as a pair. One green dot on the SPL label and none on
-    // attendance was reported as the two summaries not matching; a lone blue
-    // one with the SPL line off would be a legend for a single line.
-    //
-    // Counted, not merely present: asserting "attendance has a dot" would pass
-    // just as well if the SPL one had been dropped, which is the asymmetry this
-    // exists to catch.
-    const withSpl = show();
+  test("the card carries no attendance figure at all", (t) => {
+    // The whole reason this card was trimmed. It showed an average attendance
+    // and a peak over its own window while Trends showed an average over
+    // another, on the same screen, disagreeing. Asserted as an ABSENCE with a
+    // positive beside it: the timing figures must still be there, or this would
+    // pass on a card that rendered nothing.
+    const view = show();
     t.after(() => cleanup());
-    const dots = (c: HTMLElement) => c.querySelectorAll("span.rounded-full").length;
+    const txt = text(view.container);
+    assert.ok(txt.includes("Avg length") && txt.includes("Avg overrun"), `the timing figures went too: ${txt}`);
+    assert.equal(txt.includes("2,355"), false, `the attendance lead stat is still on the card: ${txt}`);
+    assert.equal(txt.includes("Peak attendance"), false, `the peak attendance figure is still on the card: ${txt}`);
     assert.equal(
-      dots(withSpl.container),
-      2,
-      `expected a dot on each label, saw ${dots(withSpl.container)} — the two summaries do not match`,
-    );
-    cleanup();
-
-    const withoutSpl = show({}, false);
-    t.after(() => cleanup());
-    assert.equal(
-      dots(withoutSpl.container),
+      view.container.querySelectorAll("svg").length,
       0,
-      "a series dot is drawn with only one series on the chart — a legend for nothing",
+      "the attendance chart is still drawn — two charts of attendance that do not agree",
     );
-    // The positive half: the attendance summary itself is still there.
-    assert.ok(text(withoutSpl.container).includes("2,355"), "the attendance figure went missing with the dots");
   });
 
   test("draws no arrow when the change is inside the deadband", (t) => {
@@ -151,20 +150,28 @@ describe("the SPL summary under the lead stat", () => {
       `an arrow was drawn for a flat change: ${summaryText}`,
     );
     assert.ok(
-      summaryText.includes("±0.0 dB vs the prior 4 Weekends"),
+      summaryText.includes("±0.0 dB vs the prior 4 recordings"),
       `a flat change should read with a neutral sign, not a signed one: ${summaryText}`,
     );
   });
 
-  test("is absent when the SPL line is switched off", (t) => {
-    const view = show({}, false);
+  test("the card is four timing figures and no prose", (t) => {
+    // It printed "Sound summary is off — right-click for options." above the
+    // timings: a sentence advertising a hidden switch whose only effect was to
+    // hide a figure that has no reason to be hidden. Both are gone. A card that
+    // needs a paragraph to explain what it is not showing is showing the wrong
+    // thing.
+    const view = show({ avgSpl: null, splDelta: null, splMetric: null, splMetrics: [] });
     t.after(() => cleanup());
-    const txt = text(view.container);
-    assert.ok(txt.includes("2,355"), `nothing rendered, so this asserts nothing: ${txt}`);
-    // The BLOCK itself, not a text scan for "dB" over the whole card: a scan
-    // that broad fails the moment anything else in this component ever prints
-    // a dB figure, for a reason that has nothing to do with this toggle.
-    assert.ok(!splSummary(view.container), `the SPL summary block is drawn with the line switched off: ${txt}`);
+    const labels = [...view.container.querySelectorAll("div")]
+      .map((n) => (n.textContent ?? "").trim())
+      .filter((t2) => /^(Services|Avg length|Avg start|Avg overrun)$/.test(t2));
+    assert.deepEqual(
+      labels.sort(),
+      ["Avg length", "Avg overrun", "Avg start", "Services"],
+      "the four timing figures must be there, or this asserts nothing",
+    );
+    assert.deepEqual(prose(view.container), [], "the card is carrying prose");
   });
 
   test("is absent when no weekend in scope carries a level", (t) => {
@@ -172,9 +179,9 @@ describe("the SPL summary under the lead stat", () => {
     const view = show({ avgSpl: null, splDelta: null, splMetric: null, splMetrics: [] });
     t.after(() => cleanup());
     const txt = text(view.container);
-    assert.ok(txt.includes("2,355"), `nothing rendered, so this asserts nothing: ${txt}`);
+    assert.ok(txt.includes("Avg length"), `nothing rendered, so this asserts nothing: ${txt}`);
     assert.ok(!txt.includes("Avg SPL"), `the SPL summary is drawn with no level to report: ${txt}`);
-    assert.ok(!txt.includes("—"), `a dash is standing in for a level nobody measured: ${txt}`);
+    assert.ok(!txt.includes("— dB"), `a dash is standing in for a level nobody measured: ${txt}`);
   });
 
   test("keeps the average but drops the comparison when there is no prior weekend", (t) => {
@@ -189,20 +196,46 @@ describe("the SPL summary under the lead stat", () => {
 });
 
 describe("the right-click menu", () => {
-  test("takes the chart's hover down while it is open", (t) => {
-    // jsdom lays nothing out, so the chart's box measures zero wide and any
-    // pointer move lands on the last point. That is all this needs: a hover.
+  test("offers the metric, and nothing that hides a figure", (t) => {
+    // What is left of it. The "SPL trend line" entry gated a line on a chart
+    // this card no longer draws; the "Sound summary" entry that replaced it
+    // gated the level itself, which is the card's own summary and has no reason
+    // to be switchable. Choosing WHICH metric the level is read from is a real
+    // choice and stays.
+    //
+    // The tooltip-suppression half of this test went with the chart; the chart
+    // itself still serves Home, and attendance-trend-chart.test.tsx still
+    // covers `hoverSuppressed` there.
     const view = show();
     t.after(() => cleanup());
-    const svg = view.container.querySelector("svg")!;
-    fireEvent.pointerMove(svg, { clientX: 400, clientY: 40 });
-    assert.ok(tooltip(view.container), "no tooltip to conflict with: this asserts nothing");
+    fireEvent.contextMenu(view.container.firstElementChild!.firstElementChild!, { clientX: 400, clientY: 40 });
+    const menu = document.querySelector('[role="menu"]');
+    assert.ok(menu, "the right-click menu never opened");
+    const txt = menu.textContent ?? "";
+    assert.ok(txt.includes("Metric"), `the metric picker went too: ${txt}`);
+    assert.equal(/Sound summary|trend line/.test(txt), false, `the menu still hides a figure: ${txt}`);
+  });
 
-    fireEvent.contextMenu(svg, { clientX: 400, clientY: 40 });
-    assert.ok(document.querySelector('[role="menu"]'), "the right-click menu never opened");
-    assert.ok(
-      !tooltip(view.container),
-      "the chart's tooltip is still drawn while the menu it opened is on top of it",
+  test("there is no trigger and no button when there is no metric to choose", (t) => {
+    // Asserted on what the card OFFERS, not on what happens if you right-click
+    // anyway. The proof for this used to leave an empty menu mounted, and the
+    // whole test file then failed as a 31-second timeout instead of an
+    // assertion — a red that says nothing about the bug.
+    //
+    // The empty menu itself is now impossible: ContextMenu renders null for an
+    // empty list, pinned in context-menu-empty.test.tsx. This is the other half
+    // — the card does not advertise a menu it has nothing to put in.
+    const view = show({ avgSpl: null, splDelta: null, splMetric: null, splMetrics: [] });
+    t.after(() => cleanup());
+    assert.equal(
+      view.container.querySelector('[aria-label="Overview options"]'),
+      null,
+      "the touch affordance opens a menu with nothing in it",
     );
+    fireEvent.contextMenu(view.container.firstElementChild!.firstElementChild!, { clientX: 10, clientY: 10 });
+    assert.equal(document.querySelector('[role="menu"]'), null, "a right-click opened an empty box");
+    // Closed explicitly, so nothing is left mounted for the next test — which
+    // is how the old proof turned into a hang.
+    fireEvent.keyDown(window, { key: "Escape" });
   });
 });

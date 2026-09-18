@@ -27,6 +27,7 @@ import { formatClock } from "../../../lib/clock-format";
 import { fmtDur } from "../overview-data";
 import {
   areaPathD,
+  dateTicks,
   linePathD,
   nearestIndex,
   niceAxis,
@@ -50,6 +51,37 @@ const GAP_MS = 3 * 60_000;
 const NARROW_PX = 600;
 
 const LANE_FONT = "500 11px \"IBM Plex Mono\", ui-monospace, monospace";
+
+/**
+ * A dated mark under the x axis: a triangle, a dashed guide up the plot, and a
+ * label when there is room for one.
+ *
+ * ONLY the Trends chart passes these. A single service's chart never carries a
+ * milestone — "we moved to two services" is a statement about the history, not
+ * about the 9 o'clock on the 13th, and drawing it across one morning's plot
+ * would read as something that happened during that service.
+ */
+export interface ChartMilestone {
+  id: string;
+  /** Epoch ms. */
+  t: number;
+  label: string;
+  /** The operator's own entry, or one derived from a series title changing.
+   *  Both draw identically; the hover label says which. */
+  kind: "operator" | "series";
+  /**
+   * The `ChartSeries.id` this mark belongs to, or absent for one that belongs to
+   * every series.
+   *
+   * A scoped mark is drawn ONLY while its series is, and takes that series'
+   * colour rather than the neutral one. "Moved to two services" against the
+   * Weekend line is a statement about the weekend; left drawn after the operator
+   * switched the Weekend series off, it reads as a statement about whatever is
+   * still on screen. An unscoped mark stays neutral, because a colour would
+   * claim a series it does not have.
+   */
+  seriesId?: string | null;
+}
 
 export interface HistoryChartProps {
   /** Drawn back to front; the primary series draws last and on top. */
@@ -76,6 +108,17 @@ export interface HistoryChartProps {
   onToggleSeries?: (id: string) => void;
   /** Test seam: the wall clock the live edge and a live item's block run to. */
   nowMs?: number;
+  /**
+   * What the x axis counts. `clock` (the default) is one service, labelled in
+   * times of day; `date` is weeks or a year of recordings, labelled in dates.
+   *
+   * Not inferred from the domain's width: a very long single service and a very
+   * short trend range overlap, and an axis that guesses would relabel itself on
+   * a record somebody had corrected the times of.
+   */
+  xAxis?: "clock" | "date";
+  /** Dated marks under the axis. See ChartMilestone. */
+  milestones?: ChartMilestone[];
 }
 
 const PAD_L = 44;
@@ -85,6 +128,8 @@ const PLOT_H = 150;
 const AXIS_H = 16;
 const LANE_ROW_H = 16;
 const LANE_GAP = 3;
+/** The milestone band: a 6px triangle, then the label under it. */
+const MARK_BAND_H = 24;
 
 export function HistoryChart({
   series,
@@ -98,6 +143,8 @@ export function HistoryChart({
   emptyNote,
   onToggleSeries,
   nowMs,
+  xAxis = "clock",
+  milestones,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -105,6 +152,10 @@ export function HistoryChart({
   const [width, setWidth] = useState(640);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverRow, setHoverRow] = useState<"plot" | "pre" | "service" | null>(null);
+  /** Which milestone the pointer is on, if any. Its own state rather than part
+   *  of `hoverX`: the marks sit BELOW the plot, where the plot's own pointer
+   *  handler has already decided there is nothing under the cursor. */
+  const [hoverMark, setHoverMark] = useState<string | null>(null);
 
   // 1 unit = 1 px: the SVG's viewBox tracks the measured container width rather
   // than a fixed 600, so a measured label width in CSS px can be compared
@@ -132,7 +183,13 @@ export function HistoryChart({
   const plotX1 = W - PAD_R;
   const plotY0 = PAD_T;
   const plotY1 = PAD_T + PLOT_H;
-  const laneY0 = plotY1 + AXIS_H;
+  const marks = milestones ?? [];
+  // The milestone band sits between the axis and the item lane, so a chart that
+  // has both keeps them apart. A chart with no milestones loses the band
+  // entirely rather than carrying 24px of empty height.
+  const markY0 = plotY1 + AXIS_H;
+  const markBandH = marks.length ? MARK_BAND_H : 0;
+  const laneY0 = markY0 + markBandH;
 
   /** What is actually drawn. `series` is the whole offering — see ChartSeries.on. */
   const shown = useMemo(() => series.filter((s) => s.on !== false), [series]);
@@ -155,8 +212,33 @@ export function HistoryChart({
   const yOf = (v: number) => plotY1 - ((v - axis.lo) / (axis.hi - axis.lo || 1)) * PLOT_H;
   const project = (p: ChartPoint) => ({ x: xOf(p.t), y: yOf(p.v) });
 
+  /** Marks actually drawn: inside the domain, and — for a scoped one — only
+   *  while the series it belongs to is on. Hoisted out of the render so the
+   *  "room before the next mark" rule measures against the next DRAWN mark
+   *  rather than the next one in the list, which may not be on screen. */
+  const drawnMarks = marks.filter((m) => {
+    const x = xOf(m.t);
+    if (!Number.isFinite(x) || x < plotX0 || x > plotX1) return false;
+    return !m.seriesId || shown.some((s) => s.id === m.seriesId);
+  });
+
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
-  const axisTicks = useMemo(() => timeTicks(domainStart, domainEnd), [domainStart, domainEnd]);
+  const axisTicks = useMemo(
+    () => (xAxis === "date" ? dateTicks(domainStart, domainEnd) : timeTicks(domainStart, domainEnd)),
+    [domainStart, domainEnd, xAxis],
+  );
+  const axisText = (t: number) =>
+    xAxis === "date"
+      ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : formatClock(new Date(t).toISOString());
+
+  const labelledTicks = useMemo(
+    () => keepAxisLabels(axisTicks, { xOf, text: axisText, measure, plotX0, plotX1 }),
+    // `xOf` and `axisText` are fresh closures every render; what they depend on
+    // is the domain, the plot's width and which axis this is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [axisTicks, domainStart, domainEnd, plotX0, plotX1, xAxis, measure],
+  );
   const segments = useMemo(
     () =>
       Number.isFinite(domainStart)
@@ -394,6 +476,29 @@ export function HistoryChart({
           );
         })}
 
+        {/* One mark per underlying reading, where the line's own nodes are a
+            summary of several — see ChartSeries.dots. Drawn after the lines so
+            a dot is never hidden under the line it belongs to. */}
+        {shown.filter((s) => s.dots?.length).map((s) => (
+          <g key={`dots-${s.id}`} data-series-dots={s.id}>
+            {(s.dots ?? []).map((p, i) => (
+              <circle
+                key={`${p.t}-${i}`}
+                data-series-dot={s.id}
+                cx={xOf(p.t)}
+                cy={yOf(p.v)}
+                r={2.5}
+                fill={s.color}
+                // The plot's own background shows through a dot sitting on the
+                // line, so a cluster reads as several rather than as a blob.
+                stroke="var(--color-bg)"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </g>
+        ))}
+
         {/* The stretch that just arrived, drawn in over 200ms on top of the line
             it is already part of.
             A SEPARATE element on purpose. Animating the series path itself would
@@ -445,9 +550,8 @@ export function HistoryChart({
             would hang off either edge is dropped; its tick stays. */}
         {axisTicks.map((t) => {
           const x = xOf(t);
-          const label = formatClock(new Date(t).toISOString());
-          const halfLabel = measure(label) / 2;
-          const fits = x - halfLabel >= plotX0 - 2 && x + halfLabel <= plotX1 + 2;
+          const label = axisText(t);
+          const fits = labelledTicks.has(t);
           return (
             <g key={t} data-axis-tick={t}>
               <line
@@ -476,7 +580,7 @@ export function HistoryChart({
         {/* A domain too short for even one tick still says when it was. */}
         {axisTicks.length === 0 && (
           <text x={plotX0} y={plotY1 + 14} data-axis-label="start" className="fill-fg-subtle font-mono text-[11px] tabular-nums">
-            {formatClock(new Date(domainStart).toISOString())}
+            {axisText(domainStart)}
           </text>
         )}
 
@@ -534,6 +638,81 @@ export function HistoryChart({
                   strokeWidth={3}
                   vectorEffect="non-scaling-stroke"
                 />
+              )}
+            </g>
+          );
+        })}
+
+        {/* Milestones. A dashed guide up the plot, a triangle under the axis,
+            and a label only when one fits in the gap to the next mark — a
+            label is never clipped and never overprints its neighbour. The
+            <title> carries the full one, so hovering answers for the marks that
+            could not be labelled as well as the ones that could. */}
+        {drawnMarks.map((m, i) => {
+          const x = xOf(m.t);
+          const nextX = i + 1 < drawnMarks.length ? xOf(drawnMarks[i + 1].t) : plotX1;
+          const room = Math.max(0, Math.min(nextX, plotX1) - x - 6);
+          const label = fitLabel(m.label, room, measure);
+          const active = hoverMark === m.id;
+          // A scoped mark takes its series' colour, so which line it is about is
+          // readable without hovering it. An unscoped one stays neutral: a
+          // colour would claim a series it does not have.
+          const own = m.seriesId ? shown.find((s) => s.id === m.seriesId)?.color : undefined;
+          const resting = own ?? "var(--color-fg-muted)";
+          const restingGuide = own ?? "var(--color-line-strong)";
+          return (
+            <g
+              key={m.id}
+              data-milestone={m.id}
+              data-milestone-kind={m.kind}
+              data-milestone-series={m.seriesId ?? undefined}
+              // Focusable, with the full label as its name. The triangle is 8px
+              // of glyph carrying the only copy of a sentence; reachable by
+              // pointer alone it was unreadable to a keyboard and to a screen
+              // reader, whatever the <title> said.
+              role="button"
+              tabIndex={0}
+              aria-label={m.label}
+              onPointerEnter={() => setHoverMark(m.id)}
+              onPointerLeave={() => setHoverMark((cur) => (cur === m.id ? null : cur))}
+              onFocus={() => setHoverMark(m.id)}
+              onBlur={() => setHoverMark((cur) => (cur === m.id ? null : cur))}
+              className="focus-visible:outline-none"
+            >
+              <title>{m.label}</title>
+              <line
+                x1={x}
+                y1={plotY0}
+                x2={x}
+                y2={plotY1}
+                stroke={active ? "var(--color-accent)" : restingGuide}
+                strokeWidth={1}
+                strokeDasharray="3 4"
+                pointerEvents="none"
+                vectorEffect="non-scaling-stroke"
+              />
+              <path
+                d={`M${x - 4},${markY0 + 6}L${x + 4},${markY0 + 6}L${x},${markY0}Z`}
+                fill={active ? "var(--color-accent)" : resting}
+              />
+              {/* A generous hit area over the triangle: 8px of glyph is not
+                  something a finger, or a hurried pointer, reliably lands on. */}
+              <rect x={x - 9} y={markY0} width={18} height={MARK_BAND_H} fill="transparent" />
+              {(active || label) && (
+                <text
+                  x={x + 6}
+                  y={markY0 + 15}
+                  data-milestone-label={m.id}
+                  className="fill-fg-muted text-[11px]"
+                  pointerEvents="none"
+                >
+                  {/* The hovered label is fitted to the SAME room, against the
+                      plot's right edge rather than the next mark — a long label
+                      on the last mark ran off the end of the SVG and was clipped
+                      by the viewBox, which is the one thing the lane's own label
+                      rule forbids. */}
+                  {active ? fitLabel(m.label, Math.max(room, plotX1 - x - 6), measure) : label}
+                </text>
               )}
             </g>
           );
@@ -606,6 +785,85 @@ export function HistoryChart({
       </div>
     </div>
   );
+}
+
+/** How much air two axis labels need between them. Two that merely abut read as
+ *  one word. */
+export const AXIS_LABEL_GAP = 6;
+
+/**
+ * Which ticks get a LABEL. The tick itself always draws.
+ *
+ * Two rules, and the second one was missing. A label that would hang off either
+ * end of the plot is dropped — that one was here from the start. A label that
+ * would touch the previous one it kept is dropped too, which is the rule a
+ * 600px-wide trend chart needs: ten "Aug 24"-sized labels across 540px of plot
+ * ran together into "Jul 13 Jul 20 Jul" with no gap at all. Found in Chrome at
+ * 600; jsdom measures every box as 0 and could not have.
+ *
+ * Greedy from the left, so the labels that survive are evenly spread rather than
+ * clustered at whichever end happened to be walked first.
+ *
+ * Pure and exported so the rule is testable against a fixed-width measurer — as
+ * a closure inside the component it could only be checked through a render that
+ * measures everything as zero, which is to say not at all.
+ */
+export function keepAxisLabels(
+  ticks: readonly number[],
+  opts: {
+    xOf: (t: number) => number;
+    text: (t: number) => string;
+    measure: (s: string) => number;
+    plotX0: number;
+    plotX1: number;
+  },
+): Set<number> {
+  const kept = new Set<number>();
+  let lastRight = -Infinity;
+  for (const t of ticks) {
+    const x = opts.xOf(t);
+    const half = opts.measure(opts.text(t)) / 2;
+    if (x - half < opts.plotX0 - 2 || x + half > opts.plotX1 + 2) continue;
+    if (x - half < lastRight + AXIS_LABEL_GAP) continue;
+    kept.add(t);
+    lastRight = x + half;
+  }
+  return kept;
+}
+
+/**
+ * The most of `text` that fits in `room` px, or "" when even an ellipsis does
+ * not.
+ *
+ * Nothing is ever clipped, which is the same rule the item lane's labels
+ * follow: a label cut off by the next milestone's guide reads as a different
+ * word. The full label is always in the <title> and appears on hover, so
+ * returning "" loses nothing an operator cannot get at.
+ */
+export function fitLabel(text: string, room: number, measure: (t: string) => number): string {
+  const trimmed = text.trim();
+  if (!trimmed || room <= 0) return "";
+  if (measure(trimmed) <= room) return trimmed;
+  const at = (n: number) => `${trimmed.slice(0, n).trimEnd()}\u2026`;
+  // BINARY SEARCH, not a walk down from the full length. `measure` is a canvas
+  // measureText per call, and a chart redraws on every resize frame: a 60-char
+  // label that fits in four measured 57 strings and threw away 56 of the
+  // answers. Monotonic in `n` for any real font — a longer prefix is never
+  // narrower — so halving is exact, not an approximation.
+  let lo = 3;
+  let hi = trimmed.length - 1;
+  let best = "";
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const candidate = at(mid);
+    if (measure(candidate) <= room) {
+      best = candidate;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
 }
 
 function fmt(s: ChartSeries, v: number): string {

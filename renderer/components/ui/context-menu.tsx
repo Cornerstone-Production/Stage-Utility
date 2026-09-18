@@ -225,6 +225,17 @@ export function ContextMenu({
     };
   }, [onClose]);
 
+  // Nothing to offer, nothing to draw. An empty bordered rectangle following the
+  // pointer looks like a menu that failed to load, and it swallows the next
+  // click through its own dismiss listener. Every caller builds `items` from
+  // something — the metrics in scope, the objects under the cursor — so "none
+  // of them" is a state each of them can reach, and guarding it once here is
+  // better than guarding it at each call site and missing one.
+  //
+  // AFTER the hooks, never before: a conditional return above them changes the
+  // hook order between renders.
+  if (items.length === 0) return null;
+
   return (
     <div
       ref={ref}

@@ -2,7 +2,14 @@
 // configurations of HistoryChart; nothing else in here is imported directly by
 // a section except CustomizePopover, which is the section's own control.
 
-export { HistoryChart, type HistoryChartProps } from "./history-chart";
+export {
+  AXIS_LABEL_GAP,
+  HistoryChart,
+  fitLabel,
+  keepAxisLabels,
+  type ChartMilestone,
+  type HistoryChartProps,
+} from "./history-chart";
 export { CustomizePopover, type CustomizeGroup, type CustomizeOption } from "./customize";
 export { StatStrip, type StatFigure, type StripValue } from "./stat-strip";
 export {
@@ -16,6 +23,7 @@ export {
 } from "./prefs";
 export { serviceWindowOf, type ServiceWindow } from "./service-window";
 export {
+  dateTicks,
   niceAxis,
   splitRuns,
   tenMinuteDomainEnd,

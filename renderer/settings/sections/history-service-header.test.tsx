@@ -198,6 +198,22 @@ describe("History service header", () => {
     assert.equal(started.sub, "−0:30 early", "an early start must not read as late");
   });
 
+  test("a service that started on the minute reads \"on time\"", () => {
+    // `fmtDelta(0)` spells zero as "±0:00", and the word after it then
+    // contradicts the number in front of it: the figure read "±0:00 late".
+    // Seen in Chrome on the 3 Sep 20:45 recording, once the All services rows
+    // started showing the same sub-line.
+    const punctual = timeline();
+    punctual.items[0].startedAt = iso("20:15:00");
+    const started = serviceKpis(punctual, null, null).find((k) => k.key === "started")!;
+    assert.equal(started.sub, "on time");
+    assert.equal(
+      started.color,
+      undefined,
+      "a service that started on the minute is not worth a warning colour",
+    );
+  });
+
   test("a record with no attendance or sound shows a dash, not a zero", () => {
     const kpis = serviceKpis(timeline(), null, null);
     assert.equal(kpis.find((k) => k.key === "attendance")!.value, "—");

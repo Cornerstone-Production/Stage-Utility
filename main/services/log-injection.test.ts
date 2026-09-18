@@ -87,6 +87,9 @@ const REQUEST_FACING = [
   "history-edit.ts",
   // Its orphaned-edit warning names a serviceKey and the item ids inside it.
   "history-item-times.ts",
+  // Its one line names a milestone LABEL, typed into an HTTP body by the
+  // operator (POST /api/history/milestones).
+  "history-milestones-store.ts",
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
@@ -97,6 +100,9 @@ const REQUEST_FACING = [
   "routes/automation-routes.ts",
   "routes/branding-routes.ts",
   "routes/calendar-routes.ts",
+  // Its two lines carry a tag and a message posted by a BROWSER — the most
+  // request-facing thing in the tree. Both are scrubbed.
+  "routes/client-log-routes.ts",
   "routes/context.ts",
   "routes/cue-routes.ts",
   "routes/display-settings-routes.ts",
@@ -294,6 +300,10 @@ function requestFacingFiles(): string[] {
     // Both come from Planning Center over HTTP, and the itemId can also arrive
     // directly in a POST /api/history/item-times body.
     path.join(HERE, "history-item-times.ts"),
+    // The milestone label on its one line is typed into an HTTP body by the
+    // operator (POST /api/history/milestones), so a newline in one would forge
+    // a `/log` entry. It is scrubbed at the logger.
+    path.join(HERE, "history-milestones-store.ts"),
     path.join(HERE, "home-assistant-yaml.ts"),
     // POST /api/integrations/:id/config checks only that `config` is an object,
     // then foldConfigEntries warns with the rejected KEY. That key is an

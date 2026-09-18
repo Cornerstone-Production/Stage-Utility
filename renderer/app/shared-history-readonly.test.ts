@@ -162,8 +162,12 @@ describe("the shared /history link", () => {
         const view = render(
           React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly })),
         );
-        await new Promise((r) => setTimeout(r, 0));
-        await new Promise((r) => setTimeout(r, 0));
+        // Four turns, not two: the list and the attendance list settle first,
+        // and only THEN does the selected day's row set kick off its per-row
+        // SPL fetches (the rows' peak level is the service page's own figure).
+        // Leaving those in flight tore the DOM down under them, and the pending
+        // work surfaced as "window is not defined" after the test had passed.
+        for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
         const labels = [...view.container.querySelectorAll("button[aria-label]")]
           .map((b) => b.getAttribute("aria-label")!)
           .filter((l) => /recording/i.test(l))

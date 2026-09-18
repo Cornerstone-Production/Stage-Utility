@@ -27,6 +27,34 @@ import {
   setItemTimes,
 } from "../history-edit.js";
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
+import { historyMilestonesStore } from "../history-milestones-store.js";
+
+/**
+ * Every service type id that has a SERVICE the Trends chart draws, for
+ * validating a milestone's scope.
+ *
+ * From the recorded history rather than from Planning Center: a milestone is
+ * about what was RECORDED, and a type PCO has since renamed or removed still
+ * has recordings the chart draws.
+ *
+ * The SPL store is deliberately NOT consulted. The chart's series are built
+ * from `rows` — the union of timeline and attendance records — so a type with
+ * sound and neither of those has no line for a mark to be scoped to, and
+ * accepting it would store a milestone that could never appear. That is the
+ * exact failure this check exists to prevent, so the two stores read here are
+ * the two the chart itself reads, and the refusal says so rather than claiming
+ * the type "has never recorded" when it may well have recorded sound.
+ */
+async function recordedServiceTypeIds(): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const rec of await serviceTimelineStore.list()) {
+    if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
+  }
+  for (const rec of await attendanceStore.list()) {
+    if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
+  }
+  return [...ids];
+}
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -120,6 +148,60 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: true, ...outcome });
       return;
     }
+    // ── Milestones: the operator's own dates marked under the Trends chart ──
+    //
+    // A plain list, not per-service: a milestone is a statement about the
+    // history, not about one recording. The chart derives its OTHER marks (a
+    // series title changing between consecutive recordings) itself and stores
+    // nothing — see the store's header.
+    if (method === "GET" && pathname === "/api/history/milestones") {
+      json(res, historyMilestonesStore.all());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/milestones") {
+      const body = await readBodyOrEmpty(req);
+      if (typeof body.date !== "string" || typeof body.label !== "string") {
+        error(res, "body.date + body.label (strings) required");
+        return;
+      }
+      try {
+        json(res, await historyMilestonesStore.save(
+          {
+            id: typeof body.id === "string" ? body.id : undefined,
+            date: body.date,
+            label: body.label,
+            serviceTypeId: typeof body.serviceTypeId === "string" ? body.serviceTypeId : null,
+          },
+          // Every type the recorded history actually holds. A mark scoped to
+          // anything else draws on no line at all and would be invisible with
+          // no way to tell why.
+          await recordedServiceTypeIds(),
+        ));
+      } catch (err) {
+        // The store REFUSES a milestone it cannot draw — a date that is not a
+        // day, a blank or over-long label, a service type nothing has recorded
+        // — rather than storing one the operator would never see a mark for.
+        // Returned, not swallowed: the form says why.
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+    {
+      const msMatch = pathname.match(/^\/api\/history\/milestones\/([^/]+)$/);
+      if (msMatch && method === "DELETE") {
+        const left = await historyMilestonesStore.remove(decodeURIComponent(msMatch[1]));
+        // 404 for an id that is not there. A 200 said the deletion happened, so
+        // a client working from a stale list — two tabs, or a restored backup —
+        // was told it had removed something that was never there.
+        if (left == null) {
+          error(res, "no milestone with that id", 404);
+          return;
+        }
+        json(res, left);
+        return;
+      }
+    }
+
     if (method === "GET" && pathname === "/api/attendance/history/current") {
       json(res, attendanceRecorder.getCurrent());
       return;

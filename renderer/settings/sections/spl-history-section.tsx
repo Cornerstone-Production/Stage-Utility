@@ -83,12 +83,28 @@ export type ServicePeakLevel =
   /** The metric is chosen and present, but no item on it recorded a peak. */
   | { kind: "no-samples"; metric: string };
 
+/**
+ * The first of this browser's chosen metrics that `available` actually carries,
+ * or null when none of them is there.
+ *
+ * Exported because two surfaces read it and must agree: a service's peak level
+ * (below) and the Trends chart's sound measure, which works from the SPL
+ * SUMMARY rather than the full record and so cannot go through
+ * `servicePeakLevel`. Two copies of this rule would be two rules the day one of
+ * them was tightened, and the symptom would be a chart plotting LCeq under a
+ * heading that says LAeq.
+ */
+export function primaryMetricOf(available: readonly string[]): string | null {
+  if (!available.length) return null;
+  const chosen = readStoredKeys(SPL_METRICS_STORAGE_KEY, null, defaultVisible([...available]));
+  return chosen.find((k) => available.includes(k)) ?? null;
+}
+
 export function servicePeakLevel(record: ServiceSplHistory | null): ServicePeakLevel {
   if (!record || !record.items.length) return { kind: "no-record" };
   const all = metricKeysOf(record);
   if (!all.length) return { kind: "no-metrics" };
-  const chosen = readStoredKeys(SPL_METRICS_STORAGE_KEY, null, defaultVisible(all));
-  const primary = chosen.find((k) => all.includes(k));
+  const primary = primaryMetricOf(all);
   if (!primary) return { kind: "hidden", available: all };
   const maxes = record.items
     .map((it) => metricStat(it, primary, record)?.max)

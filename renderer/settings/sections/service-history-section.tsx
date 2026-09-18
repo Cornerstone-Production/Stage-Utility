@@ -1,14 +1,14 @@
 import { errorMessage } from "@main/services/errors";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
-import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Trash2Icon, ClockIcon, DownloadIcon, EllipsisIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
+import { logToServer } from "../../lib/client-log";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
@@ -16,8 +16,11 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-m
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
-import { SplDetail } from "./spl-history-section";
-import { RecordingPill, ServiceHeader, overrunStats } from "./history-service-header";
+import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
+import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
+import { useStoredKeysVersion } from "./history-chart";
+import { TrendsCard } from "./history-trends/trends-card";
+import type { TrendRecording } from "./history-trends/trends";
 import {
   computeOverview,
   summarize,
@@ -219,6 +222,10 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
  * service that hasn't gone live yet has attendance but no timeline. Union'd on
  * `serviceKey` so that service is still one row, not a missing one.
  */
+/** The three loads the page opens with. Named so a failure can be attributed to
+ *  one of them rather than to "history". */
+type HistoryLoad = "timeline" | "attendance" | "spl";
+
 interface HistoryRow {
   serviceKey: string;
   serviceDate: string;
@@ -258,6 +265,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   /** One level per service — the SPL trend line's data. A summary, not the
    *  archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  /**
+   * The Overview's level preference. Only `metric` is read now — `shown` gated a
+   * trend line on a chart this page no longer draws, and then a figure that has
+   * no reason to be hidden. It is not deleted: it is the operator's own stored
+   * choice, and deleting somebody's data to tidy something up is not a thing
+   * this repo does. Nothing writes it any more. Same treatment as
+   * settings.splVisibleMetrics, for the same reason.
+   */
   const [splTrend, setSplTrend] = useState<{ shown: boolean; metric: string | null }>({
     shown: false,
     metric: null,
@@ -319,25 +334,74 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       });
   }
 
-  function reload() {
+  /**
+   * Which of the three history loads FAILED, as opposed to came back empty.
+   *
+   * All three used to `.catch(() => set…([]))`, which is the same shape three
+   * times and the same lie three times: a server that was down, or a request
+   * that timed out, read as "No service timings recorded yet" and "No sound
+   * recorded yet". Three found, three changed. Each failure now names itself on
+   * a `[history]` line AND is visible on the surface it starved:
+   *
+   *   timeline / attendance   the empty state says the history could not be read
+   *   spl                     the Trends card says the sound summary is missing
+   */
+  const [loadFailed, setLoadFailed] = useState<ReadonlySet<HistoryLoad>>(new Set());
+  // Stable, all three of them: `reload` closes over these and the mount effect
+  // closes over `reload`, so anything rebuilt per render would make the effect
+  // a dependency of every render and reload the whole history on each one.
+  // Functional setState throughout, so none of them needs the current value.
+  const noteFailure = useCallback((which: HistoryLoad, what: string, err: unknown) => {
+    logToServer("history", `could not read ${what}: ${errorMessage(err)}`);
+    setLoadFailed((prev) => (prev.has(which) ? prev : new Set(prev).add(which)));
+  }, []);
+  /** A load that came back clears its own failure, so a retry that works stops
+   *  the page saying otherwise. */
+  const noteLoaded = useCallback((which: HistoryLoad) =>
+    setLoadFailed((prev) => {
+      if (!prev.has(which)) return prev;
+      const next = new Set(prev);
+      next.delete(which);
+      return next;
+    }), []);
+
+  const reload = useCallback(() => {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
-      .then((l) => setList(l))
-      .catch(() => setList([]));
-  }
+      .then((l) => {
+        setList(l);
+        noteLoaded("timeline");
+      })
+      .catch((e) => {
+        setList([]);
+        noteFailure("timeline", "the service timings", e);
+      });
+  }, [noteFailure, noteLoaded]);
   useEffect(() => {
     reload();
     invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((a) => setAttList(a ?? []))
-      .catch(() => setAttList([]));
+      .then((a) => {
+        setAttList(a ?? []);
+        noteLoaded("attendance");
+      })
+      .catch((e) => {
+        setAttList([]);
+        noteFailure("attendance", "the attendance history", e);
+      });
     invoke<SplServiceSummary[]>("spl:getSummary")
-      .then((r) => setSplList(r ?? []))
-      .catch(() => setSplList([]));
+      .then((r) => {
+        setSplList(r ?? []);
+        noteLoaded("spl");
+      })
+      .catch((e) => {
+        setSplList([]);
+        noteFailure("spl", "the sound summary", e);
+      });
     invoke<{ shown: boolean; metric: string | null }>("spl:getTrendPrefs")
       .then((p) => setSplTrend(p))
       .catch(() => {
         /* the chart draws without the line; the toggle is still offered */
       });
-  }, []);
+  }, [reload, noteFailure, noteLoaded]);
 
   // Live updates while a service is recording — refresh the open detail/list, the
   // attendance chart (samples), and SPL, all without a page reload.
@@ -421,6 +485,57 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }));
     return [...tlRows, ...attOnlyRows].sort((a, b) => Date.parse(b.startsAt ?? "") - Date.parse(a.startsAt ?? ""));
   }, [list, attList]);
+  /**
+   * The same recordings, reduced to what the Trends card draws from.
+   *
+   * Derived from `rows` rather than fetched: the list already holds every
+   * timeline record and every attendance record, and a trend is those grouped
+   * by service type instead of by day. There is no route for trend data and
+   * there does not need to be one.
+   *
+   * A row with no attendance record carries a null peak and is not plotted — a
+   * service nobody counted is not a service of zero people.
+   */
+  /** The rows AND the Trends card's sound measure follow the Sound card's
+   *  metric choice, which lives in localStorage and is written by a component
+   *  React knows nothing about — the same dependency the service header carries
+   *  for the same reason. Declared here, above every reader: it is a `const`,
+   *  so a use further up the body is a temporal-dead-zone throw, not a stale
+   *  value. */
+  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+
+  const trendRecordings = useMemo<TrendRecording[]>(
+    () => {
+      // Read so the subscription is not "unused". The VALUE is never wanted;
+      // the hook's own state update is what re-renders when Customize writes a
+      // different metric, and without it the chart and the rows would go on
+      // quoting the old metric's peak until the page was reopened.
+      void metricsVersion;
+      const splByKey = new Map(splList.map((x) => [x.serviceKey, x]));
+      return rows.map((r) => {
+        // The SPL SUMMARY, not the record. It is already loaded for this page,
+        // it carries a peak per metric (see SplServiceSummary.metrics), and the
+        // trend plots one point per recording across up to 52 weeks — fetching
+        // every full record for that would be hundreds of files to answer one
+        // number each. The primary-metric rule is the rows' own, imported, so
+        // the chart and a row cannot name different metrics.
+        const summary = splByKey.get(r.serviceKey);
+        const metric = summary ? primaryMetricOf(Object.keys(summary.metrics)) : null;
+        return {
+          serviceKey: r.serviceKey,
+          serviceTypeId: r.serviceTypeId,
+          serviceTypeName: r.serviceTypeName ?? null,
+          serviceDate: r.serviceDate,
+          t: Date.parse(r.startsAt ?? `${r.serviceDate}T00:00:00`),
+          seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
+          peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
+          peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
+        };
+      });
+    },
+    [rows, splList, metricsVersion],
+  );
+
   /** The row for the current selection, if any — known synchronously from `list`/
    *  `attList` (no fetch to wait on), so it tells the detail view whether a
    *  timeline record is ever coming for this key without racing `detail`'s own
@@ -538,27 +653,61 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   };
 
   const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
+
+  /**
+   * The SPL record behind each of the SELECTED DAY's rows, so a row's peak
+   * level is the same figure the service page's header quotes.
+   *
+   * Per day rather than for the whole history on purpose: `spl:getSummary`
+   * (already loaded, above) carries a service-level Leq per metric and no PEAK
+   * at all, so a row built from it would be labelled "Peak" and be showing an
+   * energy average. The full record is the only thing that has the peak, and a
+   * day is one to four of them — not a year of them.
+   *
+   * A FAILED read and a service that recorded no sound are told apart. Both
+   * used to land as `null`, which `servicePeakLevel` reads as "no sound
+   * recorded" — so a server that was down, or a request that timed out, told
+   * the operator their meter had not been recording. `"error"` is its own
+   * state, the row says "sound unavailable", and the reason is logged per key.
+   */
+  type RowSpl = ServiceSplHistory | null | "error";
+  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
+  // The key list, as a stable string: `dayServices` is a fresh array every
+  // render and would refetch the day's SPL on each one.
+  const dayKeys = dayServices.map((s) => s.serviceKey).join("|");
+  useEffect(() => {
+    const keys = dayKeys ? dayKeys.split("|") : [];
+    // Nothing to fetch, and nothing to clear: every lookup is by serviceKey, so
+    // a map left over from the previous day can only ever miss. Clearing it here
+    // would be a setState in an effect body — a cascading render — to no end.
+    if (!keys.length) return;
+    let cancelled = false;
+    Promise.all(
+      keys.map((key) =>
+        invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: key })
+          .then((rec) => [key, rec] as const)
+          .catch((err): readonly [string, RowSpl] => {
+            // One line per key that failed, not one for the batch: a day where
+            // one of three services will not load is a different problem from a
+            // day where none of them will, and the line has to say which.
+            logToServer("history", `could not read the sound record for ${key}: ${errorMessage(err)}`);
+            return [key, "error"] as const;
+          }),
+      ),
+    ).then((pairs) => {
+      if (!cancelled) setSplByKey(new Map(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dayKeys, reloadKey]);
+
   // Per-day service counts for the calendar (respects the type filter).
   const dateCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of filtered) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
     return m;
   }, [filtered]);
-
-  // Per-day attendance intensity (0..1) for the calendar heatmap: a day's peak
-  // in-room count, normalized to the busiest recorded day. Global (all types) — the
-  // calendar is a stable navigation surface; the overview does the type scoping.
-  const dateIntensity = useMemo(() => {
-    const peak = new Map<string, number>();
-    for (const a of attList) {
-      if (a.peakOccupancy <= 0) continue;
-      peak.set(a.serviceDate, Math.max(peak.get(a.serviceDate) ?? 0, a.peakOccupancy));
-    }
-    const max = Math.max(0, ...peak.values());
-    const m = new Map<string, number>();
-    if (max > 0) for (const [d, v] of peak) m.set(d, v / max);
-    return m;
-  }, [attList]);
 
   // Small summary shown beneath the calendar for the selected day: how many
   // services + their average peak in-room (scoped to the active type filter).
@@ -631,12 +780,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }
 
   if (rows.length === 0) {
+    // A failed READ is not an empty history. Both used to say "nothing has been
+    // recorded yet", which sends an operator to look at a recorder that is fine.
+    const unread = loadFailed.has("timeline") || loadFailed.has("attendance");
     return (
       <div className="py-8">
         <EmptyState
           icon={<ClockIcon />}
-          title="No service timings recorded yet"
-          hint="Item timings are captured automatically while a service runs in Planning Center Live — when each item goes live and how long it runs versus its planned length."
+          title={unread ? "The recorded history could not be read" : "No service timings recorded yet"}
+          hint={
+            unread
+              ? "The server did not answer. Nothing has been lost — reload the page, and see the server log for the reason."
+              : "Item timings are captured automatically while a service runs in Planning Center Live — when each item goes live and how long it runs versus its planned length."
+          }
         />
       </div>
     );
@@ -1187,6 +1343,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
+      {/* Trends LEADS the page. It is the defining view of the tab: what a month
+          of Sundays did, per service type, with the dates that explain a step
+          marked under the axis. Everything below it — the Overview blend, the
+          calendar and the day list — answers a narrower question. */}
+      <TrendsCard recordings={trendRecordings} soundUnavailable={loadFailed.has("spl")} />
+
       {/* Export builder — a collapsed disclosure so it never crowds the overview.
           Read-only, so it's available on the public /history page too. */}
       <Collapsible label="Export" summary="date range · pick sheets" className="su-card px-4 py-2.5">
@@ -1264,13 +1426,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </Select>
           )}
         </div>
-        <OverviewBlend overview={overview} splTrend={splTrend} onSplTrend={saveSplTrend} />
+        <OverviewBlend overview={overview} onSplTrend={saveSplTrend} />
       </div>
 
       {/* Calendar (sticky) + selected-day detail. */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
         <div className="sm:sticky sm:top-0 flex flex-col gap-3">
-          <HistoryCalendar counts={dateCounts} intensity={dateIntensity} selected={day} onPick={pickDay} />
+          <HistoryCalendar counts={dateCounts} selected={day} onPick={pickDay} />
           {day && daySummary && (
             <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
               Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
@@ -1289,7 +1451,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         </div>
 
         <div className="min-w-0 flex flex-col gap-2">
-          {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
+          {/* The day heading — the list is grouped by day, and this is the one
+              group the calendar has selected. */}
+          {day && <span className="text-body font-semibold text-fg">{fmtDay(day)}</span>}
           {dayServices.map((row) => {
             // Attendance-only rows (arrival ramp, no timeline record yet) have no
             // items and no rundown to summarize — a separate, simpler card.
@@ -1304,17 +1468,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 <div key={row.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
                   <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(row.serviceKey)}>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-body font-medium text-gray-12 truncate">{row.planTitle ?? row.serviceKey}</span>
-                      <span className="text-caption2 text-gray-9 truncate">{caption}</span>
+                      <span className="text-body font-medium text-fg truncate">{row.planTitle ?? row.serviceKey}</span>
+                      <span className="text-caption2 text-fg-subtle truncate">{caption}</span>
                     </div>
-                    <span className="shrink-0 tabular-nums text-caption1 text-right">
-                      <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">recording since </span><span className="text-accent">{fmtTime(att.startedAt)}</span></span>
+                    <span className="shrink-0 whitespace-nowrap text-caption1 text-fg-subtle tabular-nums">
+                      recording since <span className="font-mono text-accent">{fmtTime(att.startedAt)}</span>
                     </span>
                   </button>
                   {!readOnly && (
                     <Tooltip label="Delete recording">
                       <button
-                        className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                        className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
                         onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
                         aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
                       >
@@ -1327,10 +1491,27 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             }
             const s = row.timeline;
             const live = s.endedAt == null;
-            // Live rows count up (summarize adds the in-progress item's elapsed);
-            // finished rows show the settled total.
-            const sum = summarize(s, live ? nowTick : undefined);
-            const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
+            // The figures are the SERVICE PAGE's own, picked out of serviceKpis
+            // by key — a row and the page it opens cannot quote two different
+            // peaks for one recording. Live rows count up: `serviceKpis` passes
+            // `now` into `summarize`, which adds the in-progress item's elapsed.
+            const splRow = splByKey.get(s.serviceKey) ?? null;
+            const { started, figures } = serviceRowFigures(
+              s,
+              row.attendance,
+              splRow === "error" ? null : splRow,
+              live ? nowTick : undefined,
+            );
+            // A read that FAILED says so, rather than borrowing the sentence
+            // for a service that genuinely recorded no sound.
+            const shownFigures =
+              splRow === "error"
+                ? figures.map((f) =>
+                  f.key === "level" ? { ...f, value: "—", sub: "sound unavailable" } : f,
+                )
+                : figures;
+            const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
+            const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
             return (
               // su-card, like every other top-level box on this page (Export, the
               // Overview, the calendar, the selected-day summary). These rows had
@@ -1340,26 +1521,59 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // the Stat tiles and the time editor — those sit INSIDE a card, and
               // giving them the parent's surface would flatten the nesting.
               <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
-                <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
-                    <span className="text-caption2 text-gray-9 truncate">
-                      {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
-                      {s.endedAt == null ? "recording…" : `${s.items.length} items`}
+                <button
+                  data-history-row={s.serviceKey}
+                  className="flex flex-1 min-w-0 flex-col gap-2 px-3 py-2.5 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                  onClick={() => setSelectedKey(s.serviceKey)}
+                >
+                  <div className="flex min-w-0 flex-col">
+                    {/* Time and service type, then the plan title, then the
+                        series and how many items ran. The time is mono so a
+                        column of rows lines up on the colon. */}
+                    <span className="flex items-baseline gap-2 text-caption2 text-fg-subtle">
+                      <span className="font-mono tabular-nums text-fg-muted">{started.value}</span>
+                      {s.serviceTypeName && <span className="truncate">{s.serviceTypeName}</span>}
+                      {started.sub && <span className="truncate text-warn-11">{started.sub}</span>}
+                      {live && <RecordingPill />}
                     </span>
+                    <span className="truncate text-body font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
+                    {under && <span className="truncate text-caption2 text-fg-subtle">{under}</span>}
                   </div>
-                  <span className="shrink-0 tabular-nums text-caption1 text-right">
-                    {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-accent">{fmtDur(sum.actual)}</span></span>
-                    {/* Delta vs plan only once finished — a live "−38:45" (most of
-                        the plan not yet run) reads as misleading. */}
-                    {!live && totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
+                  {/* The row's figures, on the stat strip's vocabulary at the
+                      row's scale: an 11px uppercase label over a mono value.
+                      `shrink-0` and a scroller, like the strip — a squashed
+                      "1,1\u2026" is worse than one you have to scroll to. */}
+                  <span className="flex shrink-0 items-start gap-0 overflow-x-auto sm:justify-end">
+                    {shownFigures.map((f, fi) => (
+                      <span
+                        key={f.key}
+                        data-row-figure={f.key}
+                        className={cn("flex shrink-0 flex-col gap-0.5 px-3 last:pr-0", fi > 0 && "border-l border-line")}
+                      >
+                        <span className="whitespace-nowrap text-[10px] uppercase tracking-wider text-fg-subtle">{f.label}</span>
+                        <span
+                          className="whitespace-nowrap font-mono text-footnote tabular-nums"
+                          style={{ color: f.color ?? "var(--color-fg)" }}
+                        >
+                          {f.value}
+                        </span>
+                        {/* WHY there is no number. The row stripped this, so a
+                            "—" under Peak level had no reason beside it and an
+                            operator whose own Customize had hidden every metric
+                            was told nothing at all. */}
+                        {f.sub && (
+                          <span data-row-figure-note className="whitespace-nowrap text-[10px] text-fg-subtle">
+                            {f.sub}
+                          </span>
+                        )}
+                      </span>
+                    ))}
                   </span>
                 </button>
                 {!readOnly && (
                   <Tooltip label="Delete recording">
                     <button
-                      className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                      className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
                       onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
                       aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
                     >
@@ -1370,7 +1584,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               </div>
             );
           })}
-          {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
+          {dayServices.length === 0 && <p className="text-caption1 text-fg-subtle">No services on this day.</p>}
         </div>
       </div>
     </div>
@@ -1384,12 +1598,17 @@ function fmtTrendPct(pct: number | null, fallback = ""): string {
   return pct != null ? `${pct >= 0 ? "+" : "−"}${Math.round(Math.abs(pct) * 100)}%` : fallback;
 }
 
-/** "vs the prior 4 Weekends" / "vs the prior 1 Weekend" — the tail every
- *  trend readout in the Overview ends with, once for both of them rather than
- *  copied into the attendance trend and the SPL delta separately. */
-function vsPrior(priorCount: number, scopeName: string | null): string {
-  const noun = scopeName ?? "service";
-  return `vs the prior ${priorCount} ${noun}${priorCount === 1 ? "" : "s"}`;
+/**
+ * "vs the prior 4 recordings" — the tail every trend readout in the Overview
+ * ends with.
+ *
+ * "recordings", not the service type's own name. The name is a PROPER NOUN and
+ * pluralising it produced "vs the prior 2 The Salt Companys", which is what was
+ * on screen. The scope is already named on the heading above the card, so
+ * repeating it in the tail bought nothing even when it read correctly.
+ */
+function vsPrior(priorCount: number): string {
+  return `vs the prior ${priorCount} recording${priorCount === 1 ? "" : "s"}`;
 }
 
 /**
@@ -1434,12 +1653,13 @@ function TrendChip({
  *  whether the SPL summary is there at all — are in this component alone. */
 export function OverviewBlend({
   overview,
-  splTrend,
   onSplTrend,
 }: {
   overview: OverviewData;
-  splTrend: { shown: boolean; metric: string | null };
-  onSplTrend: (patch: { shown?: boolean; metric?: string | null }) => void;
+  /** Writes the metric choice. The card reads the CHOSEN metric back through
+   *  `overview.splMetric`, which is derived from it, so the preference itself is
+   *  not a prop — one direction each way. */
+  onSplTrend: (patch: { metric?: string | null }) => void;
 }) {
   /** Where the chart's right-click (or long-press) menu is, or null. */
   const [chartMenu, setChartMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1447,149 +1667,115 @@ export function OverviewBlend({
   // A mouse user already has the right-click; the corner button only appears
   // where a touch has no other way in.
   const isCoarse = useCoarsePointer();
-  /** The menu the chart offers: the line on or off, and which metric it plots.
-   *  The metric list comes from the data in scope — see OverviewData.splMetrics —
-   *  so it offers exactly the metrics there is something to draw for. */
-  const chartMenuItems: ContextMenuItem[] = [
-    {
-      label: "SPL trend line",
-      checked: splTrend.shown,
-      onSelect: () => onSplTrend({ shown: !splTrend.shown }),
-    },
-  ];
-  if (splTrend.shown && overview.splMetrics.length > 0) {
-    chartMenuItems.push({
-      label: "Metric",
-      items: overview.splMetrics.map((m) => ({
-        label: m,
-        checked: overview.splMetric === m,
-        onSelect: () => {
-          onSplTrend({ metric: m });
-          setChartMenu(null);
-        },
-      })),
-    });
-  }
-
   /**
-   * Whether the two stat labels wear their series' colour.
+   * The one thing the menu still offers: which Smaart metric the level below is
+   * read from. The list comes from the data in scope — see
+   * OverviewData.splMetrics — so it offers exactly the metrics there is
+   * something to report for, and there is no menu at all when there are none.
    *
-   * True exactly when the chart is drawing two lines AND there is a level to
-   * summarise — which is also exactly when the SPL block renders. One condition
-   * rather than two, because the dots only mean anything as a pair: they are
-   * the chart's legend, and the chart has none of its own.
+   * The "Sound summary" toggle that used to sit above it is gone. It gated a
+   * trend LINE on an attendance chart this card no longer draws, and after the
+   * trim it gated the level block instead — a switch whose only visible effect
+   * was to hide a figure, advertised by a sentence of prose above the timings
+   * telling the operator to right-click. The prose went with it; the figure
+   * shows whenever there is one.
    */
-  const showsSeriesDots = splTrend.shown && overview.avgSpl != null;
+  const chartMenuItems: ContextMenuItem[] = overview.splMetrics.length > 0
+    ? [
+      {
+        label: "Metric",
+        items: overview.splMetrics.map((m) => ({
+          label: m,
+          checked: overview.splMetric === m,
+          onSelect: () => {
+            onSplTrend({ metric: m });
+            setChartMenu(null);
+          },
+        })),
+      },
+    ]
+    : [];
 
+  /** The level renders when there IS one. No dash and no sentence when there is
+   *  not — a dash reads as a measured silence, and prose explaining an absence
+   *  is bigger than the thing it explains. */
+  const showsLevel = overview.avgSpl != null;
+
+  // TIMINGS ONLY. Attendance moved out of this card entirely: Trends, at the
+  // top of the page, plots it per service type over a chosen range with
+  // milestones under it, and this card plotted the same quantity over a
+  // different window with a different average — two charts of attendance on one
+  // screen that did not agree. Peak attendance went with it for the same reason;
+  // a day-list row carries each service's own peak.
   const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
     { k: "Services", v: overview.services },
     { k: "Avg length", v: overview.avgLength },
     { k: "Avg start", v: overview.avgStart, accent: overview.avgStartEarly ? "text-ok-11" : overview.avgStartLate ? "text-warn-11" : undefined },
     { k: "Avg overrun", v: overview.avgOverrun, trend: overview.overrunTrend, trendLabel: overview.overrunTrend ? (overview.overrunTrend.tone === "bad" ? "worse" : overview.overrunTrend.tone === "good" ? "better" : "steady") : undefined },
-    { k: "Peak attendance", v: overview.peakAttendance },
   ];
   return (
     <div className="su-card px-5 py-5 flex flex-col">
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
-        <div className="shrink-0">
-          {/* The dot appears on BOTH labels or on neither, and only when there
-              are two series to tell apart. It is a legend for the chart beside
-              them — which line is this number about — so a single blue dot with
-              the SPL line switched off would be a legend for nothing, and a
-              green one on its own reads as an afterthought bolted to an
-              attendance summary. `showsSeriesDots` is the one condition, read
-              by both, so the pair cannot drift apart. */}
-          <div className={cn("text-caption1 uppercase tracking-[0.08em] text-fg-muted", showsSeriesDots && "flex items-center gap-1.5")}>
-            {showsSeriesDots && (
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-accent)" }} />
-            )}
-            Avg {overview.scopeName ?? "service"}
-          </div>
-          <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-            {overview.avgAttendance}
-          </div>
-          {overview.attTrend && (
-            <TrendChip
-              dir={overview.attTrend.dir}
-              tone={overview.attTrend.tone}
-              text={`${fmtTrendPct(overview.attTrend.pct, "changed")} ${vsPrior(overview.attTrend.priorCount, overview.scopeName)}`}
-              className="mt-2"
-            />
-          )}
-          {/* The level, read the same way, so the SPL line has a summary of its
-              own instead of one attendance figure over a chart with two series
-              in it. Present only when the line is drawn AND there is a level to
-              report — no dash, which would read as a measured silence. */}
-          {/* `avgSpl != null` again, redundant at runtime but not to the type
-              checker: `showsSeriesDots` is a boolean, so narrowing does not
-              travel through it and the level below would be possibly-null. */}
-          {showsSeriesDots && overview.avgSpl != null && (
-            <div className="mt-5" data-testid="spl-summary">
-              <div className="flex items-center gap-1.5 text-caption1 uppercase tracking-[0.08em] text-fg-muted">
-                {/* The series' own colour, the same dot the chart's tooltip
-                    carries, so this says which line it is summarising without
-                    needing a legend. See the attendance label above: the two
-                    dots are a pair. */}
-                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
-                Avg SPL
-              </div>
-              <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-                <span>{overview.avgSpl.toFixed(1)}</span>
-                <span className="text-caption1 font-normal text-fg-muted">dB</span>
-              </div>
-              {overview.splDelta && (
-                // NEUTRAL, always — see SplDelta. A louder weekend is not a
-                // worse one, so this never goes red. Decibels, not a
-                // percentage: a percentage of a logarithmic quantity says
-                // nothing about how loud it was. The sign comes from `dir`,
-                // never recomputed from `db` — one fact, one place to read it,
-                // so the glyph and the sign can't disagree about which way a
-                // level moved.
-                <TrendChip
-                  dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
-                  tone="neutral"
-                  text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount, overview.scopeName)}`}
-                  className="mt-2"
-                />
-              )}
+      <div
+        className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8"
+        onContextMenu={chartTrigger.onContextMenu}
+        onPointerDown={chartTrigger.onPointerDown}
+        onPointerMove={chartTrigger.onPointerMove}
+        onPointerUp={chartTrigger.onPointerUp}
+        onPointerCancel={chartTrigger.onPointerCancel}
+        onClickCapture={chartTrigger.onClickCapture}
+        style={chartTrigger.style}
+      >
+        {/* The level, and nothing about attendance. Trends owns attendance over
+            time; this card owns how the services themselves RAN, plus how loud
+            they were, which Trends does not plot. */}
+        {showsLevel && overview.avgSpl != null ? (
+          <div className="shrink-0" data-testid="spl-summary">
+            <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg SPL</div>
+            <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
+              <span>{overview.avgSpl.toFixed(1)}</span>
+              <span className="text-caption1 font-normal text-fg-muted">dB</span>
             </div>
-          )}
-        </div>
-        <div
-          className="relative flex-1 min-w-0 md:max-w-[640px]"
-          onContextMenu={chartTrigger.onContextMenu}
-          onPointerDown={chartTrigger.onPointerDown}
-          onPointerMove={chartTrigger.onPointerMove}
-          onPointerUp={chartTrigger.onPointerUp}
-          onPointerCancel={chartTrigger.onPointerCancel}
-          onClickCapture={chartTrigger.onClickCapture}
-          style={chartTrigger.style}
-        >
-          <AttendanceTrendChart
-            points={overview.attPoints}
-            splLabel={splTrend.shown ? overview.splMetric : null}
-            // The chart tracked the pointer underneath the menu it had just
-            // opened: the tooltip drew through the menu and moved as you
-            // reached for an item.
-            hoverSuppressed={chartMenu != null}
-          />
-          {isCoarse && (
-            <button
-              type="button"
-              aria-label="Chart options"
-              className="absolute right-1 top-1 grid size-11 place-items-center rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setChartMenu({ x: r.right, y: r.bottom });
-              }}
-            >
-              <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
-                <EllipsisIcon className="size-4" />
-              </span>
-            </button>
-          )}
-        </div>
-        {chartMenu && (
+            {overview.splDelta && (
+              // NEUTRAL, always — see SplDelta. A louder weekend is not a worse
+              // one, so this never goes red. Decibels, not a percentage: a
+              // percentage of a logarithmic quantity says nothing about how loud
+              // it was. The sign comes from `dir`, never recomputed from `db` —
+              // one fact, one place to read it, so the glyph and the sign cannot
+              // disagree about which way a level moved.
+              <TrendChip
+                dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
+                tone="neutral"
+                text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount)}`}
+                className="mt-2"
+              />
+            )}
+          </div>
+        ) : overview.splMetric ? (
+          // A metric was CHOSEN and produced nothing. That is worth a word —
+          // unlike "no metrics at all", which needs none, because there is
+          // nothing the operator asked for and did not get. Reached when every
+          // recording carrying the metric in scope is still running, so there is
+          // no settled level to average yet.
+          <div data-testid="spl-no-level" className="text-caption1 text-fg-subtle">
+            No level on {overview.splMetric} in this scope.
+          </div>
+        ) : null}
+        {isCoarse && chartMenuItems.length > 0 && (
+          <button
+            type="button"
+            aria-label="Overview options"
+            className="grid size-11 shrink-0 place-items-center self-start rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setChartMenu({ x: r.right, y: r.bottom });
+            }}
+          >
+            <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
+              <EllipsisIcon className="size-4" />
+            </span>
+          </button>
+        )}
+        {chartMenu && chartMenuItems.length > 0 && (
           <ContextMenu
             x={chartMenu.x}
             y={chartMenu.y}
@@ -1600,7 +1786,7 @@ export function OverviewBlend({
       </div>
       {/* Wrapping grid so the readouts never collide: 2 cols on mobile, 3 at sm,
           all at lg. Value + trend can wrap within a cell rather than overrun. */}
-      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-4">
         {strip.map((s) => (
           <div key={s.k} className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
