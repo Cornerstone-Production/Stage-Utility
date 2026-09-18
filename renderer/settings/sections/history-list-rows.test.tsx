@@ -462,8 +462,16 @@ describe("what the All services page is made of", () => {
       3,
       "every service in the month is listed, not just the selected day's",
     );
-    // A group per day carries the column header, the way the mockup draws it.
-    assert.equal(view.container.querySelectorAll("[data-row-header]").length, 2);
+    // The column header is drawn ONCE for the list, under the first day label.
+    // Under every day it was eight repetitions of "WHEN SERVICE PEAK RAN VS
+    // PLAN PEAK DB" between nine rows — the loudest thing on the card.
+    const headers = [...view.container.querySelectorAll("[data-row-header]")];
+    assert.equal(headers.length, 1, "the column header repeats per day group");
+    assert.equal(
+      headers[0].closest("[data-day-group]")?.getAttribute("data-day-group"),
+      "2026-09-13",
+      "the one header is not in the FIRST group",
+    );
   });
 
   test("picking a calendar day rings its group instead of hiding the others", async () => {

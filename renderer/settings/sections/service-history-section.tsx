@@ -1415,7 +1415,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               />
             </div>
           </div>
-          {monthGroups.map((group) => (
+          {monthGroups.map((group, gi) => (
             <div
               key={group.date}
               id={dayGroupId(group.date)}
@@ -1430,12 +1430,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               )}
             >
               <span className="text-caption1 text-fg-muted">{fmtDay(group.date)}</span>
-              {/* The column header, once per day group — the mockup's shape.
+              {/* The column header, ONCE for the whole list, under the first
+                  day label — the mockup's shape. Repeating it under every day
+                  made the column names the loudest thing in a month of
+                  services: eight repetitions of "WHEN SERVICE PEAK RAN VS PLAN
+                  PEAK DB" between nine rows.
                   The row's figures vary (a live recording has no `vs plan`), so
                   a row that has nothing for a column prints a dash under the
                   heading rather than closing the gap and sliding the rest
-                  left. */}
-              <ServiceRowHeader />
+                  left — see ROW_COLUMNS. */}
+              {gi === 0 && <ServiceRowHeader />}
               {group.services.map((row) => {
             // Attendance-only rows (arrival ramp, no timeline record yet) have no
             // items and no rundown to summarize — a separate, simpler card.
