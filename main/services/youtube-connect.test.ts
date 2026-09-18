@@ -132,6 +132,14 @@ describe("start", () => {
     assert.equal(timers[0].at, clock + 5000, "the first poll must run at the stated interval");
   });
 
+  test("an interval below the 5 second floor is clamped up to it", async () => {
+    installFakes();
+    handlers[DEVICE_CODE] = () => deviceCodeOk({ interval: 1 });
+    await start("client-id", "client-secret");
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].at, clock + 5000, "polling faster than 5s is a good way to earn a slow_down");
+  });
+
   test("a second start cancels the first", async () => {
     installFakes();
     handlers[DEVICE_CODE] = () => deviceCodeOk({ device_code: "dc-first", user_code: "FIRST-CODE" });
