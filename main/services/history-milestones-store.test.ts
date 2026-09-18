@@ -35,7 +35,8 @@ console.log = (...args: unknown[]) => {
   logged.push(args.map(String).join(" "));
 };
 
-const { historyMilestonesStore, partitionMilestones, isCalendarDate } = await import("./history-milestones-store.js");
+const { historyMilestonesStore, partitionMilestones, isCalendarDate, MAX_LABEL_LENGTH } =
+  await import("./history-milestones-store.js");
 await historyMilestonesStore.init();
 console.log = realLog;
 
@@ -128,7 +129,99 @@ describe("writing one", () => {
   test("removing one leaves the rest", async () => {
     const before = historyMilestonesStore.all().length;
     const after = await historyMilestonesStore.remove("a");
+    assert.ok(after, "removing an id that IS there must answer the list, not null");
     assert.equal(after.length, before - 1);
     assert.equal(after.some((m) => m.id === "a"), false);
+  });
+});
+
+describe("a row this module cannot read", () => {
+  test("survives an unrelated save", async () => {
+    // The store's own header says a bad row is "SKIPPED rather than dropped from
+    // the file", and it was not: the next save wrote the cache, which never held
+    // it, so adding one good milestone silently deleted the operator's
+    // unreadable one and the log line naming it stopped appearing. Deleting an
+    // operator's data to tidy something up is not a thing this repo does.
+    const file = path.join(DATA, "history-milestones.json");
+    const before = JSON.parse(fs.readFileSync(file, "utf8")) as { id?: string; date?: string }[];
+    assert.deepEqual(
+      before.filter((r) => r.date === "2026-02-31" || r.date === "sometime in the spring").length,
+      2,
+      "the fixture's two unreadable rows are not in the file to begin with",
+    );
+
+    await historyMilestonesStore.save({ date: "2026-07-04", label: "Independence", serviceTypeId: null });
+
+    const after = JSON.parse(fs.readFileSync(file, "utf8")) as { id?: string; date?: string; label?: string }[];
+    assert.ok(Array.isArray(after));
+    assert.deepEqual(
+      after.filter((r) => r.date === "2026-02-31" || r.date === "sometime in the spring").map((r) => r.label).sort(),
+      ["Kickoff", "Two services"],
+      "an unreadable row was dropped from the file by a save that had nothing to do with it",
+    );
+    assert.ok(after.some((r) => r.label === "Independence"), "the new one did not land");
+    // And it is still skipped on the way back IN, so it does not start drawing.
+    assert.equal(historyMilestonesStore.all().some((m) => m.label === "Two services"), false);
+  });
+});
+
+describe("what a milestone may say", () => {
+  test("a blank label is refused — a mark with no words is a mark with no reason", async () => {
+    await assert.rejects(
+      () => historyMilestonesStore.save({ date: "2026-08-02", label: "   ", serviceTypeId: null }),
+      /needs a label/,
+    );
+  });
+
+  test("a label longer than the field is refused, and says by how much", async () => {
+    // It is drawn under a chart axis where the room between two marks is tens
+    // of pixels; past this it is a paragraph only ever read in Settings.
+    await assert.rejects(
+      () => historyMilestonesStore.save({ date: "2026-08-02", label: "x".repeat(MAX_LABEL_LENGTH + 1), serviceTypeId: null }),
+      new RegExp(`at most ${MAX_LABEL_LENGTH} characters \\(this one is ${MAX_LABEL_LENGTH + 1}\\)`),
+    );
+    const ok = await historyMilestonesStore.save({
+      date: "2026-08-02",
+      label: "y".repeat(MAX_LABEL_LENGTH),
+      serviceTypeId: null,
+    });
+    assert.ok(ok.some((m) => m.label.length === MAX_LABEL_LENGTH), "exactly the cap must be accepted");
+  });
+
+  test("the label is stored trimmed", async () => {
+    const list = await historyMilestonesStore.save({ date: "2026-08-09", label: "  Camp  ", serviceTypeId: null });
+    assert.ok(list.some((m) => m.label === "Camp"));
+  });
+
+  test("a service type nothing has recorded is refused", async () => {
+    // A mark scoped to a type that does not exist draws on no line at all and
+    // is silently invisible — the operator sees their row in Settings and no
+    // mark on the chart, with nothing to read.
+    await assert.rejects(
+      () => historyMilestonesStore.save({ date: "2026-08-16", label: "Youth", serviceTypeId: "nope" }, ["weekend"]),
+      /no service type "nope" has ever recorded/,
+    );
+    const ok = await historyMilestonesStore.save({ date: "2026-08-16", label: "Youth", serviceTypeId: "weekend" }, ["weekend"]);
+    assert.ok(ok.some((m) => m.serviceTypeId === "weekend"));
+    // No list to check against = any id passes; the route always passes one.
+    const anywhere = await historyMilestonesStore.save({ date: "2026-08-23", label: "Free", serviceTypeId: "whatever" });
+    assert.ok(anywhere.some((m) => m.serviceTypeId === "whatever"));
+  });
+});
+
+describe("removing one", () => {
+  test("an id that is not there answers null, not a list", async () => {
+    // The route turns this into a 404. A 200 said the deletion happened, so a
+    // client working from a stale list was told it had removed something that
+    // was never there.
+    assert.equal(await historyMilestonesStore.remove("no-such-id"), null);
+  });
+
+  test("an id that IS there answers what is left", async () => {
+    const added = await historyMilestonesStore.save({ date: "2026-09-27", label: "Gone soon", serviceTypeId: null });
+    const id = added.find((m) => m.label === "Gone soon")!.id;
+    const left = await historyMilestonesStore.remove(id);
+    assert.ok(left);
+    assert.equal(left.some((m) => m.id === id), false);
   });
 });
