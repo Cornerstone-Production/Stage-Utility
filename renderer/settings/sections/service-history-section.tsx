@@ -545,21 +545,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     return m;
   }, [filtered]);
 
-  // Per-day attendance intensity (0..1) for the calendar heatmap: a day's peak
-  // in-room count, normalized to the busiest recorded day. Global (all types) — the
-  // calendar is a stable navigation surface; the overview does the type scoping.
-  const dateIntensity = useMemo(() => {
-    const peak = new Map<string, number>();
-    for (const a of attList) {
-      if (a.peakOccupancy <= 0) continue;
-      peak.set(a.serviceDate, Math.max(peak.get(a.serviceDate) ?? 0, a.peakOccupancy));
-    }
-    const max = Math.max(0, ...peak.values());
-    const m = new Map<string, number>();
-    if (max > 0) for (const [d, v] of peak) m.set(d, v / max);
-    return m;
-  }, [attList]);
-
   // Small summary shown beneath the calendar for the selected day: how many
   // services + their average peak in-room (scoped to the active type filter).
   const daySummary = useMemo(() => {
@@ -1270,7 +1255,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       {/* Calendar (sticky) + selected-day detail. */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
         <div className="sm:sticky sm:top-0 flex flex-col gap-3">
-          <HistoryCalendar counts={dateCounts} intensity={dateIntensity} selected={day} onPick={pickDay} />
+          <HistoryCalendar counts={dateCounts} selected={day} onPick={pickDay} />
           {day && daySummary && (
             <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
               Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
