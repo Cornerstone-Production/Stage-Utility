@@ -61,7 +61,11 @@ export function initialConfig(
   const out: Record<string, unknown> = {};
   for (const field of descriptor.configSchema) {
     const raw = state.config[field.key];
-    if (field.type === "password" && typeof raw === "string" && raw !== "") {
+    // "oauth-device" (YouTube's connect row) carries the same kind of secret
+    // behind its "Paste a token instead" disclosure and is masked the same
+    // way — this was the one enumeration of field.type that still read
+    // "password" alone after that type was added.
+    if ((field.type === "password" || field.type === "oauth-device") && typeof raw === "string" && raw !== "") {
       out[field.key] = FORM_MASK;
     } else if (field.type === "number") {
       // Unset numeric fields (e.g. an API port) prefill the integration's
