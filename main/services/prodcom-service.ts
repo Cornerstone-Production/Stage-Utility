@@ -695,31 +695,26 @@ export class ProdComService extends ConnectionLifecycle {
   /**
    * Come back to the WebSocket on a clock while the fallback is live.
    *
-   * Armed only while the fallback IS the live transport, so a box that has no
-   * WebSocket costs one refused upgrade every five minutes and nothing else.
+   * Armed only while the fallback IS the live transport, and it costs ONE
+   * refused upgrade every five minutes against a box that has no WebSocket —
+   * nothing else. The attempt is made BESIDE the fallback rather than in place
+   * of it (see connectWebSocket's `besideFallback`), which is what makes that
+   * true: dropping the SSE stream to make the attempt cost a fresh stream, a
+   * channel read, a keyword read and a 200-line backfill every five minutes,
+   * and fed countSseReconnect and the reconnect back-off with a drop that never
+   * happened.
    *
-   * The reconnect has ONE owner, the lifecycle's scheduleReconnect(), which is
-   * why this drops the SSE request rather than opening a WebSocket beside it:
-   * connect() does not close the other transport, so a socket opened straight
-   * from here would leave the fallback streaming into the same buffer for as
-   * long as it stayed up. This is the idle watchdog's shape exactly (drop the
-   * request, then schedule), for the same reason.
-   *
-   * Nothing is logged per retry: countSseReconnect's debug line covers the
-   * counter's copy of this, the outage itself is already reported once by
-   * noteWebSocketDown, and `websocket is back` is the signal that matters.
+   * Nothing is logged per retry: the outage is already reported once by
+   * noteWebSocketDown with a 15-minute reminder, and `websocket is back` is the
+   * signal that matters.
    */
   private armWebSocketRetry(): void {
     this.clearWebSocketRetry();
     if (this.useWebSocket) return; // already on it, or already about to try
     this.wsRetryTimer = setTimeout(() => {
       this.wsRetryTimer = null;
-      if (!this.running || this.onWebSocket) return;
-      this.useWebSocket = true;
-      this.clearIdleWatchdog();
-      this.req?.destroy();
-      this.req = null;
-      this.scheduleReconnect();
+      if (!this.running || this.onWebSocket || this.ws || !this.host || !this.port) return;
+      this.connectWebSocket(this.host, this.port, { besideFallback: true });
     }, this.wsRetryIntervalMs);
     this.wsRetryTimer.unref?.();
   }
@@ -1025,8 +1020,19 @@ export class ProdComService extends ConnectionLifecycle {
    * not describe, hence the one cast; prodcom-websocket.test.ts asserts the
    * header actually arrives, so a Node release that stopped forwarding it turns
    * the suite red instead of silently 401-ing in production.
+   *
+   * `besideFallback` is the five-minute retry's attempt, made while the SSE
+   * stream is still up and carrying captions. It differs in exactly two places,
+   * both below: opening it drops the fallback FIRST and then adopts this socket,
+   * and failing it leaves the fallback exactly as it was — no
+   * fallBackToSse (there is nothing to fall back to, we are already there), no
+   * refusal probe, no SSE reconnect counted, and no back-off advanced. Without
+   * that distinction each retry cost a torn-down stream, a channel read, a
+   * keyword read and a 200-line backfill, and fed the reconnect machinery a drop
+   * that never happened.
    */
-  private connectWebSocket(host: string, port: number): void {
+  private connectWebSocket(host: string, port: number, opts: { besideFallback?: boolean } = {}): void {
+    const beside = opts.besideFallback === true;
     const url = `ws://${host}:${port}/api/v1/ws`;
     let ws: WebSocket;
     try {
@@ -1034,6 +1040,11 @@ export class ProdComService extends ConnectionLifecycle {
         headers: this.authHeaders(this.apiKey),
       });
     } catch (e) {
+      if (beside) {
+        // The fallback is live and untouched; ask again on the next timer.
+        this.armWebSocketRetry();
+        return;
+      }
       this.fallBackToSse(host, port, errorMessage(e));
       return;
     }
@@ -1041,6 +1052,14 @@ export class ProdComService extends ConnectionLifecycle {
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      if (beside) {
+        // The retry's socket is up: drop the fallback before adopting it, so the
+        // two never feed the same buffer.
+        this.clearIdleWatchdog();
+        this.req?.destroy();
+        this.req = null;
+        this.useWebSocket = true;
+      }
       this.onWebSocket = true;
       this.sseReconnects = 0;
       // No clearWebSocketRetry() here on purpose: the timer is a one-shot that
@@ -1083,6 +1102,14 @@ export class ProdComService extends ConnectionLifecycle {
         this.onWebSocket = false;
         this.report("disconnected", null);
         this.scheduleReconnect();
+        return;
+      }
+      if (beside) {
+        // The retry's attempt failed and the fallback never stopped carrying
+        // captions. Nothing to report, nothing to diagnose — the refusal was
+        // already diagnosed and logged when this outage began — and above all no
+        // SSE reconnect to count: the stream did not drop.
+        this.armWebSocketRetry();
         return;
       }
       // It never opened. The box may be older than 2.3, may have the API off, or

@@ -46,6 +46,15 @@ class TestProdCom extends ProdComService {
   }
 }
 
+/** Long enough that ONE retry fires inside a settle window, so "exactly one
+ *  attempt" is a statement about the retry and not about how fast the clock in
+ *  this file happens to tick. */
+class SlowRetryProdCom extends TestProdCom {
+  protected override get wsRetryIntervalMs(): number {
+    return 500;
+  }
+}
+
 const CHANNELS = [{ id: "CH-A", name: "Lead TB", color: "#00F900" }];
 
 async function connected(t: TestContext, options: StubOptions = {}): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
@@ -87,10 +96,53 @@ describe("the fallback retries the websocket on a timer", () => {
     assert.equal(wsAttempts(stub), 1, "only the first, refused upgrade so far");
 
     await eventually(() => wsAttempts(stub) >= 2, "a second websocket attempt on the timer");
-    // The retry goes through the normal reconnect path rather than opening a
-    // socket beside the live stream: the fallback is dropped, the upgrade is
-    // refused again, and the fallback is reopened.
-    await eventually(() => stub.sseOpens >= 2, "the fallback to be dropped and reopened");
+  });
+
+  it("costs one refused upgrade and nothing else", async (t) => {
+    // The retry attempt is made BESIDE the live fallback. Tearing the stream
+    // down to make it cost a fresh SSE stream, a channel read, a keyword read
+    // and a 200-line backfill every five minutes, and told countSseReconnect and
+    // the reconnect back-off about a drop that never happened.
+    const stub = await startProdComStub({ channels: CHANNELS, refuseWebSocket: true });
+    const svc = new SlowRetryProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+    await svc.settled();
+
+    const before = {
+      ws: wsAttempts(stub),
+      sse: stub.sseOpens,
+      rest: stub.requests.filter((r) => !r.url.startsWith("/api/v1/ws")).length,
+    };
+    const lines: string[] = [];
+    const realDebug = console.debug;
+    console.debug = (...a: unknown[]) => lines.push(a.map(String).join(" "));
+    t.after(() => {
+      console.debug = realDebug;
+    });
+
+    await eventually(() => wsAttempts(stub) > before.ws, "the timer's attempt");
+    // Settle past the refusal, so anything the old design would have done has
+    // had time to happen.
+    await new Promise((r) => setTimeout(r, 200));
+
+    assert.equal(wsAttempts(stub) - before.ws, 1, "the timer made more than one upgrade attempt");
+    assert.equal(stub.sseOpens, before.sse, "the live fallback was torn down to make the attempt");
+    assert.equal(
+      stub.requests.filter((r) => !r.url.startsWith("/api/v1/ws")).length,
+      before.rest,
+      "the attempt re-primed channels, keywords or backfill off a stream that never dropped",
+    );
+    assert.deepEqual(
+      lines.filter((l) => l.includes("retrying the websocket after")),
+      [],
+      "a failed retry counted an SSE reconnect that never happened",
+    );
+    assert.equal(svc.retryArmed, true, "the retry must re-arm for the next five minutes");
   });
 
   it("does not arm the retry while the websocket is up", async (t) => {

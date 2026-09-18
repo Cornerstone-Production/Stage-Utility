@@ -71,9 +71,14 @@ third reconnect, and every five minutes whether or not anything reconnects. Both
 rules are needed. The counter handles a box that is dropping the fallback anyway;
 the timer handles a fallback that is up and quiet, which never reconnects and so
 never counts — a ProdCom that has been restarted and would now upgrade is picked
-up within five minutes rather than at the next restart of this server. The timer
-drops the fallback and reconnects through the normal path, so only one transport
-is ever open.
+up within five minutes rather than at the next restart of this server.
+
+The timer's attempt is made **beside** the live stream, not in place of it. If
+the WebSocket opens, the fallback is dropped and the app switches to it; if it
+does not, the fallback is untouched and nothing else happens — no reconnect, no
+re-read of channels or keywords, no backfill, and no second refusal diagnosis.
+So a box that genuinely has no WebSocket costs one refused upgrade every five
+minutes and nothing more.
 
 That stream sends no keepalive of any kind, so on that path a dropped cable is
 caught by TCP keepalive probing the box every 30 s, and a box
@@ -97,13 +102,18 @@ The `/log` page has the evidence when something looks wrong:
   once per outage, not once per retry, with a reminder carrying the attempt count
   every 15 minutes while it lasts, and `[prodcom] websocket is back …` when it
   recovers. The per-retry "retrying the websocket after N SSE reconnect(s)" is
-  `console.debug`, so it is in the terminal but deliberately not on `/log`, and
-  the five-minute retry logs nothing of its own.
+  `console.debug`, so it is in the terminal but deliberately not on `/log`. The
+  five-minute retry logs nothing at all: it neither drops the stream nor counts a
+  reconnect, so there is nothing for it to report until it succeeds, and then
+  `websocket is back` says so.
 
   The reason in that line names the HTTP status the handshake was refused with.
   Node's WebSocket exposes no status for a refused upgrade — a 426, a 401 and a
   missing route all arrive as close code 1006 — so the same URL is asked once
-  over plain HTTP before the fallback opens:
+  over plain HTTP before the fallback opens. That probe is bounded: 4 s of socket
+  silence, and a 6-second wall-clock deadline that a box answering with an
+  endless body cannot push back. If it runs out, the fallback opens on the bare
+  close reason rather than waiting:
 
   | Reason | Means |
   |---|---|
