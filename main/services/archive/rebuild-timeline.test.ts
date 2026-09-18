@@ -477,6 +477,36 @@ describe("rebuildTimelineRecord: identity of the items", () => {
     assert.deepEqual(first.items.map((i) => i.itemId), ["meet-greet", "message"]);
   });
 
+  // A truncated write, a hand-edited CSV, a merge that widened a ragged file:
+  // the raw layer can hold a row whose stamp is not a time. Taken anyway, the
+  // literal string landed in startedAt AND in the previous entry's endedAt, so
+  // one corrupt cell became two corrupt records and every duration read NaN.
+  it("skips a row whose timestamp does not parse, rather than writing the string into the record", () => {
+    const { out, warnings } = withWarnings(() =>
+      rebuildTimelineRecord(record({ endedAt: "2026-09-18T00:00:00.000Z" }), [
+        { at: "2026-09-17T23:00:00.000Z", source: "pco", kind: "item", detail: "Doors" },
+        { at: "not a date", source: "pco", kind: "item", detail: "Tremble" },
+        { at: "", source: "pco", kind: "item", detail: "HOSTING" },
+        { at: "2026-09-17T23:30:00.000Z", source: "pco", kind: "item", detail: "MESSAGE" },
+      ]),
+    );
+
+    assert.deepEqual(out.items.map((i) => i.title), ["Doors", "MESSAGE"], "a damaged row reached the record");
+    assert.equal(out.items[0].endedAt, "2026-09-17T23:30:00.000Z", "a damaged row ended the entry before it");
+    assert.equal(out.items[0].actualDurationSec, 1800);
+    // Nothing anywhere in the record is the raw string, and no duration is NaN.
+    const json = JSON.stringify(out);
+    assert.doesNotMatch(json, /not a date/, `the unparseable stamp was written into the record: ${json}`);
+    assert.ok(
+      out.items.every((i) => i.actualDurationSec == null || Number.isFinite(i.actualDurationSec)),
+      `a NaN duration survived: ${json}`,
+    );
+    assert.ok(
+      warnings.includes("[service-timeline] rebuild: skipped 2 event row(s) with an unreadable timestamp"),
+      `the skipped rows were not reported: ${JSON.stringify(warnings)}`,
+    );
+  });
+
   it("keeps the record's own fields", () => {
     const prior = record({ endedAt: SERVICE_2_ENDED, pacingResetAt: "2026-09-18T01:00:00.000Z" });
     const out = rebuildTimelineRecord(prior, oldRows(EVENING.slice(0, 3)));

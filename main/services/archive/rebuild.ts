@@ -249,10 +249,21 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
     console.warn(line);
   };
 
+  let skipped = 0;
   for (const row of byTime(rows)) {
     if (row.kind !== "item") continue;
     const at = row.at ?? "";
     const atMs = Date.parse(at);
+    // A row whose stamp does not parse has nothing this can use: it cannot be
+    // ordered, it cannot end the entry before it, and the step-back rule has no
+    // clock to judge by. Taken anyway, the literal string landed in startedAt
+    // and in the PREVIOUS entry's endedAt, so a corrupt cell became two corrupt
+    // records and every duration off it read NaN. Skipped, with a count rather
+    // than a line per row — a truncated file can carry thousands.
+    if (!Number.isFinite(atMs)) {
+      skipped += 1;
+      continue;
+    }
     let title = row.detail ?? "";
 
     // Close the entry that was on air BEFORE deciding what this row does, in the
@@ -340,6 +351,12 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
     if (runs) runs.push(entry);
     else runsByTitle.set(row.detail ?? "", [entry]);
     open = entry;
+  }
+
+  if (skipped > 0) {
+    console.warn(
+      `[service-timeline] rebuild: skipped ${scrub(skipped)} event row(s) with an unreadable timestamp`,
+    );
   }
 
   // A closed record ends its last item; an open one leaves it running, which is
