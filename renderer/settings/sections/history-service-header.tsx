@@ -144,10 +144,16 @@ export function serviceKpis(
       // A service more than a minute late is the one timing figure worth a
       // colour; anything inside a minute is on time in practice.
       color: sum.lateStartSec != null && sum.lateStartSec > 60 ? "var(--color-warn-11)" : undefined,
+      // "on time" rather than "±0:00 late", which is what a service that started
+      // exactly on the minute read as. `fmtDelta` spells zero as "±0:00", and
+      // the word after it then contradicts the number in front of it. Seen in
+      // Chrome on the 3 Sep 20:45 recording.
       sub:
-        sum.lateStartSec != null
-          ? `${fmtDelta(sum.lateStartSec)} ${sum.lateStartSec >= 0 ? "late" : "early"}`
-          : undefined,
+        sum.lateStartSec == null
+          ? undefined
+          : sum.lateStartSec === 0
+            ? "on time"
+            : `${fmtDelta(sum.lateStartSec)} ${sum.lateStartSec > 0 ? "late" : "early"}`,
     },
     {
       key: "planned",
