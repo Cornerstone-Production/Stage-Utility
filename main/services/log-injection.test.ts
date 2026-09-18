@@ -96,6 +96,9 @@ const REQUEST_FACING = [
   "plan-routes.ts",
   "preset-routes.ts",
   "proxy-routes.ts",
+  // Its title-fallback warning names a plan item TITLE read back out of the raw
+  // archive, and POST /api/history/rebuild is what runs it.
+  "rebuild.ts",
   "rosstalk-routes.ts",
   "route-harness.ts",
   "scriptview-routes.ts",
@@ -291,6 +294,10 @@ function requestFacingFiles(): string[] {
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
     path.join(HERE, "spl-recorder.ts"),
+    // The same exposure as the two recorders, from the other end: its
+    // title-fallback warning names a Planning Center plan item TITLE, read back
+    // out of the raw archive, and POST /api/history/rebuild is what runs it.
+    path.join(HERE, "archive/rebuild.ts"),
     ...inRoutes,
   ];
 }
