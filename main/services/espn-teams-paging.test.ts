@@ -106,12 +106,18 @@ describe("listTeams over a paging ESPN", () => {
 
 describe("the league catalogue", () => {
   test("every league has a distinct id and a real ESPN path", () => {
-    // An EXACT count, not a floor: the picker, the docs and the poll all read
-    // this list, and a league added without a path here is a dropdown row that
-    // fetches nothing.
-    assert.equal(LEAGUES.length, 8);
-    assert.equal(new Set(LEAGUES.map((l) => l.id)).size, 8);
-    assert.equal(new Set(LEAGUES.map((l) => l.path)).size, 8);
+    // An EXACT sorted list, not a bare count: the picker, the docs and the poll
+    // all read this list, a league added without a path here is a dropdown row
+    // that fetches nothing, and a count cannot tell an add plus a remove from no
+    // change.
+    const EXPECTED_LEAGUES = ["mlb", "nba", "ncaabb", "ncaaf", "ncaam", "ncaaw", "nfl", "nhl"];
+    assert.deepEqual(
+      LEAGUES.map((l) => l.id).sort(),
+      EXPECTED_LEAGUES,
+      "a league was added or removed; update EXPECTED_LEAGUES deliberately",
+    );
+    assert.deepEqual([...new Set(LEAGUES.map((l) => l.id))].sort(), EXPECTED_LEAGUES, "a duplicate id");
+    assert.equal(new Set(LEAGUES.map((l) => l.path)).size, EXPECTED_LEAGUES.length, "a duplicate ESPN path");
     for (const l of LEAGUES) {
       assert.ok(/^[a-z-]+\/[a-z-]+$/.test(l.path), `${l.id} has an implausible path ${l.path}`);
       assert.equal(leagueById(l.id)?.path, l.path);

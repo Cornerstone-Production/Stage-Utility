@@ -2,21 +2,26 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { CAPABILITIES } from "@main/types/object-capabilities";
+import { LAYOUT_OBJECT_TYPES } from "@main/types/layout-object-types";
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "./layout-objects.js";
 
 // The palette shows every object as a card: name, one line of description, and
 // the group it belongs to. A card with a bare name and no explanation is a card
 // nobody can choose from, so `blurb` is a required field on the spec and `tsc`
 // refuses a type without one — this file guards the things the type system
-// cannot: that the text is actually useful, and that the count is what we think.
+// cannot: that the text is actually useful, and that the set is what we think.
 
 const TYPES = Object.keys(LAYOUT_OBJECTS) as (keyof typeof LAYOUT_OBJECTS)[];
 
 describe("the catalog covers every object type", () => {
-  test("exactly 62 types, and the two registries agree", () => {
-    // An EXACT count, not a floor. The design doc said 38 while the capability
+  test("exactly the expected types, and the two registries agree", () => {
+    // An EXACT set, not a floor. The design doc said 38 while the capability
     // registry held 41; nothing noticed for three releases.
-    assert.equal(TYPES.length, 62);
+    assert.deepStrictEqual(
+      TYPES.slice().sort(),
+      LAYOUT_OBJECT_TYPES,
+      "a type was added or removed; update LAYOUT_OBJECT_TYPES deliberately",
+    );
     assert.deepEqual(
       TYPES.slice().sort(),
       Object.keys(CAPABILITIES).sort(),

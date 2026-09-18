@@ -116,13 +116,69 @@ describe("every registered route resolves a title", () => {
     );
   });
 
-  test("eighteen of the twenty-one registered routes are titled", () => {
-    // An EXACT count, not a floor. A floor with slack is how three of these went
-    // untitled with the suite green.
-    const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
+  test("the registered route set is exactly what we expect", () => {
+    // An EXACT sorted list, not a count. A floor with slack is how three of
+    // these went untitled with the suite green, and a bare count cannot tell
+    // an added route plus a removed one from no change at all — a sorted list
+    // also merges cleanly when two branches each add a different route.
     // 21 since /scriptview split into the tablet's page and /scriptview/manage.
-    assert.equal(REGISTERED.length, 21);
-    assert.equal(titled.length, 18);
+    assert.deepEqual(
+      [...REGISTERED].sort(),
+      [
+        "/",
+        "/automation",
+        "/baptism",
+        "/consoles/$viewId",
+        "/displays",
+        "/history",
+        "/history/manage",
+        "/patch",
+        "/patch/edit",
+        "/plan",
+        "/screens",
+        "/screens/$viewId/edit",
+        "/scriptview",
+        "/scriptview/$serviceType/$layout",
+        "/scriptview/manage",
+        "/scriptview/presets",
+        "/settings",
+        "/settings/advanced",
+        "/settings/branding",
+        "/settings/integrations",
+        "/views",
+      ],
+      "a route was added or removed; update this list deliberately",
+    );
+  });
+
+  test("eighteen of the twenty-one registered routes are titled", () => {
+    // The three untitled: /settings (redirects), /displays and /views (also
+    // redirects). Everything else must resolve a label.
+    const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
+    assert.deepEqual(
+      [...titled].sort(),
+      [
+        "/",
+        "/automation",
+        "/baptism",
+        "/consoles/$viewId",
+        "/history",
+        "/history/manage",
+        "/patch",
+        "/patch/edit",
+        "/plan",
+        "/screens",
+        "/screens/$viewId/edit",
+        "/scriptview",
+        "/scriptview/$serviceType/$layout",
+        "/scriptview/manage",
+        "/scriptview/presets",
+        "/settings/advanced",
+        "/settings/branding",
+        "/settings/integrations",
+      ],
+      "a route's title status changed; update this list deliberately",
+    );
   });
 });
 

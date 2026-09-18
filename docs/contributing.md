@@ -244,6 +244,16 @@ Green is not finished. Two more questions, answered in the PR body:
 "No docs needed" and "nothing worth logging" are fine answers — say which, so
 it reads as a decision rather than an omission.
 
+### Merge-friendly guards
+
+A test that pins an exact registry (every layout object type, every route,
+every config store) should assert a sorted list, one entry per line — never a
+bare count like `assert.equal(TYPES.length, 62)`. Two PRs that each add a
+different entry touch different lines and merge without a conflict; a bare
+count sits on the same line every time, so the second PR to land always
+conflicts with the first. A count is also a weaker guard on its own: two
+additions and one removal leave the number unchanged and the test still green.
+
 ## React state
 
 Do not mirror a prop or a server value into state with an effect:

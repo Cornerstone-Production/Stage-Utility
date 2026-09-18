@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { CAPABILITIES, DRILLDOWN, hasCapability, isControl } from "./object-capabilities.js";
+import { LAYOUT_OBJECT_TYPES } from "./layout-object-types.js";
 
 // Exhaustiveness is the compiler's job here — CAPABILITIES is
 // Record<LayoutObjectType, ...>, so a new object type with no entry fails tsc.
@@ -12,13 +13,13 @@ import { CAPABILITIES, DRILLDOWN, hasCapability, isControl } from "./object-capa
 // render ungated on every wall display, and nothing would fail.
 
 describe("capability registry", () => {
-  test("covers every object type, and the count is exact", () => {
+  test("covers every object type, and the set is exact", () => {
     // A floor with slack is how three config stores went missing from every
     // backup while the suite stayed green.
-    assert.equal(
-      Object.keys(CAPABILITIES).length,
-      62,
-      "62 object types exist — if this number changed, decide the new type's capabilities deliberately",
+    assert.deepStrictEqual(
+      Object.keys(CAPABILITIES).sort(),
+      LAYOUT_OBJECT_TYPES,
+      "a type was added or removed; update LAYOUT_OBJECT_TYPES deliberately",
     );
   });
 
