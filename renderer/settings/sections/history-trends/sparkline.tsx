@@ -24,10 +24,15 @@ export function Sparkline({
   if (!finite.length) return null;
   const lo = Math.min(...finite);
   const hi = Math.max(...finite);
-  const span = hi - lo || 1;
+  const span = hi - lo;
   // 2px of inset top and bottom so the 1.5px stroke is not half-clipped at the
   // extremes — the highest and lowest points are exactly the ones being read.
-  const y = (v: number) => 2 + (1 - (v - lo) / span) * (height - 4);
+  //
+  // A FLAT series — one value, or eight identical ones — draws down the middle.
+  // `span || 1` put it on the floor of the box instead, which reads as the
+  // worst week on record rather than as a week that did not move. The comment
+  // below already promised the middle; only the single-value branch did it.
+  const y = (v: number) => (span === 0 ? height / 2 : 2 + (1 - (v - lo) / span) * (height - 4));
   const x = (i: number) => (finite.length === 1 ? width / 2 : (i / (finite.length - 1)) * width);
   const d = finite.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
   const last = finite.length - 1;

@@ -11,6 +11,7 @@ import { describe, test } from "node:test";
 
 import {
   TREND_WINDOW,
+  dailyPeaks,
   seriesChangeMilestones,
   trendMilestones,
   typeTrends,
@@ -20,7 +21,7 @@ import {
 
 const DAY = 24 * 60 * 60_000;
 
-/** A weekly service of one type, `peaks` oldest first, ending today. */
+/** A weekly service of one type, `peaks` oldest first — one service a week. */
 function weekly(
   typeId: string,
   peaks: (number | null)[],
@@ -38,20 +39,81 @@ function weekly(
   }));
 }
 
+/** `weeks` Sundays, each running the services in `perDay` (peaks, in order,
+ *  two hours apart) — the shape a church with a 9, an 11 and a 6 records. */
+function sundays(typeId: string, weeks: number, perDay: number[]): TrendRecording[] {
+  const start = Date.parse("2026-01-04T09:00:00Z");
+  const out: TrendRecording[] = [];
+  for (let w = 0; w < weeks; w++) {
+    const day = start + w * 7 * DAY;
+    perDay.forEach((peak, i) => {
+      out.push({
+        serviceKey: `${typeId}:${w}:${i}`,
+        serviceTypeId: typeId,
+        serviceTypeName: "Weekend",
+        serviceDate: new Date(day).toISOString().slice(0, 10),
+        t: day + i * 2 * 60 * 60_000,
+        seriesTitle: null,
+        peakOccupancy: peak,
+      });
+    });
+  }
+  return out;
+}
+
+describe("a day's peak", () => {
+  test("is the busiest service that day, at the day's first service's time", () => {
+    // The maximum, not the sum and not the mean: attendance is people in the
+    // room, so summing double-counts the family who came to one of the three,
+    // and a mean answers "how full was a service" rather than "how many came".
+    const days = dailyPeaks(sundays("weekend", 3, [1400, 700, 1100]));
+    assert.deepEqual(days.map((d) => d.v), [1400, 1400, 1400]);
+    assert.deepEqual(days.map((d) => d.count), [3, 3, 3]);
+    const first = Date.parse("2026-01-04T09:00:00Z");
+    assert.equal(days[0].t, first, "the node sits at the day's FIRST service, inside its own cluster");
+  });
+
+  test("a recording with no attendance record does not pull a day to zero", () => {
+    const one = dailyPeaks(sundays("weekend", 1, [900]).concat(
+      sundays("weekend", 1, [0]).map((r) => ({ ...r, serviceKey: "x", peakOccupancy: null })),
+    ));
+    assert.deepEqual(one.map((d) => [d.v, d.count]), [[900, 1]]);
+  });
+});
+
 describe("a service type's trend tile", () => {
-  test("the change is this window's average against the eight before it", () => {
-    // Sixteen recordings: the first eight average 100, the last eight average
-    // 120. A 20% rise, and the tile must not average all sixteen.
+  test("the change is this window's average against the eight DAYS before it", () => {
+    // Sixteen Sundays: the first eight average 100, the last eight 120. A 20%
+    // rise, and the tile must not average all sixteen.
     const peaks = [...Array(8).fill(100), ...Array(8).fill(120)];
     const [tile] = typeTrends(weekly("weekend", peaks));
     assert.equal(tile.recent.length, TREND_WINDOW);
     assert.equal(tile.average, 120, "the average is over the RECENT window, not the whole history");
+    assert.equal(tile.priorAverage, 100);
     assert.equal(tile.priorCount, 8);
     assert.ok(tile.change != null);
     assert.equal(Math.round(tile.change * 1000) / 1000, 0.2, "120 against 100 is +20%");
   });
 
-  test("more than sixteen recordings still compares eight against the eight before", () => {
+  test("a day's several services count once, at the busiest", () => {
+    // Sixteen Sundays of three services each. The tile averages what the chart
+    // LINE plots — the day's busiest — so the two halves of the card quote the
+    // same kind of number. Averaging every recording gave (1400+700+1100)/3.
+    const older = sundays("weekend", 8, [1000, 500, 800]);
+    const newer = sundays("weekend", 8, [1200, 600, 900]).map((r, i) => ({
+      ...r,
+      serviceKey: `later:${i}`,
+      serviceDate: new Date(Date.parse(`${r.serviceDate}T00:00:00Z`) + 56 * DAY).toISOString().slice(0, 10),
+      t: r.t + 56 * DAY,
+    }));
+    const [tile] = typeTrends([...older, ...newer]);
+    assert.equal(tile.recent.length, 8, "eight DAYS, not twenty-four recordings");
+    assert.equal(tile.average, 1200, "the day's busiest, not the mean of its three services");
+    assert.equal(tile.priorAverage, 1000);
+    assert.equal(Math.round((tile.change as number) * 100) / 100, 0.2);
+  });
+
+  test("more than sixteen days still compares eight against the eight before", () => {
     // A leading run of 10s must not drag the prior window down: only the eight
     // immediately before the recent window count.
     const peaks = [...Array(10).fill(10), ...Array(8).fill(200), ...Array(8).fill(300)];
@@ -59,6 +121,30 @@ describe("a service type's trend tile", () => {
     assert.equal(tile.average, 300);
     assert.equal(tile.priorCount, 8);
     assert.equal(Math.round((tile.change as number) * 100) / 100, 0.5, "300 against 200 is +50%");
+  });
+
+  test("the prior window has to be FULL, all the way to fifteen days", () => {
+    // The 9-to-15 band. Nine days is eight recent and one prior, and comparing
+    // eight weeks against one is not the comparison the tile's label promises —
+    // so it says so instead. One line per case, so two branches adding
+    // different ones merge cleanly.
+    const at = (n: number) => {
+      const [tile] = typeTrends(weekly("weekend", Array(n).fill(100)));
+      return [n, tile.change, tile.priorCount, tile.priorAverage];
+    };
+    assert.deepEqual(
+      [1, 2, 8, 9, 12, 15, 16].map(at),
+      [
+        [1, null, 0, null],
+        [2, null, 0, null],
+        [8, null, 0, null],
+        [9, null, 0, null],
+        [12, null, 0, null],
+        [15, null, 0, null],
+        // Sixteen is the first history with a full prior window.
+        [16, 0, 8, 100],
+      ],
+    );
   });
 
   test("a type with fewer than two recordings shows no change at all", () => {
@@ -76,7 +162,7 @@ describe("a service type's trend tile", () => {
   test("a recording with no attendance record is not plotted as zero", () => {
     // A service nobody counted is not a service of nobody.
     const [tile] = typeTrends(weekly("weekend", [100, null, 100]));
-    assert.deepEqual(tile.recent.map((r) => r.peakOccupancy), [100, 100]);
+    assert.deepEqual(tile.recent.map((d) => d.v), [100, 100]);
     assert.equal(tile.average, 100);
   });
 
@@ -139,6 +225,25 @@ describe("milestones", () => {
       marks.map((m) => m.label),
       ["New building"],
       "an entry whose date cannot be read must not be drawn at the left edge, where it would mean a date it does not",
+    );
+  });
+
+  test("a stored milestone keeps the service type it was scoped to", () => {
+    // The field was stored, documented, and dropped on the way to the chart, so
+    // a mark scoped to the Youth service drew across the Weekend line. It is
+    // what the chart scopes and colours the mark by; losing it here loses both.
+    const recs = weekly("weekend", [100, 100]);
+    const marks = trendMilestones(
+      [
+        { id: "scoped", date: recs[0].serviceDate, label: "Youth moved", serviceTypeId: "youth" },
+        { id: "all", date: recs[1].serviceDate, label: "New building", serviceTypeId: null },
+      ],
+      recs,
+      { startMs: recs[0].t - DAY, endMs: recs[1].t + DAY },
+    );
+    assert.deepEqual(
+      marks.map((m) => [m.label, m.serviceTypeId]),
+      [["Youth moved", "youth"], ["New building", null]],
     );
   });
 

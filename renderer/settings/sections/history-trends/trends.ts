@@ -25,30 +25,51 @@ export interface TrendRecording {
   peakOccupancy: number | null;
 }
 
-/** How many recordings a tile averages, and how many it compares them against. */
+/** How many DAYS a tile averages, and how many it compares them against. */
 export const TREND_WINDOW = 8;
+
+/** One day of one service type: the busiest that day, and when the day's first
+ *  recording started. */
+export interface DayPeak {
+  /** `YYYY-MM-DD`. */
+  date: string;
+  /** Epoch ms of the day's FIRST recording — where the line's node sits.
+   *
+   *  Not local midnight: a node at 00:00 would sit to the left of every dot it
+   *  is supposed to run through, which reads as the line leading the services
+   *  rather than summarising them. */
+  t: number;
+  /** The busiest recording that day. */
+  v: number;
+  /** How many recordings that day fed it. */
+  count: number;
+}
 
 export interface TypeTrend {
   serviceTypeId: string | null;
   name: string;
-  /** The last `TREND_WINDOW` recordings that have a peak, oldest first — the
+  /** The last `TREND_WINDOW` DAYS that recorded a peak, oldest first — the
    *  sparkline's points and the figures below it. */
-  recent: TrendRecording[];
-  /** Mean peak across `recent`, rounded. Null when `recent` is empty. */
+  recent: DayPeak[];
+  /** Mean of `recent`, rounded. Null when `recent` is empty. */
   average: number | null;
+  /** Mean of the `TREND_WINDOW` days before `recent`, rounded. Null unless that
+   *  window is FULL — see `change`. */
+  priorAverage: number | null;
   /**
-   * Fractional change of `average` against the mean of the `TREND_WINDOW`
-   * recordings BEFORE it. Null when there is no prior window at all.
+   * Fractional change of `average` against `priorAverage`.
    *
-   * Null, not zero, and not a number computed from an empty window. Dividing by
-   * a prior mean of nothing is how a tile comes to read "+Infinity%" on the
-   * first Sunday a church records — the failure this returning null prevents.
-   * A type with fewer than two recordings can never have a prior window, so it
-   * shows no change as a consequence of the rule rather than as a special case.
+   * Null unless the prior window holds a full `TREND_WINDOW` days. A comparison
+   * of eight weeks against two is not the comparison the tile's own label
+   * promises, and a tile that quietly changed what it was measuring as a church
+   * accumulated history would be worse than one that says it cannot tell yet.
+   *
+   * Computed from the ROUNDED averages, which are the two numbers on screen: a
+   * percentage derived from unrounded means can print "+1%" beside two numbers
+   * that are equal.
    */
   change: number | null;
-  /** How many recordings the change is measured against — the tile says so, or
-   *  "vs the prior 8" would be a lie in a church three months old. */
+  /** How many days the change is measured against. Zero when there is none. */
   priorCount: number;
 }
 
@@ -64,7 +85,37 @@ function byTime(a: TrendRecording, b: TrendRecording): number {
 }
 
 /**
- * One tile per service type, newest activity first.
+ * One entry per DAY a type recorded, carrying that day's busiest service.
+ *
+ * The trend LINE runs through these, not through every recording. A church with
+ * three Sunday services plots three points a week within a couple of hours of
+ * each other, and joining them drew a sawtooth — 9am 1,400, 11am 700, 6pm 1,100
+ * and back again — in which a real week-to-week trend was invisible. The
+ * individual recordings are still drawn, as dots; the line is the week.
+ *
+ * The MAXIMUM rather than the sum or the mean, because attendance is people in
+ * the room: summing double-counts the family who came to one of the three, and
+ * a mean answers "how full was a service" when the question a trend asks is
+ * "how many came".
+ */
+export function dailyPeaks(recordings: TrendRecording[]): DayPeak[] {
+  const byDay = new Map<string, DayPeak>();
+  for (const r of recordings) {
+    if (r.peakOccupancy == null || !Number.isFinite(r.t)) continue;
+    const hit = byDay.get(r.serviceDate);
+    if (!hit) {
+      byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, v: r.peakOccupancy, count: 1 });
+      continue;
+    }
+    hit.v = Math.max(hit.v, r.peakOccupancy);
+    hit.t = Math.min(hit.t, r.t);
+    hit.count += 1;
+  }
+  return [...byDay.values()].sort((a, b) => a.t - b.t);
+}
+
+/**
+ * One tile per service type, busiest first.
  *
  * A type with no plotted recording at all is dropped: a tile reading "—" for
  * every figure is a row of nothing taking up the width of a real one.
@@ -80,19 +131,29 @@ export function typeTrends(recordings: TrendRecording[], window = TREND_WINDOW):
   }
   const out: TypeTrend[] = [];
   for (const [key, all] of byType) {
-    const plotted = all.filter((r) => r.peakOccupancy != null).sort(byTime);
-    if (!plotted.length) continue;
-    const recent = plotted.slice(-window);
-    const prior = plotted.slice(Math.max(0, plotted.length - window * 2), plotted.length - recent.length);
-    const average = mean(recent.map((r) => r.peakOccupancy as number));
-    const priorMean = mean(prior.map((r) => r.peakOccupancy as number));
+    // The SAME derivation the chart's line uses, so the tile's average and a
+    // point on the line are the same kind of number. They were not: the average
+    // was over every recording and the line was too, and once the line became
+    // per-day the tile would have been quoting a different statistic under it.
+    const days = dailyPeaks(all.slice().sort(byTime));
+    if (!days.length) continue;
+    const recent = days.slice(-window);
+    const prior = days.slice(Math.max(0, days.length - window * 2), days.length - recent.length);
+    const average = mean(recent.map((d) => d.v));
+    const priorMean = prior.length === window ? mean(prior.map((d) => d.v)) : null;
+    const rounded = average == null ? null : Math.round(average);
+    const priorRounded = priorMean == null ? null : Math.round(priorMean);
     out.push({
       serviceTypeId: key || null,
       name: names.get(key) ?? "Services",
       recent,
-      average: average == null ? null : Math.round(average),
-      change: average != null && priorMean != null && priorMean > 0 ? (average - priorMean) / priorMean : null,
-      priorCount: prior.length,
+      average: rounded,
+      priorAverage: priorRounded,
+      change:
+        rounded != null && priorRounded != null && priorRounded > 0
+          ? (rounded - priorRounded) / priorRounded
+          : null,
+      priorCount: priorRounded == null ? 0 : prior.length,
     });
   }
   // Busiest first: the weekend service leads, and a once-a-year type does not

@@ -21,14 +21,16 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { cn } from "../../../lib/cn";
+import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../../lib/api";
-import { HistoryChart, type ChartMilestone } from "../history-chart";
+import { HistoryChart, useStoredKeys, type ChartMilestone } from "../history-chart";
+import { toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
 import {
   DEFAULT_RANGE_WEEKS,
+  dailyPeaks,
   RANGE_WEEKS,
-  TREND_WINDOW,
   trendMilestones,
   typeTrends,
   withinRange,
@@ -41,6 +43,10 @@ import {
  *  this module. A stored value that is not one of the offered ranges is
  *  ignored rather than trusted: the control could not represent it. */
 const RANGE_KEY = "history:trendRangeWeeks";
+
+/** Which service types are drawn, per browser — the same kind of preference the
+ *  attendance and sound sections keep, and stored the same way. */
+const SERIES_KEY = "history:trendSeries";
 
 function storedRange(): RangeWeeks {
   try {
@@ -61,23 +67,51 @@ const SERIES_COLORS = [
   "var(--color-warn-11)",
 ];
 
-/** "+12%" / "−12%", the spelling every percentage trend in this app uses. */
-function pct(change: number): string {
-  return `${change >= 0 ? "+" : "−"}${Math.round(Math.abs(change) * 100)}%`;
+/**
+ * "+12%" / "−12%", the spelling every percentage trend in this app uses.
+ *
+ * A change that rounds to nothing is "0%", not "+0%" or "−0%": a sign in front
+ * of zero claims a direction the number denies, and which of the two you got
+ * depended on the sign of a difference too small to print.
+ */
+export function pct(change: number): string {
+  const whole = Math.round(change * 100);
+  if (whole === 0) return "0%";
+  return `${whole > 0 ? "+" : "−"}${Math.abs(whole)}%`;
 }
 
 export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
+  /**
+   * The series the operator has switched OFF, by id.
+   *
+   * Off rather than on, so a service type that starts recording next month
+   * appears by itself instead of being absent until somebody finds a control
+   * they had no reason to look for. `null` for "anything the operator stored" —
+   * the offering is per-history and filtering against today's would quietly
+   * drop a type that had not recorded in the chosen range.
+   */
+  const [hidden, toggleHidden] = useStoredKeys(SERIES_KEY, null, []);
   const [stored, setStored] = useState<StoredMilestone[]>([]);
+  /**
+   * Set when the milestone list could not be read.
+   *
+   * The failure used to be swallowed: the chart drew the derived series-change
+   * marks and simply lacked the operator's own, which is indistinguishable from
+   * having none — somebody who had just added one would be looking at a chart
+   * that silently disagreed with Settings. Said on the card AND logged, because
+   * the reason is in the console and the fact is on screen.
+   */
+  const [milestonesFailed, setMilestonesFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     invoke<StoredMilestone[]>("history:listMilestones")
       .then((list) => !cancelled && setStored(list ?? []))
-      .catch(() => {
-        // The chart draws without the operator's marks; the derived
-        // series-change marks are unaffected, and Settings → Advanced is where
-        // the list is managed and where a failure to read it would show.
+      .catch((err) => {
+        if (cancelled) return;
+        setMilestonesFailed(true);
+        console.warn(`[history] could not read the milestone list: ${errorMessage(err)}`);
       });
     return () => {
       cancelled = true;
@@ -113,19 +147,38 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
       label: tiles.find((t) => (t.serviceTypeId ?? "") === key)?.name ?? "Services",
       color: SERIES_COLORS[i % SERIES_COLORS.length],
       role: i === 0 ? "primary" : "secondary",
+      // The legend IS the toggle — the same arrangement the attendance and
+      // sound charts use. Without it a milestone scoped to one service type had
+      // no way to be seen scoping anything: the rule that hides it with its
+      // series was correct and unreachable.
+      on: !hidden.includes(key || "all"),
       // A trend has no sampling interval to have a gap in: two recordings are a
       // fortnight apart because a service was a fortnight apart, not because
       // anything went unmeasured. Without this every point would be its own run.
       gapMs: Infinity,
-      points: (byType.get(key) ?? []).map((r) => ({ t: r.t, v: r.peakOccupancy as number })),
+      // The LINE runs through each day's busiest service; the DOTS are the
+      // services. Three Sunday services plotted as three points drew a sawtooth
+      // — 9am 1,400, 11am 700, 6pm 1,100 and back again, every week — in which a
+      // real week-to-week trend was invisible.
+      points: dailyPeaks(byType.get(key) ?? []).map((d) => ({ t: d.t, v: d.v })),
+      dots: (byType.get(key) ?? []).map((r) => ({ t: r.t, v: r.peakOccupancy as number })),
     }));
-  }, [ranged, tiles]);
+  }, [ranged, tiles, hidden]);
 
   const milestones = useMemo<ChartMilestone[]>(() => {
     if (!ranged.length) return [];
     const startMs = Math.min(...ranged.map((r) => r.t));
     const endMs = Math.max(...ranged.map((r) => r.t));
-    return trendMilestones(stored, ranged, { startMs, endMs });
+    // `seriesId` is the chart's name for the same thing `serviceTypeId` names
+    // here, and it is what scopes the mark: a milestone against one type draws
+    // only while that type's line does, in that line's colour. The field was
+    // stored and documented and then dropped on the way to the chart, so a
+    // milestone somebody had scoped to the Youth service drew across the
+    // Weekend line in the neutral grey of one that belonged to everything.
+    return trendMilestones(stored, ranged, { startMs, endMs }).map((m) => ({
+      ...m,
+      seriesId: m.serviceTypeId ?? undefined,
+    }));
   }, [stored, ranged]);
 
   const figures = useMemo(() => {
@@ -145,7 +198,12 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
   return (
     <section data-testid="history-trends" className="su-card flex flex-col gap-4 px-4 py-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">Trends</span>
+        <span className="flex items-baseline gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">Trends</span>
+          {milestonesFailed && (
+            <span data-milestones-failed className="text-caption2 text-warn-11">milestones unavailable</span>
+          )}
+        </span>
         {/* The range control. A segmented set of three rather than a Select:
             three options that are always the same three read faster as buttons
             than behind a menu that has to be opened to see them. */}
@@ -182,8 +240,8 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
               >
                 <span className="truncate text-caption2 uppercase tracking-wider text-fg-subtle">{t.name}</span>
                 <Sparkline
-                  values={t.recent.map((r) => r.peakOccupancy as number)}
-                  label={`${t.name}: peak attendance over the last ${t.recent.length} recordings`}
+                  values={t.recent.map((d) => d.v)}
+                  label={`${t.name}: the busiest service of each of the last ${t.recent.length} days it recorded`}
                 />
                 <div className="flex items-baseline gap-2">
                   <span data-trend-average className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">
@@ -199,7 +257,7 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
                     >
                       {pct(t.change)}{" "}
                       <span className="text-fg-subtle">
-                        vs prior {t.priorCount}
+                        vs the prior {t.priorCount}
                       </span>
                     </span>
                   ) : (
@@ -207,7 +265,7 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
                   )}
                 </div>
                 <span className="text-caption2 text-fg-subtle">
-                  average peak, last {Math.min(t.recent.length, TREND_WINDOW)}
+                  busiest service, averaged over {t.recent.length} day{t.recent.length === 1 ? "" : "s"}
                 </span>
               </div>
             ))}
@@ -223,6 +281,10 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
             xAxis="date"
             milestones={milestones}
             figures={figures}
+            onToggleSeries={(id) => {
+              const err = toggleHidden(id);
+              if (err) toast.error(`Couldn't remember that: ${err.message}`);
+            }}
             ariaLabel={`Peak attendance per recording over the last ${weeks} weeks`}
             emptyNote="No recordings in this range — try a longer one."
           />
