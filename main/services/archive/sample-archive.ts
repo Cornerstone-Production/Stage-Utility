@@ -26,6 +26,17 @@ export interface ServiceCtx {
   serviceDate: string;
 }
 
+/** What a `kind=item` event row knows about the plan item that went live.
+ *  Everything the timeline record needs that a title alone cannot supply: a
+ *  title is not an identity (two items can share one) and a planned length is
+ *  nowhere in the raw layer otherwise. */
+export interface EventItemFields {
+  itemId: string;
+  plannedLengthSec: number | null;
+  /** Whether PCO placed the item above the plan's SERVICE START header. */
+  preService: boolean | null;
+}
+
 const MANIFEST_VERSION = 1;
 
 /** Every source this archive writes. Merging has to move all of them, so the
@@ -88,13 +99,31 @@ class SampleArchive {
     );
   }
 
-  /** Sparse state changes — a plan item going live, an automation rule firing. */
-  recordEvent(ctx: ServiceCtx, source: string, kind: string, detail: string): void {
+  /**
+   * Sparse state changes — a plan item going live, an automation rule firing.
+   *
+   * The column set is FIXED, not widened per row. A `kind=item` row carries the
+   * plan item's identity and planned length so the timeline record can be
+   * rebuilt from these rows (see rebuildTimelineRecord); an automation row has
+   * nothing to put there and writes empty cells rather than a narrower header.
+   * Two header shapes in one source would roll the file on every alternation,
+   * and readArchiveRows concatenates rolled files in FILE order — so the rows a
+   * rebuild walks would no longer be in time order.
+   */
+  recordEvent(ctx: ServiceCtx, source: string, kind: string, detail: string, item?: EventItemFields): void {
     const e = this.entry(ctx);
     if (!e) return;
     void this.appender(e, "events").append(
-      ["at", "source", "kind", "detail"],
-      [new Date().toISOString(), source, kind, detail],
+      ["at", "source", "kind", "detail", "itemId", "plannedLengthSec", "preService"],
+      [
+        new Date().toISOString(),
+        source,
+        kind,
+        detail,
+        item?.itemId ?? "",
+        item?.plannedLengthSec ?? "",
+        item?.preService == null ? "" : String(item.preService),
+      ],
     );
   }
 

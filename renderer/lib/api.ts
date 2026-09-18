@@ -726,6 +726,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "history:recalcAttendance":
       return post<T>("/api/history/recalc", p);
 
+    case "history:rebuild":
+      return post<T>("/api/history/rebuild", p);
+
     case "history:setItemCounted":
       return post<T>("/api/history/item-counted", p);
 

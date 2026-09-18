@@ -8,12 +8,19 @@ recalculated later and a rebuilt machine can be given its history back.
 While a service is live, append-only CSVs are written under
 `<data>/archive/<date>_<serviceKey>/`:
 
-| File | One row per |
-|---|---|
-| `spl.csv` | 1 Hz reading, every metric on the row |
-| `attendance.csv` | people-counter poll |
-| `events.csv` | plan-item change, automation rule firing |
-| `manifest.json` | — schema version and the files present |
+| File | One row per | Columns |
+|---|---|---|
+| `spl.csv` | 1 Hz reading, every metric on the row | `at`, `itemId`, `item`, then one per metric |
+| `attendance.csv` | people-counter poll | `at`, then one per counter field |
+| `events.csv` | plan-item change, automation rule firing | `at`, `source`, `kind`, `detail`, `itemId`, `plannedLengthSec`, `preService` |
+| `manifest.json` | — schema version and the files present | — |
+
+An event row's last three columns describe the plan item on a `kind=item` row and
+are empty on every other kind. They are what lets a service's timing record be
+rebuilt from the raw rows rather than only from the title: a title is not an
+identity, and a planned length appears nowhere else in the raw layer. Rows written
+before those columns shipped keep their narrower file and still read back — the
+rebuild matches them to the stored record by title instead.
 
 Nothing is written outside a service.
 
@@ -77,6 +84,30 @@ an archive, and it treats the raw layer differently in each direction:
 - **A service that is recording right now cannot be edited at all.** The
   recorder holds the same record, so any change races its next write. History
   refuses until the service ends.
+
+### Rebuild from raw
+
+**Edit times → Rebuild from raw** throws the stored summaries away and derives
+them again from the rows underneath, each from its own file:
+
+| Record | Derived from | How |
+|---|---|---|
+| Item timings | `events.csv` | Every `kind=item` row in time order. An item going live again within ten minutes of its last entry closing is the operator stepping back and reopens that entry; anything later is a re-run with its own. Each entry ends when the next row fires, the last at the recording's end |
+| Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
+| Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
+
+It reports what it **derived** and, separately, what it left alone: a record the
+raw layer holds nothing for is untouched and said to be untouched, rather than
+reported with the count it already had. A recording with no raw rows at all is
+refused, as is one whose service is still recording.
+
+What survives: the recording's identity and window, the pacing reset, and the
+per-item include/exclude overrides. What does not: hand edits to item times,
+which the raw rows know nothing about.
+
+Rows written before the item id and planned length were archived carry only a
+title. Those are matched to the stored record by title; a title the record never
+held gets an id derived from the title, and the log says which.
 
 ## Not retroactive
 

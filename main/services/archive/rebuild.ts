@@ -13,11 +13,17 @@
 // Only services recorded since the archive shipped have samples. Anything older
 // returns null, which is the honest answer: there is nothing to rebuild from.
 
-import type { ServiceSplHistory, SplItemHistory } from "../../types/stage.js";
+import type {
+  ServiceSplHistory,
+  ServiceTimeline,
+  ServiceTimelineItem,
+  SplItemHistory,
+} from "../../types/stage.js";
 import { addLeqSample } from "../spl-leq.js";
-import { SERVICE_GAP_MS } from "../service-recorder.js";
+import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder.js";
+import { scrub } from "../scrub.js";
 import { serviceDirPath } from "./archive-paths.js";
-import { readArchiveRows } from "./archive-rows.js";
+import { readArchiveRows, type ArchiveRow } from "./archive-rows.js";
 
 /** How many SPL sample rows a service has archived, or 0 if none. */
 export async function archivedSampleCount(serviceKey: string, serviceDate: string): Promise<number> {
@@ -146,4 +152,253 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
   // ran.
   items.forEach((it, i) => (it.sequence = i));
   return { ...record, items };
+}
+
+// ── Timeline ────────────────────────────────────────────────────────────────
+//
+// The SPL record has rebuilt from its raw rows since the archive shipped, and
+// attendance re-derives from its samples. The timing record was the one that
+// only ever moved forward: on 18 Sep 2026 a recorder bug merged two services
+// into one summary while `events.csv` held every transition of the evening
+// intact, and the repair had to be done by hand. Every summary must be
+// derivable from the raw rows by the app.
+
+/** One row of `events.csv`, as readArchiveRows hands it back. */
+export type EventRow = ArchiveRow;
+
+/**
+ * An id for a title no row named and no stored entry matches.
+ *
+ * Stable across rebuilds by construction: the entry it creates carries this
+ * title, so the next rebuild matches it by title and reuses the same id rather
+ * than minting a second one.
+ */
+function titleSlug(title: string, run = 0): string {
+  const slug =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "untitled";
+  // The ordinal only appears past the first run, so the common case is
+  // unchanged and a second rebuild re-derives the same ids.
+  return run === 0 ? slug : `${slug}-${run + 1}`;
+}
+
+/** Chronological, leaving an unparseable stamp beside its neighbours (the sort
+ *  is stable, so returning 0 does not herd damaged rows to one end). */
+function byTime(rows: EventRow[]): EventRow[] {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.at ?? "");
+    const tb = Date.parse(b.at ?? "");
+    if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
+    return ta - tb;
+  });
+}
+
+function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
+  entry.endedAt = endedAt;
+  const startMs = Date.parse(entry.startedAt);
+  const endMs = Date.parse(endedAt);
+  entry.actualDurationSec =
+    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+}
+
+/**
+ * Recompute a service's item timings from its `events.csv` rows.
+ *
+ * Pure: it neither reads the disk nor writes the store, so it can be used to
+ * compare a stored record against the raw rows as well as to replace one.
+ *
+ * The rules are the LIVE recorder's, not a second opinion about what happened —
+ * `isStepBackTo` and `lastItemEntry` are imported from service-recorder.ts for
+ * exactly that reason. An item going live again within SERVICE_GAP_MS of its
+ * last entry closing is the operator stepping back, and reopens that entry;
+ * anything later is a genuine re-run and gets its own. The one difference is
+ * the clock a step back is judged by: the live recorder uses PCO's
+ * `live_start_at`, which no raw row carries, so the row's own `at` stands in.
+ * They agree to within one poll interval, and the gap they are compared against
+ * is ten minutes.
+ *
+ * Each entry ends when the next row fires. The last one ends at the record's own
+ * `endedAt`, and stays open when the record is still open.
+ *
+ * What is NOT in the rows is carried from `prior`: the record's identity, its
+ * window, `pacingResetAt`, and any per-item `counted` override the operator set
+ * — which is a statement about the PLAN item, so it lands on every entry for
+ * that id.
+ */
+export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]): ServiceTimeline {
+  const items: ServiceTimelineItem[] = [];
+  /** Titles already warned about, so a title that ran six times says so once. */
+  const warned = new Set<string>();
+  let open: ServiceTimelineItem | null = null;
+
+  /** Stored entries per title, in sequence order — the table a title-only row
+   *  is matched against. */
+  const priorByTitle = new Map<string, ServiceTimelineItem[]>();
+  for (const i of prior.items) {
+    const list = priorByTitle.get(i.title);
+    if (list) list.push(i);
+    else priorByTitle.set(i.title, [i]);
+  }
+  /** Entries CREATED per title so far — "the Nth run of this title". */
+  const runsByTitle = new Map<string, ServiceTimelineItem[]>();
+  /** Warn about a title once, however many rows carry it. `what` is fixed
+   *  prose chosen by the caller — the title itself is scrubbed here, so no call
+   *  site can forget to. */
+  const warnOnce = (title: string, what: string) => {
+    if (warned.has(title)) return;
+    warned.add(title);
+    console.warn(`[service-timeline] rebuild: ${scrub(what)}`);
+  };
+
+  let skipped = 0;
+  for (const row of byTime(rows)) {
+    if (row.kind !== "item") continue;
+    const at = row.at ?? "";
+    const atMs = Date.parse(at);
+    // A row whose stamp does not parse has nothing this can use: it cannot be
+    // ordered, it cannot end the entry before it, and the step-back rule has no
+    // clock to judge by. Taken anyway, the literal string landed in startedAt
+    // and in the PREVIOUS entry's endedAt, so a corrupt cell became two corrupt
+    // records and every duration off it read NaN. Skipped, with a count rather
+    // than a line per row — a truncated file can carry thousands.
+    if (!Number.isFinite(atMs)) {
+      skipped += 1;
+      continue;
+    }
+    let title = row.detail ?? "";
+
+    // Close the entry that was on air BEFORE deciding what this row does, in the
+    // order the live recorder does it (finalizePrevItem, then openItem): the step
+    // back test reads endedAt, so an entry still open is "the same run" by
+    // definition and a reopen must see the stamp this row just wrote.
+    if (open) closeEntry(open, at);
+
+    // Old rows predate the itemId column, so a title is the only handle left.
+    //
+    // Matched by RUN rather than by first hit: a plan with two items called
+    // HOSTING gave every HOSTING row the first one's id, and the step-back rule
+    // then folded the second item's run into the first's entry — one entry
+    // spanning the items between them. The Nth run of a title is matched to the
+    // Nth stored item carrying it, which is right whenever the counts agree and
+    // degrades to a numbered id when they do not.
+    //
+    // An EMPTY title carries no identity at all, so it is never matched to
+    // another empty row: two such rows collapsed into one `untitled` entry that
+    // swallowed everything between them. It is recovered by POSITION against
+    // the stored record — the Nth entry is the Nth stored item — and numbered
+    // only when there is no stored item to recover from.
+    let itemId = row.itemId ?? "";
+    let forceNew = false;
+    if (!itemId) {
+      const runs = runsByTitle.get(title) ?? [];
+      const openRun = runs[runs.length - 1];
+      const sameTitle = priorByTitle.get(title) ?? [];
+      if (!title) {
+        const byPosition = prior.items[items.length];
+        if (byPosition) {
+          title = byPosition.title;
+          itemId = byPosition.itemId;
+          warnOnce("", "a row has no title, matched by position");
+        } else {
+          itemId = titleSlug("", items.length);
+          forceNew = true; // nothing to prove two blank rows are the same item
+          warnOnce("", "a row has no title and no stored item to match it to");
+        }
+      } else if (openRun && isStepBackTo(openRun, atMs)) {
+        itemId = openRun.itemId; // same run — whatever that run was given
+      } else if (sameTitle.length > 1) {
+        itemId = sameTitle[runs.length]?.itemId ?? titleSlug(title, runs.length);
+        warnOnce(title, `"${scrub(title)}" is not unique in this record, matched by position`);
+      } else {
+        itemId = sameTitle[0]?.itemId ?? titleSlug(title);
+        warnOnce(title, `no item id for "${scrub(title)}", matched by title`);
+      }
+    }
+
+    const priorEntry = lastItemEntry(prior.items, itemId);
+    const plannedCol = row.plannedLengthSec ? Number(row.plannedLengthSec) : NaN;
+    const planned = Number.isFinite(plannedCol) ? plannedCol : (priorEntry?.plannedLengthSec ?? null);
+    const preService =
+      row.preService === "true" ? true
+      : row.preService === "false" ? false
+      : (priorEntry?.preService ?? false);
+
+    const last = forceNew ? undefined : lastItemEntry(items, itemId);
+    if (last && isStepBackTo(last, atMs)) {
+      if (title) last.title = title;
+      if (planned != null) last.plannedLengthSec = planned;
+      last.endedAt = null;
+      last.actualDurationSec = null;
+      open = last;
+      continue;
+    }
+    const entry: ServiceTimelineItem = {
+      itemId,
+      title,
+      sequence: items.length,
+      plannedLengthSec: planned,
+      startedAt: at,
+      endedAt: null,
+      actualDurationSec: null,
+      preService,
+    };
+    items.push(entry);
+    // Tracked under the title the ROW carried, which is what the next
+    // title-only row will look itself up by.
+    const runs = runsByTitle.get(row.detail ?? "");
+    if (runs) runs.push(entry);
+    else runsByTitle.set(row.detail ?? "", [entry]);
+    open = entry;
+  }
+
+  if (skipped > 0) {
+    console.warn(
+      `[service-timeline] rebuild: skipped ${scrub(skipped)} event row(s) with an unreadable timestamp`,
+    );
+  }
+
+  // A closed record ends its last item; an open one leaves it running, which is
+  // what the live recorder's own finalizeRecord would have done.
+  if (open && prior.endedAt) closeEntry(open, prior.endedAt);
+
+  // `counted` exists nowhere in the raw rows, so losing it here would silently
+  // undo work. It has two writers, and they carry differently:
+  //
+  //   The OPERATOR's override (countedByOperator) is a statement about the PLAN
+  //   item — "this item never counts" — so it lands on every run of it, which
+  //   is also how setItemCounted applies it.
+  //
+  //   The RECORDER's own `counted: false` is an observation about ONE run: PCO
+  //   had been showing that item live since before the record opened. A later
+  //   run of the same item is a normal run, and spreading the flag onto it
+  //   quietly dropped real items out of every service timer. It is carried back
+  //   onto the matching run only — the Nth run to the Nth prior entry, the same
+  //   pairing rebuildSplRecord uses — and a run with no prior counterpart keeps
+  //   the auto default.
+  const operatorOverrides = new Map<string, boolean>();
+  const priorRuns = new Map<string, ServiceTimelineItem[]>();
+  for (const i of prior.items) {
+    if (i.counted != null && i.countedByOperator) operatorOverrides.set(i.itemId, i.counted);
+    const list = priorRuns.get(i.itemId);
+    if (list) list.push(i);
+    else priorRuns.set(i.itemId, [i]);
+  }
+  const runIndex = new Map<string, number>();
+  for (const it of items) {
+    const n = runIndex.get(it.itemId) ?? 0;
+    runIndex.set(it.itemId, n + 1);
+    const operator = operatorOverrides.get(it.itemId);
+    if (operator != null) {
+      it.counted = operator;
+      it.countedByOperator = true;
+      continue;
+    }
+    const sameRun = priorRuns.get(it.itemId)?.[n];
+    if (sameRun?.counted != null) it.counted = sameRun.counted;
+  }
+
+  items.forEach((it, i) => (it.sequence = i));
+  return { ...prior, items };
 }

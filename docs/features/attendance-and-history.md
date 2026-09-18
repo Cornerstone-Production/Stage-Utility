@@ -112,6 +112,13 @@ times, and per-person averages.
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
+**Rebuild from raw**, beside the window editor, discards a recording's stored
+summaries and derives them again from the rows in the
+[data archive](../data-archive.md): item timings from the plan-item event rows,
+sound levels from the SPL samples, attendance from the record's own samples. For
+a capture the recorder got wrong — the raw rows are append-only and keep the
+evening as it happened. Hand edits to item times do not survive it.
+
 While a service is recording, **Reset pacing** (in the live service's detail
 here, and beside the Previous/Next controls wherever the console offers them)
 stops items before now from counting toward the Service pacing widget: items
