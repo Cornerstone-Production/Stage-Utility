@@ -104,23 +104,18 @@ export function applyItemTimeEdits(record: ServiceTimeline): ItemTimeOverlay {
  * The single read gate: a stored timeline as the operator sees it.
  *
  * Every route that answers a timeline and every broadcast of one goes through
- * this or through `broadcastTimeline`. Orphaned edits are logged here because
- * this is the only place that can see them, and an operator whose correction
- * stopped applying after a rebuild has nothing else to read.
+ * this or through `broadcastTimeline`.
+ *
+ * SILENT about orphans, deliberately. This runs on every read — every SSE push,
+ * every poll of the History list, every hello burst — so a warning here printed
+ * the same line hundreds of times during one service and still could not say
+ * which operation had orphaned the correction. Orphaning is reported by the
+ * thing that causes it: a rebuild, a merge, or a window edit, each through
+ * logOrphanedItemTimeEdits. If one of those leaves an orphan behind, that is a
+ * bug in the operation, not something for the reader to announce forever.
  */
 export function overlaidTimeline(record: ServiceTimeline): ServiceTimeline {
-  const { record: out, orphaned } = applyItemTimeEdits(record);
-  if (orphaned.length) {
-    // Joined and scrubbed INSIDE the interpolation: log-injection.test.ts reads
-    // the source, and a value pre-scrubbed into a local reads to it as raw.
-    const runs = orphaned.map((e) => e.itemId + "#" + String(e.sequence));
-    console.warn(
-      `[history] ${scrub(record.serviceKey)}: ${scrub(orphaned.length)} item time edit(s) name a run ` +
-        `this recording no longer has (${scrub(runs.join(", "))}) — kept in case the run comes back, ` +
-        "but they are not being applied.",
-    );
-  }
-  return out;
+  return applyItemTimeEdits(record).record;
 }
 
 /** Push a timeline to clients with the overlay already on it. The ONLY way a
@@ -167,4 +162,90 @@ export function rekeyItemTimeEdits(
     if (edit) out.push({ ...edit, itemId: item.itemId, sequence: item.sequence });
   }
   return out;
+}
+
+/** The result of carrying edits onto a freshly derived item list. */
+export interface CarriedItemTimeEdits {
+  /** Edits re-keyed onto the runs they belong to, in the new numbering. */
+  edits: ServiceItemTimeEdit[];
+  /** Edits whose run has no counterpart in the new list. The caller logs these
+   *  and decides whether to keep them; nothing here throws them away. */
+  orphaned: ServiceItemTimeEdit[];
+}
+
+/**
+ * Carry edits from `prior` onto items derived fresh, pairing by RUN.
+ *
+ * Object identity is no help here: a rebuild from `events.csv` constructs new
+ * item objects, so `bindItemTimeEdits` has nothing to bind to. The pairing is
+ * the Nth run of an itemId to the Nth run of that itemId — exactly the rule
+ * `rebuildTimelineRecord` already uses to carry the recorder's own `counted`
+ * observation, and `rebuildSplRecord` to carry `itemType`.
+ *
+ * Carrying the edits UNCHANGED, as this used to, is silently wrong the moment
+ * the rebuilt run list differs from the stored one. A record whose second run
+ * of a song was corrected, rebuilt after an earlier item was added, moved that
+ * correction onto whichever run inherited sequence 4 — the row read `edited`,
+ * the operator's real correction was gone, and nothing was reported because the
+ * sequence still matched something.
+ *
+ * `items` must already carry their FINAL sequence numbers.
+ */
+export function carryItemTimeEdits(
+  prior: ServiceTimeline,
+  items: ServiceTimelineItem[],
+): CarriedItemTimeEdits {
+  const edits = prior.itemTimeEdits ?? [];
+  if (edits.length === 0) return { edits: [], orphaned: [] };
+
+  // Keyed on the PRIOR numbering. Last wins, matching applyItemTimeEdits, so a
+  // record that somehow holds two edits for one run carries the same one that
+  // was being applied rather than a different one.
+  const byRun = new Map<string, ServiceItemTimeEdit>();
+  for (const e of edits) byRun.set(`${e.itemId} ${e.sequence}`, e);
+
+  const priorRuns = new Map<string, ServiceTimelineItem[]>();
+  for (const i of prior.items) {
+    const list = priorRuns.get(i.itemId);
+    if (list) list.push(i);
+    else priorRuns.set(i.itemId, [i]);
+  }
+
+  const out: ServiceItemTimeEdit[] = [];
+  const carried = new Set<ServiceItemTimeEdit>();
+  const runIndex = new Map<string, number>();
+  for (const item of items) {
+    const n = runIndex.get(item.itemId) ?? 0;
+    runIndex.set(item.itemId, n + 1);
+    const before = priorRuns.get(item.itemId)?.[n];
+    if (!before) continue; // a run the prior record did not have — nothing to carry
+    const edit = byRun.get(`${item.itemId} ${before.sequence}`);
+    if (!edit) continue;
+    carried.add(edit);
+    out.push({ ...edit, itemId: item.itemId, sequence: item.sequence });
+  }
+  return { edits: out, orphaned: edits.filter((e) => !carried.has(e)) };
+}
+
+/**
+ * The one place an orphaned correction is reported.
+ *
+ * Logged where the orphaning HAPPENS — a rebuild, a merge, a window edit — and
+ * not on the read path: reads run on every SSE push and every poll, so warning
+ * there printed the same line hundreds of times a service while saying nothing
+ * about which operation caused it.
+ */
+export function logOrphanedItemTimeEdits(
+  serviceKey: string,
+  cause: string,
+  orphaned: readonly ServiceItemTimeEdit[],
+): void {
+  if (orphaned.length === 0) return;
+  // Joined and scrubbed INSIDE the interpolation: log-injection.test.ts reads
+  // the source, and a value pre-scrubbed into a local reads to it as raw.
+  const runs = orphaned.map((e) => e.itemId + "#" + String(e.sequence));
+  console.warn(
+    `[history] ${scrub(serviceKey)}: ${scrub(cause)} left ${scrub(orphaned.length)} item time ` +
+      `correction(s) with no run to apply to (${scrub(runs.join(", "))}) — dropped.`,
+  );
 }

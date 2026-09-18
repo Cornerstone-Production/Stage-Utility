@@ -22,6 +22,7 @@ import type {
 import { addLeqSample } from "../spl-leq.js";
 import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder.js";
 import { scrub } from "../scrub.js";
+import { carryItemTimeEdits, logOrphanedItemTimeEdits } from "../history-item-times.js";
 import { serviceDirPath } from "./archive-paths.js";
 import { readArchiveRows, type ArchiveRow } from "./archive-rows.js";
 
@@ -409,5 +410,17 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   }
 
   items.forEach((it, i) => (it.sequence = i));
-  return { ...prior, items };
+
+  // Item time corrections are keyed by (itemId, sequence) and this function has
+  // just renumbered every sequence from a run list it derived itself. Carrying
+  // them across unchanged — which is what the spread below used to do on its own
+  // — put a correction on whichever run inherited its old number the moment the
+  // rebuilt list differed from the stored one by so much as an item. Paired by
+  // RUN, the same Nth-to-Nth rule `counted` is carried by, twenty lines up.
+  const carried = carryItemTimeEdits(prior, items);
+  logOrphanedItemTimeEdits(prior.serviceKey, "rebuild from raw", carried.orphaned);
+  const out: ServiceTimeline = { ...prior, items };
+  if (carried.edits.length) out.itemTimeEdits = carried.edits;
+  else delete out.itemTimeEdits;
+  return out;
 }

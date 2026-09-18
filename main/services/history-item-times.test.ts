@@ -14,6 +14,8 @@ import assert from "node:assert/strict";
 import {
   applyItemTimeEdits,
   bindItemTimeEdits,
+  carryItemTimeEdits,
+  overlaidTimeline,
   rekeyItemTimeEdits,
 } from "./history-item-times.js";
 import { rebuildTimelineRecord, type EventRow } from "./archive/rebuild.js";
@@ -224,6 +226,136 @@ describe("applyItemTimeEdits: a rebuild from events.csv keeps the edit", () => {
       endedAt: PREROLL_RECORDED_END,
       actualDurationSec: 682,
     });
+  });
+});
+
+describe("carryItemTimeEdits: a rebuilt run list that differs from the stored one", () => {
+  const row = (at: string, title: string, itemId: string): EventRow => ({ kind: "item", at, detail: title, itemId });
+
+  /**
+   * The stored record: Song, Message, Song (reprise), with the REPRISE corrected
+   * to two minutes. The Message between the two Songs is what makes the second a
+   * genuine re-run rather than a step back — the live recorder's rule, which the
+   * rebuild shares, reopens an entry only within ten minutes of it closing.
+   *
+   * The correction is keyed `song#2`.
+   */
+  function reprised() {
+    return record(
+      [
+        item({ itemId: "song", title: "Song", sequence: 0, startedAt: "2026-09-17T20:30:00.000Z", endedAt: "2026-09-17T20:40:00.000Z" }),
+        item({ itemId: "msg", title: "Message", sequence: 1, startedAt: "2026-09-17T20:40:00.000Z", endedAt: "2026-09-17T21:00:00.000Z" }),
+        item({ itemId: "song", title: "Song", sequence: 2, startedAt: "2026-09-17T21:00:00.000Z", endedAt: "2026-09-17T21:10:00.000Z" }),
+      ],
+      [{ itemId: "song", sequence: 2, endedAt: "2026-09-17T21:02:00.000Z", editedAt: END }],
+    );
+  }
+
+  test("the correction stays on the REPRISE, not on the first run of the same item", () => {
+    // The raw rows hold two items the stored record never did — a capture the
+    // recorder opened late, which is the case a rebuild exists for — so the
+    // first Song lands on sequence 2, exactly the number the reprise's
+    // correction is keyed to. Carried across unchanged, the correction moved
+    // onto the FIRST run: that row read `edited`, the reprise the operator
+    // actually fixed read its recorded ten minutes again, and nothing was
+    // reported, because the key still matched something.
+    const rows = [
+      row("2026-09-17T20:00:00.000Z", "Countdown", "countdown"),
+      row("2026-09-17T20:15:00.000Z", "Doors", "doors"),
+      row("2026-09-17T20:30:00.000Z", "Song", "song"),
+      row("2026-09-17T20:40:00.000Z", "Message", "msg"),
+      row("2026-09-17T21:00:00.000Z", "Song", "song"),
+    ];
+    const rebuilt = rebuildTimelineRecord(reprised(), rows);
+    const at2 = rebuilt.items[2];
+    assert.equal(at2.itemId, "song", "precondition: the FIRST run now holds sequence 2");
+    assert.equal(at2.startedAt, "2026-09-17T20:30:00.000Z", "precondition: and it is the first run, not the reprise");
+
+    const out = applyItemTimeEdits(rebuilt).record;
+    const runs = out.items.filter((i) => i.itemId === "song");
+    assert.equal(runs.length, 2, "precondition: the rebuild produced both runs");
+    assert.equal(runs[0].editedFrom, undefined, "the FIRST run was never corrected");
+    assert.equal(runs[0].actualDurationSec, 600, "and still runs its recorded ten minutes");
+    assert.equal(runs[1].actualDurationSec, 120, "the reprise keeps the operator's two minutes");
+  });
+
+  test("an item added ahead of the corrected run shifts it, and the correction follows", () => {
+    // The rebuilt list gains an item the stored record never had, so every run
+    // after it is renumbered. Carried unchanged, the correction would land on
+    // whichever run inherited sequence 2 — silently, with no orphan reported.
+    const prior = record(
+      [
+        item({ itemId: "doors", title: "Doors", sequence: 0, startedAt: "2026-09-17T20:15:00.000Z", endedAt: "2026-09-17T20:30:00.000Z" }),
+        item({ itemId: "welcome", title: "Welcome", sequence: 1, startedAt: "2026-09-17T20:30:00.000Z", endedAt: "2026-09-17T20:40:00.000Z" }),
+        item({ itemId: "song", title: "Song", sequence: 2, startedAt: "2026-09-17T20:40:00.000Z", endedAt: "2026-09-17T20:50:00.000Z" }),
+      ],
+      [{ itemId: "song", sequence: 2, endedAt: "2026-09-17T20:42:00.000Z", editedAt: END }],
+    );
+    const rows = [
+      row("2026-09-17T20:15:00.000Z", "Doors", "doors"),
+      row("2026-09-17T20:20:00.000Z", "Countdown", "countdown"), // never in the stored record
+      row("2026-09-17T20:30:00.000Z", "Welcome", "welcome"),
+      row("2026-09-17T20:40:00.000Z", "Song", "song"),
+    ];
+    const rebuilt = rebuildTimelineRecord(prior, rows);
+    assert.deepEqual(
+      rebuilt.items.map((i) => i.itemId),
+      ["doors", "countdown", "welcome", "song"],
+      "precondition: the run list shifted",
+    );
+    assert.deepEqual(
+      rebuilt.itemTimeEdits,
+      [{ itemId: "song", sequence: 3, endedAt: "2026-09-17T20:42:00.000Z", editedAt: END }],
+      "the correction must be re-keyed onto Song's NEW sequence",
+    );
+    const out = applyItemTimeEdits(rebuilt).record;
+    assert.equal(out.items[3].actualDurationSec, 120, "Song keeps its correction");
+    assert.equal(out.items[2].editedFrom, undefined, "and Welcome, which took sequence 2, did not acquire one");
+  });
+
+  test("a correction whose run the rebuild no longer produces is dropped and reported", () => {
+    const prior = record(
+      [
+        item({ itemId: "doors", title: "Doors", sequence: 0, startedAt: "2026-09-17T20:15:00.000Z", endedAt: "2026-09-17T20:30:00.000Z" }),
+        item({ itemId: "song", title: "Song", sequence: 1, startedAt: "2026-09-17T20:30:00.000Z", endedAt: "2026-09-17T20:40:00.000Z" }),
+      ],
+      [{ itemId: "song", sequence: 1, endedAt: "2026-09-17T20:32:00.000Z", editedAt: END }],
+    );
+    const rebuilt = rebuildTimelineRecord(prior, [row("2026-09-17T20:15:00.000Z", "Doors", "doors")]);
+    assert.equal(rebuilt.itemTimeEdits, undefined, "nothing to apply it to, so it is not carried");
+    assert.deepEqual(applyItemTimeEdits(rebuilt).orphaned, [], "and it is gone, not left as a silent orphan");
+  });
+
+  test("a READ never logs — orphaning is reported where it happens", () => {
+    // overlaidTimeline runs on every SSE push, every poll and every hello burst.
+    // Warning there printed the same line hundreds of times in one service while
+    // saying nothing about which operation caused it.
+    const rec = record(
+      [preroll()],
+      [{ itemId: "gone", sequence: 7, endedAt: PREROLL_FIXED_END, editedAt: END }],
+    );
+    const lines: unknown[][] = [];
+    const warn = console.warn;
+    const log = console.log;
+    console.warn = (...a: unknown[]) => void lines.push(a);
+    console.log = (...a: unknown[]) => void lines.push(a);
+    try {
+      for (let i = 0; i < 5; i++) overlaidTimeline(rec);
+    } finally {
+      console.warn = warn;
+      console.log = log;
+    }
+    assert.deepEqual(lines, [], `a read logged: ${JSON.stringify(lines)}`);
+  });
+
+  test("carryItemTimeEdits names the orphans rather than swallowing them", () => {
+    const prior = record(
+      [item({ itemId: "song", sequence: 0 })],
+      [{ itemId: "song", sequence: 0, endedAt: END, editedAt: END }],
+    );
+    const { edits, orphaned } = carryItemTimeEdits(prior, []);
+    assert.deepEqual(edits, []);
+    assert.deepEqual(orphaned.map((e) => e.itemId), ["song"]);
   });
 });
 
