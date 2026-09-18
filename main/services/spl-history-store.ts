@@ -50,16 +50,24 @@ class SplHistoryStore extends KeyedRecordStore<ServiceSplHistory> {
     return records.map((r) => {
       const keys = new Set<string>();
       for (const item of r.items) for (const k of Object.keys(item.metrics ?? {})) keys.add(k);
-      const metrics: Record<string, { leq: number; count: number }> = {};
+      const metrics: Record<string, { leq: number | null; max: number | null; count: number }> = {};
       for (const key of keys) {
         const parts = r.items.map((it) => {
           const stat = it.metrics?.[key];
-          return { leq: stat?.leq ?? null, count: stat?.count ?? 0 };
+          return { leq: stat?.leq ?? null, max: stat?.max ?? null, count: stat?.count ?? 0 };
         });
         const leq = combineLeq(parts);
-        if (leq == null) continue;
+        // The loudest single reading anywhere in the service — a MAX across
+        // the items, not an energy combination, because a peak does not
+        // average.
+        const peaks = parts.map((part) => part.max).filter((v): v is number => v != null);
+        const max = peaks.length ? Math.max(...peaks) : null;
+        // Kept when EITHER exists. Dropping the metric on a missing Leq threw
+        // away peaks that were really there — a legacy capture has maxima and
+        // no Leq at all, and the Trends chart's sound measure reads the peak.
+        if (leq == null && max == null) continue;
         const count = parts.reduce((n, p) => n + (p.leq == null ? 0 : p.count), 0);
-        metrics[key] = { leq, count };
+        metrics[key] = { leq, max, count };
       }
       return {
         serviceKey: r.serviceKey,

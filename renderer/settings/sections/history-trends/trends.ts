@@ -23,6 +23,18 @@ export interface TrendRecording {
    *  recordings are not plotted: a service with no counter is not a service of
    *  zero people. */
   peakOccupancy: number | null;
+  /** The loudest reading of this recording on the operator's PRIMARY Smaart
+   *  metric. Null when nothing was recorded, or when this browser surfaces no
+   *  metric the recording carries — the same rule the day-list rows apply. */
+  peakDb: number | null;
+}
+
+/** What the card is plotting. Two measures, one derivation. */
+export type TrendMeasure = "attendance" | "sound";
+
+/** The reading a measure takes from a recording. */
+export function measureOf(measure: TrendMeasure): (r: TrendRecording) => number | null {
+  return measure === "sound" ? (r) => r.peakDb : (r) => r.peakOccupancy;
 }
 
 /** How many DAYS a tile averages, and the most it compares them against. */
@@ -114,16 +126,22 @@ function byTime(a: TrendRecording, b: TrendRecording): number {
  * a mean answers "how full was a service" when the question a trend asks is
  * "how many came".
  */
-export function dailyPeaks(recordings: TrendRecording[]): DayPeak[] {
+export function dailyPeaks(
+  recordings: TrendRecording[],
+  /** Which reading to take. The MAXIMUM is right for both: the busiest service
+   *  of the day, and the loudest. */
+  pick: (r: TrendRecording) => number | null = (r) => r.peakOccupancy,
+): DayPeak[] {
   const byDay = new Map<string, DayPeak>();
   for (const r of recordings) {
-    if (r.peakOccupancy == null || !Number.isFinite(r.t)) continue;
+    const v = pick(r);
+    if (v == null || !Number.isFinite(r.t)) continue;
     const hit = byDay.get(r.serviceDate);
     if (!hit) {
-      byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, v: r.peakOccupancy, count: 1 });
+      byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, v, count: 1 });
       continue;
     }
-    hit.v = Math.max(hit.v, r.peakOccupancy);
+    hit.v = Math.max(hit.v, v);
     hit.t = Math.min(hit.t, r.t);
     hit.count += 1;
   }
@@ -136,7 +154,12 @@ export function dailyPeaks(recordings: TrendRecording[]): DayPeak[] {
  * A type with no plotted recording at all is dropped: a tile reading "—" for
  * every figure is a row of nothing taking up the width of a real one.
  */
-export function typeTrends(recordings: TrendRecording[], window = TREND_WINDOW): TypeTrend[] {
+export function typeTrends(
+  recordings: TrendRecording[],
+  opts: { window?: number; pick?: (r: TrendRecording) => number | null } = {},
+): TypeTrend[] {
+  const window = opts.window ?? TREND_WINDOW;
+  const pick = opts.pick ?? ((r: TrendRecording) => r.peakOccupancy);
   const byType = new Map<string, TrendRecording[]>();
   const names = new Map<string, string>();
   for (const r of recordings) {
@@ -151,8 +174,11 @@ export function typeTrends(recordings: TrendRecording[], window = TREND_WINDOW):
     // point on the line are the same kind of number. They were not: the average
     // was over every recording and the line was too, and once the line became
     // per-day the tile would have been quoting a different statistic under it.
-    const days = dailyPeaks(all.slice().sort(byTime));
-    if (!days.length) continue;
+    const days = dailyPeaks(all.slice().sort(byTime), pick);
+    // A type with NO reading under this measure keeps its tile, with a null
+    // average — the card says "no sound recorded" rather than dropping the
+    // whole type the moment you switch measure, which reads as the service type
+    // having disappeared. A type with no recordings at all is still no tile.
     const recent = days.slice(-window);
     const prior = days.slice(Math.max(0, days.length - window * 2), days.length - recent.length);
     const average = mean(recent.map((d) => d.v));
@@ -173,8 +199,9 @@ export function typeTrends(recordings: TrendRecording[], window = TREND_WINDOW):
     });
   }
   // Busiest first: the weekend service leads, and a once-a-year type does not
-  // take the left-hand tile because its name sorts early.
-  return out.sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
+  // take the left-hand tile because its name sorts early. A type with nothing
+  // to show under this measure sorts last, not into the middle.
+  return out.sort((a, b) => (b.average ?? -Infinity) - (a.average ?? -Infinity));
 }
 
 /** A mark under the Trends chart. `kind` decides nothing about how it draws —
@@ -284,8 +311,12 @@ export const DEFAULT_RANGE_WEEKS: RangeWeeks = 16;
 /** Recordings inside the chosen range, measured back from the newest one rather
  *  than from the clock: a history that stops in June should still draw when it
  *  is opened in September, not show an empty chart. */
-export function withinRange(recordings: TrendRecording[], weeks: number): TrendRecording[] {
-  const plotted = recordings.filter((r) => r.peakOccupancy != null && Number.isFinite(r.t));
+export function withinRange(
+  recordings: TrendRecording[],
+  weeks: number,
+  pick: (r: TrendRecording) => number | null = (r) => r.peakOccupancy,
+): TrendRecording[] {
+  const plotted = recordings.filter((r) => pick(r) != null && Number.isFinite(r.t));
   if (!plotted.length) return [];
   const newest = Math.max(...plotted.map((r) => r.t));
   const from = newest - weeks * 7 * 24 * 60 * 60_000;

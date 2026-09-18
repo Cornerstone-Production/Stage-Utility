@@ -73,8 +73,20 @@ export interface SplServiceSummary {
    * the occurrence is still live.
    */
   endedAt: string | null;
-  /** Service-level Leq per Smaart metric key, with the samples behind it. */
-  metrics: Record<string, { leq: number; count: number }>;
+  /**
+   * Per Smaart metric key: the service-level Leq, the samples behind it, and
+   * the loudest single reading anywhere in the service.
+   *
+   * `max` exists so a caller asking "how loud did it PEAK" does not have to
+   * pull the whole per-item record. The Trends chart plots one point per
+   * recording across up to 52 weeks, and fetching every record for that is
+   * hundreds of files to answer one number each — while this summary is
+   * already loaded by every page that needs it.
+   *
+   * Either may be null: a legacy capture has maxima and no Leq. A metric with
+   * NEITHER is left out entirely.
+   */
+  metrics: Record<string, { leq: number | null; max: number | null; count: number }>;
 }
 
 /** SPL recording for one service occurrence, keyed by serviceKey. */

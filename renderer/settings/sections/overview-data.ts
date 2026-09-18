@@ -329,6 +329,9 @@ export function computeOverview(
   // draw an empty line with no way to tell that from a quiet room.
   const chosenMetric =
     splMetric && splMetrics.includes(splMetric) ? splMetric : preferredSplMetric(splMetrics);
+  // Leq only. A metric can now carry a peak with NO Leq (a legacy capture), and
+  // the energy average below has nothing to fold for one of those — so the
+  // narrow shape is the filter as well as the type.
   const splByDate = new Map<string, { leq: number; count: number }[]>();
   // The same records, restricted to the ones `inAverageScope` calls settled —
   // SplServiceSummary carries its own endedAt now (main/types/history.ts), so
@@ -350,8 +353,9 @@ export function computeOverview(
   const liveSplDates = new Set<string>();
   if (chosenMetric) {
     for (const r of splInScope) {
-      const m = r.metrics[chosenMetric];
-      if (!m) continue;
+      const stat = r.metrics[chosenMetric];
+      if (!stat || stat.leq == null) continue;
+      const m = { leq: stat.leq, count: stat.count };
       const arr = splByDate.get(r.serviceDate);
       if (arr) arr.push(m);
       else splByDate.set(r.serviceDate, [m]);

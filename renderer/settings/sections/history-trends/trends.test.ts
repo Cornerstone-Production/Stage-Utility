@@ -13,6 +13,7 @@ import {
   MIN_PRIOR_DAYS,
   TREND_WINDOW,
   dailyPeaks,
+  measureOf,
   seriesChangeMilestones,
   trendMilestones,
   typeTrends,
@@ -22,11 +23,12 @@ import {
 
 const DAY = 24 * 60 * 60_000;
 
-/** A weekly service of one type, `peaks` oldest first — one service a week. */
+/** A weekly service of one type, `peaks` oldest first — one service a week.
+ *  `db` gives each recording a level too, for the sound measure. */
 function weekly(
   typeId: string,
   peaks: (number | null)[],
-  opts: { series?: (string | null)[]; from?: number } = {},
+  opts: { series?: (string | null)[]; from?: number; db?: (number | null)[] } = {},
 ): TrendRecording[] {
   const start = opts.from ?? Date.parse("2026-01-04T09:00:00Z");
   return peaks.map((p, i) => ({
@@ -37,6 +39,7 @@ function weekly(
     t: start + i * 7 * DAY,
     seriesTitle: opts.series?.[i] ?? null,
     peakOccupancy: p,
+    peakDb: opts.db?.[i] ?? null,
   }));
 }
 
@@ -56,6 +59,7 @@ function sundays(typeId: string, weeks: number, perDay: number[]): TrendRecordin
         t: day + i * 2 * 60 * 60_000,
         seriesTitle: null,
         peakOccupancy: peak,
+        peakDb: 90 + i,
       });
     });
   }
@@ -296,5 +300,69 @@ describe("the range control", () => {
     assert.ok(eight.length <= 9, `8 weeks of weekly services is ~9 recordings, got ${eight.length}`);
     assert.ok(fiftyTwo.length > eight.length, "a longer range must include more");
     assert.equal(eight[eight.length - 1].t, long[long.length - 1].t, "the newest recording is always in range");
+  });
+});
+
+describe("the sound measure", () => {
+  const db = (v: number | null) => v;
+
+  test("a day's peak is the LOUDEST service that day, not the busiest", () => {
+    // Three Sunday services: the 9 is the fullest and the 6 is the loudest.
+    // Switching measure must switch which one the day is represented by.
+    const recs = sundays("weekend", 2, [1400, 700, 1100]).map((r, i) => ({
+      ...r,
+      peakDb: [96, 99, 104][i % 3],
+    }));
+    assert.deepEqual(dailyPeaks(recs, measureOf("sound")).map((d) => d.v), [104, 104]);
+    assert.deepEqual(dailyPeaks(recs, measureOf("attendance")).map((d) => d.v), [1400, 1400]);
+  });
+
+  test("the tiles average decibels, with the same window and the same change rule", () => {
+    const older = Array(4).fill(94);
+    const newer = Array(8).fill(100);
+    const [tile] = typeTrends(
+      weekly("weekend", Array(12).fill(500), { db: [...older, ...newer].map(db) }),
+      { pick: measureOf("sound") },
+    );
+    assert.equal(tile.average, 100);
+    assert.equal(tile.priorAverage, 94);
+    assert.equal(tile.priorCount, 4, "the relaxed floor applies to sound too");
+    assert.ok((tile.change as number) > 0);
+  });
+
+  test("a type with no SPL records keeps its tile, with nothing in it", () => {
+    // Dropping it would read as the service type having disappeared the moment
+    // you switched measure. The tile stays and the card says "no sound
+    // recorded" against a null average.
+    const tiles = typeTrends(
+      [
+        ...weekly("weekend", Array(3).fill(900), { db: Array(3).fill(101) }),
+        ...weekly("evening", Array(3).fill(200)),
+      ],
+      { pick: measureOf("sound") },
+    );
+    assert.deepEqual(
+      tiles.map((t) => [t.serviceTypeId, t.average]),
+      [["weekend", 101], ["evening", null]],
+      "a type with no level must keep its tile and sort last",
+    );
+    assert.deepEqual(tiles.find((t) => t.serviceTypeId === "evening")!.recent, []);
+  });
+
+  test("no recordings at all is still no tile, under either measure", () => {
+    assert.deepEqual(typeTrends([], { pick: measureOf("sound") }), []);
+    assert.deepEqual(typeTrends([], { pick: measureOf("attendance") }), []);
+  });
+
+  test("the range filters on the measure being plotted", () => {
+    // A recording with attendance and no level is in range for one measure and
+    // not the other. Filtering on attendance while plotting sound put an
+    // undefined into the series.
+    const recs = weekly("weekend", [100, 100, 100], { db: [null, 97, null] });
+    assert.equal(withinRange(recs, 52, measureOf("attendance")).length, 3);
+    assert.deepEqual(
+      withinRange(recs, 52, measureOf("sound")).map((r) => r.peakDb),
+      [97],
+    );
   });
 });

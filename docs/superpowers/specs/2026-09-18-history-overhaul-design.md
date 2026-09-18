@@ -151,6 +151,14 @@ week reads at a glance and a row cannot disagree with the page it opens.
 attendance over the last eight recordings, the average, and the change against
 the eight before.
 
+> **Extended after review: sound.** A switch on the card plots either peak
+> attendance or the peak LEVEL on the operator's primary Smaart metric, with the
+> same per-day maximum, the same window and the same change rule, on a dB axis.
+> The levels come from the SPL SUMMARY — which gained a `max` per metric for
+> this — rather than from the per-item records: one point per recording across
+> 52 weeks would otherwise mean reading hundreds of files to answer one number
+> each, and the summary was already loaded by this page.
+
 > **Read literally during PR 3, per DAY.** The window is eight DAYS, not eight
 > recordings: a church with three Sunday services plots three points a week
 > within two hours of each other, and a line through them was a sawtooth in

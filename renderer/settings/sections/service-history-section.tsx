@@ -15,7 +15,7 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-m
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
-import { SplDetail, SPL_METRICS_STORAGE_KEY } from "./spl-history-section";
+import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
 import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion } from "./history-chart";
 import { TrendsCard } from "./history-trends/trends-card";
@@ -434,18 +434,44 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * A row with no attendance record carries a null peak and is not plotted — a
    * service nobody counted is not a service of zero people.
    */
+  /** The rows AND the Trends card's sound measure follow the Sound card's
+   *  metric choice, which lives in localStorage and is written by a component
+   *  React knows nothing about — the same dependency the service header carries
+   *  for the same reason. Declared here, above every reader: it is a `const`,
+   *  so a use further up the body is a temporal-dead-zone throw, not a stale
+   *  value. */
+  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+
   const trendRecordings = useMemo<TrendRecording[]>(
-    () =>
-      rows.map((r) => ({
-        serviceKey: r.serviceKey,
-        serviceTypeId: r.serviceTypeId,
-        serviceTypeName: r.serviceTypeName ?? null,
-        serviceDate: r.serviceDate,
-        t: Date.parse(r.startsAt ?? `${r.serviceDate}T00:00:00`),
-        seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
-        peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
-      })),
-    [rows],
+    () => {
+      // Read so the subscription is not "unused". The VALUE is never wanted;
+      // the hook's own state update is what re-renders when Customize writes a
+      // different metric, and without it the chart and the rows would go on
+      // quoting the old metric's peak until the page was reopened.
+      void metricsVersion;
+      const splByKey = new Map(splList.map((x) => [x.serviceKey, x]));
+      return rows.map((r) => {
+        // The SPL SUMMARY, not the record. It is already loaded for this page,
+        // it carries a peak per metric (see SplServiceSummary.metrics), and the
+        // trend plots one point per recording across up to 52 weeks — fetching
+        // every full record for that would be hundreds of files to answer one
+        // number each. The primary-metric rule is the rows' own, imported, so
+        // the chart and a row cannot name different metrics.
+        const summary = splByKey.get(r.serviceKey);
+        const metric = summary ? primaryMetricOf(Object.keys(summary.metrics)) : null;
+        return {
+          serviceKey: r.serviceKey,
+          serviceTypeId: r.serviceTypeId,
+          serviceTypeName: r.serviceTypeName ?? null,
+          serviceDate: r.serviceDate,
+          t: Date.parse(r.startsAt ?? `${r.serviceDate}T00:00:00`),
+          seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
+          peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
+          peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
+        };
+      });
+    },
+    [rows, splList, metricsVersion],
   );
 
   /** The row for the current selection, if any — known synchronously from `list`/
@@ -613,15 +639,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       cancelled = true;
     };
   }, [dayKeys, reloadKey]);
-  /** The rows follow the Sound card's metric choice, which lives in
-   *  localStorage and is written by a component React knows nothing about —
-   *  the same dependency the service header carries for the same reason. */
-  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
-  // Read so the subscription is not "unused". The VALUE is never wanted; the
-  // hook's own state update is what re-renders the rows when the Sound card's
-  // Customize writes a different metric, and without that they would go on
-  // quoting the old metric's peak until the page was reopened.
-  void metricsVersion;
 
   // Per-day service counts for the calendar (respects the type filter).
   const dateCounts = useMemo(() => {

@@ -83,19 +83,38 @@ many — *+6% vs prior 5*. Below **four** prior days it reads *no prior window
 yet* instead: an "average" of one or two readings is not one, and a percentage
 off it is noise wearing a direction. The tiles sort busiest first.
 
-Everything is counted **per day, at the day's busiest service**. A church running
-a 9, an 11 and a 6 records three figures every Sunday, and attendance is people
-in the room — summing them double-counts the family who came to one, and
-averaging them answers "how full was a service" when a trend asks "how many
-came". The tile's average and a point on the line below it are the same kind of
+The switch at the top right chooses what is plotted:
+
+| | |
+|---|---|
+| **Attendance** | peak people in the room, the default |
+| **Sound** | the loudest reading on your primary Smaart metric — the same metric a day-list row names, chosen the same way |
+
+Everything below follows the switch: the tiles average decibels, the axis
+becomes a dB band framed on the levels rather than anchored at 0, and the
+figures above the plot read *Loudest* instead of *Busiest*. A service type that
+recorded attendance and no sound keeps its tile and says *no sound recorded*
+rather than disappearing when you switch. The choice is remembered per browser.
+
+Everything is counted **per day, at the day's highest reading** — the busiest
+service, or the loudest. A church running a 9, an 11 and a 6 records three
+figures every Sunday, and attendance is people in the room: summing them
+double-counts the family who came to one, and averaging them answers "how full
+was a service" when a trend asks "how many came". A peak level does not average
+either. The tile's average and a point on the line below it are the same kind of
 number for that reason.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
 or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
-each day's busiest service; a **dot** marks every individual recording, so a week
-that stood for three services still looks like three. A recording with no
-attendance record is not plotted at all, because a service nobody counted is not
-a service of nobody.
+each day's highest reading; a **dot** marks every individual recording, so a week
+that stood for three services still looks like three. A recording with nothing
+under the current measure is not plotted at all, because a service nobody counted
+is not a service of nobody, and one with no meter running is not a silent one.
+
+The sound measure reads each recording's peak from the **SPL summary**, which
+this page already loads — not from the per-item records. The chart plots one
+point per recording across up to 52 weeks, and reading a full record for each
+would be hundreds of files to answer one number apiece.
 
 **Milestones** are marked under that chart: a small triangle, a dashed guide up
 the plot, a short label where there is room for one, and the full label on hover.

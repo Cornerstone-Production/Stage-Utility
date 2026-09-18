@@ -116,7 +116,7 @@ function spl(serviceDate: string, leq: number, over: Partial<SplServiceSummary> 
     serviceTypeId: "st1",
     serviceDate,
     endedAt: `${serviceDate}T11:00:00Z`,
-    metrics: { "LAeq 10": { leq, count: 100 } },
+    metrics: { "LAeq 10": { leq, max: leq + 12, count: 100 } },
     ...over,
   };
 }

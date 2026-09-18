@@ -30,12 +30,14 @@ import { Sparkline } from "./sparkline";
 import {
   DEFAULT_RANGE_WEEKS,
   dailyPeaks,
+  measureOf,
   RANGE_WEEKS,
   trendMilestones,
   typeTrends,
   withinRange,
   type RangeWeeks,
   type StoredMilestone,
+  type TrendMeasure,
   type TrendRecording,
 } from "./trends";
 
@@ -47,6 +49,33 @@ const RANGE_KEY = "history:trendRangeWeeks";
 /** Which service types are drawn, per browser — the same kind of preference the
  *  attendance and sound sections keep, and stored the same way. */
 const SERIES_KEY = "history:trendSeries";
+
+/** Which reading the card plots, per browser. */
+const MEASURE_KEY = "history:trendMeasure";
+
+const MEASURES = [
+  { key: "attendance" as const, label: "Attendance" },
+  { key: "sound" as const, label: "Sound" },
+];
+
+function storedMeasure(): TrendMeasure {
+  try {
+    return localStorage.getItem(MEASURE_KEY) === "sound" ? "sound" : "attendance";
+  } catch {
+    return "attendance";
+  }
+}
+
+/** Keep a view preference, or carry on without it. Private mode and a full
+ *  quota both throw; the choice then holds for this visit and reverts next
+ *  time, which is the state the operator was already in. */
+function remember(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* nothing is lost */
+  }
+}
 
 function storedRange(): RangeWeeks {
   try {
@@ -82,6 +111,9 @@ export function pct(change: number): string {
 
 export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
+  /** Attendance or sound. Attendance by default: it is the question the tab is
+   *  opened to answer, and sound is the one asked afterwards. */
+  const [measure, setMeasure] = useState<TrendMeasure>(storedMeasure);
   /**
    * The series the operator has switched OFF, by id.
    *
@@ -120,16 +152,22 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
 
   function pickRange(next: RangeWeeks) {
     setWeeks(next);
-    try {
-      localStorage.setItem(RANGE_KEY, String(next));
-    } catch {
-      // Private mode or a full quota: the range holds for this visit and
-      // reverts to the default on the next one. Nothing is lost.
-    }
+    remember(RANGE_KEY, String(next));
   }
 
-  const tiles = useMemo(() => typeTrends(recordings), [recordings]);
-  const ranged = useMemo(() => withinRange(recordings, weeks), [recordings, weeks]);
+  function pickMeasure(next: TrendMeasure) {
+    setMeasure(next);
+    remember(MEASURE_KEY, next);
+  }
+
+  const sound = measure === "sound";
+  const pick = useMemo(() => measureOf(measure), [measure]);
+  /** Counts read with separators; levels read as whole decibels, the same way
+   *  every other level in the app does. */
+  const fmtValue = (v: number) => (sound ? `${Math.round(v)} dB` : Math.round(v).toLocaleString());
+
+  const tiles = useMemo(() => typeTrends(recordings, { pick }), [recordings, pick]);
+  const ranged = useMemo(() => withinRange(recordings, weeks, pick), [recordings, weeks, pick]);
 
   const series = useMemo<ChartSeries[]>(() => {
     const byType = new Map<string, TrendRecording[]>();
@@ -160,10 +198,14 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
       // services. Three Sunday services plotted as three points drew a sawtooth
       // — 9am 1,400, 11am 700, 6pm 1,100 and back again, every week — in which a
       // real week-to-week trend was invisible.
-      points: dailyPeaks(byType.get(key) ?? []).map((d) => ({ t: d.t, v: d.v })),
-      dots: (byType.get(key) ?? []).map((r) => ({ t: r.t, v: r.peakOccupancy as number })),
+      points: dailyPeaks(byType.get(key) ?? [], pick).map((d) => ({ t: d.t, v: d.v })),
+      dots: (byType.get(key) ?? []).map((r) => ({ t: r.t, v: pick(r) as number })),
+      format: fmtValue,
     }));
-  }, [ranged, tiles, hidden]);
+    // `fmtValue` is a fresh closure every render; what it depends on is the
+    // measure, which `pick` already carries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ranged, tiles, hidden, pick]);
 
   const milestones = useMemo<ChartMilestone[]>(() => {
     if (!ranged.length) return [];
@@ -182,18 +224,19 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
   }, [stored, ranged]);
 
   const figures = useMemo(() => {
-    const peaks = ranged.map((r) => r.peakOccupancy as number);
-    const avg = peaks.length ? Math.round(peaks.reduce((a, b) => a + b, 0) / peaks.length) : null;
+    const values = ranged.map((r) => pick(r) as number);
+    const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
     return [
       { key: "services", label: "Services", value: ranged.length.toLocaleString() },
-      { key: "average", label: "Average peak", value: avg == null ? "—" : avg.toLocaleString() },
+      { key: "average", label: sound ? "Average peak" : "Average peak", value: avg == null ? "—" : fmtValue(avg) },
       {
         key: "busiest",
-        label: "Busiest",
-        value: peaks.length ? Math.max(...peaks).toLocaleString() : "—",
+        label: sound ? "Loudest" : "Busiest",
+        value: values.length ? fmtValue(Math.max(...values)) : "—",
       },
     ];
-  }, [ranged]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ranged, pick, sound]);
 
   return (
     <section data-testid="history-trends" className="su-card flex flex-col gap-4 px-4 py-3.5">
@@ -204,6 +247,26 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
             <span data-milestones-failed className="text-caption2 text-warn-11">milestones unavailable</span>
           )}
         </span>
+        <div className="flex items-center gap-2">
+        {/* What is plotted. Two options, so buttons rather than a menu that has
+            to be opened to see them — the same shape as the range beside it. */}
+        <div role="group" aria-label="Trend measure" className="flex items-center gap-1 rounded-lg border border-line p-0.5">
+          {MEASURES.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              data-trend-measure={m.key}
+              aria-pressed={measure === m.key}
+              onClick={() => pickMeasure(m.key)}
+              className={cn(
+                "touch-target rounded-md px-2 py-0.5 text-caption2 transition-colors",
+                measure === m.key ? "bg-fill text-fg" : "text-fg-muted hover:bg-fill hover:text-fg",
+              )}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
         {/* The range control. A segmented set of three rather than a Select:
             three options that are always the same three read faster as buttons
             than behind a menu that has to be opened to see them. */}
@@ -223,11 +286,14 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {tiles.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-caption1 text-fg-muted">
-          No attendance recorded yet — a trend needs at least one service with a people counter running.
+          {sound
+            ? "No sound recorded yet — a trend needs at least one service with a meter running."
+            : "No attendance recorded yet — a trend needs at least one service with a people counter running."}
         </p>
       ) : (
         <>
@@ -241,11 +307,11 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
                 <span className="truncate text-caption2 uppercase tracking-wider text-fg-subtle">{t.name}</span>
                 <Sparkline
                   values={t.recent.map((d) => d.v)}
-                  label={`${t.name}: the busiest service of each of the last ${t.recent.length} days it recorded`}
+                  label={`${t.name}: the ${sound ? "loudest" : "busiest"} service of each of the last ${t.recent.length} days it recorded`}
                 />
                 <div className="flex items-baseline gap-2">
                   <span data-trend-average className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">
-                    {t.average == null ? "—" : t.average.toLocaleString()}
+                    {t.average == null ? "—" : fmtValue(t.average)}
                   </span>
                   {/* No change until there is something to compare against. A
                       tile with one window of recordings says so rather than
@@ -261,11 +327,20 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
                       <span className="text-fg-subtle">vs prior {t.priorCount}</span>
                     </span>
                   ) : (
-                    <span data-trend-change className="text-caption1 text-fg-subtle">no prior window yet</span>
+                    <span data-trend-change className="text-caption1 text-fg-subtle">
+                      {/* A type with nothing under THIS measure keeps its tile
+                          and says so, rather than vanishing when you switch —
+                          which reads as the service type having disappeared. */}
+                      {t.average == null
+                        ? sound ? "no sound recorded" : "no attendance recorded"
+                        : "no prior window yet"}
+                    </span>
                   )}
                 </div>
                 <span className="text-caption2 text-fg-subtle">
-                  busiest service, averaged over {t.recent.length} day{t.recent.length === 1 ? "" : "s"}
+                  {t.average == null
+                    ? " "
+                    : `${sound ? "loudest" : "busiest"} service, averaged over ${t.recent.length} day${t.recent.length === 1 ? "" : "s"}`}
                 </span>
               </div>
             ))}
@@ -277,7 +352,10 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
             // A trend has no service window, so nothing is hatched: every point
             // on it is a whole service, and there is no "before the service".
             window={{ startedAt: null, endedAt: null }}
-            yScale={{ kind: "count" }}
+            // A dB axis is banded the way the sound chart's is — a multiple of
+            // ten wide, never anchored at zero, because 0 dB is not a floor a
+            // sound chart has.
+            yScale={sound ? { kind: "db" } : { kind: "count" }}
             xAxis="date"
             milestones={milestones}
             figures={figures}
@@ -285,8 +363,16 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
               const err = toggleHidden(id);
               if (err) toast.error(`Couldn't remember that: ${err.message}`);
             }}
-            ariaLabel={`Peak attendance per recording over the last ${weeks} weeks`}
-            emptyNote="No recordings in this range — try a longer one."
+            ariaLabel={
+              sound
+                ? `Peak level per recording over the last ${weeks} weeks`
+                : `Peak attendance per recording over the last ${weeks} weeks`
+            }
+            emptyNote={
+              sound
+                ? "No sound recorded in this range — try a longer one."
+                : "No recordings in this range — try a longer one."
+            }
           />
         </>
       )}
