@@ -48,16 +48,36 @@ function sourcesTheRegistriesAskFor(): string[] {
   return [...used].sort();
 }
 
+/**
+ * The eight sources, sorted, one per line. A bare count cannot tell an add plus
+ * a remove from no change; a sorted list also merges cleanly when two branches
+ * each wire up a different source.
+ */
+const EXPECTED_SOURCES = [
+  "displays",
+  "osc-targets",
+  "plan-items",
+  "propresenter-instances",
+  "propresenter-macros",
+  "rosstalk-commands",
+  "rosstalk-targets",
+  "service-types",
+];
+
 describe("runtime option sources", () => {
   test("the renderer answers exactly the sources the registries ask for", () => {
     assert.deepEqual([...OPTION_SOURCE_KEYS].sort(), sourcesTheRegistriesAskFor());
   });
 
   test("eight sources, exactly", () => {
-    // An exact count, not a floor. Change this number only alongside a source
+    // An exact set, not a bare count. Change this list only alongside a source
     // that a registry param really names.
-    assert.equal(OPTION_SOURCE_KEYS.length, 8);
-    assert.equal(sourcesTheRegistriesAskFor().length, 8);
+    assert.deepEqual(
+      [...OPTION_SOURCE_KEYS].sort(),
+      EXPECTED_SOURCES,
+      "a source was added or removed; update EXPECTED_SOURCES deliberately",
+    );
+    assert.deepEqual(sourcesTheRegistriesAskFor(), EXPECTED_SOURCES);
   });
 
   test("every source answers with an array, including from nothing at all", () => {

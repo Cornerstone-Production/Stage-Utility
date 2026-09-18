@@ -21,8 +21,30 @@ const HOME_TYPES = Object.keys(LAYOUT_OBJECTS).filter((t) => t.startsWith("home-
 
 describe("routing a home card", () => {
   test("the registry has home cards to route", () => {
-    // A guard over an empty list is green for the wrong reason.
-    assert.equal(HOME_TYPES.length, 15, "the home card set changed — update this count on purpose");
+    // An exact sorted list, not a bare count: a guard over an empty list is
+    // green for the wrong reason, and a count cannot tell an add plus a remove
+    // from no change.
+    assert.deepEqual(
+      [...HOME_TYPES].sort(),
+      [
+        "home-live-status",
+        "home-next-service",
+        "home-pvp",
+        "home-pvp-now",
+        "home-readiness",
+        "home-recent-services",
+        "home-recording",
+        "home-recording-obs",
+        "home-recording-reaper",
+        "home-scores",
+        "home-screens",
+        "home-spl",
+        "home-streaming",
+        "home-streaming-resi",
+        "home-streaming-youtube",
+      ],
+      "the home card set changed — update this list deliberately",
+    );
   });
 
   test("every home- type in the registry is claimed by the card renderer", () => {

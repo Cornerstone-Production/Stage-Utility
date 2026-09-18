@@ -31,11 +31,33 @@ describe("the integrations grid's category order", () => {
   });
 
   test("sixteen, exactly, and each named once", () => {
-    // An exact count, not a floor. The duplicate check is separate because a
-    // list holding one id twice and missing another has the right length and
-    // the right set is not enough to say so.
-    assert.equal(INTEGRATION_IDS.length, 16);
-    assert.equal(CATEGORY_ORDER_IDS.length, 16);
-    assert.equal(new Set(CATEGORY_ORDER_IDS).size, 16);
+    // An exact sorted list, not a bare count. The duplicate check is separate
+    // because a list holding one id twice and missing another has the right
+    // length and the right set is not enough to say so.
+    const EXPECTED = [
+      "companion",
+      "obs",
+      "osc",
+      "planning-center",
+      "prodcom",
+      "propresenter",
+      "pvp",
+      "reaper",
+      "resi",
+      "ross-tsl",
+      "rosstalk",
+      "scores",
+      "sensource",
+      "smaart",
+      "wireless",
+      "youtube",
+    ];
+    assert.deepEqual(
+      [...INTEGRATION_IDS].sort(),
+      EXPECTED,
+      "an integration was added or removed; update this list deliberately",
+    );
+    assert.deepEqual([...CATEGORY_ORDER_IDS].sort(), EXPECTED);
+    assert.deepEqual([...new Set(CATEGORY_ORDER_IDS)].sort(), EXPECTED, "a duplicate id shares a slot with a missing one");
   });
 });
