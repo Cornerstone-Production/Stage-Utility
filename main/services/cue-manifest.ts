@@ -44,6 +44,7 @@ import { readFingerprint } from "./companion-fingerprint.js";
 import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { CALL_TRIGGER_ID } from "./cue-aliases.js";
+import { builtinTone, isBuiltinRule, type CueTone } from "./builtin-cues.js";
 import type { CueStateName, CueStatesAnswer } from "./cue-states.js";
 import type { Rule } from "../types/automation.js";
 
@@ -80,6 +81,19 @@ export interface ManifestSwitch {
   /** The operator hid this from Home Assistant. Present only when the caller
    *  asked for hidden cues; the default manifest omits the entry instead. */
   hiddenFromHome?: true;
+  /**
+   * The app ships this cue; no rule of the operator's is behind it. Absent for
+   * a stored pair, never false. Home Assistant and Companion ignore it — it is
+   * how the cue button's picker groups its list. See builtin-cues.ts.
+   */
+  builtin?: true;
+  /**
+   * How a cue button colours this switch. `live` means ON is on air or
+   * recording: red when on, green when the device is connected and off. Absent
+   * is the default rendering, which is what every user-made pair gets — the
+   * field exists so a per-pair setting can be added later without a new shape.
+   */
+  tone?: CueTone;
 }
 
 /** One cue that is not half of a pair. Momentary; there is nothing to read. */
@@ -93,6 +107,8 @@ export interface ManifestButton {
   /** The operator hid this from Home Assistant. Present only when the caller
    *  asked for hidden cues; the default manifest omits the entry instead. */
   hiddenFromHome?: true;
+  /** The app ships this cue. See ManifestSwitch.builtin. */
+  builtin?: true;
 }
 
 export interface CueManifest {
@@ -135,7 +151,10 @@ export const cueManifestDeps: {
   rules: () => Promise<readonly Rule[]>;
   states: () => Promise<CueStatesAnswer>;
 } = {
-  rules: async () => (await import("./automation-engine.js")).automationEngine.listRules(),
+  // WITH the built-ins: the manifest is what an integration and the app's
+  // own cue buttons read, and a cue the app ships is a cue.
+  rules: async () =>
+    (await import("./automation-engine.js")).automationEngine.rulesWithBuiltins(),
   states: async () => (await import("./cue-states.js")).cueStates.read(),
 };
 
@@ -195,6 +214,11 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
     }
     if (pair.binding) entry.stateSource = pair.binding.variable;
     if (pair.hiddenFromHome) entry.hiddenFromHome = true;
+    if (isBuiltinRule(pair.on)) {
+      entry.builtin = true;
+      const tone = builtinTone(pair.base);
+      if (tone) entry.tone = tone;
+    }
     switches.push(entry);
   }
 
@@ -216,6 +240,7 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
     }
     buttons.push({
       ...(hiddenButton ? { hiddenFromHome: true as const } : {}),
+      ...(isBuiltinRule(rule) ? { builtin: true as const } : {}),
       id: cue,
       name: spokenName(rule, cue),
       room: roomOf(rule),

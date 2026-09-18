@@ -82,21 +82,20 @@ request error, so without it a cue called twice would be a red line in the
 Activity log over a recording that is running perfectly well. With OBS
 disconnected the action fails with `OBS is not connected` and sends nothing.
 
-Paired as `obs_record_on` / `obs_record_off`, the two halves are an ON/OFF cue
-pair — a switch in Home Assistant, a cue button on the rules page — and the pair
-binds itself to `app:obs.recording` with nobody choosing it. So the switch
-reports what OBS is actually doing, from the `RecordStateChanged` event OBS
-pushes the instant it changes, rather than what the cue asked for:
+**Those three pairs are already built.** While OBS is switched on in Settings,
+Stage Utility offers `obs_record_on` / `obs_record_off`, `obs_stream_on` /
+`obs_stream_off` and `obs_virtual_cam_on` / `obs_virtual_cam_off` as
+[built-in cues](../automation.md#built-in-cues) — a switch in Home Assistant, a
+cue button on a panel, a name to call — with no rule to write and those names
+reserved. Each reports what OBS is actually doing, from the
+`RecordStateChanged` event OBS pushes the instant it changes, rather than what
+the cue asked for: the pair binds itself to `app:obs.recording`,
+`app:obs.streaming` or `app:obs.virtualCam`, the last being the output a video
+call picks up as a webcam, so a switch in the house says whether the call can
+see anything.
 
-| Cue | Action |
-|---|---|
-| `obs_record_on` | OBS recording → Start recording |
-| `obs_record_off` | OBS recording → Stop recording |
-
-`obs_stream_on` / `obs_stream_off` work the same way against
-`app:obs.streaming`, and `obs_vcam_on` / `obs_vcam_off` against
-`app:obs.virtualCam` — the output a video call picks up as a webcam, so a switch
-in the house says whether the call can see anything. See [State from Stage
+Build your own pair from these actions under any other name and it binds itself
+the same way. See [State from Stage
 Utility](../automation.md#state-from-stage-utility) and [Calling a cue by
 name](companion.md#calling-a-cue-by-name).
 

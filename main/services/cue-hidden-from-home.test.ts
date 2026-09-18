@@ -49,6 +49,17 @@ beforeEach(async () => {
   for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
 });
 
+/**
+ * The ids of the OPERATOR'S cues among a manifest's entries.
+ *
+ * The app ships built-ins of its own (builtin-cues.ts) and `display.refresh` is
+ * offered on every install, so an assertion over the whole list would be about
+ * those as well. They carry `builtin: true`; everything here is about the rules
+ * this file saved.
+ */
+const stored = (rows: { id: string; builtin?: true }[]): string[] =>
+  rows.filter((r) => !r.builtin).map((r) => r.id);
+
 /** A cue rule the engine will accept, with whatever trigger params on top. */
 function cue(name: string, params: Record<string, string | number> = {}): Omit<Rule, "id"> {
   return {
@@ -115,7 +126,7 @@ describe("the manifest", () => {
 
     const after = await cueManifest();
     assert.deepEqual(after.switches.map((s) => s.id), []);
-    assert.deepEqual(after.buttons.map((b) => b.id), ["take_screens"]);
+    assert.deepEqual(stored(after.buttons), ["take_screens"]);
     assert.equal(after.version > versionBefore, true);
   });
 
@@ -132,7 +143,7 @@ describe("the manifest", () => {
 
     const m = await cueManifest();
     assert.deepEqual(m.switches.map((s) => s.id), []);
-    assert.deepEqual(m.buttons.map((b) => b.id), []);
+    assert.deepEqual(stored(m.buttons), []);
   });
 
   test("hiding a single cue drops the button and leaves the rest", async () => {
@@ -145,7 +156,7 @@ describe("the manifest", () => {
         params: { ...lone.trigger.params, ...homeVisibilityParams(true) },
       },
     });
-    assert.deepEqual((await cueManifest()).buttons.map((b) => b.id), ["house_lights"]);
+    assert.deepEqual(stored((await cueManifest()).buttons), ["house_lights"]);
   });
 
   test("showing it again brings the switch back", async () => {

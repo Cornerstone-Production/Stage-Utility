@@ -60,6 +60,9 @@ const REQUEST_FACING = [
   "automation-engine.ts",
   "automation-routes.ts",
   "branding-routes.ts",
+  // Its suppression line names the STORED rule that owns a built-in's cue name
+  // — both the rule's name and the cue name are typed into an HTTP body.
+  "builtin-cues.ts",
   "calendar-routes.ts",
   "checklist-ticks-store.ts",
   "companion-reconcile.ts",
@@ -241,6 +244,10 @@ function requestFacingFiles(): string[] {
     // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
     // logged when the token is minted.
     path.join(HERE, "cue-tokens.ts"),
+    // Same exposure as cue-tokens: the built-in it declines to offer is named
+    // beside the stored rule that owns the name, and a rule name and a cue name
+    // both arrive in an HTTP body.
+    path.join(HERE, "builtin-cues.ts"),
     // Its two lines name a poll client's `cid`, which is whatever string a
     // caller put on the /api/events/poll query string — an attacker's value,
     // verbatim, reaching /log.

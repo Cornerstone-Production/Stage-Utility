@@ -446,15 +446,29 @@ nothing.
 see the same text. See [OSC](../integrations/osc.md) and
 [RossTalk](../integrations/rosstalk.md).
 
-**Cue button** binds to a cue from the rules list, including pairs hidden from
-Home Assistant. A pair shows on or off from its state variable; a tap presses
-the opposite half, and a pair whose reading is unknown presses ON. In the eight
-seconds after a press it shows what was asked for and says it is settling. A
-dashed amber ring means Companion has lost the device and the reading cannot be
-trusted. A cue that refuses — switched off, disarmed, not allowed during a
-service — says why on the button. One that needs a confirmation cannot be fired
-from a panel; the rules page has the Test button for that. A press is recorded
-in the [automation log](../automation.md) with the caller `console`.
+**Cue button** binds to a cue. The picker lists **Built in** first — the cues
+the app ships for OBS, REAPER, ProVideoPlayer and itself, which need no rule
+behind them ([built-in cues](../automation.md#built-in-cues)) — and then **Your
+cues**, from the rules list, including pairs hidden from Home Assistant. A pair
+shows on or off from its state variable; a tap presses the opposite half, and a
+pair whose reading is unknown presses ON. In the eight seconds after a press it
+shows what was asked for and says it is settling. A dashed amber ring means
+Companion has lost the device and the reading cannot be trusted. A cue that
+refuses — switched off, disarmed, not allowed during a service — says why on the
+button. One that needs a confirmation cannot be fired from a panel; the rules
+page has the Test button for that. A press is recorded in the
+[automation log](../automation.md) with the caller `console`.
+
+Two colour schemes, by what the switch means:
+
+| Scheme | On | Off |
+|---|---|---|
+| Ordinary | green ring and dot | grey dot, no ring |
+| Live — on air or recording | red ring and dot | green ring, meaning connected and standing by |
+
+The live scheme is carried by the OBS recording, OBS stream and REAPER recording
+built-ins. Everything else draws the ordinary way, and both draw an unreadable
+state as the amber dashed ring.
 
 ## Layout
 

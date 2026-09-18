@@ -23,7 +23,9 @@ letterboxed, so a few pixels of background at the sides is the worst case.
    pixels with Letterbox fit locked: the layout keeps its shape and scales
    evenly wherever it is previewed, and never reflows.
 2. **Edit** the console. Each starter button is a [cue button](../reference/widgets.md#control)
-   with no cue yet; pick one in the inspector. Add, remove and resize as you like.
+   with no cue yet; pick one in the inspector — **Built in** lists the cues the
+   app ships, so *OBS recording* needs no rule written first, and **Your cues**
+   lists the ones from the rules page. Add, remove and resize as you like.
 3. **Screens → New screen** for the panel, set its mode to **panel**, point it at
    the console, and turn on **Hide top bar**. Give it a slug, say `ultritouch`,
    so its address is `http://<server>/ultritouch`.
