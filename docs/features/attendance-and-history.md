@@ -26,6 +26,39 @@ week creates nothing.
 Baptism sessions are stamped with the service that was open when they started, so
 they land on the right occurrence.
 
+### Back-to-back services on one plan
+
+Two service times on the same plan are two records. Planning Center reports which
+occurrence is current, and that id is part of the record's key, so the 9am and the
+11am never share a record even though they share a rundown.
+
+The occurrence Planning Center reports can also change *during* a service: a
+service running past its planned end rolls on to the next occurrence, and so does
+a momentary Planning Center cache miss. Neither may split a recording in progress.
+So the change is judged by the new occurrence's own start time — the open record is
+held only while that occurrence is still more than ten minutes away, and closed and
+replaced once it has started or is about to. Where no start time is available the
+decision falls back to the gap since the last live item: under ten minutes holds,
+longer splits.
+
+Each decision is logged once, whichever way it goes:
+
+```
+[service-recorder] service-timeline-recorder: service time 1001 → 1002, holding the open record (next occurrence starts in 25 min)
+[service-recorder] attendance-recorder: service time 1001 → 1002 began at 11:00:00, closing 100:200:1001 and opening a new record
+```
+
+Inside a record, a plan item that goes live again more than ten minutes after its
+last run ended is recorded as a second entry rather than reopening the first, so a
+re-run never rewrites timings that already happened:
+
+```
+[service-timeline] "Doors" went live again 71 min after its last run ended — recording it as a new entry
+```
+
+Stepping back to an item within that window still reopens it, which is what an
+operator jumping to the previous song expects.
+
 ## Reading it back
 
 The History tab puts all three on one calendar — days with data are marked. Open
