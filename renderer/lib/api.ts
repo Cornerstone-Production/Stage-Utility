@@ -326,6 +326,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
         baptismItemId: p.baptismItemId,
       });
 
+    case "spl:series":
+      return apiFetch<T>(
+        `/api/spl/history/${encodeURIComponent(String(p.serviceKey ?? ""))}/series`
+          + `?metric=${encodeURIComponent(String(p.metric ?? ""))}`
+          + `&bucketSec=${encodeURIComponent(String(p.bucketSec ?? 5))}`,
+      );
+
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
 

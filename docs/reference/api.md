@@ -229,6 +229,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/spl/history/current` | The active service's per-item SPL record (live) |
 | GET | `/api/spl/history` | List saved past-service SPL records |
 | GET | `/api/spl/history/:key` | One past-service record |
+| GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
@@ -252,6 +253,34 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET \| POST | `/api/scores/favourites` | Read / replace the followed teams |
 | GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
+
+**The SPL series**
+
+`GET /api/spl/history/:key/series` reads the service's raw `spl.csv` rows — a
+reading per second per metric — and returns them bucketed, because a two-hour
+service is thousands of rows per metric and no plot is that wide:
+
+```json
+{ "serviceKey": "…", "metric": "SPL A Fast", "metrics": ["LAeq 1", "SPL A Fast"],
+  "bucketSec": 5, "buckets": [{ "t": 1789675200000, "max": 94.1, "avg": 88.4 }] }
+```
+
+`t` is epoch ms at the bucket's start. `max` is the loudest single reading in
+it; `avg` is the bucket's **energy** average (Leq), not an arithmetic mean —
+decibels are logarithmic. Buckets are anchored to the first row, so a service
+beginning at 19:47:13 does not open with a part-empty one, and a bucket the
+meter said nothing in is absent rather than zero.
+
+`bucketSec` in the answer may be **wider** than the one asked for: the series is
+capped at ~2,000 buckets and the width grows to fit rather than the window being
+truncated. `metric` may differ from the one asked for — an unknown metric falls
+back to the record's own, then to the first recorded — and `metrics` lists every
+metric these rows carry, so a client can offer a switch without a second
+request.
+
+`404` means the service has **no raw rows at all**: a record from before the raw
+layer existed, or one whose archive was pruned. That is not the same as a silent
+meter, and the History chart falls back to a per-item step only for the 404.
 
 **Correcting a recording**
 

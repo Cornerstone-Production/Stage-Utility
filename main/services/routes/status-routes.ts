@@ -25,6 +25,9 @@ import { splHistoryStore } from "../spl-history-store.js";
 import { splRecorder } from "../spl-recorder.js";
 import { deleteServiceRecords } from "../history-edit.js";
 import { propresenterService, propresenterManager } from "../propresenter-service.js";
+import { serviceDirPath } from "../archive/archive-paths.js";
+import { readArchiveRows } from "../archive/archive-rows.js";
+import { bucketSecFor, bucketSeries, clampBucketSec, metricsIn, type SplBucket } from "../spl-series.js";
 
 export async function statusRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -182,6 +185,27 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     {
+      // The raw sample series behind one record's sound chart. Matched BEFORE
+      // the single-segment record route below, which cannot match a two-segment
+      // path but reads as though it might.
+      const seriesMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)\/series$/);
+      if (seriesMatch && method === "GET") {
+        const key = decodeURIComponent(seriesMatch[1]);
+        const metric = c.url.searchParams.get("metric") ?? "";
+        const bucketSec = c.url.searchParams.get("bucketSec");
+        const out = await splSeriesFor(key, metric, bucketSec == null ? 5 : Number(bucketSec));
+        if (!out) {
+          // 404, not an empty series: "this record has no raw rows" and "the
+          // meter was silent all evening" are different answers, and the chart
+          // falls back to the per-item step only for the first.
+          error(res, "no raw SPL rows for this service", 404);
+          return;
+        }
+        json(res, out);
+        return;
+      }
+    }
+    {
       const histMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)$/);
       if (histMatch && histMatch[1] !== "current") {
         const key = decodeURIComponent(histMatch[1]);
@@ -197,4 +221,58 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       }
     }
 
+}
+
+/** What GET /api/spl/history/:key/series answers with. */
+interface SplSeriesResponse {
+  serviceKey: string;
+  /** The metric actually plotted — the one asked for when the rows carry it,
+   *  else the record's own preferred metric, else the first recorded. */
+  metric: string;
+  /** Every metric these rows carry, so the caller can offer a switch without a
+   *  second request. */
+  metrics: string[];
+  /** The bucket width used, which may be WIDER than the one asked for. */
+  bucketSec: number;
+  buckets: SplBucket[];
+}
+
+/**
+ * One record's raw SPL rows, down-sampled for a chart.
+ *
+ * Null — a 404 to the caller — when the record is unknown or has no raw rows at
+ * all. That is a real distinction: a service recorded before the raw layer
+ * existed, or one whose archive was pruned, has a per-item record and nothing to
+ * draw a line from, and the chart falls back to a per-item step for exactly that
+ * case. A record whose rows exist but hold nothing for the asked-for metric is
+ * NOT a 404 — it answers with the metrics it does have and an empty series.
+ */
+async function splSeriesFor(
+  serviceKey: string,
+  metric: string,
+  bucketSec: number,
+): Promise<SplSeriesResponse | null> {
+  const record = await splHistoryStore.get(serviceKey);
+  if (!record) return null;
+  const rows = await readArchiveRows(serviceDirPath(serviceKey, record.serviceDate), "spl");
+  if (!rows || rows.length === 0) return null;
+
+  const metrics = metricsIn(rows);
+  if (metrics.length === 0) return null;
+  const chosen = metrics.includes(metric)
+    ? metric
+    : record.metricKey && metrics.includes(record.metricKey)
+      ? record.metricKey
+      : metrics[0];
+
+  const stamps = rows.map((r) => Date.parse(r.at ?? "")).filter((t) => Number.isFinite(t));
+  const span = stamps.length ? Math.max(...stamps) - Math.min(...stamps) : 0;
+  const width = bucketSecFor(span, clampBucketSec(bucketSec));
+  return {
+    serviceKey,
+    metric: chosen,
+    metrics,
+    bucketSec: width,
+    buckets: bucketSeries(rows, chosen, width),
+  };
 }
