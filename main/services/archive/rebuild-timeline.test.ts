@@ -402,6 +402,67 @@ describe("rebuildTimelineRecord: identity of the items", () => {
     );
   });
 
+  // PCO can report an item live with no label, and the recorder wrote the row
+  // anyway. An empty title carries no identity at all.
+  it("recovers an empty title from the stored record by position", () => {
+    const prior = record({
+      endedAt: "2026-09-18T00:00:00.000Z",
+      items: [
+        storedItem({ itemId: "pco-1", title: "Doors", sequence: 0, plannedLengthSec: 900, preService: true }),
+        storedItem({ itemId: "pco-2", title: "VIDEO: Pre-roll", sequence: 1, plannedLengthSec: 124 }),
+      ],
+    });
+    const { out, warnings } = withWarnings(() =>
+      rebuildTimelineRecord(
+        prior,
+        oldRows([
+          ["2026-09-17T23:00:00.000Z", "Doors"],
+          ["2026-09-17T23:10:00.000Z", ""], // no label — the second stored item
+        ]),
+      ),
+    );
+
+    assert.equal(out.items.length, 2);
+    assert.deepEqual(
+      out.items.map((i) => [i.itemId, i.title, i.plannedLengthSec, i.preService]),
+      [
+        ["pco-1", "Doors", 900, true],
+        ["pco-2", "VIDEO: Pre-roll", 124, false],
+      ],
+      "an empty title was not recovered from the stored record",
+    );
+    assert.ok(
+      warnings.includes("[service-timeline] rebuild: a row has no title, matched by position"),
+      `the blank title was not reported: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  // The collapse this guards: two blank rows matched each other, the later one
+  // read as a step back to the earlier, and one `untitled` entry swallowed
+  // every item between them.
+  it("never folds two empty-title rows into one entry", () => {
+    const { out, warnings } = withWarnings(() =>
+      rebuildTimelineRecord(
+        record({ endedAt: "2026-09-18T00:00:00.000Z" }), // no stored items to recover from
+        oldRows([
+          ["2026-09-17T23:00:00.000Z", ""],
+          ["2026-09-17T23:02:00.000Z", "Tremble"],
+          ["2026-09-17T23:04:00.000Z", ""], // two minutes later — would have been a step back
+        ]),
+      ),
+    );
+
+    assert.equal(out.items.length, 3, `two blank rows collapsed: ${JSON.stringify(out.items.map((i) => i.itemId))}`);
+    assert.deepEqual(out.items.map((i) => i.itemId), ["untitled", "tremble", "untitled-3"]);
+    // The first blank entry must END, not swallow Tremble.
+    assert.equal(out.items[0].endedAt, "2026-09-17T23:02:00.000Z");
+    assert.equal(out.items[1].endedAt, "2026-09-17T23:04:00.000Z");
+    assert.ok(
+      warnings.includes("[service-timeline] rebuild: a row has no title and no stored item to match it to"),
+      `the unrecoverable blank title was not reported: ${JSON.stringify(warnings)}`,
+    );
+  });
+
   it("re-slugs to the same id on a second rebuild, so an id does not drift", () => {
     const rows = oldRows([
       ["2026-09-17T23:23:48.789Z", "MEET & GREET"],
