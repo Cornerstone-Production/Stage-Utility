@@ -190,3 +190,91 @@ describe("cue button", () => {
     assert.match(container.textContent ?? "", /confirmation/i);
   });
 });
+
+describe("the live tone", () => {
+  // The INLINE colours ARE asserted. jsdom resolves no custom property, but it
+  // keeps an inline `box-shadow: … var(--red-9)` verbatim, so "which token did
+  // this button choose" is a real question it can answer — and it is the whole
+  // decision the tone exists to make. What jsdom still cannot answer is what
+  // those tokens LOOK like and whether the ring is visible against the button's
+  // own fill; that was checked in a browser.
+  const toneOf = (container: HTMLElement) =>
+    container.querySelector("[data-state]")?.getAttribute("data-tone");
+  const ringOf = (container: HTMLElement) =>
+    (container.querySelector("[data-state]") as HTMLElement).style.boxShadow;
+  /** The lamp: the first span, which the button renders aria-hidden. */
+  const dotOf = (container: HTMLElement) =>
+    (container.querySelector("[data-state] span[aria-hidden]") as HTMLElement).style.background;
+
+  test("a live switch says so, in every state", () => {
+    for (const state of [{ state: "on" as const }, { state: "off" as const }]) {
+      assert.equal(toneOf(mount(live({ tone: "live" }, state), "haze").container), "live");
+    }
+    assert.equal(
+      toneOf(mount(live({ tone: "live" }, { state: "unknown", reason: "gone" }), "haze").container),
+      "live",
+    );
+  });
+
+  test("a switch without one is unchanged", () => {
+    assert.equal(toneOf(mount(live({}, { state: "on" }), "haze").container), null);
+    assert.equal(stateOf(mount(live({}, { state: "on" }), "haze").container), "on");
+  });
+
+  test("a button never carries one", () => {
+    // Momentary: there is nothing to read back, so there is no on state to
+    // colour, and a tone on it would be a lamp that never lights.
+    assert.equal(toneOf(mount(live(), "confetti").container), null);
+  });
+
+  test("on is red, ring and dot", () => {
+    // RED, not green. A recording in progress and a projector that is on are
+    // not the same fact, and the whole point of the tone is that a lit console
+    // button reads as "we are live" rather than "this is working".
+    const { container } = mount(live({ tone: "live" }, { state: "on" }), "haze");
+    assert.match(ringOf(container), /var\(--red-9\)/);
+    assert.equal(dotOf(container), "var(--red-9)");
+  });
+
+  test("off is the green standby ring", () => {
+    // The device answered, and said it is not recording: connected and standing
+    // by. The dot stays the faint one — the ring is what says standby, and a
+    // green dot here would be indistinguishable from an ordinary switch that is
+    // ON.
+    const { container } = mount(live({ tone: "live" }, { state: "off" }), "haze");
+    assert.match(ringOf(container), /var\(--green-9\)/);
+    assert.equal(dotOf(container), "var(--su-fg-faint)");
+  });
+
+  test("an unreadable live switch is the amber ring, not a green one", () => {
+    // `stale` is "nobody can say", and a green standby ring over a recorder
+    // nobody can reach is the exact claim this must never make.
+    const { container } = mount(
+      live({ tone: "live" }, { state: "unknown", reason: "gone" }),
+      "haze",
+    );
+    assert.match(ringOf(container), /var\(--amber-9\)/);
+  });
+
+  test("a switch without a tone is green on and unringed off", () => {
+    const on = mount(live({}, { state: "on" }), "haze");
+    assert.match(ringOf(on.container), /var\(--green-9\)/);
+    assert.equal(dotOf(on.container), "var(--green-9)");
+    const off = mount(live({}, { state: "off" }), "haze");
+    assert.equal(ringOf(off.container), "", "an ordinary switch grew a ring when off");
+    assert.equal(dotOf(off.container), "var(--su-fg-faint)");
+  });
+
+  test("its on and off states are still the ordinary ones", () => {
+    // The tone changes the COLOUR and nothing else: the press, the states and
+    // the halves are exactly a default switch's.
+    assert.equal(stateOf(mount(live({ tone: "live" }, { state: "on" }), "haze").container), "on");
+    assert.equal(stateOf(mount(live({ tone: "live" }, { state: "off" }), "haze").container), "idle");
+    assert.equal(
+      stateOf(
+        mount(live({ tone: "live" }, { state: "unknown", reason: "gone" }), "haze").container,
+      ),
+      "stale",
+    );
+  });
+});

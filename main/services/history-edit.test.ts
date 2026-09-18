@@ -13,7 +13,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { ServiceAttendance } from "../types/stage.js";
+import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-edit-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -27,6 +27,7 @@ const { splRecorder } = await import("./spl-recorder.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { deleteServiceRecords, editServiceWindow, mergeServiceRecords, recalcAttendance, ServiceIsLiveError } =
   await import("./history-edit.js");
+const { applyItemTimeEdits } = await import("./history-item-times.js");
 
 const T0 = Date.parse("2026-08-09T14:00:00.000Z");
 
@@ -333,6 +334,66 @@ describe("editServiceWindow and recalcAttendance", () => {
     assert.equal((await attendanceStore.get(LIVE_KEY))?.samples.length, 1, "a sample past the taper survived");
   });
 
+  it("pulls an item time correction back inside the new window", async () => {
+    // The items are trimmed to the window; the corrections OVER them were not,
+    // so trimming an 85-minute recording to 15 minutes left a correction saying
+    // an item ended at 12:30 — an 85-minute row inside a 15-minute service, and
+    // the Actual tile with it. setItemTimes refuses exactly this when it is
+    // typed; a window edit produced it by the back door.
+    await serviceTimelineStore.upsert({
+      ...identity,
+      serviceKey: LIVE_KEY,
+      items: [
+        { itemId: "a", title: "Doors", sequence: 0, plannedLengthSec: null, startedAt: "2026-07-26T11:00:00.000Z", endedAt: "2026-07-26T11:10:00.000Z", actualDurationSec: 600 },
+      ],
+      itemTimeEdits: [{ itemId: "a", sequence: 0, endedAt: "2026-07-26T12:30:00.000Z", editedAt: "2026-07-26T13:00:00.000Z" }],
+    } as never);
+
+    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z" });
+
+    const tl = (await serviceTimelineStore.get(LIVE_KEY))!;
+    assert.equal(
+      tl.itemTimeEdits?.[0]?.endedAt,
+      "2026-07-26T11:15:00.000Z",
+      "the correction still points past the new end of the recording",
+    );
+    assert.equal(
+      applyItemTimeEdits(tl).record.items[0].actualDurationSec,
+      900,
+      "15 minutes, the most the window allows — not the 90 the correction asked for",
+    );
+  });
+
+  it("drops a correction whose run the window edit trimmed away, and says so", async () => {
+    await serviceTimelineStore.upsert({
+      ...identity,
+      serviceKey: LIVE_KEY,
+      items: [
+        { itemId: "a", title: "Doors", sequence: 0, plannedLengthSec: null, startedAt: "2026-07-26T11:00:00.000Z", endedAt: "2026-07-26T11:10:00.000Z", actualDurationSec: 600 },
+        { itemId: "b", title: "Message", sequence: 1, plannedLengthSec: null, startedAt: "2026-07-26T11:40:00.000Z", endedAt: "2026-07-26T11:50:00.000Z", actualDurationSec: 600 },
+      ],
+      itemTimeEdits: [{ itemId: "b", sequence: 1, endedAt: "2026-07-26T11:42:00.000Z", editedAt: "2026-07-26T13:00:00.000Z" }],
+    } as never);
+
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void warnings.push(a.map(String).join(" "));
+    try {
+      await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z" });
+    } finally {
+      console.warn = warn;
+    }
+
+    const tl = (await serviceTimelineStore.get(LIVE_KEY))!;
+    assert.equal(tl.items.length, 1, "precondition: the window edit dropped the Message item");
+    assert.equal(tl.itemTimeEdits, undefined, "its correction must go with it, not dangle");
+    assert.equal(
+      warnings.filter((l) => l.includes("[history]") && l.includes("b#1")).length,
+      1,
+      `the drop was not reported: ${JSON.stringify(warnings)}`,
+    );
+  });
+
   it("refuses a window edit while the service is recording", async () => {
     goLive();
     await assert.rejects(
@@ -572,5 +633,112 @@ describe("setItemCounted with an item that ran twice", () => {
       "the second run of the item kept the default — the row the operator clicked did nothing",
     );
     assert.equal(tl!.items.find((i) => i.itemId === "song")!.counted, undefined, "an unrelated item was overridden");
+  });
+});
+
+// The same "an item can run twice" shape in the MERGE path. Both stores unioned
+// their items with `new Set(target.items.map((i) => i.itemId))`, so a source
+// that ran an item twice contributed at most one run: merging a fragment back
+// into the main record dropped the reprise, and with it its levels and timings.
+describe("mergeServiceRecords with an item that ran twice on the source", () => {
+  const T = Date.parse("2026-09-18T23:00:00.000Z");
+  const iso = (offset: number) => new Date(T + offset).toISOString();
+
+  function timeline(key: string, items: unknown[]) {
+    return {
+      serviceKey: key,
+      serviceTypeId: "st1", serviceTypeName: null, planId: "p1", planTitle: "Sunday",
+      seriesTitle: null, serviceDate: "2026-09-18", serviceTimeId: key,
+      serviceTimeStartsAt: iso(0), startedAt: iso(0), endedAt: iso(90 * 60_000),
+      items,
+    } as never;
+  }
+  function spl(key: string, items: unknown[]) {
+    return {
+      serviceKey: key,
+      serviceTypeId: "st1", serviceTypeName: null, planId: "p1", planTitle: "Sunday",
+      seriesTitle: null, serviceDate: "2026-09-18", serviceTimeId: key,
+      serviceTimeStartsAt: iso(0), startedAt: iso(0), endedAt: iso(90 * 60_000),
+      meterId: "m1", metricKey: "SPL A Slow", items,
+    } as never;
+  }
+  const tlItem = (id: string, seq: number, at: number, dur: number) => ({
+    itemId: id, title: id, sequence: seq, plannedLengthSec: 300,
+    startedAt: iso(at), endedAt: iso(at + dur * 1000), actualDurationSec: dur,
+  });
+  const splItem = (id: string, seq: number, at: number, max: number) => ({
+    itemId: id, title: id, itemType: "item", sequence: seq,
+    metrics: { "SPL A Slow": { max, avg: null, leq: max - 3, count: 10 } },
+    maxSpl: max, leqSpl: max - 3, sampleCount: 10,
+    startedAt: iso(at), endedAt: iso(at + 300_000),
+  });
+
+  beforeEach(async () => {
+    for (const k of ["two-src", "two-tgt"]) {
+      await serviceTimelineStore.delete(k);
+      await splHistoryStore.delete(k);
+      await attendanceStore.delete(k);
+    }
+  });
+
+  it("keeps both runs of an item in the timeline and the SPL record", async () => {
+    // The target caught only the first Doors; the fragment has both runs.
+    await serviceTimelineStore.upsert(timeline("two-tgt", [tlItem("doors", 0, 0, 500)]));
+    await serviceTimelineStore.upsert(
+      timeline("two-src", [tlItem("doors", 0, 0, 1), tlItem("song", 1, 600_000, 300), tlItem("doors", 2, 4_800_000, 400)]),
+    );
+    await splHistoryStore.upsert(spl("two-tgt", [splItem("doors", 0, 0, 104)]));
+    await splHistoryStore.upsert(
+      spl("two-src", [splItem("doors", 0, 0, 1), splItem("song", 1, 600_000, 99), splItem("doors", 2, 4_800_000, 78)]),
+    );
+
+    await mergeServiceRecords("two-src", "two-tgt");
+
+    const tl = await serviceTimelineStore.get("two-tgt");
+    const tlDoors = tl!.items.filter((i) => i.itemId === "doors");
+    assert.equal(tlDoors.length, 2, "the fragment's second run of Doors was dropped from the timeline");
+    assert.equal(tlDoors[0]!.actualDurationSec, 500, "the local run must not be overwritten");
+    assert.equal(tlDoors[1]!.actualDurationSec, 400, "the run taken is the fragment's SECOND one");
+
+    const sp = await splHistoryStore.get("two-tgt");
+    const splDoors = sp!.items.filter((i) => i.itemId === "doors");
+    assert.equal(splDoors.length, 2, "the fragment's second run of Doors was dropped from the SPL record");
+    assert.equal(splDoors[0]!.maxSpl, 104, "the local run's level must not be overwritten");
+    assert.equal(splDoors[1]!.maxSpl, 78, "the re-run's own level");
+    assert.deepEqual(
+      sp!.items.map((i) => i.sequence),
+      [0, 1, 2],
+      "the merged record is renumbered without gaps",
+    );
+    assert.deepEqual(
+      sp!.items.map((i) => i.itemId),
+      ["doors", "song", "doors"],
+      "runs taken from the source land where they happened, not after everything local",
+    );
+  });
+
+  it("item time corrections follow their item through the merge's renumber", async () => {
+    // The merge re-sorts by start time and reassigns every sequence, and an item
+    // time edit is keyed by (itemId, sequence). Left alone, the operator's
+    // correction of the source's "song" would still be in the merged record and
+    // would land on whichever run took sequence 1.
+    await serviceTimelineStore.upsert(timeline("two-tgt", [tlItem("doors", 0, 0, 500)]));
+    const src = timeline("two-src", [tlItem("song", 0, 600_000, 300)]) as unknown as ServiceTimeline;
+    src.itemTimeEdits = [{ itemId: "song", sequence: 0, endedAt: iso(600_000 + 120_000), editedAt: iso(0) }];
+    await serviceTimelineStore.upsert(src as never);
+
+    await mergeServiceRecords("two-src", "two-tgt");
+
+    const tl = (await serviceTimelineStore.get("two-tgt"))!;
+    const song = tl.items.find((i) => i.itemId === "song")!;
+    assert.equal(song.sequence, 1, "precondition: the merge renumbered it");
+    assert.deepEqual(
+      tl.itemTimeEdits,
+      [{ itemId: "song", sequence: 1, endedAt: iso(720_000), editedAt: iso(0) }],
+      "the edit must be re-keyed onto the item's new sequence",
+    );
+    const effective = applyItemTimeEdits(tl).record;
+    assert.equal(effective.items[1].actualDurationSec, 120, "the correction still applies after a merge");
+    assert.equal(effective.items[0].editedFrom, undefined, "and did not land on the wrong row");
   });
 });

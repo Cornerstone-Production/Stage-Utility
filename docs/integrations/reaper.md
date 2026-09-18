@@ -53,6 +53,11 @@ A `_on`/`_off` cue pair built from Record and Stop reports its real state to Hom
 Assistant, read from this poll rather than from Companion. See
 [Automation](../automation.md#state-from-stage-utility).
 
+**That pair is already built.** While REAPER is switched on in Settings,
+`reaper_record_on` / `reaper_record_off` is a
+[built-in cue](../automation.md#built-in-cues) — a switch in Home Assistant, a
+cue button on a panel — with no rule to write, and those two names are reserved.
+
 The transport is also readable: **REAPER starts recording** and **REAPER stops
 recording** are triggers, and **REAPER is recording** is a condition. An enabled
 rule using any of them holds the poll at its active cadence with no browser

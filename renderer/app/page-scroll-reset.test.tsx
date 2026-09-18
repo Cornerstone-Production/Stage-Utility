@@ -269,6 +269,34 @@ describe("a tab opens at the top", () => {
     );
   });
 
+  test("the scrolling pane clears a sticky page header", () => {
+    // Anything the BROWSER decides to scroll to — a focused input three rows
+    // down an Edit times table, a find-in-page hit, a `scrollIntoView` from a
+    // control — lands under a sticky header unless the SCROLLER says how much
+    // of its top is covered. A scroll-margin on the target only covers targets
+    // somebody remembered to put one on; History's cards have one, the time
+    // fields inside them do not.
+    //
+    // Source-matched, and named as the weak check it is, for the reason the
+    // test above gives: the shell mounts the live wiring, whose SSE reconnect
+    // never settles, so rendering it here hangs. The effective value was read
+    // off `getComputedStyle` in a real browser, and Tab-through-Edit-times was
+    // driven there.
+    //
+    // Matched on the ASSIGNMENT of the property, and on it sitting on the same
+    // element as the scroller's own name — a comment naming scroll-padding
+    // cannot satisfy either half.
+    const shell = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "shell.tsx"),
+      "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    assert.match(
+      shell,
+      /data-scroll-restoration-id=\{PAGE_SCROLLER_ID\}[\s\S]{0,400}?scrollPaddingTop:\s*"calc\(var\(--su-history-header-inset/,
+      "the one scrolling pane must reserve the sticky header's height as scroll padding",
+    );
+  });
+
   test("the reset finds the pane by the router's own selector", () => {
     // scrollPageToTop and the router must agree on what the page scroller is. A
     // pane with no id is not the shell's pane, and must not be moved.

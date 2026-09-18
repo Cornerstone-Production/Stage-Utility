@@ -38,6 +38,12 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
+import {
+  BUILTIN_ID_PREFIX,
+  builtinCueRules,
+  logBuiltinCues,
+  reservedCueNames,
+} from "./builtin-cues.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
@@ -130,6 +136,13 @@ class AutomationEngine {
     for (const bad of this.invalidLoadedCues()) {
       console.warn(`[cues] rule "${scrub(bad.rule)}" would be refused if you saved it: ${scrub(bad.problem)}`);
     }
+    // What the app itself offers, said once at boot. The count line is
+    // otherwise emitted only by the first READ of the manifest, so an install
+    // with no Home Assistant and no panel open said nothing at all about the
+    // cues a console is bound to. Here rather than at the top of the file
+    // because integration-manager calls this LAST, with every integration's
+    // enabled flag already loaded.
+    logBuiltinCues(this.rules);
     // Re-seeding on every init is deliberate: a restart must never inherit stale
     // edges from the previous process.
     this.prev.clear();
@@ -171,6 +184,24 @@ class AutomationEngine {
   private invalidLoadedCues(): { rule: string; problem: string }[] {
     const out: { rule: string; problem: string }[] = [];
     for (const rule of this.rules) {
+      // A STORED RULE MAY NOT WEAR A BUILT-IN'S ID. `builtin:` is how every
+      // reader tells a rule the app synthesised from one the operator saved —
+      // the manifest's `builtin` flag, the cue picker's two groups — so a
+      // restored archive or a hand edit carrying one would put the operator's
+      // own rule in the Built in group, under a flag saying they cannot delete
+      // something they can. Reported, never renamed: an id is what a layout's
+      // cue button refers to, and rewriting it would break the binding to fix
+      // a label.
+      //
+      // The write path cannot produce one — addRule assigns a fresh uuid and
+      // updateRule's patch type excludes the id — so this is the only way in,
+      // and a restore writes the rules file raw with no other validation point.
+      if (rule.id?.startsWith(BUILTIN_ID_PREFIX)) {
+        out.push({
+          rule: rule.name || rule.id,
+          problem: `"${rule.id}" is reserved for the cues the app ships`,
+        });
+      }
       if (rule.trigger?.id !== CALL_TRIGGER_ID) continue;
       try {
         this.assertCueValid(rule, rule.id);
@@ -183,6 +214,24 @@ class AutomationEngine {
 
   listRules(): Rule[] {
     return this.rules.map((r) => ({ ...r }));
+  }
+
+  /**
+   * The stored rules plus the ones the app ships. See builtin-cues.ts.
+   *
+   * What every CUE reader asks for — the call route, the manifest, the states
+   * read and the generated Home Assistant config — and the only thing that ever
+   * sees a built-in. `listRules()` is deliberately unchanged: the Automation
+   * page, the export, the import and the config snapshot all read that one, and
+   * a synthesised rule appearing there would be a rule an operator could edit
+   * and could not delete.
+   *
+   * Built fresh on every call, because what is offered depends on which
+   * integrations are enabled and on what ProVideoPlayer last reported. Nothing
+   * is persisted.
+   */
+  rulesWithBuiltins(): Rule[] {
+    return [...this.listRules(), ...builtinCueRules(this.rules)];
   }
 
   getSettings(): AutomationSettings {
@@ -220,6 +269,34 @@ class AutomationEngine {
       throw new Error(`"${name}" is not a usable cue name — use lower_snake_case`);
     }
 
+    // A BUILT-IN'S NAME IS TAKEN. The app ships a rule answering to it, so a
+    // stored rule under the same name would be two things behind one URL and
+    // one Home Assistant entity id. Refused here, where it is still a 400
+    // somebody can read, rather than resolved at call time where it would be a
+    // coin toss.
+    //
+    // FORMER NAMES ARE RESERVED TOO. An alias is a live URL and a live Home
+    // Assistant entity id — that is the whole reason aliases exist — so a rule
+    // claiming `obs_record_on` as a former name takes the built-in's URL exactly
+    // as claiming it as a name would, and suppresses the built-in on the way
+    // past. Checked below, against the same set.
+    //
+    // Except for what the edited rule ALREADY answers to, its own name and its
+    // own former names both: an install that built its own OBS pair before this
+    // existed must stay editable, and renaming that rule must keep working — a
+    // rename writes the old name into the alias list, so refusing it there
+    // would make a legacy pair impossible to rename out of the way. The
+    // built-in with that base is left out instead; see builtinCueRules, which
+    // logs which and why.
+    const editing = this.rules.find((r) => r.id === exceptId);
+    const alreadyHeld = new Set(
+      editing ? [this.cueNameOf(editing), ...this.cueAliasesOf(editing)] : [],
+    );
+    const reserved = reservedCueNames();
+    if (!alreadyHeld.has(name) && reserved.has(name)) {
+      throw new Error(`"${name}" is a built-in cue`);
+    }
+
     // One index of everything the OTHER rules answer to, so both checks below
     // read the same set. Names are written after the aliases, so a name wins the
     // wording when one rule's name is another's former name.
@@ -248,6 +325,9 @@ class AutomationEngine {
       }
       if (alias === name) {
         throw new Error(`"${alias}" is this cue's own name, not a former one`);
+      }
+      if (!alreadyHeld.has(alias) && reserved.has(alias)) {
+        throw new Error(`"${alias}" is a built-in cue`);
       }
       const takenBy = held.get(alias);
       if (takenBy) {
@@ -363,11 +443,15 @@ class AutomationEngine {
     // NAMES FIRST, then former names. A live name always wins: a rule that is
     // called by its own name must never be shadowed by another rule that used to
     // be called that.
+    // BUILT-INS INCLUDED, and the stored rules first in the list, so a stored
+    // rule that owns a built-in's name resolves to itself. builtinCueRules
+    // leaves that built-in out anyway; this is the belt to its braces.
+    const callable = this.rulesWithBuiltins();
     const rule =
       wanted === ""
         ? undefined
-        : (this.rules.find((r) => this.cueNameOf(r) === wanted) ??
-          this.rules.find((r) => this.cueAliasesOf(r).includes(wanted)));
+        : (callable.find((r) => this.cueNameOf(r) === wanted) ??
+          callable.find((r) => this.cueAliasesOf(r).includes(wanted)));
 
     // What the log line calls this call. A call through a former name says both,
     // with an arrow — otherwise the only trace of a Home Assistant still holding
@@ -623,7 +707,10 @@ class AutomationEngine {
    */
   private desiredStateOf(rule: Rule): CueCommand | null {
     if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
-    for (const pair of cuePairs(this.rules)) {
+    // Over the BUILT-INS too: a built-in switch is a bound pair, and without it
+    // here `POST /api/cues/obs_record_on` said twice would send a second Start
+    // to a recorder that is already running rather than answering "already on".
+    for (const pair of cuePairs(this.rulesWithBuiltins())) {
       const binding = pair.binding;
       if (binding === null) continue;
       // The whole binding, not just the base: what a press COMMANDS is the
@@ -929,7 +1016,12 @@ class AutomationEngine {
    */
   wantsAppStateSource(id: AppStateSourceId): boolean {
     const ref = appStateRef(id);
-    return boundCuePairs(this.rules).some((pair) => pair.binding?.variable === ref);
+    // WITH the built-ins, exactly as every other cue reader is. A built-in
+    // switch is a bound pair nobody had to save, so an install with no stored
+    // rules at all still has Home Assistant reading `app:reaper.recording` —
+    // and asking `this.rules` there is a switch answering from a five-second-old
+    // snapshot on the unattended booth machine this demand exists for.
+    return boundCuePairs(this.rulesWithBuiltins()).some((pair) => pair.binding?.variable === ref);
   }
 
   /**
@@ -945,7 +1037,10 @@ class AutomationEngine {
    * Not gated on `disarmed`, for the reason above.
    */
   wantsAppStateFamily(family: AppStateFamilyId): boolean {
-    return boundCuePairs(this.rules).some((pair) => {
+    // WITH the built-ins, for the reason above: every ProVideoPlayer layer has
+    // a shown and a muted switch nobody saved, and PVP at its idle cadence is
+    // what they would read from.
+    return boundCuePairs(this.rulesWithBuiltins()).some((pair) => {
       const parsed = parseAppStateRef(pair.binding?.variable ?? "");
       return parsed?.kind === "family" && parsed.family === family;
     });

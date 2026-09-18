@@ -376,7 +376,10 @@ appliance a second time by another name is refused rather than doubling every
 switch.
 
 **What appears.** One device per server, carrying a switch for every ON/OFF pair
-and a button for every cue that is not half of one. Each is named by the cue
+and a button for every cue that is not half of one. The cues Stage Utility ships
+itself ([built-in cues](../automation.md#built-in-cues) — OBS, REAPER,
+ProVideoPlayer and the app) are entities here like any other, and appear and
+disappear as their integration is switched on and off. Each is named by the cue
 alone, and the room named here is offered as the Home Assistant area. A switch
 whose Companion button has gone missing goes **unavailable** rather than
 pretending a press would do something. A pair with a state source reports what

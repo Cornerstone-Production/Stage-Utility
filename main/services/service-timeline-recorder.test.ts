@@ -185,6 +185,20 @@ describe("service-timeline-recorder: a re-run item gets its own entry", () => {
     assert.equal(rec.current!.items.length, 1, "an open entry was duplicated");
   });
 
+  // The same restart, on this recorder — the rule both now share (isStepBackTo
+  // in service-recorder.ts, judged against PCO's live_start_at). An item that
+  // never stopped in Planning Center is one run however long this box was away.
+  it("reopens an item that has been live in PCO throughout a long restart", () => {
+    const wentLiveInPco = "2026-09-18T23:23:46.000Z";
+    // The box was down for half an hour; the entry closed when it went.
+    rec.current!.items = [firstRun("2026-09-18T23:30:00.000Z")];
+    rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: wentLiveInPco }));
+
+    assert.equal(rec.current!.items.length, 1, "a restart split an item that never stopped in PCO");
+    assert.equal(rec.current!.items[0]!.endedAt, null, "the run must be open again");
+    assert.equal(rec.current!.items[0]!.startedAt, RECORD_STARTED_AT, "a reopen keeps the original start");
+  });
+
   it("finalizePrevItem closes the LAST run of an id, not the first", () => {
     rec.current!.items = [firstRun("2026-09-18T23:32:03.000Z")];
     rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: "2026-09-19T00:43:15.000Z" }));
@@ -195,5 +209,60 @@ describe("service-timeline-recorder: a re-run item gets its own entry", () => {
     assert.equal(first.endedAt, "2026-09-18T23:32:03.000Z", "the finished first run was re-closed");
     assert.equal(first.actualDurationSec, 497, "the finished first run's duration was recomputed");
     assert.ok(second.endedAt, "the live run was left open forever");
+  });
+});
+
+// Every push on `service-timeline:history` has to carry the operator's item time
+// corrections applied — the panel, the pacing widget and the Home card all read
+// the payload directly, and a raw push puts the recorded stamps back on screen
+// until the next read. The recorder is the ONE broadcaster of this channel that
+// is not in history-edit.ts, so it is the one that can drift without anything in
+// that file changing.
+describe("service-timeline-recorder: what it broadcasts", () => {
+  const rec = serviceTimelineRecorder as unknown as Held & { busy: boolean; lastLiveAt: number };
+
+  it("pushes the record with item time corrections APPLIED, not the raw one", async () => {
+    const { addBroadcastListener } = await import("./broadcaster.js");
+    const pushes: unknown[] = [];
+    addBroadcastListener((channel, payload) => {
+      if (channel === "service-timeline:history") pushes.push(payload);
+    });
+
+    rec.busy = false;
+    rec.lastItemId = "item-1";
+    rec.current = {
+      serviceKey: "st1:plan:11am",
+      startedAt: "2026-09-06T12:00:00.000Z",
+      endedAt: null,
+      items: [
+        {
+          itemId: "item-1",
+          title: "VIDEO: Pre-roll",
+          sequence: 0,
+          plannedLengthSec: 120,
+          startedAt: "2026-09-06T12:00:00.000Z",
+          endedAt: "2026-09-06T12:11:22.000Z",
+          actualDurationSec: 682,
+        },
+      ],
+    };
+    (rec.current as unknown as Record<string, unknown>).itemTimeEdits = [
+      { itemId: "item-1", sequence: 0, endedAt: "2026-09-06T12:02:00.000Z", editedAt: "2026-09-06T13:00:00.000Z" },
+    ];
+
+    // The service ending: the branch that finalises the record and pushes it.
+    await serviceTimelineRecorder.onLiveTick(
+      baseLive({ currentItemId: null, serviceEnded: true }) as never,
+    );
+
+    assert.ok(pushes.length > 0, "the recorder pushed nothing at all");
+    const last = pushes[pushes.length - 1] as { items: { actualDurationSec: number | null; editedFrom?: unknown }[] };
+    assert.equal(last.items[0].actualDurationSec, 120, "the push carried the RECORDED 682s, not the corrected 120s");
+    assert.ok(last.items[0].editedFrom, "and carried no editedFrom, so the row could not render its marker");
+    assert.equal(
+      rec.current!.items[0].actualDurationSec,
+      682,
+      "the recorder's own copy must stay raw — the overlay is applied on the way out",
+    );
   });
 });

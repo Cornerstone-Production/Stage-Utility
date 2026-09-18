@@ -226,5 +226,5 @@ bar — since the person it is sent to has nothing else on the page to reach.
 what surrounds it.
 
 The operator's own versions are in the sidebar: **History** (which is
-`/history/manage`, and keeps Edit times, Merge and Delete) and **Patch**, whose
-editor is at `/patch/edit`.
+`/history/manage`, and keeps Edit times, Merge, Rebuild from raw and Delete in
+a service's header) and **Patch**, whose editor is at `/patch/edit`.

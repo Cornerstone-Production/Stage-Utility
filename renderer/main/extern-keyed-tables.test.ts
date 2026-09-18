@@ -61,11 +61,31 @@ const EXPORTED: Record<string, object> = {
   WHEN_LABELS,
 };
 
+/**
+ * The names in EXPORTED, sorted, one per line. A count cannot tell a table
+ * added and a table removed from no change at all, and a sorted list merges
+ * cleanly when two branches each wrap a different table.
+ */
+const EXPECTED_TABLES = [
+  "BAR_ITEMS",
+  "LAYOUT_OBJECTS",
+  "RECORDER_FOR",
+  "SIZES",
+  "STREAMER_FOR",
+  "SURFACE_PRESETS",
+  "WHEN_LABELS",
+];
+
 describe("renderer tables keyed from outside this process", () => {
   it("covers exactly the exported ones", () => {
-    // Not a floor. Change this only alongside the list above, having decided
-    // whether the new table's keys arrive off disk or off HTTP.
-    assert.equal(Object.keys(EXPORTED).length, 7);
+    // Not a floor, and not a bare count. Change this only alongside the list
+    // above, having decided whether the new table's keys arrive off disk or off
+    // HTTP.
+    assert.deepEqual(
+      Object.keys(EXPORTED).sort(),
+      EXPECTED_TABLES,
+      "a table was added or removed; update EXPECTED_TABLES deliberately",
+    );
   });
 
   for (const [name, table] of Object.entries(EXPORTED)) {

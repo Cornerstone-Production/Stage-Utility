@@ -42,24 +42,17 @@ const TARGETS = [
  *  how a guard becomes a coin toss. It flaked exactly that way before this. */
 const settle = () => oscManager.whenResolved();
 
-/** A UDP port nothing is on, found by binding 0 and reading what the OS gave. */
-async function freePort(): Promise<number> {
-  const probe = dgram.createSocket("udp4");
-  await new Promise<void>((resolve) => probe.bind(0, "127.0.0.1", resolve));
-  const { port } = probe.address();
-  await new Promise<void>((resolve) => probe.close(resolve));
-  return port;
-}
-
 /** The feedback port for this run. NEVER 9000: that is the default a real
  *  instance on this machine is already listening on, and stealing it — or
  *  failing to and then testing a manager with no socket — is not this test's
- *  business. Set before anything else so the manager never reaches for 9000. */
+ *  business. Bound via bindEphemeralFeedbackPort(), which asks the OS for a
+ *  free one and reads back the real bound port from the socket itself —
+ *  never a probe-bind-close-then-reuse dance, which races against every
+ *  other test file doing the same thing in parallel under CI. */
 let PORT = 0;
 
 before(async () => {
-  PORT = await freePort();
-  await oscManager.setFeedbackPort(PORT);
+  PORT = await oscManager.bindEphemeralFeedbackPort();
   await fs.writeFile(path.join(TMP, "osc-targets.json"), JSON.stringify(TARGETS), "utf8");
   oscDeps.lookup = async (hostname) => {
     if (hostname === NAME_HOST) return [NAME_IP];
@@ -281,6 +274,24 @@ describe("how much of a message is stored", () => {
       "removing a target must not leave its values behind under a suffixed key",
     );
   });
+});
+
+describe("the ephemeral feedback bind test seam", () => {
+  test("bindEphemeralFeedbackPort returns the port the socket actually bound, not 0", async () => {
+    const port = await oscManager.bindEphemeralFeedbackPort();
+    assert.ok(port > 0 && port <= 65535, `expected a real bound port, got ${port}`);
+    assert.equal(oscManager.getFeedbackPort(), port, "getFeedbackPort must agree with what the bind returned");
+    // Restore the port every other test in this file expects to be live.
+    await oscManager.setFeedbackPort(PORT);
+    await oscManager.whenListening();
+  });
+  // The race this seam removes only shows up across two SEPARATE processes
+  // racing the same probe-bind-close-then-reuse gap under CI's parallel
+  // workers — nothing a single-process unit test can force deterministically,
+  // so it is not asserted here. What this test proves instead: the seam hands
+  // back a real, currently-bound port and nothing routes around it back to
+  // the old pattern (see the commit body for the grep that confirms the old
+  // pattern is gone from every test file).
 });
 
 describe("a feedback bind failure reaches the operator, not just the log", () => {

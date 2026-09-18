@@ -73,8 +73,20 @@ export interface SplServiceSummary {
    * the occurrence is still live.
    */
   endedAt: string | null;
-  /** Service-level Leq per Smaart metric key, with the samples behind it. */
-  metrics: Record<string, { leq: number; count: number }>;
+  /**
+   * Per Smaart metric key: the service-level Leq, the samples behind it, and
+   * the loudest single reading anywhere in the service.
+   *
+   * `max` exists so a caller asking "how loud did it PEAK" does not have to
+   * pull the whole per-item record. The Trends chart plots one point per
+   * recording across up to 52 weeks, and fetching every record for that is
+   * hundreds of files to answer one number each — while this summary is
+   * already loaded by every page that needs it.
+   *
+   * Either may be null: a legacy capture has maxima and no Leq. A metric with
+   * NEITHER is left out entirely.
+   */
+  metrics: Record<string, { leq: number | null; max: number | null; count: number }>;
 }
 
 /** SPL recording for one service occurrence, keyed by serviceKey. */
@@ -178,9 +190,50 @@ export interface ServiceTimelineItem {
   /** Auto: item was above the plan's SERVICE START header when recorded (pre-service).
    *  Drives the default "not counted" state. Absent on older records. */
   preService?: boolean;
-  /** User override for whether this item counts toward the service timers. When set,
-   *  it wins over the auto (buffer/pre-service) default; absent = use the default. */
+  /** Override for whether this item counts toward the service timers. When set,
+   *  it wins over the auto (buffer/pre-service) default; absent = use the default.
+   *
+   *  TWO writers, which `countedByOperator` tells apart: the operator, through
+   *  POST /api/history/item-counted, and the recorder, which writes `false` by
+   *  itself for an item PCO had been showing live since before this record
+   *  opened (see openItem). The second is an observation about one run and does
+   *  not generalise; the first is a statement about the plan item. */
   counted?: boolean;
+  /** True when `counted` was set by the operator rather than derived by the
+   *  recorder. A rebuild carries an operator's override onto every run of the
+   *  item — it is a statement about the PLAN item — but carries the recorder's
+   *  own `counted: false` only back onto the run it was observed on, because a
+   *  carried-over first run says nothing about a later one. Absent on records
+   *  written before this was added; see rebuildTimelineRecord. */
+  countedByOperator?: true;
+  /** The recorded values an operator's time correction replaced. Set ONLY by
+   *  applyItemTimeEdits, never persisted: the store holds the raw item plus the
+   *  record's `itemTimeEdits`, and this is how a read tells the UI which rows are
+   *  edited and what they used to say. */
+  editedFrom?: {
+    startedAt: string;
+    endedAt: string | null;
+    actualDurationSec: number | null;
+  };
+}
+
+/** An operator's correction of ONE run of ONE item's recorded timing.
+ *
+ *  Kept beside the items rather than written into them: the items are raw
+ *  observation that `rebuildTimelineRecord` re-derives from `events.csv`, so an
+ *  edit written in would be silently undone by the next rebuild. See
+ *  main/services/history-item-times.ts. */
+export interface ServiceItemTimeEdit {
+  itemId: string;
+  /** Which RUN — the item's `sequence` in the record. An item can appear more
+   *  than once (a reprise, or a mis-split second service). */
+  sequence: number;
+  /** ISO replacing the recorded start. Absent = that field is not overridden. */
+  startedAt?: string;
+  /** ISO replacing the recorded end. Absent = that field is not overridden. */
+  endedAt?: string;
+  /** ISO when the operator made the correction. */
+  editedAt: string;
 }
 
 /** Recorded ACTUAL service rundown timing for one occurrence — when each item
@@ -214,4 +267,8 @@ export interface ServiceTimeline {
    *  a new record always starts null. */
   pacingResetAt?: string | null;
   items: ServiceTimelineItem[];
+  /** Operator corrections to individual items' recorded timings, applied over
+   *  `items` on every read (never into them). Absent on a record nobody has
+   *  corrected. See main/services/history-item-times.ts. */
+  itemTimeEdits?: ServiceItemTimeEdit[];
 }

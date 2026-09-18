@@ -141,6 +141,9 @@ slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
 | POST | `/api/integrations/:id/config` | Update config (secrets encrypted) |
 | POST | `/api/integrations/:id/enabled` | Enable / disable |
 | POST | `/api/integrations/:id/test` | Test a connection |
+| POST | `/api/integrations/youtube/connect` | Start a device-flow attempt using the SAVED client ID and secret. `409` with `{error: "Save the client ID and secret first"}` when either is blank or mode is not `oauth`. Otherwise the status below |
+| GET | `/api/integrations/youtube/connect` | `{status: "idle" \| "pending" \| "connected" \| "error", userCode?, verificationUrl?, expiresAt?, message?, channelTitle?}` — never the device code. Open, like every other read in this app: any LAN reader can see a pending `userCode` while an attempt is running, which is acceptable because the code only grants read-only YouTube access and is only good for a few minutes |
+| DELETE | `/api/integrations/youtube/connect` | Cancels a pending attempt, or clears a stale error back to idle. `{disconnect: true}` in the body instead clears the stored refresh token and channel title and stops the service |
 | GET | `/api/wireless/providers` | Available device drivers |
 | GET / POST | `/api/wireless/connections` | List / add a device connection |
 | PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
@@ -226,6 +229,8 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/spl/history/current` | The active service's per-item SPL record (live) |
 | GET | `/api/spl/history` | List saved past-service SPL records |
 | GET | `/api/spl/history/:key` | One past-service record |
+| GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
+| GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
@@ -250,6 +255,41 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
 
+**The SPL series**
+
+`GET /api/spl/history/:key/series` reads the service's raw `spl.csv` rows — a
+reading per second per metric — and returns them bucketed, because a two-hour
+service is thousands of rows per metric and no plot is that wide:
+
+```json
+{ "serviceKey": "…", "metric": "SPL A Fast", "metrics": ["LAeq 1", "SPL A Fast"],
+  "bucketSec": 5, "buckets": [{ "t": 1789675200000, "max": 94.1, "avg": 88.4 }] }
+```
+
+`t` is epoch ms at the bucket's start. `max` is the loudest single reading in
+it; `avg` is the bucket's **energy** average (Leq), not an arithmetic mean —
+decibels are logarithmic. Both are rounded to two decimal places, which is what
+a meter reports. Buckets are anchored to the earliest row, so a service
+beginning at 19:47:13 does not open with a part-empty one, and a bucket the
+meter said nothing in is absent rather than zero. One bucket is emitted once
+however the rows are ordered on disk — rolled files and merged services do not
+arrive in time order.
+
+`bucketSec` in the answer may be **wider** than the one asked for: the series is
+capped at ~2,000 buckets and the width grows to fit rather than the window being
+truncated. `metric` may differ from the one asked for — an unknown metric falls
+back to the record's own, then to the first recorded — and `metrics` lists every
+metric these rows carry, so a client can offer a switch without a second
+request.
+
+`500` means the rows are there and could not be READ — an unreadable directory,
+a half-written file. The reason is logged server-side on a `[spl-series]` line;
+the History chart says the samples are unavailable rather than falling back.
+
+`404` means the service has **no raw rows at all**: a record from before the raw
+layer existed, or one whose archive was pruned. That is not the same as a silent
+meter, and the History chart falls back to a per-item step only for the 404.
+
 **Correcting a recording**
 
 A recording is one thing stored in three places — per-item timings, SPL and
@@ -261,8 +301,14 @@ thing.
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
+| POST | `/api/history/rebuild` | Recompute all three summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timelineItems, splItems, attendanceSamples }`; `500` with the reason if it cannot |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
+| POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
+| POST | `/api/log/client` | `{ tag, message }` — one line onto the server log, so a browser-side failure reaches [`/log`](../ops/updates-and-logs.md). `tag` is a short lower-case word (`history`), written as `[history] …` at `warn`. Both fields are scrubbed, and a client is cut off after ten lines a minute with `429` — the cut-off writes one line of its own, so a throttled browser does not read as one that stopped failing |
+| GET | `/api/history/milestones` | The operator's dated marks for the Trends chart |
+| POST | `/api/history/milestones` | Add or replace one. `{ date, label, serviceTypeId? }`, plus `id` to replace. `400` with the reason for a `date` that is not a real `YYYY-MM-DD` day, a blank or over-60-character `label`, or a `serviceTypeId` nothing has recorded — each would store a mark nobody would ever see. Answers the whole list |
+| DELETE | `/api/history/milestones/:id` | Remove one. Answers the whole list, or `404` when there is no such id |
 | POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |
 
 Two things to know:
@@ -271,6 +317,13 @@ Two things to know:
   answer `409`. The recorder holds the same record and would write its own copy
   back over any change, and releasing it only makes the next live tick start a
   fresh empty record in its place. Correcting a recording is a post-hoc repair.
+- **An item time correction is an overlay.** The recorded stamps are never
+  rewritten: the edit is stored on the record as `itemTimeEdits` and applied to
+  `startedAt`, `endedAt` and `actualDurationSec` on every read, so a rebuild from
+  the raw rows cannot undo it and clearing it restores what the recorder saw. An
+  edited item carries `editedFrom` with the recorded values. `400` if the end is
+  not after the start or either time falls outside the recording's own window.
+  Neighbouring items are not moved.
 - **Deleting a recording keeps its raw samples.** The
   [data archive](../data-archive.md) is the source of truth the records are
   derived from; removing it is a separate, irreversible decision. A merge does
@@ -322,6 +375,12 @@ and set which plan items start each phase, and
 | POST | `/api/archive/inspect` | Read a zip and report what it holds. Writes nothing |
 | POST | `/api/archive/import` | Apply it. `X-Archive-Mode: skip\|merge\|replace` decides what happens to services recorded differently here |
 
+The import answers what it did and, separately, what it could not do:
+`rawFilesFailed` names archive members it could not write, and
+`itemTimeEditsDropped` names per service any item time corrections whose run
+lost the merge — the local run wins, so the correction describing the run that
+did not survive goes with it. Both are empty on a clean import.
+
 **`/api/update/apply` and `/api/update/track` answer `409`** —
 `{error: "locked", locked: true, reasons}` — while a service is live or any
 recorder is running. Pass `{override: true}` to go anyway.
@@ -355,6 +414,7 @@ neither is a 400.
 | POST | `/api/branding` | Update app name, accent colour, logos and their crops |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream — see [Channels](#channels) |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels}`) |
+| GET | `/api/events/poll?cid=&since=` | The same channels, collected by polling — see [Polling](#polling) |
 
 ## Channels
 
@@ -366,6 +426,63 @@ toward the Companion integration's connected-client total.
 
 A comment heartbeat goes out every 20 seconds, and a client whose socket backs up
 past 2 MB is dropped rather than buffered.
+
+Both transports are named on [`/log`](../ops/updates-and-logs.md):
+`[events] stream client connected (3 streams)` and its `closed` counterpart, and
+`[events] poll client <cid> started` / `expired (no poll for 30s)`.
+
+### Polling
+
+`GET /api/events/poll` carries the same channels for a client that cannot hold a
+stream open. A browser page opts in with `?transport=poll` on its URL
+([Display URLs](../display-urls.md#polling-transport)); this is the endpoint
+underneath it.
+
+| Parameter | |
+|---|---|
+| `cid` | **Required.** The same client id `/api/events/subscribe` is keyed by, so one channel filter serves both transports. A request without it is a 400. |
+| `since` | The `seq` from the previous response. Omit it to ask for a snapshot. |
+
+```json
+{
+  "seq": 148,
+  "resync": false,
+  "frames": [ { "channel": "pco:live", "data": { "mode": "item" } } ]
+}
+```
+
+`frames` are in the order they were broadcast, and `data` is the same payload the
+stream would have sent on that channel. `seq` is what to send as the next
+`since`.
+
+With no `since`, the response is the connect-time snapshot — the same channels
+the stream hydrates, `server:hello` first — and `resync` is `false`, because
+nothing was missed.
+
+`resync: true` means the request's `since` is no longer covered. The frames are a
+fresh snapshot rather than a continuation, and the client should drop its
+position and ask for a snapshot again rather than resume from the returned `seq`.
+Three things cause it:
+
+- the server keeps only the last 500 broadcasts, and only for 60 seconds, so a
+  client that stopped asking has a gap it cannot fill;
+- a `since` ahead of the server's own counter — a client that outlived a server
+  restart;
+- a `cid` that had expired and come back. Nothing is buffered while no client is
+  polling, so the counter does not move while you are away and your `since` can
+  look perfectly current when it is not. The registry is what knows otherwise.
+
+Channel filtering applies to the buffered frames, so a client that reported a
+narrow set through `/api/events/subscribe` is not sent the rest of the firehose.
+It does **not** apply to the snapshot: the SSE hello burst is unfiltered too, and
+for the same reason — a client caches every hydrated channel at connect so that a
+component mounting later is served from that cache rather than waiting for the
+channel to change.
+
+A `cid` that has not polled for 30 seconds is dropped. Poll clients count as
+subscribers exactly as open streams do, so a producer that only runs while
+something is watching starts for a polling client and stands down when it
+expires.
 
 **Hydrated on connect** — these carry state rather than events, so the stream
 opens with a full snapshot of each and a display is never blank waiting for

@@ -212,7 +212,11 @@ export const cueStatesDeps: {
   clearTimeout: (t: NodeJS.Timeout) => void;
 } = {
   now: () => Date.now(),
-  rules: async () => (await import("./automation-engine.js")).automationEngine.listRules(),
+  // WITH the built-ins: a built-in switch is a bound pair, and its state is
+  // read through exactly the same cache, seam and settle window as a
+  // stored one's.
+  rules: async () =>
+    (await import("./automation-engine.js")).automationEngine.rulesWithBuiltins(),
   // TWO NAMESPACES, one seam. An `app:` ref is answered from this process (the
   // REAPER transport poll, say) and everything else is a Companion variable —
   // both in the same VariableResult shape, so nothing below this line, including

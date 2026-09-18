@@ -452,3 +452,34 @@ describe("a stored number outside the field's bounds", () => {
     });
   }
 });
+
+describe("oauth-device is masked the same way password is", () => {
+  // A unit test on initialConfig() directly, with a synthetic descriptor —
+  // the real YouTube descriptor is exercised end-to-end in
+  // integration-youtube-connect-field.test.tsx, but that only proves the SAVE
+  // path skips a mask. This is the seed path: what the form starts out
+  // holding before the operator touches anything.
+  const descriptor: IntegrationDescriptor = {
+    id: "fixture",
+    kind: "control",
+    label: "Fixture",
+    docs: "fixture",
+    configSchema: [{ key: "refreshToken", label: "Connection", type: "oauth-device" }],
+  };
+
+  test("a stored secret seeds the FORM's own mask, not the server's transport mask", () => {
+    const state = { id: "fixture", enabled: true, connection: "connected", message: null, config: { refreshToken: "••••" } } as IntegrationState;
+    const seeded = initialConfig(descriptor, state);
+    // FORM_MASK is 8 bullets; the server's own MASK (what state.config carries)
+    // is 4. Asserting the length, not just "some bullets", is what tells apart
+    // "masked like every other secret field" from "passed the raw value
+    // through unmasked because oauth-device is not in the password branch".
+    assert.equal(seeded.refreshToken, "••••••••");
+  });
+
+  test("no stored secret seeds blank, same as an unset password field", () => {
+    const state = { id: "fixture", enabled: true, connection: "disconnected", message: null, config: { refreshToken: "" } } as IntegrationState;
+    const seeded = initialConfig(descriptor, state);
+    assert.equal(seeded.refreshToken, "");
+  });
+});

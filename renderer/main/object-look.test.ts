@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
+import { LAYOUT_OBJECT_TYPES } from "@main/types/layout-object-types";
 import { HOST_FRAMED_TYPES, LAYOUT_OBJECTS, defaultStyle, defaultStyleFor } from "./layout-objects.js";
 
 /** Content whose box is drawn for it, or that is deliberately full-bleed. */
@@ -66,7 +67,15 @@ describe("a widget you just added", () => {
     // Home's grid frames it.
     // 61/32 before the cue button, which is carded: it is a pill on a panel,
     // and it paints no box of its own.
-    assert.equal(all.length, 62);
+    //
+    // The set, not the count: two counts that both hold steady cannot tell an
+    // add plus a remove from no change, and a bare number is a merge conflict
+    // waiting to happen the next time two branches each add a type.
+    assert.deepStrictEqual(
+      all.slice().sort(),
+      LAYOUT_OBJECT_TYPES,
+      "a type was added or removed; update LAYOUT_OBJECT_TYPES deliberately",
+    );
     assert.equal(all.filter(hasCard).length, 33);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });

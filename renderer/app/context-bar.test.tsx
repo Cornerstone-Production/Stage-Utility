@@ -206,10 +206,25 @@ describe("nothing appears or disappears", () => {
   };
 
   test("the registry is the list, and it has grown by the score capsule", () => {
-    // The count is asserted EXACTLY, not as a floor: the loops below walk
+    // An exact sorted list, not a bare count: the loops below walk
     // Object.keys(BAR_ITEMS), so an item that never reached the registry is an
-    // item they silently do not cover.
-    assert.equal(ALL.length, 9);
+    // item they silently do not cover, and a count cannot tell an add plus a
+    // remove from no change.
+    assert.deepEqual(
+      [...ALL].sort(),
+      [
+        "clock",
+        "current-item",
+        "integration-health",
+        "live-timer",
+        "plan",
+        "recording",
+        "scores",
+        "service-type",
+        "streaming",
+      ],
+      "a bar item was added or removed; update this list deliberately",
+    );
     assert.ok(ALL.includes("scores"), "the score capsule is not a bar item");
     // Two items, not one compound. The operator asked to be able to put the
     // service type on the bar without the plan title.
@@ -225,7 +240,20 @@ describe("nothing appears or disappears", () => {
       ALL.filter((id) => BAR_ITEMS[id].canBeEmpty),
       ["scores"],
     );
-    assert.equal(MUST_RENDER.length, 8);
+    assert.deepEqual(
+      [...MUST_RENDER].sort(),
+      [
+        "clock",
+        "current-item",
+        "integration-health",
+        "live-timer",
+        "plan",
+        "recording",
+        "service-type",
+        "streaming",
+      ],
+      "the set of items that must always render changed; update this list deliberately",
+    );
   });
 
   test("every item bound by the rule renders with no service, no recorder and no integrations", () => {

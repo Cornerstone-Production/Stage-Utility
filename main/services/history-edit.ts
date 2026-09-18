@@ -6,14 +6,28 @@
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
 import type { AttendanceSample } from "../types/history.js";
-import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
+import type { ServiceAttendance, ServiceItemTimeEdit, ServiceTimeline } from "../types/stage.js";
+import { serviceDirPath } from "./archive/archive-paths.js";
+import { readArchiveRows } from "./archive/archive-rows.js";
+import { mergeItemRuns } from "./archive/merge-records.js";
+import { rebuildSplRecord, rebuildTimelineRecord } from "./archive/rebuild.js";
 import { sampleArchive } from "./archive/sample-archive.js";
+import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
+import {
+  bindItemTimeEdits,
+  broadcastTimeline,
+  clampItemTimeEdits,
+  logOrphanedItemTimeEdits,
+  overlaidTimeline,
+  rekeyItemTimeEdits,
+} from "./history-item-times.js";
+import { clockOf } from "./app-timezone.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
@@ -204,8 +218,15 @@ export async function editServiceWindow(
         }
       }
     }
+    // The items have been trimmed to the new window; the corrections OVER them
+    // had not been, so a recording trimmed to fifteen minutes could still show
+    // an eighty-five minute item. Clamped the same way the items just were.
+    const clamped = clampItemTimeEdits(tl);
+    logOrphanedItemTimeEdits(tl.serviceKey, "the new service window", clamped.orphaned);
+    if (clamped.edits.length) tl.itemTimeEdits = clamped.edits;
+    else delete tl.itemTimeEdits;
     await serviceTimelineStore.upsert(tl);
-    broadcast("service-timeline:history", tl);
+    broadcastTimeline(tl);
   }
 
   const att = await attendanceStore.get(serviceKey);
@@ -245,9 +266,160 @@ export async function setItemCounted(serviceKey: string, itemId: string, counted
   if (!tl) return;
   const hits = tl.items.filter((x) => x.itemId === itemId);
   if (hits.length === 0) return;
-  for (const it of hits) it.counted = counted;
+  // Marked as the OPERATOR's, not the recorder's. The recorder writes `counted:
+  // false` by itself for an item carried over from an earlier session, and with
+  // one unmarked field a rebuild could not tell the two apart — so it spread an
+  // observation about one run onto every run of the item.
+  for (const it of hits) {
+    it.counted = counted;
+    it.countedByOperator = true;
+  }
   await serviceTimelineStore.upsert(tl);
-  broadcast("service-timeline:history", tl);
+  broadcastTimeline(tl);
+}
+
+/** A correction the record itself refuses. 400, not 500: the request was
+ *  well-formed and the operator is being told what is wrong with it. */
+export class ItemTimeEditError extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "ItemTimeEditError";
+  }
+}
+
+/**
+ * Refuse a correction, and leave a line saying why.
+ *
+ * The operator sees the sentence in a toast; nobody else does. A refusal is a
+ * decision this server made about the operator's work, and at 9am on a Sunday
+ * "I typed a time and it did not save" with nothing in /log is the whole story
+ * they can tell. Logged here rather than at each throw site so the reason and
+ * the run always travel together.
+ */
+function refuseItemTimes(serviceKey: string, run: string, reason: string): never {
+  console.warn(`[history] ${scrub(serviceKey)}: refused a time correction for ${scrub(run)} — ${scrub(reason)}`);
+  throw new ItemTimeEditError(reason);
+}
+
+/** "20:15:00 → 20:26:22", or "20:15:00 → (open)" for an item still running. */
+function span(startedAt: string, endedAt: string | null): string {
+  const s = Date.parse(startedAt);
+  const e = endedAt ? Date.parse(endedAt) : NaN;
+  return `${Number.isFinite(s) ? clockOf(s) : "?"}–${Number.isFinite(e) ? clockOf(e) : "(open)"}`;
+}
+
+/**
+ * Correct ONE run of ONE item's recorded start and/or end.
+ *
+ * `null` for a field clears that override; clearing both removes the correction
+ * entirely and the row goes back to what the recorder saw. The recorded stamps
+ * are never touched — see history-item-times.ts for why this is an overlay and
+ * not a rewrite.
+ *
+ * Unlike setItemCounted, this is keyed by (itemId, sequence) rather than itemId
+ * alone. `counted` is a statement about the PLAN item and applies to every run
+ * of it; a timing is a statement about ONE run, and a reprise that genuinely ran
+ * nine minutes must not be shortened because the first run was mis-recorded.
+ */
+export async function setItemTimes(
+  serviceKey: string,
+  itemId: string,
+  sequence: number,
+  /**
+   * The three states of each field are distinct and all three are used:
+   *
+   *   ABSENT (`undefined`, or the key not present) — leave whatever override
+   *     this run already has. The panel saves one field without discarding the
+   *     other; `"startedAt" in times` is what distinguishes this from null, so a
+   *     caller that spreads `{ startedAt: undefined }` gets "absent", which is
+   *     the same answer.
+   *   `null` — clear this field's override; the recorded value comes back.
+   *   an ISO string — override this field with it.
+   */
+  times: { startedAt?: string | null; endedAt?: string | null },
+): Promise<ServiceTimeline> {
+  assertNotLive(serviceKey, "edited");
+  forgetAll(serviceKey); // see editServiceWindow
+  // Names the RUN, not just the item: an item can appear twice in one record, and
+  // a log line naming only the title cannot tell an operator which row moved.
+  const run = `${itemId}#${sequence}`;
+  const tl = await serviceTimelineStore.get(serviceKey);
+  if (!tl) refuseItemTimes(serviceKey, run, `No recording found for "${serviceKey}".`);
+  const item = tl.items.find((x) => x.itemId === itemId && x.sequence === sequence);
+  if (!item) {
+    refuseItemTimes(serviceKey, run, "That item is no longer in this recording — reload the service and try again.");
+  }
+
+  // A field the caller did not mention keeps whatever override it already had;
+  // an explicit null clears it. Distinguishing "absent" from "null" is what lets
+  // the UI save one field without silently dropping the other.
+  // The LAST entry for this run, matching what applyItemTimeEdits applies. A
+  // well-formed record holds one — the filter below replaces rather than appends
+  // — but a merge or a hand-edited file can hold two, and `find` would have read
+  // the superseded one, so a save touching only the end silently reverted the
+  // start to a value the operator had already replaced.
+  const forRun = (tl.itemTimeEdits ?? []).filter((e) => e.itemId === itemId && e.sequence === sequence);
+  const prior = forRun[forRun.length - 1];
+  const startedAt = "startedAt" in times ? (times.startedAt ?? undefined) : prior?.startedAt;
+  const endedAt = "endedAt" in times ? (times.endedAt ?? undefined) : prior?.endedAt;
+  for (const [label, v] of [["start", startedAt], ["end", endedAt]] as const) {
+    if (v != null && !Number.isFinite(Date.parse(v))) {
+      refuseItemTimes(serviceKey, run, `That ${label} time is not a time I can read.`);
+    }
+  }
+
+  const effStart = startedAt ?? item.startedAt;
+  const effEnd = endedAt ?? item.endedAt;
+  // Strictly after. A zero-length item is not a correction anybody means: the row
+  // would read 0:00 with an `edited` marker on it, count nothing toward the
+  // service timers, and leave a gap the length of the item it replaced. Clearing
+  // the override is what "this item did not happen" is spelled with.
+  if (effEnd != null && Date.parse(effEnd) <= Date.parse(effStart)) {
+    refuseItemTimes(serviceKey, run, "The end has to come after the start.");
+  }
+  // Inside the recording's own window. An item timed outside it would be invisible
+  // in half the readouts and would make the service's Actual disagree with its
+  // own start and end — if the window is wrong, that is what Edit times fixes
+  // first, and saying so is more use than accepting the number.
+  const winStart = Date.parse(tl.startedAt);
+  const winEnd = tl.endedAt ? Date.parse(tl.endedAt) : Infinity;
+  for (const t of [effStart, effEnd]) {
+    if (t == null) continue;
+    const ms = Date.parse(t);
+    if (ms < winStart || ms > winEnd) {
+      refuseItemTimes(
+        serviceKey,
+        run,
+        `That is outside the recording's own window (${span(tl.startedAt, tl.endedAt)}). ` +
+          "Fix the service start and end first, then the item.",
+      );
+    }
+  }
+
+  const rest = (tl.itemTimeEdits ?? []).filter((e) => !(e.itemId === itemId && e.sequence === sequence));
+  const cleared = startedAt === undefined && endedAt === undefined;
+  if (!cleared) {
+    const edit: ServiceItemTimeEdit = { itemId, sequence, editedAt: new Date().toISOString() };
+    if (startedAt !== undefined) edit.startedAt = startedAt;
+    if (endedAt !== undefined) edit.endedAt = endedAt;
+    rest.push(edit);
+  }
+  if (rest.length) tl.itemTimeEdits = rest;
+  else delete tl.itemTimeEdits; // absent, not an empty array, so an untouched record stays untouched
+
+  await serviceTimelineStore.upsert(tl);
+  const out = overlaidTimeline(tl);
+  broadcastTimeline(tl);
+  // Every interpolation through scrub(), including the ones whose value this file
+  // computed itself: log-injection.test.ts reads the source, and an exception for
+  // "this one is obviously safe" is how the rule stops being a rule.
+  console.log(
+    `[history] ${scrub(serviceKey)}: "${scrub(item.title)}" (${scrub(run)}) times ` +
+      `${scrub(cleared ? "reset to the recording" : "edited")} by operator ` +
+      `(${scrub(span(item.startedAt, item.endedAt))} → ${scrub(span(effStart, effEnd))})`,
+  );
+  return out;
 }
 
 /** Re-derive attendance aggregates from the current samples (no window change) —
@@ -260,6 +432,252 @@ export async function recalcAttendance(serviceKey: string): Promise<void> {
   recomputeAttendance(att);
   await attendanceStore.upsert(att);
   broadcast("attendance:history", att);
+}
+
+/**
+ * One record's share of a rebuild.
+ *
+ * `rebuilt` is the whole point. Reporting a count alone made a record the raw
+ * layer had NOTHING for indistinguishable from one that had just been derived:
+ * a service whose archive directory is missing answered 200 and told the
+ * operator "Rebuilt: 12 items" about the twelve items it had left exactly as
+ * they were. A count is what the record holds; `rebuilt` is whether this run
+ * put it there.
+ */
+export interface RebuiltRecord {
+  /** True when the raw layer supplied these numbers; false = left as it was. */
+  rebuilt: boolean;
+  /** What the record holds afterwards. For attendance this counts SAMPLES —
+   *  one field name across the three so the shape is uniform. */
+  items: number;
+  /** True when this store has no record for the key at all. */
+  missing: boolean;
+}
+
+/** What a rebuild did, per record. Reported rather than summed: this rewrites
+ *  the source of truth, and "it worked" is not evidence. */
+export interface RebuildOutcome {
+  timeline: RebuiltRecord;
+  spl: RebuiltRecord;
+  attendance: RebuiltRecord;
+  /** Records that were derived but whose write failed AFTER another record's
+   *  write had already landed — see rebuildServiceRecords. Empty is the normal
+   *  case; a non-empty list means the operator is looking at a half-rebuilt
+   *  service and needs to know which half. */
+  failed: string[];
+}
+
+const NO_RECORD: RebuiltRecord = { rebuilt: false, items: 0, missing: true };
+
+/** Nothing in the raw layer to rebuild this service from. A refusal, not a
+ *  fault: the request was well-formed and the server is fine — there is simply
+ *  no evidence to re-derive from, and pretending otherwise is the bug this
+ *  replaced. 409, like the live-service refusal. */
+export class NoRawRowsError extends Error {
+  readonly status = 409;
+  constructor() {
+    super("No raw rows exist for this recording — there is nothing to rebuild it from.");
+    this.name = "NoRawRowsError";
+  }
+}
+
+/**
+ * A rebuild that changed nothing because it could not.
+ *
+ * Deliberately carries NO detail from the underlying failure. A filesystem
+ * error names an absolute path, this message reaches a LAN-visible page, and
+ * the operator cannot act on the path anyway. The real reason is on the tagged
+ * log line the thrower writes; `cause` keeps it for a stack trace.
+ */
+export class RebuildFailedError extends Error {
+  constructor(reason: string) {
+    super("That recording could not be rebuilt, and nothing was changed. The log says why.", { cause: reason });
+    this.name = "RebuildFailedError";
+  }
+}
+
+/**
+ * Recompute all three of a service's summaries from its raw rows.
+ *
+ * The raw layer is append-only truth and every summary must be derivable from
+ * it by the app. Two of the three already were — SPL rebuilds from `spl.csv` on
+ * every restart, attendance re-derives from its own samples — but the timing
+ * record was only ever written forward, so when a recorder bug corrupted one on
+ * 18 Sep 2026 while `events.csv` stayed perfect, the repair had to be done by
+ * hand. This is that repair, in the app.
+ *
+ * Hand edits to times do not survive it: an edited window, a trimmed tail and a
+ * corrected end are all statements the raw rows know nothing about. The `counted`
+ * overrides DO survive, because rebuildTimelineRecord carries them.
+ *
+ * Reports what it DERIVED, per record, rather than what each record holds. A
+ * service with no archive directory used to answer 200 with the counts of the
+ * records it had not touched, so the operator was told "Rebuilt: 12 items"
+ * about twelve items nothing had looked at. Now each record says whether the
+ * raw layer supplied it, nothing derivable at all is a 409, and a partial
+ * result names its halves.
+ *
+ * Throws rather than reporting a partial success where nothing landed. A
+ * rebuild that silently wrote nothing would leave the operator looking at the
+ * same bad record believing it had been repaired.
+ */
+export async function rebuildServiceRecords(serviceKey: string): Promise<RebuildOutcome> {
+  assertNotLive(serviceKey, "rebuilt");
+  forgetAll(serviceKey); // see editServiceWindow
+
+  const outcome: RebuildOutcome = {
+    timeline: { ...NO_RECORD },
+    spl: { ...NO_RECORD },
+    attendance: { ...NO_RECORD },
+    failed: [],
+  };
+
+  // ── Derive everything FIRST, write nothing ──
+  //
+  // Interleaving the two meant a failure part-way through left the service
+  // half-rebuilt with no record of which half: the timing record derived from
+  // this evening's rows, the SPL record still the corrupted one, and a 500 that
+  // said neither. Deriving first makes the common failure — a bad row, an
+  // unreadable CSV — cost nothing at all, because it happens before the first
+  // write.
+  const pending: { name: LegName; write: () => Promise<void> }[] = [];
+  try {
+    const serviceDate = await serviceDateOf(serviceKey);
+    // Not the same refusal as "no raw rows": serviceDateOf reads all three
+    // stores, so a null date means this key names no recording at all. That is
+    // the caller naming something that does not exist, and stays a 500 — the
+    // 409 below is about a recording that DOES exist and has nothing behind it.
+    if (!serviceDate) {
+      throw new Error(`no record for "${serviceKey}" names a service date, so its raw rows cannot be located`);
+    }
+    const dir = serviceDirPath(serviceKey, serviceDate);
+
+    // Timeline, from events.csv.
+    const tl = await serviceTimelineStore.get(serviceKey);
+    if (tl) {
+      const rows = await readArchiveRows(dir, "events");
+      if (rows && rows.length > 0) {
+        const next = rebuildTimelineRecord(tl, rows);
+        outcome.timeline = { rebuilt: true, items: next.items.length, missing: false };
+        pending.push({
+          name: "timeline",
+          write: async () => {
+            await serviceTimelineStore.upsert(next);
+            broadcastTimeline(next);
+          },
+        });
+      } else {
+        // Left exactly as it was. The count is what it still holds, and
+        // `rebuilt: false` is what stops that count reading as an achievement.
+        outcome.timeline = { rebuilt: false, items: tl.items.length, missing: false };
+      }
+    }
+
+    // SPL, from spl.csv.
+    const spl = await splHistoryStore.get(serviceKey);
+    if (spl) {
+      const next = await rebuildSplRecord(spl);
+      outcome.spl = { rebuilt: next != null, items: (next ?? spl).items.length, missing: false };
+      if (next) {
+        pending.push({
+          name: "spl",
+          write: async () => {
+            await splHistoryStore.upsert(next);
+            broadcast("spl:history", next);
+          },
+        });
+      }
+    }
+
+    // Attendance, from its own stored samples. Not from attendance.csv: the
+    // stored samples are already the down-sampled series the record is defined
+    // over, and recomputeAttendance is the same pass Recalculate runs.
+    // Re-deriving the series itself is a different operation with a different
+    // answer, and is not what this offers. It always re-derives when the record
+    // exists, so it is `rebuilt` whenever it is here.
+    const att = await attendanceStore.get(serviceKey);
+    if (att) {
+      // CLONED before recomputing. The store hands back the instance it caches,
+      // and recomputeAttendance mutates in place — so a failed write left every
+      // reader in this process looking at re-based samples that were never
+      // saved, and the next restart silently undid them.
+      const next: ServiceAttendance = structuredClone(att);
+      recomputeAttendance(next);
+      outcome.attendance = { rebuilt: true, items: next.samples.length, missing: false };
+      pending.push({
+        name: "attendance",
+        write: async () => {
+          await attendanceStore.upsert(next);
+          broadcast("attendance:history", next);
+        },
+      });
+    }
+  } catch (err) {
+    // Nothing has been written, so this costs the operator nothing but the
+    // answer. The REASON is logged, never returned: a raw filesystem error
+    // names a path, and this response reaches a LAN-visible page.
+    console.warn(`[history] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
+    throw new RebuildFailedError(errorMessage(err));
+  }
+
+  if (pending.length === 0) {
+    console.log(`[history] rebuild of ${scrub(serviceKey)}: no raw rows, nothing changed`);
+    throw new NoRawRowsError();
+  }
+
+  // ── Now write ──
+  //
+  // A write that fails before ANY has landed is still "nothing changed", and
+  // says so with a throw. One that fails after another landed cannot be undone,
+  // so it is reported instead: the operator is looking at a half-rebuilt
+  // service and the answer has to name which half. See CLAUDE.md — a function
+  // that can partially fail returns what failed.
+  let landed = 0;
+  for (const leg of pending) {
+    try {
+      await leg.write();
+      landed += 1;
+    } catch (err) {
+      console.warn(
+        `[history] rebuild of ${scrub(serviceKey)}: could not write the ${scrub(leg.name)} record: ${scrub(errorMessage(err))}`,
+      );
+      outcome[leg.name].rebuilt = false;
+      if (landed === 0) throw new RebuildFailedError(errorMessage(err));
+      outcome.failed.push(leg.name);
+    }
+  }
+
+  // Written out at both call sites rather than through a `line` variable: the
+  // log-injection scan reads the ARGUMENT of a console call, and a variable it
+  // cannot follow is exactly the shape that lets an unscrubbed value through.
+  if (outcome.failed.length) {
+    console.warn(`[history] rebuilt ${scrub(serviceKey)} from raw: ${scrub(summarise(outcome))}`);
+  } else {
+    console.log(`[history] rebuilt ${scrub(serviceKey)} from raw: ${scrub(summarise(outcome))}`);
+  }
+  return outcome;
+}
+
+/** The three legs, with the noun each counts. Named once so the log line and
+ *  the outcome cannot drift into describing different things. */
+const LEGS = [
+  ["timeline", "timeline items"],
+  ["spl", "SPL items"],
+  ["attendance", "attendance samples"],
+] as const;
+
+type LegName = (typeof LEGS)[number][0];
+
+/** "12 timeline items, 24 SPL items; left alone: attendance" — what was derived
+ *  and, explicitly, what was not. The half that was missing is the half an
+ *  operator debugging this on a Sunday needs. */
+function summarise(outcome: RebuildOutcome): string {
+  const rebuilt = LEGS.filter(([n]) => outcome[n].rebuilt).map(([n, noun]) => `${outcome[n].items} ${noun}`);
+  const left = LEGS.filter(([n]) => !outcome[n].rebuilt && !outcome[n].missing).map(([, noun]) => noun);
+  const parts = [rebuilt.join(", ") || "nothing"];
+  if (left.length) parts.push(`left alone: ${left.join(", ")}`);
+  if (outcome.failed.length) parts.push(`FAILED to write: ${outcome.failed.join(", ")}`);
+  return parts.join("; ");
 }
 
 /**
@@ -369,7 +787,7 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<bool
     .map(([base, n]) => `${n} ${base}`)
     .join(", ");
   console.log(
-    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: moved ${summary || "no rows"} ` +
+    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: moved ${scrub(summary || "no rows")} ` +
       `into ${scrub(targetDate)}; removed the source archive.`,
   );
   return true;
@@ -417,22 +835,33 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     serviceTimelineStore.get(targetKey),
   ]);
   if (srcTl && tgtTl) {
-    const have = new Set(tgtTl.items.map((i) => i.itemId));
-    for (const it of srcTl.items) if (!have.has(it.itemId)) tgtTl.items.push(it);
+    // Item time corrections are keyed by (itemId, sequence) and this block
+    // renumbers every sequence, so bind each side's edits to their ITEM OBJECTS
+    // first and re-key from the new numbers after. mergeItemRuns returns the
+    // references it was given, so identity is what survives the renumber.
+    // Without this the operator's corrections would still be in the merged
+    // record and would land, silently, on whichever rows took those numbers.
+    const boundEdits = bindItemTimeEdits(tgtTl, srcTl);
+    // By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a
+    // source that ran an item twice contributed at most one of them.
+    tgtTl.items = mergeItemRuns(tgtTl.items, srcTl.items);
     tgtTl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
     tgtTl.items.forEach((it, i) => { it.sequence = i; });
+    const rekeyed = rekeyItemTimeEdits(boundEdits, tgtTl.items);
+    if (rekeyed.length) tgtTl.itemTimeEdits = rekeyed;
+    else delete tgtTl.itemTimeEdits;
     const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
     if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
     await serviceTimelineStore.upsert(tgtTl);
     await serviceTimelineStore.delete(sourceKey);
-    broadcast("service-timeline:history", tgtTl);
+    broadcastTimeline(tgtTl);
     outcome.merged.push("timeline");
   } else if (srcTl) {
     // Source-only: re-key rather than leave it behind over a moved archive.
     const moved = adoptIdentity(srcTl, targetIdentity);
     await serviceTimelineStore.upsert(moved);
     await serviceTimelineStore.delete(sourceKey);
-    broadcast("service-timeline:history", moved);
+    broadcastTimeline(moved);
     outcome.moved.push("timeline");
   }
 
@@ -495,8 +924,11 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     splHistoryStore.get(targetKey),
   ]);
   if (srcSpl && tgtSpl) {
-    const have = new Set(tgtSpl.items.map((i) => i.itemId));
-    for (const it of srcSpl.items) if (!have.has(it.itemId)) tgtSpl.items.push(it);
+    // By RUN, as the timeline above, and re-ordered by when each run actually
+    // started so a run taken from the source lands where it happened rather than
+    // after everything this box recorded.
+    tgtSpl.items = mergeItemRuns(tgtSpl.items, srcSpl.items);
+    tgtSpl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
     tgtSpl.items.forEach((it, i) => { it.sequence = i; });
     if (srcSpl.endedAt && (!tgtSpl.endedAt || Date.parse(srcSpl.endedAt) > Date.parse(tgtSpl.endedAt))) {
       tgtSpl.endedAt = srcSpl.endedAt;
@@ -515,8 +947,9 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
 
   console.log(
     `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: ` +
-      `merged [${outcome.merged.join(", ") || "none"}], re-keyed [${outcome.moved.join(", ") || "none"}], ` +
-      `archive ${outcome.archivesMoved ? "moved" : "left in place"}.`,
+      `merged [${scrub(outcome.merged.join(", ") || "none")}], ` +
+      `re-keyed [${scrub(outcome.moved.join(", ") || "none")}], ` +
+      `archive ${scrub(outcome.archivesMoved ? "moved" : "left in place")}.`,
   );
   return outcome;
 }

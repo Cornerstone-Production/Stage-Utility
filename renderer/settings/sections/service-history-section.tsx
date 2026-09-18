@@ -1,22 +1,26 @@
 import { errorMessage } from "@main/services/errors";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
-import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon, RotateCcwIcon, EllipsisIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, DownloadIcon, EllipsisIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
+import { logToServer } from "../../lib/client-log";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
-import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
-import { SplDetail } from "./spl-history-section";
+import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
+import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
+import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
+import { useStoredKeysVersion } from "./history-chart";
+import { TrendsCard } from "./history-trends/trends-card";
+import type { TrendRecording } from "./history-trends/trends";
 import {
   computeOverview,
   summarize,
@@ -60,24 +64,101 @@ function fromTimeInput(serviceDate: string, hhmm: string): string | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
+/** ISO → local "HH:MM:SS", for an item field. Seconds, unlike the service window
+ *  above: an item's whole point is its DURATION, and a minute-resolution field
+ *  cannot say "two minutes" about something that started at 20:15:33. */
+function toItemTimeInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
+ * Local "HH:MM[:SS]" on the same local DAY as `anchorIso` → ISO.
+ *
+ * Anchored on the item's OWN recorded stamp rather than the record's
+ * serviceDate, so an item that ran after midnight keeps its own date instead of
+ * being dragged back to the day the service started on.
+ */
+function fromItemTimeInput(anchorIso: string | null, hhmmss: string): string | undefined {
+  if (!hhmmss) return undefined;
+  const anchor = anchorIso ? new Date(anchorIso) : null;
+  if (!anchor || Number.isNaN(anchor.getTime())) return undefined;
+  const [h, m, sec] = hhmmss.split(":");
+  const d = new Date(anchor);
+  d.setHours(Number(h), Number(m), Number(sec ?? 0), 0);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/** A row's identity in the edit-times form. An item can run twice in one record,
+ *  so the id alone would stack two rows' fields on top of each other. */
+function rowKey(it: ServiceTimelineItem): string {
+  return `${it.itemId}:${it.sequence}`;
+}
+
+/** "recorded 11:22, edited to 2:00" — the durations, which is what the operator
+ *  changed. Falls back to the stamps when either side is still open and there is
+ *  no duration to compare.
+ *
+ *  Exported so a test can assert the string: a Radix tooltip's text is in the
+ *  DOM only while it is open, and opening one needs a pointer jsdom has not got. */
+export function editedTooltip(it: ServiceTimelineItem): string {
+  const was = it.editedFrom;
+  if (!was) return "";
+  if (was.actualDurationSec != null && it.actualDurationSec != null) {
+    return `recorded ${fmtDur(was.actualDurationSec)}, edited to ${fmtDur(it.actualDurationSec)}`;
+  }
+  const span = (start: string, end: string | null) => `${fmtTime(start)}–${end ? fmtTime(end) : "still running"}`;
+  return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
+}
 
 
 
 
 
-/** Mean per-item over/under (seconds) + how many ran over, for items with both
- *  planned and actual times. */
-function overrunStats(tl: ServiceTimeline) {
-  const deltas = tl.items
-    .filter((it) => isCountedItem(it, tl) && it.plannedLengthSec != null && it.actualDurationSec != null)
-    .map((it) => (it.actualDurationSec as number) - (it.plannedLengthSec as number));
-  if (!deltas.length) return { avg: null as number | null, over: 0, total: 0 };
-  return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
+
+/** One record's share of a Rebuild from raw — mirrors RebuiltRecord in
+ *  main/services/history-edit.ts. */
+interface RebuiltRecord {
+  rebuilt: boolean;
+  items: number;
+  missing: boolean;
+}
+interface RebuildOutcome {
+  timeline: RebuiltRecord;
+  spl: RebuiltRecord;
+  attendance: RebuiltRecord;
+  failed: string[];
+}
+
+/** The three legs and the noun each one counts, in the order they are reported. */
+const REBUILD_LEGS = [
+  ["timeline", "item timings"],
+  ["spl", "SPL items"],
+  ["attendance", "attendance samples"],
+] as const;
+
+/**
+ * What a rebuild actually did, in a sentence.
+ *
+ * Says what was LEFT ALONE, not only what was derived. A bare count read as an
+ * achievement even for a record the raw layer had nothing for — which is how a
+ * rebuild that changed nothing once reported "Rebuilt: 12 items".
+ */
+export function describeRebuild(out: RebuildOutcome): string {
+  const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
+  const left = REBUILD_LEGS.filter(([k]) => !out[k].rebuilt && !out[k].missing).map(([, noun]) => noun);
+  const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
+  if (left.length) parts.push(`left alone: ${left.join(", ")}`);
+  if (out.failed.length) parts.push(`could not save: ${out.failed.join(", ")}`);
+  return parts.join(" · ");
 }
 
 /** Baptism sessions that overlap a service's recorded window. */
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
-function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
+export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
   const o = overrunStats(tl);
   const L: string[] = [];
@@ -94,9 +175,21 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
     L.push(`${i + 1}. ${it.title || "—"}  plan ${fmtDur(it.plannedLengthSec)}  actual ${it.endedAt == null ? "(live)" : fmtDur(it.actualDurationSec)}${d != null ? `  ${fmtDelta(d)}` : ""}`);
   });
   if (att) {
-    const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
+    // `averageOccupancy`, the SAME derivation the Attendance card's Average
+    // figure uses. This averaged every sample instead, which is the bug that
+    // function was written to fix — the arrival ramp and the emptying-room
+    // taper are both long and both near-empty, so the mean lands BELOW the
+    // recorded low. On the 17 Sep recording the pasted report said "Avg in-room
+    // 781" for a service whose Lowest was 933, under a card reading 1,164. The
+    // card was fixed and this copy drifted on.
+    const avgOcc = averageOccupancy(att);
     L.push("", "ATTENDANCE");
-    L.push(`Peak attendance ${servicePeakAttendance(att).toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+    // Attendance is people in the room; entries is how many came in during the
+    // service. This had them swapped — a pasted report said "Peak attendance
+    // 2,061 · Peak in-room 1,196" for a service that recorded a peak of 1,196
+    // in the room and 1,727 through the doors. Both are the recorder's own
+    // stored fields, so the report and the screen cannot disagree.
+    L.push(`Peak attendance ${att.peakOccupancy.toLocaleString()} · Entries ${att.peakAttendance.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
   }
   if (spl && spl.items.length) {
     L.push("", "AUDIO — peak SPL (dB)");
@@ -129,6 +222,10 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
  * service that hasn't gone live yet has attendance but no timeline. Union'd on
  * `serviceKey` so that service is still one row, not a missing one.
  */
+/** The three loads the page opens with. Named so a failure can be attributed to
+ *  one of them rather than to "history". */
+type HistoryLoad = "timeline" | "attendance" | "spl";
+
 interface HistoryRow {
   serviceKey: string;
   serviceDate: string;
@@ -168,6 +265,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   /** One level per service — the SPL trend line's data. A summary, not the
    *  archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  /**
+   * The Overview's level preference. Only `metric` is read now — `shown` gated a
+   * trend line on a chart this page no longer draws, and then a figure that has
+   * no reason to be hidden. It is not deleted: it is the operator's own stored
+   * choice, and deleting somebody's data to tidy something up is not a thing
+   * this repo does. Nothing writes it any more. Same treatment as
+   * settings.splVisibleMetrics, for the same reason.
+   */
   const [splTrend, setSplTrend] = useState<{ shown: boolean; metric: string | null }>({
     shown: false,
     metric: null,
@@ -186,6 +291,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [editingTimes, setEditingTimes] = useState(false);
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
+  /** Per-row time fields, keyed by rowKey(), holding ONLY what the operator has
+   *  typed. A row with no entry renders from the record, so a save (or another
+   *  operator's edit arriving over SSE) drops through without clobbering a row
+   *  being typed in elsewhere in the table. */
+  const [itemTimeDraft, setItemTimeDraft] = useState<Record<string, { start: string; end: string }>>({});
+  /** Rows with a save in flight, so a double-click cannot send two. */
+  const [itemTimeSaving, setItemTimeSaving] = useState<Set<string>>(new Set());
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -222,25 +334,74 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       });
   }
 
-  function reload() {
+  /**
+   * Which of the three history loads FAILED, as opposed to came back empty.
+   *
+   * All three used to `.catch(() => set…([]))`, which is the same shape three
+   * times and the same lie three times: a server that was down, or a request
+   * that timed out, read as "No service timings recorded yet" and "No sound
+   * recorded yet". Three found, three changed. Each failure now names itself on
+   * a `[history]` line AND is visible on the surface it starved:
+   *
+   *   timeline / attendance   the empty state says the history could not be read
+   *   spl                     the Trends card says the sound summary is missing
+   */
+  const [loadFailed, setLoadFailed] = useState<ReadonlySet<HistoryLoad>>(new Set());
+  // Stable, all three of them: `reload` closes over these and the mount effect
+  // closes over `reload`, so anything rebuilt per render would make the effect
+  // a dependency of every render and reload the whole history on each one.
+  // Functional setState throughout, so none of them needs the current value.
+  const noteFailure = useCallback((which: HistoryLoad, what: string, err: unknown) => {
+    logToServer("history", `could not read ${what}: ${errorMessage(err)}`);
+    setLoadFailed((prev) => (prev.has(which) ? prev : new Set(prev).add(which)));
+  }, []);
+  /** A load that came back clears its own failure, so a retry that works stops
+   *  the page saying otherwise. */
+  const noteLoaded = useCallback((which: HistoryLoad) =>
+    setLoadFailed((prev) => {
+      if (!prev.has(which)) return prev;
+      const next = new Set(prev);
+      next.delete(which);
+      return next;
+    }), []);
+
+  const reload = useCallback(() => {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
-      .then((l) => setList(l))
-      .catch(() => setList([]));
-  }
+      .then((l) => {
+        setList(l);
+        noteLoaded("timeline");
+      })
+      .catch((e) => {
+        setList([]);
+        noteFailure("timeline", "the service timings", e);
+      });
+  }, [noteFailure, noteLoaded]);
   useEffect(() => {
     reload();
     invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((a) => setAttList(a ?? []))
-      .catch(() => setAttList([]));
+      .then((a) => {
+        setAttList(a ?? []);
+        noteLoaded("attendance");
+      })
+      .catch((e) => {
+        setAttList([]);
+        noteFailure("attendance", "the attendance history", e);
+      });
     invoke<SplServiceSummary[]>("spl:getSummary")
-      .then((r) => setSplList(r ?? []))
-      .catch(() => setSplList([]));
+      .then((r) => {
+        setSplList(r ?? []);
+        noteLoaded("spl");
+      })
+      .catch((e) => {
+        setSplList([]);
+        noteFailure("spl", "the sound summary", e);
+      });
     invoke<{ shown: boolean; metric: string | null }>("spl:getTrendPrefs")
       .then((p) => setSplTrend(p))
       .catch(() => {
         /* the chart draws without the line; the toggle is still offered */
       });
-  }, []);
+  }, [reload, noteFailure, noteLoaded]);
 
   // Live updates while a service is recording — refresh the open detail/list, the
   // attendance chart (samples), and SPL, all without a page reload.
@@ -324,6 +485,57 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }));
     return [...tlRows, ...attOnlyRows].sort((a, b) => Date.parse(b.startsAt ?? "") - Date.parse(a.startsAt ?? ""));
   }, [list, attList]);
+  /**
+   * The same recordings, reduced to what the Trends card draws from.
+   *
+   * Derived from `rows` rather than fetched: the list already holds every
+   * timeline record and every attendance record, and a trend is those grouped
+   * by service type instead of by day. There is no route for trend data and
+   * there does not need to be one.
+   *
+   * A row with no attendance record carries a null peak and is not plotted — a
+   * service nobody counted is not a service of zero people.
+   */
+  /** The rows AND the Trends card's sound measure follow the Sound card's
+   *  metric choice, which lives in localStorage and is written by a component
+   *  React knows nothing about — the same dependency the service header carries
+   *  for the same reason. Declared here, above every reader: it is a `const`,
+   *  so a use further up the body is a temporal-dead-zone throw, not a stale
+   *  value. */
+  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+
+  const trendRecordings = useMemo<TrendRecording[]>(
+    () => {
+      // Read so the subscription is not "unused". The VALUE is never wanted;
+      // the hook's own state update is what re-renders when Customize writes a
+      // different metric, and without it the chart and the rows would go on
+      // quoting the old metric's peak until the page was reopened.
+      void metricsVersion;
+      const splByKey = new Map(splList.map((x) => [x.serviceKey, x]));
+      return rows.map((r) => {
+        // The SPL SUMMARY, not the record. It is already loaded for this page,
+        // it carries a peak per metric (see SplServiceSummary.metrics), and the
+        // trend plots one point per recording across up to 52 weeks — fetching
+        // every full record for that would be hundreds of files to answer one
+        // number each. The primary-metric rule is the rows' own, imported, so
+        // the chart and a row cannot name different metrics.
+        const summary = splByKey.get(r.serviceKey);
+        const metric = summary ? primaryMetricOf(Object.keys(summary.metrics)) : null;
+        return {
+          serviceKey: r.serviceKey,
+          serviceTypeId: r.serviceTypeId,
+          serviceTypeName: r.serviceTypeName ?? null,
+          serviceDate: r.serviceDate,
+          t: Date.parse(r.startsAt ?? `${r.serviceDate}T00:00:00`),
+          seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
+          peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
+          peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
+        };
+      });
+    },
+    [rows, splList, metricsVersion],
+  );
+
   /** The row for the current selection, if any — known synchronously from `list`/
    *  `attList` (no fetch to wait on), so it tells the detail view whether a
    *  timeline record is ever coming for this key without racing `detail`'s own
@@ -441,27 +653,61 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   };
 
   const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
+
+  /**
+   * The SPL record behind each of the SELECTED DAY's rows, so a row's peak
+   * level is the same figure the service page's header quotes.
+   *
+   * Per day rather than for the whole history on purpose: `spl:getSummary`
+   * (already loaded, above) carries a service-level Leq per metric and no PEAK
+   * at all, so a row built from it would be labelled "Peak" and be showing an
+   * energy average. The full record is the only thing that has the peak, and a
+   * day is one to four of them — not a year of them.
+   *
+   * A FAILED read and a service that recorded no sound are told apart. Both
+   * used to land as `null`, which `servicePeakLevel` reads as "no sound
+   * recorded" — so a server that was down, or a request that timed out, told
+   * the operator their meter had not been recording. `"error"` is its own
+   * state, the row says "sound unavailable", and the reason is logged per key.
+   */
+  type RowSpl = ServiceSplHistory | null | "error";
+  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
+  // The key list, as a stable string: `dayServices` is a fresh array every
+  // render and would refetch the day's SPL on each one.
+  const dayKeys = dayServices.map((s) => s.serviceKey).join("|");
+  useEffect(() => {
+    const keys = dayKeys ? dayKeys.split("|") : [];
+    // Nothing to fetch, and nothing to clear: every lookup is by serviceKey, so
+    // a map left over from the previous day can only ever miss. Clearing it here
+    // would be a setState in an effect body — a cascading render — to no end.
+    if (!keys.length) return;
+    let cancelled = false;
+    Promise.all(
+      keys.map((key) =>
+        invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: key })
+          .then((rec) => [key, rec] as const)
+          .catch((err): readonly [string, RowSpl] => {
+            // One line per key that failed, not one for the batch: a day where
+            // one of three services will not load is a different problem from a
+            // day where none of them will, and the line has to say which.
+            logToServer("history", `could not read the sound record for ${key}: ${errorMessage(err)}`);
+            return [key, "error"] as const;
+          }),
+      ),
+    ).then((pairs) => {
+      if (!cancelled) setSplByKey(new Map(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dayKeys, reloadKey]);
+
   // Per-day service counts for the calendar (respects the type filter).
   const dateCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of filtered) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
     return m;
   }, [filtered]);
-
-  // Per-day attendance intensity (0..1) for the calendar heatmap: a day's peak
-  // in-room count, normalized to the busiest recorded day. Global (all types) — the
-  // calendar is a stable navigation surface; the overview does the type scoping.
-  const dateIntensity = useMemo(() => {
-    const peak = new Map<string, number>();
-    for (const a of attList) {
-      if (a.peakOccupancy <= 0) continue;
-      peak.set(a.serviceDate, Math.max(peak.get(a.serviceDate) ?? 0, a.peakOccupancy));
-    }
-    const max = Math.max(0, ...peak.values());
-    const m = new Map<string, number>();
-    if (max > 0) for (const [d, v] of peak) m.set(d, v / max);
-    return m;
-  }, [attList]);
 
   // Small summary shown beneath the calendar for the selected day: how many
   // services + their average peak in-room (scoped to the active type filter).
@@ -534,12 +780,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }
 
   if (rows.length === 0) {
+    // A failed READ is not an empty history. Both used to say "nothing has been
+    // recorded yet", which sends an operator to look at a recorder that is fine.
+    const unread = loadFailed.has("timeline") || loadFailed.has("attendance");
     return (
       <div className="py-8">
         <EmptyState
           icon={<ClockIcon />}
-          title="No service timings recorded yet"
-          hint="Item timings are captured automatically while a service runs in Planning Center Live — when each item goes live and how long it runs versus its planned length."
+          title={unread ? "The recorded history could not be read" : "No service timings recorded yet"}
+          hint={
+            unread
+              ? "The server did not answer. Nothing has been lost — reload the page, and see the server log for the reason."
+              : "Item timings are captured automatically while a service runs in Planning Center Live — when each item goes live and how long it runs versus its planned length."
+          }
         />
       </div>
     );
@@ -547,23 +800,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
   // ── Detail: one service's actual rundown. ──
   if (detail) {
-    const live = detail.endedAt == null;
-    const sum = summarize(detail, live ? nowTick : undefined);
-    const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
-    const over = overrunStats(detail);
-    // Projected end = actual start + planned length; actual end = the record's
-    // finalized end (else the last item that closed). Shown as card subscripts.
-    const firstStartMs = Date.parse(sum.firstStart);
-    const projectedEnd =
-      sum.planned != null && Number.isFinite(firstStartMs)
-        ? new Date(firstStartMs + sum.planned * 1000).toISOString()
-        : null;
-    // Actual end = the last COUNTED item's end (excludes trailing buffer / pre-service).
-    const actualEnd = [...detail.items].reverse().find((it) => isCountedItem(it, detail) && it.endedAt)?.endedAt ?? detail.endedAt ?? null;
-    const actualSub = [
-      totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : null,
-      actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
-    ].filter(Boolean).join(" · ") || undefined;
+    // The service-level timing figures live in the header now — `serviceKpis`
+    // derives every one of them from the record, so nothing here recomputes
+    // them. Leaving the tiles in place beside the header put Started, Planned,
+    // Actual and Avg overrun on screen twice.
     const det = detail; // narrow for the async handler
     const linkedBap = linkBaptisms(baptisms, detail);
     const bapStats = baptismStats(linkedBap);
@@ -575,6 +815,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     function startEditTimes() {
       setEditStart(toTimeInput(det.startedAt));
       setEditEnd(toTimeInput(det.endedAt));
+      setItemTimeDraft({}); // rows render from the record until they are typed in
       setEditingTimes(true);
     }
     async function saveTimes() {
@@ -598,6 +839,30 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         toast.success("Attendance recalculated");
       } catch {
         toast.error("Recalculate failed");
+      }
+    }
+    async function rebuildFromRaw() {
+      if (!(await confirm({
+        title: "Rebuild from raw?",
+        message:
+          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. The raw rows themselves are not touched.",
+        confirmLabel: "Rebuild",
+        destructive: true,
+      }))) return;
+      try {
+        const out = await invoke<RebuildOutcome>("history:rebuild", { serviceKey: det.serviceKey });
+        setReloadKey((k) => k + 1);
+        // Names what was LEFT ALONE as well as what was derived. A count on its
+        // own read as an achievement even for a record the raw layer had
+        // nothing for, which is exactly how a rebuild that changed nothing
+        // reported "Rebuilt: 12 items".
+        const msg = describeRebuild(out);
+        if (out.failed.length) toast.error(msg);
+        else toast.success(msg);
+      } catch (e) {
+        // Say why. The most likely refusal — the service is still recording —
+        // is one the operator can act on.
+        toast.error(`Rebuild failed: ${errorMessage(e)}`);
       }
     }
     async function doResetPacing() {
@@ -637,6 +902,122 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         toast.error(`Merge failed: ${errorMessage(e)}`);
       }
     }
+    /** The values a row's two fields show: what has been typed, else the record. */
+    function draftFor(it: ServiceTimelineItem): { start: string; end: string } {
+      return itemTimeDraft[rowKey(it)] ?? { start: toItemTimeInput(it.startedAt), end: toItemTimeInput(it.endedAt) };
+    }
+    function setDraft(it: ServiceTimelineItem, patch: Partial<{ start: string; end: string }>) {
+      const key = rowKey(it);
+      setItemTimeDraft((d) => ({ ...d, [key]: { ...draftFor(it), ...patch } }));
+    }
+    function itemTimesDirty(it: ServiceTimelineItem): boolean {
+      const d = itemTimeDraft[rowKey(it)];
+      if (!d) return false;
+      return d.start !== toItemTimeInput(it.startedAt) || d.end !== toItemTimeInput(it.endedAt);
+    }
+
+    /**
+     * Save ONE row.
+     *
+     * Per row rather than one Save for the whole table, unlike the service
+     * window form above it. That form posts a single request carrying both of
+     * its fields; item corrections are one request per row, so a single Save
+     * would fan out N of them and could half-succeed — and there is no honest
+     * thing to put in the toast when it does. The counted checkbox in the same
+     * row already commits on its own for the same reason.
+     */
+    async function saveItemTimes(it: ServiceTimelineItem) {
+      const key = rowKey(it);
+      if (itemTimeSaving.has(key)) return;
+      const d = draftFor(it);
+      // The RECORDED stamps — what the fields are compared against, and the anchor
+      // for the date an HH:MM:SS is put back onto.
+      const wasStart = it.editedFrom?.startedAt ?? it.startedAt;
+      const wasEnd = it.editedFrom?.endedAt ?? it.endedAt;
+      /**
+       * null for a field that still reads what was recorded.
+       *
+       * Not merely tidy: the fields carry whole seconds and the recorder writes
+       * milliseconds, so sending an untouched Started back put a 0.9s override on
+       * it — the row was marked edited for a field nobody touched, and Reset had
+       * something to undo that had never been done. A blank field clears the
+       * override too, rather than meaning midnight.
+       *
+       * `recorded` being null means the recorder never wrote that stamp — an item
+       * still on air has no end — so there is nothing for a typed value to match
+       * and ANY typed value is an edit. Comparing against the start instead, as
+       * this used to, meant typing the item's own start time into its empty Ended
+       * field silently cleared the field rather than saving it. The start is
+       * still the DATE the time is put back onto, which is all it was ever good
+       * for here.
+       */
+      const field = (typed: string, recorded: string | null) => {
+        if (!typed) return null;
+        if (recorded != null && typed === toItemTimeInput(recorded)) return null;
+        return fromItemTimeInput(recorded ?? it.startedAt, typed) ?? null;
+      };
+      const startedAt = field(d.start, wasStart);
+      const endedAt = field(d.end, wasEnd);
+      setItemTimeSaving((s) => new Set(s).add(key));
+      try {
+        const saved = await invoke<ServiceTimeline>("history:setItemTimes", {
+          serviceKey: det.serviceKey,
+          itemId: it.itemId,
+          sequence: it.sequence,
+          startedAt,
+          endedAt,
+        });
+        // Drop the draft so the row re-renders from the record.
+        setItemTimeDraft((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        // Render what the ROUTE answered rather than waiting for the broadcast.
+        // The answer is the authority — it is the record the server actually
+        // stored, overlay applied — and relying on the SSE push meant the row
+        // sat on its old value for as long as the round trip took, and did not
+        // update at all on a client whose stream had dropped. The push still
+        // arrives and still agrees; this just does not need it.
+        if (saved && typeof saved === "object" && Array.isArray(saved.items)) setDetail(saved);
+        toast.success("Item times updated");
+      } catch (e) {
+        toast.error(`Couldn't update this item: ${errorMessage(e)}`);
+      } finally {
+        setItemTimeSaving((s) => {
+          const next = new Set(s);
+          next.delete(key);
+          return next;
+        });
+      }
+    }
+
+    /** Clear a row's override: the recorded times come back. */
+    async function resetItemTimes(it: ServiceTimelineItem) {
+      const key = rowKey(it);
+      try {
+        const saved = await invoke<ServiceTimeline>("history:setItemTimes", {
+          serviceKey: det.serviceKey,
+          itemId: it.itemId,
+          sequence: it.sequence,
+          startedAt: null,
+          endedAt: null,
+        });
+        // Reset discards what was typed as well as what was stored — that is what
+        // makes it reachable on a dirty row: "put it back" has to work while the
+        // fields are mid-edit, which is exactly when an operator wants it.
+        setItemTimeDraft((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        if (saved && typeof saved === "object" && Array.isArray(saved.items)) setDetail(saved);
+        toast.success("Item times reset to the recording");
+      } catch (e) {
+        toast.error(`Couldn't reset this item: ${errorMessage(e)}`);
+      }
+    }
+
     async function toggleCounted(item: ServiceTimelineItem) {
       // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
       try {
@@ -646,55 +1027,44 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }
     }
     // The include/exclude checkbox column only shows while editing times.
-    // Mobile drops #, Plan, and Ended (see the max-sm:hidden cells) so the item name
-    // isn't crushed; sm+ shows the full grid. Templates must match the visible cells.
+    // Mobile drops #, Plan, Started and Ended (see the max-sm:hidden cells) so the
+    // item name isn't crushed; sm+ shows the full grid. Templates must match the
+    // visible cells. Started and Ended are wider in edit mode because they hold an
+    // HH:MM:SS field there rather than a formatted time.
     const gridCols = editingTimes
-      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem]"
-      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
+      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]"
+      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]";
+    // Series · service type · date · time, in one muted line. Blank parts drop
+    // out rather than leaving a dangling separator.
+    const metaLine = [
+      detail.seriesTitle,
+      detail.serviceTypeName,
+      fmtDate(detail.startedAt),
+      fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt),
+    ].filter(Boolean).join(" · ");
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex flex-col min-w-0">
-            <span className="text-title3 font-semibold text-gray-12">
-              {detail.planTitle ?? detail.serviceKey}
-              {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
-            </span>
-            <span className="text-caption1 text-gray-9">
-              {detail.seriesTitle ? `${detail.seriesTitle} · ` : ""}
-              {fmtDate(detail.startedAt)}
-              {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
-            {!readOnly && live && (
-              <Button variant="filled" size="small" onClick={doResetPacing} tooltip="Stop items before now from counting toward the pacing readout — the recording itself is untouched">
-                <RotateCcwIcon className="size-3.5 text-gray-9" /> Reset pacing
-              </Button>
-            )}
-            {!readOnly && (
-              <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
-                <ClockIcon className="size-3.5 text-gray-9" /> Edit times
-              </Button>
-            )}
-            <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
-              <CopyIcon className="size-3.5 text-gray-9" /> Copy report
-            </Button>
-            {!readOnly && mergeCandidates.length > 0 && (
-              <Button variant="filled" size="small" onClick={() => { setMerging((v) => !v); setEditingTimes(false); }} tooltip="Merge this recording into another service (fixes a split service), then delete this one">
-                <GitMergeIcon className="size-3.5 text-gray-9" /> Merge…
-              </Button>
-            )}
-          </div>
-        </div>
+        <ServiceHeader
+          timeline={detail}
+          attendance={attendance}
+          spl={spl}
+          now={nowTick}
+          readOnly={readOnly}
+          meta={metaLine}
+          onBack={() => setSelectedKey(null)}
+          onEditTimes={startEditTimes}
+          onCopyReport={copyReport}
+          onMerge={mergeCandidates.length > 0 ? () => { setMerging((v) => !v); setEditingTimes(false); } : undefined}
+          onRebuild={rebuildFromRaw}
+          onDelete={() => void deleteService(det.serviceKey, det.planTitle ?? det.serviceKey)}
+          onResetPacing={doResetPacing}
+        />
         {merging && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-6 bg-amber-2/40 p-3">
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-warn-9/40 bg-warn-9/8 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               Merge this recording into
               <Select value={mergeTarget} onValueChange={setMergeTarget}>
-                <SelectTrigger className="h-auto rounded-md border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12">
+                <SelectTrigger className="h-auto rounded-md border-line-strong bg-field px-2 py-1 text-caption1 text-fg">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -709,56 +1079,68 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </label>
             <Button variant="accent" size="small" disabled={!mergeTarget} onClick={doMerge}>Merge + delete this</Button>
             <Button variant="transparent" size="small" onClick={() => setMerging(false)}>Cancel</Button>
-            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
+            <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
               Moves this recording's items + attendance samples into the chosen service (matching items aren't duplicated), then deletes this record. For reuniting a service split across two records (e.g. one that overran into the next occurrence).
             </span>
           </div>
         )}
         {editingTimes && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-5 bg-gray-2 p-3">
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-fill/40 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               Start
-              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               End
-              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
             <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
-            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service.
+            <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
             </span>
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
-          <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" sub={projectedEnd ? `ends ${fmtTime(projectedEnd)}` : undefined} />
-          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-accent" sub={actualSub} />
-          <Stat label="Avg overrun" value={over.avg != null ? fmtDelta(over.avg) : "—"} accent={over.avg != null && over.avg > 0 ? "text-red-11" : "text-gray-12"} sub={over.total ? `${over.over} of ${over.total} over` : undefined} />
-        </div>
-
-        <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-          <div className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}>
+        {/* Three cards under the header, one per nav anchor. The links are real
+            anchors and the header is sticky; what keeps a jump from landing the
+            heading UNDER the header is the scrolling pane's own scroll padding,
+            measured from this header (shell.tsx). */}
+        <SectionCard id="history-rundown" title="Rundown">
+        {/* The app's type scale, not the table's own: 10px uppercase headers
+            over 13px rows, every number mono and tabular so the columns line up
+            down the page. The marks — live, not counted, edited — and the two
+            row buttons were each on a bespoke 10px; they are on the scale's
+            11px caption now. Nothing about what the table DOES changed. */}
+        <div className="flex flex-col overflow-hidden rounded-lg border border-line">
+          <div
+            data-testid="rundown-header"
+            className={`grid ${gridCols} gap-2 border-b border-line bg-fill px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle`}
+          >
             {editingTimes && (
               <Tooltip label="Whether this item counts toward the service timers">
                 <span className="text-center">✓</span>
               </Tooltip>
             )}
-            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Ended</span>
+            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Started</span><span className="text-right max-sm:hidden">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
             const counted = isCountedItem(it, detail); // buffer + pre-service shown but not totaled
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
-            const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
+            const deltaColor = delta == null ? "text-fg-subtle" : delta > 30 ? "text-danger-11" : delta < -30 ? "text-accent" : "text-fg-muted";
+            // `editedFrom` is set by the server's overlay and only on a row that
+            // actually differs from what was recorded — the marker cannot lie.
+            const edited = it.editedFrom != null;
+            const draft = draftFor(it);
+            const dirty = itemTimesDirty(it);
+            const saving = itemTimeSaving.has(rowKey(it));
             return (
               // Keyed by sequence too: a plan item can run twice in one record
               // (reprised, or a second service caught before the split), and a
               // duplicate React key drops the second row's state onto the first.
-              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} items-center gap-2 px-3 py-1.5 text-footnote ${i % 2 ? "bg-fill/40" : ""} ${counted ? "" : "opacity-55"}`}>
                 {editingTimes && (
                   <Tooltip
                     label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}
@@ -771,58 +1153,130 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     />
                   </Tooltip>
                 )}
-                <span className="text-gray-9 max-sm:hidden">{i + 1}</span>
-                <span className="text-gray-12 truncate">
+                <span className="font-mono tabular-nums text-fg-subtle max-sm:hidden">{i + 1}</span>
+                <span className="truncate text-fg">
                   {it.title || "—"}
-                  {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
-                  {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                  {itemLive && <span className="ml-1.5 text-caption2 text-live-11">live</span>}
+                  {!counted && <span className="ml-1.5 text-caption2 italic text-fg-subtle">not counted</span>}
+                  {edited && (
+                    <Tooltip label={editedTooltip(it)}>
+                      <span className="ml-1.5 text-caption2 italic text-warn-11">edited</span>
+                    </Tooltip>
+                  )}
+                  {editingTimes && dirty && (
+                    <button
+                      className="ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10 max-sm:hidden"
+                      disabled={saving}
+                      aria-label={`Save times — ${it.title || "item"}`}
+                      onClick={() => void saveItemTimes(it)}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                  )}
+                  {/* Offered whenever the row IS edited, dirty or not. Hidden
+                      while dirty, an operator who started retyping had no way
+                      back to the recording without first undoing their own
+                      typing — and mid-edit is exactly when "put it back" is
+                      wanted. Reset discards the draft along with the override. */}
+                  {editingTimes && edited && (
+                    <button
+                      className="ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill max-sm:hidden"
+                      aria-label={`Reset times — ${it.title || "item"}`}
+                      onClick={() => void resetItemTimes(it)}
+                    >
+                      Reset
+                    </button>
+                  )}
                 </span>
-                <span className="text-right text-gray-10 max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
-                <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
-                <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
-                <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                <span className="text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
+                <span className="text-right font-mono tabular-nums text-fg">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
+                <span className={`text-right font-mono tabular-nums ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
+                {editingTimes ? (
+                  <>
+                    {/* `placeholder` and `title` both: a time input shows no
+                        placeholder in any browser that renders it natively, so
+                        the hover text is the one an operator actually reads.
+                        Clearing ONE field is how a single override is dropped
+                        without touching the other — Reset drops both. */}
+                    <input
+                      type="time"
+                      step="1"
+                      aria-label={`Started — ${it.title || "item"}`}
+                      placeholder="clear to use the recorded start"
+                      title="Clear this field to go back to the recorded start"
+                      value={draft.start}
+                      onChange={(e) => setDraft(it, { start: e.target.value })}
+                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
+                    />
+                    <input
+                      type="time"
+                      step="1"
+                      aria-label={`Ended — ${it.title || "item"}`}
+                      placeholder="clear to use the recorded end"
+                      title="Clear this field to go back to the recorded end"
+                      value={draft.end}
+                      onChange={(e) => setDraft(it, { end: e.target.value })}
+                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
+                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                  </>
+                )}
               </div>
             );
           })}
         </div>
+        </SectionCard>
 
         {/* Baptism timings sit with the rundown above rather than after the audio:
             they are timing data, and on a baptism weekend they explain the overrun
             in the table right above them. Only rendered when a session links, so a
-            normal service is unchanged. */}
+            normal service is unchanged — which is also why it is not in the
+            section nav: a nav entry that is there most weeks and gone the rest
+            reads as a bug. */}
         {linkedBap.length > 0 && (
-          <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-            <span className="text-body font-semibold text-gray-12">Baptisms</span>
+          <SectionCard title="Baptisms">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Baptized" value={String(bapStats.people)} accent="text-gray-12" />
+              <Stat label="Baptized" value={String(bapStats.people)} accent="text-fg" />
               <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
-              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-gray-12" />
-              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-gray-12" />
-              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-gray-12" />
-              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-gray-12" />
+              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-fg" />
+              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-fg" />
+              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
+              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
             </div>
-            <span className="text-caption2 text-gray-9">Per-person splits are in the Baptisms tab.</span>
-          </div>
+            <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
+          </SectionCard>
         )}
 
-        {/* Full attendance + audio detail for the same service occurrence — one place
-            for everything about this service (rundown above, the rest folded in here). */}
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Attendance</span>
+        {/* Full attendance + sound detail for the same service occurrence — one
+            place for everything about this service. Each is PR 1's chart module
+            with its own strip and Customize; nothing here restyles them. */}
+        <SectionCard id="history-attendance" title="Attendance">
           {attendance ? (
             <AttendanceDetail detail={attendance} timeline={detail} />
           ) : (
-            <p className="text-caption1 text-gray-9">No attendance recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
-        </div>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+        </SectionCard>
+        <SectionCard id="history-sound" title="Sound">
           {spl ? (
-            <SplDetail detail={spl} />
+            <SplDetail
+              // KEYED BY THE RECORD. The section fetches the raw series on
+              // mount; without a key React keeps the same component across a
+              // service switch and the previous service's line stays on screen
+              // until the new fetch lands.
+              key={spl.serviceKey}
+              detail={spl}
+              timeline={detail}
+              attendance={attendance}
+            />
           ) : (
-            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
           )}
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -843,33 +1297,45 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
-        <div className="flex flex-col min-w-0">
-          <span className="text-title3 font-semibold text-gray-12">
-            {attendance.planTitle ?? attendance.serviceKey}
-            {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
+        {/* The same vocabulary as a service's own page — the green `recording`
+            pill, "Sound", and cards — rather than the red LIVE badge and
+            border-t dividers this page kept while the other one moved on. It
+            has no rundown and no KPIs to show, so it is not the ServiceHeader;
+            it is the two cards that page shares with it. */}
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="flex items-center gap-2 text-title3 font-semibold text-fg">
+            <span className="truncate">{attendance.planTitle ?? attendance.serviceKey}</span>
+            {live && <RecordingPill />}
           </span>
-          <span className="text-caption1 text-gray-9">
+          <span className="text-caption1 text-fg-muted">
             {fmtDate(attendance.startedAt)}
             {live
               ? ` · arriving · recording since ${fmtTime(attendance.startedAt)} · ${statusText}`
               : ` · recorded ${fmtTime(attendance.startedAt)}–${fmtTime(attendance.endedAt as string)} · ${statusText}`}
           </span>
         </div>
-        <p className="text-caption1 text-gray-9">
+        <p className="text-caption1 text-fg-muted">
           Item timings appear here when the first item goes live in Planning Center.
         </p>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Attendance</span>
+        <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
-        </div>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+        </SectionCard>
+        <SectionCard id="history-sound" title="Sound">
           {spl ? (
-            <SplDetail detail={spl} />
+            <SplDetail
+              // KEYED BY THE RECORD. The section fetches the raw series on
+              // mount; without a key React keeps the same component across a
+              // service switch and the previous service's line stays on screen
+              // until the new fetch lands.
+              key={spl.serviceKey}
+              detail={spl}
+              timeline={detail}
+              attendance={attendance}
+            />
           ) : (
-            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
           )}
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -877,6 +1343,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
+      {/* Trends LEADS the page. It is the defining view of the tab: what a month
+          of Sundays did, per service type, with the dates that explain a step
+          marked under the axis. Everything below it — the Overview blend, the
+          calendar and the day list — answers a narrower question. */}
+      <TrendsCard recordings={trendRecordings} soundUnavailable={loadFailed.has("spl")} />
+
       {/* Export builder — a collapsed disclosure so it never crowds the overview.
           Read-only, so it's available on the public /history page too. */}
       <Collapsible label="Export" summary="date range · pick sheets" className="su-card px-4 py-2.5">
@@ -954,13 +1426,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </Select>
           )}
         </div>
-        <OverviewBlend overview={overview} splTrend={splTrend} onSplTrend={saveSplTrend} />
+        <OverviewBlend overview={overview} onSplTrend={saveSplTrend} />
       </div>
 
       {/* Calendar (sticky) + selected-day detail. */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
         <div className="sm:sticky sm:top-0 flex flex-col gap-3">
-          <HistoryCalendar counts={dateCounts} intensity={dateIntensity} selected={day} onPick={pickDay} />
+          <HistoryCalendar counts={dateCounts} selected={day} onPick={pickDay} />
           {day && daySummary && (
             <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
               Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
@@ -979,7 +1451,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         </div>
 
         <div className="min-w-0 flex flex-col gap-2">
-          {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
+          {/* The day heading — the list is grouped by day, and this is the one
+              group the calendar has selected. */}
+          {day && <span className="text-body font-semibold text-fg">{fmtDay(day)}</span>}
           {dayServices.map((row) => {
             // Attendance-only rows (arrival ramp, no timeline record yet) have no
             // items and no rundown to summarize — a separate, simpler card.
@@ -994,17 +1468,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 <div key={row.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
                   <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(row.serviceKey)}>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-body font-medium text-gray-12 truncate">{row.planTitle ?? row.serviceKey}</span>
-                      <span className="text-caption2 text-gray-9 truncate">{caption}</span>
+                      <span className="text-body font-medium text-fg truncate">{row.planTitle ?? row.serviceKey}</span>
+                      <span className="text-caption2 text-fg-subtle truncate">{caption}</span>
                     </div>
-                    <span className="shrink-0 tabular-nums text-caption1 text-right">
-                      <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">recording since </span><span className="text-accent">{fmtTime(att.startedAt)}</span></span>
+                    <span className="shrink-0 whitespace-nowrap text-caption1 text-fg-subtle tabular-nums">
+                      recording since <span className="font-mono text-accent">{fmtTime(att.startedAt)}</span>
                     </span>
                   </button>
                   {!readOnly && (
                     <Tooltip label="Delete recording">
                       <button
-                        className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                        className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
                         onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
                         aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
                       >
@@ -1017,10 +1491,27 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             }
             const s = row.timeline;
             const live = s.endedAt == null;
-            // Live rows count up (summarize adds the in-progress item's elapsed);
-            // finished rows show the settled total.
-            const sum = summarize(s, live ? nowTick : undefined);
-            const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
+            // The figures are the SERVICE PAGE's own, picked out of serviceKpis
+            // by key — a row and the page it opens cannot quote two different
+            // peaks for one recording. Live rows count up: `serviceKpis` passes
+            // `now` into `summarize`, which adds the in-progress item's elapsed.
+            const splRow = splByKey.get(s.serviceKey) ?? null;
+            const { started, figures } = serviceRowFigures(
+              s,
+              row.attendance,
+              splRow === "error" ? null : splRow,
+              live ? nowTick : undefined,
+            );
+            // A read that FAILED says so, rather than borrowing the sentence
+            // for a service that genuinely recorded no sound.
+            const shownFigures =
+              splRow === "error"
+                ? figures.map((f) =>
+                  f.key === "level" ? { ...f, value: "—", sub: "sound unavailable" } : f,
+                )
+                : figures;
+            const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
+            const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
             return (
               // su-card, like every other top-level box on this page (Export, the
               // Overview, the calendar, the selected-day summary). These rows had
@@ -1030,26 +1521,59 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // the Stat tiles and the time editor — those sit INSIDE a card, and
               // giving them the parent's surface would flatten the nesting.
               <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
-                <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
-                    <span className="text-caption2 text-gray-9 truncate">
-                      {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
-                      {s.endedAt == null ? "recording…" : `${s.items.length} items`}
+                <button
+                  data-history-row={s.serviceKey}
+                  className="flex flex-1 min-w-0 flex-col gap-2 px-3 py-2.5 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                  onClick={() => setSelectedKey(s.serviceKey)}
+                >
+                  <div className="flex min-w-0 flex-col">
+                    {/* Time and service type, then the plan title, then the
+                        series and how many items ran. The time is mono so a
+                        column of rows lines up on the colon. */}
+                    <span className="flex items-baseline gap-2 text-caption2 text-fg-subtle">
+                      <span className="font-mono tabular-nums text-fg-muted">{started.value}</span>
+                      {s.serviceTypeName && <span className="truncate">{s.serviceTypeName}</span>}
+                      {started.sub && <span className="truncate text-warn-11">{started.sub}</span>}
+                      {live && <RecordingPill />}
                     </span>
+                    <span className="truncate text-body font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
+                    {under && <span className="truncate text-caption2 text-fg-subtle">{under}</span>}
                   </div>
-                  <span className="shrink-0 tabular-nums text-caption1 text-right">
-                    {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-accent">{fmtDur(sum.actual)}</span></span>
-                    {/* Delta vs plan only once finished — a live "−38:45" (most of
-                        the plan not yet run) reads as misleading. */}
-                    {!live && totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
+                  {/* The row's figures, on the stat strip's vocabulary at the
+                      row's scale: an 11px uppercase label over a mono value.
+                      `shrink-0` and a scroller, like the strip — a squashed
+                      "1,1\u2026" is worse than one you have to scroll to. */}
+                  <span className="flex shrink-0 items-start gap-0 overflow-x-auto sm:justify-end">
+                    {shownFigures.map((f, fi) => (
+                      <span
+                        key={f.key}
+                        data-row-figure={f.key}
+                        className={cn("flex shrink-0 flex-col gap-0.5 px-3 last:pr-0", fi > 0 && "border-l border-line")}
+                      >
+                        <span className="whitespace-nowrap text-[10px] uppercase tracking-wider text-fg-subtle">{f.label}</span>
+                        <span
+                          className="whitespace-nowrap font-mono text-footnote tabular-nums"
+                          style={{ color: f.color ?? "var(--color-fg)" }}
+                        >
+                          {f.value}
+                        </span>
+                        {/* WHY there is no number. The row stripped this, so a
+                            "—" under Peak level had no reason beside it and an
+                            operator whose own Customize had hidden every metric
+                            was told nothing at all. */}
+                        {f.sub && (
+                          <span data-row-figure-note className="whitespace-nowrap text-[10px] text-fg-subtle">
+                            {f.sub}
+                          </span>
+                        )}
+                      </span>
+                    ))}
                   </span>
                 </button>
                 {!readOnly && (
                   <Tooltip label="Delete recording">
                     <button
-                      className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                      className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
                       onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
                       aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
                     >
@@ -1060,7 +1584,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               </div>
             );
           })}
-          {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
+          {dayServices.length === 0 && <p className="text-caption1 text-fg-subtle">No services on this day.</p>}
         </div>
       </div>
     </div>
@@ -1074,12 +1598,17 @@ function fmtTrendPct(pct: number | null, fallback = ""): string {
   return pct != null ? `${pct >= 0 ? "+" : "−"}${Math.round(Math.abs(pct) * 100)}%` : fallback;
 }
 
-/** "vs the prior 4 Weekends" / "vs the prior 1 Weekend" — the tail every
- *  trend readout in the Overview ends with, once for both of them rather than
- *  copied into the attendance trend and the SPL delta separately. */
-function vsPrior(priorCount: number, scopeName: string | null): string {
-  const noun = scopeName ?? "service";
-  return `vs the prior ${priorCount} ${noun}${priorCount === 1 ? "" : "s"}`;
+/**
+ * "vs the prior 4 recordings" — the tail every trend readout in the Overview
+ * ends with.
+ *
+ * "recordings", not the service type's own name. The name is a PROPER NOUN and
+ * pluralising it produced "vs the prior 2 The Salt Companys", which is what was
+ * on screen. The scope is already named on the heading above the card, so
+ * repeating it in the tail bought nothing even when it read correctly.
+ */
+function vsPrior(priorCount: number): string {
+  return `vs the prior ${priorCount} recording${priorCount === 1 ? "" : "s"}`;
 }
 
 /**
@@ -1124,12 +1653,13 @@ function TrendChip({
  *  whether the SPL summary is there at all — are in this component alone. */
 export function OverviewBlend({
   overview,
-  splTrend,
   onSplTrend,
 }: {
   overview: OverviewData;
-  splTrend: { shown: boolean; metric: string | null };
-  onSplTrend: (patch: { shown?: boolean; metric?: string | null }) => void;
+  /** Writes the metric choice. The card reads the CHOSEN metric back through
+   *  `overview.splMetric`, which is derived from it, so the preference itself is
+   *  not a prop — one direction each way. */
+  onSplTrend: (patch: { metric?: string | null }) => void;
 }) {
   /** Where the chart's right-click (or long-press) menu is, or null. */
   const [chartMenu, setChartMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1137,149 +1667,115 @@ export function OverviewBlend({
   // A mouse user already has the right-click; the corner button only appears
   // where a touch has no other way in.
   const isCoarse = useCoarsePointer();
-  /** The menu the chart offers: the line on or off, and which metric it plots.
-   *  The metric list comes from the data in scope — see OverviewData.splMetrics —
-   *  so it offers exactly the metrics there is something to draw for. */
-  const chartMenuItems: ContextMenuItem[] = [
-    {
-      label: "SPL trend line",
-      checked: splTrend.shown,
-      onSelect: () => onSplTrend({ shown: !splTrend.shown }),
-    },
-  ];
-  if (splTrend.shown && overview.splMetrics.length > 0) {
-    chartMenuItems.push({
-      label: "Metric",
-      items: overview.splMetrics.map((m) => ({
-        label: m,
-        checked: overview.splMetric === m,
-        onSelect: () => {
-          onSplTrend({ metric: m });
-          setChartMenu(null);
-        },
-      })),
-    });
-  }
-
   /**
-   * Whether the two stat labels wear their series' colour.
+   * The one thing the menu still offers: which Smaart metric the level below is
+   * read from. The list comes from the data in scope — see
+   * OverviewData.splMetrics — so it offers exactly the metrics there is
+   * something to report for, and there is no menu at all when there are none.
    *
-   * True exactly when the chart is drawing two lines AND there is a level to
-   * summarise — which is also exactly when the SPL block renders. One condition
-   * rather than two, because the dots only mean anything as a pair: they are
-   * the chart's legend, and the chart has none of its own.
+   * The "Sound summary" toggle that used to sit above it is gone. It gated a
+   * trend LINE on an attendance chart this card no longer draws, and after the
+   * trim it gated the level block instead — a switch whose only visible effect
+   * was to hide a figure, advertised by a sentence of prose above the timings
+   * telling the operator to right-click. The prose went with it; the figure
+   * shows whenever there is one.
    */
-  const showsSeriesDots = splTrend.shown && overview.avgSpl != null;
+  const chartMenuItems: ContextMenuItem[] = overview.splMetrics.length > 0
+    ? [
+      {
+        label: "Metric",
+        items: overview.splMetrics.map((m) => ({
+          label: m,
+          checked: overview.splMetric === m,
+          onSelect: () => {
+            onSplTrend({ metric: m });
+            setChartMenu(null);
+          },
+        })),
+      },
+    ]
+    : [];
 
+  /** The level renders when there IS one. No dash and no sentence when there is
+   *  not — a dash reads as a measured silence, and prose explaining an absence
+   *  is bigger than the thing it explains. */
+  const showsLevel = overview.avgSpl != null;
+
+  // TIMINGS ONLY. Attendance moved out of this card entirely: Trends, at the
+  // top of the page, plots it per service type over a chosen range with
+  // milestones under it, and this card plotted the same quantity over a
+  // different window with a different average — two charts of attendance on one
+  // screen that did not agree. Peak attendance went with it for the same reason;
+  // a day-list row carries each service's own peak.
   const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
     { k: "Services", v: overview.services },
     { k: "Avg length", v: overview.avgLength },
     { k: "Avg start", v: overview.avgStart, accent: overview.avgStartEarly ? "text-ok-11" : overview.avgStartLate ? "text-warn-11" : undefined },
     { k: "Avg overrun", v: overview.avgOverrun, trend: overview.overrunTrend, trendLabel: overview.overrunTrend ? (overview.overrunTrend.tone === "bad" ? "worse" : overview.overrunTrend.tone === "good" ? "better" : "steady") : undefined },
-    { k: "Peak attendance", v: overview.peakAttendance },
   ];
   return (
     <div className="su-card px-5 py-5 flex flex-col">
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
-        <div className="shrink-0">
-          {/* The dot appears on BOTH labels or on neither, and only when there
-              are two series to tell apart. It is a legend for the chart beside
-              them — which line is this number about — so a single blue dot with
-              the SPL line switched off would be a legend for nothing, and a
-              green one on its own reads as an afterthought bolted to an
-              attendance summary. `showsSeriesDots` is the one condition, read
-              by both, so the pair cannot drift apart. */}
-          <div className={cn("text-caption1 uppercase tracking-[0.08em] text-fg-muted", showsSeriesDots && "flex items-center gap-1.5")}>
-            {showsSeriesDots && (
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-accent)" }} />
-            )}
-            Avg {overview.scopeName ?? "service"}
-          </div>
-          <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-            {overview.avgAttendance}
-          </div>
-          {overview.attTrend && (
-            <TrendChip
-              dir={overview.attTrend.dir}
-              tone={overview.attTrend.tone}
-              text={`${fmtTrendPct(overview.attTrend.pct, "changed")} ${vsPrior(overview.attTrend.priorCount, overview.scopeName)}`}
-              className="mt-2"
-            />
-          )}
-          {/* The level, read the same way, so the SPL line has a summary of its
-              own instead of one attendance figure over a chart with two series
-              in it. Present only when the line is drawn AND there is a level to
-              report — no dash, which would read as a measured silence. */}
-          {/* `avgSpl != null` again, redundant at runtime but not to the type
-              checker: `showsSeriesDots` is a boolean, so narrowing does not
-              travel through it and the level below would be possibly-null. */}
-          {showsSeriesDots && overview.avgSpl != null && (
-            <div className="mt-5" data-testid="spl-summary">
-              <div className="flex items-center gap-1.5 text-caption1 uppercase tracking-[0.08em] text-fg-muted">
-                {/* The series' own colour, the same dot the chart's tooltip
-                    carries, so this says which line it is summarising without
-                    needing a legend. See the attendance label above: the two
-                    dots are a pair. */}
-                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
-                Avg SPL
-              </div>
-              <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-                <span>{overview.avgSpl.toFixed(1)}</span>
-                <span className="text-caption1 font-normal text-fg-muted">dB</span>
-              </div>
-              {overview.splDelta && (
-                // NEUTRAL, always — see SplDelta. A louder weekend is not a
-                // worse one, so this never goes red. Decibels, not a
-                // percentage: a percentage of a logarithmic quantity says
-                // nothing about how loud it was. The sign comes from `dir`,
-                // never recomputed from `db` — one fact, one place to read it,
-                // so the glyph and the sign can't disagree about which way a
-                // level moved.
-                <TrendChip
-                  dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
-                  tone="neutral"
-                  text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount, overview.scopeName)}`}
-                  className="mt-2"
-                />
-              )}
+      <div
+        className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8"
+        onContextMenu={chartTrigger.onContextMenu}
+        onPointerDown={chartTrigger.onPointerDown}
+        onPointerMove={chartTrigger.onPointerMove}
+        onPointerUp={chartTrigger.onPointerUp}
+        onPointerCancel={chartTrigger.onPointerCancel}
+        onClickCapture={chartTrigger.onClickCapture}
+        style={chartTrigger.style}
+      >
+        {/* The level, and nothing about attendance. Trends owns attendance over
+            time; this card owns how the services themselves RAN, plus how loud
+            they were, which Trends does not plot. */}
+        {showsLevel && overview.avgSpl != null ? (
+          <div className="shrink-0" data-testid="spl-summary">
+            <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg SPL</div>
+            <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
+              <span>{overview.avgSpl.toFixed(1)}</span>
+              <span className="text-caption1 font-normal text-fg-muted">dB</span>
             </div>
-          )}
-        </div>
-        <div
-          className="relative flex-1 min-w-0 md:max-w-[640px]"
-          onContextMenu={chartTrigger.onContextMenu}
-          onPointerDown={chartTrigger.onPointerDown}
-          onPointerMove={chartTrigger.onPointerMove}
-          onPointerUp={chartTrigger.onPointerUp}
-          onPointerCancel={chartTrigger.onPointerCancel}
-          onClickCapture={chartTrigger.onClickCapture}
-          style={chartTrigger.style}
-        >
-          <AttendanceTrendChart
-            points={overview.attPoints}
-            splLabel={splTrend.shown ? overview.splMetric : null}
-            // The chart tracked the pointer underneath the menu it had just
-            // opened: the tooltip drew through the menu and moved as you
-            // reached for an item.
-            hoverSuppressed={chartMenu != null}
-          />
-          {isCoarse && (
-            <button
-              type="button"
-              aria-label="Chart options"
-              className="absolute right-1 top-1 grid size-11 place-items-center rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setChartMenu({ x: r.right, y: r.bottom });
-              }}
-            >
-              <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
-                <EllipsisIcon className="size-4" />
-              </span>
-            </button>
-          )}
-        </div>
-        {chartMenu && (
+            {overview.splDelta && (
+              // NEUTRAL, always — see SplDelta. A louder weekend is not a worse
+              // one, so this never goes red. Decibels, not a percentage: a
+              // percentage of a logarithmic quantity says nothing about how loud
+              // it was. The sign comes from `dir`, never recomputed from `db` —
+              // one fact, one place to read it, so the glyph and the sign cannot
+              // disagree about which way a level moved.
+              <TrendChip
+                dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
+                tone="neutral"
+                text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount)}`}
+                className="mt-2"
+              />
+            )}
+          </div>
+        ) : overview.splMetric ? (
+          // A metric was CHOSEN and produced nothing. That is worth a word —
+          // unlike "no metrics at all", which needs none, because there is
+          // nothing the operator asked for and did not get. Reached when every
+          // recording carrying the metric in scope is still running, so there is
+          // no settled level to average yet.
+          <div data-testid="spl-no-level" className="text-caption1 text-fg-subtle">
+            No level on {overview.splMetric} in this scope.
+          </div>
+        ) : null}
+        {isCoarse && chartMenuItems.length > 0 && (
+          <button
+            type="button"
+            aria-label="Overview options"
+            className="grid size-11 shrink-0 place-items-center self-start rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setChartMenu({ x: r.right, y: r.bottom });
+            }}
+          >
+            <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
+              <EllipsisIcon className="size-4" />
+            </span>
+          </button>
+        )}
+        {chartMenu && chartMenuItems.length > 0 && (
           <ContextMenu
             x={chartMenu.x}
             y={chartMenu.y}
@@ -1290,7 +1786,7 @@ export function OverviewBlend({
       </div>
       {/* Wrapping grid so the readouts never collide: 2 cols on mobile, 3 at sm,
           all at lg. Value + trend can wrap within a cell rather than overrun. */}
-      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-4">
         {strip.map((s) => (
           <div key={s.k} className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
@@ -1307,12 +1803,38 @@ export function OverviewBlend({
   );
 }
 
+/**
+ * One card on a service's page — Rundown, Attendance, Sound (and Baptisms on
+ * the weekends it applies).
+ *
+ * `id` is the anchor the header's nav links to and the element its
+ * IntersectionObserver watches, so a card without one is simply not in the nav.
+ *
+ * No scroll margin of its own: the scrolling pane reserves the sticky header's
+ * height as scroll PADDING (shell.tsx), which covers an anchor jump to a card
+ * and also the things nobody would put a margin on — a focused time field
+ * inside this card, a find-in-page hit. Carrying both would add up and land
+ * every jump a header's height too low.
+ */
+function SectionCard({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+  return (
+    <section
+      id={id}
+      aria-label={title}
+      className="su-card flex flex-col gap-3 px-4 py-4 max-sm:px-3"
+    >
+      <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
 function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
-      <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="text-caption2 text-gray-9">{sub}</div>}
+    <div className="rounded-lg border border-line bg-fill/40 px-3 py-2">
+      <div className="text-caption2 uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className={`font-mono text-title3 font-medium tabular-nums ${accent}`}>{value}</div>
+      {sub && <div className="text-caption2 text-fg-subtle">{sub}</div>}
     </div>
   );
 }

@@ -116,7 +116,7 @@ function spl(serviceDate: string, leq: number, over: Partial<SplServiceSummary> 
     serviceTypeId: "st1",
     serviceDate,
     endedAt: `${serviceDate}T11:00:00Z`,
-    metrics: { "LAeq 10": { leq, count: 100 } },
+    metrics: { "LAeq 10": { leq, max: leq + 12, count: 100 } },
     ...over,
   };
 }
@@ -382,5 +382,48 @@ describe("preferredSplMetric", () => {
     assert.equal(preferredSplMetric(["SPL C Fast", "SPL A Slow"]), "SPL A Slow");
     assert.equal(preferredSplMetric(["FS Peak"]), "FS Peak");
     assert.equal(preferredSplMetric([]), null);
+  });
+});
+
+describe("which metrics the card offers", () => {
+  const peakOnly = (serviceDate: string): SplServiceSummary => ({
+    ...spl(serviceDate, 0),
+    // A legacy capture: maxima and no Leq. The summary carries these on purpose.
+    metrics: { "LAeq 1": { leq: null, max: 104.2, count: 0 } },
+  } as unknown as SplServiceSummary);
+
+  test("leaves out a metric it has no level for", () => {
+    // `Object.keys(r.metrics)` offered every metric present while the fold takes
+    // Leq only, so a peak-only metric could be offered AND picked as the
+    // preferred default — `/laeq/i` matches "LAeq 1" whether or not it has an
+    // Leq — and produce a card with no level and nothing saying why.
+    const out = computeOverview(
+      WEEKENDS.map((d) => svc({ serviceKey: `k-${d}`, serviceDate: d })),
+      settledWeekends,
+      null, null, null,
+      { splList: WEEKENDS.map((d) => peakOnly(d)) },
+    );
+    assert.deepEqual(out.splMetrics, [], "a metric with no Leq anywhere must not be offered");
+    assert.equal(out.splMetric, null, "and must not be chosen");
+    assert.equal(out.avgSpl, null);
+  });
+
+  test("still offers one that HAS a level, alongside one that does not", () => {
+    // The positive half: the filter must not throw away a real metric.
+    const both = {
+      ...peakOnly(WEEKENDS[0]),
+      metrics: {
+        "LAeq 1": { leq: null, max: 104.2, count: 0 },
+        "SPL A Fast": { leq: 91.5, max: 108.1, count: 500 },
+      },
+    } as unknown as SplServiceSummary;
+    const out = computeOverview(
+      WEEKENDS.map((d) => svc({ serviceKey: `k-${d}`, serviceDate: d })),
+      settledWeekends,
+      null, null, null,
+      { splList: [both] },
+    );
+    assert.deepEqual(out.splMetrics, ["SPL A Fast"]);
+    assert.equal(out.splMetric, "SPL A Fast");
   });
 });

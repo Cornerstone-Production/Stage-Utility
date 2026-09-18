@@ -333,7 +333,11 @@ describe("the registry and the readers", () => {
     reaperService.getLatest = () => ({ ...REAPER_OFFLINE, connected: true });
     youtubeService.getLatest = () => ({ ...YOUTUBE_OFFLINE, connected: true });
     resiService.getLatest = () => ({ ...RESI_OFFLINE, connected: true });
-    assert.equal(APP_STATE_SOURCE_IDS.length, 6);
+    assert.deepEqual(
+      [...APP_STATE_SOURCE_IDS].sort(),
+      ["obs.recording", "obs.streaming", "obs.virtualCam", "reaper.recording", "resi.live", "youtube.live"],
+      "a source was added or removed; update this list deliberately",
+    );
     for (const id of APP_STATE_SOURCE_IDS) {
       const answer = readAppState(`app:${id}`);
       assert.equal("value" in answer, true, `app:${id} answered with no value`);
@@ -345,7 +349,11 @@ describe("the registry and the readers", () => {
     // than a list written here: a third family added without a reader does not
     // compile, and one added without reaching this file is still read here.
     pvp(layer("Lyrics"));
-    assert.equal(APP_STATE_FAMILY_IDS.length, 2);
+    assert.deepEqual(
+      [...APP_STATE_FAMILY_IDS].sort(),
+      ["pvp.layer-hidden", "pvp.layer-muted"],
+      "a family was added or removed; update this list deliberately",
+    );
     for (const family of APP_STATE_FAMILY_IDS) {
       const answer = readAppState(`app:${family}:Lyrics`);
       assert.equal("value" in answer, true, `app:${family}:Lyrics answered with no value`);

@@ -26,6 +26,41 @@ export function mergeByKey<T>(mine: T[], theirs: T[], key: (v: T) => string | nu
   return [...mine, ...extra];
 }
 
+/**
+ * Union per-item entries, keeping the local entry where both sides have the
+ * same RUN of the same item.
+ *
+ * A plan item can appear more than once in one record — a reprise, or a second
+ * service whose occurrence split was missed — and `itemId` alone is therefore not
+ * an identity: keyed on it, a source recording with two runs of Doors
+ * contributed at most one, and the second was silently dropped by every merge
+ * path in the app.
+ *
+ * The key is the item id plus its RUN INDEX (the nth appearance of that id in
+ * that record), and deliberately NOT `sequence`. Each recording numbers its own
+ * items, and two boxes watching one service number them differently the moment
+ * one of them missed anything: keyed on `itemId:sequence`, the SAME run recorded
+ * by both sides fails to match and is taken again, so the merged record shows
+ * one item twice with two different levels and merging stops being idempotent.
+ * Run index matches those, and its own failure — two boxes that disagree about
+ * how many times an item ran — can only ever lose a run of that one item, never
+ * duplicate anything and never touch another item. Gaps are what a merge is for;
+ * invented duplicates are not.
+ */
+export function mergeItemRuns<T extends { itemId: string }>(mine: T[], theirs: T[]): T[] {
+  const runKeys = (items: T[]): string[] => {
+    const seenPerId = new Map<string, number>();
+    return items.map((i) => {
+      const n = seenPerId.get(i.itemId) ?? 0;
+      seenPerId.set(i.itemId, n + 1);
+      return `${i.itemId}#${n}`;
+    });
+  };
+  const mineKeys = new Set(runKeys(mine));
+  const theirKeys = runKeys(theirs);
+  return [...mine, ...theirs.filter((_, i) => !mineKeys.has(theirKeys[i]!))];
+}
+
 /** Fill fields that are null/undefined locally from the incoming record. Never
  *  replaces a value this box actually has. */
 export function fillMissingFields<T extends Record<string, unknown>>(mine: T, theirs: T, skip: string[] = []): T {
@@ -46,9 +81,9 @@ interface SplRecord {
   [k: string]: unknown;
 }
 
-/** Items this box never recorded are taken; items it has are left untouched. */
+/** Runs this box never recorded are taken; runs it has are left untouched. */
 export function mergeSplRecord(mine: SplRecord, theirs: SplRecord): SplRecord {
-  const merged = mergeByKey(mine.items ?? [], theirs.items ?? [], (i) => i.itemId);
+  const merged = mergeItemRuns(mine.items ?? [], theirs.items ?? []);
   return {
     ...fillMissingFields(mine, theirs, ["items"]),
     items: merged.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)),
@@ -99,17 +134,80 @@ interface TimelineItem {
   itemId: string;
   sequence?: number;
 }
+interface TimelineItemTimeEdit {
+  itemId: string;
+  sequence: number;
+  [k: string]: unknown;
+}
 interface TimelineRecord {
   items?: TimelineItem[];
+  itemTimeEdits?: TimelineItemTimeEdit[];
   [k: string]: unknown;
 }
 
-export function mergeTimelineRecord(mine: TimelineRecord, theirs: TimelineRecord): TimelineRecord {
-  const merged = mergeByKey(mine.items ?? [], theirs.items ?? [], (i) => i.itemId);
-  return {
-    ...fillMissingFields(mine, theirs, ["items"]),
-    items: merged.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)),
+/** What a timeline merge produced, and what it could not keep. */
+export interface MergedTimelineRecord {
+  record: TimelineRecord;
+  /** Corrections whose run did not survive the merge. Returned rather than
+   *  dropped in silence — they are the operator's work, and the import reports
+   *  them. */
+  droppedItemTimeEdits: TimelineItemTimeEdit[];
+}
+
+/**
+ * Union two timelines, and carry BOTH sides' item time corrections.
+ *
+ * `itemTimeEdits` used to ride through `fillMissingFields`, which is wrong twice
+ * over. It copies the incoming array only when this box has none — so an import
+ * into a record that had been corrected here dropped every incoming correction
+ * without a word — and it copies them by VALUE, keys and all, so an incoming
+ * correction naming `song#2` landed on whatever this box's `song#2` happened to
+ * be, which after a run-level union is frequently a different run.
+ *
+ * Bound to the ITEM OBJECTS first and re-keyed from the merged list after, the
+ * way mergeServiceRecords does it: `mergeItemRuns` returns the references it was
+ * given, so identity is what survives. A correction whose run lost the clash —
+ * "fill, never overwrite" means the local run wins — goes with it, and is
+ * reported.
+ */
+export function mergeTimelineRecord(mine: TimelineRecord, theirs: TimelineRecord): MergedTimelineRecord {
+  const bound = new Map<TimelineItem, TimelineItemTimeEdit>();
+  const bind = (rec: TimelineRecord) => {
+    for (const edit of rec.itemTimeEdits ?? []) {
+      const item = (rec.items ?? []).find((x) => x.itemId === edit.itemId && x.sequence === edit.sequence);
+      // Two corrections for one run cannot both apply; the last wins, as
+      // applyItemTimeEdits does, rather than the first silently shadowing it.
+      if (item) bound.set(item, edit);
+    }
   };
+  bind(mine);
+  bind(theirs);
+
+  const merged = mergeItemRuns(mine.items ?? [], theirs.items ?? []).sort(
+    (a, b) => (a.sequence ?? 0) - (b.sequence ?? 0),
+  );
+
+  const kept: TimelineItemTimeEdit[] = [];
+  const carried = new Set<TimelineItemTimeEdit>();
+  for (const item of merged) {
+    const edit = bound.get(item);
+    if (!edit) continue;
+    carried.add(edit);
+    kept.push({ ...edit, itemId: item.itemId, sequence: item.sequence ?? edit.sequence });
+  }
+  const dropped = [...(mine.itemTimeEdits ?? []), ...(theirs.itemTimeEdits ?? [])].filter(
+    (e) => !carried.has(e),
+  );
+
+  const record: TimelineRecord = {
+    // itemTimeEdits is skipped here and set below: fillMissingFields would adopt
+    // the incoming array wholesale whenever this box had none.
+    ...fillMissingFields(mine, theirs, ["items", "itemTimeEdits"]),
+    items: merged,
+  };
+  if (kept.length) record.itemTimeEdits = kept;
+  else delete record.itemTimeEdits;
+  return { record, droppedItemTimeEdits: dropped };
 }
 
 /**

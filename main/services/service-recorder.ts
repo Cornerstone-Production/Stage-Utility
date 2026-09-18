@@ -81,12 +81,39 @@ export function lastItemEntry<T extends RecordedItem>(items: T[], itemId: string
  *
  * An entry never closed is the same run by definition — say yes, rather than
  * pushing a duplicate alongside an entry that is still open.
+ *
+ * `goingLiveAtMs` is PCO's `live_start_at` for the run now on air, never this
+ * box's clock (see itemLiveSinceMs), and that is what makes a restart safe: an
+ * entry closed AFTER the run went live in Planning Center was closed for a LOCAL
+ * reason — the server went down, a meter stopped reporting — while the item
+ * itself never stopped, so the difference below is negative and it reopens
+ * however long the box was away. Judged against `now` instead, half an hour of
+ * downtime splits an item that has been on air throughout.
  */
 export function isStepBackTo(entry: RecordedItem, goingLiveAtMs: number): boolean {
   if (!entry.endedAt) return true;
   const endedMs = Date.parse(entry.endedAt);
   if (!Number.isFinite(endedMs) || !Number.isFinite(goingLiveAtMs)) return true; // no clock to judge by
   return goingLiveAtMs - endedMs < SERVICE_GAP_MS;
+}
+
+/**
+ * When the current item went live, as Planning Center reports it.
+ *
+ * PCO's `live_start_at` is the one clock both recorders can agree on, and the
+ * reason this is a shared helper rather than a line in each of them: the SPL
+ * recorder judged a step back by its own wall clock instead, so a restart or a
+ * meter outage longer than SERVICE_GAP_MS split an item on the SPL record that
+ * the timeline record kept whole. Two recorders, one live service, two different
+ * answers about what happened.
+ *
+ * Falls back to now when PCO reports no start — an item that is live with no
+ * `live_start_at` has only just been put on air, or the field is missing on an
+ * older build, and both mean "now" closely enough.
+ */
+export function itemLiveSinceMs(live: { liveStartAt: string | null }): number {
+  const parsed = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
 /** The identity every service record carries. */

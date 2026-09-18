@@ -123,6 +123,10 @@ export type ProdComStub = {
    *  test can drive "the list loaded, then a later read failed" — which is the
    *  only path on which the previously-loaded keywords can be wrongly dropped. */
   setFailKeywords(fail: boolean): void;
+  /** Start or stop refusing the WebSocket upgrade AFTER the stub is running — a
+   *  ProdCom that was mid-restart and now accepts it, which is the case the
+   *  fallback's retry timer exists for. */
+  setRefuseWebSocket(refuse: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -206,7 +210,12 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
   const sseStreams = new Set<http.ServerResponse>();
   const open = new Set<import("node:net").Socket>();
 
-  const state = { wsUpgrades: 0, sseOpens: 0, failKeywords: options.failKeywords === true };
+  const state = {
+    wsUpgrades: 0,
+    sseOpens: 0,
+    failKeywords: options.failKeywords === true,
+    refuseWebSocket: options.refuseWebSocket === true,
+  };
   const waiters: (() => void)[] = [];
   const notify = () => {
     for (const w of waiters.splice(0)) w();
@@ -328,7 +337,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     notify();
     const url = new URL(req.url ?? "/", "http://stub");
 
-    if (options.refuseWebSocket || url.pathname !== "/api/v1/ws") {
+    if (state.refuseWebSocket || url.pathname !== "/api/v1/ws") {
       socket.write("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
@@ -417,6 +426,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     wsSend,
     setFailKeywords: (fail: boolean) => {
       state.failKeywords = fail;
+    },
+    setRefuseWebSocket: (refuse: boolean) => {
+      state.refuseWebSocket = refuse;
     },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
     wsTranscript: (entry, wrap = "data") =>

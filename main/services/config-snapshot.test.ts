@@ -94,11 +94,15 @@ function declaredStoreCount(): number {
  * one-word edit changes. Adding a store here is a deliberate act; changing one
  * that already exists should make a reviewer stop.
  */
+// Sorted alphabetically, one entry per line, so two branches each adding a
+// different store touch different lines and merge cleanly.
 const EXPECTED_CONFIG = [
   "automation-rules.json",
   "automation-settings.json",
-  "bar-config.json",
   "baptism-triggers.json",
+  "bar-config.json",
+  // The operator's own dates worth marking on the Trends chart.
+  "history-milestones.json",
   "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",
@@ -107,10 +111,10 @@ const EXPECTED_CONFIG = [
   "osc-targets.json",
   "patch.json",
   "presets.json",
-  // The operator's own colours, kept from the picker.
-  "saved-colors.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
+  // The operator's own colours, kept from the picker.
+  "saved-colors.json",
   // The operator's followed teams. Losing them to a reinstall is losing setup.
   "scores-favourites.json",
   "scriptview-config.json",
@@ -120,7 +124,7 @@ const EXPECTED_CONFIG = [
   "slots.json",
   "views.json",
   "wireless-connections.json",
-].sort();
+];
 
 const EXPECTED_RUNTIME = [
   "attendance-history.json",
@@ -129,10 +133,10 @@ const EXPECTED_RUNTIME = [
   "checklist-ticks.json",
   "service-timeline.json",
   "signals.json",
-  "stream-starts.json",
   "spl-history.json",
+  "stream-starts.json",
   "update-notices.json",
-].sort();
+];
 
 describe("store classification", () => {
   test("every store declared on disk is registered", () => {
@@ -150,11 +154,21 @@ describe("store classification", () => {
   });
 
   test("the config half is exactly this set", () => {
-    assert.deepEqual(configFiles().slice().sort(), EXPECTED_CONFIG);
+    assert.deepEqual(configFiles().slice().sort(), [...EXPECTED_CONFIG].sort());
   });
 
   test("the runtime half is exactly this set", () => {
-    assert.deepEqual(runtimeFiles().slice().sort(), EXPECTED_RUNTIME);
+    assert.deepEqual(runtimeFiles().slice().sort(), [...EXPECTED_RUNTIME].sort());
+  });
+
+  test("EXPECTED_CONFIG and EXPECTED_RUNTIME stay sorted", () => {
+    for (const list of [EXPECTED_CONFIG, EXPECTED_RUNTIME]) {
+      assert.deepEqual(
+        list,
+        [...list].sort(),
+        "keep this list sorted so two branches adding entries merge cleanly",
+      );
+    }
   });
 
   test("secrets and the encryption key are never in a snapshot", () => {

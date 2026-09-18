@@ -14,9 +14,17 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { shouldRecordLive } from "./live-service-gate.js";
+import { scrub, scrubError } from "./scrub.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
-import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
+import {
+  ServiceRecorder,
+  isStepBackTo,
+  itemLiveSinceMs,
+  lastItemEntry,
+  type NewRecordContext,
+  type RecorderStore,
+} from "./service-recorder.js";
 
 // How long a change may sit in memory before it is written.
 //
@@ -80,7 +88,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
    */
   protected override async resumeRecord(existing: ServiceSplHistory): Promise<ServiceSplHistory> {
     const rebuilt = await rebuildSplRecord(existing).catch(() => null);
-    if (rebuilt) console.log(`[spl-recorder] rebuilt ${existing.serviceKey} from the archive on resume`);
+    if (rebuilt) console.log(`[spl-recorder] rebuilt ${scrub(existing.serviceKey)} from the archive on resume`);
     return rebuilt ?? existing;
   }
 
@@ -106,26 +114,46 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
         await this.ensureRecord(live, gapSinceLive);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
+        // One expression for the item's name, character-identical to openItem in
+        // service-timeline-recorder.ts. `live.label` alone is not it: PCO
+        // reports an item live with no label often enough, and this recorder
+        // then wrote the numeric ITEM ID into the archive row as the title and
+        // left its own item untitled — two records naming the same item two
+        // different things, and a rebuild matching on the id string.
+        const title = live.label ?? live.currentItemTitle ?? "";
         let itemChanged = false;
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem();
           this.lastItemId = live.currentItemId;
           itemChanged = true;
           if (this.currentKey) {
+            // The one place a plan-item transition reaches the raw layer, for
+            // BOTH item-shaped records — this recorder's and the timeline's,
+            // which share a serviceKey. So the row carries what a timeline
+            // rebuild needs (id, planned length, pre-service), not just a
+            // title: rebuildTimelineRecord is only as good as this row.
             sampleArchive.recordEvent(
               { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
               "pco",
               "item",
-              live.label ?? live.currentItemId,
+              title,
+              {
+                itemId: live.currentItemId,
+                plannedLengthSec: typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null,
+                preService: live.beforeServiceStart === true,
+              },
             );
           }
         }
         this.recordSample(
-        live.currentItemId,
-        live.label,
-        live.itemType ?? null,
-        pickMeter(smaartService.getLatest()),
-      );
+          live.currentItemId,
+          title,
+          live.itemType ?? null,
+          pickMeter(smaartService.getLatest()),
+          // When PCO says this item went live, NOT our own clock — the same
+          // reference the timeline recorder judges a step back by.
+          itemLiveSinceMs(live),
+        );
         // The record is O(n) and item max/avg move slowly — push on an item change,
         // else at most every LIVE_BROADCAST_MS instead of every tick.
         const now = Date.now();
@@ -154,10 +182,35 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
     title: string | null,
     itemType: string | null,
     sample: MeterSample | null,
+    /** When PCO says this run went live — see itemLiveSinceMs. */
+    goingLiveAtMs: number,
   ): void {
     if (!this.current) return;
-    let item = this.current.items.find((i) => i.itemId === itemId);
-    if (!item) {
+    const nowIso = new Date().toISOString();
+    // The LAST entry for this id, not the first: an item can run more than once,
+    // and `find` folded a re-run's samples into a run that finished hours ago.
+    // Mirrors openItem in service-timeline-recorder.ts, down to the clock the
+    // decision is made against.
+    const prior = lastItemEntry(this.current.items, itemId);
+    let item = prior && isStepBackTo(prior, goingLiveAtMs) ? prior : undefined;
+    if (item) {
+      if (title && item.title !== title) item.title = title;
+      // The plan may not have been loaded when the item first went live.
+      if (itemType && item.itemType !== itemType) item.itemType = itemType;
+      // An operator stepping back to a closed item reopens it, so finalizePrevItem
+      // stamps its real end rather than leaving the earlier one in place.
+      item.endedAt = null;
+    } else {
+      // Belt and braces for the occurrence split (see ensureRecord): an entry whose
+      // last run finished more than SERVICE_GAP_MS ago is a RE-RUN and gets its own
+      // max/Leq rather than having a second service's levels folded into it.
+      if (prior) {
+        console.log(
+          `[spl-recorder] "${scrub(title || itemId)}" went live again ` +
+            `${scrub(Math.round((goingLiveAtMs - Date.parse(prior.endedAt!)) / 60_000))} min after its last run ended — ` +
+            `recording it as a new entry`,
+        );
+      }
       item = {
         itemId,
         title: title ?? "",
@@ -166,14 +219,10 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
         metrics: {},
         maxSpl: null,
         sampleCount: 0,
-        startedAt: new Date().toISOString(),
+        startedAt: nowIso,
         endedAt: null,
       };
       this.current.items.push(item);
-    } else {
-      if (title && item.title !== title) item.title = title;
-      // The plan may not have been loaded when the item first went live.
-      if (itemType && item.itemType !== itemType) item.itemType = itemType;
     }
     if (!item.metrics) item.metrics = {}; // resumed legacy record
 
@@ -223,7 +272,9 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
 
   private finalizePrevItem(): void {
     if (!this.current || !this.lastItemId) return;
-    const prev = this.current.items.find((i) => i.itemId === this.lastItemId);
+    // The LAST entry for the id — the run that was actually on air. `find` would
+    // close an earlier run of the same item and leave the live one open forever.
+    const prev = lastItemEntry(this.current.items, this.lastItemId);
     if (prev && !prev.endedAt) prev.endedAt = new Date().toISOString();
   }
 
@@ -240,7 +291,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
     void sampleArchive
       .writeManifest(ctx)
       .then(() => sampleArchive.closeService(ctx.serviceKey))
-      .catch((err) => console.error("[spl-recorder] archive close failed:", err));
+      .catch((err) => console.error("[spl-recorder] archive close failed:", scrubError(err)));
   }
 
 }

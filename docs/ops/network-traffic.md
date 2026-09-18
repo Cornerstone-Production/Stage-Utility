@@ -45,6 +45,11 @@ re-send the plan, slot configuration and layouts along with it.
 Idle, the stream is silent: measured at 0 bytes over 12 seconds on a server with
 nothing happening.
 
+A screen on the [polling transport](../display-urls.md#polling-transport)
+(`?transport=poll`) is the exception: it costs one request every two seconds
+whether or not anything changed — about 43,000 a day, mostly empty answers. Use
+it only on a browser that cannot hold the stream.
+
 ## Between services
 
 Integrations back off toward a dormant ceiling (see [reliability](reliability.md))

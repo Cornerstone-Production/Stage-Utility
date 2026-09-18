@@ -1,18 +1,27 @@
-import { clamp } from "@main/services/clamp";
-import { ChipToggle, ChipToggleRow } from "../../components/ui";
-import { useRef, useState } from "react";
-import { formatClock } from "../../lib/clock-format";
+import { useMemo } from "react";
 
+import { toast } from "../../components/ui";
+import { errorMessage } from "@main/services/errors";
+import {
+  CustomizePopover,
+  HistoryChart,
+  addDefaultOnce,
+  serviceWindowOf,
+  useStoredKeys,
+  type ChartSeries,
+  type LaneItem,
+} from "./history-chart";
 
-function fmtTime(iso: string | null): string {
-  return formatClock(iso);
-}
-
-// Which chart series/overlays and summary cards to surface, mirroring the SPL
-// tab's metric picker. Attendance has a fixed, small set (not arbitrary per-item
-// columns), so the keys are enumerated here and grouped for the picker UI. The
-// chart "attendance" series is the per-service (baselined) value stored in each
-// sample; the day total is a scalar summary card, not a drawable series.
+// Which chart series/overlays and at-rest figures to surface. Attendance has a
+// fixed, small set (not arbitrary per-item columns), so the keys are enumerated
+// here and grouped for the Customize popover.
+//
+// THE KEYS ARE THE ONES THE CHIP ROW STORED, deliberately: the chips are gone but
+// their localStorage entry is not, so an operator who had turned Total entries on
+// still has it on. `average` is the one new key, and only new selections carry it.
+//
+// The chart "attendance" series is the per-service (baselined) value stored in
+// each sample; the day total is a scalar figure, not a drawable series.
 // "Attendance" = people in the room (occupancy series/peak — the real count).
 // "Total entries" = the cumulative door count (double-counts re-entries).
 const CHART_METRICS = [
@@ -22,29 +31,25 @@ const CHART_METRICS = [
   { key: "markers", label: "Plan items" },
 ] as const;
 const STAT_METRICS = [
-  { key: "peak", label: "Peak attendance" },
-  { key: "lowest", label: "Lowest attendance" },
-  { key: "entries", label: "Total entries" },
-  { key: "dayTotal", label: "Total entries (day)" },
+  { key: "peak", label: "Peak" },
+  { key: "lowest", label: "Lowest" },
+  { key: "average", label: "Average" },
+  { key: "entries", label: "Entries" },
+  { key: "dayTotal", label: "Day total" },
   { key: "samples", label: "Samples" },
 ] as const;
 const ALL_METRIC_KEYS = [...CHART_METRICS.map((m) => m.key), ...STAT_METRICS.map((m) => m.key)];
 const METRICS_STORAGE_KEY = "attendance:visibleMetrics";
+/** The real attendance (in-room) + avg + the item lane, and the four figures the
+ *  spec names: peak, lowest in service, average, samples. "Total entries"
+ *  (cumulative) stays off unless picked. */
+const DEFAULT_METRICS = ["occupancy", "avg", "markers", "peak", "lowest", "average", "samples"];
 
-function loadVisibleMetrics(): string[] {
-  try {
-    const raw = localStorage.getItem(METRICS_STORAGE_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return arr.filter((k) => ALL_METRIC_KEYS.includes(k));
-    }
-  } catch {
-    /* fall through to default */
-  }
-  // Default: the real attendance (in-room) + avg + plan markers, and Peak/Lowest
-  // attendance + samples. "Total entries" (cumulative) stays off unless picked.
-  return ["occupancy", "avg", "markers", "peak", "lowest", "samples"];
-}
+// `average` is new, and a new default reaches nobody who already has a stored
+// selection — the stored list wins and cannot name a key that did not exist
+// when it was written. Added once, at module load so it lands before the first
+// read, and never again: re-adding it every load would undo an untick.
+addDefaultOnce(METRICS_STORAGE_KEY, "average");
 
 /**
  * Attendance — browse past services and their recorded attendance/occupancy
@@ -60,357 +65,190 @@ function loadVisibleMetrics(): string[] {
 export function perServiceAttendance(v: number, samples: AttendanceSample[]): number {
   return Math.max(0, v - (samples[0]?.attendance ?? 0));
 }
-/** Per-service PEAK attendance from a record's samples (max − first). Falls back to
- *  the stored field when there are no samples. */
-export function servicePeakAttendance(rec: ServiceAttendance): number {
-  const s = rec.samples;
-  if (!s || s.length === 0) return rec.peakAttendance;
-  let max = s[0].attendance;
-  for (const x of s) if (x.attendance > max) max = x.attendance;
-  return perServiceAttendance(max, s);
+/**
+ * ENTRIES is `rec.peakAttendance` — the recorder's own in-service figure, and
+ * nothing derived.
+ *
+ * There used to be a `servicePeakAttendance(rec)` here that took the maximum
+ * across EVERY sample and subtracted the first. That runs the door count on
+ * through the post-service taper, so it answered "how many people came in at
+ * any point around this service" — which is not a figure an operator wants
+ * under any label. On the 17 Sep Salt Company recording it read 2,061 against
+ * a recorded 1,727.
+ *
+ * Every other surface in the app already reads the stored field: the
+ * `servicePeakAttendance` LAYOUT metric, on dashboards and custom layouts,
+ * resolves to `rec.peakAttendance` (use-people-count-state.ts), so History's
+ * card was the one place quoting a different number under the same word.
+ *
+ * `perServiceAttendance` above stays: baselining each SAMPLE is what the
+ * chart's entries series needs, and it is a different question.
+ */
+
+/**
+ * Mean in-room occupancy while the SERVICE was running.
+ *
+ * In-service samples only — the ones with no `phase`. The arrival ramp and the
+ * emptying-room taper are both long and both near-empty, and averaging them in
+ * put this figure BELOW the recorded low: peak 1,196, lowest 933, "average"
+ * 781. Peak and Lowest have always been in-service (the recorder derives them
+ * that way, and AttendanceSample's own doc says only unphased samples feed
+ * Peak/Lowest/Avg); the average was the one that did not agree with them.
+ *
+ * Records written before the phase tags existed have no phase on any sample, so
+ * every sample counts — the same answer those records gave before.
+ */
+export function averageOccupancy(rec: ServiceAttendance): number | null {
+  const inService = rec.samples.filter((s) => !s.phase);
+  // No in-service samples at all is NOT "average the ramp instead". It is a
+  // record that is still arriving, or one that never went live — the real case
+  // being the "arriving" row History shows up to an hour before the start. Peak
+  // reads 0 and Lowest reads — for that record, so an Average of 400 taken off
+  // the ramp is the one figure claiming a service happened.
+  //
+  // A LEGACY record — written before the phase tags existed — has no phase on
+  // ANY sample, so every one of them is in-service by this test and it reads
+  // exactly as it always did. That needs no second branch, and the branch that
+  // used to be here (fall back to every sample) was unreachable for legacy
+  // records and wrong for the arriving one.
+  if (!inService.length) return null;
+  return Math.round(inService.reduce((s, p) => s + p.occupancy, 0) / inService.length);
 }
 
-/** The full attendance detail — metric picker + summary cards + trend chart — for
- *  one service record. Extracted so the unified History tab can embed it directly.
- *  `timeline` (same serviceKey) supplies the PCO plan-item markers on the chart. */
+/** The full attendance detail — the chart module, its stat strip and its
+ *  Customize popover — for one service record. Extracted so the unified History
+ *  tab can embed it directly. `timeline` (same serviceKey) supplies the plan
+ *  items that fill the chart's item lane. */
 export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendance; timeline: ServiceTimeline | null }) {
-  const [visible, setVisible] = useState<string[]>(loadVisibleMetrics);
+  const [visible, storeMetric] = useStoredKeys(METRICS_STORAGE_KEY, ALL_METRIC_KEYS, DEFAULT_METRICS);
   const shows = (k: string) => visible.includes(k);
+  /** The toggle takes effect either way; a browser that refused to REMEMBER it
+   *  says so rather than quietly forgetting the choice at the next reload. */
   function toggleMetric(key: string) {
-    setVisible((prev) => {
-      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      try {
-        localStorage.setItem(METRICS_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        /* best-effort persist */
-      }
-      return next;
+    const err = storeMetric(key);
+    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+  }
+
+  const avgOccupancy = averageOccupancy(detail);
+  // Attendance is cumulative; plot it per-service (each sample minus the first) so
+  // a service not reset off the prior one still reads its own count.
+  const points = useMemo(
+    () =>
+      detail.samples.map((s) => ({
+        t: Date.parse(s.t),
+        occupancy: s.occupancy,
+        attendance: perServiceAttendance(s.attendance, detail.samples),
+      })).filter((p) => Number.isFinite(p.t)),
+    [detail.samples],
+  );
+
+  // EVERY series the section offers, each carrying whether it is on. The chart
+  // draws the on ones and lists them ALL in the legend, which is what lets the
+  // legend turn one back on — see ChartSeries.on. The ids are the stored
+  // preference keys, so a legend click and a Customize tick are one action over
+  // one store and the two cannot disagree.
+  const series: ChartSeries[] = [
+    {
+      id: "occupancy",
+      label: "Attendance",
+      color: "var(--color-green-9)",
+      role: "primary",
+      fill: true,
+      on: shows("occupancy"),
+      points: points.map((p) => ({ t: p.t, v: p.occupancy })),
+    },
+    {
+      id: "attendance",
+      label: "Total entries",
+      color: "var(--color-accent)",
+      role: "secondary",
+      dashed: true,
+      on: shows("attendance"),
+      points: points.map((p) => ({ t: p.t, v: p.attendance })),
+    },
+  ];
+  // A reference line, drawn as a two-point series rather than as its own kind of
+  // overlay — it shares the y scale, so it is a series by any other name. ABSENT
+  // rather than off when there is no average to reference: a legend entry that
+  // cannot be turned on is a dead control.
+  if (avgOccupancy != null && points.length > 1) {
+    series.push({
+      id: "avg",
+      // "Avg", not "Avg 1,164": the strip prints the label and the value side by
+      // side, and a label carrying the number read "AVG 1,164  1,164".
+      label: "Avg",
+      color: "var(--color-green-11)",
+      role: "secondary",
+      dashed: true,
+      on: shows("avg"),
+      // Two points two hours apart. Without this the default sampling-gap rule
+      // broke it into two single-point runs and drew two dots at the edges of
+      // the plot instead of a reference line.
+      gapMs: Infinity,
+      points: [
+        { t: points[0].t, v: avgOccupancy },
+        { t: points[points.length - 1].t, v: avgOccupancy },
+      ],
     });
   }
-  // PCO plan-item markers + the service's mean in-room occupancy, overlaid on the trend.
-  const markers = (timeline?.items ?? [])
-    .filter((it) => it.title && it.startedAt)
-    .map((it) => ({ t: it.startedAt, label: it.title }));
-  const avgOccupancy = detail.samples.length
-    ? Math.round(detail.samples.reduce((s, p) => s + p.occupancy, 0) / detail.samples.length)
-    : null;
-  // Attendance is cumulative; show it per-service (each sample minus the first) so a
-  // service not reset off the prior one still reads its own count on the chart + peak.
-  const attSamples = detail.samples.map((s) => ({ t: s.t, attendance: perServiceAttendance(s.attendance, detail.samples), occupancy: s.occupancy, phase: s.phase }));
-  const statValues: Record<string, { value: number | null; accent: string }> = {
-    peak: { value: detail.peakOccupancy, accent: "text-green-11" }, // peak people in the room = real attendance
-    lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
-    entries: { value: servicePeakAttendance(detail), accent: "text-accent" }, // cumulative door count
-    dayTotal: { value: detail.totalAttendance ?? null, accent: "text-accent" },
-    samples: { value: detail.samples.length, accent: "text-gray-12" },
+
+  const items: LaneItem[] = shows("markers")
+    ? (timeline?.items ?? []).filter((it) => it.startedAt).map((it) => ({
+      itemId: it.itemId,
+      title: it.title,
+      sequence: it.sequence,
+      startedAt: it.startedAt,
+      endedAt: it.endedAt,
+      preService: it.preService ?? false,
+      plannedSec: it.plannedLengthSec,
+      actualSec: it.actualDurationSec,
+    }))
+    : [];
+
+  const values: Record<string, number | null> = {
+    peak: detail.peakOccupancy, // peak people in the room = real attendance
+    lowest: detail.minOccupancy ?? null,
+    average: avgOccupancy,
+    entries: detail.peakAttendance, // people who came in during the service
+    dayTotal: detail.totalAttendance ?? null,
+    samples: detail.samples.length,
   };
-  const shownStats = STAT_METRICS.filter((m) => shows(m.key));
-  const colClass =
-    shownStats.length >= 6 ? "sm:grid-cols-6"
-    : shownStats.length === 5 ? "sm:grid-cols-5"
-    : shownStats.length === 4 ? "sm:grid-cols-4"
-    : "sm:grid-cols-3";
-  return (
-    <div className="flex flex-col gap-4">
-      <MetricPicker visible={visible} onToggle={toggleMetric} />
-      {shownStats.length > 0 && (
-        <div className={`grid grid-cols-2 gap-2 ${colClass}`}>
-          {shownStats.map((m) => (
-            <Stat key={m.key} label={m.label} value={statValues[m.key].value} accent={statValues[m.key].accent} />
-          ))}
-        </div>
-      )}
-      <AttendanceChart
-        samples={attSamples}
-        markers={shows("markers") ? markers : []}
-        avgOccupancy={shows("avg") ? avgOccupancy : null}
-        showAttendance={shows("attendance")}
-        showOccupancy={shows("occupancy")}
-        serviceStartedAt={detail.serviceStartedAt ?? null}
-        serviceEndedAt={detail.endedAt}
-      />
-    </div>
-  );
-}
-
-/** Toggle chips for which chart series/overlays and summary cards to surface —
- *  mirrors the SPL tab's picker. Persisted per-browser (view preference, not a
- *  live-display setting), grouped so the two kinds read distinctly. */
-function MetricPicker({ visible, onToggle }: { visible: string[]; onToggle: (key: string) => void }) {
-  const Chip = ({ k, label }: { k: string; label: string }) => (
-    <ChipToggle label={label} on={visible.includes(k)} onToggle={() => onToggle(k)} />
-  );
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-col gap-1.5">
-        <span className="text-caption2 text-gray-9">Chart</span>
-        <ChipToggleRow>
-          {CHART_METRICS.map((m) => <Chip key={m.key} k={m.key} label={m.label} />)}
-        </ChipToggleRow>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-caption2 text-gray-9">Summary</span>
-        <ChipToggleRow>
-          {STAT_METRICS.map((m) => <Chip key={m.key} k={m.key} label={m.label} />)}
-        </ChipToggleRow>
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, accent }: { label: string; value: number | null; accent: string }) {
-  return (
-    <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
-      <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value == null ? "—" : value.toLocaleString()}</div>
-    </div>
-  );
-}
-
-/** Dependency-free SVG line chart of attendance + in-room occupancy over time,
- *  with optional PCO plan-item markers (vertical lines at item start times) and a
- *  service-average in-room reference line. X is time-based so markers align with
- *  the curve even though samples aren't perfectly evenly spaced. */
-function AttendanceChart({
-  samples,
-  markers = [],
-  avgOccupancy = null,
-  showAttendance = true,
-  showOccupancy = true,
-  serviceStartedAt = null,
-  serviceEndedAt = null,
-}: {
-  samples: AttendanceSample[];
-  markers?: { t: string; label: string }[];
-  avgOccupancy?: number | null;
-  showAttendance?: boolean;
-  showOccupancy?: boolean;
-  /** Service-proper window (the band between the arrival ramp and the taper). */
-  serviceStartedAt?: string | null;
-  serviceEndedAt?: string | null;
-}) {
-  // Hover tooltip state — declared before the early return (Rules of Hooks).
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [hover, setHover] = useState<number | null>(null);
-  if (samples.length < 2) {
-    return (
-      <div className="rounded-lg border border-dashed border-gray-a5 px-4 py-10 text-center text-caption1 text-gray-9">
-        Not enough samples yet to graph — the trend fills in as the service runs.
-      </div>
-    );
-  }
-  const W = 600, H = 264, padL = 40, padR = 12, padT = 16, padB = 50;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const n = samples.length;
-  const dataMax = Math.max(1, ...samples.map((s) => Math.max(showAttendance ? s.attendance : 0, showOccupancy ? s.occupancy : 0)));
-  // Nice round y-axis (0 / mid / top) in 1·2·5×10ⁿ steps with headroom — matches the
-  // custom-layout people-graph so the two charts read consistently (0/500/1000, not
-  // 0/531/1062).
-  const niceStep = (target: number) => {
-    const x = target > 1 ? target : 1;
-    const pow = Math.pow(10, Math.floor(Math.log10(x)));
-    const nn = x / pow;
-    const m = nn <= 1 ? 1 : nn <= 2 ? 2 : nn <= 5 ? 5 : 10;
-    return Math.max(1, Math.round(m * pow));
+  const colors: Record<string, string> = {
+    peak: "var(--color-ok-11)",
+    lowest: "var(--color-warn-11)",
+    entries: "var(--color-accent)",
+    dayTotal: "var(--color-accent)",
   };
-  let step = niceStep(dataMax / 2);
-  let hi = 2 * step;
-  while (hi <= dataMax) { step = niceStep(step + 1); hi = 2 * step; }
-  const yTicks = [0, step, hi];
-  const t0 = Date.parse(samples[0].t);
-  const t1 = Date.parse(samples[n - 1].t);
-  const span = t1 - t0 || 1;
-  const xt = (iso: string) => padL + ((Date.parse(iso) - t0) / span) * plotW;
-  const y = (v: number) => padT + plotH - (v / hi) * plotH;
-  // Break the curve wherever sampling stopped. Samples land every 30s, so a run of
-  // missing ones means the counter was unreachable or the server was down — not that
-  // the room emptied smoothly. Joining across it drew a confident straight line
-  // through an hour nobody measured, which is worse than showing nothing there.
-  const GAP_MS = 3 * 60_000;
-  const runs: (typeof samples)[] = [];
-  for (const s of samples) {
-    const cur = runs[runs.length - 1];
-    const prev = cur?.[cur.length - 1];
-    if (!cur || (prev && Date.parse(s.t) - Date.parse(prev.t) > GAP_MS)) runs.push([s]);
-    else cur.push(s);
-  }
-  const pts = (run: typeof samples, key: "attendance" | "occupancy") =>
-    run.map((s) => `${xt(s.t).toFixed(1)},${y(s[key]).toFixed(1)}`).join(" ");
-  // Each run gets its own fill, dropped to the baseline at its own ends rather than
-  // at the chart's, so the gap reads as absent instead of as zero.
-  const areaOf = (run: typeof samples, key: "attendance" | "occupancy") => {
-    const x0 = xt(run[0].t).toFixed(1);
-    const x1 = xt(run[run.length - 1].t).toFixed(1);
-    const base = (padT + plotH).toFixed(1);
-    return `${x0},${base} ${pts(run, key)} ${x1},${base}`;
-  };
-  const inRange = markers.filter((m) => {
-    const mt = Date.parse(m.t);
-    return Number.isFinite(mt) && mt >= t0 - 1000 && mt <= t1 + 1000;
-  });
+  const figures = STAT_METRICS.filter((m) => shows(m.key)).map((m) => ({
+    key: m.key,
+    label: m.label,
+    value: values[m.key] == null ? "—" : (values[m.key] as number).toLocaleString(),
+    color: colors[m.key],
+  }));
 
-  // Service-proper window: the arrival ramp sits left of it and the emptying-room
-  // taper to the right, so those tails get dimmed while the service band stays clear.
-  const clampX = (v: number) => clamp(v, padL, W - padR);
-  const sStart = serviceStartedAt ? Date.parse(serviceStartedAt) : NaN;
-  const sEnd = serviceEndedAt ? Date.parse(serviceEndedAt) : NaN;
-  const bandX0 = Number.isFinite(sStart) ? clampX(xt(serviceStartedAt as string)) : null;
-  const bandX1 = Number.isFinite(sEnd) ? clampX(xt(serviceEndedAt as string)) : null;
-  const hasPre = bandX0 != null && bandX0 > padL + 1;
-  const hasPost = bandX1 != null && bandX1 < W - padR - 1;
-  // PCO item times for the x-axis — thinned left→right so close items don't overlap
-  // (the NAME stays on the vertical marker line; only the time drops to the axis).
-  const axisTimes: { x: number; t: string }[] = [];
-  let lastAxisX = -Infinity;
-  for (const m of [...inRange].sort((a, b) => xt(a.t) - xt(b.t))) {
-    const mx = xt(m.t);
-    if (mx - lastAxisX >= 30 && mx > padL + 22 && mx < W - padR - 22) {
-      axisTimes.push({ x: mx, t: m.t });
-      lastAxisX = mx;
-    }
-  }
-  // Vertical NAME labels for items that start close together (e.g. "MEDIA" +
-  // "VIDEO: Pre-roll") would stack illegibly. Draw a label only if it clears the
-  // last drawn one; collided labels are HIDDEN — their marker line stays, and the
-  // names are surfaced in the hover tooltip so nothing is lost.
-  const LABEL_GAP = 13;
-  const labelDrawn = new Set<number>();
-  {
-    let lastX = -Infinity;
-    for (const { i, mx } of inRange.map((m, i) => ({ i, mx: xt(m.t) })).sort((a, b) => a.mx - b.mx)) {
-      if (mx - lastX >= LABEL_GAP) {
-        labelDrawn.add(i);
-        lastX = mx;
+  return (
+    <HistoryChart
+      series={series}
+      items={items}
+      // ONE window for both charts — see service-window.ts. Sound had its own
+      // and never hatched.
+      window={serviceWindowOf({ timeline, attendance: detail })}
+      yScale={{ kind: "count" }}
+      figures={figures}
+      live={detail.endedAt == null}
+      ariaLabel="Attendance and in-room occupancy over the service, with the plan's items"
+      onToggleSeries={toggleMetric}
+      customize={
+        <CustomizePopover
+          label="Customize attendance"
+          groups={[
+            { id: "series", label: "Chart", options: CHART_METRICS.map((m) => ({ ...m })) },
+            { id: "figures", label: "Figures", options: STAT_METRICS.map((m) => ({ ...m })) },
+          ]}
+          selected={visible}
+          onToggle={toggleMetric}
+        />
       }
-    }
-  }
-
-  // Hover tooltip: map the pointer to the nearest sample and show its values + time.
-  function onMove(e: React.PointerEvent<SVGSVGElement>) {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const r = svg.getBoundingClientRect();
-    const vbX = ((e.clientX - r.left) / r.width) * W;
-    const targetT = t0 + ((vbX - padL) / plotW) * span;
-    let best = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < n; i++) {
-      const d = Math.abs(Date.parse(samples[i].t) - targetT);
-      if (d < bestD) { bestD = d; best = i; }
-    }
-    setHover(best);
-  }
-  const hs = hover != null ? samples[hover] : null;
-  const hx = hs ? xt(hs.t) : 0;
-  // Plan items at the crosshair — surfaces any name the thinning above hid, so a
-  // cluster's overlapping labels are still discoverable ("so you know it's there").
-  const hoverItems = (() => {
-    if (!hs || inRange.length === 0) return [] as typeof inRange;
-    let nx = 0;
-    let nd = Infinity;
-    for (const m of inRange) {
-      const d = Math.abs(xt(m.t) - hx);
-      if (d < nd) { nd = d; nx = xt(m.t); }
-    }
-    if (nd > 18) return [] as typeof inRange;
-    return [...inRange].filter((m) => Math.abs(xt(m.t) - nx) <= LABEL_GAP).sort((a, b) => xt(a.t) - xt(b.t));
-  })();
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-4 text-caption2 flex-wrap text-gray-11">
-        {showOccupancy && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> Attendance</span>}
-        {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-accent" /> Total entries</span>}
-        {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg attendance {avgOccupancy.toLocaleString()}</span>}
-        {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
-        {(hasPre || hasPost) && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-gray-a4" /> Before / after service</span>}
-      </div>
-      <div className="overflow-x-auto rounded-lg border border-gray-5 bg-gray-2 p-2">
-        <svg ref={svgRef} onPointerMove={onMove} onPointerLeave={() => setHover(null)} viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
-          <defs>
-            <linearGradient id="attFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.22} />
-              <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0.02} />
-            </linearGradient>
-            <linearGradient id="occFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--green-9)" stopOpacity={0.20} />
-              <stop offset="100%" stopColor="var(--green-9)" stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          {/* nice round gridlines */}
-          {yTicks.map((t) => (
-            <g key={t}>
-              <line x1={padL} y1={y(t)} x2={W - padR} y2={y(t)} stroke="var(--gray-a4)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-              <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--gray-9)">{t.toLocaleString()}</text>
-            </g>
-          ))}
-          {/* dim the pre-service arrival ramp / post-service taper (outside the service band) */}
-          {hasPre && <rect x={padL} y={padT} width={(bandX0 as number) - padL} height={plotH} fill="var(--gray-a3)" />}
-          {hasPost && <rect x={bandX1 as number} y={padT} width={W - padR - (bandX1 as number)} height={plotH} fill="var(--gray-a3)" />}
-          {hasPre && <line x1={bandX0 as number} y1={padT} x2={bandX0 as number} y2={padT + plotH} stroke="var(--green-8)" strokeWidth={1} opacity={0.6} vectorEffect="non-scaling-stroke" />}
-          {hasPost && <line x1={bandX1 as number} y1={padT} x2={bandX1 as number} y2={padT + plotH} stroke="var(--amber-8)" strokeWidth={1} opacity={0.6} vectorEffect="non-scaling-stroke" />}
-          {/* PCO plan-item markers — item NAME on the line; the time drops to the x-axis */}
-          {inRange.map((m, i) => {
-            const mx = xt(m.t);
-            return (
-              <g key={`${m.t}-${i}`}>
-                <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
-                {labelDrawn.has(i) && (
-                  <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
-                    {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-          {/* filled areas (attendance sits above occupancy, so paint it first/behind) */}
-          {showAttendance && runs.map((r, i) => <polygon key={`af${i}`} points={areaOf(r, "attendance")} fill="url(#attFill)" />)}
-          {showOccupancy && runs.map((r, i) => <polygon key={`of${i}`} points={areaOf(r, "occupancy")} fill="url(#occFill)" />)}
-          {/* service-average in-room reference */}
-          {avgOccupancy != null && (
-            <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} vectorEffect="non-scaling-stroke" />
-          )}
-          {/* Service start/end times — vertical (matching the item times) but in a
-              distinct, brighter tone so they read as boundaries, not plan items. */}
-          <text x={padL} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-muted)" transform={`rotate(90 ${padL} ${padT + plotH + 6})`}>{fmtTime(samples[0].t)}</text>
-          <text x={W - padR} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-muted)" transform={`rotate(90 ${W - padR} ${padT + plotH + 6})`}>{fmtTime(samples[n - 1].t)}</text>
-          {/* PCO item times on the x-axis (thinned), each ticking up to its marker line */}
-          {axisTimes.map((a, i) => (
-            <g key={`axt-${i}`}>
-              <line x1={a.x} y1={padT + plotH} x2={a.x} y2={padT + plotH + 3} stroke="var(--gray-a6)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-              <text x={a.x} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-subtle)" transform={`rotate(90 ${a.x} ${padT + plotH + 6})`}>{fmtTime(a.t)}</text>
-            </g>
-          ))}
-          {showOccupancy && runs.map((r, i) => <polyline key={`ol${i}`} points={pts(r, "occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
-          {showAttendance && runs.map((r, i) => <polyline key={`al${i}`} points={pts(r, "attendance")} fill="none" stroke="var(--color-accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
-          {/* hover crosshair + tooltip */}
-          {hs && (
-            <g pointerEvents="none">
-              <line x1={hx} y1={padT} x2={hx} y2={padT + plotH} stroke="var(--gray-a7)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-              {showOccupancy && <circle cx={hx} cy={y(hs.occupancy)} r={3} fill="var(--green-9)" />}
-              {showAttendance && <circle cx={hx} cy={y(hs.attendance)} r={3} fill="var(--color-accent)" />}
-              {(() => {
-                const rows: { t: string; kind: "time" | "val" | "item" }[] = [{ t: fmtTime(hs.t), kind: "time" }];
-                if (showOccupancy) rows.push({ t: `Attendance ${hs.occupancy.toLocaleString()}`, kind: "val" });
-                if (showAttendance) rows.push({ t: `Entries ${hs.attendance.toLocaleString()}`, kind: "val" });
-                for (const m of hoverItems) rows.push({ t: `▸ ${m.label.length > 24 ? `${m.label.slice(0, 23)}…` : m.label}`, kind: "item" });
-                const boxW = clamp(Math.round(Math.max(...rows.map((r) => r.t.length)) * 5) + 14, 96, W - padL - padR);
-                const boxH = 6 + rows.length * 12;
-                const bx = clamp(hx + 6, padL, W - padR - boxW);
-                return (
-                  <g>
-                    <rect x={bx} y={padT + 2} width={boxW} height={boxH} rx={4} fill="var(--gray-1)" stroke="var(--gray-6)" opacity={0.97} />
-                    {rows.map((ln, i) => (
-                      <text key={i} x={bx + 6} y={padT + 14 + i * 12} fontSize={9} fill={ln.kind === "time" ? "var(--gray-9)" : ln.kind === "item" ? "var(--gray-11)" : "var(--gray-12)"}>{ln.t}</text>
-                    ))}
-                  </g>
-                );
-              })()}
-            </g>
-          )}
-        </svg>
-      </div>
-    </div>
+    />
   );
 }

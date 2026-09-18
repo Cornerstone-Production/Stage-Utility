@@ -293,6 +293,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
 
+    case "history:listMilestones":
+      return apiFetch<T>("/api/history/milestones");
+    case "history:saveMilestone":
+      return post<T>("/api/history/milestones", p);
+    case "history:deleteMilestone":
+      return del<T>(`/api/history/milestones/${encodeURIComponent(String(p.id ?? ""))}`);
+
     case "baptism:get":
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":
@@ -325,6 +332,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
         testimonyItemId: p.testimonyItemId,
         baptismItemId: p.baptismItemId,
       });
+
+    case "spl:series":
+      return apiFetch<T>(
+        `/api/spl/history/${encodeURIComponent(String(p.serviceKey ?? ""))}/series`
+          + `?metric=${encodeURIComponent(String(p.metric ?? ""))}`
+          + `&bucketSec=${encodeURIComponent(String(p.bucketSec ?? 5))}`,
+      );
 
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
@@ -726,8 +740,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "history:recalcAttendance":
       return post<T>("/api/history/recalc", p);
 
+    case "history:rebuild":
+      return post<T>("/api/history/rebuild", p);
+
     case "history:setItemCounted":
       return post<T>("/api/history/item-counted", p);
+
+    case "history:setItemTimes":
+      return post<T>("/api/history/item-times", p);
 
     case "history:merge":
       return post<T>("/api/history/merge", p);
@@ -765,6 +785,22 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       const id = p.id as string;
       return post<T>(`/api/integrations/${encodeURIComponent(id)}/test`);
     }
+
+    // ── YouTube device-flow connect ──────────────────────────────────────
+    case "youtube:connectStart":
+      return post<T>("/api/integrations/youtube/connect");
+
+    case "youtube:connectStatus":
+      return apiFetch<T>("/api/integrations/youtube/connect");
+
+    case "youtube:connectCancel":
+      return del<T>("/api/integrations/youtube/connect");
+
+    case "youtube:connectDisconnect":
+      return apiFetch<T>("/api/integrations/youtube/connect", {
+        method: "DELETE",
+        body: JSON.stringify({ disconnect: true }),
+      });
 
     // ── Wireless ───────────────────────────────────────────────────────
     case "wireless:listProviders":
@@ -940,6 +976,28 @@ let eventSource: EventSource | null = null;
 const sseListeners: SseListener[] = [];
 
 /**
+ * Collect events by polling instead of holding an event stream open.
+ *
+ * Opt in per page with `?transport=poll` on any Stage Utility URL. It exists
+ * for an embedded browser that cannot hold a long-lived response: the Ross
+ * Ultritouch renders its Browser component in DashBoard's fallback browser
+ * (its Chromium will not start on the panel's Linux), and that browser buffers
+ * /api/events and releases the frames in batches up to a minute late — so the
+ * panel showed a minute-old service and measured its clock skew a minute wrong.
+ *
+ * Off by default and deliberately not sticky: a held stream is cheaper and
+ * immediate, and this costs one request per client every two seconds.
+ */
+const POLL_TRANSPORT = (() => {
+  try {
+    return typeof location !== "undefined" && new URLSearchParams(location.search).get("transport") === "poll";
+  } catch {
+    return false; // no DOM (worker, test harness, SSR) — there is no URL to opt in on
+  }
+})();
+if (POLL_TRANSPORT) console.log("[api] transport: poll every 2s (?transport=poll)");
+
+/**
  * Channels the server pushes a snapshot of the moment a stream connects.
  *
  * That hydrate fires once, at connect — so a component that mounts later (any
@@ -964,6 +1022,75 @@ export { HYDRATED_CHANNELS };
 const hydratedSet = HYDRATED_SET;
 /** Last payload seen per hydrated channel, for replay to late subscribers. */
 const lastPayload = new Map<string, unknown>();
+
+/**
+ * Deliver one frame to every direct-path subscriber on a channel.
+ *
+ * Both non-worker transports end here: the EventSource listener parses its
+ * `e.data` and calls this, and the poller calls it with the already-parsed
+ * `data` off a poll response. That is what makes the hydrate cache and the
+ * replay-on-subscribe behave identically on a panel that polls and a display
+ * that streams — the alternative, a second copy of the caching rule inside the
+ * poller, is the shape this repo keeps paying for.
+ */
+function dispatch(channel: string, payload: unknown, replayed: boolean): void {
+  fanOut(channel, payload, replayed, directHandlers.get(channel));
+}
+
+type SseCallback = (payload: unknown, replayed: boolean) => void;
+
+/**
+ * Hand one parsed frame to a set of callbacks. The ONE place a frame is
+ * delivered, on any of the three transports.
+ *
+ * This shape existed three times — here, in the shared worker's port onmessage,
+ * and in the wrapper abandonWorker builds — and the three had already drifted:
+ * only this one copied the callback set before iterating it, and only this one
+ * wrote the hydrate cache. Neither difference had produced a reported bug (the
+ * worker keeps its own replay cache, and on the direct stream ensureEventSource
+ * attaches a cache listener to every hydrated channel), but three copies of a
+ * delivery rule is three places the next change has to be made, and this repo's
+ * most expensive recurring mistake is making it in two of them.
+ *
+ * The copy is not about unsubscribing: deleting the CURRENT entry of a Set
+ * mid-iteration is safe, and deleting a later one is the caller saying it does
+ * not want the frame. It is about SUBSCRIBING during dispatch — a Set iterator
+ * visits an entry added while it is running, so a subscriber that arrived
+ * half-way through would be handed a frame from before it existed, and then the
+ * replayed snapshot on top of it. A handler's throw is contained so one broken
+ * subscriber cannot cost the others their frame.
+ */
+function fanOut(channel: string, payload: unknown, replayed: boolean, callbacks: Iterable<SseCallback> | undefined): void {
+  if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
+  if (!callbacks) return;
+  for (const cb of [...callbacks]) {
+    try {
+      cb(payload, replayed);
+    } catch (err) {
+      console.error(`[api] SSE handler error for "${channel}":`, err);
+    }
+  }
+}
+
+/** Direct-path callbacks by channel — one EventSource listener per CHANNEL
+ *  rather than per subscriber, so dispatch can fan out without delivering a
+ *  frame once per listener. */
+const directHandlers = new Map<string, Set<(payload: unknown, replayed: boolean) => void>>();
+
+/**
+ * That one wire listener, by channel, so the LAST subscriber to leave can find
+ * it.
+ *
+ * Held here rather than in the closure of the subscriber that created it. That
+ * closure only belongs to whichever subscriber arrived FIRST, so the listener
+ * came off the stream only when the first to arrive was also the last to leave
+ * — and unmounting two components in the order they mounted, which is the
+ * ordinary React case, left it attached with its callback set already gone. The
+ * next subscriber to the channel then counted as the first again and added a
+ * SECOND listener, so every frame was dispatched twice and every list rendered
+ * twice, for the life of the page.
+ */
+const channelListeners = new Map<string, SseListener>();
 
 /**
  * Test seam — forget the replay cache, so a case can model a COLD page.
@@ -1000,7 +1127,12 @@ function reportChannels(): void {
   if (reportTimer) return;
   reportTimer = setTimeout(() => {
     reportTimer = null;
-    const channels = [...new Set(sseListeners.map((l) => l.channel))];
+    // Derived from the CALLBACK registry, not the wire listeners: the polling
+    // transport registers no EventSource listener at all, so reading
+    // sseListeners alone reported an empty set and the server filtered every
+    // channel out for that client. sseListeners is still unioned in because the
+    // shared-worker fallback wrappers live only there.
+    const channels = [...new Set([...directHandlers.keys(), ...sseListeners.map((l) => l.channel)])];
     void post("/api/events/subscribe", { cid: CLIENT_ID, channels }).catch(() => {});
   }, 200);
 }
@@ -1028,6 +1160,9 @@ function reportChannels(): void {
 //
 //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
 let sharedSse = (() => {
+  // The worker exists to SHARE one EventSource across tabs. On the polling
+  // transport there is no stream to share, so it would open one nobody reads.
+  if (POLL_TRANSPORT) return false;
   try {
     return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
   } catch {
@@ -1062,6 +1197,10 @@ export const __sseFallback = {
     fallbackWrappers.length = 0;
     sseListeners.length = 0;
     workerHandlers.clear();
+    // The direct-path registries too: a case that left subscribers in one would
+    // have the next case's frames delivered into its own handlers.
+    directHandlers.clear();
+    channelListeners.clear();
   },
 };
 
@@ -1092,10 +1231,7 @@ function ensureWorker(): boolean {
       // something the server just sent" — the same distinction the direct path
       // draws, so a subscriber cannot tell which transport it is on.
       const { channel, data, replay } = msg as { channel: string; data: unknown; replay?: boolean };
-      const set = workerHandlers.get(channel);
-      if (set) for (const cb of set) {
-        try { cb(data, replay === true); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
-      }
+      fanOut(channel, data, replay === true, workerHandlers.get(channel));
     };
     sseWorker.port.start();
     startWorkerHeartbeat();
@@ -1149,10 +1285,14 @@ function abandonWorker(why: string): void {
       const handler = (e: MessageEvent) => {
         try {
           // A frame off the wire, never a replay — this is the direct
-          // EventSource path standing in for the abandoned worker.
-          cb(JSON.parse(e.data), false);
+          // EventSource path standing in for the abandoned worker. Through
+          // fanOut so this frame seeds the hydrate cache like any other: a tab
+          // that has fallen back is ON the direct path, where a late subscriber
+          // is served from that cache.
+          fanOut(channel, JSON.parse(e.data), false, [cb]);
         } catch (err) {
-          console.error(`[api] SSE handler error for "${channel}":`, err);
+          // fanOut contains a handler's throw, so this is a malformed frame.
+          console.error(`[api] SSE parse error for "${channel}":`, err);
         }
       };
       fallbackWrappers.push({ channel, handler });
@@ -1295,6 +1435,94 @@ function ensureEventSource(): EventSource {
   return eventSource;
 }
 
+// ── Polling transport ───────────────────────────────────────────────────────
+// See POLL_TRANSPORT above. A chain of timeouts rather than an interval, so a
+// failing server is backed off from instead of queued against.
+const POLL_INTERVAL_MS = 2000;
+/**
+ * Ceiling on the backoff, and it must stay UNDER the server's 30 s poll-client
+ * TTL (`POLL_CLIENT_TTL_MS` in event-poll.ts).
+ *
+ * At 30 s the two were equal, so a backed-off client was expired on almost
+ * every cycle: the server dropped its registry entry and, with it, the channel
+ * filter reported through /api/events/subscribe — and nothing re-reported one,
+ * because reportChannels only fires when a subscription changes. The client
+ * then quietly received every channel on the box, including the 4 Hz metrics
+ * firehose, on the slowest connection it has.
+ */
+const POLL_MAX_INTERVAL_MS = 20_000;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollDelayMs = POLL_INTERVAL_MS;
+/** The newest seq this client has seen. null means "send me a snapshot" — the
+ *  first poll, and any poll after the server said it had rotated past us. */
+let pollSince: number | null = null;
+let pollFailures = 0;
+let pollInFlight = false;
+
+interface PollBody {
+  seq: number;
+  resync: boolean;
+  frames: Array<{ channel: string; data: unknown }>;
+}
+
+function schedulePoll(ms: number): void {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    void pollOnce();
+  }, ms);
+}
+
+/**
+ * One poll, then schedule the next.
+ *
+ * The catch does not swallow: it is the loop's own error handler, and it
+ * changes what happens next (a longer delay) as well as saying so once per
+ * failure streak. There is no caller above it to hand the failure to — this is
+ * the top of a background loop, and a display whose server is restarting must
+ * keep trying rather than throw into nothing.
+ */
+async function pollOnce(): Promise<void> {
+  if (pollInFlight) return; // a slow answer must not stack a second request on it
+  pollInFlight = true;
+  try {
+    const since = pollSince === null ? "" : `&since=${pollSince}`;
+    const res = await fetch(`/api/events/poll?cid=${encodeURIComponent(CLIENT_ID)}${since}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as PollBody;
+    if (pollFailures > 0) {
+      console.log(`[api] poll transport recovered after ${pollFailures} failed attempt(s)`);
+      pollFailures = 0;
+    }
+    pollDelayMs = POLL_INTERVAL_MS;
+    if (body.resync) {
+      // A resync means the server handed us a fresh snapshot instead of a
+      // continuation, so drop our position and ask for one again rather than
+      // resuming from a seq whose predecessors we never saw.
+      pollSince = null;
+      // And re-report our channel set. One cause of a resync is that the server
+      // expired this cid, which also discards the filter it was holding for us.
+      // Nothing else would ever send it again — reportChannels fires only when
+      // a subscription changes, and none has.
+      reportChannels();
+    } else {
+      pollSince = body.seq;
+    }
+    for (const frame of body.frames) dispatch(frame.channel, frame.data, false);
+  } catch (err) {
+    pollFailures++;
+    // Once per streak: a display left running against a stopped server would
+    // otherwise write a line every two seconds for as long as it is down.
+    if (pollFailures === 1) console.warn("[api] event poll failed — backing off", err);
+    pollDelayMs = Math.min(pollDelayMs * 2, POLL_MAX_INTERVAL_MS);
+  } finally {
+    pollInFlight = false;
+    schedulePoll(pollDelayMs);
+  }
+}
+
+if (POLL_TRANSPORT) void pollOnce();
+
 let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let sseReconnectDelayMs = 1000;
 const SSE_RECONNECT_MIN_MS = 1000;
@@ -1317,6 +1545,24 @@ function scheduleSseReconnect(): void {
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
+    // Polling path: a panel that was hidden is up to one backed-off interval
+    // behind, so collect now rather than waiting the rest of it out.
+    //
+    // The backoff is deliberately left alone. Becoming visible says nothing
+    // about whether the server came back, and a kiosk whose tab flips on a
+    // screensaver would otherwise drop a 20 s backoff to 2 s on every flip —
+    // hammering a server that is still down, which is what the backoff exists
+    // to prevent. One immediate attempt is the right amount of optimism; if it
+    // succeeds, pollOnce resets the delay itself.
+    //
+    // There is no `pollDelayMs = POLL_INTERVAL_MS` here even for the healthy
+    // case: a successful poll already set it to exactly that, so the assignment
+    // could not change anything, and a version guarded on `pollFailures === 0`
+    // would not go red on removal.
+    if (POLL_TRANSPORT) {
+      schedulePoll(0);
+      return;
+    }
     // Shared path: the worker owns the stream, so ask IT to check. A machine that
     // slept may have had the stream closed underneath every tab at once.
     if (sharedSse && sseWorker) {
@@ -1371,18 +1617,44 @@ export function onNotification(
     };
   }
 
-  const handler = (e: MessageEvent) => {
-    try {
-      const payload = JSON.parse(e.data);
-      if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
-      cb(payload, false);
-    } catch (err) {
-      console.error(`[api] SSE parse error for "${channel}":`, err);
-    }
-  };
+  // One wire listener per CHANNEL, not per subscriber: dispatch() fans a frame
+  // out to everything registered here, so a second listener on the same channel
+  // would deliver every frame twice.
+  let set = directHandlers.get(channel);
+  const first = set === undefined;
+  if (!set) {
+    set = new Set();
+    directHandlers.set(channel, set);
+  }
+  set.add(cb);
 
-  const entry: SseListener = { channel, handler };
-  sseListeners.push(entry);
+  // The wire listener, in ONE place: opening the stream and remembering the
+  // listener are the same decision, and splitting them across two `if`s left a
+  // state where either half alone still did nothing — so neither could be shown
+  // to matter. On the polling transport there is no stream; the poller is
+  // already running from module scope, which is what makes the hydrate snapshot
+  // available to a subscriber that mounts later.
+  if (first && !POLL_TRANSPORT) {
+    const handler = (e: MessageEvent) => {
+      try {
+        dispatch(channel, JSON.parse(e.data), false);
+      } catch (err) {
+        console.error(`[api] SSE parse error for "${channel}":`, err);
+      }
+    };
+    // The stream FIRST, then the registration. ensureEventSource re-attaches
+    // everything in sseListeners when it builds or rebuilds the stream, so
+    // registering before calling it attached this handler twice — once in that
+    // loop and once below. It only bit the very first subscriber on a page,
+    // because every later call finds the stream already open and re-attaches
+    // nothing, which is why a channel somewhere rendered every update twice
+    // while every other channel was fine.
+    const es = ensureEventSource();
+    const entry: SseListener = { channel, handler };
+    channelListeners.set(channel, entry);
+    sseListeners.push(entry);
+    es.addEventListener(channel, handler);
+  }
 
   // Replay the connect-time snapshot this subscriber was too late for. Deferred
   // so a caller cannot receive it synchronously during its own render.
@@ -1391,14 +1663,22 @@ export function onNotification(
     queueMicrotask(() => cb(cached, true));
   }
 
-  const es = ensureEventSource();
-  es.addEventListener(channel, handler);
   reportChannels(); // our channel set grew — tell the server
 
   return () => {
-    const idx = sseListeners.indexOf(entry);
-    if (idx !== -1) sseListeners.splice(idx, 1);
-    eventSource?.removeEventListener(channel, handler);
+    set.delete(cb);
+    if (set.size === 0) {
+      directHandlers.delete(channel);
+      // Looked up by CHANNEL, never captured from the subscribe that created
+      // it: see channelListeners.
+      const entry = channelListeners.get(channel);
+      if (entry) {
+        channelListeners.delete(channel);
+        const idx = sseListeners.indexOf(entry);
+        if (idx !== -1) sseListeners.splice(idx, 1);
+        eventSource?.removeEventListener(channel, entry.handler);
+      }
+    }
     reportChannels(); // our channel set shrank — tell the server
   };
 }

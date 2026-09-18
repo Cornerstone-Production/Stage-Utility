@@ -118,6 +118,7 @@ describe("IPC channel wiring", () => {
     // that ADDING an entry has to be a deliberate edit here, with a reason.
     const expected = new Map([
       ["spl:listHistory", "superseded by the service-timeline list; route kept for the HTTP API"],
+      ["spl:setVisibleMetrics", "the History metric choice is a per-browser preference now (spl:visibleMetrics in localStorage); the server setting is READ once to seed it — spl:getVisibleMetrics still has a caller — and the route stays for the documented HTTP API"],
       ["spl:deleteHistory", "History deletes all three records via serviceTimeline:delete"],
       ["attendance:deleteHistory", "same — see deleteServiceRecords"],
       ["stage:setNdiEnabled", "NDI schema is dormant on this branch; the UI ships with the native app"],

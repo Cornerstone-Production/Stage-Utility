@@ -150,6 +150,15 @@ same way: rename the layer in PVP and the state reads unknown with `No PVP layer
 called "<name>"`, beside an action that has stopped working. A PVP that is not
 connected reads unknown too — never "shown".
 
+**Every layer already has three cues.** While ProVideoPlayer is switched on,
+Stage Utility offers `pvp_<layer>_shown_on` / `_off`, `pvp_<layer>_muted_on` /
+`_off` and `pvp_<layer>_clear` for each layer it reports, plus
+`pvp_clear_workspace`, as [built-in cues](../automation.md#built-in-cues) with no
+rule to write. `<layer>` is the layer's name in lower_snake_case — `Lower
+Thirds` becomes `lower_thirds` — and **shown** is the operator's direction, so
+the switch is on when the layer is on screen. Rename a layer in PVP and its cues
+are renamed with it.
+
 ## What is verified, and what is not
 
 **ProVideoPlayer answers every command with "OK" whether or not it acted on it,

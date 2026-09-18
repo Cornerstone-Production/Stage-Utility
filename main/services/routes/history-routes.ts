@@ -15,16 +15,46 @@ import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { baptismTimerService } from "../baptism-timer-service.js";
-import { broadcast } from "../broadcaster.js";
 import { clockOf } from "../app-timezone.js";
 import { scrub } from "../scrub.js";
 import {
   deleteServiceRecords,
   editServiceWindow,
   mergeServiceRecords,
+  rebuildServiceRecords,
   recalcAttendance,
   setItemCounted,
+  setItemTimes,
 } from "../history-edit.js";
+import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
+import { historyMilestonesStore } from "../history-milestones-store.js";
+
+/**
+ * Every service type id that has a SERVICE the Trends chart draws, for
+ * validating a milestone's scope.
+ *
+ * From the recorded history rather than from Planning Center: a milestone is
+ * about what was RECORDED, and a type PCO has since renamed or removed still
+ * has recordings the chart draws.
+ *
+ * The SPL store is deliberately NOT consulted. The chart's series are built
+ * from `rows` — the union of timeline and attendance records — so a type with
+ * sound and neither of those has no line for a mark to be scoped to, and
+ * accepting it would store a milestone that could never appear. That is the
+ * exact failure this check exists to prevent, so the two stores read here are
+ * the two the chart itself reads, and the refusal says so rather than claiming
+ * the type "has never recorded" when it may well have recorded sound.
+ */
+async function recordedServiceTypeIds(): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const rec of await serviceTimelineStore.list()) {
+    if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
+  }
+  for (const rec of await attendanceStore.list()) {
+    if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
+  }
+  return [...ids];
+}
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -52,6 +82,19 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: true });
       return;
     }
+    // Recompute all three summaries from the raw rows. Throws rather than
+    // reporting a partial success, and the dispatcher maps that: 409 while the
+    // service is still recording (ServiceIsLiveError), 500 with the reason
+    // otherwise. See rebuildServiceRecords.
+    if (method === "POST" && pathname === "/api/history/rebuild") {
+      const body = await readBodyOrEmpty(req);
+      if (typeof body.serviceKey !== "string") {
+        error(res, "body.serviceKey (string) required");
+        return;
+      }
+      json(res, await rebuildServiceRecords(body.serviceKey));
+      return;
+    }
     if (method === "POST" && pathname === "/api/history/item-counted") {
       const body = await readBodyOrEmpty(req);
       if (typeof body.serviceKey !== "string" || typeof body.itemId !== "string" || typeof body.counted !== "boolean") {
@@ -60,6 +103,36 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       }
       await setItemCounted(body.serviceKey, body.itemId, body.counted);
       json(res, { ok: true });
+      return;
+    }
+    // Correct ONE run of ONE item's recorded start/end. Keyed by sequence as well
+    // as id because an item can run twice in a record and a timing is a statement
+    // about one run, not about the plan item (unlike item-counted above).
+    //
+    // An ABSENT field leaves that override alone; an explicit null clears it.
+    // Answers the updated record so the panel renders the effective times
+    // without a second read.
+    if (method === "POST" && pathname === "/api/history/item-times") {
+      const body = await readBodyOrEmpty(req);
+      if (
+        typeof body.serviceKey !== "string" ||
+        typeof body.itemId !== "string" ||
+        typeof body.sequence !== "number"
+      ) {
+        error(res, "body.serviceKey + body.itemId (strings) and body.sequence (number) required");
+        return;
+      }
+      const times: { startedAt?: string | null; endedAt?: string | null } = {};
+      for (const field of ["startedAt", "endedAt"] as const) {
+        if (!(field in body)) continue;
+        const v = body[field];
+        if (v !== null && typeof v !== "string") {
+          error(res, `body.${field} must be an ISO string, or null to clear it`);
+          return;
+        }
+        times[field] = v;
+      }
+      json(res, await setItemTimes(body.serviceKey, body.itemId, body.sequence, times));
       return;
     }
     if (method === "POST" && pathname === "/api/history/merge") {
@@ -75,6 +148,60 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: true, ...outcome });
       return;
     }
+    // ── Milestones: the operator's own dates marked under the Trends chart ──
+    //
+    // A plain list, not per-service: a milestone is a statement about the
+    // history, not about one recording. The chart derives its OTHER marks (a
+    // series title changing between consecutive recordings) itself and stores
+    // nothing — see the store's header.
+    if (method === "GET" && pathname === "/api/history/milestones") {
+      json(res, historyMilestonesStore.all());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/milestones") {
+      const body = await readBodyOrEmpty(req);
+      if (typeof body.date !== "string" || typeof body.label !== "string") {
+        error(res, "body.date + body.label (strings) required");
+        return;
+      }
+      try {
+        json(res, await historyMilestonesStore.save(
+          {
+            id: typeof body.id === "string" ? body.id : undefined,
+            date: body.date,
+            label: body.label,
+            serviceTypeId: typeof body.serviceTypeId === "string" ? body.serviceTypeId : null,
+          },
+          // Every type the recorded history actually holds. A mark scoped to
+          // anything else draws on no line at all and would be invisible with
+          // no way to tell why.
+          await recordedServiceTypeIds(),
+        ));
+      } catch (err) {
+        // The store REFUSES a milestone it cannot draw — a date that is not a
+        // day, a blank or over-long label, a service type nothing has recorded
+        // — rather than storing one the operator would never see a mark for.
+        // Returned, not swallowed: the form says why.
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+    {
+      const msMatch = pathname.match(/^\/api\/history\/milestones\/([^/]+)$/);
+      if (msMatch && method === "DELETE") {
+        const left = await historyMilestonesStore.remove(decodeURIComponent(msMatch[1]));
+        // 404 for an id that is not there. A 200 said the deletion happened, so
+        // a client working from a stale list — two tabs, or a restored backup —
+        // was told it had removed something that was never there.
+        if (left == null) {
+          error(res, "no milestone with that id", 404);
+          return;
+        }
+        json(res, left);
+        return;
+      }
+    }
+
     if (method === "GET" && pathname === "/api/attendance/history/current") {
       json(res, attendanceRecorder.getCurrent());
       return;
@@ -100,7 +227,8 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
 
     // ── Service timeline (actual rundown timing; mirrors the SPL/attendance routes) ──
     if (method === "GET" && pathname === "/api/service-timeline/current") {
-      json(res, serviceTimelineRecorder.getCurrent());
+      const live = serviceTimelineRecorder.getCurrent();
+      json(res, live && overlaidTimeline(live));
       return;
     }
     if (method === "POST" && pathname === "/api/service-timeline/current/reset-pacing") {
@@ -117,15 +245,15 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       const nowIso = new Date().toISOString();
       current.pacingResetAt = nowIso;
       await serviceTimelineStore.upsert(current);
-      broadcast("service-timeline:history", current);
+      broadcastTimeline(current);
       console.log(
         `[service-timeline] pacing reset by operator at ${scrub(clockOf(Date.now()))} — items before it no longer count toward pacing`,
       );
-      json(res, current);
+      json(res, overlaidTimeline(current));
       return;
     }
     if (method === "GET" && pathname === "/api/service-timeline") {
-      json(res, await serviceTimelineStore.list());
+      json(res, (await serviceTimelineStore.list()).map((r) => overlaidTimeline(r)));
       return;
     }
     {
@@ -133,7 +261,8 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       if (tlMatch && tlMatch[1] !== "current") {
         const key = decodeURIComponent(tlMatch[1]);
         if (method === "GET") {
-          json(res, await serviceTimelineStore.get(key));
+          const rec = await serviceTimelineStore.get(key);
+          json(res, rec && overlaidTimeline(rec));
           return;
         }
         if (method === "DELETE") {

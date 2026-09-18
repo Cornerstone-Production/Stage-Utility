@@ -8,6 +8,7 @@
 
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
+import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
 import { obsService } from "../obs-service.js";
@@ -25,6 +26,9 @@ import { splHistoryStore } from "../spl-history-store.js";
 import { splRecorder } from "../spl-recorder.js";
 import { deleteServiceRecords } from "../history-edit.js";
 import { propresenterService, propresenterManager } from "../propresenter-service.js";
+import { serviceDirPath } from "../archive/archive-paths.js";
+import { readArchiveRows, rolledFiles } from "../archive/archive-rows.js";
+import { bucketSecFor, bucketSeries, clampBucketSec, metricsIn, type SplBucket } from "../spl-series.js";
 
 export async function statusRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -182,6 +186,40 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     {
+      // The raw sample series behind one record's sound chart. Matched BEFORE
+      // the single-segment record route below, which cannot match a two-segment
+      // path but reads as though it might.
+      const seriesMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)\/series$/);
+      if (seriesMatch && method === "GET") {
+        const key = decodeURIComponent(seriesMatch[1]);
+        const metric = c.url.searchParams.get("metric") ?? "";
+        const bucketSec = c.url.searchParams.get("bucketSec");
+        let out: SplSeriesResponse | null;
+        try {
+          out = await splSeriesFor(key, metric, bucketSec == null ? 5 : Number(bucketSec));
+        } catch (err) {
+          // A real read failure, not an absence: an unreadable directory, a
+          // half-written file, a disk that went away. The chart is required to
+          // tell these apart — it draws the per-item step for an ABSENCE and
+          // says "samples unavailable" for this — so it must not come back as a
+          // 404. The reason is logged here because this is the only place that
+          // has it.
+          console.warn(`[spl-series] ${scrub(key)}: could not read the raw samples: ${scrub(errorMessage(err))}`);
+          error(res, "could not read the raw SPL samples", 500);
+          return;
+        }
+        if (!out) {
+          // 404, not an empty series: "this record has no raw rows" and "the
+          // meter was silent all evening" are different answers, and the chart
+          // falls back to the per-item step only for the first.
+          error(res, "no raw SPL rows for this service", 404);
+          return;
+        }
+        json(res, out);
+        return;
+      }
+    }
+    {
       const histMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)$/);
       if (histMatch && histMatch[1] !== "current") {
         const key = decodeURIComponent(histMatch[1]);
@@ -197,4 +235,68 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       }
     }
 
+}
+
+/** What GET /api/spl/history/:key/series answers with. */
+interface SplSeriesResponse {
+  serviceKey: string;
+  /** The metric actually plotted — the one asked for when the rows carry it,
+   *  else the record's own preferred metric, else the first recorded. */
+  metric: string;
+  /** Every metric these rows carry, so the caller can offer a switch without a
+   *  second request. */
+  metrics: string[];
+  /** The bucket width used, which may be WIDER than the one asked for. */
+  bucketSec: number;
+  buckets: SplBucket[];
+}
+
+/**
+ * One record's raw SPL rows, down-sampled for a chart.
+ *
+ * Null — a 404 to the caller — when the record is unknown or has no raw rows at
+ * all. That is a real distinction: a service recorded before the raw layer
+ * existed, or one whose archive was pruned, has a per-item record and nothing to
+ * draw a line from, and the chart falls back to a per-item step for exactly that
+ * case. A record whose rows exist but hold nothing for the asked-for metric is
+ * NOT a 404 — it answers with the metrics it does have and an empty series.
+ */
+async function splSeriesFor(
+  serviceKey: string,
+  metric: string,
+  bucketSec: number,
+): Promise<SplSeriesResponse | null> {
+  const record = await splHistoryStore.get(serviceKey);
+  if (!record) return null;
+  const dir = serviceDirPath(serviceKey, record.serviceDate);
+  const rows = await readArchiveRows(dir, "spl");
+  if (!rows || rows.length === 0) {
+    // readArchiveRows swallows a per-file read error and answers null, which is
+    // the same answer it gives for "no such file". Those are different things:
+    // an archive that EXISTS and cannot be read is a failure the operator needs
+    // told about, not a record that predates the raw layer. If files are there
+    // and nothing came back, say so.
+    const present = await rolledFiles(dir, "spl");
+    if (present.length > 0) throw new Error(`${present.length} raw file(s) present but no rows could be read`);
+    return null;
+  }
+
+  const metrics = metricsIn(rows);
+  if (metrics.length === 0) return null;
+  const chosen = metrics.includes(metric)
+    ? metric
+    : record.metricKey && metrics.includes(record.metricKey)
+      ? record.metricKey
+      : metrics[0];
+
+  const stamps = rows.map((r) => Date.parse(r.at ?? "")).filter((t) => Number.isFinite(t));
+  const span = stamps.length ? Math.max(...stamps) - Math.min(...stamps) : 0;
+  const width = bucketSecFor(span, clampBucketSec(bucketSec));
+  return {
+    serviceKey,
+    metric: chosen,
+    metrics,
+    bucketSec: width,
+    buckets: bucketSeries(rows, chosen, width),
+  };
 }
