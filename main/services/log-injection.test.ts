@@ -106,6 +106,9 @@ const REQUEST_FACING = [
   "system-routes.ts",
   "view-import.ts",
   "view-routes.ts",
+  // The channel title on a successful Connect comes back from Google, not the
+  // operator, but it is still external data reaching a log line.
+  "youtube-connect.ts",
 ];
 
 /**
@@ -283,6 +286,10 @@ function requestFacingFiles(): string[] {
     // logged nothing at all before the plan import, which is when it acquired
     // the exposure.
     path.join(HERE, "view-import.ts"),
+    // The channel title on a successful Connect is read back from Google over
+    // HTTP, not typed by the operator, but it is still external data reaching
+    // a log line the same way a device's reply would.
+    path.join(HERE, "youtube-connect.ts"),
   ];
   return [...files, ...inRoutes];
 }

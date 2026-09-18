@@ -10,7 +10,7 @@ import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { DEFAULT_COMPANION_PORT, companionApi } from "./companion-api.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
-import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
+import { youtubeService, configComplete, type YouTubeConfig, type YouTubeMode } from "./youtube-service.js";
 import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { scoresService } from "./scores-service.js";
@@ -510,7 +510,11 @@ const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
     },
     { key: "clientId", label: "OAuth Client ID", type: "text", showIf: { key: "mode", equals: "oauth" } },
     { key: "clientSecret", label: "OAuth Client Secret", type: "password", showIf: { key: "mode", equals: "oauth" } },
-    { key: "refreshToken", label: "Refresh Token", type: "password", showIf: { key: "mode", equals: "oauth" } },
+    // Device-flow connect row, replacing a pasted refresh token as the default
+    // path — see youtube-connect.ts. Still the field the refresh token itself
+    // lives behind: `oauth-device` never puts the secret in an input, which is
+    // why integration-secret-parity.test.ts accepts it beside "password".
+    { key: "refreshToken", label: "Connection", type: "oauth-device", showIf: { key: "mode", equals: "oauth" } },
   ],
 };
 
@@ -2418,6 +2422,42 @@ class IntegrationManager {
       clientSecret: secrets.clientSecret ?? "",
       refreshToken: secrets.refreshToken ?? "",
     };
+  }
+
+  /**
+   * What `POST /api/integrations/youtube/connect` needs to start a device-flow
+   * attempt: the saved mode and OAuth client, never the browser's — the whole
+   * point of the button is that it uses what Save already put on disk.
+   */
+  async getYouTubeConnectContext(): Promise<{ mode: YouTubeMode; clientId: string; clientSecret: string }> {
+    const cfg = await this.getYouTubeConfig();
+    return { mode: cfg.mode, clientId: cfg.clientId, clientSecret: cfg.clientSecret };
+  }
+
+  /**
+   * Whether a refresh token is on file right now, and the channel title beside
+   * it — read from storage rather than from youtube-connect's own memory, so a
+   * token pasted by hand into the disclosure also reads as connected.
+   */
+  async getYouTubeConnectionInfo(): Promise<{ connected: boolean; channelTitle: string | null }> {
+    const secrets = await secretsStore.getSecrets("youtube");
+    const cfg = this.states.get("youtube")?.config ?? {};
+    return {
+      connected: hasSecretValue(secrets.refreshToken),
+      channelTitle: typeof cfg.channelTitle === "string" && cfg.channelTitle ? cfg.channelTitle : null,
+    };
+  }
+
+  /**
+   * Store a device-flow result and confirm it works. The refresh token rides
+   * through `setConfig`'s ordinary secret path — it is in SECRET_KEYS for
+   * "youtube" — so it lands in secrets.bin exactly like a pasted one; the
+   * channel title is plain config beside it. `test()` then runs so the card
+   * turns green without waiting for the next poll.
+   */
+  async saveYouTubeConnection(refreshToken: string, channelTitle: string): Promise<void> {
+    await this.setConfig("youtube", { refreshToken, channelTitle });
+    await this.test("youtube");
   }
 
   private async getSensourceConfig(): Promise<SenSourceConfig> {

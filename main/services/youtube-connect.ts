@@ -163,7 +163,7 @@ function endWithError(message: string, logLine: string): void {
 }
 
 async function finishSuccess(accessToken: string, refreshToken: string): Promise<void> {
-  let channelTitle: string | null = null;
+  let channelTitle: string | null;
   try {
     const res = await youtubeConnectDeps.fetch(CHANNELS_URL, {
       headers: { Authorization: `Bearer ${accessToken}` },
