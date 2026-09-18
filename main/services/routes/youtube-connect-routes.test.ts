@@ -41,6 +41,10 @@ async function seed(config: Record<string, unknown>): Promise<void> {
 let saved: { refreshToken: string; channelTitle: string }[] = [];
 let cleared = 0;
 let connected = false;
+/** Every outbound request the state machine made through the fake, in order —
+ *  what proves the route dispatched with the SAVED credentials rather than
+ *  anything a request body carried. */
+let outbound: { url: string; body: string }[] = [];
 
 function installFakes(deviceCodeBody: unknown = {
   device_code: "super-secret-device-code",
@@ -49,11 +53,15 @@ function installFakes(deviceCodeBody: unknown = {
   expires_in: 1800,
   interval: 5,
 }): void {
-  youtubeConnectDeps.fetch = (async () =>
-    new Response(JSON.stringify(deviceCodeBody), {
+  youtubeConnectDeps.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const body = init?.body == null ? "" : String(init.body);
+    outbound.push({ url: url.pathname, body });
+    return new Response(JSON.stringify(deviceCodeBody), {
       status: 200,
       headers: { "content-type": "application/json" },
-    })) as typeof fetch;
+    });
+  }) as typeof fetch;
   youtubeConnectDeps.schedule = () => () => {};
   youtubeConnectDeps.saveConnection = async (refreshToken, channelTitle) => {
     saved.push({ refreshToken, channelTitle });
@@ -76,6 +84,7 @@ afterEach(() => {
   saved = [];
   cleared = 0;
   connected = false;
+  outbound = [];
 });
 
 describe("POST /api/integrations/youtube/connect", () => {
@@ -102,6 +111,32 @@ describe("POST /api/integrations/youtube/connect", () => {
     assert.equal(body.userCode, "ABCD-EFGH");
     assert.equal(body.verificationUrl, "https://www.google.com/device");
     assert.equal(typeof body.expiresAt, "number");
+
+    // The route reads the client id/secret off getYouTubeConnectContext()
+    // (what Save persisted), never off the request. This is what proves it —
+    // asserting only the response shape above would pass even if the route
+    // forwarded a client id a caller supplied.
+    assert.equal(outbound.length, 1);
+    assert.ok(
+      outbound[0].body.includes("client_id=saved-client-id"),
+      `expected the saved client id on the wire, got: ${outbound[0].body}`,
+    );
+  });
+
+  test("a client id in the request body is ignored — the SAVED one is what reaches Google", async () => {
+    await seed({ mode: "oauth", clientId: "saved-client-id", clientSecret: "saved-client-secret" });
+    installFakes();
+    await callRoute(integrationRoutes, "/api/integrations/youtube/connect", {
+      method: "POST",
+      body: { clientId: "browser-supplied-client-id", clientSecret: "browser-supplied-secret" },
+    });
+
+    assert.equal(outbound.length, 1);
+    assert.ok(
+      outbound[0].body.includes("client_id=saved-client-id"),
+      `a browser-supplied client id must never reach Google: ${outbound[0].body}`,
+    );
+    assert.ok(!outbound[0].body.includes("browser-supplied-client-id"));
   });
 
   test("the device code never appears in any response body", async () => {
