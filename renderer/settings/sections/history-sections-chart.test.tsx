@@ -341,6 +341,45 @@ test("the sound chart plots the real sample series when the route has one", asyn
   }
 });
 
+test("the dashed sound series is named Leq, never Average", async () => {
+  // It is the bucket's ENERGY average — a Leq, the same number spl-leq.ts
+  // computes. "Average" reads as an arithmetic mean of decibels, which is a
+  // different and lower figure, and nothing on the page said which was drawn.
+  //
+  // Read off what the component PUT in the DOM, in both places the name shows:
+  // the legend entry and the Customize row. A rename in one of the two is the
+  // failure this exists for.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: true });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL,
+        timeline: TIMELINE,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const legend = document.querySelector("[data-series-toggle='avg']") as HTMLElement;
+    assert.ok(legend, "no legend entry for the dashed series");
+    assert.equal(legend.textContent, "LAeq Leq", `the legend reads ${legend.textContent}`);
+
+    fireEvent.click(screen.getByLabelText("Customize sound"));
+    const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
+    assert.ok(popover.getByText("Leq"), "Customize does not offer Leq");
+    assert.equal(popover.queryAllByText("Average").length, 0, "Customize still says Average");
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("a 404 falls back to the per-item step, one run per item", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });

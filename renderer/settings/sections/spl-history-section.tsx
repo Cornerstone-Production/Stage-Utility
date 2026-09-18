@@ -138,7 +138,11 @@ const DEFAULT_FIGURES = ["peak", "loudest", "message"];
  *  screen is a view preference, not a recording setting. */
 const SOUND_SERIES = [
   { key: "max", label: "Peak" },
-  { key: "avg", label: "Average" },
+  // "Leq", not "Average": the line IS the bucket's equivalent continuous level,
+  // energy-averaged the way spl-leq.ts computes it. Labelled "Average" it read
+  // as an arithmetic mean of decibels — a different, and lower, number — and
+  // nothing on the page said which of the two was drawn.
+  { key: "avg", label: "Leq" },
 ] as const;
 const SERIES_KEYS = SOUND_SERIES.map((s) => s.key);
 const SERIES_STORAGE_KEY = "spl:visibleSeries";
@@ -475,7 +479,7 @@ export function SplDetail({
       },
       {
         id: "avg",
-        label: `${raw.metric} average`,
+        label: `${raw.metric} Leq`,
         color: "var(--color-fg-muted)",
         role: "secondary",
         dashed: true,

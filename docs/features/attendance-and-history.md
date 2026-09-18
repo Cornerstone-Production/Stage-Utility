@@ -280,8 +280,10 @@ service average.
 Sound plots the **recorded samples**: `spl.csv` holds a reading per second, and
 the chart reads them bucketed (see
 [`/api/spl/history/:key/series`](../reference/api.md)). The solid line is each
-bucket's loudest reading, with its gradient; the dashed line is each bucket's
-energy average. Its y axis is chosen to frame the levels, never anchored at 0 dB.
+bucket's loudest reading, with its gradient; the dashed line is that bucket's
+**Leq** — its equivalent continuous level, energy-averaged across the bucket
+rather than an arithmetic mean of decibels. It is named `Leq` in the legend, in
+the strip and in Customize for that reason. Its y axis is chosen to frame the levels, never anchored at 0 dB.
 While a service is recording the series follows the recorder's own broadcast
 rather than a timer of its own: a re-read the moment a new item goes live, and
 otherwise at most one every ten seconds. Between items the line grows by about a
