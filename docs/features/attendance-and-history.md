@@ -78,12 +78,22 @@ the day's services. Open a service for its own page, described after it.
 busiest service on each of the last eight **days** that type recorded, the
 average across them, and the change against the days before.
 
+The change is **absolute**, not a percentage — *+71 vs prior 8*, or *+1.2 dB vs
+prior 8* under the sound measure — because that is the number you can act on:
+seventy more people is a van, six percent is a conversation. It is green when it
+rises and red when it falls.
+
+It is the difference between the two figures it is derived from, both rounded to
+the precision the tile prints — whole people, tenths of a decibel — so it can
+never disagree with the number above it.
+
 The comparison uses whatever prior days there are, up to eight, and says how
-many — *+6% vs prior 3*. Below **three** prior days it reads *no prior window
-yet* instead: one or two readings are not an average, and a percentage off them
-is noise wearing a direction. Because the count is always on the label, a thin
-comparison is visible as one rather than passed off as a full eight. The tiles
-sort busiest first.
+many. Below **three** prior days it reads *no prior window yet* instead: one or
+two readings are not an average, and a change off them is noise wearing a
+direction. Because the count is always on the label, a thin comparison is
+visible as one rather than passed off as a full eight. The tiles sort busiest
+first, and the first type seen in that order takes the first colour in the
+palette.
 
 The switch at the top right chooses what is plotted:
 

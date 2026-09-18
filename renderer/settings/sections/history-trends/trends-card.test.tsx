@@ -19,7 +19,7 @@ const teardown = installRenderDom();
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
-const { TrendsCard, pct } = await import("./trends-card.js");
+const { TrendsCard, absChange } = await import("./trends-card.js");
 const { TooltipProvider } = await import("../../../components/ui/index.js");
 type TrendRecording = import("./trends.js").TrendRecording;
 
@@ -68,42 +68,79 @@ describe("a sparkline that does not move", () => {
 });
 
 describe("how a change reads", () => {
-  test("a change that rounds to nothing is 0%, with no sign in front of it", () => {
-    // A sign in front of zero claims a direction the number denies, and which
-    // of "+0%" and "−0%" you got depended on the sign of a difference too small
-    // to print. One case per line, so two branches adding different ones merge
-    // cleanly.
+  test("it is an ABSOLUTE difference, and a zero carries no sign", () => {
+    // Absolute, not a percentage: "seventy more people" is a van, "+6%" is a
+    // conversation. A sign in front of zero claims a direction the number
+    // denies, and which of "+0" and "−0" you got depended on the sign of a
+    // difference too small to print.
+    // One case per line, so two branches adding different ones merge cleanly.
     assert.deepEqual(
-      [0, 0.001, -0.001, 0.004, -0.004, 0.006, -0.006, 0.12, -0.12, 1].map((c) => [c, pct(c)]),
       [
-        [0, "0%"],
-        [0.001, "0%"],
-        [-0.001, "0%"],
-        [0.004, "0%"],
-        [-0.004, "0%"],
-        [0.006, "+1%"],
-        [-0.006, "−1%"],
-        [0.12, "+12%"],
-        [-0.12, "−12%"],
-        [1, "+100%"],
+        [0, 0, ""],
+        [0.4, 0, ""],
+        [-0.4, 0, ""],
+        [71, 0, ""],
+        [-71, 0, ""],
+        [1234, 0, ""],
+        [1.24, 1, " dB"],
+        [-1.24, 1, " dB"],
+        [0.04, 1, " dB"],
+      ].map(([d, dp, unit]) => [d, absChange(d as number, dp as number, unit as string)]),
+      [
+        [0, "0"],
+        [0.4, "0"],
+        [-0.4, "0"],
+        [71, "+71"],
+        [-71, "−71"],
+        // Counts read with separators; a decibel does not.
+        [1234, "+1,234"],
+        [1.24, "+1.2 dB"],
+        [-1.24, "−1.2 dB"],
+        [0.04, "0.0 dB"],
       ],
     );
   });
 
-  test("the percentage is the one the tile's own two numbers give", async () => {
-    // Derived from the UNROUNDED means it printed "+1%" beside two numbers that
-    // were equal on screen. Sixteen Sundays: eight at 1000/1001 alternating,
-    // eight at 1000 — both windows round to 1000, so the tile must read 0%.
-    const recs = alternating();
-    const view = await renderCard(recs);
+  test("the change is the difference of the tile's own two numbers", async () => {
+    // Taken from the UNROUNDED means it prints a change beside two numbers that
+    // are equal on screen. The fixture is built so the two rules disagree: the
+    // prior window means 999.625 and the recent one 1000.375, so both round to
+    // 1,000 — a change of 0 — while the raw difference is 0.75, which rounds to
+    // "+1". The tile must read 0.
+    const view = await renderCard(straddlingRound());
     const tile = view.container.querySelector("[data-trend-tile]")!;
     const avg = tile.querySelector("[data-trend-average]")!.textContent;
     const change = tile.querySelector("[data-trend-change]")!.textContent ?? "";
+    view.unmount();
     assert.equal(avg, "1,000");
     assert.ok(
-      change.startsWith("0%"),
-      `two windows that both round to 1,000 must read 0%, not "${change}"`,
+      change.startsWith("0 "),
+      `two windows that both round to 1,000 must read 0, not "${change}"`,
     );
+  });
+
+  test("up is green and down is red — not the series colour", async () => {
+    // The direction is the thing being read. The series colour is already on
+    // the sparkline beside it, and spending it twice on one tile left the
+    // direction with no colour at all.
+    const up = await renderCard(longRun("weekend", 1000));
+    const upClass = up.container.querySelector("[data-trend-change]")?.className ?? "";
+    up.unmount();
+    try { localStorage.clear(); } catch { /* jsdom always has one */ }
+
+    // The same fixture reversed: sixteen weeks falling.
+    const falling = longRun("weekend", 1000).map((r, i, a) => ({
+      ...r,
+      peakOccupancy: a[a.length - 1 - i].peakOccupancy,
+    }));
+    const down = await renderCard(falling);
+    const downText = down.container.querySelector("[data-trend-change]")?.textContent ?? "";
+    const downClass = down.container.querySelector("[data-trend-change]")?.className ?? "";
+    down.unmount();
+
+    assert.ok(upClass.includes("text-ok-11"), `a rise is not green: ${upClass}`);
+    assert.ok(downText.startsWith("−"), `the fixture did not fall: ${downText}`);
+    assert.ok(downClass.includes("text-danger-11"), `a fall is not red: ${downClass}`);
   });
 });
 
@@ -179,7 +216,7 @@ describe("the measure switch", () => {
     const view = await renderCard(alternating());
     await click(view, "sound");
     const avg = view.container.querySelector("[data-trend-average]")?.textContent ?? "";
-    assert.match(avg, /^\d+ dB$/, `the tile did not switch to decibels: "${avg}"`);
+    assert.match(avg, /^[\d.]+ dB$/, `the tile did not switch to decibels: "${avg}"`);
     assert.equal(
       view.container.querySelector('[data-trend-measure="sound"]')?.getAttribute("aria-pressed"),
       "true",
@@ -268,16 +305,21 @@ describe("the strip above the trends plot", () => {
 });
 
 describe("a service type's colour", () => {
-  /** Every colour the card drew for one type, off what it PUT in the DOM:
-   *  the tile's sparkline, the tile's change figure, the chart line and the
-   *  legend swatch. A colour decided anywhere else cannot satisfy this. */
+  /**
+   * Every colour the card drew for one type, off what it PUT in the DOM: the
+   * tile's sparkline, the chart line and the legend swatch. A colour decided
+   * anywhere else cannot satisfy this.
+   *
+   * NOT the change figure. That is green or red by direction on purpose — the
+   * series colour is already on the sparkline beside it, and the direction is
+   * the thing being read. See "up is green and down is red".
+   */
   const colorsFor = (view: ReturnType<typeof render>, id: string) => {
     const tile = view.container.querySelector(`[data-trend-tile="${id}"]`);
     const line = view.container.querySelector(`[data-series-line="${id}"]`);
     const swatch = view.container.querySelector(`[data-series-toggle="${id}"] span`) as HTMLElement | null;
     return {
       sparkline: tile?.querySelector("[data-sparkline]")?.getAttribute("stroke") ?? null,
-      change: (tile?.querySelector("[data-trend-change]") as HTMLElement | null)?.style.color || null,
       line: line?.getAttribute("stroke") ?? null,
       swatch: swatch?.style.borderColor || null,
     };
@@ -312,19 +354,16 @@ describe("a service type's colour", () => {
   });
 
   test("is the same colour in the tile, the line and the legend", async () => {
-    // Four surfaces, one entry. A tile drawn in a colour its own line does not
-    // use is a tile that belongs to nothing. Sixteen days per type so the
-    // change figure — the fourth surface — actually has a percentage to print;
-    // with ten it reads "no prior window yet" and carries no colour at all.
+    // Three surfaces, one entry. A tile drawn in a colour its own line does not
+    // use is a tile that belongs to nothing.
     const view = await renderCard([...longRun("weekend", 1000), ...longRun("evening", 200)]);
     try {
       for (const id of ["weekend", "evening"]) {
         const c = colorsFor(view, id);
         assert.ok(c.line, `no line for ${id}`);
-        assert.ok(c.change, `${id}'s change figure carries no colour, so this asserts nothing`);
         assert.deepEqual(
-          [c.sparkline, c.change, c.swatch],
-          [c.line, c.line, c.line],
+          [c.sparkline, c.swatch],
+          [c.line, c.line],
           `${id} is drawn in more than one colour: ${JSON.stringify(c)}`,
         );
       }
@@ -524,6 +563,36 @@ async function withCard(check: (view: ReturnType<typeof render>) => void | Promi
   }
 }
 
+
+/**
+ * Sixteen Sundays whose two windows round to the SAME number while their raw
+ * means differ by three quarters of a person.
+ *
+ * Prior eight: three 999s and five 1000s = 999.625 → 1,000.
+ * Recent eight: three 1001s and five 1000s = 1000.375 → 1,000.
+ *
+ * So the change taken from the two rounded means is 0, and the change taken
+ * from the raw ones is +1. Only one of those is the difference between the
+ * numbers on screen.
+ */
+function straddlingRound(): TrendRecording[] {
+  const peaks = [
+    999, 999, 999, 1000, 1000, 1000, 1000, 1000,
+    1001, 1001, 1001, 1000, 1000, 1000, 1000, 1000,
+  ];
+  const start = Date.parse("2026-01-04T15:00:00Z");
+  const DAY = 24 * 60 * 60_000;
+  return peaks.map((p, i) => ({
+    serviceKey: `weekend:${i}`,
+    serviceTypeId: "weekend",
+    serviceTypeName: "Weekend",
+    serviceDate: new Date(start + i * 7 * DAY).toISOString().slice(0, 10),
+    t: start + i * 7 * DAY,
+    seriesTitle: null,
+    peakOccupancy: p,
+    peakDb: null,
+  }));
+}
 
 /** Sixteen days of one service type, so a tile has a prior window and prints a
  *  real change figure. `peak` drifts by a point a week so the two windows are

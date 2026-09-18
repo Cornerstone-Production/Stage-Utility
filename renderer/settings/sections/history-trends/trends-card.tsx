@@ -102,16 +102,36 @@ function storedRange(): RangeWeeks {
 const TREND_LINE_WIDTH = 2;
 
 /**
- * "+12%" / "−12%", the spelling every percentage trend in this app uses.
+ * How many decimals a measure prints. Whole people; tenths of a decibel.
  *
- * A change that rounds to nothing is "0%", not "+0%" or "−0%": a sign in front
+ * ONE definition, read by the tile's average AND by its change, so the change
+ * is always exactly the difference between the two figures it came from. Two
+ * precisions is how "+1" ends up beside two numbers that are equal on screen.
+ */
+const DECIMALS: Record<TrendMeasure, number> = { attendance: 0, sound: 1 };
+
+/** Round to a measure's own precision. */
+function atPrecision(v: number, dp: number): number {
+  const f = 10 ** dp;
+  return Math.round(v * f) / f;
+}
+
+/**
+ * "+71" / "−71" / "+1.2 dB", the absolute change a tile prints.
+ *
+ * A change that comes out at nothing is "0", not "+0" or "−0": a sign in front
  * of zero claims a direction the number denies, and which of the two you got
  * depended on the sign of a difference too small to print.
+ *
+ * Absolute rather than a percentage because that is the number an operator can
+ * act on — "seventy more people" is a van, "+6%" is a conversation.
  */
-export function pct(change: number): string {
-  const whole = Math.round(change * 100);
-  if (whole === 0) return "0%";
-  return `${whole > 0 ? "+" : "−"}${Math.abs(whole)}%`;
+export function absChange(delta: number, dp: number, unit = ""): string {
+  const v = atPrecision(delta, dp);
+  const body = Math.abs(v).toFixed(dp);
+  const withSeparators = dp === 0 ? Number(body).toLocaleString() : body;
+  if (v === 0) return `${withSeparators}${unit}`;
+  return `${v > 0 ? "+" : "−"}${withSeparators}${unit}`;
 }
 
 export function TrendsCard({
@@ -177,9 +197,12 @@ export function TrendsCard({
 
   const sound = measure === "sound";
   const pick = useMemo(() => measureOf(measure), [measure]);
-  /** Counts read with separators; levels read as whole decibels, the same way
-   *  every other level in the app does. */
-  const fmtValue = (v: number) => (sound ? `${Math.round(v)} dB` : Math.round(v).toLocaleString());
+  /** How many decimals this measure prints — see DECIMALS. */
+  const dp = DECIMALS[measure];
+  /** Counts read with separators; levels read to a tenth of a decibel, which is
+   *  the precision the change beside them is worth quoting to. */
+  const fmtValue = (v: number) =>
+    sound ? `${atPrecision(v, dp).toFixed(dp)} dB` : atPrecision(v, dp).toLocaleString();
 
   const tiles = useMemo(() => typeTrends(recordings, { pick }), [recordings, pick]);
   const ranged = useMemo(() => withinRange(recordings, weeks, pick), [recordings, weeks, pick]);
@@ -449,20 +472,30 @@ export function TrendsCard({
                   {/* No change until there is something to compare against. A
                       tile with one window of recordings says so rather than
                       printing a figure derived from nothing. */}
-                  {t.change != null ? (
-                    // In the SERIES colour, not red/green. The sign already
-                    // carries the direction; what the tile has to say at a
-                    // glance is which line on the plot below it belongs to.
-                    <span
-                      data-trend-change
-                      className="text-caption1"
-                      style={{ color: colorOf(t.serviceTypeId ?? "") }}
-                    >
-                      {pct(t.change)}{" "}
-                      {/* The REAL count, never the window it would like to
-                          have. A tile comparing against four days says four. */}
-                      <span className="text-fg-subtle">vs prior {t.priorCount}</span>
-                    </span>
+                  {t.averageRaw != null && t.priorAverageRaw != null ? (
+                    // UP is good and DOWN is not, so the change is green or red
+                    // rather than the series colour — the series colour is
+                    // already carried by the sparkline beside it, and spending
+                    // it twice on one tile leaves the direction, which is the
+                    // thing being read, with no colour at all.
+                    //
+                    // The difference of the two ROUNDED figures, at the
+                    // measure's own precision, so it is always exactly the gap
+                    // between the number above it and the one it names.
+                    (() => {
+                      const delta = atPrecision(t.averageRaw, dp) - atPrecision(t.priorAverageRaw, dp);
+                      return (
+                        <span
+                          data-trend-change
+                          className={cn("text-caption1", delta >= 0 ? "text-ok-11" : "text-danger-11")}
+                        >
+                          {absChange(delta, dp, sound ? " dB" : "")}{" "}
+                          {/* The REAL count, never the window it would like to
+                              have. A tile comparing against four days says four. */}
+                          <span className="text-fg-subtle">vs prior {t.priorCount}</span>
+                        </span>
+                      );
+                    })()
                   ) : (
                     <span data-trend-change className="text-caption1 text-fg-subtle">
                       {/* A type with nothing under THIS measure keeps its tile
