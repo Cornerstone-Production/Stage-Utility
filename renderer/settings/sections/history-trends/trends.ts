@@ -47,13 +47,18 @@ export const TREND_WINDOW = 8;
  * saw no change figure until it had recorded sixteen Sundays, four months in.
  * The tile was right and useless for a season.
  *
- * Four is where an average starts meaning something: one quiet week in four
- * moves the mean by a quarter of its own gap, which a reader can discount; one
- * in two is not an average, it is two numbers. The tile always says how many
- * days it actually compared against — "vs prior 4" — so a thin comparison is
- * labelled as one rather than passed off as eight.
+ * Three, because the tile says how many days it actually compared against —
+ * "vs prior 3" — so a thin comparison is transparent rather than passed off as
+ * eight, and the reader can discount it themselves. Below three there is
+ * nothing to discount: one or two readings are not an average, and a percentage
+ * off them is noise wearing a direction.
+ *
+ * Four was the first attempt and left the three-month archive this was built
+ * against showing no change on any tile — its busiest service type has eleven
+ * recorded days, which is eight recent and three prior. A floor nothing real
+ * clears is a figure nobody ever sees.
  */
-export const MIN_PRIOR_DAYS = 4;
+export const MIN_PRIOR_DAYS = 3;
 
 /** One day of one service type: the busiest that day, and when the day's first
  *  recording started. */

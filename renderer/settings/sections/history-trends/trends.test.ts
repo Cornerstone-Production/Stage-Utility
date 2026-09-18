@@ -131,8 +131,9 @@ describe("a service type's trend tile", () => {
   test("the tile compares against the prior days it HAS, once there are four", () => {
     // The 9-to-15 band, which used to show nothing at all: requiring a full
     // eight meant no change figure until sixteen Sundays, four months in, and
-    // the tile was right and useless for a season. Below four the "average" is
-    // one or two readings and a percentage off it is noise wearing a direction.
+    // the tile was right and useless for a season. Below MIN_PRIOR_DAYS the
+    // "average" is one or two readings and a percentage off them is noise
+    // wearing a direction.
     // One line per case, so two branches adding different ones merge cleanly.
     const at = (n: number) => {
       const [tile] = typeTrends(weekly("weekend", Array(n).fill(100)));
@@ -147,8 +148,9 @@ describe("a service type's trend tile", () => {
         [8, null, 0, null],
         // Nine is one prior day — not an average.
         [9, null, 0, null],
-        [11, null, 0, null],
-        // Twelve is four prior days: the first history that compares.
+        // Eleven is three prior days: the first history that compares, and the
+        // shape of the real three-month archive this was built against.
+        [11, 0, 3, 100],
         [12, 0, 4, 100],
         [15, 0, 7, 100],
         [16, 0, 8, 100],

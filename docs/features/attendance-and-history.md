@@ -79,9 +79,11 @@ busiest service on each of the last eight **days** that type recorded, the
 average across them, and the change against the days before.
 
 The comparison uses whatever prior days there are, up to eight, and says how
-many — *+6% vs prior 5*. Below **four** prior days it reads *no prior window
-yet* instead: an "average" of one or two readings is not one, and a percentage
-off it is noise wearing a direction. The tiles sort busiest first.
+many — *+6% vs prior 3*. Below **three** prior days it reads *no prior window
+yet* instead: one or two readings are not an average, and a percentage off them
+is noise wearing a direction. Because the count is always on the label, a thin
+comparison is visible as one rather than passed off as a full eight. The tiles
+sort busiest first.
 
 The switch at the top right chooses what is plotted:
 

@@ -171,15 +171,15 @@ the eight before.
 > right and useless for a season.
 >
 > **Relaxed after review.** The comparison uses whatever prior days there are,
-> up to eight, and the tile says how many: "vs prior 5". Below FOUR it still
-> reads "no prior window yet", because an average of one or two readings is not
-> an average and a percentage off it is noise wearing a direction.
+> up to eight, and the tile says how many: "vs prior 3". Below THREE it still
+> reads "no prior window yet", because one or two readings are not an average
+> and a percentage off them is noise wearing a direction. The count being on the
+> label is what makes a thin comparison safe to show at all.
 >
-> On the three-month archive this was verified against, the busiest type has
-> eleven recorded days — eight recent and three prior — so it is still one day
-> short of showing a change. The rule is not the archive's fault and the archive
-> is not the rule's; both are recorded here so the next reader does not mistake
-> the empty tiles for a bug. The alternative — splitting whatever is available
+> The floor was four for one round and left every tile on the three-month
+> archive reading "no prior window yet" — its busiest type has eleven recorded
+> days, which is eight recent and three prior, one short. A floor nothing real
+> clears is a figure nobody ever sees. The alternative — splitting whatever is available
 > in half — makes the average and the compared window two different things,
 > and a tile whose average is over five recordings and whose change is over two
 > is harder to read than one that says it cannot tell yet. A type with fewer
