@@ -197,9 +197,10 @@ The **list** beside it is the **whole month the calendar is showing**, grouped b
 day, newest first — paging the calendar pages the list. Clicking a day scrolls
 to that day's group and rings it; it does not hide the rest of the month.
 
-Each day group carries a column header, then a row per service: the start time
-with the service type under it, the plan title with its series and item count
-under that, and four figures. Each figure's caption sits under its value.
+A column header is drawn once, under the first day's label, then a row per
+service: the start time with the service type under it, the plan title with its
+series and item count under that, and four figures. Each figure's caption sits
+under its value.
 
 | | |
 |---|---|

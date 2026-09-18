@@ -42,6 +42,20 @@ function fmtDay(day: string): string {
 }
 
 /**
+ * A row's surface, now that the list is a CARD.
+ *
+ * Recessed, not another `su-card`. The rows carried the page's own card
+ * treatment while they sat flat on the page, which was right then — the one
+ * column an operator reads down should not be the only thing not on a surface.
+ * Inside a card, a card inside a card flattens the nesting instead, and the
+ * recessed fill is what the Stat tiles and the time editor already use for the
+ * same reason. Both row shapes — the normal one and the arrival-only one — read
+ * it, so they cannot drift apart.
+ */
+const ROW_SURFACE =
+  "flex items-center gap-1 rounded-lg border border-line bg-fill/40 pr-1.5 transition-colors hover:bg-fill";
+
+/**
  * The grid every row in the Recorded services list shares WITH ITS HEADER.
  *
  * One string, used by both, because the header only means anything if it sits
@@ -1391,7 +1405,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           />
         </div>
 
-        <div className="min-w-0 flex flex-col gap-2">
+        {/* A CARD, like Trends above it and the calendar beside it — same
+            border, radius and padding. It was flat on the page, so the one
+            column an operator reads down was the only thing on the tab that did
+            not sit on a surface. */}
+        <section data-services-card className="su-card min-w-0 flex flex-col gap-2 px-4 py-3.5">
           {/* The card's own header: what the list is, what it is showing, and
               the Export control. Export used to be a full-width disclosure of
               its own above the calendar — a builder for a thing you do twice a
@@ -1451,7 +1469,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 ? `${fmtTime(row.startsAt)} · arriving · ${lastOccupancy.toLocaleString()} in the room`
                 : `${fmtTime(row.startsAt)} · no items recorded`;
               return (
-                <div key={row.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
+                <div key={row.serviceKey} className={ROW_SURFACE}>
                   <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(row.serviceKey)}>
                     <div className="flex flex-col min-w-0">
                       <span className="text-body font-medium text-fg truncate">{row.planTitle ?? row.serviceKey}</span>
@@ -1506,14 +1524,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // in it prints a dash.
             const byKey = new Map(shownFigures.map((f) => [f.key, f]));
             return (
-              // su-card, like every other top-level box on this page (Export, the
-              // Overview, the calendar, the selected-day summary). These rows had
-              // their own `bg-gray-2` + `rounded-lg` treatment, so the one column
-              // an operator actually reads down was the one thing that did not
-              // match the surface around it. The recessed grey is still right for
-              // the Stat tiles and the time editor — those sit INSIDE a card, and
-              // giving them the parent's surface would flatten the nesting.
-              <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
+              <div key={s.serviceKey} className={ROW_SURFACE}>
                 <button
                   data-history-row={s.serviceKey}
                   className={cn(ROW_GRID, "min-w-0 flex-1 px-3 py-2.5 text-left")}
@@ -1587,7 +1598,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           {monthGroups.length === 0 && (
             <p className="text-caption1 text-fg-subtle">No services recorded in this month.</p>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );

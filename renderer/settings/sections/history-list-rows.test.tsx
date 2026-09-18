@@ -437,6 +437,36 @@ describe("what the All services page is made of", () => {
     assert.ok(header?.contains(exportTrigger), "Export is not in the Recorded services header");
   });
 
+  test("the list is a CARD, with its title, count and Export inside it", async () => {
+    // It was flat on the page while Trends above it and the calendar beside it
+    // were cards, so the one column an operator reads down was the only thing
+    // on the tab not sitting on a surface.
+    //
+    // WHAT THIS CANNOT SEE: the border, the radius and the padding. They come
+    // from `.su-card` in styles.css, and jsdom loads no stylesheet. Measured in
+    // Chrome instead — 1px border, 14px radius, the same box Trends draws — and
+    // what is asserted here is that the class is on the element and that the
+    // three header pieces are inside it rather than floating above it.
+    installFetch();
+    const view = await renderList();
+    const card = view.container.querySelector("[data-services-card]");
+    assert.ok(card, "the list is not wrapped in a card at all");
+    assert.ok(card.className.includes("su-card"), `the wrapper is not the app's card: ${card.className}`);
+    for (const [what, sel] of [
+      ["the title", "h3"],
+      ["the Showing line", "[data-list-showing]"],
+      ["Export", "[aria-label='Export']"],
+    ] as const) {
+      assert.ok(card.querySelector(sel), `${what} is not inside the card`);
+    }
+    // And the rows are RECESSED inside it, not cards of their own: a card
+    // inside a card flattens the nesting it is there to create.
+    const rows = [...view.container.querySelectorAll("[data-history-row]")]
+      .map((r) => r.parentElement?.className ?? "");
+    assert.ok(rows.length > 0, "no rows, so this asserts nothing");
+    assert.deepEqual(rows.filter((c) => c.includes("su-card")), [], "a row is still a card inside the card");
+  });
+
   test("the header names the MONTH it is showing and counts the month's services", async () => {
     installFetch();
     const view = await renderList();
