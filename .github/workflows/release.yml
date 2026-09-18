@@ -218,6 +218,29 @@ jobs:
       # not answering, this run stops here with nothing half-done, and the
       # re-run finds the same tree and does it all again. A green tree with no
       # checkmark is a merge made blind, which is worse than a late release.
+      # A red gate is a red checkmark, not a missing one. ci.yml no longer runs
+      # on the push, so without this a merged tree that fails here would carry
+      # no `build` at all — and the release PR whose head it is skips ci.yml,
+      # so it would read as green. github.sha, not the verify step's output,
+      # which is unset when verify fails.
+      - name: Mark the verified commit as failed
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+              -f state=failure -f context=build \
+              -f description="lint, type-check, tests or build failed in the release run" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo "::error::the gate failed AND its failure status could not be written to ${GITHUB_SHA:0:7}"
+          exit 1
+
       - name: Mark the verified commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -231,7 +254,8 @@ jobs:
               -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
               exit 0
             fi
-            echo "status write failed (attempt $attempt of 3)"; sleep 10
+            echo "status write failed (attempt $attempt of 3)"
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
           done
           echo "::error::could not write the build status to ${SHA}; stopping before the bump so nothing is half-released"
           exit 1
@@ -291,13 +315,6 @@ jobs:
       # The release itself is created by the artifacts job, once the archives
       # exist — see the note there. This job only tags.
 
-  # Downloadable installs, attached to the release the job above just published.
-  #
-  # Every platform is built on this one runner because there is nothing to
-  # cross-compile: the server's only third-party dependencies are pure JavaScript
-  # and there are no native modules, so the per-platform part is which Node binary
-  # gets copied in. Five archives take about twenty seconds.
-
       # The bump commit differs from the verified tree by one version string.
       # Mark it with the same status rather than running the suite again; a
       # GITHUB_TOKEN push triggers no workflows.
@@ -323,17 +340,26 @@ jobs:
               -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
               exit 0
             fi
-            echo "status write failed (attempt $attempt of 3)"; sleep 10
+            echo "status write failed (attempt $attempt of 3)"
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
           done
           echo "::error::v$V is tagged and pushed, but ${BUMP:0:7} carries no build status. Re-run this workflow, or: gh api repos/${GITHUB_REPOSITORY}/statuses/${BUMP} -f state=success -f context=build"
           exit 1
 
+  # Downloadable installs, attached to the release the job above just published.
+  #
+  # Every platform is built on this one runner because there is nothing to
+  # cross-compile: the server's only third-party dependencies are pure JavaScript
+  # and there are no native modules, so the per-platform part is which Node binary
+  # gets copied in. Five archives take about twenty seconds.
   artifacts:
     needs: release
-    # `!cancelled()`, not the default success(): the release job can go red
-    # AFTER the tag is pushed (a failed status write), and a tag with no
-    # archives is a deployment that cannot update.
-    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
+    # `always()`, not the default success(): once the tag is pushed the
+    # archives must follow whatever happens to the release job afterwards — a
+    # failed status write, or a hand on the cancel button — because a tag with
+    # no archives is a deployment that cannot update. `published` is only true
+    # once the tag is on the remote, so this never builds for a stand-down.
+    if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
