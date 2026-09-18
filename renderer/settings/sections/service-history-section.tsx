@@ -935,12 +935,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           </div>
         )}
 
+        {/* Three cards under the header, one per nav anchor. `scroll-mt-40`
+            because the links are real anchors and the header is sticky: without
+            it a jump lands the card's heading UNDER the header. */}
+        <SectionCard id="history-rundown" title="Rundown">
         {/* The app's type scale, not the table's own: 10px uppercase headers
             over 13px rows, every number mono and tabular so the columns line up
             down the page. The marks — live, not counted, edited — and the two
             row buttons were each on a bespoke 10px; they are on the scale's
             11px caption now. Nothing about what the table DOES changed. */}
-        <div id="history-rundown" className="flex flex-col overflow-hidden rounded-lg border border-line">
+        <div className="flex flex-col overflow-hidden rounded-lg border border-line">
           <div
             data-testid="rundown-header"
             className={`grid ${gridCols} gap-2 border-b border-line bg-fill px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle`}
@@ -967,7 +971,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // Keyed by sequence too: a plan item can run twice in one record
               // (reprised, or a second service caught before the split), and a
               // duplicate React key drops the second row's state onto the first.
-              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} items-center gap-2 px-3 py-1.5 text-footnote ${i % 2 ? "bg-fill/40" : "bg-surface"} ${counted ? "" : "opacity-55"}`}>
+              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} items-center gap-2 px-3 py-1.5 text-footnote ${i % 2 ? "bg-fill/40" : ""} ${counted ? "" : "opacity-55"}`}>
                 {editingTimes && (
                   <Tooltip
                     label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}
@@ -1056,14 +1060,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             );
           })}
         </div>
+        </SectionCard>
 
         {/* Baptism timings sit with the rundown above rather than after the audio:
             they are timing data, and on a baptism weekend they explain the overrun
             in the table right above them. Only rendered when a session links, so a
-            normal service is unchanged. */}
+            normal service is unchanged — which is also why it is not in the
+            section nav: a nav entry that is there most weeks and gone the rest
+            reads as a bug. */}
         {linkedBap.length > 0 && (
-          <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-            <span className="text-body font-semibold text-gray-12">Baptisms</span>
+          <SectionCard title="Baptisms">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
               <Stat label="Baptized" value={String(bapStats.people)} accent="text-gray-12" />
               <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
@@ -1072,22 +1078,21 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-gray-12" />
               <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-gray-12" />
             </div>
-            <span className="text-caption2 text-gray-9">Per-person splits are in the Baptisms tab.</span>
-          </div>
+            <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
+          </SectionCard>
         )}
 
-        {/* Full attendance + audio detail for the same service occurrence — one place
-            for everything about this service (rundown above, the rest folded in here). */}
-        <div id="history-attendance" className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Attendance</span>
+        {/* Full attendance + sound detail for the same service occurrence — one
+            place for everything about this service. Each is PR 1's chart module
+            with its own strip and Customize; nothing here restyles them. */}
+        <SectionCard id="history-attendance" title="Attendance">
           {attendance ? (
             <AttendanceDetail detail={attendance} timeline={detail} />
           ) : (
-            <p className="text-caption1 text-gray-9">No attendance recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
-        </div>
-        <div id="history-sound" className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Sound</span>
+        </SectionCard>
+        <SectionCard id="history-sound" title="Sound">
           {spl ? (
             <SplDetail
               // KEYED BY THE RECORD. The section fetches the raw series on
@@ -1100,9 +1105,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               attendance={attendance}
             />
           ) : (
-            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
           )}
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -1593,6 +1598,28 @@ export function OverviewBlend({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * One card on a service's page — Rundown, Attendance, Sound (and Baptisms on
+ * the weekends it applies).
+ *
+ * `id` is the anchor the header's nav links to and the element its
+ * IntersectionObserver watches, so a card without one is simply not in the nav.
+ * `scroll-mt-40` is load-bearing: the links are real anchors and the header is
+ * sticky, so without it a jump puts the heading underneath the header.
+ */
+function SectionCard({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+  return (
+    <section
+      id={id}
+      aria-label={title}
+      className="su-card flex scroll-mt-40 flex-col gap-3 px-4 py-4 max-sm:px-3"
+    >
+      <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+      {children}
+    </section>
   );
 }
 
