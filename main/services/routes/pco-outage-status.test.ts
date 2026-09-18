@@ -61,11 +61,33 @@ const PCO_READS: { path: string; route: Parameters<typeof callRoute>[0]; method:
 
 describe("a PCO read that fails answers 502, not 500", () => {
   test("the list is the complete set of PCO-only GET routes", () => {
-    // EXACT, not a floor. This started as two routes with no try at all and
-    // seven more with the same shape one file over; a floor is how the next one
-    // added goes uncovered.
-    assert.equal(PCO_READS.length, 11);
-    assert.equal(new Set(PCO_READS.map((r) => r.path)).size, 11, "a path is listed twice");
+    // EXACT sorted list, not a bare count. This started as two routes with no
+    // try at all and seven more with the same shape one file over; a floor is
+    // how the next one added goes uncovered, and a count cannot tell an add
+    // plus a remove from no change.
+    const EXPECTED_PATHS = [
+      "/api/pco/attachments",
+      "/api/pco/calendar-sources",
+      "/api/pco/calendar?viewId=view-1",
+      "/api/pco/checklist",
+      "/api/pco/checklist-sources",
+      "/api/pco/plan-items",
+      "/api/plans?serviceTypeId=st-1",
+      "/api/scriptview/note-categories?serviceTypeId=st-1",
+      "/api/scriptview/rundown?serviceTypeId=st-1",
+      "/api/service-types",
+      "/api/team-positions",
+    ];
+    assert.deepEqual(
+      PCO_READS.map((r) => r.path).sort(),
+      EXPECTED_PATHS,
+      "a PCO-only route was added or removed; update EXPECTED_PATHS deliberately",
+    );
+    assert.deepEqual(
+      [...new Set(PCO_READS.map((r) => r.path))].sort(),
+      EXPECTED_PATHS,
+      "a path is listed twice",
+    );
   });
 
   for (const { path: routePath, route, method } of PCO_READS) {

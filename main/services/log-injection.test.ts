@@ -122,6 +122,9 @@ const REQUEST_FACING = [
   "spl-recorder.ts",
   "stage-controller.ts",
   "view-import.ts",
+  // The channel title on a successful Connect comes back from Google, not the
+  // operator, but it is still external data reaching a log line.
+  "youtube-connect.ts",
 ];
 
 /**
@@ -171,29 +174,6 @@ const UNAUDITED =
 
 /** Files that log and are deliberately NOT scanned, each with its reason. */
 const NOT_SCANNED = new Map<string, string>([
-  ["pco-calendar-service.ts", ELSEWHERE],
-
-  ["device-manager.ts", DEVICE],
-  ["kiosk-responder.ts", DEVICE],
-  ["live-poller.ts", DEVICE],
-  ["obs-protocol.ts", DEVICE],
-  ["obs-service.ts", DEVICE],
-  ["osc-manager.ts", DEVICE],
-  ["prodcom-service.ts", DEVICE],
-  ["propresenter-service.ts", DEVICE],
-  ["pvp-service.ts", DEVICE],
-  ["reaper-service.ts", DEVICE],
-  ["remote-server.ts", DEVICE],
-  ["resi-service.ts", DEVICE],
-  ["companion-api.ts", DEVICE],
-  ["rosstalk-manager.ts", DEVICE],
-  ["scores-service.ts", DEVICE],
-  ["sensource-service.ts", DEVICE],
-  ["smaart-service.ts", DEVICE],
-  ["tsl-service.ts", DEVICE],
-  ["wireless-manager.ts", DEVICE],
-  ["youtube-service.ts", DEVICE],
-
   ["app-paths.ts", UNAUDITED],
   ["app-root.ts", UNAUDITED],
   ["archive/archive-bundle.ts", UNAUDITED],
@@ -213,22 +193,43 @@ const NOT_SCANNED = new Map<string, string>([
   ["broadcaster.ts", UNAUDITED],
   ["cache-maintenance.ts", UNAUDITED],
   ["calendar-broadcaster.ts", UNAUDITED],
+  ["companion-api.ts", DEVICE],
   ["config-snapshot.ts", UNAUDITED],
   ["data-store.ts", UNAUDITED],
+  ["device-manager.ts", DEVICE],
   ["encryption.ts", UNAUDITED],
   ["keyed-record-store.ts", UNAUDITED],
+  ["kiosk-responder.ts", DEVICE],
   ["layout-image-store.ts", UNAUDITED],
   ["layout-library.ts", UNAUDITED],
+  ["live-poller.ts", DEVICE],
+  ["obs-protocol.ts", DEVICE],
+  ["obs-service.ts", DEVICE],
+  ["osc-manager.ts", DEVICE],
   ["pco-attachment-cache.ts", UNAUDITED],
+  ["pco-calendar-service.ts", ELSEWHERE],
   ["photo-cache.ts", UNAUDITED],
+  ["prodcom-service.ts", DEVICE],
+  ["propresenter-service.ts", DEVICE],
+  ["pvp-service.ts", DEVICE],
+  ["reaper-service.ts", DEVICE],
   ["reconcile-records.ts", UNAUDITED],
+  ["remote-server.ts", DEVICE],
+  ["resi-service.ts", DEVICE],
+  ["rosstalk-manager.ts", DEVICE],
+  ["scores-service.ts", DEVICE],
   ["scriptview-layouts-store.ts", UNAUDITED],
   ["secrets.ts", UNAUDITED],
+  ["sensource-service.ts", DEVICE],
   ["service-recorder.ts", UNAUDITED],
   ["slots-store.ts", UNAUDITED],
+  ["smaart-service.ts", DEVICE],
   ["stream-start-store.ts", UNAUDITED],
+  ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
+  ["wireless-manager.ts", DEVICE],
+  ["youtube-service.ts", DEVICE],
 ]);
 
 /** The files an HTTP request's own data can reach, as paths. */
@@ -237,45 +238,24 @@ function requestFacingFiles(): string[] {
   const inRoutes = readdirSync(routes)
     .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
     .map((f) => path.join(routes, f));
-  return [
-    path.join(HERE, "stage-controller.ts"),
-    path.join(HERE, "pco-service.ts"),
+  // Sorted alphabetically by filename, one entry per line, each comment
+  // directly above the file it explains, so two branches adding different
+  // files touch different lines and merge cleanly.
+  const files = [
     // Rule names are typed into an HTTP body and action detail carries whatever a
     // provider or device said back, so the engine is request-facing in exactly the
     // sense this scan means. It logged nothing at all until a failed rule started
     // being surfaced on /log, which is when it acquired the exposure.
     path.join(HERE, "automation-engine.ts"),
-    // POST /api/integrations/:id/config checks only that `config` is an object,
-    // then foldConfigEntries warns with the rejected KEY. That key is an
-    // attacker's string, verbatim, and this file was missing from the list.
-    path.join(HERE, "integration-manager.ts"),
+    // Same exposure as cue-tokens: the built-in it declines to offer is named
+    // beside the stored rule that owns the name, and a rule name and a cue name
+    // both arrive in an HTTP body.
+    path.join(HERE, "builtin-cues.ts"),
     // The plan id and the checklist row label both arrive in an HTTP body. It
     // reached beta AFTER this scan's coverage half was written, and the coverage
     // half caught it on its first run against a tree that had it — which is the
     // whole reason that half exists.
     path.join(HERE, "checklist-ticks-store.ts"),
-    // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
-    // logged when the token is minted.
-    path.join(HERE, "cue-tokens.ts"),
-    // Same exposure as cue-tokens: the built-in it declines to offer is named
-    // beside the stored rule that owns the name, and a rule name and a cue name
-    // both arrive in an HTTP body.
-    path.join(HERE, "builtin-cues.ts"),
-    // Its two lines name a poll client's `cid`, which is whatever string a
-    // caller put on the /api/events/poll query string — an attacker's value,
-    // verbatim, reaching /log.
-    path.join(HERE, "event-poll.ts"),
-    // Its lines name the Companion custom variable a cue pair is bound to and
-    // the pair's base — a rule param typed into an HTTP body — and the value
-    // Companion sent back.
-    // Its read failure line carries whatever cue-states could not read, which
-    // reaches Companion over HTTP with a variable name typed into a rule.
-    // Scanned rather than excluded even though its one line carries a COUNT and
-    // nothing else: the file is reached by `GET /api/cues/manifest`, and the
-    // next line added to it will be under the scan rather than outside it.
-    path.join(HERE, "cue-manifest.ts"),
-    path.join(HERE, "cue-live.ts"),
-    path.join(HERE, "cue-states.ts"),
     // Every value on its lines is either a cue name — typed into an HTTP body
     // — or a Companion page name out of the export. Both reach `/log`.
     path.join(HERE, "companion-reconcile.ts"),
@@ -283,34 +263,65 @@ function requestFacingFiles(): string[] {
     // Companion over HTTP, and the pair's base is a cue name typed into an HTTP
     // body. See companion-state-probe.ts.
     path.join(HERE, "companion-state-probe.ts"),
+    // Its read failure line carries whatever cue-states could not read, which
+    // reaches Companion over HTTP with a variable name typed into a rule.
+    path.join(HERE, "cue-live.ts"),
+    // Scanned rather than excluded even though its one line carries a COUNT and
+    // nothing else: the file is reached by `GET /api/cues/manifest`, and the
+    // next line added to it will be under the scan rather than outside it.
+    path.join(HERE, "cue-manifest.ts"),
+    // Its lines name the Companion custom variable a cue pair is bound to and
+    // the pair's base — a rule param typed into an HTTP body — and the value
+    // Companion sent back.
+    path.join(HERE, "cue-states.ts"),
+    // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
+    // logged when the token is minted.
+    path.join(HERE, "cue-tokens.ts"),
+    // Its two lines name a poll client's `cid`, which is whatever string a
+    // caller put on the /api/events/poll query string — an attacker's value,
+    // verbatim, reaching /log.
+    path.join(HERE, "event-poll.ts"),
+    // Every rebuild/merge line names a serviceKey, which arrives verbatim in an
+    // HTTP body — POST /api/history/rebuild and /api/history/merge both take it
+    // from the caller — and the rebuild it drives reaches plan item titles.
+    path.join(HERE, "history-edit.ts"),
     // Its one line — a pair whose two halves press the same Companion button
     // with no state variable bound — names the pair's base, which is a cue name
     // typed into an HTTP body.
     path.join(HERE, "home-assistant-yaml.ts"),
+    // POST /api/integrations/:id/config checks only that `config` is an object,
+    // then foldConfigEntries warns with the rejected KEY. That key is an
+    // attacker's string, verbatim, and this file was missing from the list.
+    path.join(HERE, "integration-manager.ts"),
+    path.join(HERE, "pco-service.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
-    // Every value on its three log lines comes out of an UPLOADED FILE — the
-    // service type name and id, a patch sheet's name, a variant's name. It
-    // logged nothing at all before the plan import, which is when it acquired
-    // the exposure.
-    path.join(HERE, "view-import.ts"),
+    // The same exposure as the two recorders, from the other end: its
+    // title-fallback warning names a Planning Center plan item TITLE, read back
+    // out of the raw archive, and POST /api/history/rebuild is what runs it.
+    path.join(HERE, "archive/rebuild.ts"),
     // Both recorders log a Planning Center plan item TITLE — on the re-run line
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
     path.join(HERE, "spl-recorder.ts"),
-    // The same exposure as the two recorders, from the other end: its
-    // title-fallback warning names a Planning Center plan item TITLE, read back
-    // out of the raw archive, and POST /api/history/rebuild is what runs it.
-    path.join(HERE, "archive/rebuild.ts"),
-    // Every rebuild/merge line names a serviceKey, which arrives verbatim in an
-    // HTTP body — POST /api/history/rebuild and /api/history/merge both take it
-    // from the caller — and the rebuild it drives reaches plan item titles.
-    path.join(HERE, "history-edit.ts"),
-    ...inRoutes,
+    path.join(HERE, "stage-controller.ts"),
+    // Every value on its three log lines comes out of an UPLOADED FILE — the
+    // service type name and id, a patch sheet's name, a variant's name. It
+    // logged nothing at all before the plan import, which is when it acquired
+    // the exposure.
+    path.join(HERE, "view-import.ts"),
+    // The channel title on a successful Connect is read back from Google over
+    // HTTP, not typed by the operator, but it is still external data reaching
+    // a log line the same way a device's reply would.
+    path.join(HERE, "youtube-connect.ts"),
   ];
+  return [...files, ...inRoutes];
 }
+
+/** The hand-written part of {@link requestFacingFiles}, for the sortedness check below. */
+const REQUEST_FACING_LITERAL = requestFacingFiles().filter((f) => !f.includes(`${path.sep}routes${path.sep}`));
 
 describe("log injection at the request boundary", () => {
   const files = requestFacingFiles();
@@ -325,6 +336,23 @@ describe("log injection at the request boundary", () => {
       [...REQUEST_FACING].sort(),
       "the request-facing set has changed; add the new file to REQUEST_FACING deliberately, " +
         "having first checked that its log lines are scrubbed",
+    );
+  });
+
+  it("REQUEST_FACING and the hand-written half of requestFacingFiles() stay sorted", () => {
+    // Both lists are read and merged by branch-adding, not by whole-file
+    // rewrite: two branches each adding a different file touch different
+    // lines and merge cleanly only if the list stays alphabetical.
+    assert.deepEqual(
+      REQUEST_FACING,
+      [...REQUEST_FACING].sort(),
+      "keep this list sorted so two branches adding entries merge cleanly",
+    );
+    const literalBasenames = REQUEST_FACING_LITERAL.map((f) => path.basename(f));
+    assert.deepEqual(
+      literalBasenames,
+      [...literalBasenames].sort(),
+      "keep this list sorted so two branches adding entries merge cleanly",
     );
   });
 
@@ -361,6 +389,15 @@ describe("log injection at the request boundary", () => {
       stale,
       [],
       `these exclusions name a file that no longer logs, or no longer exists:\n  ${stale.join("\n  ")}`,
+    );
+  });
+
+  it("NOT_SCANNED stays sorted", () => {
+    const keys = [...NOT_SCANNED.keys()];
+    assert.deepEqual(
+      keys,
+      [...keys].sort(),
+      "keep this list sorted so two branches adding entries merge cleanly",
     );
   });
 

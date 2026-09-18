@@ -141,6 +141,9 @@ slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
 | POST | `/api/integrations/:id/config` | Update config (secrets encrypted) |
 | POST | `/api/integrations/:id/enabled` | Enable / disable |
 | POST | `/api/integrations/:id/test` | Test a connection |
+| POST | `/api/integrations/youtube/connect` | Start a device-flow attempt using the SAVED client ID and secret. `409` with `{error: "Save the client ID and secret first"}` when either is blank or mode is not `oauth`. Otherwise the status below |
+| GET | `/api/integrations/youtube/connect` | `{status: "idle" \| "pending" \| "connected" \| "error", userCode?, verificationUrl?, expiresAt?, message?, channelTitle?}` — never the device code. Open, like every other read in this app: any LAN reader can see a pending `userCode` while an attempt is running, which is acceptable because the code only grants read-only YouTube access and is only good for a few minutes |
+| DELETE | `/api/integrations/youtube/connect` | Cancels a pending attempt, or clears a stale error back to idle. `{disconnect: true}` in the body instead clears the stored refresh token and channel title and stops the service |
 | GET | `/api/wireless/providers` | Available device drivers |
 | GET / POST | `/api/wireless/connections` | List / add a device connection |
 | PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |

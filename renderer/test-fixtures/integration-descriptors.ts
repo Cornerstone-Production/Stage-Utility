@@ -404,8 +404,8 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
       },
       {
         "key": "refreshToken",
-        "label": "Refresh Token",
-        "type": "password",
+        "label": "Connection",
+        "type": "oauth-device",
         "showIf": {
           "key": "mode",
           "equals": "oauth"

@@ -92,7 +92,10 @@ Prefer a check the type system enforces, or one that runs the real code path, ov
 one that reads source text. If it must read source: walk the tree recursively,
 match on something prose cannot satisfy (an assignment, not a bare constructor
 name), and assert an EXACT count rather than a floor — a floor with slack is how
-three config stores went missing from every backup with the suite green.
+three config stores went missing from every backup with the suite green. Make
+that exact thing a sorted list, one entry per line, never a bare number: two
+branches adding different entries then merge without conflict, and a count
+cannot tell an add plus a remove from no change.
 
 ## Ship the docs and the log line with the change
 

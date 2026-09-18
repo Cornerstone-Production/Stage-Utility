@@ -6,12 +6,13 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
 import { integrationManager } from "../integration-manager.js";
 import { deviceManager } from "../device-manager.js";
 import { stageController } from "../stage-controller.js";
 import { wirelessManager } from "../wireless-manager.js";
 import { oscManager } from "../osc-manager.js";
+import * as youtubeConnect from "../youtube-connect.js";
 
 export async function integrationRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -231,6 +232,37 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
       const id = testMatch[1];
       const result = await integrationManager.test(id);
       json(res, result);
+      return;
+    }
+
+    // ── YouTube device-flow connect ──────────────────────────────────────
+    // Same-origin browser writes, like every other integration write above —
+    // the global cross-origin gate in remote-server.ts already refuses a
+    // mutating request whose Origin names somebody else.
+
+    if (method === "POST" && pathname === "/api/integrations/youtube/connect") {
+      const ctx = await integrationManager.getYouTubeConnectContext();
+      if (ctx.mode !== "oauth" || !ctx.clientId || !ctx.clientSecret) {
+        error(res, "Save the client ID and secret first", 409);
+        return;
+      }
+      json(res, await youtubeConnect.start(ctx.clientId, ctx.clientSecret));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/integrations/youtube/connect") {
+      json(res, await youtubeConnect.status());
+      return;
+    }
+
+    if (method === "DELETE" && pathname === "/api/integrations/youtube/connect") {
+      const body = await readBodyOrEmpty(req);
+      if (body.disconnect === true) {
+        await youtubeConnect.disconnect();
+      } else {
+        youtubeConnect.cancel();
+      }
+      json(res, await youtubeConnect.status());
       return;
     }
 

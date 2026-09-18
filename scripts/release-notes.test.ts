@@ -399,8 +399,17 @@ describe("the overrides in docs/release-notes/overrides", () => {
   const REPO_ROOT = path.join(HERE, "..");
 
   /** Every release with an override, EXACTLY. Adding one is a deliberate act and
-   *  should have to be declared here; a file quietly disappearing is the bug. */
-  const VERSIONS_WITH_OVERRIDES = ["1.18.0", "1.19.0"];
+   *  should have to be declared here; a file quietly disappearing is the bug.
+   *
+   *  In RELEASE order, not alphabetical — versions do not sort lexicographically
+   *  past 9.x, and release order is the order a reader actually cares about. One
+   *  entry per line so two branches each shipping an override touch different
+   *  lines and merge cleanly; a same-line collision still resolves as "keep
+   *  both", appended in whichever order git picks. */
+  const VERSIONS_WITH_OVERRIDES = [
+    "1.18.0",
+    "1.19.0",
+  ];
 
   interface Override { commit: string; betaOnly: boolean; reason: string }
 
@@ -545,6 +554,14 @@ describe("a change to the release tooling itself is not user-visible", () => {
     const file = path.join(HERE, "..", "main", "services", "internal-scopes.json");
     const shared = JSON.parse(fs.readFileSync(file, "utf8"));
     assert.deepEqual(shared.scopes, ["ci", "dx", "release", "test"]);
+    // The reader treats this as a Set, so order carries no meaning here — sorted
+    // so two branches each adding a scope merge cleanly instead of both
+    // appending to the same line.
+    assert.deepEqual(
+      shared.scopes,
+      [...shared.scopes].sort(),
+      "keep this list sorted so two branches adding entries merge cleanly",
+    );
   });
 });
 

@@ -136,8 +136,21 @@ describe("the table", () => {
   });
 
   test("the counts are exactly 4 switches, 3 buttons, and 3 per layer", () => {
-    assert.equal(BUILTIN_FIXED_SWITCHES.length, 4);
-    assert.equal(BUILTIN_FIXED_BUTTONS.length, 3);
+    // The two fixed lists as exact sorted sets of base names, not bare counts —
+    // a count cannot tell an add plus a remove from no change, and a sorted
+    // list merges cleanly when two branches each add a different built-in.
+    assert.deepEqual(
+      BUILTIN_FIXED_SWITCHES.map((s) => s.base).sort(),
+      ["obs_record", "obs_stream", "obs_virtual_cam", "reaper_record"],
+      "a fixed switch was added or removed; update this list deliberately",
+    );
+    assert.deepEqual(
+      BUILTIN_FIXED_BUTTONS.map((b) => b.base).sort(),
+      ["display_refresh", "pco_advance", "pvp_clear_workspace"],
+      "a fixed button was added or removed; update this list deliberately",
+    );
+    // Per-layer shape, fixed by the spec's table rather than an evolving
+    // registry — a plain count is the right guard here.
     assert.equal(layerSwitches("Lyrics", "lyrics").length, 2);
     assert.equal(layerButtons("Lyrics", "lyrics").length, 1);
 
