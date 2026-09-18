@@ -79,18 +79,21 @@ function overviewData(over: Partial<OverviewData> = {}): OverviewData {
 /** Everything the card says, with its line breaks flattened. */
 const text = (el: HTMLElement) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/** The SPL summary block itself, present only while the line is on AND there
- *  is a level to report — see the `data-testid` in OverviewBlend. */
+/** The SPL summary block itself, present exactly when there IS a level to
+ *  report — see the `data-testid` in OverviewBlend. */
 const splSummary = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-testid="spl-summary"]');
 
-function show(over: Partial<OverviewData> = {}, shown = true) {
-  return render(
-    <OverviewBlend
-      overview={overviewData(over)}
-      splTrend={{ shown, metric: "LAeq 10" }}
-      onSplTrend={() => {}}
-    />,
-  );
+function show(over: Partial<OverviewData> = {}) {
+  return render(<OverviewBlend overview={overviewData(over)} onSplTrend={() => {}} />);
+}
+
+/** Every sentence on the card — anything with a space and a lower-case word,
+ *  which is prose rather than a label or a figure. */
+function prose(el: HTMLElement): string[] {
+  return [...el.querySelectorAll("div, p, span")]
+    .map((n) => (n.textContent ?? "").trim())
+    .filter((t) => /[a-z]/.test(t) && /\s/.test(t) && !/^[A-Z][a-z]+ [a-z]+$/.test(t))
+    .filter((t) => /\.|right-click|switched off|is off/i.test(t));
 }
 
 describe("the SPL summary under the lead stat", () => {
@@ -152,15 +155,23 @@ describe("the SPL summary under the lead stat", () => {
     );
   });
 
-  test("is absent when the SPL line is switched off", (t) => {
-    const view = show({}, false);
+  test("the card is four timing figures and no prose", (t) => {
+    // It printed "Sound summary is off — right-click for options." above the
+    // timings: a sentence advertising a hidden switch whose only effect was to
+    // hide a figure that has no reason to be hidden. Both are gone. A card that
+    // needs a paragraph to explain what it is not showing is showing the wrong
+    // thing.
+    const view = show({ avgSpl: null, splDelta: null, splMetric: null, splMetrics: [] });
     t.after(() => cleanup());
-    const txt = text(view.container);
-    assert.ok(txt.includes("Avg length"), `nothing rendered, so this asserts nothing: ${txt}`);
-    // The BLOCK itself, not a text scan for "dB" over the whole card: a scan
-    // that broad fails the moment anything else in this component ever prints
-    // a dB figure, for a reason that has nothing to do with this toggle.
-    assert.ok(!splSummary(view.container), `the SPL summary block is drawn with the line switched off: ${txt}`);
+    const labels = [...view.container.querySelectorAll("div")]
+      .map((n) => (n.textContent ?? "").trim())
+      .filter((t2) => /^(Services|Avg length|Avg start|Avg overrun)$/.test(t2));
+    assert.deepEqual(
+      labels.sort(),
+      ["Avg length", "Avg overrun", "Avg start", "Services"],
+      "the four timing figures must be there, or this asserts nothing",
+    );
+    assert.deepEqual(prose(view.container), [], "the card is carrying prose");
   });
 
   test("is absent when no weekend in scope carries a level", (t) => {
@@ -185,11 +196,12 @@ describe("the SPL summary under the lead stat", () => {
 });
 
 describe("the right-click menu", () => {
-  test("opens on the card, and its toggle names the sound summary", (t) => {
-    // The toggle used to say "SPL trend line" and gated a line on a chart this
-    // card no longer draws. The stored preference is kept and still READ — it
-    // is what decides whether the sound summary appears — rather than left
-    // written and consulted by nothing.
+  test("offers the metric, and nothing that hides a figure", (t) => {
+    // What is left of it. The "SPL trend line" entry gated a line on a chart
+    // this card no longer draws; the "Sound summary" entry that replaced it
+    // gated the level itself, which is the card's own summary and has no reason
+    // to be switchable. Choosing WHICH metric the level is read from is a real
+    // choice and stays.
     //
     // The tooltip-suppression half of this test went with the chart; the chart
     // itself still serves Home, and attendance-trend-chart.test.tsx still
@@ -199,17 +211,16 @@ describe("the right-click menu", () => {
     fireEvent.contextMenu(view.container.firstElementChild!.firstElementChild!, { clientX: 400, clientY: 40 });
     const menu = document.querySelector('[role="menu"]');
     assert.ok(menu, "the right-click menu never opened");
-    assert.ok(
-      (menu.textContent ?? "").includes("Sound summary"),
-      `the menu still offers a trend line this card does not draw: ${menu.textContent}`,
-    );
+    const txt = menu.textContent ?? "";
+    assert.ok(txt.includes("Metric"), `the metric picker went too: ${txt}`);
+    assert.equal(/Sound summary|trend line/.test(txt), false, `the menu still hides a figure: ${txt}`);
   });
 
-  test("switching the summary off leaves the timing figures alone", (t) => {
-    const view = show({}, false);
+  test("the menu is absent entirely when there is no metric to choose", (t) => {
+    // A menu with nothing in it is a right-click that opens an empty box.
+    const view = show({ avgSpl: null, splDelta: null, splMetric: null, splMetrics: [] });
     t.after(() => cleanup());
-    const txt = text(view.container);
-    assert.ok(!splSummary(view.container), "the summary is drawn with the toggle off");
-    assert.ok(txt.includes("Avg overrun"), `the timings went with it: ${txt}`);
+    fireEvent.contextMenu(view.container.firstElementChild!.firstElementChild!, { clientX: 10, clientY: 10 });
+    assert.equal(document.querySelector('[role="menu"]'), null);
   });
 });

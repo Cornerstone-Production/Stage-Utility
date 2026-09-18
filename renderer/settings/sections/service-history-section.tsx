@@ -260,6 +260,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   /** One level per service — the SPL trend line's data. A summary, not the
    *  archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  /**
+   * The Overview's level preference. Only `metric` is read now — `shown` gated a
+   * trend line on a chart this page no longer draws, and then a figure that has
+   * no reason to be hidden. It is not deleted: it is the operator's own stored
+   * choice, and deleting somebody's data to tidy something up is not a thing
+   * this repo does. Nothing writes it any more. Same treatment as
+   * settings.splVisibleMetrics, for the same reason.
+   */
   const [splTrend, setSplTrend] = useState<{ shown: boolean; metric: string | null }>({
     shown: false,
     metric: null,
@@ -1357,7 +1365,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </Select>
           )}
         </div>
-        <OverviewBlend overview={overview} splTrend={splTrend} onSplTrend={saveSplTrend} />
+        <OverviewBlend overview={overview} onSplTrend={saveSplTrend} />
       </div>
 
       {/* Calendar (sticky) + selected-day detail. */}
@@ -1584,12 +1592,13 @@ function TrendChip({
  *  whether the SPL summary is there at all — are in this component alone. */
 export function OverviewBlend({
   overview,
-  splTrend,
   onSplTrend,
 }: {
   overview: OverviewData;
-  splTrend: { shown: boolean; metric: string | null };
-  onSplTrend: (patch: { shown?: boolean; metric?: string | null }) => void;
+  /** Writes the metric choice. The card reads the CHOSEN metric back through
+   *  `overview.splMetric`, which is derived from it, so the preference itself is
+   *  not a prop — one direction each way. */
+  onSplTrend: (patch: { metric?: string | null }) => void;
 }) {
   /** Where the chart's right-click (or long-press) menu is, or null. */
   const [chartMenu, setChartMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1597,37 +1606,39 @@ export function OverviewBlend({
   // A mouse user already has the right-click; the corner button only appears
   // where a touch has no other way in.
   const isCoarse = useCoarsePointer();
-  /** The menu the chart offers: the line on or off, and which metric it plots.
-   *  The metric list comes from the data in scope — see OverviewData.splMetrics —
-   *  so it offers exactly the metrics there is something to draw for. */
-  const chartMenuItems: ContextMenuItem[] = [
-    {
-      // It gated a trend LINE on the attendance chart this card no longer
-      // carries. The preference is kept and still read — it is what decides
-      // whether the sound summary appears — rather than left written and
-      // consulted by nothing.
-      label: "Sound summary",
-      checked: splTrend.shown,
-      onSelect: () => onSplTrend({ shown: !splTrend.shown }),
-    },
-  ];
-  if (splTrend.shown && overview.splMetrics.length > 0) {
-    chartMenuItems.push({
-      label: "Metric",
-      items: overview.splMetrics.map((m) => ({
-        label: m,
-        checked: overview.splMetric === m,
-        onSelect: () => {
-          onSplTrend({ metric: m });
-          setChartMenu(null);
-        },
-      })),
-    });
-  }
+  /**
+   * The one thing the menu still offers: which Smaart metric the level below is
+   * read from. The list comes from the data in scope — see
+   * OverviewData.splMetrics — so it offers exactly the metrics there is
+   * something to report for, and there is no menu at all when there are none.
+   *
+   * The "Sound summary" toggle that used to sit above it is gone. It gated a
+   * trend LINE on an attendance chart this card no longer draws, and after the
+   * trim it gated the level block instead — a switch whose only visible effect
+   * was to hide a figure, advertised by a sentence of prose above the timings
+   * telling the operator to right-click. The prose went with it; the figure
+   * shows whenever there is one.
+   */
+  const chartMenuItems: ContextMenuItem[] = overview.splMetrics.length > 0
+    ? [
+      {
+        label: "Metric",
+        items: overview.splMetrics.map((m) => ({
+          label: m,
+          checked: overview.splMetric === m,
+          onSelect: () => {
+            onSplTrend({ metric: m });
+            setChartMenu(null);
+          },
+        })),
+      },
+    ]
+    : [];
 
-  /** The sound summary renders when the operator wants it and there is a level
-   *  to report. No dash when there is none — that reads as a measured silence. */
-  const showsLevel = splTrend.shown && overview.avgSpl != null;
+  /** The level renders when there IS one. No dash and no sentence when there is
+   *  not — a dash reads as a measured silence, and prose explaining an absence
+   *  is bigger than the thing it explains. */
+  const showsLevel = overview.avgSpl != null;
 
   // TIMINGS ONLY. Attendance moved out of this card entirely: Trends, at the
   // top of the page, plots it per service type over a chosen range with
@@ -1678,12 +1689,8 @@ export function OverviewBlend({
               />
             )}
           </div>
-        ) : (
-          <div className="text-caption1 text-fg-subtle">
-            {splTrend.shown ? "No sound recorded in this scope." : "Sound summary is off — right-click for options."}
-          </div>
-        )}
-        {isCoarse && (
+        ) : null}
+        {isCoarse && chartMenuItems.length > 0 && (
           <button
             type="button"
             aria-label="Overview options"
@@ -1698,7 +1705,7 @@ export function OverviewBlend({
             </span>
           </button>
         )}
-        {chartMenu && (
+        {chartMenu && chartMenuItems.length > 0 && (
           <ContextMenu
             x={chartMenu.x}
             y={chartMenu.y}
