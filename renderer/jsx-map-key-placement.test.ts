@@ -2,10 +2,12 @@
 //
 // A key on a child of the returned element keys nothing: React reads it off the
 // array's own children. It is easy to write and invisible in review — the
-// History calendar rendered `<Tooltip><button key={dateStr} …>`, so every visit
-// to History logged "Encountered two children with the same key" and React was
+// History calendar rendered `<Tooltip><button key={dateStr} …>`, so React was
 // free to reuse the wrong day's DOM on the next render. The canvas-shape presets
-// in the layout editor had the identical shape.
+// in the layout editor had the identical shape. Nothing catches it at runtime
+// where it matters: React warns only in a development build, and the production
+// bundle an operator runs says nothing (verified in a real browser against both
+// builds), so a static check is the only place this can be caught.
 //
 // This walks the TSX with the TypeScript parser rather than reading source text:
 // there is no comment, string or identifier a file can contain that satisfies it,

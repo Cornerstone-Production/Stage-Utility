@@ -117,8 +117,10 @@ export function HistoryCalendar({
               : undefined;
           return (
             // The key belongs on the element this callback RETURNS — on the
-            // inner button it keyed nothing, and every render of the calendar
-            // logged a duplicate-key warning.
+            // inner button it keyed nothing, so React saw a whole month of
+            // unkeyed children and was free to reuse the wrong day's DOM on a
+            // re-render. It says so in a dev build; the production bundle
+            // strips that warning, which is why this was never noticed.
             <Tooltip key={dateStr} label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}>
               <button
                 type="button"

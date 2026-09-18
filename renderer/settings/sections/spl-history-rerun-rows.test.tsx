@@ -8,11 +8,15 @@
 //
 // Both halves are asserted. The row COUNT alone does not go red on the bug —
 // React still renders both children of a duplicate key on a first render — so
-// the warning is the half that proves the fix.
+// the warning is the half that proves the fix, and this suite runs React's
+// development build, which is what emits it. The production bundle does not warn
+// at all (both checked in a real Chrome against a real server), so the shipped
+// cost is silent: two rows sharing an identity across re-renders.
 //
-// NOT unit-tested here, and checked in a real browser instead: how the table
+// NOT unit-tested here, and driven in a real browser instead: how the table
 // looks with two rows of the same name (jsdom loads no stylesheet, so nothing
-// about the row striping or column alignment is observable).
+// about the row striping or column alignment is observable). Done — a service
+// with Doors run twice renders 104/101 dB and 78/74 dB on their own rows.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND — node:assert inspects
 // `actual` to build its message, and inspecting a live jsdom element does not

@@ -2,12 +2,16 @@
 //
 // `key={dateStr}` sat on the inner <button> while the element the day cell's
 // `.map` returned was the <Tooltip> around it, so React saw a whole month of
-// unkeyed children: every visit to History logged "Encountered two children with
-// the same key" and React was free to reuse the wrong day's DOM on a re-render.
+// unkeyed children and was free to reuse the wrong day's DOM on a re-render.
 //
 // The grid renders either way, so a cell count would not go red on the bug — the
-// warning is the assertion that proves the fix. jsx-map-key-placement.test.ts is
-// the repo-wide half of the same guard.
+// warning is the assertion that proves the fix, and this suite runs React's
+// development build, which is what emits it. Checked in a real Chrome: the dev
+// server logs "Each child in a list should have a unique key prop … passed a
+// child from HistoryCalendar" on every visit to /history, and the PRODUCTION
+// bundle logs nothing at all, which is why a month of unkeyed children shipped
+// unnoticed. jsx-map-key-placement.test.ts is the repo-wide half of this guard
+// and needs no browser at all.
 //
 // NOT unit-tested here, and checked in a real browser instead: the heatmap tint
 // (a color-mix() on a CSS custom property — jsdom loads no stylesheet and
