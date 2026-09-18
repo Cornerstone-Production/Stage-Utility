@@ -85,16 +85,6 @@ export function SplDetail({ detail, timeline }: { detail: ServiceSplHistory; tim
         toast.error(`Could not read the saved Smaart metrics: ${errorMessage(err)}`);
       });
   }, []);
-  async function toggleMetric(key: string) {
-    const next = visible.includes(key) ? visible.filter((k) => k !== key) : [...visible, key];
-    setVisible(next);
-    try {
-      await invoke("spl:setVisibleMetrics", { metrics: next });
-    } catch (err) {
-      toast.error(`Could not save that metric choice: ${errorMessage(err)}`);
-    }
-  }
-
   const [figureKeys, storeFigure] = useStoredKeys(FIGURES_STORAGE_KEY, FIGURE_KEYS, DEFAULT_FIGURES);
   function toggleFigure(key: string) {
     const err = storeFigure(key);
@@ -111,6 +101,36 @@ export function SplDetail({ detail, timeline }: { detail: ServiceSplHistory; tim
     const filtered = visible.filter((k) => allKeys.includes(k));
     return filtered.length ? filtered : defaultVisible(allKeys);
   }, [visible, allKeys]);
+  /**
+   * Toggle a metric, computed from what is SHOWN rather than from what is
+   * stored.
+   *
+   * With nothing stored, the shown set is `defaultVisible(...)` — two metrics
+   * the operator can SEE ticked. Computing the next set from the empty STORED
+   * list turned the first untick into an ADD: the unticked metric stayed,
+   * because it was appended, and the OTHER default vanished, because a
+   * one-entry stored list stops being empty and the default stops applying.
+   *
+   * So the first click on a fresh install did the opposite of what it said,
+   * about the metric it said it about, and silently removed a second one it
+   * said nothing about.
+   *
+   * Declared after `shownMetrics` for the obvious reason, which is also why the
+   * bug was easy to write: `visible` is in scope from the top of the component
+   * and reads like the right thing.
+   */
+  async function toggleMetric(key: string) {
+    const next = shownMetrics.includes(key)
+      ? shownMetrics.filter((k) => k !== key)
+      : [...shownMetrics, key];
+    setVisible(next);
+    try {
+      await invoke("spl:setVisibleMetrics", { metrics: next });
+    } catch (err) {
+      toast.error(`Could not save that metric choice: ${errorMessage(err)}`);
+    }
+  }
+
   const items = useMemo(() => detail.items.slice().sort((a, b) => a.sequence - b.sequence), [detail]);
 
   const preById = useMemo(() => {
