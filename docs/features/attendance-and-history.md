@@ -69,8 +69,68 @@ operator jumping to the previous song expects.
 
 ## Reading it back
 
-The History tab puts all three on one calendar — days with data are marked. Open
-a service for its own page, described next.
+The History tab opens on **All services**: a Trends card, then a calendar beside
+the day's services. Open a service for its own page, described after it.
+
+### All services
+
+**Trends** leads the page. One tile per service type, showing a sparkline of its
+peak attendance over its last eight recordings, the average across them, and the
+change against the eight before. A type that has not recorded eight and eight
+reads *no prior window yet* rather than quoting a change it cannot measure — an
+average with nothing before it is not a trend, and a percentage derived from
+nothing is worse than no percentage. The tiles sort busiest first.
+
+Under them, one chart of every service type across the chosen range — 8, 16 or
+52 weeks, defaulting to 16, remembered per browser. One point per recording, the
+peak people in the room; a recording with no attendance record is not plotted,
+because a service nobody counted is not a service of nobody.
+
+**Milestones** are marked under that chart: a small triangle, a dashed guide up
+the plot, a short label where there is room for one, and the full label on hover.
+They come from two places, and draw alike:
+
+- **Your own list**, in Settings → Advanced → Data → History milestones. A date,
+  a label, and optionally one service type. "Moved to two services", "new
+  building" — the reason a step in the line is there.
+- **Series changes**, derived: wherever a plan's series title differs from the
+  previous recording of the same type. The first series a type ever records is
+  not a change, and a plan with no series title is stepped over rather than
+  counted as leaving and rejoining one.
+
+Milestones never appear on a single service's chart. They are statements about
+the history, and one drawn across a Sunday morning would read as something that
+happened during that service.
+
+A milestone whose date is not a real calendar day is refused when you enter it,
+with the reason. One that reached the file another way — a hand edit, a restored
+backup — is skipped rather than drawn at a date nothing happened on, and the
+server says so on a `[history]` line naming it.
+
+The **calendar** shades a day by how many services were recorded on it, in four
+steps, with everything at four or more on the darkest. There is no dot and no
+count in the cell: the day number sits alone and the shade carries the rest,
+with the count on the cell's tooltip and its accessible name. Today is outlined
+in the accent and the selected day carries a heavier accent ring; neither fills
+the cell, so the shade still shows underneath.
+
+The **list** beside it is the selected day's services. Each row carries the start
+time and service type, the plan title, the series and how many items ran, then
+four figures:
+
+| | |
+|---|---|
+| Peak attendance | the most people in the room at once |
+| Ran | what the service ran; **Running**, counting up, while it is still recording |
+| vs plan | its difference against the planned total — absent while recording, where most of a plan not yet run reads as a service running short |
+| Peak *metric* | the loudest reading on the primary Smaart metric |
+
+They are the service page's own figures, picked out of the same derivation, so a
+row and the page it opens cannot quote different numbers for one recording. A
+service whose attendance recorder opened before its first plan item went live —
+the arrival ramp — is a simpler row saying how many are in the room so far.
+
+The shared `/history` link shows the same figures; it carries no Delete.
 
 ### The service page
 

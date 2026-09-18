@@ -63,6 +63,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `kiosk-devices.json` | which machine drives which screen |
 | `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colours |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
+| `history-milestones.json` | the dates you marked on the History trend chart |
 | `branding-images/`, `layout-images/` | uploaded images, named by content hash |
 
 **What it observed** — deliberately not restored, because it describes this

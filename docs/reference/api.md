@@ -304,6 +304,9 @@ thing.
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
+| GET | `/api/history/milestones` | The operator's dated marks for the Trends chart |
+| POST | `/api/history/milestones` | Add or replace one. `{ date, label, serviceTypeId? }`, plus `id` to replace. `date` is `YYYY-MM-DD` and must be a real day — `400` with the reason otherwise, since a mark nobody would ever see is worse than a refusal. Answers the whole list |
+| DELETE | `/api/history/milestones/:id` | Remove one. Answers the whole list |
 | POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |
 
 Two things to know:
