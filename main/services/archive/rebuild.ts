@@ -22,6 +22,7 @@ import type {
 import { addLeqSample } from "../spl-leq.js";
 import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder.js";
 import { scrub } from "../scrub.js";
+import { carryItemTimeEdits, logOrphanedItemTimeEdits } from "../history-item-times.js";
 import { serviceDirPath } from "./archive-paths.js";
 import { readArchiveRows, type ArchiveRow } from "./archive-rows.js";
 
@@ -223,9 +224,18 @@ function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
  * `endedAt`, and stays open when the record is still open.
  *
  * What is NOT in the rows is carried from `prior`: the record's identity, its
- * window, `pacingResetAt`, and any per-item `counted` override the operator set
- * — which is a statement about the PLAN item, so it lands on every entry for
- * that id.
+ * window, `pacingResetAt`, any per-item `counted` override the operator set —
+ * which is a statement about the PLAN item, so it lands on every entry for that
+ * id — and `itemTimeEdits`, their corrections to individual item timings.
+ *
+ * The time corrections are carried, never applied: they are an overlay read back
+ * on by `applyItemTimeEdits` (see history-item-times.ts), so a rebuild produces
+ * the raw run from the rows and the next read puts the corrections back on top.
+ * That is the whole reason they are not written into the items — the rows say
+ * what the recorder saw and always will, so an edit written in would be undone
+ * here without a word. Pass the STORED record as `prior`, not an overlaid one;
+ * `applyItemTimeEdits` undoes an overlay it is given, so either works, but only
+ * the stored record is the raw truth this is meant to re-derive against.
  */
 export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]): ServiceTimeline {
   const items: ServiceTimelineItem[] = [];
@@ -400,5 +410,17 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   }
 
   items.forEach((it, i) => (it.sequence = i));
-  return { ...prior, items };
+
+  // Item time corrections are keyed by (itemId, sequence) and this function has
+  // just renumbered every sequence from a run list it derived itself. Carrying
+  // them across unchanged — which is what the spread below used to do on its own
+  // — put a correction on whichever run inherited its old number the moment the
+  // rebuilt list differed from the stored one by so much as an item. Paired by
+  // RUN, the same Nth-to-Nth rule `counted` is carried by, twenty lines up.
+  const carried = carryItemTimeEdits(prior, items);
+  logOrphanedItemTimeEdits(prior.serviceKey, "rebuild from raw", carried.orphaned);
+  const out: ServiceTimeline = { ...prior, items };
+  if (carried.edits.length) out.itemTimeEdits = carried.edits;
+  else delete out.itemTimeEdits;
+  return out;
 }

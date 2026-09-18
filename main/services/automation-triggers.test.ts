@@ -547,6 +547,29 @@ describe("service pacing and updates", () => {
     assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), false);
   });
 
+  test("a correction to a DIFFERENT service's recording cannot fire it", () => {
+    // `service-timeline:history` is not per-service: it carries whichever record
+    // was last broadcast, and correcting a past recording in Settings pushes a
+    // historical record down the same pipe the live one uses. The step from this
+    // morning's drift to last month's is not drift — it is two services — and
+    // firing on it runs a cue in the middle of somebody else's service.
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    const live = { serviceKey: "weekend:today", items: [item(1, 300, 420)] };
+    const edited = { serviceKey: "weekend:last-month", items: [item(1, 300, 420), item(2, 300, 900)] };
+    assert.equal(t.didFire(live, edited, { minutes: 5 }, NOW), false);
+  });
+
+  test("a record with no serviceKey on either side does not fire", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    const before = { items: [item(1, 300, 420)] };
+    const after = { items: [item(1, 300, 420), item(2, 300, 900)] };
+    assert.equal(
+      t.didFire(before, after, { minutes: 5 }, NOW),
+      false,
+      "two records that cannot be shown to be the same service are not comparable",
+    );
+  });
+
   test("update.available fires when a release appears, not while one waits", () => {
     const t = AUTOMATION_TRIGGERS["update.available"];
     assert.equal(t.didFire({ releasesBehind: 0 }, { releasesBehind: 1 }, {}, NOW), true);

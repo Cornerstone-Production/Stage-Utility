@@ -16,6 +16,7 @@ import { appTimeZone } from "./app-timezone.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
+import { overlaidTimeline } from "./history-item-times.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { baptismStore } from "./baptism-store.js";
 
@@ -109,7 +110,11 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
   ]);
 
   const att = attendance.filter((a) => inRange(a.serviceDate, from, to));
-  const tl = timelines.filter((t) => inRange(t.serviceDate, from, to));
+  // Overlaid, not raw: the workbook is the operator's report of what happened,
+  // and it must agree with the History panel. The archive bundle deliberately
+  // does the opposite and exports raw records plus their itemTimeEdits, because
+  // that one has to round-trip back into the store with Reset still working.
+  const tl = timelines.filter((t) => inRange(t.serviceDate, from, to)).map((t) => overlaidTimeline(t));
   const spl = spls.filter((s) => inRange(s.serviceDate, from, to));
 
   type Timeline = (typeof tl)[number];

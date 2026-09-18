@@ -194,6 +194,34 @@ export interface ServiceTimelineItem {
    *  carried-over first run says nothing about a later one. Absent on records
    *  written before this was added; see rebuildTimelineRecord. */
   countedByOperator?: true;
+  /** The recorded values an operator's time correction replaced. Set ONLY by
+   *  applyItemTimeEdits, never persisted: the store holds the raw item plus the
+   *  record's `itemTimeEdits`, and this is how a read tells the UI which rows are
+   *  edited and what they used to say. */
+  editedFrom?: {
+    startedAt: string;
+    endedAt: string | null;
+    actualDurationSec: number | null;
+  };
+}
+
+/** An operator's correction of ONE run of ONE item's recorded timing.
+ *
+ *  Kept beside the items rather than written into them: the items are raw
+ *  observation that `rebuildTimelineRecord` re-derives from `events.csv`, so an
+ *  edit written in would be silently undone by the next rebuild. See
+ *  main/services/history-item-times.ts. */
+export interface ServiceItemTimeEdit {
+  itemId: string;
+  /** Which RUN — the item's `sequence` in the record. An item can appear more
+   *  than once (a reprise, or a mis-split second service). */
+  sequence: number;
+  /** ISO replacing the recorded start. Absent = that field is not overridden. */
+  startedAt?: string;
+  /** ISO replacing the recorded end. Absent = that field is not overridden. */
+  endedAt?: string;
+  /** ISO when the operator made the correction. */
+  editedAt: string;
 }
 
 /** Recorded ACTUAL service rundown timing for one occurrence — when each item
@@ -227,4 +255,8 @@ export interface ServiceTimeline {
    *  a new record always starts null. */
   pacingResetAt?: string | null;
   items: ServiceTimelineItem[];
+  /** Operator corrections to individual items' recorded timings, applied over
+   *  `items` on every read (never into them). Absent on a record nobody has
+   *  corrected. See main/services/history-item-times.ts. */
+  itemTimeEdits?: ServiceItemTimeEdit[];
 }

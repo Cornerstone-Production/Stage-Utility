@@ -266,6 +266,7 @@ thing.
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
 | POST | `/api/history/rebuild` | Recompute all three summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timelineItems, splItems, attendanceSamples }`; `500` with the reason if it cannot |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
+| POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
 | POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |
 
@@ -275,6 +276,13 @@ Two things to know:
   answer `409`. The recorder holds the same record and would write its own copy
   back over any change, and releasing it only makes the next live tick start a
   fresh empty record in its place. Correcting a recording is a post-hoc repair.
+- **An item time correction is an overlay.** The recorded stamps are never
+  rewritten: the edit is stored on the record as `itemTimeEdits` and applied to
+  `startedAt`, `endedAt` and `actualDurationSec` on every read, so a rebuild from
+  the raw rows cannot undo it and clearing it restores what the recorder saw. An
+  edited item carries `editedFrom` with the recorded values. `400` if the end is
+  not after the start or either time falls outside the recording's own window.
+  Neighbouring items are not moved.
 - **Deleting a recording keeps its raw samples.** The
   [data archive](../data-archive.md) is the source of truth the records are
   derived from; removing it is a separate, irreversible decision. A merge does
@@ -325,6 +333,12 @@ and set which plan items start each phase, and
 | GET | `/api/archive/export` | The raw sample archive as a zip |
 | POST | `/api/archive/inspect` | Read a zip and report what it holds. Writes nothing |
 | POST | `/api/archive/import` | Apply it. `X-Archive-Mode: skip\|merge\|replace` decides what happens to services recorded differently here |
+
+The import answers what it did and, separately, what it could not do:
+`rawFilesFailed` names archive members it could not write, and
+`itemTimeEditsDropped` names per service any item time corrections whose run
+lost the merge — the local run wins, so the correction describing the run that
+did not survive goes with it. Both are empty on a clean import.
 
 **`/api/update/apply` and `/api/update/track` answer `409`** —
 `{error: "locked", locked: true, reasons}` — while a service is live or any

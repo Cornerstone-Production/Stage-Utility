@@ -178,10 +178,14 @@ describe("History: Rebuild from raw", () => {
     fireEvent.click(btn!);
     await settle();
 
-    // The confirm has to say what is lost — the rebuild discards hand edits.
+    // The confirm has to say what a rebuild does to the operator's own work.
+    // It used to say hand edits to times were lost, which was true when this
+    // test was written; per-item time corrections are now an OVERLAY over the
+    // rebuilt run (see main/services/history-item-times.ts) and survive it, so
+    // the sentence that would have been a warning is now a reassurance.
     const dialog = text(document.body as HTMLElement);
     assert.match(dialog, /Rebuild from raw\?/);
-    assert.match(dialog, /hand edits to times are lost/i);
+    assert.match(dialog, /per-item time corrections are kept/i);
 
     const go = button(document.body as HTMLElement, "Rebuild");
     assert.ok(go, `the confirm dialog offered no Rebuild button: ${dialog}`);

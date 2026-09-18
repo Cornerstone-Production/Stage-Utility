@@ -82,7 +82,7 @@ test("timeline merge keeps BOTH runs too", () => {
       { itemId: "doors", sequence: 1, actualDurationSec: 600 },
     ],
   };
-  const out = mergeTimelineRecord(mine, theirs);
+  const out = mergeTimelineRecord(mine, theirs).record;
   assert.equal(out.items!.length, 2, "the source's second run was dropped");
   assert.equal((out.items![0] as unknown as { actualDurationSec: number }).actualDurationSec, 497);
   assert.equal((out.items![1] as unknown as { actualDurationSec: number }).actualDurationSec, 600);
@@ -98,13 +98,68 @@ test("a merge does not duplicate a run both boxes recorded but numbered differen
   // The same two runs off a box that also caught the pre-service, so everything
   // it recorded is numbered four higher.
   const theirs = { items: [{ itemId: "doors", sequence: 4 }, { itemId: "song", sequence: 5 }] };
-  const out = mergeTimelineRecord(mine, theirs);
+  const out = mergeTimelineRecord(mine, theirs).record;
   assert.equal(out.items!.length, 2, "a run both boxes recorded was added a second time");
   assert.deepEqual(
     out.items!.map((i) => i.sequence),
     [0, 1],
     "the local entries must be the ones kept",
   );
+});
+
+// ── Item time corrections through an archive-import merge ──
+//
+// These used to ride through fillMissingFields, which is wrong twice over: it
+// copies the incoming array only when this box has none, and it copies the keys
+// verbatim onto a run list that has just been unioned.
+
+test("an import merge keeps BOTH sides' item time corrections", () => {
+  const mine = {
+    items: [{ itemId: "doors", sequence: 0 }],
+    itemTimeEdits: [{ itemId: "doors", sequence: 0, endedAt: "2026-09-17T20:20:00.000Z", editedAt: "x" }],
+  };
+  const theirs = {
+    items: [{ itemId: "doors", sequence: 0 }, { itemId: "song", sequence: 1 }],
+    itemTimeEdits: [{ itemId: "song", sequence: 1, endedAt: "2026-09-17T21:00:00.000Z", editedAt: "y" }],
+  };
+  const { record, droppedItemTimeEdits } = mergeTimelineRecord(mine, theirs);
+  assert.deepEqual(
+    record.itemTimeEdits?.map((e) => `${e.itemId}#${String(e.sequence)}`).sort(),
+    ["doors#0", "song#1"],
+    "the incoming correction was dropped because this box already had one",
+  );
+  assert.deepEqual(droppedItemTimeEdits, []);
+});
+
+test("an incoming correction lands on the run it described, not on this box's same number", () => {
+  // Their box caught the pre-service, so everything it recorded is numbered four
+  // higher — the same disagreement mergeItemRuns exists for. Their correction is
+  // keyed `song#5`; this box's `song` is sequence 1. Copied by value, the
+  // correction named a run that is not the one it was made about.
+  const mine = { items: [{ itemId: "doors", sequence: 0 }, { itemId: "song", sequence: 1 }] };
+  const theirs = {
+    items: [{ itemId: "doors", sequence: 4 }, { itemId: "song", sequence: 5 }],
+    itemTimeEdits: [{ itemId: "song", sequence: 5, endedAt: "2026-09-17T21:00:00.000Z", editedAt: "y" }],
+  };
+  const { record, droppedItemTimeEdits } = mergeTimelineRecord(mine, theirs);
+  assert.equal(record.items!.length, 2, "precondition: the runs were unioned, not duplicated");
+  assert.equal(record.itemTimeEdits, undefined, "their run lost the clash, so its correction goes with it");
+  assert.deepEqual(
+    droppedItemTimeEdits.map((e) => `${e.itemId}#${String(e.sequence)}`),
+    ["song#5"],
+    "and it must be REPORTED, not discarded in silence",
+  );
+});
+
+test("an incoming correction for a run only they have is carried", () => {
+  const mine = { items: [{ itemId: "doors", sequence: 0 }] };
+  const theirs = {
+    items: [{ itemId: "doors", sequence: 0 }, { itemId: "song", sequence: 1 }],
+    itemTimeEdits: [{ itemId: "song", sequence: 1, endedAt: "2026-09-17T21:00:00.000Z", editedAt: "y" }],
+  };
+  const { record, droppedItemTimeEdits } = mergeTimelineRecord(mine, theirs);
+  assert.deepEqual(record.itemTimeEdits?.map((e) => `${e.itemId}#${String(e.sequence)}`), ["song#1"]);
+  assert.deepEqual(droppedItemTimeEdits, []);
 });
 
 test("attendance merge unions samples by timestamp and re-sorts", () => {
@@ -142,7 +197,7 @@ test("timeline merge adds missing items in sequence order", () => {
       { itemId: "b", sequence: 1 },
     ],
   };
-  const out = mergeTimelineRecord(mine, theirs);
+  const out = mergeTimelineRecord(mine, theirs).record;
   assert.deepEqual(
     out.items!.map((i) => i.itemId),
     ["a", "b"],

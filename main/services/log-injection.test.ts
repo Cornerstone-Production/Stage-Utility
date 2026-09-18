@@ -85,6 +85,8 @@ const REQUEST_FACING = [
   // Its rebuild lines name a serviceKey, which arrives verbatim in an HTTP
   // body, and rebuildTimelineRecord reaches it with plan item titles.
   "history-edit.ts",
+  // Its orphaned-edit warning names a serviceKey and the item ids inside it.
+  "history-item-times.ts",
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
@@ -288,6 +290,10 @@ function requestFacingFiles(): string[] {
     // Its one line — a pair whose two halves press the same Companion button
     // with no state variable bound — names the pair's base, which is a cue name
     // typed into an HTTP body.
+    // Its orphaned-edit warning names a serviceKey and the item ids inside it.
+    // Both come from Planning Center over HTTP, and the itemId can also arrive
+    // directly in a POST /api/history/item-times body.
+    path.join(HERE, "history-item-times.ts"),
     path.join(HERE, "home-assistant-yaml.ts"),
     // POST /api/integrations/:id/config checks only that `config` is an object,
     // then foldConfigEntries warns with the rejected KEY. That key is an

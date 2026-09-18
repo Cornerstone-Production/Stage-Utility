@@ -6,7 +6,7 @@
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
 import type { AttendanceSample } from "../types/history.js";
-import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
+import type { ServiceAttendance, ServiceItemTimeEdit, ServiceTimeline } from "../types/stage.js";
 import { serviceDirPath } from "./archive/archive-paths.js";
 import { readArchiveRows } from "./archive/archive-rows.js";
 import { mergeItemRuns } from "./archive/merge-records.js";
@@ -19,6 +19,15 @@ import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
+import {
+  bindItemTimeEdits,
+  broadcastTimeline,
+  clampItemTimeEdits,
+  logOrphanedItemTimeEdits,
+  overlaidTimeline,
+  rekeyItemTimeEdits,
+} from "./history-item-times.js";
+import { clockOf } from "./app-timezone.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
@@ -209,8 +218,15 @@ export async function editServiceWindow(
         }
       }
     }
+    // The items have been trimmed to the new window; the corrections OVER them
+    // had not been, so a recording trimmed to fifteen minutes could still show
+    // an eighty-five minute item. Clamped the same way the items just were.
+    const clamped = clampItemTimeEdits(tl);
+    logOrphanedItemTimeEdits(tl.serviceKey, "the new service window", clamped.orphaned);
+    if (clamped.edits.length) tl.itemTimeEdits = clamped.edits;
+    else delete tl.itemTimeEdits;
     await serviceTimelineStore.upsert(tl);
-    broadcast("service-timeline:history", tl);
+    broadcastTimeline(tl);
   }
 
   const att = await attendanceStore.get(serviceKey);
@@ -259,7 +275,151 @@ export async function setItemCounted(serviceKey: string, itemId: string, counted
     it.countedByOperator = true;
   }
   await serviceTimelineStore.upsert(tl);
-  broadcast("service-timeline:history", tl);
+  broadcastTimeline(tl);
+}
+
+/** A correction the record itself refuses. 400, not 500: the request was
+ *  well-formed and the operator is being told what is wrong with it. */
+export class ItemTimeEditError extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "ItemTimeEditError";
+  }
+}
+
+/**
+ * Refuse a correction, and leave a line saying why.
+ *
+ * The operator sees the sentence in a toast; nobody else does. A refusal is a
+ * decision this server made about the operator's work, and at 9am on a Sunday
+ * "I typed a time and it did not save" with nothing in /log is the whole story
+ * they can tell. Logged here rather than at each throw site so the reason and
+ * the run always travel together.
+ */
+function refuseItemTimes(serviceKey: string, run: string, reason: string): never {
+  console.warn(`[history] ${scrub(serviceKey)}: refused a time correction for ${scrub(run)} — ${scrub(reason)}`);
+  throw new ItemTimeEditError(reason);
+}
+
+/** "20:15:00 → 20:26:22", or "20:15:00 → (open)" for an item still running. */
+function span(startedAt: string, endedAt: string | null): string {
+  const s = Date.parse(startedAt);
+  const e = endedAt ? Date.parse(endedAt) : NaN;
+  return `${Number.isFinite(s) ? clockOf(s) : "?"}–${Number.isFinite(e) ? clockOf(e) : "(open)"}`;
+}
+
+/**
+ * Correct ONE run of ONE item's recorded start and/or end.
+ *
+ * `null` for a field clears that override; clearing both removes the correction
+ * entirely and the row goes back to what the recorder saw. The recorded stamps
+ * are never touched — see history-item-times.ts for why this is an overlay and
+ * not a rewrite.
+ *
+ * Unlike setItemCounted, this is keyed by (itemId, sequence) rather than itemId
+ * alone. `counted` is a statement about the PLAN item and applies to every run
+ * of it; a timing is a statement about ONE run, and a reprise that genuinely ran
+ * nine minutes must not be shortened because the first run was mis-recorded.
+ */
+export async function setItemTimes(
+  serviceKey: string,
+  itemId: string,
+  sequence: number,
+  /**
+   * The three states of each field are distinct and all three are used:
+   *
+   *   ABSENT (`undefined`, or the key not present) — leave whatever override
+   *     this run already has. The panel saves one field without discarding the
+   *     other; `"startedAt" in times` is what distinguishes this from null, so a
+   *     caller that spreads `{ startedAt: undefined }` gets "absent", which is
+   *     the same answer.
+   *   `null` — clear this field's override; the recorded value comes back.
+   *   an ISO string — override this field with it.
+   */
+  times: { startedAt?: string | null; endedAt?: string | null },
+): Promise<ServiceTimeline> {
+  assertNotLive(serviceKey, "edited");
+  forgetAll(serviceKey); // see editServiceWindow
+  // Names the RUN, not just the item: an item can appear twice in one record, and
+  // a log line naming only the title cannot tell an operator which row moved.
+  const run = `${itemId}#${sequence}`;
+  const tl = await serviceTimelineStore.get(serviceKey);
+  if (!tl) refuseItemTimes(serviceKey, run, `No recording found for "${serviceKey}".`);
+  const item = tl.items.find((x) => x.itemId === itemId && x.sequence === sequence);
+  if (!item) {
+    refuseItemTimes(serviceKey, run, "That item is no longer in this recording — reload the service and try again.");
+  }
+
+  // A field the caller did not mention keeps whatever override it already had;
+  // an explicit null clears it. Distinguishing "absent" from "null" is what lets
+  // the UI save one field without silently dropping the other.
+  // The LAST entry for this run, matching what applyItemTimeEdits applies. A
+  // well-formed record holds one — the filter below replaces rather than appends
+  // — but a merge or a hand-edited file can hold two, and `find` would have read
+  // the superseded one, so a save touching only the end silently reverted the
+  // start to a value the operator had already replaced.
+  const forRun = (tl.itemTimeEdits ?? []).filter((e) => e.itemId === itemId && e.sequence === sequence);
+  const prior = forRun[forRun.length - 1];
+  const startedAt = "startedAt" in times ? (times.startedAt ?? undefined) : prior?.startedAt;
+  const endedAt = "endedAt" in times ? (times.endedAt ?? undefined) : prior?.endedAt;
+  for (const [label, v] of [["start", startedAt], ["end", endedAt]] as const) {
+    if (v != null && !Number.isFinite(Date.parse(v))) {
+      refuseItemTimes(serviceKey, run, `That ${label} time is not a time I can read.`);
+    }
+  }
+
+  const effStart = startedAt ?? item.startedAt;
+  const effEnd = endedAt ?? item.endedAt;
+  // Strictly after. A zero-length item is not a correction anybody means: the row
+  // would read 0:00 with an `edited` marker on it, count nothing toward the
+  // service timers, and leave a gap the length of the item it replaced. Clearing
+  // the override is what "this item did not happen" is spelled with.
+  if (effEnd != null && Date.parse(effEnd) <= Date.parse(effStart)) {
+    refuseItemTimes(serviceKey, run, "The end has to come after the start.");
+  }
+  // Inside the recording's own window. An item timed outside it would be invisible
+  // in half the readouts and would make the service's Actual disagree with its
+  // own start and end — if the window is wrong, that is what Edit times fixes
+  // first, and saying so is more use than accepting the number.
+  const winStart = Date.parse(tl.startedAt);
+  const winEnd = tl.endedAt ? Date.parse(tl.endedAt) : Infinity;
+  for (const t of [effStart, effEnd]) {
+    if (t == null) continue;
+    const ms = Date.parse(t);
+    if (ms < winStart || ms > winEnd) {
+      refuseItemTimes(
+        serviceKey,
+        run,
+        `That is outside the recording's own window (${span(tl.startedAt, tl.endedAt)}). ` +
+          "Fix the service start and end first, then the item.",
+      );
+    }
+  }
+
+  const rest = (tl.itemTimeEdits ?? []).filter((e) => !(e.itemId === itemId && e.sequence === sequence));
+  const cleared = startedAt === undefined && endedAt === undefined;
+  if (!cleared) {
+    const edit: ServiceItemTimeEdit = { itemId, sequence, editedAt: new Date().toISOString() };
+    if (startedAt !== undefined) edit.startedAt = startedAt;
+    if (endedAt !== undefined) edit.endedAt = endedAt;
+    rest.push(edit);
+  }
+  if (rest.length) tl.itemTimeEdits = rest;
+  else delete tl.itemTimeEdits; // absent, not an empty array, so an untouched record stays untouched
+
+  await serviceTimelineStore.upsert(tl);
+  const out = overlaidTimeline(tl);
+  broadcastTimeline(tl);
+  // Every interpolation through scrub(), including the ones whose value this file
+  // computed itself: log-injection.test.ts reads the source, and an exception for
+  // "this one is obviously safe" is how the rule stops being a rule.
+  console.log(
+    `[history] ${scrub(serviceKey)}: "${scrub(item.title)}" (${scrub(run)}) times ` +
+      `${scrub(cleared ? "reset to the recording" : "edited")} by operator ` +
+      `(${scrub(span(item.startedAt, item.endedAt))} → ${scrub(span(effStart, effEnd))})`,
+  );
+  return out;
 }
 
 /** Re-derive attendance aggregates from the current samples (no window change) —
@@ -403,7 +563,7 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
           name: "timeline",
           write: async () => {
             await serviceTimelineStore.upsert(next);
-            broadcast("service-timeline:history", next);
+            broadcastTimeline(next);
           },
         });
       } else {
@@ -675,23 +835,33 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     serviceTimelineStore.get(targetKey),
   ]);
   if (srcTl && tgtTl) {
+    // Item time corrections are keyed by (itemId, sequence) and this block
+    // renumbers every sequence, so bind each side's edits to their ITEM OBJECTS
+    // first and re-key from the new numbers after. mergeItemRuns returns the
+    // references it was given, so identity is what survives the renumber.
+    // Without this the operator's corrections would still be in the merged
+    // record and would land, silently, on whichever rows took those numbers.
+    const boundEdits = bindItemTimeEdits(tgtTl, srcTl);
     // By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a
     // source that ran an item twice contributed at most one of them.
     tgtTl.items = mergeItemRuns(tgtTl.items, srcTl.items);
     tgtTl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
     tgtTl.items.forEach((it, i) => { it.sequence = i; });
+    const rekeyed = rekeyItemTimeEdits(boundEdits, tgtTl.items);
+    if (rekeyed.length) tgtTl.itemTimeEdits = rekeyed;
+    else delete tgtTl.itemTimeEdits;
     const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
     if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
     await serviceTimelineStore.upsert(tgtTl);
     await serviceTimelineStore.delete(sourceKey);
-    broadcast("service-timeline:history", tgtTl);
+    broadcastTimeline(tgtTl);
     outcome.merged.push("timeline");
   } else if (srcTl) {
     // Source-only: re-key rather than leave it behind over a moved archive.
     const moved = adoptIdentity(srcTl, targetIdentity);
     await serviceTimelineStore.upsert(moved);
     await serviceTimelineStore.delete(sourceKey);
-    broadcast("service-timeline:history", moved);
+    broadcastTimeline(moved);
     outcome.moved.push("timeline");
   }
 

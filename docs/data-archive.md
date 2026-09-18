@@ -81,6 +81,19 @@ an archive, and it treats the raw layer differently in each direction:
   nothing reads them for a service with no record. Removing an operator's raw
   samples is a bigger decision than "delete this recording" asks for; the
   directory is named `YYYY-MM-DD_serviceKey` if you want to remove it by hand.
+- **Correcting one item's times never touches the raw rows.** An item's start
+  and end are an observation the raw `events.csv` also holds, so a correction is
+  stored beside the items as an overlay (`itemTimeEdits`) and applied on every
+  read. Rebuilding the record from `events.csv` re-derives the raw run and the
+  correction goes straight back on top, so a rebuild cannot undo an edit. Reset
+  removes the overlay and the row reads what the recorder saw.
+- **A corrected item does not move its neighbours.** Shortening an item leaves a
+  gap before the next one, and the table shows the gap. Closing it would invent
+  timings for items nobody asked about.
+- **Trimming the window trims the corrections with it.** A correction is pulled
+  back to the new start or end the same way the items around it are; one that the
+  trim leaves with no run, or with no time left to describe, is dropped and named
+  in the log.
 - **A service that is recording right now cannot be edited at all.** The
   recorder holds the same record, so any change races its next write. History
   refuses until the service ends.
@@ -101,13 +114,28 @@ raw layer holds nothing for is untouched and said to be untouched, rather than
 reported with the count it already had. A recording with no raw rows at all is
 refused, as is one whose service is still recording.
 
-What survives: the recording's identity and window, the pacing reset, and the
-per-item include/exclude overrides. What does not: hand edits to item times,
-which the raw rows know nothing about.
+What survives: the recording's identity and window, the pacing reset, the
+per-item include/exclude overrides, and the per-item time corrections — those
+are an overlay over the rebuilt run rather than a change to it, so the rebuild
+re-derives the raw timings and the correction goes straight back on top.
+
+A correction follows its RUN, not its row number. The rebuild pairs the nth run
+of an item to the nth run, the same way it carries the recorder's own
+include/exclude observation, so a rebuild that finds items the stored record
+never had moves every correction along with the run it was made about rather
+than leaving it on whichever row inherited its number. A correction whose run the
+rebuild no longer produces at all is dropped, and the [history] log names it.
 
 Rows written before the item id and planned length were archived carry only a
 title. Those are matched to the stored record by title; a title the record never
 held gets an id derived from the title, and the log says which.
+
+### Raw in the bundle, effective in the workbook
+
+The archive bundle exports the **raw** records plus their overlays, so an import
+restores both the recording and the corrections with Reset still working. The
+History workbook (`GET /api/history/export`) exports the **effective** times, so
+the spreadsheet and the History panel agree.
 
 ## Not retroactive
 

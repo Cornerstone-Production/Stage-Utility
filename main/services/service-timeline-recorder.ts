@@ -13,7 +13,7 @@
 // attendance recorders. Only the item timing below is specific to this one.
 
 import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcastTimeline } from "./history-item-times.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { shouldRecordLive } from "./live-service-gate.js";
 import { scrub } from "./scrub.js";
@@ -78,7 +78,7 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
           this.finalizePrevItem(); // close the OUTGOING item (this.lastItemId)
           this.lastItemId = live.currentItemId;
           this.openItem(live); // create/reopen the now-current item
-          broadcast("service-timeline:history", this.current);
+          broadcastTimeline(this.current);
           this.schedulePersist();
         }
       } else if (this.current && !this.current.endedAt) {
@@ -88,7 +88,7 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
         this.finalizeRecord();
         this.lastItemId = null;
         await serviceTimelineStore.upsert(this.current);
-        broadcast("service-timeline:history", this.current);
+        broadcastTimeline(this.current);
       }
     } finally {
       this.busy = false;

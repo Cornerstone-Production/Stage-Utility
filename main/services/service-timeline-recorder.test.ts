@@ -211,3 +211,58 @@ describe("service-timeline-recorder: a re-run item gets its own entry", () => {
     assert.ok(second.endedAt, "the live run was left open forever");
   });
 });
+
+// Every push on `service-timeline:history` has to carry the operator's item time
+// corrections applied — the panel, the pacing widget and the Home card all read
+// the payload directly, and a raw push puts the recorded stamps back on screen
+// until the next read. The recorder is the ONE broadcaster of this channel that
+// is not in history-edit.ts, so it is the one that can drift without anything in
+// that file changing.
+describe("service-timeline-recorder: what it broadcasts", () => {
+  const rec = serviceTimelineRecorder as unknown as Held & { busy: boolean; lastLiveAt: number };
+
+  it("pushes the record with item time corrections APPLIED, not the raw one", async () => {
+    const { addBroadcastListener } = await import("./broadcaster.js");
+    const pushes: unknown[] = [];
+    addBroadcastListener((channel, payload) => {
+      if (channel === "service-timeline:history") pushes.push(payload);
+    });
+
+    rec.busy = false;
+    rec.lastItemId = "item-1";
+    rec.current = {
+      serviceKey: "st1:plan:11am",
+      startedAt: "2026-09-06T12:00:00.000Z",
+      endedAt: null,
+      items: [
+        {
+          itemId: "item-1",
+          title: "VIDEO: Pre-roll",
+          sequence: 0,
+          plannedLengthSec: 120,
+          startedAt: "2026-09-06T12:00:00.000Z",
+          endedAt: "2026-09-06T12:11:22.000Z",
+          actualDurationSec: 682,
+        },
+      ],
+    };
+    (rec.current as unknown as Record<string, unknown>).itemTimeEdits = [
+      { itemId: "item-1", sequence: 0, endedAt: "2026-09-06T12:02:00.000Z", editedAt: "2026-09-06T13:00:00.000Z" },
+    ];
+
+    // The service ending: the branch that finalises the record and pushes it.
+    await serviceTimelineRecorder.onLiveTick(
+      baseLive({ currentItemId: null, serviceEnded: true }) as never,
+    );
+
+    assert.ok(pushes.length > 0, "the recorder pushed nothing at all");
+    const last = pushes[pushes.length - 1] as { items: { actualDurationSec: number | null; editedFrom?: unknown }[] };
+    assert.equal(last.items[0].actualDurationSec, 120, "the push carried the RECORDED 682s, not the corrected 120s");
+    assert.ok(last.items[0].editedFrom, "and carried no editedFrom, so the row could not render its marker");
+    assert.equal(
+      rec.current!.items[0].actualDurationSec,
+      682,
+      "the recorder's own copy must stay raw — the overlay is applied on the way out",
+    );
+  });
+});

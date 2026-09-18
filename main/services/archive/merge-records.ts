@@ -134,17 +134,80 @@ interface TimelineItem {
   itemId: string;
   sequence?: number;
 }
+interface TimelineItemTimeEdit {
+  itemId: string;
+  sequence: number;
+  [k: string]: unknown;
+}
 interface TimelineRecord {
   items?: TimelineItem[];
+  itemTimeEdits?: TimelineItemTimeEdit[];
   [k: string]: unknown;
 }
 
-export function mergeTimelineRecord(mine: TimelineRecord, theirs: TimelineRecord): TimelineRecord {
-  const merged = mergeItemRuns(mine.items ?? [], theirs.items ?? []);
-  return {
-    ...fillMissingFields(mine, theirs, ["items"]),
-    items: merged.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)),
+/** What a timeline merge produced, and what it could not keep. */
+export interface MergedTimelineRecord {
+  record: TimelineRecord;
+  /** Corrections whose run did not survive the merge. Returned rather than
+   *  dropped in silence — they are the operator's work, and the import reports
+   *  them. */
+  droppedItemTimeEdits: TimelineItemTimeEdit[];
+}
+
+/**
+ * Union two timelines, and carry BOTH sides' item time corrections.
+ *
+ * `itemTimeEdits` used to ride through `fillMissingFields`, which is wrong twice
+ * over. It copies the incoming array only when this box has none — so an import
+ * into a record that had been corrected here dropped every incoming correction
+ * without a word — and it copies them by VALUE, keys and all, so an incoming
+ * correction naming `song#2` landed on whatever this box's `song#2` happened to
+ * be, which after a run-level union is frequently a different run.
+ *
+ * Bound to the ITEM OBJECTS first and re-keyed from the merged list after, the
+ * way mergeServiceRecords does it: `mergeItemRuns` returns the references it was
+ * given, so identity is what survives. A correction whose run lost the clash —
+ * "fill, never overwrite" means the local run wins — goes with it, and is
+ * reported.
+ */
+export function mergeTimelineRecord(mine: TimelineRecord, theirs: TimelineRecord): MergedTimelineRecord {
+  const bound = new Map<TimelineItem, TimelineItemTimeEdit>();
+  const bind = (rec: TimelineRecord) => {
+    for (const edit of rec.itemTimeEdits ?? []) {
+      const item = (rec.items ?? []).find((x) => x.itemId === edit.itemId && x.sequence === edit.sequence);
+      // Two corrections for one run cannot both apply; the last wins, as
+      // applyItemTimeEdits does, rather than the first silently shadowing it.
+      if (item) bound.set(item, edit);
+    }
   };
+  bind(mine);
+  bind(theirs);
+
+  const merged = mergeItemRuns(mine.items ?? [], theirs.items ?? []).sort(
+    (a, b) => (a.sequence ?? 0) - (b.sequence ?? 0),
+  );
+
+  const kept: TimelineItemTimeEdit[] = [];
+  const carried = new Set<TimelineItemTimeEdit>();
+  for (const item of merged) {
+    const edit = bound.get(item);
+    if (!edit) continue;
+    carried.add(edit);
+    kept.push({ ...edit, itemId: item.itemId, sequence: item.sequence ?? edit.sequence });
+  }
+  const dropped = [...(mine.itemTimeEdits ?? []), ...(theirs.itemTimeEdits ?? [])].filter(
+    (e) => !carried.has(e),
+  );
+
+  const record: TimelineRecord = {
+    // itemTimeEdits is skipped here and set below: fillMissingFields would adopt
+    // the incoming array wholesale whenever this box had none.
+    ...fillMissingFields(mine, theirs, ["items", "itemTimeEdits"]),
+    items: merged,
+  };
+  if (kept.length) record.itemTimeEdits = kept;
+  else delete record.itemTimeEdits;
+  return { record, droppedItemTimeEdits: dropped };
 }
 
 /**
