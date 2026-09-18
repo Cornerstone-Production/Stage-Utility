@@ -116,9 +116,11 @@ export function HistoryCalendar({
               ? { backgroundColor: `color-mix(in srgb, var(--su-accent) ${heatPct}%, transparent)` }
               : undefined;
           return (
-            <Tooltip label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}>
+            // The key belongs on the element this callback RETURNS — on the
+            // inner button it keyed nothing, and every render of the calendar
+            // logged a duplicate-key warning.
+            <Tooltip key={dateStr} label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}>
               <button
-                key={dateStr}
                 type="button"
                 disabled={!hasData}
                 onClick={() => onPick(dateStr)}

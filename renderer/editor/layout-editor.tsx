@@ -2186,9 +2186,10 @@ export function LayoutEditor({
                   {CANVAS_PRESETS.map((p) => {
                     const active = p.w === canvas.width && p.h === canvas.height;
                     return (
-                      <Tooltip label={p.label}>
+                      // The key goes on the RETURNED element, not the button
+                      // inside it — see history-calendar.tsx.
+                      <Tooltip key={p.id} label={p.label}>
                         <button
-                          key={p.id}
                           type="button"
                           onClick={() => { setCanvas(canvasAfterPreset(canvas, p)); setDirty(true); }}
                           className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`} aria-label={p.label}>
