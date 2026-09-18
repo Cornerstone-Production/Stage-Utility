@@ -60,6 +60,56 @@ function fromTimeInput(serviceDate: string, hhmm: string): string | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
+/** ISO → local "HH:MM:SS", for an item field. Seconds, unlike the service window
+ *  above: an item's whole point is its DURATION, and a minute-resolution field
+ *  cannot say "two minutes" about something that started at 20:15:33. */
+function toItemTimeInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
+ * Local "HH:MM[:SS]" on the same local DAY as `anchorIso` → ISO.
+ *
+ * Anchored on the item's OWN recorded stamp rather than the record's
+ * serviceDate, so an item that ran after midnight keeps its own date instead of
+ * being dragged back to the day the service started on.
+ */
+function fromItemTimeInput(anchorIso: string | null, hhmmss: string): string | undefined {
+  if (!hhmmss) return undefined;
+  const anchor = anchorIso ? new Date(anchorIso) : null;
+  if (!anchor || Number.isNaN(anchor.getTime())) return undefined;
+  const [h, m, sec] = hhmmss.split(":");
+  const d = new Date(anchor);
+  d.setHours(Number(h), Number(m), Number(sec ?? 0), 0);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/** A row's identity in the edit-times form. An item can run twice in one record,
+ *  so the id alone would stack two rows' fields on top of each other. */
+function rowKey(it: ServiceTimelineItem): string {
+  return `${it.itemId}:${it.sequence}`;
+}
+
+/** "recorded 11:22, edited to 2:00" — the durations, which is what the operator
+ *  changed. Falls back to the stamps when either side is still open and there is
+ *  no duration to compare.
+ *
+ *  Exported so a test can assert the string: a Radix tooltip's text is in the
+ *  DOM only while it is open, and opening one needs a pointer jsdom has not got. */
+export function editedTooltip(it: ServiceTimelineItem): string {
+  const was = it.editedFrom;
+  if (!was) return "";
+  if (was.actualDurationSec != null && it.actualDurationSec != null) {
+    return `recorded ${fmtDur(was.actualDurationSec)}, edited to ${fmtDur(it.actualDurationSec)}`;
+  }
+  const span = (start: string, end: string | null) => `${fmtTime(start)}–${end ? fmtTime(end) : "still running"}`;
+  return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
+}
+
 
 
 
@@ -223,6 +273,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [editingTimes, setEditingTimes] = useState(false);
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
+  /** Per-row time fields, keyed by rowKey(), holding ONLY what the operator has
+   *  typed. A row with no entry renders from the record, so a save (or another
+   *  operator's edit arriving over SSE) drops through without clobbering a row
+   *  being typed in elsewhere in the table. */
+  const [itemTimeDraft, setItemTimeDraft] = useState<Record<string, { start: string; end: string }>>({});
+  /** Rows with a save in flight, so a double-click cannot send two. */
+  const [itemTimeSaving, setItemTimeSaving] = useState<Set<string>>(new Set());
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -612,6 +669,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     function startEditTimes() {
       setEditStart(toTimeInput(det.startedAt));
       setEditEnd(toTimeInput(det.endedAt));
+      setItemTimeDraft({}); // rows render from the record until they are typed in
       setEditingTimes(true);
     }
     async function saveTimes() {
@@ -641,7 +699,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (!(await confirm({
         title: "Rebuild from raw?",
         message:
-          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Any hand edits to times are lost. The raw rows themselves are not touched.",
+          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. The raw rows themselves are not touched.",
         confirmLabel: "Rebuild",
         destructive: true,
       }))) return;
@@ -698,6 +756,78 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         toast.error(`Merge failed: ${errorMessage(e)}`);
       }
     }
+    /** The values a row's two fields show: what has been typed, else the record. */
+    function draftFor(it: ServiceTimelineItem): { start: string; end: string } {
+      return itemTimeDraft[rowKey(it)] ?? { start: toItemTimeInput(it.startedAt), end: toItemTimeInput(it.endedAt) };
+    }
+    function setDraft(it: ServiceTimelineItem, patch: Partial<{ start: string; end: string }>) {
+      const key = rowKey(it);
+      setItemTimeDraft((d) => ({ ...d, [key]: { ...draftFor(it), ...patch } }));
+    }
+    function itemTimesDirty(it: ServiceTimelineItem): boolean {
+      const d = itemTimeDraft[rowKey(it)];
+      if (!d) return false;
+      return d.start !== toItemTimeInput(it.startedAt) || d.end !== toItemTimeInput(it.endedAt);
+    }
+
+    /**
+     * Save ONE row.
+     *
+     * Per row rather than one Save for the whole table, unlike the service
+     * window form above it. That form posts a single request carrying both of
+     * its fields; item corrections are one request per row, so a single Save
+     * would fan out N of them and could half-succeed — and there is no honest
+     * thing to put in the toast when it does. The counted checkbox in the same
+     * row already commits on its own for the same reason.
+     */
+    async function saveItemTimes(it: ServiceTimelineItem) {
+      const key = rowKey(it);
+      if (itemTimeSaving.has(key)) return;
+      const d = draftFor(it);
+      // The recorded stamps are the anchor for the DATE; a blank field clears the
+      // override rather than meaning "midnight".
+      const startedAt = d.start ? (fromItemTimeInput(it.editedFrom?.startedAt ?? it.startedAt, d.start) ?? null) : null;
+      const endedAt = d.end
+        ? (fromItemTimeInput(it.editedFrom?.endedAt ?? it.endedAt ?? it.editedFrom?.startedAt ?? it.startedAt, d.end) ?? null)
+        : null;
+      setItemTimeSaving((s) => new Set(s).add(key));
+      try {
+        await invoke("history:setItemTimes", { serviceKey: det.serviceKey, itemId: it.itemId, sequence: it.sequence, startedAt, endedAt });
+        // Drop the draft so the row re-renders from the record the broadcast
+        // brings back — which is the only proof the save actually landed.
+        setItemTimeDraft((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        toast.success("Item times updated");
+      } catch (e) {
+        toast.error(`Couldn't update this item: ${errorMessage(e)}`);
+      } finally {
+        setItemTimeSaving((s) => {
+          const next = new Set(s);
+          next.delete(key);
+          return next;
+        });
+      }
+    }
+
+    /** Clear a row's override: the recorded times come back. */
+    async function resetItemTimes(it: ServiceTimelineItem) {
+      const key = rowKey(it);
+      try {
+        await invoke("history:setItemTimes", { serviceKey: det.serviceKey, itemId: it.itemId, sequence: it.sequence, startedAt: null, endedAt: null });
+        setItemTimeDraft((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        toast.success("Item times reset to the recording");
+      } catch (e) {
+        toast.error(`Couldn't reset this item: ${errorMessage(e)}`);
+      }
+    }
+
     async function toggleCounted(item: ServiceTimelineItem) {
       // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
       try {
@@ -707,11 +837,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }
     }
     // The include/exclude checkbox column only shows while editing times.
-    // Mobile drops #, Plan, and Ended (see the max-sm:hidden cells) so the item name
-    // isn't crushed; sm+ shows the full grid. Templates must match the visible cells.
+    // Mobile drops #, Plan, Started and Ended (see the max-sm:hidden cells) so the
+    // item name isn't crushed; sm+ shows the full grid. Templates must match the
+    // visible cells. Started and Ended are wider in edit mode because they hold an
+    // HH:MM:SS field there rather than a formatted time.
     const gridCols = editingTimes
-      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem]"
-      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
+      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]"
+      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]";
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
@@ -788,9 +920,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
-            <Button variant="transparent" size="small" onClick={rebuildFromRaw} tooltip="Recompute all three records from the raw rows in the data archive — hand edits to times are lost">Rebuild from raw</Button>
+            <Button variant="transparent" size="small" onClick={rebuildFromRaw} tooltip="Recompute all three records from the raw rows in the data archive — your per-item time corrections are kept">Rebuild from raw</Button>
             <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. <strong className="font-medium text-gray-11">Rebuild from raw</strong> goes further: it discards the stored summaries and derives them again from the archived rows.
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-gray-11">Rebuild from raw</strong> goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
             </span>
           </div>
         )}
@@ -803,19 +935,28 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         </div>
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-          <div className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}>
+          <div
+            data-testid="rundown-header"
+            className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}
+          >
             {editingTimes && (
               <Tooltip label="Whether this item counts toward the service timers">
                 <span className="text-center">✓</span>
               </Tooltip>
             )}
-            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Ended</span>
+            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Started</span><span className="text-right max-sm:hidden">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
             const counted = isCountedItem(it, detail); // buffer + pre-service shown but not totaled
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
+            // `editedFrom` is set by the server's overlay and only on a row that
+            // actually differs from what was recorded — the marker cannot lie.
+            const edited = it.editedFrom != null;
+            const draft = draftFor(it);
+            const dirty = itemTimesDirty(it);
+            const saving = itemTimeSaving.has(rowKey(it));
             return (
               // Keyed by sequence too: a plan item can run twice in one record
               // (reprised, or a second service caught before the split), and a
@@ -838,11 +979,59 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   {it.title || "—"}
                   {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
                   {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                  {edited && (
+                    <Tooltip label={editedTooltip(it)}>
+                      <span className="ml-1.5 text-[10px] italic text-amber-11">edited</span>
+                    </Tooltip>
+                  )}
+                  {editingTimes && dirty && (
+                    <button
+                      className="ml-2 align-middle rounded-md border border-accent px-1.5 py-px text-[10px] text-accent hover:bg-accent/10 max-sm:hidden"
+                      disabled={saving}
+                      aria-label={`Save times — ${it.title || "item"}`}
+                      onClick={() => void saveItemTimes(it)}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                  )}
+                  {editingTimes && edited && !dirty && (
+                    <button
+                      className="ml-2 align-middle rounded-md border border-gray-6 px-1.5 py-px text-[10px] text-gray-11 hover:bg-gray-4 max-sm:hidden"
+                      aria-label={`Reset times — ${it.title || "item"}`}
+                      onClick={() => void resetItemTimes(it)}
+                    >
+                      Reset
+                    </button>
+                  )}
                 </span>
                 <span className="text-right text-gray-10 max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
                 <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
                 <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
-                <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                {editingTimes ? (
+                  <>
+                    <input
+                      type="time"
+                      step="1"
+                      aria-label={`Started — ${it.title || "item"}`}
+                      value={draft.start}
+                      onChange={(e) => setDraft(it, { start: e.target.value })}
+                      className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
+                    />
+                    <input
+                      type="time"
+                      step="1"
+                      aria-label={`Ended — ${it.title || "item"}`}
+                      value={draft.end}
+                      onChange={(e) => setDraft(it, { end: e.target.value })}
+                      className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
+                    <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                  </>
+                )}
               </div>
             );
           })}
