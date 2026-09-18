@@ -70,8 +70,52 @@ operator jumping to the previous song expects.
 ## Reading it back
 
 The History tab puts all three on one calendar — days with data are marked. Open
-a service for its charts: an attendance trend with plan-item markers and a service
-average, and per-item SPL.
+a service for its rundown and its two charts, Attendance and Audio (SPL). Both
+are the same chart, described below.
+
+### The service chart
+
+One chart serves attendance and sound. Three parts, top to bottom.
+
+**The stat strip** is the section's heading and its readout. At rest it shows the
+figures you chose in Customize — attendance defaults to peak, lowest, average and
+samples; sound to peak, the loudest item and the message's Leq. Point at the plot
+and it becomes the time under the cursor with each line's value there. Point at an
+item's block and it adds that item's number, title, what it ran and what it was
+planned for. While the service is still recording it reads `LIVE` with the current
+values, and a pointer anywhere on the chart wins over that — you asked about that
+instant.
+
+**The plot** draws one line per series with no fill behind the plot area. Time
+before and after the service proper is hatched at 45°, with a hairline at each
+boundary, so the arrival ramp and the emptying-room taper are visibly not the
+service. A gap of more than three minutes in the samples breaks the line.
+
+Attendance plots people in the room, in green, with a dashed reference line at the
+service average. Sound plots one **step per plan item** — the item's Leq held flat
+across the time it ran — because that is what is recorded: the SPL recorder stores
+one figure per item, not a sample series. For the same reason an item's peak mark
+is a tick on the top edge of its block rather than at the loudest instant, which is
+not recorded. Its y axis is chosen to frame the levels, never anchored at 0 dB.
+
+**The item lane** is two rows under the axis: pre-service items outlined above,
+in-service items filled below, each spanning the time it actually ran. A block is
+labelled with the item's full title when it fits, otherwise with its rundown number
+— the same number the table above uses — otherwise with nothing. A title is never
+clipped or shortened, because a half-title names a different item. Below 600px the
+lane keeps only the in-service row and labels become numbers.
+
+**Customize** is the sliders button at the section's right. It holds which series
+to draw, which figures the strip shows at rest, and for sound which Smaart metrics
+to plot. The legend under the plot stays as a quick reading of what is on. The
+attendance choices are remembered per browser; the Smaart metric list is a server
+setting, shared by everyone.
+
+While a service is recording, the chart grows with it: new samples extend the line
+in place, the newest stretch draws in, the live edge carries a pulsing dot, the
+current item's block grows, and the time axis widens in ten-minute steps rather
+than sliding on every sample. All of that motion is off when the machine asks for
+reduced motion; the live edge itself stays, because it is information.
 
 The overview's attendance trend can carry a second line: the **service SPL** for
 each date, drawn behind the attendance curve on its own dB scale. Right-click the
@@ -170,8 +214,9 @@ ramp — the lead window before the service time, default 60 minutes — and con
 through a taper after the last item, also 60 minutes by default, so the curve shows
 the room emptying. Both windows are set in Advanced.
 
-Only the service proper feeds peak, low and last; the ramp and taper would
-otherwise drag those figures toward an empty room. Where two services are close
+Only the service proper feeds peak, low, average and last; the ramp and taper
+would otherwise drag those figures toward an empty room — far enough that an
+average taken over the whole recording can come out below the recorded low. Where two services are close
 enough that one's taper overlaps the next one's ramp, the ramp wins — the room is
 filling for the next service, not emptying from the last.
 

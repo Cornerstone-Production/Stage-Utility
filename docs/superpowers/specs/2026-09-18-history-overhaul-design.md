@@ -33,7 +33,13 @@ fed by a `series[]`, an `items[]` (the record's timeline entries), the service
 window, and `yScale`. Attendance and sound are two configurations of it.
 
 **Plot.** No plot-area fill. Grid lines at the y ticks in `--line` at low
-opacity. Axis text 11px Plex Mono, tabular, `--muted`. The primary series draws
+opacity. Axis text 11px Plex Mono, tabular, `--muted`.
+
+> **Token names, corrected during PR 1.** `--line`, `--line2`, `--card2`,
+> `--muted` and `--accent` are the mockup's names. This app's are
+> `--color-line`, `--color-line-strong`, `--color-fill`, `--color-fg-muted` and
+> `--color-accent` (renderer/styles.css). The module uses those and carries no
+> colour literal. The primary series draws
 at 1.8px with a gradient fill to zero; secondary series at 1.2px, dashed where
 they share a scale. Before and after the service window is a 45° hatch in
 `--line`, with a hairline at each boundary. Everything is theme tokens; the
@@ -46,8 +52,18 @@ title when its measured width plus 12px fits, otherwise the rundown number
 (sequence + 1, matching the table's first column), otherwise nothing. Nothing
 is ever clipped. Hover a segment: it takes the accent outline and the strip
 shows the item's number, title, ran and planned. Segments carry a per-item
-peak mark for the sound chart (a 3px tick at the loudest sample's x, in the
-series colour).
+peak mark for the sound chart (a 3px tick in the series colour).
+
+> **Corrected during PR 1.** This said "a 3px tick at the loudest sample's x".
+> There is no such x: the SPL recorder stores one stat block per plan item and
+> `spl:history` broadcasts the same shape, so the loudest INSTANT is not
+> recorded anywhere. The tick is on the block's top edge and means "this item
+> peaked at N" — and on the top edge rather than through the middle, because a
+> full-height tick struck through the item's own label.
+>
+> The same gap decides what the sound LINE is: a step, each item's Leq held flat
+> across the time it ran, not a sampled curve. And it has no gradient fill — a
+> fill runs to the axis floor, and a dB axis has no floor that means anything.
 
 **Stat strip.** One row above the plot, the section's header. At rest, the
 figures the operator chose in Customize (defaults: attendance peak, lowest in
@@ -121,6 +137,11 @@ broadcast. One line when a milestone list entry cannot be parsed:
 - Segment geometry: a segment's x span equals the item's window on the scale.
 - Strip: at-rest figures follow the Customize choices; hover shows the nearest
   sample; live shows `LIVE`.
+- Axis: the dB band is a multiple of ten, so no gridline is labelled 82.5.
+- A series that declares no sampling gap is never broken (the average reference
+  line and the sound step line both would be, under the sampled-series rule).
+- The attendance average counts in-service samples only — over the whole
+  recording it comes out BELOW the recorded low.
 - Live: appending samples keeps the same path element; reduced motion disables
   the pulse and draw-in.
 - Calendar: shade step and count for 0, 1, 2, 3, 6 services.
