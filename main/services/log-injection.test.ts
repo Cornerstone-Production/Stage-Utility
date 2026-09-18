@@ -100,6 +100,9 @@ const REQUEST_FACING = [
   "routes/automation-routes.ts",
   "routes/branding-routes.ts",
   "routes/calendar-routes.ts",
+  // Its two lines carry a tag and a message posted by a BROWSER — the most
+  // request-facing thing in the tree. Both are scrubbed.
+  "routes/client-log-routes.ts",
   "routes/context.ts",
   "routes/cue-routes.ts",
   "routes/display-settings-routes.ts",

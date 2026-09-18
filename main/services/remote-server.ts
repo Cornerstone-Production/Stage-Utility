@@ -60,6 +60,7 @@ import { SERVER_VERSION } from "./server-version.js";
 
 import { type RouteCtx, json, error, readBodyOrEmpty, MAX_IMAGE_BODY_BYTES } from "./routes/context.js";
 import { statusRoutes } from "./routes/status-routes.js";
+import { clientLogRoutes } from "./routes/client-log-routes.js";
 import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
 import { proxyRoutes } from "./routes/proxy-routes.js";
@@ -96,6 +97,7 @@ import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js
  */
 export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   statusRoutes,
+  clientLogRoutes,
   historyRoutes,
   archiveRoutes,
   proxyRoutes,
