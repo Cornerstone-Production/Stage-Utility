@@ -130,7 +130,7 @@ test("the attendance section is the chart module, not a chip row", () => {
   assert.ok(screen.getByLabelText(/Attendance and in-room occupancy/), "no chart");
   assert.ok(screen.getByLabelText("Customize attendance"), "no Customize control");
   // The chip rows' group captions are gone from the page body.
-  assert.equal(screen.queryByText("Summary"), null);
+  assert.equal(screen.queryAllByText("Summary").length, 0);
   // The lane drew the plan's items.
   assert.equal(document.querySelectorAll("[data-lane-segment]").length, 2);
 });

@@ -205,8 +205,8 @@ describe("the plot", () => {
 
   test("no hatch when the record has no service window to sit inside", () => {
     render(chart({ window: { startedAt: null, endedAt: null } }));
-    assert.equal(document.querySelector("[data-hatch='pre']"), null);
-    assert.equal(document.querySelector("[data-hatch='post']"), null);
+    assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 0);
+    assert.equal(document.querySelectorAll("[data-hatch='post']").length, 0);
   });
 
   test("there is no plot-area fill behind the series", () => {
@@ -214,7 +214,7 @@ describe("the plot", () => {
     render(chart());
     const rects = [...document.querySelectorAll("rect")];
     const areaFills = rects.filter((r) => !r.hasAttribute("data-hatch") && !r.hasAttribute("data-lane-segment"));
-    assert.deepEqual(areaFills, []);
+    assert.equal(areaFills.length, 0, `${areaFills.length} rect(s) behind the series`);
   });
 
   test("a secondary series draws thinner than the primary", () => {
@@ -230,7 +230,7 @@ describe("the plot", () => {
 
   test("an empty record says so instead of drawing an axis around nothing", () => {
     render(chart({ series: [series({ points: [] })] }));
-    assert.equal(document.querySelector("svg"), null);
+    assert.equal(document.querySelectorAll("svg").length, 0);
     assert.ok(screen.getByText(/Nothing recorded yet/));
   });
 });
@@ -254,7 +254,7 @@ describe("the item lane", () => {
 
   test("a peak mark only where the caller gave one (the sound chart)", () => {
     render(chart());
-    assert.equal(document.querySelector("[data-peak-mark]"), null);
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
     cleanup();
     render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 3);
@@ -296,7 +296,7 @@ describe("Customize", () => {
     );
     fireEvent.click(screen.getByLabelText("Customize sound"));
     assert.ok(screen.getByText("Series"));
-    assert.equal(screen.queryByText("Smaart metrics"), null);
+    assert.equal(screen.queryAllByText("Smaart metrics").length, 0);
     cleanup();
     await flushReact();
   });
