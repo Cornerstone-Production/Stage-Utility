@@ -12,6 +12,7 @@
 // leaving half a year behind.
 
 import { errorMessage } from "../errors.js";
+import { scrub } from "../scrub.js";
 import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -97,6 +98,14 @@ export interface ImportResult {
    * the time anyone notices. Empty on a clean import.
    */
   rawFilesFailed: { file: string; reason: string }[];
+  /**
+   * Item time corrections a MERGE could not keep, per service.
+   *
+   * A merged run that loses the clash with this box's own takes its correction
+   * with it — correct, since the run it described is not the one that survived,
+   * but invisible without this. Empty on a clean import and on every replace.
+   */
+  itemTimeEditsDropped: { serviceKey: string; runs: string[] }[];
 }
 
 function pkgVersion(): string {
@@ -403,11 +412,29 @@ export async function importArchive(
     (r) => attendanceStore.upsert(r as never),
     (a, b) => mergeAttendanceRecord(a as never, b as never) as never,
   );
+  // A timeline merge can fail to keep a correction: the run it names loses the
+  // clash with this box's own, and "fill, never overwrite" takes the correction
+  // with it. Reported per service rather than swallowed — it is the operator's
+  // work, and an import that quietly discards it looks identical to one that did
+  // not have any.
+  const itemTimeEditsDropped: { serviceKey: string; runs: string[] }[] = [];
   await write(
     timeline,
     (k) => serviceTimelineStore.get(k) as never,
     (r) => serviceTimelineStore.upsert(r as never),
-    (a, b) => mergeTimelineRecord(a as never, b as never) as never,
+    (a, b) => {
+      const { record, droppedItemTimeEdits } = mergeTimelineRecord(a as never, b as never);
+      if (droppedItemTimeEdits.length) {
+        const runs = droppedItemTimeEdits.map((e) => e.itemId + "#" + String(e.sequence));
+        itemTimeEditsDropped.push({ serviceKey: (a as { serviceKey: string }).serviceKey, runs });
+        console.warn(
+          `[archive] import into ${scrub((a as { serviceKey: string }).serviceKey)}: ` +
+            `${scrub(droppedItemTimeEdits.length)} item time correction(s) had no run left to apply ` +
+            `to after the merge (${scrub(runs.join(", "))}) — dropped.`,
+        );
+      }
+      return record as never;
+    },
   );
 
   // Raw files. A null dir means the service predates the archive and has none.
@@ -482,5 +509,5 @@ export async function importArchive(
   // reported only what had been added.
   const baptismSessionsAdded = await baptismStore.addSessions(freshSessions as never);
 
-  return { added, skipped, merged, replaced, baptismSessionsAdded, rawFilesFailed };
+  return { added, skipped, merged, replaced, baptismSessionsAdded, rawFilesFailed, itemTimeEditsDropped };
 }
