@@ -288,6 +288,20 @@ export class ItemTimeEditError extends Error {
   }
 }
 
+/**
+ * Refuse a correction, and leave a line saying why.
+ *
+ * The operator sees the sentence in a toast; nobody else does. A refusal is a
+ * decision this server made about the operator's work, and at 9am on a Sunday
+ * "I typed a time and it did not save" with nothing in /log is the whole story
+ * they can tell. Logged here rather than at each throw site so the reason and
+ * the run always travel together.
+ */
+function refuseItemTimes(serviceKey: string, run: string, reason: string): never {
+  console.warn(`[history] ${scrub(serviceKey)}: refused a time correction for ${scrub(run)} — ${scrub(reason)}`);
+  throw new ItemTimeEditError(reason);
+}
+
 /** "20:15:00 → 20:26:22", or "20:15:00 → (open)" for an item still running. */
 function span(startedAt: string, endedAt: string | null): string {
   const s = Date.parse(startedAt);
@@ -312,17 +326,29 @@ export async function setItemTimes(
   serviceKey: string,
   itemId: string,
   sequence: number,
+  /**
+   * The three states of each field are distinct and all three are used:
+   *
+   *   ABSENT (`undefined`, or the key not present) — leave whatever override
+   *     this run already has. The panel saves one field without discarding the
+   *     other; `"startedAt" in times` is what distinguishes this from null, so a
+   *     caller that spreads `{ startedAt: undefined }` gets "absent", which is
+   *     the same answer.
+   *   `null` — clear this field's override; the recorded value comes back.
+   *   an ISO string — override this field with it.
+   */
   times: { startedAt?: string | null; endedAt?: string | null },
 ): Promise<ServiceTimeline> {
   assertNotLive(serviceKey, "edited");
   forgetAll(serviceKey); // see editServiceWindow
+  // Names the RUN, not just the item: an item can appear twice in one record, and
+  // a log line naming only the title cannot tell an operator which row moved.
+  const run = `${itemId}#${sequence}`;
   const tl = await serviceTimelineStore.get(serviceKey);
-  if (!tl) throw new ItemTimeEditError(`No recording found for "${serviceKey}".`);
+  if (!tl) refuseItemTimes(serviceKey, run, `No recording found for "${serviceKey}".`);
   const item = tl.items.find((x) => x.itemId === itemId && x.sequence === sequence);
   if (!item) {
-    throw new ItemTimeEditError(
-      "That item is no longer in this recording — reload the service and try again.",
-    );
+    refuseItemTimes(serviceKey, run, "That item is no longer in this recording — reload the service and try again.");
   }
 
   // A field the caller did not mention keeps whatever override it already had;
@@ -339,14 +365,18 @@ export async function setItemTimes(
   const endedAt = "endedAt" in times ? (times.endedAt ?? undefined) : prior?.endedAt;
   for (const [label, v] of [["start", startedAt], ["end", endedAt]] as const) {
     if (v != null && !Number.isFinite(Date.parse(v))) {
-      throw new ItemTimeEditError(`That ${label} time is not a time I can read.`);
+      refuseItemTimes(serviceKey, run, `That ${label} time is not a time I can read.`);
     }
   }
 
   const effStart = startedAt ?? item.startedAt;
   const effEnd = endedAt ?? item.endedAt;
+  // Strictly after. A zero-length item is not a correction anybody means: the row
+  // would read 0:00 with an `edited` marker on it, count nothing toward the
+  // service timers, and leave a gap the length of the item it replaced. Clearing
+  // the override is what "this item did not happen" is spelled with.
   if (effEnd != null && Date.parse(effEnd) <= Date.parse(effStart)) {
-    throw new ItemTimeEditError("The end has to come after the start.");
+    refuseItemTimes(serviceKey, run, "The end has to come after the start.");
   }
   // Inside the recording's own window. An item timed outside it would be invisible
   // in half the readouts and would make the service's Actual disagree with its
@@ -358,7 +388,9 @@ export async function setItemTimes(
     if (t == null) continue;
     const ms = Date.parse(t);
     if (ms < winStart || ms > winEnd) {
-      throw new ItemTimeEditError(
+      refuseItemTimes(
+        serviceKey,
+        run,
         `That is outside the recording's own window (${span(tl.startedAt, tl.endedAt)}). ` +
           "Fix the service start and end first, then the item.",
       );
@@ -383,7 +415,7 @@ export async function setItemTimes(
   // computed itself: log-injection.test.ts reads the source, and an exception for
   // "this one is obviously safe" is how the rule stops being a rule.
   console.log(
-    `[history] ${scrub(serviceKey)}: "${scrub(item.title)}" times ` +
+    `[history] ${scrub(serviceKey)}: "${scrub(item.title)}" (${scrub(run)}) times ` +
       `${scrub(cleared ? "reset to the recording" : "edited")} by operator ` +
       `(${scrub(span(item.startedAt, item.endedAt))} → ${scrub(span(effStart, effEnd))})`,
   );

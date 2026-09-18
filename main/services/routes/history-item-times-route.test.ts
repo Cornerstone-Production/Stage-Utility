@@ -189,6 +189,49 @@ describe("POST /api/history/item-times", () => {
     assert.equal((await serviceTimelineStore.get(KEY))!.itemTimeEdits, undefined);
   });
 
+  it("refuses a ZERO-length item — an end equal to the start is not a correction", async () => {
+    // The boundary the `<=` is there for. A zero-length row would read 0:00 with
+    // an `edited` marker on it, count nothing toward the timers, and leave a gap
+    // the length of the item it replaced. Clearing the override is how "this did
+    // not happen" is spelled.
+    const out = await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: WINDOW_START });
+    assert.equal(out.status, 400, `expected 400, got ${out.status}: ${out.body}`);
+    assert.match(out.body, /end has to come after the start/);
+    assert.equal((await serviceTimelineStore.get(KEY))!.itemTimeEdits, undefined);
+  });
+
+  it("logs a reason when it refuses, naming the run", async () => {
+    // The operator sees the sentence in a toast and nobody else does. "I typed a
+    // time and it did not save", with nothing in /log, is the whole story an
+    // operator can tell at 9am on a Sunday.
+    const lines: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+    try {
+      await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: "2026-09-17T23:00:00.000Z" });
+    } finally {
+      console.warn = warn;
+    }
+    const refusal = lines.find((l) => l.includes("[history]") && l.includes("refused"));
+    assert.ok(refusal, `no refusal was logged: ${JSON.stringify(lines)}`);
+    assert.match(refusal!, /vid-1#0/, "the log line does not name the run that was refused");
+    assert.match(refusal!, /outside the recording's own window/, "and does not say why");
+  });
+
+  it("names the run on the success line too", async () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+    try {
+      await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: FIXED_END });
+    } finally {
+      console.log = log;
+    }
+    const line = lines.find((l) => l.includes("times edited by operator"));
+    assert.ok(line, `nothing logged the edit: ${JSON.stringify(lines)}`);
+    assert.match(line!, /vid-1#0/, "an item can run twice; the title alone cannot say which row moved");
+  });
+
   it("refuses a time outside the recording's own window", async () => {
     const out = await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: "2026-09-17T23:00:00.000Z" });
     assert.equal(out.status, 400, `expected 400, got ${out.status}: ${out.body}`);
