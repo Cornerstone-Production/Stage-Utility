@@ -158,8 +158,20 @@ the eight before.
 > BUSIEST service and a dot marks each recording; the tile averages the same
 > per-day figure, so the two halves of the card quote the same kind of number.
 >
-> "The eight before" means a type shows no change until it has recorded sixteen
-> days, and the tile says "no prior window yet" rather than implying one. The alternative — splitting whatever is available
+> "The eight before" was read as requiring a FULL eight, which meant no change
+> figure until a type had recorded sixteen days — four months in. The tile was
+> right and useless for a season.
+>
+> **Relaxed after review.** The comparison uses whatever prior days there are,
+> up to eight, and the tile says how many: "vs prior 5". Below FOUR it still
+> reads "no prior window yet", because an average of one or two readings is not
+> an average and a percentage off it is noise wearing a direction.
+>
+> On the three-month archive this was verified against, the busiest type has
+> eleven recorded days — eight recent and three prior — so it is still one day
+> short of showing a change. The rule is not the archive's fault and the archive
+> is not the rule's; both are recorded here so the next reader does not mistake
+> the empty tiles for a bug. The alternative — splitting whatever is available
 > in half — makes the average and the compared window two different things,
 > and a tile whose average is over five recordings and whose change is over two
 > is harder to read than one that says it cannot tell yet. A type with fewer

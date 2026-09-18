@@ -76,10 +76,12 @@ the day's services. Open a service for its own page, described after it.
 
 **Trends** leads the page. One tile per service type, showing a sparkline of the
 busiest service on each of the last eight **days** that type recorded, the
-average across them, and the change against the eight days before. A type that
-has not recorded eight days and eight more reads *no prior window yet* rather
-than quoting a change it cannot measure: a comparison of eight weeks against two
-is not the comparison the tile's label promises. The tiles sort busiest first.
+average across them, and the change against the days before.
+
+The comparison uses whatever prior days there are, up to eight, and says how
+many — *+6% vs prior 5*. Below **four** prior days it reads *no prior window
+yet* instead: an "average" of one or two readings is not one, and a percentage
+off it is noise wearing a direction. The tiles sort busiest first.
 
 Everything is counted **per day, at the day's busiest service**. A church running
 a 9, an 11 and a 6 records three figures every Sunday, and attendance is people

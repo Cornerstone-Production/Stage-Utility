@@ -25,8 +25,23 @@ export interface TrendRecording {
   peakOccupancy: number | null;
 }
 
-/** How many DAYS a tile averages, and how many it compares them against. */
+/** How many DAYS a tile averages, and the most it compares them against. */
 export const TREND_WINDOW = 8;
+
+/**
+ * The fewest prior days a comparison may rest on.
+ *
+ * The prior window used to have to be FULL — eight days — which meant a church
+ * saw no change figure until it had recorded sixteen Sundays, four months in.
+ * The tile was right and useless for a season.
+ *
+ * Four is where an average starts meaning something: one quiet week in four
+ * moves the mean by a quarter of its own gap, which a reader can discount; one
+ * in two is not an average, it is two numbers. The tile always says how many
+ * days it actually compared against — "vs prior 4" — so a thin comparison is
+ * labelled as one rather than passed off as eight.
+ */
+export const MIN_PRIOR_DAYS = 4;
 
 /** One day of one service type: the busiest that day, and when the day's first
  *  recording started. */
@@ -53,16 +68,17 @@ export interface TypeTrend {
   recent: DayPeak[];
   /** Mean of `recent`, rounded. Null when `recent` is empty. */
   average: number | null;
-  /** Mean of the `TREND_WINDOW` days before `recent`, rounded. Null unless that
-   *  window is FULL — see `change`. */
+  /** Mean of the up-to-`TREND_WINDOW` days before `recent`, rounded. Null when
+   *  there are fewer than `MIN_PRIOR_DAYS` of them — see `change`. */
   priorAverage: number | null;
   /**
    * Fractional change of `average` against `priorAverage`.
    *
-   * Null unless the prior window holds a full `TREND_WINDOW` days. A comparison
-   * of eight weeks against two is not the comparison the tile's own label
-   * promises, and a tile that quietly changed what it was measuring as a church
-   * accumulated history would be worse than one that says it cannot tell yet.
+   * Null until there are `MIN_PRIOR_DAYS` prior days to average. Below that the
+   * "average" is one or two readings and a percentage off it is noise wearing a
+   * direction; above it the tile compares against whatever it HAS, up to eight,
+   * and says how many — a thin comparison is labelled, not hidden and not
+   * dressed up as a full one.
    *
    * Computed from the ROUNDED averages, which are the two numbers on screen: a
    * percentage derived from unrounded means can print "+1%" beside two numbers
@@ -140,7 +156,7 @@ export function typeTrends(recordings: TrendRecording[], window = TREND_WINDOW):
     const recent = days.slice(-window);
     const prior = days.slice(Math.max(0, days.length - window * 2), days.length - recent.length);
     const average = mean(recent.map((d) => d.v));
-    const priorMean = prior.length === window ? mean(prior.map((d) => d.v)) : null;
+    const priorMean = prior.length >= MIN_PRIOR_DAYS ? mean(prior.map((d) => d.v)) : null;
     const rounded = average == null ? null : Math.round(average);
     const priorRounded = priorMean == null ? null : Math.round(priorMean);
     out.push({

@@ -256,9 +256,9 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
                       className={cn("text-caption1", t.change >= 0 ? "text-ok-11" : "text-warn-11")}
                     >
                       {pct(t.change)}{" "}
-                      <span className="text-fg-subtle">
-                        vs the prior {t.priorCount}
-                      </span>
+                      {/* The REAL count, never the window it would like to
+                          have. A tile comparing against four days says four. */}
+                      <span className="text-fg-subtle">vs prior {t.priorCount}</span>
                     </span>
                   ) : (
                     <span data-trend-change className="text-caption1 text-fg-subtle">no prior window yet</span>

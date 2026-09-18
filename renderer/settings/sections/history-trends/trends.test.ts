@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  MIN_PRIOR_DAYS,
   TREND_WINDOW,
   dailyPeaks,
   seriesChangeMilestones,
@@ -123,28 +124,54 @@ describe("a service type's trend tile", () => {
     assert.equal(Math.round((tile.change as number) * 100) / 100, 0.5, "300 against 200 is +50%");
   });
 
-  test("the prior window has to be FULL, all the way to fifteen days", () => {
-    // The 9-to-15 band. Nine days is eight recent and one prior, and comparing
-    // eight weeks against one is not the comparison the tile's label promises —
-    // so it says so instead. One line per case, so two branches adding
-    // different ones merge cleanly.
+  test("the tile compares against the prior days it HAS, once there are four", () => {
+    // The 9-to-15 band, which used to show nothing at all: requiring a full
+    // eight meant no change figure until sixteen Sundays, four months in, and
+    // the tile was right and useless for a season. Below four the "average" is
+    // one or two readings and a percentage off it is noise wearing a direction.
+    // One line per case, so two branches adding different ones merge cleanly.
     const at = (n: number) => {
       const [tile] = typeTrends(weekly("weekend", Array(n).fill(100)));
       return [n, tile.change, tile.priorCount, tile.priorAverage];
     };
     assert.deepEqual(
-      [1, 2, 8, 9, 12, 15, 16].map(at),
+      [1, 2, 8, 9, 11, 12, 15, 16, 20].map(at),
       [
         [1, null, 0, null],
         [2, null, 0, null],
+        // Eight days is the whole recent window with nothing before it.
         [8, null, 0, null],
+        // Nine is one prior day — not an average.
         [9, null, 0, null],
-        [12, null, 0, null],
-        [15, null, 0, null],
-        // Sixteen is the first history with a full prior window.
+        [11, null, 0, null],
+        // Twelve is four prior days: the first history that compares.
+        [12, 0, 4, 100],
+        [15, 0, 7, 100],
         [16, 0, 8, 100],
+        // Never more than eight, however long the history.
+        [20, 0, 8, 100],
       ],
     );
+  });
+
+  test("a thin comparison reports the count it actually used", () => {
+    // The label reads "vs prior 4". It must be the REAL number, not the window
+    // the tile would like to have had — a four-day comparison dressed up as
+    // eight is the thing relaxing the rule could easily have introduced.
+    const twelve = typeTrends(weekly("weekend", [...Array(4).fill(100), ...Array(8).fill(150)]))[0];
+    assert.equal(twelve.priorCount, 4);
+    assert.equal(twelve.priorAverage, 100);
+    assert.equal(twelve.average, 150);
+    assert.equal(Math.round((twelve.change as number) * 100) / 100, 0.5, "150 against 100 is +50%");
+  });
+
+  test("the floor is where MIN_PRIOR_DAYS says, not a number typed twice", () => {
+    // Pins the constant to the behaviour, so moving one moves both.
+    const below = typeTrends(weekly("weekend", Array(TREND_WINDOW + MIN_PRIOR_DAYS - 1).fill(100)))[0];
+    const atFloor = typeTrends(weekly("weekend", Array(TREND_WINDOW + MIN_PRIOR_DAYS).fill(100)))[0];
+    assert.equal(below.change, null);
+    assert.equal(atFloor.change, 0);
+    assert.equal(atFloor.priorCount, MIN_PRIOR_DAYS);
   });
 
   test("a type with fewer than two recordings shows no change at all", () => {
