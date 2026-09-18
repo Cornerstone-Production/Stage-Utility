@@ -29,10 +29,22 @@ import {
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 import { historyMilestonesStore } from "../history-milestones-store.js";
 
-/** Every service type id the recorded history holds, for validating a
- *  milestone's scope. Read from the timeline store rather than from Planning
- *  Center: a milestone is about what was RECORDED, and a type PCO has since
- *  renamed or removed still has recordings the chart draws. */
+/**
+ * Every service type id that has a SERVICE the Trends chart draws, for
+ * validating a milestone's scope.
+ *
+ * From the recorded history rather than from Planning Center: a milestone is
+ * about what was RECORDED, and a type PCO has since renamed or removed still
+ * has recordings the chart draws.
+ *
+ * The SPL store is deliberately NOT consulted. The chart's series are built
+ * from `rows` — the union of timeline and attendance records — so a type with
+ * sound and neither of those has no line for a mark to be scoped to, and
+ * accepting it would store a milestone that could never appear. That is the
+ * exact failure this check exists to prevent, so the two stores read here are
+ * the two the chart itself reads, and the refusal says so rather than claiming
+ * the type "has never recorded" when it may well have recorded sound.
+ */
 async function recordedServiceTypeIds(): Promise<string[]> {
   const ids = new Set<string>();
   for (const rec of await serviceTimelineStore.list()) {

@@ -81,6 +81,11 @@ export function partitionMilestones(raw: unknown): {
   if (!Array.isArray(raw)) return { valid, skipped, skippedRows };
   for (const row of raw) {
     if (!row || typeof row !== "object") {
+      // Named, not merely kept. A row that is a string or a null is skipped for
+      // the same reason a bad date is, and an operator looking for a mark that
+      // never appeared needs a line about it just as much — it was kept in the
+      // file and mentioned nowhere.
+      skipped.push(typeof row === "string" ? row : String(row));
       skippedRows.push(row);
       continue;
     }
@@ -173,7 +178,7 @@ export const historyMilestonesStore = {
     }
     const serviceTypeId = input.serviceTypeId || null;
     if (serviceTypeId && knownTypeIds && !knownTypeIds.includes(serviceTypeId)) {
-      throw new Error(`no service type "${serviceTypeId}" has ever recorded`);
+      throw new Error(`no service type "${serviceTypeId}" has a recorded service to mark`);
     }
     const entry: HistoryMilestone = {
       id: input.id || randomUUID(),

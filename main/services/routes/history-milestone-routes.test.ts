@@ -84,7 +84,7 @@ describe("POST /api/history/milestones", () => {
     // It would draw on no line at all — invisible, with no way to tell why.
     const out = await post({ date: "2026-09-27", label: "Youth moved", serviceTypeId: "no-such-type" });
     assert.equal(out.status, 400);
-    assert.match(String((out.json as { error: string }).error), /no service type "no-such-type" has ever recorded/);
+    assert.match(String((out.json as { error: string }).error), /no service type "no-such-type" has a recorded service to mark/);
   });
 
   it("accepts a service type that HAS recorded", async () => {

@@ -25,6 +25,9 @@ fs.writeFileSync(
     // catches it.
     { id: "b", date: "2026-02-31", label: "Two services", serviceTypeId: null },
     { id: "c", date: "sometime in the spring", label: "Kickoff", serviceTypeId: "salt" },
+    // Not an object at all. Kept in the file like the others, and — this is the
+    // fix — NAMED in the log rather than skipped in silence.
+    "just a string",
     { id: "d", date: "2026-05-10", label: "Summer\nseries", serviceTypeId: "weekend" },
   ]),
 );
@@ -56,6 +59,7 @@ describe("reading the list", () => {
       [
         '[history] milestone "Kickoff" has no valid date, skipped',
         '[history] milestone "Two services" has no valid date, skipped',
+        '[history] milestone "just a string" has no valid date, skipped',
       ],
       "an operator looking for a mark that never appeared must have something to read",
     );
@@ -199,7 +203,7 @@ describe("what a milestone may say", () => {
     // mark on the chart, with nothing to read.
     await assert.rejects(
       () => historyMilestonesStore.save({ date: "2026-08-16", label: "Youth", serviceTypeId: "nope" }, ["weekend"]),
-      /no service type "nope" has ever recorded/,
+      /no service type "nope" has a recorded service to mark/,
     );
     const ok = await historyMilestonesStore.save({ date: "2026-08-16", label: "Youth", serviceTypeId: "weekend" }, ["weekend"]);
     assert.ok(ok.some((m) => m.serviceTypeId === "weekend"));
