@@ -2,7 +2,6 @@ import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
-import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -1486,12 +1485,17 @@ function fmtTrendPct(pct: number | null, fallback = ""): string {
   return pct != null ? `${pct >= 0 ? "+" : "−"}${Math.round(Math.abs(pct) * 100)}%` : fallback;
 }
 
-/** "vs the prior 4 Weekends" / "vs the prior 1 Weekend" — the tail every
- *  trend readout in the Overview ends with, once for both of them rather than
- *  copied into the attendance trend and the SPL delta separately. */
-function vsPrior(priorCount: number, scopeName: string | null): string {
-  const noun = scopeName ?? "service";
-  return `vs the prior ${priorCount} ${noun}${priorCount === 1 ? "" : "s"}`;
+/**
+ * "vs the prior 4 recordings" — the tail every trend readout in the Overview
+ * ends with.
+ *
+ * "recordings", not the service type's own name. The name is a PROPER NOUN and
+ * pluralising it produced "vs the prior 2 The Salt Companys", which is what was
+ * on screen. The scope is already named on the heading above the card, so
+ * repeating it in the tail bought nothing even when it read correctly.
+ */
+function vsPrior(priorCount: number): string {
+  return `vs the prior ${priorCount} recording${priorCount === 1 ? "" : "s"}`;
 }
 
 /**
@@ -1554,7 +1558,11 @@ export function OverviewBlend({
    *  so it offers exactly the metrics there is something to draw for. */
   const chartMenuItems: ContextMenuItem[] = [
     {
-      label: "SPL trend line",
+      // It gated a trend LINE on the attendance chart this card no longer
+      // carries. The preference is kept and still read — it is what decides
+      // whether the sound summary appears — rather than left written and
+      // consulted by nothing.
+      label: "Sound summary",
       checked: splTrend.shown,
       onSelect: () => onSplTrend({ shown: !splTrend.shown }),
     },
@@ -1573,124 +1581,79 @@ export function OverviewBlend({
     });
   }
 
-  /**
-   * Whether the two stat labels wear their series' colour.
-   *
-   * True exactly when the chart is drawing two lines AND there is a level to
-   * summarise — which is also exactly when the SPL block renders. One condition
-   * rather than two, because the dots only mean anything as a pair: they are
-   * the chart's legend, and the chart has none of its own.
-   */
-  const showsSeriesDots = splTrend.shown && overview.avgSpl != null;
+  /** The sound summary renders when the operator wants it and there is a level
+   *  to report. No dash when there is none — that reads as a measured silence. */
+  const showsLevel = splTrend.shown && overview.avgSpl != null;
 
+  // TIMINGS ONLY. Attendance moved out of this card entirely: Trends, at the
+  // top of the page, plots it per service type over a chosen range with
+  // milestones under it, and this card plotted the same quantity over a
+  // different window with a different average — two charts of attendance on one
+  // screen that did not agree. Peak attendance went with it for the same reason;
+  // a day-list row carries each service's own peak.
   const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
     { k: "Services", v: overview.services },
     { k: "Avg length", v: overview.avgLength },
     { k: "Avg start", v: overview.avgStart, accent: overview.avgStartEarly ? "text-ok-11" : overview.avgStartLate ? "text-warn-11" : undefined },
     { k: "Avg overrun", v: overview.avgOverrun, trend: overview.overrunTrend, trendLabel: overview.overrunTrend ? (overview.overrunTrend.tone === "bad" ? "worse" : overview.overrunTrend.tone === "good" ? "better" : "steady") : undefined },
-    { k: "Peak attendance", v: overview.peakAttendance },
   ];
   return (
     <div className="su-card px-5 py-5 flex flex-col">
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
-        <div className="shrink-0">
-          {/* The dot appears on BOTH labels or on neither, and only when there
-              are two series to tell apart. It is a legend for the chart beside
-              them — which line is this number about — so a single blue dot with
-              the SPL line switched off would be a legend for nothing, and a
-              green one on its own reads as an afterthought bolted to an
-              attendance summary. `showsSeriesDots` is the one condition, read
-              by both, so the pair cannot drift apart. */}
-          <div className={cn("text-caption1 uppercase tracking-[0.08em] text-fg-muted", showsSeriesDots && "flex items-center gap-1.5")}>
-            {showsSeriesDots && (
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-accent)" }} />
-            )}
-            Avg {overview.scopeName ?? "service"}
-          </div>
-          <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-            {overview.avgAttendance}
-          </div>
-          {overview.attTrend && (
-            <TrendChip
-              dir={overview.attTrend.dir}
-              tone={overview.attTrend.tone}
-              text={`${fmtTrendPct(overview.attTrend.pct, "changed")} ${vsPrior(overview.attTrend.priorCount, overview.scopeName)}`}
-              className="mt-2"
-            />
-          )}
-          {/* The level, read the same way, so the SPL line has a summary of its
-              own instead of one attendance figure over a chart with two series
-              in it. Present only when the line is drawn AND there is a level to
-              report — no dash, which would read as a measured silence. */}
-          {/* `avgSpl != null` again, redundant at runtime but not to the type
-              checker: `showsSeriesDots` is a boolean, so narrowing does not
-              travel through it and the level below would be possibly-null. */}
-          {showsSeriesDots && overview.avgSpl != null && (
-            <div className="mt-5" data-testid="spl-summary">
-              <div className="flex items-center gap-1.5 text-caption1 uppercase tracking-[0.08em] text-fg-muted">
-                {/* The series' own colour, the same dot the chart's tooltip
-                    carries, so this says which line it is summarising without
-                    needing a legend. See the attendance label above: the two
-                    dots are a pair. */}
-                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
-                Avg SPL
-              </div>
-              <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
-                <span>{overview.avgSpl.toFixed(1)}</span>
-                <span className="text-caption1 font-normal text-fg-muted">dB</span>
-              </div>
-              {overview.splDelta && (
-                // NEUTRAL, always — see SplDelta. A louder weekend is not a
-                // worse one, so this never goes red. Decibels, not a
-                // percentage: a percentage of a logarithmic quantity says
-                // nothing about how loud it was. The sign comes from `dir`,
-                // never recomputed from `db` — one fact, one place to read it,
-                // so the glyph and the sign can't disagree about which way a
-                // level moved.
-                <TrendChip
-                  dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
-                  tone="neutral"
-                  text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount, overview.scopeName)}`}
-                  className="mt-2"
-                />
-              )}
+      <div
+        className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8"
+        onContextMenu={chartTrigger.onContextMenu}
+        onPointerDown={chartTrigger.onPointerDown}
+        onPointerMove={chartTrigger.onPointerMove}
+        onPointerUp={chartTrigger.onPointerUp}
+        onPointerCancel={chartTrigger.onPointerCancel}
+        onClickCapture={chartTrigger.onClickCapture}
+        style={chartTrigger.style}
+      >
+        {/* The level, and nothing about attendance. Trends owns attendance over
+            time; this card owns how the services themselves RAN, plus how loud
+            they were, which Trends does not plot. */}
+        {showsLevel && overview.avgSpl != null ? (
+          <div className="shrink-0" data-testid="spl-summary">
+            <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg SPL</div>
+            <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
+              <span>{overview.avgSpl.toFixed(1)}</span>
+              <span className="text-caption1 font-normal text-fg-muted">dB</span>
             </div>
-          )}
-        </div>
-        <div
-          className="relative flex-1 min-w-0 md:max-w-[640px]"
-          onContextMenu={chartTrigger.onContextMenu}
-          onPointerDown={chartTrigger.onPointerDown}
-          onPointerMove={chartTrigger.onPointerMove}
-          onPointerUp={chartTrigger.onPointerUp}
-          onPointerCancel={chartTrigger.onPointerCancel}
-          onClickCapture={chartTrigger.onClickCapture}
-          style={chartTrigger.style}
-        >
-          <AttendanceTrendChart
-            points={overview.attPoints}
-            splLabel={splTrend.shown ? overview.splMetric : null}
-            // The chart tracked the pointer underneath the menu it had just
-            // opened: the tooltip drew through the menu and moved as you
-            // reached for an item.
-            hoverSuppressed={chartMenu != null}
-          />
-          {isCoarse && (
-            <button
-              type="button"
-              aria-label="Chart options"
-              className="absolute right-1 top-1 grid size-11 place-items-center rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setChartMenu({ x: r.right, y: r.bottom });
-              }}
-            >
-              <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
-                <EllipsisIcon className="size-4" />
-              </span>
-            </button>
-          )}
-        </div>
+            {overview.splDelta && (
+              // NEUTRAL, always — see SplDelta. A louder weekend is not a worse
+              // one, so this never goes red. Decibels, not a percentage: a
+              // percentage of a logarithmic quantity says nothing about how loud
+              // it was. The sign comes from `dir`, never recomputed from `db` —
+              // one fact, one place to read it, so the glyph and the sign cannot
+              // disagree about which way a level moved.
+              <TrendChip
+                dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
+                tone="neutral"
+                text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount)}`}
+                className="mt-2"
+              />
+            )}
+          </div>
+        ) : (
+          <div className="text-caption1 text-fg-subtle">
+            {splTrend.shown ? "No sound recorded in this scope." : "Sound summary is off — right-click for options."}
+          </div>
+        )}
+        {isCoarse && (
+          <button
+            type="button"
+            aria-label="Overview options"
+            className="grid size-11 shrink-0 place-items-center self-start rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setChartMenu({ x: r.right, y: r.bottom });
+            }}
+          >
+            <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
+              <EllipsisIcon className="size-4" />
+            </span>
+          </button>
+        )}
         {chartMenu && (
           <ContextMenu
             x={chartMenu.x}
@@ -1702,7 +1665,7 @@ export function OverviewBlend({
       </div>
       {/* Wrapping grid so the readouts never collide: 2 cols on mobile, 3 at sm,
           all at lg. Value + trend can wrap within a cell rather than overrun. */}
-      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-4">
         {strip.map((s) => (
           <div key={s.k} className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
