@@ -195,7 +195,7 @@ describe("History: Rebuild from raw", () => {
     assert.deepEqual(posted[0].body, { serviceKey: KEY });
 
     const shown = lastToast();
-    assert.match(shown, /12 items/, `the toast does not report the timeline count: ${shown}`);
+    assert.match(shown, /12 item timings/, `the toast does not report the timeline count: ${shown}`);
     assert.match(shown, /11 SPL items/, `the toast does not report the SPL count: ${shown}`);
     assert.match(shown, /143 attendance samples/, `the toast does not report the sample count: ${shown}`);
     assert.doesNotMatch(shown, /left alone/, `nothing was left alone, so the toast must not say so: ${shown}`);
@@ -228,8 +228,8 @@ describe("History: Rebuild from raw", () => {
     await settle();
 
     const shown = lastToast();
-    assert.match(shown, /left alone: items, SPL items/, `the toast hid what it did not touch: ${shown}`);
-    assert.doesNotMatch(shown, /Rebuilt: 12 items/, `an untouched record was reported as rebuilt: ${shown}`);
+    assert.match(shown, /left alone: item timings, SPL items/, `the toast hid what it did not touch: ${shown}`);
+    assert.doesNotMatch(shown, /Rebuilt: 12 item timings/, `an untouched record was reported as rebuilt: ${shown}`);
     assert.match(shown, /Rebuilt: 143 attendance samples/, `the one derived record is missing: ${shown}`);
   });
 

@@ -81,7 +81,7 @@ interface RebuildOutcome {
 
 /** The three legs and the noun each one counts, in the order they are reported. */
 const REBUILD_LEGS = [
-  ["timeline", "items"],
+  ["timeline", "item timings"],
   ["spl", "SPL items"],
   ["attendance", "attendance samples"],
 ] as const;
