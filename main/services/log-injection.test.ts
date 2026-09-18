@@ -100,6 +100,7 @@ const REQUEST_FACING = [
   "route-harness.ts",
   "scriptview-routes.ts",
   "stage-controller.ts",
+  "event-poll.ts",
   "state-routes.ts",
   "status-routes.ts",
   "system-routes.ts",
@@ -247,6 +248,10 @@ function requestFacingFiles(): string[] {
     // beside the stored rule that owns the name, and a rule name and a cue name
     // both arrive in an HTTP body.
     path.join(HERE, "builtin-cues.ts"),
+    // Its two lines name a poll client's `cid`, which is whatever string a
+    // caller put on the /api/events/poll query string — an attacker's value,
+    // verbatim, reaching /log.
+    path.join(HERE, "event-poll.ts"),
     // Its lines name the Companion custom variable a cue pair is bound to and
     // the pair's base — a rule param typed into an HTTP body — and the value
     // Companion sent back.

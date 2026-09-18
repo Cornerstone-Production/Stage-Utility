@@ -20,7 +20,7 @@
 import type { PcoLiveDTO } from "../types/stage.js";
 import { errorMessage } from "./errors.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { splRecorder } from "./spl-recorder.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
@@ -58,8 +58,10 @@ const AUTH_RETRY_INTERVAL_MS = 5 * 60_000;
 // Everything on the live DTO that a client actually reacts to. serverNow is
 // deliberately excluded: it changes every tick but the client ticks the countdown
 // itself from targetAt/liveStartAt + its own clock, so re-pushing it every second
-// is pure overhead. We broadcast only when one of these changes (plus a slow
-// keepalive for clock re-sync).
+// is pure overhead. We broadcast only when one of these changes — plus a slow
+// keepalive for clock re-sync, which runs on its OWN interval rather than inside
+// the tick, because the tick's cadence is Planning Center's and a client's clock
+// drift is not (see LIVE_KEEPALIVE_MS).
 function liveSignature(l: PcoLiveDTO): string {
   return JSON.stringify([
     l.mode, l.currentItemId, l.label, l.lengthSec, l.liveStartAt, l.targetAt,
@@ -76,10 +78,20 @@ function liveSignature(l: PcoLiveDTO): string {
 }
 // Re-push at least this often even when unchanged, so a client's clock-skew estimate
 // can't drift and a just-connected client stays fresh. Still ~15x fewer pushes than 1 Hz.
+//
+// It is enforced on its OWN interval, not only inside tick(). Outside a service
+// window the tick runs every five minutes, so the check below it could not fire
+// any sooner than that: a display loaded on a Tuesday sat at a skew of 0 —
+// meaning it rendered the host browser's clock, whatever that was — until the
+// next tick happened to come round. The keepalive is about the CLIENT's clock,
+// which drifts on its own schedule and not on Planning Center's, so it is timed
+// on its own. The interval never calls PCO; it re-sends the last DTO with a
+// fresh `serverNow`.
 const LIVE_KEEPALIVE_MS = 15_000;
 
 class LivePoller {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
   private lastSig: string | null = null;
   private lastBroadcastAt = 0;
@@ -104,7 +116,32 @@ class LivePoller {
       this.timer = null;
     }
     if (!wasRunning) console.log("[live-poller] start");
+    if (!this.keepaliveTimer) {
+      this.keepaliveTimer = setInterval(() => this.clockKeepalive(), LIVE_KEEPALIVE_MS);
+      this.keepaliveTimer.unref?.();
+    }
     void this.tick();
+  }
+
+  /**
+   * Re-send the last live DTO with a fresh `serverNow`, for clock re-sync only.
+   *
+   * Never touches Planning Center: this is the same object the last fetch
+   * produced, restamped. Silent when nothing subscribes to pco:live, so an
+   * unattended appliance broadcasts into an empty room 0 times an hour rather
+   * than 240.
+   */
+  private clockKeepalive(): void {
+    // No `running` check: stop() clears this interval, so there is no state in
+    // which this runs stopped. A check that cannot fail was written here first
+    // and would not go red on removal, which is the repo's test for dead code.
+    if (!channelHasSubscribers("pco:live")) return;
+    const last = stageController.getLastLive();
+    if (!last) return;
+    const now = Date.now();
+    if (now - this.lastBroadcastAt < LIVE_KEEPALIVE_MS) return;
+    broadcast("pco:live", { ...last, serverNow: new Date().toISOString() });
+    this.lastBroadcastAt = now;
   }
 
   stop(): void {
@@ -112,6 +149,10 @@ class LivePoller {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = null;
     }
   }
 
