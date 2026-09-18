@@ -359,10 +359,13 @@ export async function setItemTimes(
   await serviceTimelineStore.upsert(tl);
   const out = overlaidTimeline(tl);
   broadcastTimeline(tl);
+  // Every interpolation through scrub(), including the ones whose value this file
+  // computed itself: log-injection.test.ts reads the source, and an exception for
+  // "this one is obviously safe" is how the rule stops being a rule.
   console.log(
     `[history] ${scrub(serviceKey)}: "${scrub(item.title)}" times ` +
-      `${cleared ? "reset to the recording" : "edited"} by operator ` +
-      `(${span(item.startedAt, item.endedAt)} → ${span(effStart, effEnd)})`,
+      `${scrub(cleared ? "reset to the recording" : "edited")} by operator ` +
+      `(${scrub(span(item.startedAt, item.endedAt))} → ${scrub(span(effStart, effEnd))})`,
   );
   return out;
 }

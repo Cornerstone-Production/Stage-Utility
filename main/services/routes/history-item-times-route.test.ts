@@ -31,6 +31,7 @@ const { serviceTimelineRecorder } = await import("../service-timeline-recorder.j
 const { addBroadcastListener } = await import("../broadcaster.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
 const { errorMessage } = await import("../errors.js");
+const { serviceDirPath } = await import("../archive/archive-paths.js");
 
 const KEY = "st1:plan9:evening";
 const WINDOW_START = "2026-09-17T20:15:00.000Z";
@@ -213,6 +214,38 @@ describe("POST /api/history/item-times", () => {
     const out = await post({ serviceKey: KEY, itemId: "vid-1", endedAt: FIXED_END });
     assert.equal(out.status, 400, `expected 400, got ${out.status}: ${out.body}`);
     assert.match(out.body, /sequence/);
+  });
+
+  it("survives Rebuild from raw — the run is re-derived and the correction goes back on top", async () => {
+    // THE case this whole design exists for. events.csv says 11:22 and always
+    // will, so a correction written into the item would be thrown away here
+    // without a word. Driven through BOTH real routes against a real archive
+    // file, not through applyItemTimeEdits: the pure function cannot see a
+    // rebuild route that writes the rebuilt record and drops the overlay with it.
+    const dir = serviceDirPath(KEY, "2026-09-17");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "events.csv"),
+      "at,source,kind,detail,itemId,plannedLengthSec,preService\n" +
+        `${WINDOW_START},pco,item,VIDEO: Pre-roll,vid-1,120,false\n` +
+        `${PREROLL_END},pco,item,Welcome,wel-1,300,false\n`,
+      "utf8",
+    );
+
+    await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: FIXED_END });
+
+    const rebuilt = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+    assert.equal(rebuilt.status, 200, `rebuild failed: ${rebuilt.status} ${rebuilt.body}`);
+    assert.equal((rebuilt.json as { timeline: { rebuilt: boolean } }).timeline.rebuilt, true, "precondition: it rebuilt");
+
+    const stored = (await serviceTimelineStore.get(KEY))!;
+    assert.equal(stored.items[0].endedAt, PREROLL_END, "the rebuild itself must re-derive the RAW row");
+    assert.equal(stored.itemTimeEdits?.length, 1, "the rebuild must carry the overlay");
+
+    const out = await callRoute(historyRoutes, `/api/service-timeline/${encodeURIComponent(KEY)}`);
+    const read = out.json as ServiceTimeline;
+    assert.equal(read.items[0].endedAt, FIXED_END, "a rebuild must not undo the operator's correction");
+    assert.equal(read.items[0].actualDurationSec, 120);
   });
 
   it("refuses a non-string, non-null time rather than storing it", async () => {
