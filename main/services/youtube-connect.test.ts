@@ -43,7 +43,11 @@ function installFakes(): void {
   };
   youtubeConnectDeps.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-    const body = typeof init?.body === "string" ? init.body : "";
+    // `start()` and `doPoll()` both send a `URLSearchParams`, not a string —
+    // `typeof init.body === "string"` was always false for it, so every body
+    // captured here was silently "". String(...) reads a URLSearchParams the
+    // same way the real fetch would serialise it.
+    const body = init?.body == null ? "" : String(init.body);
     requests.push({ url: url.pathname, body });
     const handler = handlers[url.pathname];
     const { status: s, body: b } = handler ? handler() : { status: 200, body: {} };
@@ -130,23 +134,45 @@ describe("start", () => {
 
   test("a second start cancels the first", async () => {
     installFakes();
-    handlers[DEVICE_CODE] = () => deviceCodeOk({ user_code: "FIRST-CODE" });
+    handlers[DEVICE_CODE] = () => deviceCodeOk({ device_code: "dc-first", user_code: "FIRST-CODE" });
     await start("a", "a-secret");
     assert.equal(timers.length, 1);
 
-    handlers[DEVICE_CODE] = () => deviceCodeOk({ user_code: "SECOND-CODE" });
+    handlers[DEVICE_CODE] = () => deviceCodeOk({ device_code: "dc-second", user_code: "SECOND-CODE" });
     const second = await start("b", "b-secret");
 
     assert.equal(second.userCode, "SECOND-CODE");
     assert.equal(timers.length, 1, "the first attempt's timer must be gone, not left running alongside the second");
 
     // Prove it really is gone, not just replaced in the list: advance past
-    // where the first poll would have fired and check nothing hit /token with
-    // the first attempt's device code.
+    // where the first poll would have fired and check every /token request
+    // carries the SECOND attempt's device code, never the first's.
     handlers[TOKEN] = () => ({ status: 400, body: { error: "authorization_pending" } });
     await advance(10_000);
     const tokenBodies = requests.filter((r) => r.url === TOKEN).map((r) => r.body);
-    for (const b of tokenBodies) assert.ok(!b.includes("dc-1") || b.includes("device_code=dc-1"));
+    assert.ok(tokenBodies.length > 0, "the second attempt should have polled at least once");
+    for (const b of tokenBodies) {
+      assert.ok(b.includes("device_code=dc-second"), `expected the second attempt's code, got: ${b}`);
+      assert.ok(!b.includes("device_code=dc-first"), `the first attempt's device code must never be polled: ${b}`);
+    }
+  });
+
+  test("a start whose device/code request fails still cancels the previous attempt's timer", async () => {
+    // The success-success case above is already covered by schedulePoll's OWN
+    // internal stopPolling() call, made right before it schedules the new
+    // timer — so it cannot tell start()'s own call apart from that one. This
+    // is the one path where only start()'s own call matters: the new attempt
+    // never reaches schedulePoll at all, so nothing else would cancel the old
+    // timer if start() did not.
+    installFakes();
+    handlers[DEVICE_CODE] = () => deviceCodeOk();
+    await start("client-id", "client-secret");
+    assert.equal(timers.length, 1);
+
+    handlers[DEVICE_CODE] = () => ({ status: 400, body: { error: "invalid_client" } });
+    await start("wrong-type-client", "secret");
+
+    assert.equal(timers.length, 0, "the previous attempt's timer must not survive a failed re-start");
   });
 
   test("invalid_client at the device/code step names the client-type fix", async () => {
