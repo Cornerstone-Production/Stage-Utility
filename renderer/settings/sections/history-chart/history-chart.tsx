@@ -258,7 +258,15 @@ export function HistoryChart({
 
   if (!all.length) {
     return (
-      <div className="flex flex-col gap-3">
+      // THE REF GOES ON BOTH BRANCHES.
+      //
+      // The width effect runs once, on mount, and returns early when the host
+      // is not there. This branch used to render without the ref, so a section
+      // whose data arrives AFTER the first paint — the sound chart, which fetches
+      // its series — mounted empty, the observer was never attached, and the
+      // chart stayed at its 640px default: a half-width plot letterboxed in the
+      // middle of a 1,256px card, for the rest of the page's life.
+      <div className="flex flex-col gap-3" ref={hostRef}>
         <StatStrip figures={figures} hover={null} live={null} right={customize} />
         <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted">
           {emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}

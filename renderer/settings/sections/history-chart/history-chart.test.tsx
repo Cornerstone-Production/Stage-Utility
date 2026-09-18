@@ -309,6 +309,44 @@ describe("the live x domain", () => {
   });
 });
 
+describe("measuring its own width", () => {
+  test("a chart that mounts EMPTY still observes its host", async () => {
+    // The width effect runs once, on mount, and returns early when the host is
+    // not there. The empty branch used to render without the ref, so a section
+    // whose data arrives after the first paint — the sound chart, which fetches
+    // its series — never attached the observer and stayed at its 640px default:
+    // a half-width plot letterboxed in the middle of a 1,256px card, for the
+    // rest of the page's life.
+    //
+    // jsdom lays nothing out, so this cannot assert the WIDTH. What it can
+    // assert is the thing that was missing: that the element the chart renders
+    // was handed to a ResizeObserver at all. That is the whole bug.
+    const observed: Element[] = [];
+    const real = (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver;
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      observe(el: Element) {
+        observed.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    };
+    try {
+      const view = render(chart({ series: [series({ points: [] })] }));
+      assert.equal(observed.length, 1, "an empty chart observed nothing");
+      // And it is the element that actually wraps the section, not a stray node.
+      assert.equal(observed[0].isConnected, true);
+      assert.ok(observed[0].textContent?.includes("Peak"), "the observed host is not the chart's wrapper");
+
+      // Data arrives. The observer must still be the one from mount — the effect
+      // does not run again — so the host it holds has to be the right element.
+      view.rerender(chart());
+      assert.equal(observed.length, 1, "the chart re-observed, which the effect deps do not allow");
+    } finally {
+      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = real;
+    }
+  });
+});
+
 describe("the legend", () => {
   test("with a handler it is a row of toggles, each saying whether it is on", () => {
     const toggled: string[] = [];
