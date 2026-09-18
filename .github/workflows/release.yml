@@ -297,27 +297,6 @@ jobs:
   # cross-compile: the server's only third-party dependencies are pure JavaScript
   # and there are no native modules, so the per-platform part is which Node binary
   # gets copied in. Five archives take about twenty seconds.
-  artifacts:
-    needs: release
-    # `!cancelled()`, not the default success(): the release job can go red
-    # AFTER the tag is pushed (a failed status write), and a tag with no
-    # archives is a deployment that cannot update.
-    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
-          # The release notes are a commit range from the previous tag, so the
-          # default shallow clone would have nothing to compute them over.
-          fetch-depth: 0
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
 
       # The bump commit differs from the verified tree by one version string.
       # Mark it with the same status rather than running the suite again; a
@@ -348,6 +327,28 @@ jobs:
           done
           echo "::error::v$V is tagged and pushed, but ${BUMP:0:7} carries no build status. Re-run this workflow, or: gh api repos/${GITHUB_REPOSITORY}/statuses/${BUMP} -f state=success -f context=build"
           exit 1
+
+  artifacts:
+    needs: release
+    # `!cancelled()`, not the default success(): the release job can go red
+    # AFTER the tag is pushed (a failed status write), and a tag with no
+    # archives is a deployment that cannot update.
+    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
+          # The release notes are a commit range from the previous tag, so the
+          # default shallow clone would have nothing to compute them over.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
 
       - name: Build
         run: |
