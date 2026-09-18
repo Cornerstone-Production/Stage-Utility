@@ -56,16 +56,76 @@ describe("the shared /history link", () => {
     assert.equal(editable.label, "History");
   });
 
-  it("readOnly actually hides the destructive controls", () => {
-    // The prop being passed is worth nothing if it stopped gating anything.
+  it("readOnly actually hides the destructive controls", async () => {
+    // RENDERED, not scanned. This used to count `{!readOnly &&` in
+    // service-history-section.tsx and assert a FLOOR of three — a source-text
+    // check with slack, which went red the moment the service page's actions
+    // moved into their own component without one of them changing behaviour.
+    // A floor with slack is also green when two of the three gates go away.
+    //
+    // The header is where Edit times, Merge, Rebuild from raw and Delete live,
+    // so the page the shared link resolves to is asked directly what it offers.
+    const { installDom } = await import("../test-dom.js");
+    const teardown = installDom();
+    try {
+      const { render, cleanup } = await import("@testing-library/react");
+      const React = (await import("react")).default;
+      const { TooltipProvider } = await import("../components/ui/index.js");
+      const { ServiceHeader } = await import("../settings/sections/history-service-header.js");
+      const view = render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(ServiceHeader, {
+            timeline: {
+              serviceKey: "k",
+              planTitle: "Evening",
+              serviceDate: "2026-09-17",
+              serviceTimeStartsAt: null,
+              startedAt: "2026-09-17T20:15:00.000Z",
+              endedAt: "2026-09-17T21:45:00.000Z",
+              items: [],
+            } as unknown as ServiceTimeline,
+            attendance: null,
+            spl: null,
+            readOnly: true,
+            meta: "Evening",
+            onBack: () => {},
+            onEditTimes: () => {},
+            onCopyReport: () => {},
+            onMerge: () => {},
+            onRebuild: () => {},
+            onDelete: () => {},
+            onResetPacing: () => {},
+          }),
+        ),
+      );
+      const labels = [...view.container.querySelectorAll('[data-testid="history-actions"] button')]
+        .map((b) => (b.textContent ?? "").replace(/\s+/g, " ").trim());
+      assert.deepEqual(
+        labels,
+        ["Copy report"],
+        "the shared link must offer nothing that changes or deletes a recording",
+      );
+      cleanup();
+    } finally {
+      teardown();
+    }
+  });
+
+  it("the day list's Delete stays gated too", () => {
+    // The other destructive control on the page, and the one the header does
+    // not own: one Delete per day-list row, in each of the two row shapes (a
+    // normal recording and an attendance-only arrival ramp). An EXACT count,
+    // not a floor — a floor is how a gate goes missing with the suite green.
     const section = readFileSync(
       new URL("../settings/sections/service-history-section.tsx", import.meta.url),
       "utf8",
     );
-    const gated = [...section.matchAll(/\{!readOnly &&/g)];
-    assert.ok(
-      gated.length >= 3,
-      `only ${gated.length} controls are gated on readOnly — Edit times, Merge and Delete were`,
+    assert.equal(
+      [...section.matchAll(/\{!readOnly &&/g)].length,
+      2,
+      "the two day-list Delete buttons must each be gated on readOnly",
     );
   });
 });

@@ -8,6 +8,7 @@ import {
   CustomizePopover,
   HistoryChart,
   hasStoredChoice,
+  readStoredKeys,
   seedStoredKeys,
   serviceWindowOf,
   useStoredKeys,
@@ -41,6 +42,40 @@ function defaultVisible(keys: string[]): string[] {
 
 function dB(v: number | null): string {
   return v == null ? "—" : `${Math.round(v)} dB`;
+}
+
+/** Every Smaart metric a record carries, sorted. One definition: the section's
+ *  columns, its legend and the service header's peak KPI all ask this. */
+function metricKeysOf(record: ServiceSplHistory): string[] {
+  const keys = new Set<string>();
+  for (const it of record.items) if (it.metrics) for (const k of Object.keys(it.metrics)) keys.add(k);
+  if (record.metricKey) keys.add(record.metricKey);
+  return Array.from(keys).sort();
+}
+
+/**
+ * The PRIMARY metric this browser surfaces and what the service peaked at on it.
+ *
+ * The primary is the first of the operator's chosen metrics that this record
+ * actually carries — the same rule `SplDetail` uses for its peak marks and its
+ * "Peak <metric>" figure, read from the same localStorage entry, so the header
+ * and the section below it can never name different metrics.
+ *
+ * Read rather than hooked: the header needs one number, not the whole
+ * preference machinery, and `SplDetail` — rendered on the same page — owns the
+ * seed from the server.
+ */
+export function servicePeakLevel(record: ServiceSplHistory | null): { metric: string; db: number } | null {
+  if (!record || !record.items.length) return null;
+  const all = metricKeysOf(record);
+  if (!all.length) return null;
+  const chosen = readStoredKeys(SPL_METRICS_STORAGE_KEY, null, defaultVisible(all));
+  const primary = chosen.find((k) => all.includes(k));
+  if (!primary) return null;
+  const maxes = record.items
+    .map((it) => metricStat(it, primary, record)?.max)
+    .filter((v): v is number => v != null);
+  return maxes.length ? { metric: primary, db: Math.max(...maxes) } : null;
 }
 
 /** Which at-rest figures the sound strip shows. Its own localStorage entry: the
@@ -189,12 +224,7 @@ export function SplDetail({
     if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
   }
 
-  const allKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const it of detail.items) if (it.metrics) for (const k of Object.keys(it.metrics)) keys.add(k);
-    if (detail.metricKey) keys.add(detail.metricKey);
-    return Array.from(keys).sort();
-  }, [detail]);
+  const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
 
 
   /**

@@ -398,6 +398,18 @@
   .su-history-pulse {
     animation: su-history-pulse 1.6s ease-in-out infinite;
   }
+  /* The same beat on an HTML dot — the service header's `recording` pill.
+     Opacity only: `r` is an SVG geometry property and does nothing here, and a
+     transform-scale pulse on a 6px dot reads as a wobble rather than a heartbeat.
+     The reduced-motion block below collapses it, and the pill's caller also
+     drops the class outright. */
+  @keyframes su-history-pulse-dot {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+  .su-history-pulse-dot {
+    animation: su-history-pulse-dot 1.6s ease-in-out infinite;
+  }
   /* One place that honours the operating system's reduced-motion setting, rather
      than per-component motion-reduce: variants that each have to be remembered.
      Not `animation: none` globally - a spinner that stops spinning reads as a
