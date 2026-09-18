@@ -29,7 +29,7 @@ import { installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, act } = await import("@testing-library/react");
+const { render, screen, cleanup, act, within } = await import("@testing-library/react");
 const React = await import("react");
 const { SplDetail } = await import("./spl-history-section.js");
 
@@ -77,11 +77,14 @@ const DETAIL = {
 test("two runs of one item are two rows, with no duplicate-key warning", async () => {
   // The metric picker asks the server which metrics to surface on mount.
   const beforeFetch = globalThis.fetch;
-  globalThis.fetch = (async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ metrics: [METRIC] }),
-  })) as unknown as typeof fetch;
+  // Routed by URL. A single catch-all answer handed the SERIES route the
+  // visible-metrics body, and the section then read `.buckets` off it — a
+  // stub that answers everything with one shape tests the stub.
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/series")) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+    return { ok: true, status: 200, json: async () => ({ metrics: [METRIC] }) };
+  }) as unknown as typeof fetch;
   const errors: string[] = [];
   const beforeError = console.error;
   console.error = (...args: unknown[]) => {
@@ -98,9 +101,13 @@ test("two runs of one item are two rows, with no duplicate-key warning", async (
       await Promise.resolve();
     });
 
-    assert.equal(screen.queryAllByText("Doors").length, 2, "the two runs are not both on screen");
-    assert.equal(screen.queryAllByText("104 dB").length, 1, "the first run's peak is missing");
-    assert.equal(screen.queryAllByText("78 dB").length, 1, "the re-run's own peak is missing");
+    // Scoped to the TABLE. The section now draws the chart module above it, and
+    // the chart names items too — in its lane and in its stat strip — so a
+    // page-wide query counts a title three times and says nothing about rows.
+    const table = within(screen.getByRole("table"));
+    assert.equal(table.queryAllByText("Doors").length, 2, "the two runs are not both on screen");
+    assert.equal(table.queryAllByText("104 dB").length, 1, "the first run's peak is missing");
+    assert.equal(table.queryAllByText("78 dB").length, 1, "the re-run's own peak is missing");
     assert.deepEqual(
       errors.filter((e) => e.includes("same key")),
       [],

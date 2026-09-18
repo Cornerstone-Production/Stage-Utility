@@ -1127,7 +1127,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
           <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
           {spl ? (
-            <SplDetail detail={spl} />
+            <SplDetail
+              // KEYED BY THE RECORD. The section fetches the raw series on
+              // mount; without a key React keeps the same component across a
+              // service switch and the previous service's line stays on screen
+              // until the new fetch lands.
+              key={spl.serviceKey}
+              detail={spl}
+              timeline={detail}
+              attendance={attendance}
+            />
           ) : (
             <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
           )}
@@ -1174,7 +1183,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
           <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
           {spl ? (
-            <SplDetail detail={spl} />
+            <SplDetail
+              // KEYED BY THE RECORD. The section fetches the raw series on
+              // mount; without a key React keeps the same component across a
+              // service switch and the previous service's line stays on screen
+              // until the new fetch lands.
+              key={spl.serviceKey}
+              detail={spl}
+              timeline={detail}
+              attendance={attendance}
+            />
           ) : (
             <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
           )}
