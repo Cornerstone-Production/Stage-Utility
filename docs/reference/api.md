@@ -267,9 +267,12 @@ service is thousands of rows per metric and no plot is that wide:
 
 `t` is epoch ms at the bucket's start. `max` is the loudest single reading in
 it; `avg` is the bucket's **energy** average (Leq), not an arithmetic mean —
-decibels are logarithmic. Buckets are anchored to the first row, so a service
+decibels are logarithmic. Both are rounded to two decimal places, which is what
+a meter reports. Buckets are anchored to the earliest row, so a service
 beginning at 19:47:13 does not open with a part-empty one, and a bucket the
-meter said nothing in is absent rather than zero.
+meter said nothing in is absent rather than zero. One bucket is emitted once
+however the rows are ordered on disk — rolled files and merged services do not
+arrive in time order.
 
 `bucketSec` in the answer may be **wider** than the one asked for: the series is
 capped at ~2,000 buckets and the width grows to fit rather than the window being

@@ -58,12 +58,35 @@ function splCsv(): string {
   return [head, ...lines].join("\n");
 }
 
+const ROLLED_KEY = "75953:909:2253";
+
+/** The second half of the same ten minutes, as a rolled file — what
+ *  csv-appender.ts writes when the meter's column set changes mid-service, and
+ *  what a history merge moves between directories. */
+function rolledCsv(from: number, to: number): string {
+  const head = "at,itemId,item,SPL A Fast,LAeq 1";
+  const lines = [];
+  for (let i = from; i < to; i++) {
+    lines.push(`${new Date(T0 + i * 1000).toISOString()},item-a,Message,85,81`);
+  }
+  return [head, ...lines].join("\n");
+}
+
 before(async () => {
   await splHistoryStore.upsert(record(KEY) as never);
   await splHistoryStore.upsert(record(NO_RAW_KEY) as never);
+  await splHistoryStore.upsert(record(ROLLED_KEY) as never);
   const dir = serviceDirPath(KEY, DATE);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "spl.csv"), splCsv(), "utf8");
+
+  // A service whose rows are split across TWO files, with the later seconds in
+  // spl.csv and the earlier ones in spl.2.csv — so file order is not time
+  // order, which is exactly what a merge produces.
+  const rolledDir = serviceDirPath(ROLLED_KEY, DATE);
+  await fs.mkdir(rolledDir, { recursive: true });
+  await fs.writeFile(path.join(rolledDir, "spl.csv"), rolledCsv(30, 60), "utf8");
+  await fs.writeFile(path.join(rolledDir, "spl.2.csv"), rolledCsv(0, 30), "utf8");
 });
 
 after(() => {
@@ -127,6 +150,23 @@ describe("GET /api/spl/history/:key/series", () => {
   test("404 for a service key that is not a record", async () => {
     const r = await callRoute(statusRoutes, url("nope:nope:nope"));
     assert.equal(r.status, 404);
+  });
+
+  test("a rolled spl.2.csv is read into ONE series, in time order", async () => {
+    // readArchiveRows walks spl.csv then spl.2.csv, so a service whose earlier
+    // seconds live in the rolled file arrives back-to-front. Every bucket must
+    // still be distinct and in order — the defect was one bucket emitted twice
+    // at the same t, drawing a vertical spike through the plot.
+    const r = await callRoute(statusRoutes, url(ROLLED_KEY, "?metric=SPL%20A%20Fast&bucketSec=5"));
+    assert.equal(r.status, 200);
+    const buckets = (r.json as { buckets: { t: number }[] }).buckets;
+    assert.equal(buckets.length, 12, `${buckets.length} buckets for sixty seconds at five`);
+    assert.equal(new Set(buckets.map((b) => b.t)).size, buckets.length, "a bucket was emitted twice");
+    for (let i = 1; i < buckets.length; i++) {
+      assert.ok(buckets[i].t > buckets[i - 1].t, "out of time order");
+    }
+    // It starts at the EARLIEST row, which lives in the rolled file.
+    assert.equal(buckets[0].t, T0);
   });
 
   test("the single-segment record route still answers, unshadowed", async () => {

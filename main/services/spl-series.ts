@@ -79,40 +79,65 @@ export function clampBucketSec(sec: unknown): number {
  * with a zero: the chart breaks its line across a hole, and a 0 dB sample would
  * draw a spike to the floor of the plot through a minute the meter was simply
  * unreachable.
+ *
+ * ACCUMULATED IN A MAP, not streamed. Rows reach here in FILE order, which is
+ * time order only while nothing has been appended out of sequence — and things
+ * have: `readArchiveRows` walks `spl.csv`, `spl.2.csv`, … in roll order, and a
+ * merge moves one service's rolled files into another's directory (see
+ * archive-rows.ts and merge-records.ts). A streaming accumulator closes its
+ * bucket the moment the index changes, so rows for one bucket arriving in two
+ * runs emitted that bucket TWICE, at the same `t` — two points on one x, which
+ * draws a vertical spike through the plot and doubles the weight of whatever
+ * was in it.
  */
 export function bucketSeries(rows: readonly ArchiveRow[], metric: string, bucketSec: number): SplBucket[] {
   const width = clampBucketSec(bucketSec) * 1000;
+  // The anchor is the EARLIEST usable row, not the first one seen, so an
+  // interleaved file cannot move the bucket boundaries by a few seconds
+  // depending on which run happened to be read first.
   let anchor = NaN;
-  const out: SplBucket[] = [];
-  let open: { index: number; max: number; leq: number | null; count: number } | null = null;
-
-  const flush = () => {
-    if (open && open.leq != null) out.push({ t: anchor + open.index * width, max: open.max, avg: open.leq });
-    open = null;
-  };
-
   for (const row of rows) {
-    const raw = row[metric];
-    if (raw == null || raw === "") continue;
-    const v = Number(raw);
-    if (!Number.isFinite(v)) continue;
+    if (!usable(row, metric)) continue;
     const at = Date.parse(row.at ?? "");
-    if (!Number.isFinite(at)) continue;
-    if (!Number.isFinite(anchor)) anchor = at;
-    const index = Math.floor((at - anchor) / width);
-    if (!open || open.index !== index) {
-      flush();
-      open = { index, max: v, leq: null, count: 0 };
-    }
-    open.max = Math.max(open.max, v);
-    open.leq = addLeqSample(open.leq, open.count, v);
-    open.count += 1;
+    if (!Number.isFinite(anchor) || at < anchor) anchor = at;
   }
-  flush();
-  // Rows are appended in time order, but a rolled file can land out of order
-  // after a merge (see archive-rows.ts), and an unsorted series draws as a
-  // scribble rather than as a line.
+  if (!Number.isFinite(anchor)) return [];
+
+  const open = new Map<number, { max: number; leq: number | null; count: number }>();
+  for (const row of rows) {
+    if (!usable(row, metric)) continue;
+    const v = Number(row[metric]);
+    const index = Math.floor((Date.parse(row.at as string) - anchor) / width);
+    let b = open.get(index);
+    if (!b) open.set(index, (b = { max: v, leq: null, count: 0 }));
+    b.max = Math.max(b.max, v);
+    b.leq = addLeqSample(b.leq, b.count, v);
+    b.count += 1;
+  }
+
+  const out: SplBucket[] = [];
+  for (const [index, b] of open) {
+    if (b.leq == null) continue;
+    out.push({ t: anchor + index * width, max: round2(b.max), avg: round2(b.leq) });
+  }
+  // A Map iterates in insertion order, which is file order. Sorted, because an
+  // unsorted series draws as a scribble rather than as a line.
   return out.sort((a, b) => a.t - b.t);
+}
+
+/** A row that carries a finite reading for `metric` at a parsable time. */
+function usable(row: ArchiveRow, metric: string): boolean {
+  const raw = row[metric];
+  if (raw == null || raw === "") return false;
+  if (!Number.isFinite(Number(raw))) return false;
+  return Number.isFinite(Date.parse(row.at ?? ""));
+}
+
+/** Two decimal places. A meter reports two; carrying the float's full expansion
+ *  put 14 significant figures of noise into every bucket of a 2,000-bucket
+ *  response, for a line drawn at one point per pixel. */
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 /** Every metric column present in a set of raw rows, sorted. The three fixed

@@ -83,7 +83,9 @@ describe("bucketSeries", () => {
     const out = bucketSeries(rows(5, (i) => spiky[i]), "SPL A Fast", 5);
     assert.equal(out.length, 1);
     const arithmetic = spiky.reduce((a, b) => a + b, 0) / spiky.length;
-    assert.ok(Math.abs(out[0].avg - (leqOf(spiky) as number)) < 1e-9, `${out[0].avg} is not the Leq`);
+    // Within the rounding the response carries (two places), not exactly — the
+    // point is that it is the Leq and not the mean.
+    assert.ok(Math.abs(out[0].avg - (leqOf(spiky) as number)) < 0.005, `${out[0].avg} is not the Leq`);
     assert.ok(out[0].avg - arithmetic > 5, `${out[0].avg} is too close to the arithmetic ${arithmetic}`);
   });
 
@@ -144,6 +146,52 @@ describe("bucketSeries", () => {
     const shuffled = [...rows(20, (i) => 80 + i)].reverse();
     const out = bucketSeries(shuffled, "SPL A Fast", 5);
     for (let i = 1; i < out.length; i++) assert.ok(out[i].t > out[i - 1].t, "out of order");
+  });
+
+  test("INTERLEAVED rows for one bucket make ONE bucket, not two at the same t", () => {
+    // The real shape, and the one a reversal does not produce: readArchiveRows
+    // walks spl.csv then spl.2.csv, and a merge moves one service's rolled files
+    // into another's directory — so rows for a single five-second bucket arrive
+    // in two runs with other seconds in between. A streaming accumulator closes
+    // its bucket the moment the index changes and emits that bucket twice, at
+    // the SAME t: two points on one x, a vertical spike through the plot, and
+    // double weight on whatever was in it.
+    //
+    // Seconds 0..9 as two files: even seconds first, then odd.
+    const all = rows(10, (i) => 80 + i);
+    const interleaved = [...all.filter((_, i) => i % 2 === 0), ...all.filter((_, i) => i % 2 === 1)];
+    const out = bucketSeries(interleaved, "SPL A Fast", 5);
+
+    assert.equal(out.length, 2, `${out.length} buckets for ten seconds at five`);
+    assert.equal(new Set(out.map((b) => b.t)).size, out.length, "two buckets share a timestamp");
+    // And they carry EVERY row, not just the run that happened to be first.
+    assert.deepEqual(out.map((b) => b.max), [84, 89]);
+    // Same answer as the contiguous read of the same rows.
+    assert.deepEqual(out, bucketSeries(all, "SPL A Fast", 5));
+  });
+
+  test("the anchor is the earliest row, not the first one read", () => {
+    // Otherwise an out-of-order file moves every bucket boundary by a few
+    // seconds depending on which run was read first, and two reads of the same
+    // archive answer differently.
+    // Rotated by THREE, not five: a rotation that lands on a bucket boundary
+    // moves every index by a whole bucket and gives the same timestamps back by
+    // luck, so it proves nothing. Values vary for the same reason.
+    const all = rows(10, (i) => 80 + i);
+    const laterFirst = [...all.slice(3), ...all.slice(0, 3)];
+    assert.deepEqual(bucketSeries(laterFirst, "SPL A Fast", 5), bucketSeries(all, "SPL A Fast", 5));
+  });
+
+  test("levels are rounded to two decimal places", () => {
+    // A meter reports two. Carrying the float's full expansion put fourteen
+    // significant figures of noise into every bucket of a 2,000-bucket
+    // response, for a line drawn at one point per pixel.
+    const out = bucketSeries(rows(5, (i) => 80 + i / 3), "SPL A Fast", 5);
+    for (const b of out) {
+      assert.equal(b.max, Math.round(b.max * 100) / 100, `max ${b.max}`);
+      assert.equal(b.avg, Math.round(b.avg * 100) / 100, `avg ${b.avg}`);
+      assert.ok(String(b.avg).replace(/^-?\d+\.?/, "").length <= 2, `avg ${b.avg} has too many places`);
+    }
   });
 
   test("nothing in, nothing out", () => {
