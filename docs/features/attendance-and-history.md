@@ -108,10 +108,21 @@ number for that reason.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
 or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
-each day's highest reading; a **dot** marks every individual recording, so a week
-that stood for three services still looks like three. A recording with nothing
-under the current measure is not plotted at all, because a service nobody counted
-is not a service of nobody, and one with no meter running is not a silent one.
+each day's highest reading, and every line is the same weight: they are peers,
+not a measurement and its references. A recording with nothing under the current
+measure is not plotted at all, because a service nobody counted is not a service
+of nobody, and one with no meter running is not a silent one.
+
+Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
+change figure, its line, its legend swatch and its milestones. The colour is
+assigned per service type the first time it is seen and then persisted, so it
+does not follow the sort order — it does not change when you switch measure or
+range, when a quiet type has a loud week, or when a type misses a week.
+
+**Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
+tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
+and the figures above the plot together; its legend entry stays, dimmed, and
+clicking it brings the type back. The choice is remembered per browser.
 
 The sound measure reads each recording's peak from the **SPL summary**, which
 this page already loads — not from the per-item records. Recordings made before
@@ -134,9 +145,9 @@ They come from two places, and draw alike:
 
 A milestone scoped to **one service type** draws only while that type's line is
 on, in that line's colour. One that applies to everything stays neutral — a
-colour would claim a series it has not got. The legend under the chart is the
-switch: clicking a service type takes its line off, and its milestones with it.
-That choice is remembered per browser, like the range.
+colour would claim a series it has not got. Hiding a service type takes its
+milestones with it. The legend names the triangles — *▲ milestone · hover for
+the label* — so the marks under the axis are not an unexplained row.
 
 Each mark is focusable as well as hoverable, and carries its full label as its
 accessible name: the triangle is a few pixels of glyph holding the only copy of
@@ -158,12 +169,15 @@ If the milestone list cannot be read at all, the card says *milestones
 unavailable* and the reason is logged. The derived series-change marks still
 draw.
 
-The **calendar** shades a day by how many services were recorded on it, in four
-steps, with everything at four or more on the darkest. There is no dot and no
-count in the cell: the day number sits alone and the shade carries the rest,
-with the count on the cell's tooltip and its accessible name. Today is outlined
-in the accent and the selected day carries a heavier accent ring; neither fills
-the cell, so the shade still shows underneath.
+The **calendar** shades a day **green** by how many services were recorded on it,
+in four steps, with everything at four or more on the darkest. There is no dot
+and no count in the cell: the day number sits alone and the shade carries the
+rest, with the count on the cell's tooltip and its accessible name. Today is
+outlined in the accent and the selected day carries a heavier accent ring;
+neither fills the cell, so the shade still shows underneath — and neither shares
+a colour with the shade, so the accent means "the day you are looking at" and
+nothing else. One sentence under the grid says what the shade is, in place of a
+row of tinted swatches repeating the grid above it.
 
 The **list** beside it is the selected day's services. Each row carries the start
 time and service type, the plan title, the series and how many items ran, then
@@ -192,15 +206,14 @@ history could not be read", or *sound unavailable* on the Trends card — rather
 than showing the copy for a history that is genuinely empty. The reason is on a
 `[history]` line on the server log, one per thing that failed.
 
-Below the list is an **Overview** of how the services themselves ran — how many,
-their average length, average start against the scheduled time, and average
-per-item overrun — plus the average sound level, which Trends does not plot.
-Right-click it (or tap and hold) to pick the Smaart metric it reports — only
-metrics with a level to report are offered, so a meter that recorded peaks and
-no energy average is not offered as a choice that would come back blank. It carries no attendance figure and no attendance
-chart: Trends, at the top of the page, plots attendance over a chosen range, and
-two charts of the same quantity over different windows disagreed with each
-other.
+**Export** is a button in the Recorded services header. It opens a date range —
+blank for all dates — and a list of sheets, and downloads them as one `.xlsx`.
+It reads only, so it is offered on the shared `/history` link too.
+
+The page carries no Overview card. Every figure it blended across a service type
+— average length, average start against schedule, average per-item overrun, peak
+and level — is on the service page's own KPI row, against the service it belongs
+to, where it means something specific rather than something all-time.
 
 The shared `/history` link shows the same figures; it carries no Delete.
 

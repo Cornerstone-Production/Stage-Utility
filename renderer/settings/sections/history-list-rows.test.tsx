@@ -390,3 +390,43 @@ describe("a history load that failed, rather than came back empty", () => {
     assert.ok(view.container.querySelectorAll("[data-history-row]").length > 0, "the day list went too");
   });
 });
+
+describe("what the All services page is made of", () => {
+  // The page composition itself, because two of the three things here are a
+  // REMOVAL and a MOVE: a removal nothing asserts comes back on the next merge,
+  // and a shipped feature moved behind a button is one refactor away from being
+  // a shipped feature that is gone.
+
+  test("there is no Overview card, and Export is in the Recorded services header", async () => {
+    installFetch();
+    const view = await renderList();
+    const text = view.container.textContent ?? "";
+
+    // GONE. Its five figures were an all-time blend across one service type;
+    // every one of them is on the service page's own KPI row instead.
+    assert.ok(!text.includes("Avg length"), "the Overview card is still on the page");
+    assert.ok(!text.includes("Avg start"), "the Overview card is still on the page");
+    assert.equal(
+      view.container.querySelector('[aria-label="Overview service type"]'),
+      null,
+      "the Overview scope picker is still there",
+    );
+
+    // MOVED, not removed. Export is a shipped feature.
+    assert.ok(text.includes("Recorded services"), "the list card has no title");
+    const exportTrigger = view.container.querySelector('[aria-label="Export"]');
+    assert.ok(exportTrigger, "Export is gone from the page entirely");
+    assert.equal(exportTrigger.closest("[data-history-row]"), null, "Export landed inside a service row");
+    // In the HEADER, beside the title — not floating somewhere else on the page.
+    const header = [...view.container.querySelectorAll("h3")]
+      .find((h) => h.textContent?.trim() === "Recorded services")?.parentElement;
+    assert.ok(header?.contains(exportTrigger), "Export is not in the Recorded services header");
+  });
+
+  test("the header says which day it is showing and how many services", async () => {
+    installFetch();
+    const view = await renderList();
+    const text = view.container.textContent ?? "";
+    assert.match(text, /Showing .+ · 2 services/, `no count in the header: ${text.slice(0, 400)}`);
+  });
+});

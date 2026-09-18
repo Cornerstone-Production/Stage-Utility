@@ -61,6 +61,23 @@ peak mark for the sound chart (a 3px tick in the series colour).
 > peaked at N" — and on the top edge rather than through the middle, because a
 > full-height tick struck through the item's own label.
 >
+> **Reversed on the maintainer's review.** A 4px nub on a block's top edge, in
+> a colour, with nothing on the page naming it, was an unexplained chip. It is
+> the FULL height of the block, drawn under the label rather than shortened to
+> dodge it, named **Item peak** in the legend, and switchable under Chart in
+> Customize.
+>
+> **The lane's PLANNED figure.** The plan to fill it in on the sound chart said
+> to pass `it.plannedLengthSec` the way the attendance section does.
+> `SplItemHistory` has no such field — it is a title, a sequence and per-metric
+> stats — so the section takes it from the TIMELINE record it is already given,
+> keyed by `itemId` like the existing `preService` lookup.
+>
+> **The dashed line is a Leq, and now says so.** It was labelled "Average",
+> which names an arithmetic mean of decibels; the line is the bucket's energy
+> average, which is a different and higher number. The arithmetic was always
+> right and the label was always wrong.
+>
 > The same gap decides what the sound LINE is: a step, each item's Leq held flat
 > across the time it ran, not a sampled curve. And it has no gradient fill — a
 > fill runs to the axis floor, and a dB axis has no floor that means anything.
@@ -111,6 +128,20 @@ KEPT, below Trends — this section describes what leads, not what the page is
 allowed to contain, and removing a working view is not a decision a silence
 makes.
 
+> **Reversed on the maintainer's review of the built page.** The whole-tab v4
+> mockup is the spec for this page, and it has neither. The Overview card is
+> REMOVED: its figures were an all-time blend across one service type, and every
+> one of them is on the service page's own KPI row against the service it
+> belongs to. `OverviewBlend` is deleted with it; `computeOverview` stays,
+> because Home's Recent services card calls it. `spl:getTrendPrefs` /
+> `spl:setTrendPrefs` lose their last renderer caller and are listed in
+> `api-channels.test.ts` with the reason — the stored choice is the operator's
+> own and is not deleted to tidy up.
+>
+> Export is a shipped feature and is MOVED, not removed: a button in the
+> Recorded services header opening the same range-and-sheets builder in a
+> popover.
+
 > **Trimmed after review.** The Overview kept its own average attendance, its
 > peak, and an attendance chart, over a different window than Trends and with a
 > different average — two charts of one quantity on one screen that disagreed.
@@ -128,9 +159,12 @@ makes.
 > The SPL line is the one real loss and is named rather than implied. The
 > chart component itself still serves Home's Recent services card.
 
-**Calendar.** Shade is the number of services that day in four steps. No dots,
-no counts; the shade alone carries it. The day number is centred in its cell.
-Today is outlined in the accent; the selected day carries the accent ring.
+**Calendar.** Shade is the number of services that day in four steps, in GREEN
+— the accent rings today and the selected day on the same grid, so shading with
+it too gave one colour two meanings. No dots, no counts; the shade alone carries
+it. Cells are square. The day number is centred in its cell. Today is outlined
+in the accent; the selected day carries the accent ring. One sentence under the
+grid says what the shade is, in place of the row of tinted swatches.
 
 **List.** Grouped by day. Each row: time and service type, plan title and
 series with item count, then peak attendance, ran, versus plan, and the peak on
@@ -139,6 +173,17 @@ page's own header has named the metric it actually read since PR 2, because a
 church metering LCeq is not told it peaked at an LAeq it never recorded. The row
 figures are picked out of `serviceKpis` by key rather than derived again, so a
 week reads at a glance and a row cannot disagree with the page it opens.
+
+> **Not built: the mockup's column-header row.** The mockup's rows are uniform,
+> so a WHEN / SERVICE / PEAK / RAN / VS PLAN / PEAK DB header sits over six
+> columns that are always there. The real rows' figure set VARIES —
+> `serviceRowFigures` drops `vs plan` on a live recording and whenever the plan
+> total is unknown, and an attendance-only arrival row has a different shape
+> entirely — so a fixed header would name columns that are not under it. Each
+> figure keeps its own 10px uppercase label on the row instead, which is what
+> makes a varying set readable. A chevron at the row's right end was added; the
+> delete control stays visible rather than moving behind hover, because this
+> page is driven on a tablet beside a console and hover is not a gesture there.
 
 > **Corrected during PR 3.** The row needs the FULL SPL record for a peak;
 > `spl:getSummary`, which the list already held, carries a service-level Leq per

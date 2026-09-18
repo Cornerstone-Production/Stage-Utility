@@ -102,3 +102,27 @@ test("a day cell prints its day number and nothing else", () => {
   assert.deepEqual(offenders, [], "a day cell rendered something that is not its day number");
   r.unmount();
 });
+
+test("the shade is green, and the accent is left to mean 'this is the day you picked'", () => {
+  // The accent rings TODAY and the SELECTED day on this same grid. Shading the
+  // fill with it too gave one colour two meanings a cell apart. Asserted on the
+  // inline style the component PUT on the element — a token named anywhere else
+  // in the file cannot satisfy it.
+  const { r, seventh, cells } = renderMonth(3);
+  assert.match(seventh.style.backgroundColor, /--color-green-9/, `the shade is ${seventh.style.backgroundColor}`);
+  const accented = cells.filter((c) => c.style.backgroundColor.includes("--color-accent"));
+  assert.deepEqual(accented.map((c) => c.getAttribute("data-date")), [], "a cell is FILLED with the accent");
+  r.unmount();
+});
+
+test("the shade is explained in a sentence, not a row of tints", () => {
+  // Four swatches and their numbers under a grid of the same four tints is the
+  // same picture twice, and the question a shaded grid raises is what the shade
+  // is, not which of four a given cell is. The count is on the tooltip.
+  const { r } = renderMonth(3);
+  const text = r.container.textContent ?? "";
+  assert.ok(text.includes("Shade is how many services ran that day."), `no explanation: ${text}`);
+  assert.ok(text.includes("Today is outlined."), "the outline is not explained either");
+  assert.ok(!text.includes("4+"), "the old step legend is still there");
+  r.unmount();
+});
