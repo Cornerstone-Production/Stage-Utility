@@ -108,16 +108,16 @@ export function applyItemTimeEdits(record: ServiceTimeline): ItemTimeOverlay {
  * this is the only place that can see them, and an operator whose correction
  * stopped applying after a rebuild has nothing else to read.
  */
-export function overlaidTimeline(record: ServiceTimeline): ServiceTimeline;
-export function overlaidTimeline(record: ServiceTimeline | null): ServiceTimeline | null;
-export function overlaidTimeline(record: ServiceTimeline | null): ServiceTimeline | null {
-  if (!record) return null;
+export function overlaidTimeline(record: ServiceTimeline): ServiceTimeline {
   const { record: out, orphaned } = applyItemTimeEdits(record);
   if (orphaned.length) {
+    // Joined and scrubbed INSIDE the interpolation: log-injection.test.ts reads
+    // the source, and a value pre-scrubbed into a local reads to it as raw.
+    const runs = orphaned.map((e) => e.itemId + "#" + String(e.sequence));
     console.warn(
-      `[history] ${scrub(record.serviceKey)}: ${orphaned.length} item time edit(s) name a run this recording ` +
-        `no longer has (${orphaned.map((e) => `${scrub(e.itemId)}#${e.sequence}`).join(", ")}) — ` +
-        "kept in case the run comes back, but they are not being applied.",
+      `[history] ${scrub(record.serviceKey)}: ${scrub(orphaned.length)} item time edit(s) name a run ` +
+        `this recording no longer has (${scrub(runs.join(", "))}) — kept in case the run comes back, ` +
+        "but they are not being applied.",
     );
   }
   return out;

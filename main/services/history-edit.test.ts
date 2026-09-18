@@ -13,7 +13,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { ServiceAttendance } from "../types/stage.js";
+import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-edit-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -27,6 +27,7 @@ const { splRecorder } = await import("./spl-recorder.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { deleteServiceRecords, editServiceWindow, mergeServiceRecords, recalcAttendance, ServiceIsLiveError } =
   await import("./history-edit.js");
+const { applyItemTimeEdits } = await import("./history-item-times.js");
 
 const T0 = Date.parse("2026-08-09T14:00:00.000Z");
 
@@ -654,5 +655,30 @@ describe("mergeServiceRecords with an item that ran twice on the source", () => 
       ["doors", "song", "doors"],
       "runs taken from the source land where they happened, not after everything local",
     );
+  });
+
+  it("item time corrections follow their item through the merge's renumber", async () => {
+    // The merge re-sorts by start time and reassigns every sequence, and an item
+    // time edit is keyed by (itemId, sequence). Left alone, the operator's
+    // correction of the source's "song" would still be in the merged record and
+    // would land on whichever run took sequence 1.
+    await serviceTimelineStore.upsert(timeline("two-tgt", [tlItem("doors", 0, 0, 500)]));
+    const src = timeline("two-src", [tlItem("song", 0, 600_000, 300)]) as unknown as ServiceTimeline;
+    src.itemTimeEdits = [{ itemId: "song", sequence: 0, endedAt: iso(600_000 + 120_000), editedAt: iso(0) }];
+    await serviceTimelineStore.upsert(src as never);
+
+    await mergeServiceRecords("two-src", "two-tgt");
+
+    const tl = (await serviceTimelineStore.get("two-tgt"))!;
+    const song = tl.items.find((i) => i.itemId === "song")!;
+    assert.equal(song.sequence, 1, "precondition: the merge renumbered it");
+    assert.deepEqual(
+      tl.itemTimeEdits,
+      [{ itemId: "song", sequence: 1, endedAt: iso(720_000), editedAt: iso(0) }],
+      "the edit must be re-keyed onto the item's new sequence",
+    );
+    const effective = applyItemTimeEdits(tl).record;
+    assert.equal(effective.items[1].actualDurationSec, 120, "the correction still applies after a merge");
+    assert.equal(effective.items[0].editedFrom, undefined, "and did not land on the wrong row");
   });
 });

@@ -112,12 +112,28 @@ times, and per-person averages.
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
+**Edit times** also makes each item's own Started and Ended editable. An item
+that recorded wrong — a pre-roll that reads eleven minutes because the plan was
+still being shuffled in Planning Center — is corrected to what it actually ran,
+and the row's Actual, its delta, and the service's Actual and Avg overrun tiles
+all follow. A corrected row is marked **edited**, with the recorded times in its
+tooltip and a **Reset** beside it that puts them back.
+
+The correction is an overlay, not a rewrite. The recorded stamps stay exactly as
+the recorder wrote them, so Reset always has something to restore. Neighbouring
+items do not move: shortening an item leaves a gap before the next one, visible
+in the table, rather than inventing a time for an item nobody asked about. A
+correction has to fall inside the recording's own window and end after it starts
+— if the window itself is wrong, fix that first with the Start and End fields at
+the top.
+
 **Rebuild from raw**, beside the window editor, discards a recording's stored
 summaries and derives them again from the rows in the
 [data archive](../data-archive.md): item timings from the plan-item event rows,
 sound levels from the SPL samples, attendance from the record's own samples. For
 a capture the recorder got wrong — the raw rows are append-only and keep the
-evening as it happened. Hand edits to item times do not survive it.
+evening as it happened. Item time corrections survive it: they are an overlay
+over the rebuilt run, not a change to it.
 
 While a service is recording, **Reset pacing** (in the live service's detail
 here, and beside the Previous/Next controls wherever the console offers them)

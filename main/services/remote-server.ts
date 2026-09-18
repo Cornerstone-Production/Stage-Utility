@@ -51,6 +51,7 @@ import { smaartService } from "./smaart-service.js";
 import { splRecorder } from "./spl-recorder.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+import { overlaidTimeline } from "./history-item-times.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
 import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
@@ -185,8 +186,9 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * What an unhandled throw out of a route module answers.
  *
  * Some failures are the caller's situation, not a broken server, and the
- * difference matters to the UI: an oversized body is 413, and editing a service
- * that is recording right now is 409. Anything a route did not deliberately
+ * difference matters to the UI: an oversized body is 413, editing a service that
+ * is recording right now is 409, and a correction the record itself refuses —
+ * an item end before its start — is 400. Anything a route did not deliberately
  * label stays a 500 — a status is opt-in so a stray `status` field on some
  * unrelated error cannot turn a real fault into a 2xx-ish answer the caller
  * shrugs off.
@@ -197,7 +199,7 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  */
 export function handlerErrorStatus(err: unknown): number {
   const declared = (err as { status?: number } | null)?.status;
-  return declared === 413 || declared === 409 ? declared : 500;
+  return declared === 413 || declared === 409 || declared === 400 ? declared : 500;
 }
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
@@ -322,7 +324,8 @@ function writeHelloBurst(res: EventSink): void {
   sseWrite(res, "spl:metrics", smaartService.getLatest());
   sseWrite(res, "spl:history", splRecorder.getCurrent());
   sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
-  sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
+  const liveTimeline = serviceTimelineRecorder.getCurrent();
+  sseWrite(res, "service-timeline:history", liveTimeline && overlaidTimeline(liveTimeline));
   sseWrite(res, "baptism:state", baptismTimerService.getState());
   sseWrite(res, "obs:status", obsService.getLatest());
   sseWrite(res, "reaper:status", reaperService.getLatest());

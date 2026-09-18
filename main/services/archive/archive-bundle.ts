@@ -145,6 +145,12 @@ export async function buildArchive(): Promise<Uint8Array> {
   const encode = (v: unknown) => strToU8(JSON.stringify(v, null, 2));
   files["stores/spl-history.json"] = encode({ services: byKey(await splHistoryStore.list()) });
   files["stores/attendance-history.json"] = encode({ services: byKey(await attendanceStore.list()) });
+  // RAW records, deliberately — including `itemTimeEdits` rather than the times
+  // they resolve to. This bundle round-trips back into the store, so baking an
+  // operator's item time correction into the items would make it permanent and
+  // take Reset (and a rebuild from events.csv) with it. The History workbook
+  // does the opposite and exports the effective times, because that one is a
+  // report, not a backup.
   files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.list()) });
   try {
     files["stores/baptism.json"] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), "baptism.json")));

@@ -15,7 +15,6 @@ import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { baptismTimerService } from "../baptism-timer-service.js";
-import { broadcast } from "../broadcaster.js";
 import { clockOf } from "../app-timezone.js";
 import { scrub } from "../scrub.js";
 import {
@@ -25,7 +24,9 @@ import {
   rebuildServiceRecords,
   recalcAttendance,
   setItemCounted,
+  setItemTimes,
 } from "../history-edit.js";
+import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -76,6 +77,36 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: true });
       return;
     }
+    // Correct ONE run of ONE item's recorded start/end. Keyed by sequence as well
+    // as id because an item can run twice in a record and a timing is a statement
+    // about one run, not about the plan item (unlike item-counted above).
+    //
+    // An ABSENT field leaves that override alone; an explicit null clears it.
+    // Answers the updated record so the panel renders the effective times
+    // without a second read.
+    if (method === "POST" && pathname === "/api/history/item-times") {
+      const body = await readBodyOrEmpty(req);
+      if (
+        typeof body.serviceKey !== "string" ||
+        typeof body.itemId !== "string" ||
+        typeof body.sequence !== "number"
+      ) {
+        error(res, "body.serviceKey + body.itemId (strings) and body.sequence (number) required");
+        return;
+      }
+      const times: { startedAt?: string | null; endedAt?: string | null } = {};
+      for (const field of ["startedAt", "endedAt"] as const) {
+        if (!(field in body)) continue;
+        const v = body[field];
+        if (v !== null && typeof v !== "string") {
+          error(res, `body.${field} must be an ISO string, or null to clear it`);
+          return;
+        }
+        times[field] = v;
+      }
+      json(res, await setItemTimes(body.serviceKey, body.itemId, body.sequence, times));
+      return;
+    }
     if (method === "POST" && pathname === "/api/history/merge") {
       const body = await readBodyOrEmpty(req);
       if (typeof body.sourceKey !== "string" || typeof body.targetKey !== "string") {
@@ -114,7 +145,8 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
 
     // ── Service timeline (actual rundown timing; mirrors the SPL/attendance routes) ──
     if (method === "GET" && pathname === "/api/service-timeline/current") {
-      json(res, serviceTimelineRecorder.getCurrent());
+      const live = serviceTimelineRecorder.getCurrent();
+      json(res, live && overlaidTimeline(live));
       return;
     }
     if (method === "POST" && pathname === "/api/service-timeline/current/reset-pacing") {
@@ -131,15 +163,15 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       const nowIso = new Date().toISOString();
       current.pacingResetAt = nowIso;
       await serviceTimelineStore.upsert(current);
-      broadcast("service-timeline:history", current);
+      broadcastTimeline(current);
       console.log(
         `[service-timeline] pacing reset by operator at ${scrub(clockOf(Date.now()))} — items before it no longer count toward pacing`,
       );
-      json(res, current);
+      json(res, overlaidTimeline(current));
       return;
     }
     if (method === "GET" && pathname === "/api/service-timeline") {
-      json(res, await serviceTimelineStore.list());
+      json(res, (await serviceTimelineStore.list()).map((r) => overlaidTimeline(r)));
       return;
     }
     {
@@ -147,7 +179,8 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       if (tlMatch && tlMatch[1] !== "current") {
         const key = decodeURIComponent(tlMatch[1]);
         if (method === "GET") {
-          json(res, await serviceTimelineStore.get(key));
+          const rec = await serviceTimelineStore.get(key);
+          json(res, rec && overlaidTimeline(rec));
           return;
         }
         if (method === "DELETE") {
