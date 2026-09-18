@@ -50,11 +50,19 @@ Each decision is logged once, whichever way it goes:
 
 Inside a record, a plan item that goes live again more than ten minutes after its
 last run ended is recorded as a second entry rather than reopening the first, so a
-re-run never rewrites timings that already happened:
+re-run never rewrites what already happened. Both the timeline and the SPL
+recorder do this, and each says so:
 
 ```
 [service-timeline] "Doors" went live again 71 min after its last run ended — recording it as a new entry
+[spl-recorder] "Doors" went live again 71 min after its last run ended — recording it as a new entry
 ```
+
+So a re-run is its own row in the per-item SPL table, with its own max and Leq —
+a reprise is not averaged into the earlier performance, and neither is a second
+service's item where an occurrence split was missed. A rebuild from the raw
+archive splits the same way, on the same ten-minute gap between one item's
+samples, so a mid-service restart cannot merge two runs back together.
 
 Stepping back to an item within that window still reopens it, which is what an
 operator jumping to the previous song expects.

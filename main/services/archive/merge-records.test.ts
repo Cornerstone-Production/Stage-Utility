@@ -52,6 +52,61 @@ test("SPL merge adds items this box never recorded and leaves its own alone", ()
   assert.equal(out.meterId, "m1", "null local field filled");
 });
 
+// A plan item that ran twice is two entries, and a merge keyed on the item id
+// alone contributed at most one of them — the second run's levels, or its
+// timings, were dropped on the floor by every merge path in the app.
+test("SPL merge keeps BOTH runs of an item the source recorded twice", () => {
+  const mine = { items: [{ itemId: "doors", sequence: 0, maxSpl: 104 }], meterId: null };
+  const theirs = {
+    items: [
+      { itemId: "doors", sequence: 0, maxSpl: 120 },
+      { itemId: "song", sequence: 1, maxSpl: 99 },
+      // The reprise this box never recorded.
+      { itemId: "doors", sequence: 2, maxSpl: 78 },
+    ],
+    meterId: "m1",
+  };
+  const out = mergeSplRecord(mine, theirs);
+  const doors = out.items!.filter((i) => i.itemId === "doors") as unknown as { maxSpl: number }[];
+  assert.equal(doors.length, 2, "the source's second run of Doors was dropped");
+  assert.equal(doors[0]!.maxSpl, 104, "the local run must not be overwritten");
+  assert.equal(doors[1]!.maxSpl, 78, "the run taken is the source's SECOND one");
+  assert.equal(out.items!.length, 3);
+});
+
+test("timeline merge keeps BOTH runs too", () => {
+  const mine = { items: [{ itemId: "doors", sequence: 0, actualDurationSec: 497 }] };
+  const theirs = {
+    items: [
+      { itemId: "doors", sequence: 0, actualDurationSec: 1 },
+      { itemId: "doors", sequence: 1, actualDurationSec: 600 },
+    ],
+  };
+  const out = mergeTimelineRecord(mine, theirs);
+  assert.equal(out.items!.length, 2, "the source's second run was dropped");
+  assert.equal((out.items![0] as unknown as { actualDurationSec: number }).actualDurationSec, 497);
+  assert.equal((out.items![1] as unknown as { actualDurationSec: number }).actualDurationSec, 600);
+});
+
+// Why the key is the RUN INDEX and not `sequence`. Each recording numbers its
+// own items, so two boxes watching one service disagree the moment either missed
+// anything. Keyed on itemId + sequence, the SAME run recorded by both sides
+// fails to match and is taken a second time: the merged record shows one item
+// twice with two different levels, and merging stops being idempotent.
+test("a merge does not duplicate a run both boxes recorded but numbered differently", () => {
+  const mine = { items: [{ itemId: "doors", sequence: 0 }, { itemId: "song", sequence: 1 }] };
+  // The same two runs off a box that also caught the pre-service, so everything
+  // it recorded is numbered four higher.
+  const theirs = { items: [{ itemId: "doors", sequence: 4 }, { itemId: "song", sequence: 5 }] };
+  const out = mergeTimelineRecord(mine, theirs);
+  assert.equal(out.items!.length, 2, "a run both boxes recorded was added a second time");
+  assert.deepEqual(
+    out.items!.map((i) => i.sequence),
+    [0, 1],
+    "the local entries must be the ones kept",
+  );
+});
+
 test("attendance merge unions samples by timestamp and re-sorts", () => {
   const mine = { samples: [{ t: "2026-07-26T09:00:00.000Z", attendance: 10, occupancy: 10 }] };
   const theirs = {

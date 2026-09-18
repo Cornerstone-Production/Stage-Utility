@@ -100,6 +100,12 @@ const REQUEST_FACING = [
   "rosstalk-routes.ts",
   "route-harness.ts",
   "scriptview-routes.ts",
+  // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
+  // carry-over lines. A title is typed into Planning Center and arrives here in
+  // an HTTP response body — outside data by every measure this file uses, and
+  // the same exposure pco-service.ts is scanned for.
+  "service-timeline-recorder.ts",
+  "spl-recorder.ts",
   "stage-controller.ts",
   "state-routes.ts",
   "status-routes.ts",
@@ -207,10 +213,8 @@ const NOT_SCANNED = new Map<string, string>([
   ["secrets.ts", UNAUDITED],
   ["sensource-service.ts", DEVICE],
   ["service-recorder.ts", UNAUDITED],
-  ["service-timeline-recorder.ts", DEVICE],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
-  ["spl-recorder.ts", UNAUDITED],
   ["stream-start-store.ts", UNAUDITED],
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
@@ -280,6 +284,11 @@ function requestFacingFiles(): string[] {
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
+    // Both recorders log a Planning Center plan item TITLE — on the re-run line
+    // and, for the timeline, on the carried-over-item line. A title is typed
+    // into Planning Center and reaches this process in an HTTP response body.
+    path.join(HERE, "service-timeline-recorder.ts"),
+    path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
     // Every value on its three log lines comes out of an UPLOADED FILE — the
     // service type name and id, a patch sheet's name, a variant's name. It

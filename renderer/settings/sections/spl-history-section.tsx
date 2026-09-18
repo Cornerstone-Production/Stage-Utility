@@ -101,7 +101,7 @@ export function SplDetail({ detail }: { detail: ServiceSplHistory }) {
           </thead>
           <tbody>
             {items.map((it) => (
-              <tr key={it.itemId} className="border-b border-gray-4">
+              <tr key={`${it.itemId}:${it.sequence}`} className="border-b border-gray-4">
                 <td className="py-1.5 pr-3 text-gray-12 whitespace-nowrap">{it.title || "Untitled"}</td>
                 {shownMetrics.map((k) => {
                   const st = metricStat(it, k, detail);

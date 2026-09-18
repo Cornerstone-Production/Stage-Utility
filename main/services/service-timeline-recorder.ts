@@ -16,10 +16,12 @@ import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { shouldRecordLive } from "./live-service-gate.js";
+import { scrub } from "./scrub.js";
 import {
   ServiceRecorder,
   SERVICE_GAP_MS,
   isStepBackTo,
+  itemLiveSinceMs,
   lastItemEntry,
   type NewRecordContext,
   type RecorderStore,
@@ -100,7 +102,9 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     const title = live.label ?? live.currentItemTitle ?? "";
     const planned = typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null;
     const liveStartMs = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
-    const goingLiveAtMs = Number.isFinite(liveStartMs) ? liveStartMs : Date.now();
+    // Shared with the SPL recorder, so the two cannot answer "is this the same
+    // run" differently about the same live service.
+    const goingLiveAtMs = itemLiveSinceMs(live);
     // The LAST entry for this id, not the first: an item can run more than once.
     const item = lastItemEntry(this.current.items, id);
     if (item && isStepBackTo(item, goingLiveAtMs)) {
@@ -117,7 +121,9 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     // service silently overwrite the first service's timings in place.
     if (item) {
       console.log(
-        `[service-timeline] "${title || id}" went live again ${Math.round((goingLiveAtMs - Date.parse(item.endedAt!)) / 60_000)} min after its last run ended — recording it as a new entry`,
+        `[service-timeline] "${scrub(title || id)}" went live again ` +
+          `${scrub(Math.round((goingLiveAtMs - Date.parse(item.endedAt!)) / 60_000))} min after its last run ended — ` +
+          `recording it as a new entry`,
       );
     }
     // A NEW item whose PCO live_start_at predates this record by more than the
@@ -135,7 +141,9 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
       startedAt = this.current.startedAt;
       counted = false;
       console.log(
-        `[service-timeline] "${title}" had been live in Planning Center for ${fmtCarryoverDuration(carriedMs)} before this record opened — carried over from an earlier session, not counted`,
+        `[service-timeline] "${scrub(title)}" had been live in Planning Center for ` +
+          `${scrub(fmtCarryoverDuration(carriedMs))} before this record opened — ` +
+          `carried over from an earlier session, not counted`,
       );
     }
     this.current.items.push({

@@ -20,6 +20,7 @@
 // kept as a fallback for a box whose WebSocket will not come up, with that timer
 // intact, because on that path there is still nothing better to use.
 
+import * as crypto from "node:crypto";
 import * as http from "http";
 
 import type { TranscriptLineDTO } from "../types/stage.js";
@@ -83,6 +84,51 @@ const WS_HEARTBEAT_TIMEOUT_MS = 90_000;
  * refused upgrade each time against a box that genuinely has no WebSocket.
  */
 const WS_RETRY_EVERY = 3;
+
+/**
+ * While on the SSE fallback, also retry the WebSocket on this timer.
+ *
+ * WS_RETRY_EVERY alone is unreachable on a HEALTHY fallback: it only counts
+ * reconnects, and a quiet SSE stream that stays open never reconnects. On
+ * 18 Sep 2026 ProdCom refused every upgrade until it restarted at 00:38Z, and
+ * the client then sat on the fallback for a further 34 minutes — the stream was
+ * fine, so nothing counted, so nothing asked again.
+ *
+ * Both rules are kept. The counter is what handles a box that is dropping the
+ * fallback anyway (no point waiting five minutes when a reconnect is happening
+ * now); this is what handles the case the counter cannot see. Five minutes
+ * bounds the damage — the fallback has no keepalive, so the longer it is held
+ * the longer a dead box goes unnoticed — while costing one refused upgrade every
+ * five minutes against a box that genuinely has no WebSocket.
+ */
+const WS_RETRY_INTERVAL_MS = 5 * 60_000;
+
+/** Socket-inactivity timeout for the refused-upgrade probe. Same 4 s as every
+ *  other one-shot read in this file (test(), getJson). NOT on its own enough —
+ *  see PROBE_DEADLINE_MS. */
+const PROBE_TIMEOUT_MS = 4000;
+
+/**
+ * Wall-clock ceiling on the whole probe, from the request going out to an answer
+ * or nothing.
+ *
+ * Node's `timeout` option measures INACTIVITY, and a peer that keeps sending
+ * resets it indefinitely: a refusal answered with a chunked body trickling one
+ * chunk a second holds the probe open for ever, and with it the fallback that is
+ * waiting on it. The deadline is the thing the peer cannot push back. Generous
+ * enough that a slow-but-finite answer still gets read, short enough that the
+ * captions are back inside a few seconds either way.
+ */
+const PROBE_DEADLINE_MS = 6000;
+
+/** How much of a refused handshake's body is worth keeping. Enough for
+ *  ProdCom's own `{"error":{"code":…,"message":…}}`, short enough that a box
+ *  answering with an HTML error page cannot fill a log line. */
+const PROBE_BODY_BYTES = 200;
+
+/** What the probe calls itself, so it is not mistaken for the live client.
+ *  Exported because the tests separate the two by it. */
+export const PROBE_USER_AGENT = "stage-utility-upgrade-probe";
 
 const MAX_LINES = 100;
 
@@ -409,12 +455,25 @@ export class ProdComService extends ConnectionLifecycle {
   /** The WebSocket, when that is the live transport. */
   private ws: WebSocket | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Armed while the SSE fallback is the live transport — see
+   *  WS_RETRY_INTERVAL_MS. */
+  private wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** False once a WebSocket upgrade has failed, until WS_RETRY_EVERY reconnects
    *  later. Reset by configure(), so an operator who has just fixed the box gets
    *  an immediate attempt rather than waiting out the counter. */
   private useWebSocket = true;
   private sseReconnects = 0;
+  /** One refused-upgrade probe at a time — two sockets closing before open must
+   *  not put two extra requests on a box that is already unhappy. */
+  private wsProbeInFlight = false;
+  /** The probe's request while it is in flight, so teardown() can take its
+   *  socket with it rather than leaving it reading from a box the operator has
+   *  just disconnected from. */
+  private wsProbeRequest: http.ClientRequest | null = null;
+  /** Bumped by teardown(), so work that was in flight when a stop() or a
+   *  configure() landed can tell that it no longer speaks for this service. */
+  private connectionEpoch = 0;
   /** Whether the live connection is the WebSocket — drives which watchdog runs
    *  and which log lines make sense. */
   private onWebSocket = false;
@@ -509,6 +568,17 @@ export class ProdComService extends ConnectionLifecycle {
   protected get reconnectMs(): number {
     return RECONNECT_MS;
   }
+  protected get wsRetryIntervalMs(): number {
+    return WS_RETRY_INTERVAL_MS;
+  }
+  protected get probeDeadlineMs(): number {
+    return PROBE_DEADLINE_MS;
+  }
+
+  /** Test seam: whether the fallback's WebSocket retry is currently armed. */
+  protected get wsRetryArmed(): boolean {
+    return this.wsRetryTimer !== null;
+  }
 
   /** Test seam: the REST prime (channels, then backfill) the current connection
    *  kicked off, so a test can await the same work instead of polling. */
@@ -543,9 +613,17 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   protected override teardown(): void {
+    this.connectionEpoch += 1;
     this.clearIdleWatchdog();
+    // stop(), restart() and configure() all land here — one clear covers all
+    // three, the way the idle watchdog's does.
+    this.clearWebSocketRetry();
     this.req?.destroy();
     this.req = null;
+    // A probe outlives the connection that started it otherwise: its result is
+    // already discarded by the epoch check, but the socket would go on reading.
+    this.wsProbeRequest?.destroy();
+    this.wsProbeRequest = null;
     this.closeSocket();
     this.onWebSocket = false;
     this.wsEnvelopeLogged = false;
@@ -612,6 +690,38 @@ export class ProdComService extends ConnectionLifecycle {
   private clearIdleWatchdog(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
+  }
+
+  /**
+   * Come back to the WebSocket on a clock while the fallback is live.
+   *
+   * Armed only while the fallback IS the live transport, and it costs ONE
+   * refused upgrade every five minutes against a box that has no WebSocket —
+   * nothing else. The attempt is made BESIDE the fallback rather than in place
+   * of it (see connectWebSocket's `besideFallback`), which is what makes that
+   * true: dropping the SSE stream to make the attempt cost a fresh stream, a
+   * channel read, a keyword read and a 200-line backfill every five minutes,
+   * and fed countSseReconnect and the reconnect back-off with a drop that never
+   * happened.
+   *
+   * Nothing is logged per retry: the outage is already reported once by
+   * noteWebSocketDown with a 15-minute reminder, and `websocket is back` is the
+   * signal that matters.
+   */
+  private armWebSocketRetry(): void {
+    this.clearWebSocketRetry();
+    if (this.useWebSocket) return; // already on it, or already about to try
+    this.wsRetryTimer = setTimeout(() => {
+      this.wsRetryTimer = null;
+      if (!this.running || this.onWebSocket || this.ws || !this.host || !this.port) return;
+      this.connectWebSocket(this.host, this.port, { besideFallback: true });
+    }, this.wsRetryIntervalMs);
+    this.wsRetryTimer.unref?.();
+  }
+
+  private clearWebSocketRetry(): void {
+    if (this.wsRetryTimer) clearTimeout(this.wsRetryTimer);
+    this.wsRetryTimer = null;
   }
 
   /** Drop partials nothing has updated for PARTIAL_TTL_MS. Returns whether any went. */
@@ -889,6 +999,10 @@ export class ProdComService extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     this.clearIdleWatchdog();
+    // One connection attempt at a time owns the retry: it is re-armed when the
+    // fallback comes up, so a timer left over from the last stream cannot fire
+    // into an attempt that is already in flight.
+    this.clearWebSocketRetry();
     if (!this.running || !this.host || !this.port) return;
     if (this.useWebSocket) this.connectWebSocket(this.host, this.port);
     else this.connectSse(this.host, this.port);
@@ -906,8 +1020,19 @@ export class ProdComService extends ConnectionLifecycle {
    * not describe, hence the one cast; prodcom-websocket.test.ts asserts the
    * header actually arrives, so a Node release that stopped forwarding it turns
    * the suite red instead of silently 401-ing in production.
+   *
+   * `besideFallback` is the five-minute retry's attempt, made while the SSE
+   * stream is still up and carrying captions. It differs in exactly two places,
+   * both below: opening it drops the fallback FIRST and then adopts this socket,
+   * and failing it leaves the fallback exactly as it was — no
+   * fallBackToSse (there is nothing to fall back to, we are already there), no
+   * refusal probe, no SSE reconnect counted, and no back-off advanced. Without
+   * that distinction each retry cost a torn-down stream, a channel read, a
+   * keyword read and a 200-line backfill, and fed the reconnect machinery a drop
+   * that never happened.
    */
-  private connectWebSocket(host: string, port: number): void {
+  private connectWebSocket(host: string, port: number, opts: { besideFallback?: boolean } = {}): void {
+    const beside = opts.besideFallback === true;
     const url = `ws://${host}:${port}/api/v1/ws`;
     let ws: WebSocket;
     try {
@@ -915,6 +1040,11 @@ export class ProdComService extends ConnectionLifecycle {
         headers: this.authHeaders(this.apiKey),
       });
     } catch (e) {
+      if (beside) {
+        // The fallback is live and untouched; ask again on the next timer.
+        this.armWebSocketRetry();
+        return;
+      }
       this.fallBackToSse(host, port, errorMessage(e));
       return;
     }
@@ -922,8 +1052,21 @@ export class ProdComService extends ConnectionLifecycle {
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      if (beside) {
+        // The retry's socket is up: drop the fallback before adopting it, so the
+        // two never feed the same buffer.
+        this.clearIdleWatchdog();
+        this.req?.destroy();
+        this.req = null;
+        this.useWebSocket = true;
+      }
       this.onWebSocket = true;
       this.sseReconnects = 0;
+      // No clearWebSocketRetry() here on purpose: the timer is a one-shot that
+      // nulls itself when it fires, is armed ONLY from the fallback's connected
+      // handler, and connect() clears it at the head of every attempt — so by
+      // the time a socket opens there is nothing left to clear. A line here
+      // could not be made to fail on any reachable state.
       this.noteWebSocketHealthy();
       this.report("connected", `Streaming from ${host}:${port}`);
       // Only the transcript stream is consumed here. The live box offers
@@ -961,18 +1104,177 @@ export class ProdComService extends ConnectionLifecycle {
         this.scheduleReconnect();
         return;
       }
+      if (beside) {
+        // The retry's attempt failed and the fallback never stopped carrying
+        // captions. Nothing to report, nothing to diagnose — the refusal was
+        // already diagnosed and logged when this outage began — and above all no
+        // SSE reconnect to count: the stream did not drop.
+        this.armWebSocketRetry();
+        return;
+      }
       // It never opened. The box may be older than 2.3, may have the API off, or
       // may have rejected the key — the SSE stream is the only thing left to try.
-      this.fallBackToSse(host, port, ev.reason || `closed before open (code ${ev.code})`);
+      // Which of those it is does not survive Node's WebSocket (see
+      // probeUpgrade), so ask the same URL over plain HTTP before giving up.
+      void this.probeThenFallBack(host, port, ev.reason || `closed before open (code ${ev.code})`);
     };
   }
 
+  /**
+   * Diagnose the refused upgrade, then fall back.
+   *
+   * `epoch` is captured before the probe's awaits. A configure() or a stop()
+   * landing while the probe is in flight bumps it, and opening the SSE stream
+   * then would be opening a transport for a box this service has already let go
+   * — the same reason ensureRecord in service-recorder.ts captures a generation.
+   */
+  private async probeThenFallBack(host: string, port: number, bare: string): Promise<void> {
+    const epoch = this.connectionEpoch;
+    const probe = await this.probeUpgrade(host, port, bare);
+    if (epoch !== this.connectionEpoch) return;
+    this.fallBackToSse(host, port, probe?.reason ?? bare, probe?.detail ?? null);
+  }
+
+  /**
+   * Ask the WebSocket URL the same question over plain HTTP, and report what the
+   * box actually said.
+   *
+   * Node's WebSocket exposes NO HTTP status for a refused handshake: a 426, a 401
+   * and a box with no such route all arrive as `close` with code 1006 and an
+   * empty reason. For two days in September 2026 the only evidence of a ProdCom
+   * refusing every upgrade was `closed before open (code 1006)`, which says
+   * nothing about whether the API was off, the key was wrong or the build was too
+   * old. This is one extra request per refusal that turns that into
+   * `upgrade refused with HTTP 426 (Upgrade Required)`.
+   *
+   * The headers are a real RFC 6455 handshake, so a box that WOULD upgrade
+   * answers 101 here — which is itself a finding: the handshake is fine and the
+   * socket is dying after it, which is a different bug from a refusal.
+   *
+   * `reason` is the outage KIND for noteWebSocketDown's dedupe, so it carries
+   * only the status and its canonical phrase (from Node's own table, not the
+   * wire): no byte counts, no timestamps, nothing that varies per attempt. The
+   * body goes back separately as `detail`, scrubbed and truncated, and is logged
+   * only on the line that actually prints.
+   *
+   * Never throws, and never rejects: a probe is diagnostics, and a failure to
+   * diagnose must not stop the fallback from opening. Three things enforce that,
+   * and each of them has been the difference between a fallback that opens and
+   * one that never does:
+   *
+   *   A DEADLINE, not Node's `timeout` option. That option fires on socket
+   *   INACTIVITY, so a box answering the refusal with a chunked body that
+   *   trickles a byte a second resets it for ever: reproduced in-process with a
+   *   503 and one chunk per second, the SSE stream had still not opened after
+   *   12 s, `wsProbeInFlight` was still true, and the captions were gone for the
+   *   rest of the service. `PROBE_DEADLINE_MS` is wall-clock from the request
+   *   going out and cannot be pushed back by the peer.
+   *
+   *   A CAP ON READING. Once PROBE_BODY_BYTES have arrived there is nothing more
+   *   to learn, so the response is finished there rather than read to its end —
+   *   an endless body is a diagnostic, not a download.
+   *
+   *   A HELD REFERENCE. `wsProbeRequest` is what teardown() destroys, so a
+   *   stop() or a configure() during a probe takes the socket with it instead of
+   *   leaving it running against a box the operator has just disconnected from.
+   */
+  private probeUpgrade(
+    host: string,
+    port: number,
+    bare: string,
+  ): Promise<{ reason: string; detail: string | null } | null> {
+    if (this.wsProbeInFlight) return Promise.resolve(null);
+    this.wsProbeInFlight = true;
+    return new Promise<{ reason: string; detail: string | null } | null>((resolve) => {
+      let settled = false;
+      let req: http.ClientRequest | null = null;
+      const deadline = setTimeout(() => done(null), this.probeDeadlineMs);
+      deadline.unref?.();
+      const done = (result: { reason: string; detail: string | null } | null): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        this.wsProbeInFlight = false;
+        this.wsProbeRequest = null;
+        // Always, on every path. A probe socket left open holds its own timeout,
+        // which keeps the process's event loop busy after the answer is already
+        // known — visible as a test that asserts in 4 ms and takes 4 s to finish.
+        req?.destroy();
+        resolve(result);
+      };
+
+      try {
+        req = http.request({
+          host,
+          port,
+          path: "/api/v1/ws",
+          method: "GET",
+          timeout: PROBE_TIMEOUT_MS,
+          headers: {
+            ...this.authHeaders(this.apiKey),
+            Connection: "Upgrade",
+            Upgrade: "websocket",
+            "Sec-WebSocket-Version": "13",
+            // A real key, because a box that validates the handshake would answer a
+            // constant one differently from the client's own request.
+            "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64"),
+            // Names itself, so this request is distinguishable from the real
+            // client's upgrade in ProdCom's own activity log (which records
+            // requests) — the live client sends `user-agent: node`.
+            "User-Agent": PROBE_USER_AGENT,
+          },
+        });
+      } catch (e) {
+        // http.request throws SYNCHRONOUSLY on a header value Node will not put
+        // on the wire (ERR_INVALID_CHAR — a newline or a non-latin1 character in
+        // an API key, which undici's WebSocket accepts). Uncaught, that rejection
+        // escapes probeThenFallBack and the fallback never opens at all.
+        done({ reason: `probe failed: ${errorMessage(e)}`, detail: null });
+        return;
+      }
+      this.wsProbeRequest = req;
+
+      // 101: Node routes an accepted upgrade to 'upgrade', never to 'response'.
+      req.on("upgrade", (_res, socket) => {
+        socket.destroy();
+        done({ reason: `upgrade accepted by a probe but the WebSocket ${bare}`, detail: null });
+      });
+
+      req.on("response", (res) => {
+        const code = res.statusCode ?? 0;
+        const phrase = http.STATUS_CODES[code];
+        let body = "";
+        const finish = () => {
+          res.destroy();
+          done({
+            reason: `upgrade refused with HTTP ${code}${phrase ? ` (${phrase})` : ""}`,
+            detail: body.slice(0, PROBE_BODY_BYTES).replace(/\s+/g, " ").trim() || null,
+          });
+        };
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          if (body.length >= PROBE_BODY_BYTES) return;
+          body += chunk;
+          // Enough to name the refusal: stop reading rather than following a
+          // body that may never end.
+          if (body.length >= PROBE_BODY_BYTES) finish();
+        });
+        res.on("end", finish);
+        res.on("error", finish);
+      });
+
+      req.on("timeout", () => req?.destroy(new Error("timed out")));
+      req.on("error", (e) => done({ reason: `probe failed: ${errorMessage(e)}`, detail: null }));
+      req.end();
+    });
+  }
+
   /** Give up on the WebSocket for now and open the SSE stream instead. */
-  private fallBackToSse(host: string, port: number, reason: string): void {
+  private fallBackToSse(host: string, port: number, reason: string, detail: string | null = null): void {
     this.ws = null;
     this.onWebSocket = false;
     this.useWebSocket = false;
-    this.noteWebSocketDown(reason);
+    this.noteWebSocketDown(reason, detail);
     if (!this.running) return;
     this.connectSse(host, port);
   }
@@ -982,13 +1284,17 @@ export class ProdComService extends ConnectionLifecycle {
    *
    * `reason` is the KIND, so a box that starts refusing the key after having
    * refused the upgrade is still news — but a thousand repeats of code 1006 are
-   * one line.
+   * one line. `detail` is whatever the box said in the body of a refused
+   * handshake (see probeUpgrade): it can vary per attempt, so it rides on the
+   * line rather than in the reason the dedupe keys on, and is only printed on the
+   * line that actually prints.
    */
-  protected noteWebSocketDown(reason: string): void {
+  protected noteWebSocketDown(reason: string, detail: string | null = null): void {
     const out = this.wsOutages.fail("websocket", reason, this.now());
     if (out.log) {
       console.warn(
-        `[prodcom] websocket unavailable (${scrub(reason)}) — falling back to the transcript SSE stream${out.note}`,
+        `[prodcom] websocket unavailable (${scrub(reason)}) — falling back to the transcript SSE stream${out.note}` +
+          (detail ? ` — the box said: ${scrub(detail)}` : ""),
       );
     }
   }
@@ -1097,6 +1403,9 @@ export class ProdComService extends ConnectionLifecycle {
         this.priming = this.primeFromRest(host, port);
         res.setEncoding("utf8");
         this.armIdleWatchdog();
+        // A healthy fallback never reconnects, so the every-third-reconnect rule
+        // cannot fire — this is the clock that asks again anyway.
+        this.armWebSocketRetry();
 
         // Parse text/event-stream via the shared reader — a new one per
         // connection, so a partial event does not survive a reconnect. It caps the

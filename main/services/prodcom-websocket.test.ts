@@ -31,7 +31,7 @@
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
-import { ProdComService } from "./prodcom-service.js";
+import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-11T12:00:00Z");
@@ -241,8 +241,14 @@ describe("falling back to the SSE stream", () => {
     // keepalive-less stream until this server is restarted.
     const { stub } = await connected(t, { refuseWebSocket: true, sseCloseImmediately: true });
     await stub.waitForSse(1);
+    // The CLIENT's upgrades only. A refused upgrade is also diagnosed by an HTTP
+    // probe of the same path (see prodcom-upgrade-probe.test.ts), and counting
+    // that here would make the very first refusal look like a second attempt —
+    // this case would then pass in milliseconds without the counter existing.
     await eventually(
-      () => stub.requests.filter((r) => r.url === "/api/v1/ws").length >= 2,
+      () =>
+        stub.requests.filter((r) => r.url === "/api/v1/ws" && r.headers["user-agent"] !== PROBE_USER_AGENT)
+          .length >= 2,
       "a second websocket attempt after a run of SSE reconnects",
       6000,
     );
