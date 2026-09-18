@@ -101,6 +101,8 @@ const EXPECTED_CONFIG = [
   "automation-settings.json",
   "baptism-triggers.json",
   "bar-config.json",
+  // The operator's own dates worth marking on the Trends chart.
+  "history-milestones.json",
   "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",

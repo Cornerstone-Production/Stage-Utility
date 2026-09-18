@@ -19,6 +19,8 @@ import { AttendanceDetail, averageOccupancy } from "./attendance-history-section
 import { SplDetail, SPL_METRICS_STORAGE_KEY } from "./spl-history-section";
 import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion } from "./history-chart";
+import { TrendsCard } from "./history-trends/trends-card";
+import type { TrendRecording } from "./history-trends/trends";
 import {
   computeOverview,
   summarize,
@@ -422,6 +424,31 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }));
     return [...tlRows, ...attOnlyRows].sort((a, b) => Date.parse(b.startsAt ?? "") - Date.parse(a.startsAt ?? ""));
   }, [list, attList]);
+  /**
+   * The same recordings, reduced to what the Trends card draws from.
+   *
+   * Derived from `rows` rather than fetched: the list already holds every
+   * timeline record and every attendance record, and a trend is those grouped
+   * by service type instead of by day. There is no route for trend data and
+   * there does not need to be one.
+   *
+   * A row with no attendance record carries a null peak and is not plotted — a
+   * service nobody counted is not a service of zero people.
+   */
+  const trendRecordings = useMemo<TrendRecording[]>(
+    () =>
+      rows.map((r) => ({
+        serviceKey: r.serviceKey,
+        serviceTypeId: r.serviceTypeId,
+        serviceTypeName: r.serviceTypeName ?? null,
+        serviceDate: r.serviceDate,
+        t: Date.parse(r.startsAt ?? `${r.serviceDate}T00:00:00`),
+        seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
+        peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
+      })),
+    [rows],
+  );
+
   /** The row for the current selection, if any — known synchronously from `list`/
    *  `attList` (no fetch to wait on), so it tells the detail view whether a
    *  timeline record is ever coming for this key without racing `detail`'s own
@@ -1222,6 +1249,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
+      {/* Trends LEADS the page. It is the defining view of the tab: what a month
+          of Sundays did, per service type, with the dates that explain a step
+          marked under the axis. Everything below it — the Overview blend, the
+          calendar and the day list — answers a narrower question. */}
+      <TrendsCard recordings={trendRecordings} />
+
       {/* Export builder — a collapsed disclosure so it never crowds the overview.
           Read-only, so it's available on the public /history page too. */}
       <Collapsible label="Export" summary="date range · pick sheets" className="su-card px-4 py-2.5">

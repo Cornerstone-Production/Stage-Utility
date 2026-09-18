@@ -149,6 +149,37 @@ export function timeTicks(startMs: number, endMs: number): number[] {
 }
 
 /**
+ * Where a DATE axis is labelled.
+ *
+ * The Trends chart's domain is weeks or a year, not one service, so the
+ * clock-anchored ticks above would produce four hundred of them. Anchored on
+ * the week instead: at most ~13 labels across a year, and every tick is a
+ * Sunday-to-Saturday boundary an operator can place a service against.
+ *
+ * The step widens with the domain so the count stays readable: weekly up to
+ * ~14 weeks, fortnightly to ~30, then monthly-ish (4 weeks). Local midnight,
+ * because a week boundary is a calendar thing and a UTC one lands on Saturday
+ * evening in Chicago.
+ */
+export function dateTicks(startMs: number, endMs: number): number[] {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
+  const WEEK = 7 * 24 * 60 * 60_000;
+  const weeks = (endMs - startMs) / WEEK;
+  const stepWeeks = weeks <= 14 ? 1 : weeks <= 30 ? 2 : 4;
+  const out: number[] = [];
+  // Start on the first local midnight at or after the domain start, then step
+  // in whole days so a daylight-saving shift cannot drift the ticks by an hour.
+  const cursor = new Date(startMs);
+  cursor.setHours(0, 0, 0, 0);
+  if (cursor.getTime() < startMs) cursor.setDate(cursor.getDate() + 1);
+  while (cursor.getTime() <= endMs) {
+    out.push(cursor.getTime());
+    cursor.setDate(cursor.getDate() + stepWeeks * 7);
+  }
+  return out;
+}
+
+/**
  * Break a series wherever sampling stopped.
  *
  * Samples land every 30s, so a run of missing ones means the counter was

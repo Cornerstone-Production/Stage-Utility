@@ -15,6 +15,7 @@ import {
 } from "./plan-note-checklist.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
+import { historyMilestonesStore } from "./history-milestones-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
@@ -433,6 +434,10 @@ export class StageController {
       );
     }
     await savedColorsStore.init();
+    // Loaded here so an entry with an unusable date is reported at boot, on the
+    // line the Trends chart's absence of a mark would otherwise be the only
+    // evidence of.
+    await historyMilestonesStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();
 

@@ -20,6 +20,7 @@ import "./automation-store.js";
 import "./baptism-store.js";
 import "./baptism-triggers-store.js";
 import "./checklist-ticks-store.js";
+import "./history-milestones-store.js";
 import "./layout-groups-store.js";
 import "./layout-templates-store.js";
 import "./osc-store.js";

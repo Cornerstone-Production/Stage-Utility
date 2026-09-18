@@ -27,6 +27,7 @@ import {
   setItemTimes,
 } from "../history-edit.js";
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
+import { historyMilestonesStore } from "../history-milestones-store.js";
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -120,6 +121,45 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: true, ...outcome });
       return;
     }
+    // ── Milestones: the operator's own dates marked under the Trends chart ──
+    //
+    // A plain list, not per-service: a milestone is a statement about the
+    // history, not about one recording. The chart derives its OTHER marks (a
+    // series title changing between consecutive recordings) itself and stores
+    // nothing — see the store's header.
+    if (method === "GET" && pathname === "/api/history/milestones") {
+      json(res, historyMilestonesStore.all());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/milestones") {
+      const body = await readBodyOrEmpty(req);
+      if (typeof body.date !== "string" || typeof body.label !== "string") {
+        error(res, "body.date + body.label (strings) required");
+        return;
+      }
+      try {
+        json(res, await historyMilestonesStore.save({
+          id: typeof body.id === "string" ? body.id : undefined,
+          date: body.date,
+          label: body.label,
+          serviceTypeId: typeof body.serviceTypeId === "string" ? body.serviceTypeId : null,
+        }));
+      } catch (err) {
+        // The store REFUSES a date it cannot draw rather than storing one the
+        // operator would never see a mark for. Returned, not swallowed: the
+        // form says why.
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+    {
+      const msMatch = pathname.match(/^\/api\/history\/milestones\/([^/]+)$/);
+      if (msMatch && method === "DELETE") {
+        json(res, await historyMilestonesStore.remove(decodeURIComponent(msMatch[1])));
+        return;
+      }
+    }
+
     if (method === "GET" && pathname === "/api/attendance/history/current") {
       json(res, attendanceRecorder.getCurrent());
       return;
