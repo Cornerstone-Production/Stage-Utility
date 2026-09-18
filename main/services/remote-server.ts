@@ -283,7 +283,7 @@ function countSubscribers(channel: string): number {
  * channels in the same order, and cannot drift from the stream's because there
  * is only one list.
  */
-type EventSink = http.ServerResponse | { readonly collected: PollFrame[] };
+export type EventSink = http.ServerResponse | { readonly collected: PollFrame[] };
 
 function sseWrite(res: EventSink, event: string, data: unknown): boolean {
   const serialized = JSON.stringify(data);
@@ -309,8 +309,14 @@ function sseWrite(res: EventSink, event: string, data: unknown): boolean {
  * name that is quoted at the call. Do not write an example of the shape it
  * matches anywhere in a comment — doing so makes the scan find a channel named
  * by prose, and this comment did exactly that on its first draft.
+ *
+ * EXPORTED so a test can drive it against the poll transport's collecting sink
+ * and read the payloads back. What a channel HYDRATES WITH is as much a
+ * contract as which channels hydrate, and the source scan above can only see
+ * the names — it cannot see a snapshot sent raw where every other read of the
+ * same record is overlaid.
  */
-function writeHelloBurst(res: EventSink): void {
+export function writeHelloBurst(res: EventSink): void {
   // Advertise the running code version so a kiosk that reconnects after an
   // update/restart and sees a new version reloads itself (see useStageState).
   sseWrite(res, "server:hello", { version: SERVER_VERSION });

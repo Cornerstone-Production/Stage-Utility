@@ -309,9 +309,98 @@ describe("POST /api/history/item-times", () => {
     );
   });
 
+  // The two reads that answer the LIVE recorder's record rather than the store.
+  // Both were added with the overlay and neither had a guard: the panel and the
+  // pacing widget read these on every open, so a raw answer puts the recorded
+  // stamps back on screen for a service being corrected mid-evening.
+  describe("the live-record reads", () => {
+    const liveRecord = () => ({
+      serviceKey: KEY,
+      serviceTypeId: "st1",
+      planId: "plan9",
+      planTitle: "Evening",
+      seriesTitle: null,
+      serviceDate: "2026-09-17",
+      serviceTimeId: "evening",
+      serviceTimeStartsAt: WINDOW_START,
+      startedAt: WINDOW_START,
+      endedAt: null,
+      pacingResetAt: null,
+      items: [
+        { itemId: "vid-1", title: "VIDEO: Pre-roll", sequence: 0, plannedLengthSec: 120, startedAt: WINDOW_START, endedAt: PREROLL_END, actualDurationSec: 682 },
+      ],
+      itemTimeEdits: [{ itemId: "vid-1", sequence: 0, endedAt: FIXED_END, editedAt: WINDOW_END }],
+    });
+
+    it("GET /api/service-timeline/current answers the EFFECTIVE record", async () => {
+      (serviceTimelineRecorder as unknown as { current: unknown }).current = liveRecord();
+      const out = await callRoute(historyRoutes, "/api/service-timeline/current");
+      const read = out.json as ServiceTimeline;
+      assert.equal(read.items[0].actualDurationSec, 120, "the live read answered the recorded 682s");
+      assert.ok(read.items[0].editedFrom, "and carried no editedFrom for the row's marker");
+    });
+
+    it("POST …/current/reset-pacing answers the EFFECTIVE record too", async () => {
+      (serviceTimelineRecorder as unknown as { current: unknown }).current = liveRecord();
+      const out = await callRoute(historyRoutes, "/api/service-timeline/current/reset-pacing", { method: "POST" });
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const read = out.json as ServiceTimeline;
+      assert.ok(read.pacingResetAt, "precondition: the reset happened");
+      assert.equal(read.items[0].actualDurationSec, 120, "the reset-pacing answer carried the recorded 682s");
+    });
+
+    it("the reset-pacing BROADCAST carries the overlay as well", async () => {
+      (serviceTimelineRecorder as unknown as { current: unknown }).current = liveRecord();
+      broadcasts.length = 0;
+      await callRoute(historyRoutes, "/api/service-timeline/current/reset-pacing", { method: "POST" });
+      const pushed = broadcasts.filter((b) => b.channel === "service-timeline:history");
+      assert.equal(pushed.length, 1, "expected exactly one push");
+      assert.equal((pushed[0]!.payload as ServiceTimeline).items[0].actualDurationSec, 120);
+    });
+  });
+
   it("refuses a non-string, non-null time rather than storing it", async () => {
     const out = await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: 1758140000000 });
     assert.equal(out.status, 400, `expected 400, got ${out.status}: ${out.body}`);
     assert.equal((await serviceTimelineStore.get(KEY))!.itemTimeEdits, undefined);
+  });
+});
+
+// The SSE hello burst is the fifth read of a timeline record, and the one with
+// no route around it: a client attaching mid-service is handed a full state
+// snapshot, and a raw snapshot there means every freshly-opened panel and kiosk
+// shows the recorded stamps until something else moves on the channel.
+//
+// Driven against the POLL transport's collecting sink, which is the same
+// writeHelloBurst the SSE stream calls — one list, deliberately, so the two
+// transports cannot drift.
+describe("the hello burst", () => {
+  it("hydrates service-timeline:history with the overlay applied", async () => {
+    const { writeHelloBurst } = await import("../remote-server.js");
+    (serviceTimelineRecorder as unknown as { current: unknown }).current = {
+      serviceKey: KEY,
+      serviceTypeId: "st1",
+      planId: "plan9",
+      planTitle: "Evening",
+      seriesTitle: null,
+      serviceDate: "2026-09-17",
+      serviceTimeId: "evening",
+      serviceTimeStartsAt: WINDOW_START,
+      startedAt: WINDOW_START,
+      endedAt: null,
+      items: [
+        { itemId: "vid-1", title: "VIDEO: Pre-roll", sequence: 0, plannedLengthSec: 120, startedAt: WINDOW_START, endedAt: PREROLL_END, actualDurationSec: 682 },
+      ],
+      itemTimeEdits: [{ itemId: "vid-1", sequence: 0, endedAt: FIXED_END, editedAt: WINDOW_END }],
+    };
+
+    const sink = { collected: [] as { channel: string; serialized: string }[] };
+    writeHelloBurst(sink);
+
+    const frame = sink.collected.find((f) => f.channel === "service-timeline:history");
+    assert.ok(frame, `the burst did not hydrate the channel at all: ${sink.collected.map((f) => f.channel).join(", ")}`);
+    const payload = JSON.parse(frame!.serialized) as ServiceTimeline;
+    assert.equal(payload.items[0].actualDurationSec, 120, "the hello burst hydrated the RECORDED 682s");
+    assert.ok(payload.items[0].editedFrom, "and carried no editedFrom for the row's marker");
   });
 });

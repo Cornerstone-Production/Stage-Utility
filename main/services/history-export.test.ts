@@ -508,3 +508,36 @@ describe("service time", () => {
     }
   });
 });
+
+// The workbook is the operator's REPORT of what happened, so it must agree with
+// the History panel — which means it reads the effective times, not the raw ones.
+// (The archive bundle deliberately does the opposite: it round-trips back into
+// the store, so it exports raw records plus their overlays.)
+describe("buildHistoryWorkbook: an item time correction", () => {
+  test("the PCO items row reads the EFFECTIVE duration and end", async () => {
+    const before = await serviceTimelineStore.get(KEY);
+    assert.ok(before, "precondition: the seeded timeline is there");
+    try {
+      await serviceTimelineStore.upsert({
+        ...before,
+        itemTimeEdits: [
+          { itemId: "i1", sequence: 1, endedAt: "2026-07-26T09:02:00.000Z", editedAt: "2026-07-26T12:00:00.000Z" },
+        ],
+      });
+
+      const buf = await buildHistoryWorkbook({ include: ["items"] });
+      const { rows } = await sheetOf(buf, "PCO items");
+      const row = rows.find((r) => r.Item === "Countdown");
+      assert.ok(row, `the Countdown row is missing: ${JSON.stringify(rows)}`);
+      assert.equal(Number(row!["Actual (s)"]), 120, "the workbook exported the RECORDED 360s, not the corrected 120s");
+      assert.equal(Number(row!["Delta (s)"]), -180, "and its delta followed the recorded value with it");
+      assert.equal(
+        String(row!.Ended).includes("09:02"),
+        true,
+        `Ended still reads the recorded stamp: ${String(row!.Ended)}`,
+      );
+    } finally {
+      await serviceTimelineStore.upsert(before!);
+    }
+  });
+});
