@@ -334,6 +334,12 @@ and set which plan items start each phase, and
 | POST | `/api/archive/inspect` | Read a zip and report what it holds. Writes nothing |
 | POST | `/api/archive/import` | Apply it. `X-Archive-Mode: skip\|merge\|replace` decides what happens to services recorded differently here |
 
+The import answers what it did and, separately, what it could not do:
+`rawFilesFailed` names archive members it could not write, and
+`itemTimeEditsDropped` names per service any item time corrections whose run
+lost the merge — the local run wins, so the correction describing the run that
+did not survive goes with it. Both are empty on a clean import.
+
 **`/api/update/apply` and `/api/update/track` answer `409`** —
 `{error: "locked", locked: true, reasons}` — while a service is live or any
 recorder is running. Pass `{override: true}` to go anyway.
