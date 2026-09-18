@@ -328,7 +328,13 @@ export async function setItemTimes(
   // A field the caller did not mention keeps whatever override it already had;
   // an explicit null clears it. Distinguishing "absent" from "null" is what lets
   // the UI save one field without silently dropping the other.
-  const prior = (tl.itemTimeEdits ?? []).find((e) => e.itemId === itemId && e.sequence === sequence);
+  // The LAST entry for this run, matching what applyItemTimeEdits applies. A
+  // well-formed record holds one — the filter below replaces rather than appends
+  // — but a merge or a hand-edited file can hold two, and `find` would have read
+  // the superseded one, so a save touching only the end silently reverted the
+  // start to a value the operator had already replaced.
+  const forRun = (tl.itemTimeEdits ?? []).filter((e) => e.itemId === itemId && e.sequence === sequence);
+  const prior = forRun[forRun.length - 1];
   const startedAt = "startedAt" in times ? (times.startedAt ?? undefined) : prior?.startedAt;
   const endedAt = "endedAt" in times ? (times.endedAt ?? undefined) : prior?.endedAt;
   for (const [label, v] of [["start", startedAt], ["end", endedAt]] as const) {

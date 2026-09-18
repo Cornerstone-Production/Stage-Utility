@@ -171,6 +171,50 @@ describe("applyItemTimeEdits", () => {
     assert.equal(out.items[0].editedFrom, undefined);
   });
 
+  test("an item the recorder has REOPENED takes no end override", () => {
+    // A step back sets endedAt to null and puts the item back on air. An end
+    // override left from before the reopen would close it again behind the
+    // recorder's back: a finished duration on a row that is still running, and a
+    // pacing readout that thinks the live item is done.
+    const live = item({ itemId: "vid-1", title: "VIDEO: Pre-roll", sequence: 0, startedAt: PREROLL_START, endedAt: null });
+    const rec = record([live], [{ itemId: "vid-1", sequence: 0, endedAt: PREROLL_FIXED_END, editedAt: END }]);
+    const { record: out } = applyItemTimeEdits(rec);
+    assert.equal(out.items[0].endedAt, null, "the reopened item must stay open");
+    assert.equal(out.items[0].actualDurationSec, null);
+    assert.equal(out.items[0].editedFrom, undefined, "and must not read as edited");
+    assert.equal(out.itemTimeEdits?.length, 1, "the override is kept — closing the item restores it");
+  });
+
+  test("a reopened item still takes a START override", () => {
+    const live = item({ itemId: "vid-1", sequence: 0, startedAt: PREROLL_START, endedAt: null });
+    const { record: out } = applyItemTimeEdits(
+      record([live], [{ itemId: "vid-1", sequence: 0, startedAt: "2026-09-17T20:16:00.000Z", editedAt: END }]),
+    );
+    assert.equal(out.items[0].startedAt, "2026-09-17T20:16:00.000Z");
+    assert.equal(out.items[0].endedAt, null, "correcting the start does not close it");
+  });
+
+  test("two corrections for one run: the LAST wins, against the RAW item", () => {
+    // setItemTimes replaces rather than appends, but a merge, an import or a
+    // hand-edited file can produce two. Applied in sequence, the second read the
+    // already-corrected item as "what was recorded", so editedFrom held the
+    // FIRST correction's values — Reset put back a time that never happened and
+    // the tooltip named it as the recording.
+    const { record: out } = applyItemTimeEdits(
+      record([preroll()], [
+        { itemId: "vid-1", sequence: 0, endedAt: PREROLL_FIXED_END, editedAt: END },
+        { itemId: "vid-1", sequence: 0, endedAt: "2026-09-17T20:18:00.000Z", editedAt: END },
+      ]),
+    );
+    assert.equal(out.items[0].endedAt, "2026-09-17T20:18:00.000Z", "the LAST correction is the one applied");
+    assert.equal(out.items[0].actualDurationSec, 180);
+    assert.deepEqual(
+      out.items[0].editedFrom,
+      { startedAt: PREROLL_START, endedAt: PREROLL_RECORDED_END, actualDurationSec: 682 },
+      "and what it replaced is the RECORDING, never the other correction",
+    );
+  });
+
   test("an edit naming a run the record no longer has is reported, not applied", () => {
     const { record: out, orphaned } = applyItemTimeEdits(
       record([preroll()], [

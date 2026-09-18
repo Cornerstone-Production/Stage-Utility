@@ -32,6 +32,14 @@ export interface ItemTimeOverlay {
   orphaned: ServiceItemTimeEdit[];
 }
 
+/** A run's identity as a map key. JSON rather than a joined string: an itemId is
+ *  a Planning Center value, and any separator picked by hand is a separator two
+ *  different runs could collide on. (An earlier version used a literal NUL,
+ *  which worked and made grep treat this file as binary.) */
+function runKey(run: { itemId: string; sequence: number }): string {
+  return JSON.stringify([run.itemId, run.sequence]);
+}
+
 /** Seconds between two ISO stamps, or null if the end is open or either is junk. */
 function durationSec(startedAt: string, endedAt: string | null): number | null {
   if (endedAt == null) return null;
@@ -76,6 +84,17 @@ export function applyItemTimeEdits(record: ServiceTimeline): ItemTimeOverlay {
   const edits = record.itemTimeEdits ?? [];
   if (edits.length === 0) return { record: { ...record, items }, orphaned: [] };
 
+  // At most ONE correction per run is applied, and it is the LAST.
+  //
+  // setItemTimes replaces rather than appends, so a well-formed record holds one
+  // — but a merge, an import or a hand-edited file can produce two, and applying
+  // them in sequence read the already-corrected item as "what was recorded" for
+  // the second. `editedFrom` then held the FIRST correction's values, so Reset
+  // put back a time that had never happened and the tooltip named it as the
+  // recording. Last wins, computed once, against the raw item.
+  const byRun = new Map<string, ServiceItemTimeEdit>();
+  for (const e of edits) byRun.set(runKey(e), e);
+
   const orphaned: ServiceItemTimeEdit[] = [];
   for (const edit of edits) {
     const i = items.findIndex((x) => x.itemId === edit.itemId && x.sequence === edit.sequence);
@@ -83,9 +102,16 @@ export function applyItemTimeEdits(record: ServiceTimeline): ItemTimeOverlay {
       orphaned.push(edit);
       continue;
     }
+    if (byRun.get(runKey(edit)) !== edit) continue; // superseded
     const raw = items[i];
     const startedAt = edit.startedAt ?? raw.startedAt;
-    const endedAt = edit.endedAt ?? raw.endedAt;
+    // An item with no recorded end is ON AIR — the recorder either has not closed
+    // it yet or stepped back and REOPENED it, which sets endedAt to null. An end
+    // override left over from before the reopen would close it again behind the
+    // recorder's back: the row would show a finished duration for an item still
+    // running, and the pacing readout would treat the live item as done. The
+    // override is kept, not deleted, so closing the item restores it.
+    const endedAt = raw.endedAt == null ? null : (edit.endedAt ?? raw.endedAt);
     // An override that restates the recorded value is not an edit, and marking
     // the row "edited" for it would be a lie in the UI.
     if (startedAt === raw.startedAt && endedAt === raw.endedAt) continue;
@@ -202,7 +228,7 @@ export function carryItemTimeEdits(
   // record that somehow holds two edits for one run carries the same one that
   // was being applied rather than a different one.
   const byRun = new Map<string, ServiceItemTimeEdit>();
-  for (const e of edits) byRun.set(`${e.itemId} ${e.sequence}`, e);
+  for (const e of edits) byRun.set(runKey(e), e);
 
   const priorRuns = new Map<string, ServiceTimelineItem[]>();
   for (const i of prior.items) {
@@ -219,7 +245,7 @@ export function carryItemTimeEdits(
     runIndex.set(item.itemId, n + 1);
     const before = priorRuns.get(item.itemId)?.[n];
     if (!before) continue; // a run the prior record did not have — nothing to carry
-    const edit = byRun.get(`${item.itemId} ${before.sequence}`);
+    const edit = byRun.get(runKey({ itemId: item.itemId, sequence: before.sequence }));
     if (!edit) continue;
     carried.add(edit);
     out.push({ ...edit, itemId: item.itemId, sequence: item.sequence });

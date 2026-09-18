@@ -248,6 +248,24 @@ describe("POST /api/history/item-times", () => {
     assert.equal(read.items[0].actualDurationSec, 120);
   });
 
+  it("a second save REPLACES the run's correction rather than stacking one", async () => {
+    await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: FIXED_END });
+    await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: "2026-09-17T20:18:00.000Z" });
+
+    const stored = (await serviceTimelineStore.get(KEY))!;
+    assert.equal(stored.itemTimeEdits?.length, 1, "the run must hold ONE correction, not a stack of them");
+    assert.equal(stored.itemTimeEdits?.[0].endedAt, "2026-09-17T20:18:00.000Z");
+
+    const out = await callRoute(historyRoutes, `/api/service-timeline/${encodeURIComponent(KEY)}`);
+    const read = out.json as ServiceTimeline;
+    assert.equal(read.items[0].actualDurationSec, 180);
+    assert.deepEqual(
+      read.items[0].editedFrom,
+      { startedAt: WINDOW_START, endedAt: PREROLL_END, actualDurationSec: 682 },
+      "Reset must restore the RECORDING, not the previous correction",
+    );
+  });
+
   it("refuses a non-string, non-null time rather than storing it", async () => {
     const out = await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: 1758140000000 });
     assert.equal(out.status, 400, `expected 400, got ${out.status}: ${out.body}`);
