@@ -15,6 +15,7 @@
 
 import type { ServiceSplHistory, SplItemHistory } from "../../types/stage.js";
 import { addLeqSample } from "../spl-leq.js";
+import { SERVICE_GAP_MS } from "../service-recorder.js";
 import { serviceDirPath } from "./archive-paths.js";
 import { readArchiveRows } from "./archive-rows.js";
 
@@ -38,13 +39,26 @@ export async function rebuildSplItems(
   const rows = await readArchiveRows(serviceDirPath(serviceKey, serviceDate), "spl");
   if (!rows || rows.length === 0) return null;
 
-  const byItem = new Map<string, SplItemHistory>();
+  /** The run of each item currently being accumulated, and when it last sampled.
+   *  An item can run twice in one record (a reprise, or a second service whose
+   *  occurrence split was missed), and one bucket per itemId folded the second
+   *  run's levels into the first — the same defect the live recorders carry
+   *  lastItemEntry/isStepBackTo for. A gap of more than SERVICE_GAP_MS between
+   *  consecutive samples of one item is a new run. */
+  const openRun = new Map<string, { item: SplItemHistory; lastAtMs: number }>();
+  const items: SplItemHistory[] = [];
   let sequence = 0;
 
   for (const row of rows) {
     const itemId = row.itemId;
     if (!itemId) continue;
-    let item = byItem.get(itemId);
+    const atMs = row.at ? Date.parse(row.at) : NaN;
+    const open = openRun.get(itemId);
+    // No parsable stamp on either side means no clock to judge by — keep the run.
+    const sameRun =
+      open != null &&
+      (!Number.isFinite(atMs) || !Number.isFinite(open.lastAtMs) || atMs - open.lastAtMs < SERVICE_GAP_MS);
+    let item = sameRun ? open!.item : undefined;
     if (!item) {
       item = {
         itemId,
@@ -57,8 +71,9 @@ export async function rebuildSplItems(
         startedAt: row.at || new Date(0).toISOString(),
         endedAt: null,
       };
-      byItem.set(itemId, item);
+      items.push(item);
     }
+    openRun.set(itemId, { item, lastAtMs: Number.isFinite(atMs) ? atMs : (open?.lastAtMs ?? NaN) });
     if (row.at) item.endedAt = row.at;
     if (row.item && !item.title) item.title = row.item;
 
@@ -78,7 +93,7 @@ export async function rebuildSplItems(
       st.count += 1;
     }
   }
-  return [...byItem.values()];
+  return items;
 }
 
 /**
@@ -93,9 +108,20 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
 
   // Carry the item type and the primary-metric fields, which the raw rows do not
   // hold: itemType comes from the plan, and maxSpl/leqSpl mirror the chosen metric.
-  const priorById = new Map(record.items.map((i) => [i.itemId, i]));
+  // Paired by RUN, not by id: an item that ran twice has two rebuilt entries and
+  // (at most) two prior ones, and pairing on the id alone would give the second
+  // run the first run's sequence — two rows with the same identity.
+  const priorRuns = new Map<string, SplItemHistory[]>();
+  for (const i of record.items) {
+    const list = priorRuns.get(i.itemId);
+    if (list) list.push(i);
+    else priorRuns.set(i.itemId, [i]);
+  }
+  const runIndex = new Map<string, number>();
   for (const it of items) {
-    const prior = priorById.get(it.itemId);
+    const n = runIndex.get(it.itemId) ?? 0;
+    runIndex.set(it.itemId, n + 1);
+    const prior = priorRuns.get(it.itemId)?.[n];
     if (prior) {
       it.itemType = prior.itemType;
       it.sequence = prior.sequence;
@@ -107,6 +133,15 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
       it.leqSpl = m.leq;
       it.sampleCount = m.count;
     }
+  }
+  // Sequences must stay unique: itemId + sequence is how the History table keys a
+  // row, and a carried number colliding with a generated one would collapse two
+  // runs into one row in the UI.
+  let next = items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
+  const used = new Set<number>();
+  for (const it of items) {
+    if (used.has(it.sequence)) it.sequence = next++;
+    used.add(it.sequence);
   }
   items.sort((a, b) => a.sequence - b.sequence);
   return { ...record, items };

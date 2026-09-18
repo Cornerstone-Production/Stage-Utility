@@ -10,8 +10,25 @@ process.env.STAGE_UTILITY_DATA = dataDir;
 const { sampleArchive } = await import("./sample-archive.js");
 const { archivedSampleCount, rebuildSplItems, rebuildSplRecord } = await import("./rebuild.js");
 const { addLeqSample } = await import("../spl-leq.js");
+const { serviceDirPath } = await import("./archive-paths.js");
 
 const CTX = { serviceKey: "st1:p1:t9", serviceDate: "2026-07-26" };
+
+/**
+ * Write a spl.csv by hand.
+ *
+ * sampleArchive stamps `at` with the wall clock, so it cannot produce rows an
+ * hour apart. A run split is decided on those stamps, so the fixture has to.
+ */
+async function writeSplCsv(
+  ctx: { serviceKey: string; serviceDate: string },
+  rows: { at: string; itemId: string; item: string; v: number }[],
+): Promise<void> {
+  const dir = serviceDirPath(ctx.serviceKey, ctx.serviceDate);
+  await fs.mkdir(dir, { recursive: true });
+  const lines = ["at,itemId,item,SPL A Slow", ...rows.map((r) => `${r.at},${r.itemId},${r.item},${r.v}`)];
+  await fs.writeFile(path.join(dir, "spl.csv"), lines.join("\n") + "\n", "utf8");
+}
 
 /** The same fold the live recorder does, as an independent reference. */
 function expectedLeq(values: number[]): number {
@@ -97,6 +114,71 @@ test("samples that rolled to a second file are included", async () => {
   const items = (await rebuildSplItems(ctx.serviceKey, ctx.serviceDate))!;
   assert.equal(items[0].metrics["SPL A Slow"].count, 2, "both files were read");
   assert.equal(items[0].metrics["LAeq 10"].count, 1);
+});
+
+// A rebuild has to split runs the same way the live recorder does. Otherwise a
+// mid-service restart undoes the fix: the recorder gives a re-run item its own
+// entry, and resumeRecord rebuilds from the archive and merges the two back into
+// one — the exact levels the split exists to keep apart.
+test("a re-run item rebuilds as two entries, not one", async () => {
+  const ctx = { serviceKey: "st1:rerun:t1", serviceDate: "2026-09-18" };
+  await writeSplCsv(ctx, [
+    { at: "2026-09-18T23:23:46.000Z", itemId: "doors", item: "Doors", v: 104 },
+    { at: "2026-09-18T23:24:46.000Z", itemId: "doors", item: "Doors", v: 102 },
+    // The second service's Doors, 1h 18m later.
+    { at: "2026-09-19T00:43:15.000Z", itemId: "doors", item: "Doors", v: 78 },
+    { at: "2026-09-19T00:44:15.000Z", itemId: "doors", item: "Doors", v: 76 },
+  ]);
+
+  const items = (await rebuildSplItems(ctx.serviceKey, ctx.serviceDate))!;
+  assert.equal(items.length, 2, "both runs folded into one entry");
+  assert.equal(items[0].metrics["SPL A Slow"].max, 104, "the first run's peak");
+  assert.equal(items[0].metrics["SPL A Slow"].count, 2);
+  assert.equal(items[0].endedAt, "2026-09-18T23:24:46.000Z");
+  assert.equal(items[1].metrics["SPL A Slow"].max, 78, "the re-run's own peak");
+  assert.equal(items[1].metrics["SPL A Slow"].count, 2);
+  assert.equal(items[1].startedAt, "2026-09-19T00:43:15.000Z");
+  assert.notEqual(items[0].sequence, items[1].sequence, "two runs cannot share a sequence");
+});
+
+test("samples inside one run stay in one entry however many there are", async () => {
+  const ctx = { serviceKey: "st1:onerun:t1", serviceDate: "2026-09-18" };
+  await writeSplCsv(ctx, [
+    { at: "2026-09-18T23:23:46.000Z", itemId: "song", item: "Song", v: 90 },
+    { at: "2026-09-18T23:28:46.000Z", itemId: "song", item: "Song", v: 95 },
+    { at: "2026-09-18T23:33:46.000Z", itemId: "song", item: "Song", v: 92 },
+  ]);
+  const items = (await rebuildSplItems(ctx.serviceKey, ctx.serviceDate))!;
+  assert.equal(items.length, 1, "a five-minute sampling gap is not a new run");
+  assert.equal(items[0].metrics["SPL A Slow"].count, 3);
+});
+
+test("a rebuilt re-run keeps a unique sequence even when the prior record had one entry", async () => {
+  const ctx = { serviceKey: "st1:rerun:t1", serviceDate: "2026-09-18" };
+  const record = {
+    serviceKey: ctx.serviceKey,
+    serviceTypeId: "st1",
+    serviceTypeName: "Sunday",
+    planId: "p1",
+    planTitle: "A Plan",
+    seriesTitle: null,
+    serviceDate: ctx.serviceDate,
+    serviceTimeId: "t1",
+    serviceTimeStartsAt: null,
+    meterId: "m1",
+    metricKey: "SPL A Slow",
+    startedAt: "2026-09-18T23:23:00.000Z",
+    endedAt: null,
+    items: [
+      { itemId: "doors", title: "Doors", itemType: "item", sequence: 0, metrics: {}, maxSpl: null, avgSpl: null, sampleCount: 0, startedAt: "", endedAt: null },
+    ],
+  };
+  const out = (await rebuildSplRecord(record as never))!;
+  assert.equal(out.items.length, 2);
+  assert.equal(out.items[0].itemType, "item", "the first run pairs with the prior entry");
+  assert.equal(out.items[0].sequence, 0);
+  assert.equal(out.items[1].sequence, 1, "the re-run must not inherit the first run's sequence");
+  assert.equal(out.items[1].maxSpl, 78, "the primary-metric mirror is the re-run's own");
 });
 
 test("a service with no archive rebuilds to null rather than an empty record", async () => {

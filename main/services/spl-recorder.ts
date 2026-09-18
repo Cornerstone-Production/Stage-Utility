@@ -16,7 +16,13 @@ import { broadcast } from "./broadcaster.js";
 import { shouldRecordLive } from "./live-service-gate.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
-import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
+import {
+  ServiceRecorder,
+  isStepBackTo,
+  lastItemEntry,
+  type NewRecordContext,
+  type RecorderStore,
+} from "./service-recorder.js";
 
 // How long a change may sit in memory before it is written.
 //
@@ -156,8 +162,28 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
     sample: MeterSample | null,
   ): void {
     if (!this.current) return;
-    let item = this.current.items.find((i) => i.itemId === itemId);
-    if (!item) {
+    const nowIso = new Date().toISOString();
+    // The LAST entry for this id, not the first: an item can run more than once,
+    // and `find` folded a re-run's samples into a run that finished hours ago.
+    // Mirrors openItem in service-timeline-recorder.ts.
+    const prior = lastItemEntry(this.current.items, itemId);
+    let item = prior && isStepBackTo(prior, Date.parse(nowIso)) ? prior : undefined;
+    if (item) {
+      if (title && item.title !== title) item.title = title;
+      // The plan may not have been loaded when the item first went live.
+      if (itemType && item.itemType !== itemType) item.itemType = itemType;
+      // An operator stepping back to a closed item reopens it, so finalizePrevItem
+      // stamps its real end rather than leaving the earlier one in place.
+      item.endedAt = null;
+    } else {
+      // Belt and braces for the occurrence split (see ensureRecord): an entry whose
+      // last run finished more than SERVICE_GAP_MS ago is a RE-RUN and gets its own
+      // max/Leq rather than having a second service's levels folded into it.
+      if (prior) {
+        console.log(
+          `[spl-recorder] "${title || itemId}" went live again ${Math.round((Date.parse(nowIso) - Date.parse(prior.endedAt!)) / 60_000)} min after its last run ended — recording it as a new entry`,
+        );
+      }
       item = {
         itemId,
         title: title ?? "",
@@ -166,14 +192,10 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
         metrics: {},
         maxSpl: null,
         sampleCount: 0,
-        startedAt: new Date().toISOString(),
+        startedAt: nowIso,
         endedAt: null,
       };
       this.current.items.push(item);
-    } else {
-      if (title && item.title !== title) item.title = title;
-      // The plan may not have been loaded when the item first went live.
-      if (itemType && item.itemType !== itemType) item.itemType = itemType;
     }
     if (!item.metrics) item.metrics = {}; // resumed legacy record
 
@@ -223,7 +245,9 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
 
   private finalizePrevItem(): void {
     if (!this.current || !this.lastItemId) return;
-    const prev = this.current.items.find((i) => i.itemId === this.lastItemId);
+    // The LAST entry for the id — the run that was actually on air. `find` would
+    // close an earlier run of the same item and leave the live one open forever.
+    const prev = lastItemEntry(this.current.items, this.lastItemId);
     if (prev && !prev.endedAt) prev.endedAt = new Date().toISOString();
   }
 
