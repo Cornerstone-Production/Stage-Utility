@@ -24,6 +24,7 @@ const { callRoute } = await import("./route-harness.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
 const { serviceTimelineStore } = await import("../service-timeline-store.js");
 const { attendanceStore } = await import("../attendance-store.js");
+const { splHistoryStore } = await import("../spl-history-store.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { serviceDirPath } = await import("../archive/archive-paths.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
@@ -98,6 +99,53 @@ function attendance() {
   };
 }
 
+/** Six 1 Hz readings across the two items, as the meter reported them. The
+ *  rebuilt max and Leq are computed from exactly these, so a stored record
+ *  carrying different numbers proves the rebuild really ran. */
+const SPL_CSV = [
+  "at,itemId,item,SPL A Slow",
+  "2026-09-17T23:23:50.000Z,pco-1,Doors,80",
+  "2026-09-17T23:23:51.000Z,pco-1,Doors,84",
+  "2026-09-17T23:23:52.000Z,pco-1,Doors,88",
+  "2026-09-17T23:30:10.000Z,pco-2,10 min Warning,90",
+  "2026-09-17T23:30:11.000Z,pco-2,10 min Warning,96",
+  "",
+].join("\n");
+
+/** An SPL record that DISAGREES with spl.csv on every number — one item where
+ *  the raw rows have two, and aggregates nothing could derive from them. */
+function corruptedSpl() {
+  return {
+    serviceKey: KEY,
+    serviceTypeId: "st1",
+    serviceTypeName: "Weekend",
+    planId: "plan-1",
+    planTitle: "Sunday Gathering",
+    seriesTitle: null,
+    serviceDate: DATE,
+    serviceTimeId: "t-1",
+    serviceTimeStartsAt: null,
+    startedAt: "2026-09-17T23:23:48.789Z",
+    endedAt: ENDED,
+    meterId: "m1",
+    metricKey: "SPL A Slow",
+    items: [
+      {
+        itemId: "pco-1",
+        title: "Doors",
+        itemType: "item",
+        sequence: 0,
+        metrics: { "SPL A Slow": { max: 131, avg: null, leq: 131, count: 999 } },
+        maxSpl: 131,
+        leqSpl: 131,
+        sampleCount: 999,
+        startedAt: "2026-09-17T23:23:48.789Z",
+        endedAt: ENDED,
+      },
+    ],
+  };
+}
+
 const broadcasts: string[] = [];
 addBroadcastListener((channel) => void broadcasts.push(channel));
 
@@ -112,6 +160,13 @@ async function seed(): Promise<void> {
   await fs.writeFile(path.join(dir, "events.csv"), EVENTS, "utf8");
   await serviceTimelineStore.upsert(corruptedTimeline() as never);
   await attendanceStore.upsert(attendance() as never);
+  await splHistoryStore.delete(KEY); // the SPL leg is opted into per test
+}
+
+/** Add the SPL half: a record that disagrees with its own raw samples. */
+async function seedSpl(): Promise<void> {
+  await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "spl.csv"), SPL_CSV, "utf8");
+  await splHistoryStore.upsert(corruptedSpl() as never);
 }
 
 describe("POST /api/history/rebuild", () => {
@@ -161,6 +216,41 @@ describe("POST /api/history/rebuild", () => {
 
     assert.ok(broadcasts.includes("service-timeline:history"), `no timeline broadcast: ${broadcasts.join(",")}`);
     assert.ok(broadcasts.includes("attendance:history"), `no attendance broadcast: ${broadcasts.join(",")}`);
+  });
+
+  // The SPL leg was unguarded: deleting it from rebuildServiceRecords left the
+  // whole suite green, because nothing here had an SPL record at all.
+  it("recomputes the SPL aggregates from spl.csv, on disk", async () => {
+    await seedSpl();
+
+    const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+      method: "POST",
+      body: { serviceKey: KEY },
+    });
+
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    assert.deepEqual((out.json as { spl: unknown }).spl, { rebuilt: true, items: 2, missing: false });
+
+    const spl = await splHistoryStore.get(KEY);
+    assert.ok(spl, "the SPL record vanished");
+    assert.equal(spl.items.length, 2, "the second item never came back from the raw rows");
+
+    const [doors, warning] = spl.items;
+    assert.equal(doors.itemId, "pco-1");
+    assert.equal(doors.title, "Doors");
+    assert.equal(doors.sampleCount, 3, "the stored 999 survived the rebuild");
+    assert.equal(doors.maxSpl, 88, "the stored max of 131 survived the rebuild");
+    assert.equal(doors.metrics["SPL A Slow"].count, 3);
+    assert.equal(doors.metrics["SPL A Slow"].max, 88);
+    // An ENERGY average of 80/84/88 dB, not the arithmetic 84 — the whole point
+    // of re-deriving from the samples rather than trusting the stored fold.
+    assert.equal(Math.round(doors.leqSpl as number), 85);
+    assert.equal(warning.itemId, "pco-2");
+    assert.equal(warning.sampleCount, 2);
+    assert.equal(warning.maxSpl, 96);
+    assert.equal(warning.startedAt, "2026-09-17T23:30:10.000Z");
+
+    assert.ok(broadcasts.includes("spl:history"), `no SPL broadcast: ${broadcasts.join(",")}`);
   });
 
   it("refuses with a sentence while that service is recording", async () => {
