@@ -67,6 +67,10 @@ export interface HistoryChartProps {
   customize?: React.ReactNode;
   /** Names the plot for a screen reader. */
   ariaLabel: string;
+  /** What to say when there is nothing to draw. The default assumes a service
+   *  that has not recorded yet; a caller whose emptiness has another cause —
+   *  no metric chosen — says so instead of letting the wrong sentence stand. */
+  emptyNote?: string;
   /** Makes the legend a toggle. Wire it to the SAME handler Customize uses, so
    *  the two controls over one choice cannot disagree. */
   onToggleSeries?: (id: string) => void;
@@ -91,6 +95,7 @@ export function HistoryChart({
   live = false,
   customize,
   ariaLabel,
+  emptyNote,
   onToggleSeries,
   nowMs,
 }: HistoryChartProps) {
@@ -256,7 +261,7 @@ export function HistoryChart({
       <div className="flex flex-col gap-3">
         <StatStrip figures={figures} hover={null} live={null} right={customize} />
         <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted">
-          Nothing recorded yet — the chart fills in as the service runs.
+          {emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}
         </div>
       </div>
     );

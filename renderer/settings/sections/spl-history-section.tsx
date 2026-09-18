@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { invoke } from "../../lib/api";
 import { onNotification } from "../../lib/api";
@@ -8,6 +8,8 @@ import { combineLeq } from "@main/services/spl-leq";
 import {
   CustomizePopover,
   HistoryChart,
+  hasStoredChoice,
+  seedStoredKeys,
   serviceWindowOf,
   useStoredKeys,
   type ChartPoint,
@@ -68,6 +70,27 @@ const SERIES_KEYS = SOUND_SERIES.map((s) => s.key);
 const SERIES_STORAGE_KEY = "spl:visibleSeries";
 const DEFAULT_SERIES = ["max", "avg"];
 
+/**
+ * Which Smaart metrics this browser surfaces — the table's columns, the
+ * fallback chart's lines, and which one is the primary the peak marks and the
+ * strip's figures read.
+ *
+ * PER BROWSER, like every other preference in this module. It used to be
+ * `settingsStore.splVisibleMetrics`, server-wide, so one person clicking a
+ * legend entry changed what everybody saw — and worse, an empty server list is
+ * indistinguishable from "never chosen", so unticking the last metric sprang
+ * both defaults back.
+ *
+ * The server setting is NOT deleted: it is read once to seed this entry
+ * (`seedStoredKeys`), so an operator's existing selection survives the move.
+ * Nothing writes it any more. It stays in settings rather than being removed —
+ * it is the operator's own choice, and deleting an operator's data to tidy
+ * something up is not a thing this repo does. Re-exposing it as an
+ * organisation-wide default belongs with a control in the Integrations panel,
+ * which is new UI and not this change.
+ */
+const SPL_METRICS_STORAGE_KEY = "spl:visibleMetrics";
+
 /** How often the chart re-reads the series while the record is still open. The
  *  recorder appends to spl.csv continuously; ten seconds is two ticks of the
  *  meter and a cheap read of one file. */
@@ -119,19 +142,6 @@ export function SplDetail({
   timeline?: ServiceTimeline | null;
   attendance?: ServiceAttendance | null;
 }) {
-  const [visible, setVisible] = useState<string[]>([]);
-  useEffect(() => {
-    invoke<{ metrics: string[] }>("spl:getVisibleMetrics")
-      .then((r) => setVisible(r.metrics ?? []))
-      .catch((err) => {
-        // The list is a preference, not the data — falling back to the default
-        // selection is right. Saying so is also right: a browser that silently
-        // ignored the operator's saved metrics looks like the server lost them.
-        setVisible([]);
-        toast.error(`Could not read the saved Smaart metrics: ${errorMessage(err)}`);
-      });
-  }, []);
-
   const [figureKeys, storeFigure] = useStoredKeys(FIGURES_STORAGE_KEY, FIGURE_KEYS, DEFAULT_FIGURES);
   function toggleFigure(key: string) {
     const err = storeFigure(key);
@@ -149,35 +159,69 @@ export function SplDetail({
     if (detail.metricKey) keys.add(detail.metricKey);
     return Array.from(keys).sort();
   }, [detail]);
-  const shownMetrics = useMemo(() => {
-    const filtered = visible.filter((k) => allKeys.includes(k));
-    return filtered.length ? filtered : defaultVisible(allKeys);
-  }, [visible, allKeys]);
+
 
   /**
-   * Toggle a metric, computed from what is SHOWN rather than from what is
-   * stored.
+   * The metrics this browser shows.
    *
-   * With nothing stored the shown set is `defaultVisible(...)` — two metrics the
-   * operator can see ticked. Computing the next set from the empty STORED list
-   * turned the first untick into an ADD: the metric stayed, and the other
-   * default vanished, because a one-entry stored list stops being empty and the
-   * default no longer applies.
+   * `null` for the allow-list: the metrics one service carries are not the ones
+   * another does, and filtering against the record on screen would drop every
+   * metric the CURRENT service happens not to have the next time the choice was
+   * written. The per-record filter happens below, on the way to the screen.
+   *
+   * The fallback is this record's own default pair, so a browser that has never
+   * chosen gets something sensible — and an operator who has unticked every
+   * metric keeps an EMPTY list, which is a real choice and not a request for the
+   * defaults back. `readStoredKeys` draws exactly that line.
    */
-  const toggleMetric = useCallback(
-    async (key: string) => {
-      const next = shownMetrics.includes(key)
-        ? shownMetrics.filter((k) => k !== key)
-        : [...shownMetrics, key];
-      setVisible(next);
-      try {
-        await invoke("spl:setVisibleMetrics", { metrics: next });
-      } catch (err) {
-        toast.error(`Could not save that metric choice: ${errorMessage(err)}`);
-      }
-    },
-    [shownMetrics],
+  const [storedMetrics, storeMetric, reloadMetrics] = useStoredKeys(
+    SPL_METRICS_STORAGE_KEY,
+    null,
+    defaultVisible(allKeys),
   );
+  const shownMetrics = useMemo(
+    () => storedMetrics.filter((k) => allKeys.includes(k)),
+    [storedMetrics, allKeys],
+  );
+  /** No metric chosen at all, as opposed to a record that recorded none. */
+  const noneChosen = storedMetrics.length === 0;
+
+  // Take the server's list over, once, for a browser that has never chosen.
+  // Before the first render, so the hook below reads the seeded value rather
+  // than the defaults for one frame.
+  const [seeded, setSeeded] = useState(() => hasStoredChoice(SPL_METRICS_STORAGE_KEY));
+  useEffect(() => {
+    if (seeded) return;
+    let cancelled = false;
+    invoke<{ metrics: string[] }>("spl:getVisibleMetrics")
+      .then((r) => {
+        if (cancelled) return;
+        // An EMPTY server list means nobody ever chose there either — leave this
+        // browser with no stored choice so it takes the per-record defaults,
+        // rather than freezing "show nothing" into it.
+        if (r.metrics?.length) {
+          seedStoredKeys(SPL_METRICS_STORAGE_KEY, r.metrics);
+          // The hook read the store before this landed, so it is holding the
+          // defaults. Without this re-read the seeded selection does not appear
+          // until the page is opened again.
+          reloadMetrics();
+        }
+        setSeeded(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSeeded(true);
+        toast.error(`Could not read the saved Smaart metrics: ${errorMessage(err)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [seeded, reloadMetrics]);
+
+  function toggleMetric(key: string) {
+    const err = storeMetric(key);
+    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+  }
 
   const items = useMemo(() => detail.items.slice().sort((a, b) => a.sequence - b.sequence), [detail]);
   const preById = useMemo(() => {
@@ -265,18 +309,23 @@ export function SplDetail({
         points: buckets.map((b) => ({ t: b.t, v: b.avg })),
       },
     ]
-    : shownMetrics.map((key, i) => {
+    // EVERY metric the record carries, each saying whether it is on — not just
+    // the shown ones. A pre-filtered list leaves the legend unable to name a
+    // metric the operator switched off, so it can never come back, which is the
+    // one thing a toggle has to be able to do. Attendance has always done this.
+    : allKeys.map((key, i) => {
       const runs = stepRuns(items, detail, key);
+      const primary = key === primaryKey;
       return {
         id: key,
         label: key,
-        color: i === 0 ? "var(--color-accent)" : SECONDARY_COLORS[(i - 1) % SECONDARY_COLORS.length],
-        role: i === 0 ? ("primary" as const) : ("secondary" as const),
+        color: primary ? "var(--color-accent)" : SECONDARY_COLORS[i % SECONDARY_COLORS.length],
+        role: primary ? ("primary" as const) : ("secondary" as const),
         // NO FILL, unlike attendance. A fill runs to the axis floor, and a dB
         // axis has no floor that means anything — the band is chosen to frame
         // the data, so the fill's depth would say only where the axis starts.
-        dashed: i > 0,
-        on: true,
+        dashed: !primary,
+        on: shownMetrics.includes(key),
         format: (v: number) => dB(v),
         runs,
         points: runs.flat(),
@@ -298,12 +347,14 @@ export function SplDetail({
     };
   });
 
-  const figures = SOUND_FIGURES.filter((f) => figureKeys.includes(f.key)).map((f) => ({
-    key: f.key,
-    label: f.key === "peak" && primaryKey ? `Peak ${primaryKey}` : f.label,
-    value: figureValue(f.key, items, detail, primaryKey),
-    color: f.key === "peak" ? "var(--color-accent)" : undefined,
-  }));
+  const figures = noneChosen
+    ? [{ key: "none", label: "Sound", value: "No metric selected" }]
+    : SOUND_FIGURES.filter((f) => figureKeys.includes(f.key)).map((f) => ({
+      key: f.key,
+      label: f.key === "peak" && primaryKey ? `Peak ${primaryKey}` : f.label,
+      value: figureValue(f.key, items, detail, primaryKey),
+      color: f.key === "peak" ? "var(--color-accent)" : undefined,
+    }));
 
   if (!items.length || allKeys.length === 0) {
     return <p className="text-caption1 text-fg-muted">No per-item SPL recorded for this service.</p>;
@@ -322,6 +373,11 @@ export function SplDetail({
             ? "Recorded sound level across the service"
             : "Recorded sound level per plan item across the service"
         }
+        // An empty chart because nobody picked a metric is not an empty chart
+        // because nothing was recorded, and the default sentence says the
+        // second. The legend below still lists every metric, so the way out is
+        // one click away.
+        emptyNote={noneChosen ? "No metric selected — pick one in the legend or in Customize." : undefined}
         // The legend's meaning follows the mode, because the series do: with a
         // raw series it toggles peak and average, and on the per-item fallback
         // it toggles which Smaart metrics are drawn. Either way it is wired to

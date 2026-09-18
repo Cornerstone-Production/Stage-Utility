@@ -130,17 +130,26 @@ missed — stack onto their own lines rather than hiding under one another, up t
 two extra. Hovering picks the topmost.
 
 **Customize** is the sliders button at the section's right. It holds which series
-to draw, which figures the strip shows at rest, and for sound which Smaart metrics
-the table carries.
+to draw, which figures the strip shows at rest, and for sound which Smaart
+metrics to surface.
+
+The Smaart metric choice does more than pick table columns: the first one still
+ticked is the **primary** — the metric the chart's line is read from when the
+service has no raw samples, the one each item's peak mark and the strip's Peak
+and Message figures report, and the one the raw series is requested for. Untick
+every metric and the chart says so rather than drawing an empty plot.
 
 The legend under the plot is the same choice as a row of buttons: clicking one
 turns that series off and on, and it stays in step with Customize because both
 write the same preference. A series that is off is still listed, struck through —
 a legend that dropped what was off could never turn it back on.
 
-The attendance choices and the sound chart's own two lines are remembered per
-browser (`attendance:visibleMetrics`, `spl:visibleFigures`, `spl:visibleSeries`);
-the Smaart metric list is a server setting, shared by everyone.
+Every one of these is remembered **per browser** — they are view preferences,
+not recording settings: `attendance:visibleMetrics`, `spl:visibleFigures`,
+`spl:visibleSeries` and `spl:visibleMetrics`. The Smaart metric list used to be
+a server setting shared by everyone, so one person clicking a legend entry
+changed what the next person saw; a browser that has never chosen is seeded from
+that old setting once, so no existing selection was lost.
 
 While a service is recording, the chart grows with it: new samples extend the line
 in place, the newest stretch draws in, the live edge carries a pulsing dot, the

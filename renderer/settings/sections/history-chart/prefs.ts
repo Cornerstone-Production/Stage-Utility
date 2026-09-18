@@ -1,13 +1,39 @@
 // prefs.ts — which series and figures a section shows, remembered.
 //
-// The chip rows persisted to two different places and this keeps both, rather
-// than migrating an operator's choices to a third: attendance to localStorage
-// (a per-browser view preference), and the SPL metric list to the server
-// (settingsStore.splVisibleMetrics, through spl:get/setVisibleMetrics). The
-// Customize popover is a new control over the SAME stores, so nobody's existing
-// selection is lost by this change.
+// Every one of these is a per-BROWSER view preference: which lines a person
+// wants on screen and which figures they want in the strip. None of them is a
+// recording setting, and none of them should reach another operator's screen.
+//
+// The SPL metric list used to be the exception — it lived in
+// settingsStore.splVisibleMetrics, server-wide — so one person clicking a legend
+// entry changed what everybody saw. It is a localStorage entry now, SEEDED once
+// from the server value (seedStoredKeys) so nobody's existing selection is lost
+// in the move.
 
 import { useCallback, useState } from "react";
+
+/** True when this browser has a stored choice at all — as opposed to an EMPTY
+ *  one, which is a real choice and reads back as `[]`. Callers that offer a
+ *  default only to a browser that has never chosen ask this. */
+export function hasStoredChoice(storageKey: string): boolean {
+  try {
+    return localStorage.getItem(storageKey) != null;
+  } catch {
+    return false;
+  }
+}
+
+/** Write a starting choice, but only into a browser that has never made one.
+ *  Seeds a per-browser preference from the server-side setting it is taking
+ *  over from, so nobody's existing selection is lost in the move. */
+export function seedStoredKeys(storageKey: string, keys: string[]): void {
+  try {
+    if (localStorage.getItem(storageKey) != null) return;
+    localStorage.setItem(storageKey, JSON.stringify(keys));
+  } catch {
+    // Private mode or a full quota. The browser simply takes the defaults.
+  }
+}
 
 /**
  * Read a stored key list, dropping anything no longer offered.
@@ -19,13 +45,23 @@ import { useCallback, useState } from "react";
  * of this comment claimed the all-removed case fell back; it never did, and
  * saying so invited a change that would spring every default back on.)
  */
-export function readStoredKeys(storageKey: string, allowed: readonly string[], fallback: string[]): string[] {
+export function readStoredKeys(
+  storageKey: string,
+  /** The keys still on offer, or null for "anything the operator stored".
+   *
+   *  null matters for a list whose offering is PER RECORD: the Smaart metrics
+   *  one service carries are not the ones another does, and filtering against
+   *  the record on screen would quietly drop every metric the current service
+   *  happens not to have, the next time the choice was written. */
+  allowed: readonly string[] | null,
+  fallback: string[],
+): string[] {
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return fallback;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return fallback;
-    const clean = parsed.filter((k): k is string => typeof k === "string" && allowed.includes(k));
+    const clean = parsed.filter((k): k is string => typeof k === "string" && (allowed == null || allowed.includes(k)));
     // An EMPTY stored list is a real choice — "show me no figures" — and is kept.
     // It is only an unreadable or absent value that falls back.
     return clean;
@@ -79,9 +115,9 @@ export function addDefaultOnce(storageKey: string, key: string): void {
  */
 export function useStoredKeys(
   storageKey: string,
-  allowed: readonly string[],
+  allowed: readonly string[] | null,
   fallback: string[],
-): [string[], (key: string) => Error | null] {
+): [string[], (key: string) => Error | null, () => void] {
   const [keys, setKeys] = useState<string[]>(() => readStoredKeys(storageKey, allowed, fallback));
   const toggle = useCallback(
     (key: string): Error | null => {
@@ -96,5 +132,21 @@ export function useStoredKeys(
     },
     [keys, storageKey],
   );
-  return [keys, toggle];
+  /**
+   * Re-read the store.
+   *
+   * For the one case where something else writes it after this hook has already
+   * initialised: a seed arriving from the server (seedStoredKeys). Without it
+   * the seeded choice does not appear until the page is opened again, so the
+   * first visit after the preference moved shows the defaults instead of the
+   * operator's actual selection — the exact thing the seed exists to prevent.
+   */
+  const reload = useCallback(() => {
+    setKeys(readStoredKeys(storageKey, allowed, fallback));
+    // `allowed` and `fallback` are fresh arrays on every render, so they are
+    // deliberately NOT dependencies: including them would rebuild `reload` each
+    // render and re-fire any effect that depends on it, forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+  return [keys, toggle, reload];
 }

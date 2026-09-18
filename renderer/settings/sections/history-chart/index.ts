@@ -5,7 +5,13 @@
 export { HistoryChart, type HistoryChartProps } from "./history-chart";
 export { CustomizePopover, type CustomizeGroup, type CustomizeOption } from "./customize";
 export { StatStrip, type StatFigure, type StripValue } from "./stat-strip";
-export { addDefaultOnce, readStoredKeys, useStoredKeys } from "./prefs";
+export {
+  addDefaultOnce,
+  hasStoredChoice,
+  readStoredKeys,
+  seedStoredKeys,
+  useStoredKeys,
+} from "./prefs";
 export { serviceWindowOf, type ServiceWindow } from "./service-window";
 export {
   niceAxis,

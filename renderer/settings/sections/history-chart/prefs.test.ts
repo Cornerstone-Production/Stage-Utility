@@ -6,7 +6,7 @@ import { after, beforeEach, describe, test } from "node:test";
 import { installDom } from "../../../test-dom.js";
 
 const teardown = installDom();
-const { addDefaultOnce, readStoredKeys } = await import("./prefs.js");
+const { addDefaultOnce, hasStoredChoice, readStoredKeys, seedStoredKeys } = await import("./prefs.js");
 
 const KEY = "attendance:visibleMetrics";
 const ALLOWED = ["occupancy", "attendance", "avg", "items", "peak", "lowest", "samples"] as const;
@@ -93,5 +93,54 @@ describe("addDefaultOnce", () => {
     addDefaultOnce(KEY, "average");
     addDefaultOnce(KEY, "lowest");
     assert.deepEqual(JSON.parse(localStorage.getItem(KEY) as string), ["peak", "average", "lowest"]);
+  });
+});
+
+describe("seedStoredKeys", () => {
+  test("writes into a browser that has never chosen", () => {
+    seedStoredKeys(KEY, ["peak", "samples"]);
+    assert.deepEqual(readStoredKeys(KEY, ALLOWED, FALLBACK), ["peak", "samples"]);
+  });
+
+  test("NEVER over an existing choice", () => {
+    // The seed carries a server-side setting into this browser once. Written
+    // again it would overwrite the operator's own selection with whatever the
+    // server still holds, every time the page was opened.
+    localStorage.setItem(KEY, JSON.stringify(["lowest"]));
+    seedStoredKeys(KEY, ["peak", "samples"]);
+    assert.deepEqual(readStoredKeys(KEY, ALLOWED, FALLBACK), ["lowest"]);
+  });
+
+  test("an EMPTY existing choice is still a choice", () => {
+    // Unticking everything is what an empty list means. Seeding over it would
+    // undo it — the same bug one level down.
+    localStorage.setItem(KEY, JSON.stringify([]));
+    seedStoredKeys(KEY, ["peak"]);
+    assert.deepEqual(readStoredKeys(KEY, ALLOWED, FALLBACK), []);
+  });
+});
+
+describe("hasStoredChoice", () => {
+  test("false before, true after — including for an empty choice", () => {
+    assert.equal(hasStoredChoice(KEY), false);
+    localStorage.setItem(KEY, JSON.stringify([]));
+    assert.equal(hasStoredChoice(KEY), true);
+  });
+});
+
+describe("readStoredKeys with no allow-list", () => {
+  test("keeps keys the CURRENT offering does not have", () => {
+    // The Smaart metrics one service carries are not the ones another does.
+    // Filtering against the record on screen would drop every metric the
+    // current service happens not to have, the next time the choice was
+    // written — so a visit to a one-metric record would quietly erase the rest.
+    localStorage.setItem(KEY, JSON.stringify(["LAeq 1", "SPL A Fast"]));
+    assert.deepEqual(readStoredKeys(KEY, null, []), ["LAeq 1", "SPL A Fast"]);
+    assert.deepEqual(readStoredKeys(KEY, ["LAeq 1"], []), ["LAeq 1"]);
+  });
+
+  test("a non-string is still dropped", () => {
+    localStorage.setItem(KEY, JSON.stringify(["LAeq 1", 7, null]));
+    assert.deepEqual(readStoredKeys(KEY, null, []), ["LAeq 1"]);
   });
 });
