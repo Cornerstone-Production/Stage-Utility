@@ -248,6 +248,34 @@ function silentType(): TrendRecording[] {
   }));
 }
 
+describe("the stat strip above the plot", () => {
+  const strip = (view: ReturnType<typeof render>) =>
+    [...view.container.querySelectorAll("[data-history-strip] > div")]
+      .map((d) => [...d.children].map((c) => (c.textContent ?? "").trim()));
+
+  test("names a level a level, not a peak attendance", () => {
+    // Both arms of a ternary read "Average peak". A level is not a peak
+    // attendance and reads as one at a glance.
+    return withBoth(async ({ attendance, sound }) => {
+      assert.deepEqual(attendance.map((f) => f[0]), ["Services", "Average peak", "Busiest"]);
+      assert.deepEqual(sound.map((f) => f[0]), ["Services", "Average level", "Loudest"]);
+    }, strip);
+  });
+
+  test("counts only the series the legend is showing", () => {
+    // It read every recording in range whatever the legend said, so switching a
+    // line off left the strip describing a chart nobody was looking at.
+    return withTwoTypes(async (view, toggle) => {
+      const before = strip(view);
+      assert.equal(before[0][1], "20", `both types are 10 days each: ${JSON.stringify(before)}`);
+      await toggle("weekend");
+      const after = strip(view);
+      assert.equal(after[0][1], "10", "the hidden series is still being counted");
+      assert.notEqual(after[1][1], before[1][1], "the average did not follow the legend either");
+    });
+  });
+});
+
 describe("when the milestone list will not load", () => {
   test("the card says so, and the reason is logged", async () => {
     // Swallowed, the chart drew the derived series-change marks and simply
@@ -335,6 +363,56 @@ async function withCard(check: (view: ReturnType<typeof render>) => void | Promi
   });
   try {
     await check(view);
+  } finally {
+    view.unmount();
+  }
+}
+
+/** Renders the card twice, once per measure, and hands `read` both results. */
+async function withBoth<T>(
+  check: (both: { attendance: T; sound: T }) => void | Promise<void>,
+  read: (view: ReturnType<typeof render>) => T,
+) {
+  const view = await renderCard(alternating());
+  const attendance = read(view);
+  await act(async () => {
+    view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  const sound = read(view);
+  try {
+    await check({ attendance, sound });
+  } finally {
+    view.unmount();
+  }
+}
+
+/** Two service types, ten days each, and a way to switch one off. */
+async function withTwoTypes(
+  check: (view: ReturnType<typeof render>, toggle: (id: string) => Promise<void>) => void | Promise<void>,
+) {
+  const DAY = 24 * 60 * 60_000;
+  const start = Date.parse("2026-01-04T15:00:00Z");
+  const of = (typeId: string, peak: number): TrendRecording[] =>
+    Array.from({ length: 10 }, (_, i) => ({
+      serviceKey: `${typeId}:${i}`,
+      serviceTypeId: typeId,
+      serviceTypeName: typeId,
+      serviceDate: new Date(start + i * 7 * DAY).toISOString().slice(0, 10),
+      t: start + i * 7 * DAY,
+      seriesTitle: null,
+      peakOccupancy: peak,
+      peakDb: 95,
+    }));
+  const view = await renderCard([...of("weekend", 1000), ...of("evening", 200)]);
+  const toggle = async (id: string) => {
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>(`[data-series-toggle="${id}"]`)!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  };
+  try {
+    await check(view, toggle);
   } finally {
     view.unmount();
   }
