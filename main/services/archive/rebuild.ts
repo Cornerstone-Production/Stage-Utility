@@ -13,11 +13,17 @@
 // Only services recorded since the archive shipped have samples. Anything older
 // returns null, which is the honest answer: there is nothing to rebuild from.
 
-import type { ServiceSplHistory, SplItemHistory } from "../../types/stage.js";
+import type {
+  ServiceSplHistory,
+  ServiceTimeline,
+  ServiceTimelineItem,
+  SplItemHistory,
+} from "../../types/stage.js";
 import { addLeqSample } from "../spl-leq.js";
-import { SERVICE_GAP_MS } from "../service-recorder.js";
+import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder.js";
+import { scrub } from "../scrub.js";
 import { serviceDirPath } from "./archive-paths.js";
-import { readArchiveRows } from "./archive-rows.js";
+import { readArchiveRows, type ArchiveRow } from "./archive-rows.js";
 
 /** How many SPL sample rows a service has archived, or 0 if none. */
 export async function archivedSampleCount(serviceKey: string, serviceDate: string): Promise<number> {
@@ -146,4 +152,153 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
   // ran.
   items.forEach((it, i) => (it.sequence = i));
   return { ...record, items };
+}
+
+// ── Timeline ────────────────────────────────────────────────────────────────
+//
+// The SPL record has rebuilt from its raw rows since the archive shipped, and
+// attendance re-derives from its samples. The timing record was the one that
+// only ever moved forward: on 18 Sep 2026 a recorder bug merged two services
+// into one summary while `events.csv` held every transition of the evening
+// intact, and the repair had to be done by hand. Every summary must be
+// derivable from the raw rows by the app.
+
+/** One row of `events.csv`, as readArchiveRows hands it back. */
+export type EventRow = ArchiveRow;
+
+/**
+ * An id for a title no row named and no stored entry matches.
+ *
+ * Stable across rebuilds by construction: the entry it creates carries this
+ * title, so the next rebuild matches it by title and reuses the same id rather
+ * than minting a second one.
+ */
+function titleSlug(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "untitled";
+}
+
+/** Chronological, leaving an unparseable stamp beside its neighbours (the sort
+ *  is stable, so returning 0 does not herd damaged rows to one end). */
+function byTime(rows: EventRow[]): EventRow[] {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.at ?? "");
+    const tb = Date.parse(b.at ?? "");
+    if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
+    return ta - tb;
+  });
+}
+
+function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
+  entry.endedAt = endedAt;
+  const startMs = Date.parse(entry.startedAt);
+  const endMs = Date.parse(endedAt);
+  entry.actualDurationSec =
+    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+}
+
+/**
+ * Recompute a service's item timings from its `events.csv` rows.
+ *
+ * Pure: it neither reads the disk nor writes the store, so it can be used to
+ * compare a stored record against the raw rows as well as to replace one.
+ *
+ * The rules are the LIVE recorder's, not a second opinion about what happened —
+ * `isStepBackTo` and `lastItemEntry` are imported from service-recorder.ts for
+ * exactly that reason. An item going live again within SERVICE_GAP_MS of its
+ * last entry closing is the operator stepping back, and reopens that entry;
+ * anything later is a genuine re-run and gets its own. The one difference is
+ * the clock a step back is judged by: the live recorder uses PCO's
+ * `live_start_at`, which no raw row carries, so the row's own `at` stands in.
+ * They agree to within one poll interval, and the gap they are compared against
+ * is ten minutes.
+ *
+ * Each entry ends when the next row fires. The last one ends at the record's own
+ * `endedAt`, and stays open when the record is still open.
+ *
+ * What is NOT in the rows is carried from `prior`: the record's identity, its
+ * window, `pacingResetAt`, and any per-item `counted` override the operator set
+ * — which is a statement about the PLAN item, so it lands on every entry for
+ * that id.
+ */
+export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]): ServiceTimeline {
+  const items: ServiceTimelineItem[] = [];
+  /** Titles already warned about, so a title that ran six times says so once. */
+  const warned = new Set<string>();
+  let open: ServiceTimelineItem | null = null;
+
+  for (const row of byTime(rows)) {
+    if (row.kind !== "item") continue;
+    const at = row.at ?? "";
+    const atMs = Date.parse(at);
+    const title = row.detail ?? "";
+
+    // Close the entry that was on air BEFORE deciding what this row does, in the
+    // order the live recorder does it (finalizePrevItem, then openItem): the step
+    // back test reads endedAt, so an entry still open is "the same run" by
+    // definition and a reopen must see the stamp this row just wrote.
+    if (open) closeEntry(open, at);
+
+    // Old rows predate the itemId column. A title is the only handle left, so
+    // match it against the stored record; failing that, mint a stable id from
+    // the title rather than dropping the row.
+    let itemId = row.itemId ?? "";
+    if (!itemId) {
+      itemId = prior.items.find((i) => i.title === title)?.itemId ?? titleSlug(title);
+      if (!warned.has(title)) {
+        warned.add(title);
+        console.warn(`[service-timeline] rebuild: no item id for "${scrub(title)}", matched by title`);
+      }
+    }
+
+    const priorEntry = lastItemEntry(prior.items, itemId);
+    const plannedCol = row.plannedLengthSec ? Number(row.plannedLengthSec) : NaN;
+    const planned = Number.isFinite(plannedCol) ? plannedCol : (priorEntry?.plannedLengthSec ?? null);
+    const preService =
+      row.preService === "true" ? true
+      : row.preService === "false" ? false
+      : (priorEntry?.preService ?? false);
+
+    const last = lastItemEntry(items, itemId);
+    if (last && isStepBackTo(last, atMs)) {
+      if (title) last.title = title;
+      if (planned != null) last.plannedLengthSec = planned;
+      last.endedAt = null;
+      last.actualDurationSec = null;
+      open = last;
+      continue;
+    }
+    const entry: ServiceTimelineItem = {
+      itemId,
+      title,
+      sequence: items.length,
+      plannedLengthSec: planned,
+      startedAt: at,
+      endedAt: null,
+      actualDurationSec: null,
+      preService,
+    };
+    items.push(entry);
+    open = entry;
+  }
+
+  // A closed record ends its last item; an open one leaves it running, which is
+  // what the live recorder's own finalizeRecord would have done.
+  if (open && prior.endedAt) closeEntry(open, prior.endedAt);
+
+  // `counted` is the operator's override of the auto pre-service default, set
+  // per plan item and applied to every run of it — see setItemCounted. It exists
+  // nowhere in the raw rows, so losing it here would silently undo their edit.
+  const overrides = new Map<string, boolean>();
+  for (const i of prior.items) if (i.counted != null) overrides.set(i.itemId, i.counted);
+  for (const it of items) {
+    const c = overrides.get(it.itemId);
+    if (c != null) it.counted = c;
+  }
+
+  items.forEach((it, i) => (it.sequence = i));
+  return { ...prior, items };
 }
