@@ -16,8 +16,9 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-m
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
-import { SplDetail } from "./spl-history-section";
-import { RecordingPill, ServiceHeader, overrunStats } from "./history-service-header";
+import { SplDetail, SPL_METRICS_STORAGE_KEY } from "./spl-history-section";
+import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
+import { useStoredKeysVersion } from "./history-chart";
 import {
   computeOverview,
   summarize,
@@ -538,6 +539,55 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   };
 
   const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
+
+  /**
+   * The SPL record behind each of the SELECTED DAY's rows, so a row's peak
+   * level is the same figure the service page's header quotes.
+   *
+   * Per day rather than for the whole history on purpose: `spl:getSummary`
+   * (already loaded, above) carries a service-level Leq per metric and no PEAK
+   * at all, so a row built from it would be labelled "Peak" and be showing an
+   * energy average. The full record is the only thing that has the peak, and a
+   * day is one to four of them — not a year of them.
+   *
+   * A record that fails to load lands as `null`, which `servicePeakLevel` reads
+   * as "no sound recorded" and the row prints as "—" with that note. Nothing is
+   * swallowed: the row says what it does not know.
+   */
+  const [splByKey, setSplByKey] = useState<Map<string, ServiceSplHistory | null>>(new Map());
+  // The key list, as a stable string: `dayServices` is a fresh array every
+  // render and would refetch the day's SPL on each one.
+  const dayKeys = dayServices.map((s) => s.serviceKey).join("|");
+  useEffect(() => {
+    const keys = dayKeys ? dayKeys.split("|") : [];
+    // Nothing to fetch, and nothing to clear: every lookup is by serviceKey, so
+    // a map left over from the previous day can only ever miss. Clearing it here
+    // would be a setState in an effect body — a cascading render — to no end.
+    if (!keys.length) return;
+    let cancelled = false;
+    Promise.all(
+      keys.map((key) =>
+        invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: key })
+          .then((rec) => [key, rec] as const)
+          .catch(() => [key, null] as const),
+      ),
+    ).then((pairs) => {
+      if (!cancelled) setSplByKey(new Map(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dayKeys, reloadKey]);
+  /** The rows follow the Sound card's metric choice, which lives in
+   *  localStorage and is written by a component React knows nothing about —
+   *  the same dependency the service header carries for the same reason. */
+  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+  // Read so the subscription is not "unused". The VALUE is never wanted; the
+  // hook's own state update is what re-renders the rows when the Sound card's
+  // Customize writes a different metric, and without that they would go on
+  // quoting the old metric's peak until the page was reopened.
+  void metricsVersion;
+
   // Per-day service counts for the calendar (respects the type filter).
   const dateCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -1274,7 +1324,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         </div>
 
         <div className="min-w-0 flex flex-col gap-2">
-          {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
+          {/* The day heading — the list is grouped by day, and this is the one
+              group the calendar has selected. */}
+          {day && <span className="text-body font-semibold text-fg">{fmtDay(day)}</span>}
           {dayServices.map((row) => {
             // Attendance-only rows (arrival ramp, no timeline record yet) have no
             // items and no rundown to summarize — a separate, simpler card.
@@ -1289,17 +1341,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 <div key={row.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
                   <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(row.serviceKey)}>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-body font-medium text-gray-12 truncate">{row.planTitle ?? row.serviceKey}</span>
-                      <span className="text-caption2 text-gray-9 truncate">{caption}</span>
+                      <span className="text-body font-medium text-fg truncate">{row.planTitle ?? row.serviceKey}</span>
+                      <span className="text-caption2 text-fg-subtle truncate">{caption}</span>
                     </div>
-                    <span className="shrink-0 tabular-nums text-caption1 text-right">
-                      <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">recording since </span><span className="text-accent">{fmtTime(att.startedAt)}</span></span>
+                    <span className="shrink-0 whitespace-nowrap text-caption1 text-fg-subtle tabular-nums">
+                      recording since <span className="font-mono text-accent">{fmtTime(att.startedAt)}</span>
                     </span>
                   </button>
                   {!readOnly && (
                     <Tooltip label="Delete recording">
                       <button
-                        className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                        className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
                         onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
                         aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
                       >
@@ -1312,10 +1364,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             }
             const s = row.timeline;
             const live = s.endedAt == null;
-            // Live rows count up (summarize adds the in-progress item's elapsed);
-            // finished rows show the settled total.
-            const sum = summarize(s, live ? nowTick : undefined);
-            const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
+            // The figures are the SERVICE PAGE's own, picked out of serviceKpis
+            // by key — a row and the page it opens cannot quote two different
+            // peaks for one recording. Live rows count up: `serviceKpis` passes
+            // `now` into `summarize`, which adds the in-progress item's elapsed.
+            const { started, figures } = serviceRowFigures(
+              s,
+              row.attendance,
+              splByKey.get(s.serviceKey) ?? null,
+              live ? nowTick : undefined,
+            );
+            const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
+            const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
             return (
               // su-card, like every other top-level box on this page (Export, the
               // Overview, the calendar, the selected-day summary). These rows had
@@ -1325,26 +1385,50 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // the Stat tiles and the time editor — those sit INSIDE a card, and
               // giving them the parent's surface would flatten the nesting.
               <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
-                <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
-                    <span className="text-caption2 text-gray-9 truncate">
-                      {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
-                      {s.endedAt == null ? "recording…" : `${s.items.length} items`}
+                <button
+                  data-history-row={s.serviceKey}
+                  className="flex flex-1 min-w-0 flex-col gap-2 px-3 py-2.5 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                  onClick={() => setSelectedKey(s.serviceKey)}
+                >
+                  <div className="flex min-w-0 flex-col">
+                    {/* Time and service type, then the plan title, then the
+                        series and how many items ran. The time is mono so a
+                        column of rows lines up on the colon. */}
+                    <span className="flex items-baseline gap-2 text-caption2 text-fg-subtle">
+                      <span className="font-mono tabular-nums text-fg-muted">{started.value}</span>
+                      {s.serviceTypeName && <span className="truncate">{s.serviceTypeName}</span>}
+                      {started.sub && <span className="truncate text-warn-11">{started.sub}</span>}
+                      {live && <RecordingPill />}
                     </span>
+                    <span className="truncate text-body font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
+                    {under && <span className="truncate text-caption2 text-fg-subtle">{under}</span>}
                   </div>
-                  <span className="shrink-0 tabular-nums text-caption1 text-right">
-                    {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-accent">{fmtDur(sum.actual)}</span></span>
-                    {/* Delta vs plan only once finished — a live "−38:45" (most of
-                        the plan not yet run) reads as misleading. */}
-                    {!live && totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
+                  {/* The row's figures, on the stat strip's vocabulary at the
+                      row's scale: an 11px uppercase label over a mono value.
+                      `shrink-0` and a scroller, like the strip — a squashed
+                      "1,1\u2026" is worse than one you have to scroll to. */}
+                  <span className="flex shrink-0 items-start gap-0 overflow-x-auto sm:justify-end">
+                    {figures.map((f, fi) => (
+                      <span
+                        key={f.key}
+                        data-row-figure={f.key}
+                        className={cn("flex shrink-0 flex-col gap-0.5 px-3 last:pr-0", fi > 0 && "border-l border-line")}
+                      >
+                        <span className="whitespace-nowrap text-[10px] uppercase tracking-wider text-fg-subtle">{f.label}</span>
+                        <span
+                          className="whitespace-nowrap font-mono text-footnote tabular-nums"
+                          style={{ color: f.color ?? "var(--color-fg)" }}
+                        >
+                          {f.value}
+                        </span>
+                      </span>
+                    ))}
                   </span>
                 </button>
                 {!readOnly && (
                   <Tooltip label="Delete recording">
                     <button
-                      className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                      className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
                       onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
                       aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
                     >
@@ -1355,7 +1439,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               </div>
             );
           })}
-          {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
+          {dayServices.length === 0 && <p className="text-caption1 text-fg-subtle">No services on this day.</p>}
         </div>
       </div>
     </div>

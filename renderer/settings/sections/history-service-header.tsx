@@ -93,6 +93,33 @@ const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
 };
 
 /**
+ * Everything derived from one recording that a figure about it can be built
+ * from — the header's six KPIs and the All services row's four alike.
+ *
+ * ONE derivation, two presentations. The row used to compute its own late
+ * start, its own actual and its own delta-vs-plan; three expressions that were
+ * the same on the day they were written and had nothing holding them together
+ * afterwards.
+ */
+function serviceFigureParts(timeline: ServiceTimeline, spl: ServiceSplHistory | null, now?: number) {
+  const sum = summarize(timeline, now);
+  const over = overrunStats(timeline);
+  const firstStartMs = Date.parse(sum.firstStart);
+  const projectedEnd =
+    sum.planned != null && Number.isFinite(firstStartMs)
+      ? new Date(firstStartMs + sum.planned * 1000).toISOString()
+      : null;
+  const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
+  // The last COUNTED item's end — the trailing buffer is not when the service
+  // ended, and neither is a pre-service item.
+  const actualEnd =
+    [...timeline.items].reverse().find((it) => isCountedItem(it, timeline) && it.endedAt)?.endedAt ??
+    timeline.endedAt ??
+    null;
+  return { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel: servicePeakLevel(spl) };
+}
+
+/**
  * The six figures in the header row.
  *
  * Pure, and exported, so the formatting is testable without a DOM: the
@@ -108,21 +135,7 @@ export function serviceKpis(
   spl: ServiceSplHistory | null,
   now?: number,
 ): (StatFigure & { sub?: string })[] {
-  const sum = summarize(timeline, now);
-  const over = overrunStats(timeline);
-  const firstStartMs = Date.parse(sum.firstStart);
-  const projectedEnd =
-    sum.planned != null && Number.isFinite(firstStartMs)
-      ? new Date(firstStartMs + sum.planned * 1000).toISOString()
-      : null;
-  const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
-  // The last COUNTED item's end — the trailing buffer is not when the service
-  // ended, and neither is a pre-service item.
-  const actualEnd =
-    [...timeline.items].reverse().find((it) => isCountedItem(it, timeline) && it.endedAt)?.endedAt ??
-    timeline.endedAt ??
-    null;
-  const peakLevel = servicePeakLevel(spl);
+  const { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel } = serviceFigureParts(timeline, spl, now);
   return [
     {
       key: "started",
@@ -193,6 +206,65 @@ export function serviceKpis(
       sub: LEVEL_EMPTY_NOTE[peakLevel.kind],
     },
   ];
+}
+
+/**
+ * The figures one row of All services carries, and the time it started.
+ *
+ * Every one of them is PICKED OUT of `serviceKpis` by key rather than derived
+ * again, so a row and the page it opens cannot quote different numbers for the
+ * same recording. The row shows four of the six: a week read down a column is
+ * "how full, how long, how far off, how loud", and Planned and Avg overrun are
+ * questions you ask about one service rather than about a month of them.
+ *
+ * Two presentational differences, and they are the reason this is a function
+ * rather than a filter at the call site:
+ *
+ *   - `Actual` is labelled "Ran", or "Running" while the record is open. The
+ *     column heading on a service's own page is the noun; in a list of past
+ *     services it reads as a verb.
+ *   - versus-plan is its own figure here and a sub-line of Actual there, and it
+ *     is DROPPED while the record is open. Half a plan not yet run shows as
+ *     "−38:45", which reads as a service running three quarters of an hour
+ *     short rather than as one that is three quarters of the way through.
+ *
+ * `started` comes back separately because it is not a figure in the row — it is
+ * the row's own left-hand identity, the time the service began, with its
+ * early/late note.
+ */
+export function serviceRowFigures(
+  timeline: ServiceTimeline,
+  attendance: ServiceAttendance | null,
+  spl: ServiceSplHistory | null,
+  now?: number,
+): { started: StatFigure & { sub?: string }; figures: (StatFigure & { sub?: string })[] } {
+  const live = timeline.endedAt == null;
+  const kpis = serviceKpis(timeline, attendance, spl, live ? now : undefined);
+  const by = new Map(kpis.map((k) => [k.key, k]));
+  const pick = (key: string): StatFigure & { sub?: string } =>
+    by.get(key) ?? { key, label: key, value: "—" };
+  const { totalDelta } = serviceFigureParts(timeline, spl, live ? now : undefined);
+  const actual = pick("actual");
+  return {
+    started: pick("started"),
+    figures: [
+      { ...pick("attendance"), sub: undefined },
+      { ...actual, label: live ? "Running" : "Ran", sub: undefined },
+      ...(live || totalDelta == null
+        ? []
+        : [
+          {
+            key: "vs-plan",
+            label: "vs plan",
+            value: fmtDelta(totalDelta),
+            // The same rule the header's Avg overrun uses: over is the one
+            // direction worth a colour.
+            color: totalDelta > 0 ? "var(--color-danger-11)" : undefined,
+          },
+        ]),
+      { ...pick("level"), sub: undefined },
+    ],
+  };
 }
 
 /**
