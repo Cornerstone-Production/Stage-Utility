@@ -37,18 +37,35 @@ const ATTENDANCE = {
   startedAt: new Date(T0 - 30 * MIN).toISOString(),
   serviceStartedAt: new Date(T0).toISOString(),
   endedAt: new Date(T0 + 60 * MIN).toISOString(),
-  samples: Array.from({ length: 40 }, (_, i) => ({
-    t: new Date(T0 - 30 * MIN + i * 3 * MIN).toISOString(),
-    attendance: 100 + i * 5,
-    occupancy: 200 + i,
-  })),
+  // Ten arriving, twenty in service, ten leaving — the shape every record has.
+  // The tails are near-empty and long, which is what made an all-samples average
+  // read BELOW the in-service low.
+  samples: [
+    ...Array.from({ length: 10 }, (_, i) => ({
+      t: new Date(T0 - 30 * MIN + i * 3 * MIN).toISOString(),
+      attendance: 10 + i * 5,
+      occupancy: 20 + i * 10,
+      phase: "pre" as const,
+    })),
+    ...Array.from({ length: 20 }, (_, i) => ({
+      t: new Date(T0 + i * 2 * MIN).toISOString(),
+      attendance: 100 + i * 5,
+      occupancy: 200 + i,
+    })),
+    ...Array.from({ length: 10 }, (_, i) => ({
+      t: new Date(T0 + 45 * MIN + i * 3 * MIN).toISOString(),
+      attendance: 300,
+      occupancy: 120 - i * 10,
+      phase: "post" as const,
+    })),
+  ],
   attendanceBaseline: 100,
   totalAttendance: 900,
   peakAttendance: 295,
-  peakOccupancy: 239,
+  peakOccupancy: 219,
   minOccupancy: 200,
   lastAttendance: 295,
-  lastOccupancy: 239,
+  lastOccupancy: 30,
 } as unknown as ServiceAttendance;
 
 const TIMELINE = {
@@ -133,6 +150,29 @@ test("the attendance section is the chart module, not a chip row", () => {
   assert.equal(screen.queryAllByText("Summary").length, 0);
   // The lane drew the plan's items.
   assert.equal(document.querySelectorAll("[data-lane-segment]").length, 2);
+});
+
+test("the average is the SERVICE's average, not the whole recording's", () => {
+  // Peak and Lowest have always been in-service. Averaging the arrival ramp and
+  // the emptying-room taper in put Average BELOW Lowest on a real record —
+  // peak 1,196, lowest 933, "average" 781 — which reads as a broken figure.
+  render(attendance());
+  // Read the figures from the DOM, not from innerText: jsdom does not implement
+  // innerText's layout-aware line breaking, so labels and values run together
+  // into one string and every regex over it is a guess.
+  const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+  const figure = (label: string) => {
+    for (const cell of strip.querySelectorAll(":scope > div")) {
+      const spans = cell.querySelectorAll("span");
+      if (spans[0]?.textContent === label) return Number((spans[1]?.textContent ?? "").replace(/,/g, ""));
+    }
+    return NaN;
+  };
+  const avg = figure("Average");
+  // The twenty in-service samples run 200…219.
+  assert.equal(avg, 210, `average was ${avg}`);
+  assert.ok(avg >= figure("Lowest"), `average ${avg} is below the lowest ${figure("Lowest")}`);
+  assert.ok(avg <= figure("Peak"), `average ${avg} is above the peak ${figure("Peak")}`);
 });
 
 test("the at-rest strip shows the default figures", () => {

@@ -320,7 +320,7 @@ export function HistoryChart({
             sample count, so appending a sample updates `d` on the element that is
             already there instead of replacing it — see history-chart-live.test.tsx. */}
         {series.map((s) => {
-          const runs = splitRuns(s.points, GAP_MS);
+          const runs = splitRuns(s.points, s.gapMs ?? GAP_MS);
           return (
             <g key={s.id} data-series={s.id}>
               {s.fill
@@ -446,10 +446,13 @@ export function HistoryChart({
               {seg.item.peakLabel && w > 8 && (
                 <line
                   data-peak-mark={seg.item.itemId}
+                  // The TOP EDGE, not the full height. A full-height tick drew
+                  // straight through the item's own label — "Trem|ble",
+                  // "What a|God" — which is worse than not marking it at all.
                   x1={(seg.x0 + seg.x1) / 2}
-                  y1={y + 1}
+                  y1={y}
                   x2={(seg.x0 + seg.x1) / 2}
-                  y2={y + LANE_ROW_H - 1}
+                  y2={y + 4}
                   stroke={series.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
                   strokeWidth={3}
                   vectorEffect="non-scaling-stroke"
@@ -480,7 +483,13 @@ export function HistoryChart({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption2 text-fg-muted">
         {series.map((s) => (
           <span key={s.id} className="inline-flex items-center gap-1.5">
-            <span className="size-2.5 rounded-full" style={{ background: s.color }} />
+            {/* The swatch is the LINE: a dashed series gets a dashed rule, not
+                the same filled dot as the solid one beside it. Two identical
+                dots said the two lines were drawn alike when one is a dashed
+                reference. */}
+            {s.dashed
+              ? <span className="inline-block w-3 border-t border-dashed" style={{ borderColor: s.color }} />
+              : <span className="size-2.5 rounded-full" style={{ background: s.color }} />}
             {s.label}
           </span>
         ))}

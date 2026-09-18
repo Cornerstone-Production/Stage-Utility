@@ -35,6 +35,23 @@ describe("niceAxis", () => {
     assert.deepEqual(a.ticks, [75, 85, 95]);
   });
 
+  test("the dB band is a multiple of ten, so the middle tick is a round number", () => {
+    // 72–95 gives 65 and a rough top of 100, whose midpoint is 82.5 → "83".
+    // A gridline labelled 83 reads as a data value. Widened to 65–105, mid 85.
+    assert.deepEqual(niceAxis([72, 95], { kind: "db" }), { lo: 65, hi: 105, ticks: [65, 85, 105] });
+  });
+
+  test("every dB tick is a whole multiple of five", () => {
+    for (let min = 40; min <= 110; min++) {
+      for (const width of [1, 7, 18, 33]) {
+        const a = niceAxis([min, min + width], { kind: "db" });
+        for (const t of a.ticks) {
+          assert.equal(t % 5, 0, `tick ${t} from ${min}..${min + width} is not a multiple of 5`);
+        }
+      }
+    }
+  });
+
   test("a single dB reading still gets a band to sit in", () => {
     const a = niceAxis([88], { kind: "db" });
     assert.ok(a.hi - a.lo >= 10, `${a.lo}–${a.hi} is too tight to read`);

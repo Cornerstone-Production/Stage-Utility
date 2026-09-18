@@ -22,6 +22,16 @@ export interface ChartSeries {
   dashed?: boolean;
   /** Gradient fill from the line down to the axis floor. Primary only. */
   fill?: boolean;
+  /**
+   * How long a hole in this series means "unmeasured", in ms.
+   *
+   * The default breaks the line across a sampling gap, which is right for a
+   * sampled series and WRONG for anything else. A reference line is two points
+   * two hours apart and broke into two dots at the ends of the plot; a step line
+   * holding one level across a 25-minute item broke in the middle of the item.
+   * Both pass `Infinity`: they have no sampling to have a gap in.
+   */
+  gapMs?: number;
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
 }
@@ -62,8 +72,12 @@ export function niceAxis(values: number[], scale: YScale): Axis {
     const min = Math.min(...finite);
     const max = Math.max(...finite);
     const lo = Math.floor((min - 3) / 5) * 5;
-    const hi = Math.max(lo + 10, Math.ceil((max + 3) / 5) * 5);
-    return { lo, hi, ticks: [lo, Math.round((lo + hi) / 2), hi] };
+    // The SPAN is a multiple of ten, not just the ends, so the middle tick is a
+    // multiple of five. 65–100 put "83" between them, which reads as a data
+    // value rather than as a gridline.
+    const rough = Math.max(lo + 10, Math.ceil((max + 3) / 5) * 5);
+    const hi = lo + Math.ceil((rough - lo) / 10) * 10;
+    return { lo, hi, ticks: [lo, (lo + hi) / 2, hi] };
   }
   const dataMax = Math.max(1, ...finite);
   let step = niceStep(dataMax / 2);

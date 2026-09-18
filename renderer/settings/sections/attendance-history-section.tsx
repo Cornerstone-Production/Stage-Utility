@@ -61,10 +61,24 @@ export function servicePeakAttendance(rec: ServiceAttendance): number {
   return perServiceAttendance(max, s);
 }
 
-/** Mean in-room occupancy across the record's samples, or null with no samples. */
+/**
+ * Mean in-room occupancy while the SERVICE was running.
+ *
+ * In-service samples only — the ones with no `phase`. The arrival ramp and the
+ * emptying-room taper are both long and both near-empty, and averaging them in
+ * put this figure BELOW the recorded low: peak 1,196, lowest 933, "average"
+ * 781. Peak and Lowest have always been in-service (the recorder derives them
+ * that way, and AttendanceSample's own doc says only unphased samples feed
+ * Peak/Lowest/Avg); the average was the one that did not agree with them.
+ *
+ * Records written before the phase tags existed have no phase on any sample, so
+ * every sample counts — the same answer those records gave before.
+ */
 function averageOccupancy(rec: ServiceAttendance): number | null {
-  if (!rec.samples.length) return null;
-  return Math.round(rec.samples.reduce((s, p) => s + p.occupancy, 0) / rec.samples.length);
+  const inService = rec.samples.filter((s) => !s.phase);
+  const use = inService.length ? inService : rec.samples;
+  if (!use.length) return null;
+  return Math.round(use.reduce((s, p) => s + p.occupancy, 0) / use.length);
 }
 
 /** The full attendance detail — the chart module, its stat strip and its
@@ -120,10 +134,16 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
     // of overlay — it shares the y scale, so it is a series by any other name.
     series.push({
       id: "avg",
-      label: `Avg ${avgOccupancy.toLocaleString()}`,
+      // "Avg", not "Avg 1,164": the strip prints the label and the value side by
+      // side, and a label carrying the number read "AVG 1,164  1,164".
+      label: "Avg",
       color: "var(--green-11)",
       role: "secondary",
       dashed: true,
+      // Two points two hours apart. Without this the default sampling-gap rule
+      // broke it into two single-point runs and drew two dots at the edges of
+      // the plot instead of a reference line.
+      gapMs: Infinity,
       points: [
         { t: points[0].t, v: avgOccupancy },
         { t: points[points.length - 1].t, v: avgOccupancy },

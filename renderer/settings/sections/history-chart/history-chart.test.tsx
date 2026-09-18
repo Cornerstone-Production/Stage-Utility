@@ -228,6 +228,35 @@ describe("the plot", () => {
     assert.equal(secondary.getAttribute("stroke-dasharray"), "4 3");
   });
 
+  test("a series that says it has no sampling gap is never broken", () => {
+    // A reference line is two points two hours apart, and a step line holds one
+    // level across a 25-minute item. Under the default sampling-gap rule both
+    // were cut into single-point runs: the reference line drew as two dots at
+    // the edges of the plot, and the step line broke inside every long item.
+    const far = [{ t: T0, v: 120 }, { t: T0 + 60 * MIN, v: 120 }];
+    render(chart({ series: [series({ id: "ref", points: far, fill: false, gapMs: Infinity })] }));
+    assert.equal(document.querySelectorAll("[data-series-line='ref']").length, 1);
+    cleanup();
+    render(chart({ series: [series({ id: "ref", points: far, fill: false })] }));
+    assert.equal(
+      document.querySelectorAll("[data-series-line='ref']").length,
+      2,
+      "the default gap rule should still break a sampled series",
+    );
+  });
+
+  test("a peak mark sits on the block's top edge, clear of its label", () => {
+    // A full-height tick drew straight through the item's own title —
+    // "Trem|ble", "What a|God" — which names the item worse than no mark.
+    render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
+    const g = document.querySelector("[data-lane-row='service']") as SVGGElement;
+    const rect = g.querySelector("[data-lane-segment]") as SVGRectElement;
+    const mark = g.querySelector("[data-peak-mark]") as SVGLineElement;
+    const top = Number(rect.getAttribute("y"));
+    assert.equal(Number(mark.getAttribute("y1")), top);
+    assert.equal(Number(mark.getAttribute("y2")) - top, 4, "the mark reaches down into the label");
+  });
+
   test("an empty record says so instead of drawing an axis around nothing", () => {
     render(chart({ series: [series({ points: [] })] }));
     assert.equal(document.querySelectorAll("svg").length, 0);

@@ -126,8 +126,14 @@ export function SplDetail({ detail, timeline }: { detail: ServiceSplHistory; tim
     label: key,
     color: i === 0 ? "var(--color-accent)" : SECONDARY_COLORS[(i - 1) % SECONDARY_COLORS.length],
     role: i === 0 ? "primary" : "secondary",
-    fill: i === 0,
+    // NO FILL, unlike attendance. A fill runs to the axis floor, and a dB axis
+    // has no floor that means anything — the band is chosen to frame the data,
+    // so the fill's depth would say only where the axis happens to start.
     dashed: i > 0,
+    // A step is not a sample series and has no gap to break across: the default
+    // rule split the line in the MIDDLE of every item longer than three minutes,
+    // which is most of them.
+    gapMs: Infinity,
     format: (v: number) => dB(v),
     points: stepPoints(items, detail, key),
   }));
