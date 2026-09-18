@@ -1,4 +1,9 @@
-// History → a recording → Edit times → "Rebuild from raw".
+// History → a recording → "Rebuild from raw", in the service page's header.
+//
+// It used to sit inside the Edit times bar, which is why `openRecording` below
+// used to press Edit times first. It is one of the header's action group now,
+// so a recording is all that has to be open — and the test asserts it is
+// reachable WITHOUT entering edit mode, which is the behaviour that changed.
 //
 // A control that renders is not a control that does anything: this presses the
 // real button, through the real confirm dialog, through the real
@@ -132,8 +137,9 @@ const lastToast = () => {
   return all.length ? text(all[all.length - 1] as HTMLElement) : "NO TOAST";
 };
 
-/** Open the one recording and reveal the edit actions. */
-async function openEditActions(container: HTMLElement) {
+/** Open the one recording. Nothing else: Rebuild from raw is in the header's
+ *  action group, so edit mode is not a step on the way to it. */
+async function openRecording(container: HTMLElement) {
   const row = [...container.querySelectorAll("button")].find((b) =>
     text(b as HTMLElement).includes("Sunday Gathering"),
   );
@@ -141,10 +147,11 @@ async function openEditActions(container: HTMLElement) {
   fireEvent.click(row!);
   await settle();
   await settle();
-  const edit = [...container.querySelectorAll("button")].find((b) => text(b as HTMLElement) === "Edit times");
-  assert.ok(edit, "the Edit times button never rendered");
-  fireEvent.click(edit!);
-  await settle();
+  assert.equal(
+    container.querySelectorAll('input[type="time"]').length,
+    0,
+    "edit mode must NOT be on — Rebuild from raw has to be reachable without it",
+  );
 }
 
 describe("History: Rebuild from raw", () => {
@@ -171,7 +178,7 @@ describe("History: Rebuild from raw", () => {
     t.after(() => cleanup());
     await settle();
     await settle();
-    await openEditActions(view.container);
+    await openRecording(view.container);
 
     const btn = button(view.container, "Rebuild from raw");
     assert.ok(btn, `the Rebuild from raw button never rendered: ${text(view.container)}`);
@@ -223,7 +230,7 @@ describe("History: Rebuild from raw", () => {
     t.after(() => cleanup());
     await settle();
     await settle();
-    await openEditActions(view.container);
+    await openRecording(view.container);
 
     fireEvent.click(button(view.container, "Rebuild from raw")!);
     await settle();
@@ -252,7 +259,7 @@ describe("History: Rebuild from raw", () => {
     t.after(() => cleanup());
     await settle();
     await settle();
-    await openEditActions(view.container);
+    await openRecording(view.container);
 
     fireEvent.click(button(view.container, "Rebuild from raw")!);
     await settle();
@@ -279,7 +286,7 @@ describe("History: Rebuild from raw", () => {
     t.after(() => cleanup());
     await settle();
     await settle();
-    await openEditActions(view.container);
+    await openRecording(view.container);
 
     fireEvent.click(button(view.container, "Rebuild from raw")!);
     await settle();
@@ -306,7 +313,7 @@ describe("History: Rebuild from raw", () => {
     t.after(() => cleanup());
     await settle();
     await settle();
-    await openEditActions(view.container);
+    await openRecording(view.container);
 
     fireEvent.click(button(view.container, "Rebuild from raw")!);
     await settle();

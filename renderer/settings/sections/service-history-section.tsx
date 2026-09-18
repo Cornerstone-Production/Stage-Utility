@@ -935,10 +935,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           </div>
         )}
 
-        <div id="history-rundown" className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
+        {/* The app's type scale, not the table's own: 10px uppercase headers
+            over 13px rows, every number mono and tabular so the columns line up
+            down the page. The marks — live, not counted, edited — and the two
+            row buttons were each on a bespoke 10px; they are on the scale's
+            11px caption now. Nothing about what the table DOES changed. */}
+        <div id="history-rundown" className="flex flex-col overflow-hidden rounded-lg border border-line">
           <div
             data-testid="rundown-header"
-            className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}
+            className={`grid ${gridCols} gap-2 border-b border-line bg-fill px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle`}
           >
             {editingTimes && (
               <Tooltip label="Whether this item counts toward the service timers">
@@ -951,7 +956,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             const itemLive = it.endedAt == null;
             const counted = isCountedItem(it, detail); // buffer + pre-service shown but not totaled
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
-            const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
+            const deltaColor = delta == null ? "text-fg-subtle" : delta > 30 ? "text-danger-11" : delta < -30 ? "text-accent" : "text-fg-muted";
             // `editedFrom` is set by the server's overlay and only on a row that
             // actually differs from what was recorded — the marker cannot lie.
             const edited = it.editedFrom != null;
@@ -962,7 +967,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // Keyed by sequence too: a plan item can run twice in one record
               // (reprised, or a second service caught before the split), and a
               // duplicate React key drops the second row's state onto the first.
-              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} items-center gap-2 px-3 py-1.5 text-footnote ${i % 2 ? "bg-fill/40" : "bg-surface"} ${counted ? "" : "opacity-55"}`}>
                 {editingTimes && (
                   <Tooltip
                     label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}
@@ -975,19 +980,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     />
                   </Tooltip>
                 )}
-                <span className="text-gray-9 max-sm:hidden">{i + 1}</span>
-                <span className="text-gray-12 truncate">
+                <span className="font-mono tabular-nums text-fg-subtle max-sm:hidden">{i + 1}</span>
+                <span className="truncate text-fg">
                   {it.title || "—"}
-                  {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
-                  {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                  {itemLive && <span className="ml-1.5 text-caption2 text-live-11">live</span>}
+                  {!counted && <span className="ml-1.5 text-caption2 italic text-fg-subtle">not counted</span>}
                   {edited && (
                     <Tooltip label={editedTooltip(it)}>
-                      <span className="ml-1.5 text-[10px] italic text-amber-11">edited</span>
+                      <span className="ml-1.5 text-caption2 italic text-warn-11">edited</span>
                     </Tooltip>
                   )}
                   {editingTimes && dirty && (
                     <button
-                      className="ml-2 align-middle rounded-md border border-accent px-1.5 py-px text-[10px] text-accent hover:bg-accent/10 max-sm:hidden"
+                      className="ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10 max-sm:hidden"
                       disabled={saving}
                       aria-label={`Save times — ${it.title || "item"}`}
                       onClick={() => void saveItemTimes(it)}
@@ -1002,7 +1007,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       wanted. Reset discards the draft along with the override. */}
                   {editingTimes && edited && (
                     <button
-                      className="ml-2 align-middle rounded-md border border-gray-6 px-1.5 py-px text-[10px] text-gray-11 hover:bg-gray-4 max-sm:hidden"
+                      className="ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill max-sm:hidden"
                       aria-label={`Reset times — ${it.title || "item"}`}
                       onClick={() => void resetItemTimes(it)}
                     >
@@ -1010,9 +1015,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     </button>
                   )}
                 </span>
-                <span className="text-right text-gray-10 max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
-                <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
-                <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
+                <span className="text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
+                <span className="text-right font-mono tabular-nums text-fg">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
+                <span className={`text-right font-mono tabular-nums ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
                 {editingTimes ? (
                   <>
                     {/* `placeholder` and `title` both: a time input shows no
@@ -1028,7 +1033,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded start"
                       value={draft.start}
                       onChange={(e) => setDraft(it, { start: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
+                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
                     />
                     <input
                       type="time"
@@ -1038,13 +1043,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded end"
                       value={draft.end}
                       onChange={(e) => setDraft(it, { end: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
+                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
                     />
                   </>
                 ) : (
                   <>
-                    <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
-                    <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
+                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
                   </>
                 )}
               </div>
