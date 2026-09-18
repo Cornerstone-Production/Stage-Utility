@@ -250,7 +250,14 @@ export async function setItemCounted(serviceKey: string, itemId: string, counted
   if (!tl) return;
   const hits = tl.items.filter((x) => x.itemId === itemId);
   if (hits.length === 0) return;
-  for (const it of hits) it.counted = counted;
+  // Marked as the OPERATOR's, not the recorder's. The recorder writes `counted:
+  // false` by itself for an item carried over from an earlier session, and with
+  // one unmarked field a rebuild could not tell the two apart — so it spread an
+  // observation about one run onto every run of the item.
+  for (const it of hits) {
+    it.counted = counted;
+    it.countedByOperator = true;
+  }
   await serviceTimelineStore.upsert(tl);
   broadcast("service-timeline:history", tl);
 }

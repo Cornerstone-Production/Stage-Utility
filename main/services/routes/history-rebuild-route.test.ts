@@ -253,6 +253,52 @@ describe("POST /api/history/rebuild", () => {
     assert.ok(broadcasts.includes("spl:history"), `no SPL broadcast: ${broadcasts.join(",")}`);
   });
 
+  // The operator's "this item does not count" is a statement about the PLAN
+  // item, so it survives a rebuild and reaches every run of it. Driven through
+  // the real POST /api/history/item-counted, because what marks the override as
+  // the operator's is that route — a test that set the flag by hand would prove
+  // only that the rebuild reads a field the test wrote.
+  it("keeps an operator's counted override across a rebuild, on every run of the item", async () => {
+    // Two runs of Doors, more than SERVICE_GAP_MS apart.
+    await fs.writeFile(
+      path.join(serviceDirPath(KEY, DATE), "events.csv"),
+      [
+        "at,source,kind,detail",
+        "2026-09-17T23:23:48.789Z,pco,item,Doors",
+        "2026-09-17T23:30:04.452Z,pco,item,MESSAGE",
+        "2026-09-17T23:50:00.000Z,pco,item,Doors",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const set = await callRoute(historyRoutes, "/api/history/item-counted", {
+      method: "POST",
+      body: { serviceKey: KEY, itemId: "pco-1", counted: false },
+    });
+    assert.equal(set.status, 200, `the override was not accepted: ${set.body}`);
+
+    const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+      method: "POST",
+      body: { serviceKey: KEY },
+    });
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+
+    const tl = await serviceTimelineStore.get(KEY);
+    const doors = (tl?.items ?? []).filter((i) => i.itemId === "pco-1");
+    assert.equal(doors.length, 2, `expected two runs of Doors: ${JSON.stringify(tl?.items.map((i) => i.title))}`);
+    assert.deepEqual(
+      doors.map((i) => [i.counted, i.countedByOperator]),
+      [
+        [false, true],
+        [false, true],
+      ],
+      "the operator's override did not survive the rebuild on both runs",
+    );
+    // And the item they did NOT exclude is untouched.
+    assert.equal(tl?.items.find((i) => i.title === "MESSAGE")?.counted, undefined);
+  });
+
   it("refuses with a sentence while that service is recording", async () => {
     const held = serviceTimelineRecorder as unknown as {
       current: unknown;

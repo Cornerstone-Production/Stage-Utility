@@ -234,6 +234,7 @@ describe("rebuildTimelineRecord: identity of the items", () => {
           actualDurationSec: 376,
           preService: true,
           counted: false,
+          countedByOperator: true,
         },
       ],
     });
@@ -505,6 +506,65 @@ describe("rebuildTimelineRecord: identity of the items", () => {
       warnings.includes("[service-timeline] rebuild: skipped 2 event row(s) with an unreadable timestamp"),
       `the skipped rows were not reported: ${JSON.stringify(warnings)}`,
     );
+  });
+
+  // `counted` has two writers. The operator's override says "this plan item
+  // never counts"; the recorder's own `counted: false` says "PCO had been
+  // showing THIS RUN live since before the record opened". Carried alike, the
+  // second spread onto later runs and quietly dropped real items out of every
+  // service timer.
+  describe("the counted override", () => {
+    const rows = () =>
+      oldRows([
+        ["2026-09-17T23:00:00.000Z", "BENEDICTION"],
+        ["2026-09-17T23:10:00.000Z", "Tremble"],
+        ["2026-09-17T23:40:00.000Z", "BENEDICTION"], // a genuine second run
+      ]);
+
+    it("carries an operator's override onto every run of the item", () => {
+      const prior = record({
+        endedAt: "2026-09-18T00:00:00.000Z",
+        items: [
+          storedItem({ itemId: "pco-b", title: "BENEDICTION", sequence: 0, counted: false, countedByOperator: true }),
+          storedItem({ itemId: "pco-t", title: "Tremble", sequence: 1 }),
+        ],
+      });
+      const { out } = withWarnings(() => rebuildTimelineRecord(prior, rows()));
+
+      const benediction = out.items.filter((i) => i.title === "BENEDICTION");
+      assert.equal(benediction.length, 2, "the two runs collapsed");
+      assert.deepEqual(
+        benediction.map((i) => [i.counted, i.countedByOperator]),
+        [
+          [false, true],
+          [false, true],
+        ],
+        "an operator's override did not reach both runs",
+      );
+    });
+
+    it("carries the recorder's own exclusion back onto that run only", () => {
+      // No countedByOperator: the recorder wrote this itself for an item left
+      // live in Planning Center since an earlier session.
+      const prior = record({
+        endedAt: "2026-09-18T00:00:00.000Z",
+        items: [
+          storedItem({ itemId: "pco-b", title: "BENEDICTION", sequence: 0, counted: false }),
+          storedItem({ itemId: "pco-t", title: "Tremble", sequence: 1 }),
+        ],
+      });
+      const { out } = withWarnings(() => rebuildTimelineRecord(prior, rows()));
+
+      const benediction = out.items.filter((i) => i.title === "BENEDICTION");
+      assert.equal(benediction.length, 2, "the two runs collapsed");
+      assert.equal(benediction[0].counted, false, "the observed run lost its exclusion");
+      assert.equal(
+        benediction[1].counted,
+        undefined,
+        "a carried-over FIRST run excluded a later run that was never carried over",
+      );
+      assert.equal(benediction[1].countedByOperator, undefined);
+    });
   });
 
   it("keeps the record's own fields", () => {

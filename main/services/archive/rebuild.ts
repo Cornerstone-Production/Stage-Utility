@@ -363,14 +363,40 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   // what the live recorder's own finalizeRecord would have done.
   if (open && prior.endedAt) closeEntry(open, prior.endedAt);
 
-  // `counted` is the operator's override of the auto pre-service default, set
-  // per plan item and applied to every run of it — see setItemCounted. It exists
-  // nowhere in the raw rows, so losing it here would silently undo their edit.
-  const overrides = new Map<string, boolean>();
-  for (const i of prior.items) if (i.counted != null) overrides.set(i.itemId, i.counted);
+  // `counted` exists nowhere in the raw rows, so losing it here would silently
+  // undo work. It has two writers, and they carry differently:
+  //
+  //   The OPERATOR's override (countedByOperator) is a statement about the PLAN
+  //   item — "this item never counts" — so it lands on every run of it, which
+  //   is also how setItemCounted applies it.
+  //
+  //   The RECORDER's own `counted: false` is an observation about ONE run: PCO
+  //   had been showing that item live since before the record opened. A later
+  //   run of the same item is a normal run, and spreading the flag onto it
+  //   quietly dropped real items out of every service timer. It is carried back
+  //   onto the matching run only — the Nth run to the Nth prior entry, the same
+  //   pairing rebuildSplRecord uses — and a run with no prior counterpart keeps
+  //   the auto default.
+  const operatorOverrides = new Map<string, boolean>();
+  const priorRuns = new Map<string, ServiceTimelineItem[]>();
+  for (const i of prior.items) {
+    if (i.counted != null && i.countedByOperator) operatorOverrides.set(i.itemId, i.counted);
+    const list = priorRuns.get(i.itemId);
+    if (list) list.push(i);
+    else priorRuns.set(i.itemId, [i]);
+  }
+  const runIndex = new Map<string, number>();
   for (const it of items) {
-    const c = overrides.get(it.itemId);
-    if (c != null) it.counted = c;
+    const n = runIndex.get(it.itemId) ?? 0;
+    runIndex.set(it.itemId, n + 1);
+    const operator = operatorOverrides.get(it.itemId);
+    if (operator != null) {
+      it.counted = operator;
+      it.countedByOperator = true;
+      continue;
+    }
+    const sameRun = priorRuns.get(it.itemId)?.[n];
+    if (sameRun?.counted != null) it.counted = sameRun.counted;
   }
 
   items.forEach((it, i) => (it.sequence = i));

@@ -178,9 +178,22 @@ export interface ServiceTimelineItem {
   /** Auto: item was above the plan's SERVICE START header when recorded (pre-service).
    *  Drives the default "not counted" state. Absent on older records. */
   preService?: boolean;
-  /** User override for whether this item counts toward the service timers. When set,
-   *  it wins over the auto (buffer/pre-service) default; absent = use the default. */
+  /** Override for whether this item counts toward the service timers. When set,
+   *  it wins over the auto (buffer/pre-service) default; absent = use the default.
+   *
+   *  TWO writers, which `countedByOperator` tells apart: the operator, through
+   *  POST /api/history/item-counted, and the recorder, which writes `false` by
+   *  itself for an item PCO had been showing live since before this record
+   *  opened (see openItem). The second is an observation about one run and does
+   *  not generalise; the first is a statement about the plan item. */
   counted?: boolean;
+  /** True when `counted` was set by the operator rather than derived by the
+   *  recorder. A rebuild carries an operator's override onto every run of the
+   *  item — it is a statement about the PLAN item — but carries the recorder's
+   *  own `counted: false` only back onto the run it was observed on, because a
+   *  carried-over first run says nothing about a later one. Absent on records
+   *  written before this was added; see rebuildTimelineRecord. */
+  countedByOperator?: true;
 }
 
 /** Recorded ACTUAL service rundown timing for one occurrence — when each item
