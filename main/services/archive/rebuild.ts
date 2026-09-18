@@ -223,9 +223,18 @@ function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
  * `endedAt`, and stays open when the record is still open.
  *
  * What is NOT in the rows is carried from `prior`: the record's identity, its
- * window, `pacingResetAt`, and any per-item `counted` override the operator set
- * — which is a statement about the PLAN item, so it lands on every entry for
- * that id.
+ * window, `pacingResetAt`, any per-item `counted` override the operator set —
+ * which is a statement about the PLAN item, so it lands on every entry for that
+ * id — and `itemTimeEdits`, their corrections to individual item timings.
+ *
+ * The time corrections are carried, never applied: they are an overlay read back
+ * on by `applyItemTimeEdits` (see history-item-times.ts), so a rebuild produces
+ * the raw run from the rows and the next read puts the corrections back on top.
+ * That is the whole reason they are not written into the items — the rows say
+ * what the recorder saw and always will, so an edit written in would be undone
+ * here without a word. Pass the STORED record as `prior`, not an overlaid one;
+ * `applyItemTimeEdits` undoes an overlay it is given, so either works, but only
+ * the stored record is the raw truth this is meant to re-derive against.
  */
 export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]): ServiceTimeline {
   const items: ServiceTimelineItem[] = [];
