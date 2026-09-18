@@ -70,8 +70,48 @@ operator jumping to the previous song expects.
 ## Reading it back
 
 The History tab puts all three on one calendar — days with data are marked. Open
-a service for its rundown and its two charts, Attendance and Audio (SPL). Both
-are the same chart, described below.
+a service for its own page, described next.
+
+### The service page
+
+A sticky header, then three cards: **Rundown**, **Attendance** and **Sound**.
+The two charts are the same chart, described below the header.
+
+The header stays put while the page scrolls, so what you are looking at is
+always labelled and every action is always one reach away. It carries, top to
+bottom:
+
+- a crumb back to **All services**;
+- the plan title, and one muted line of series, service type, date and start
+  time. While the recording is still open, a green **recording** pill sits
+  beside it;
+- one action group — **Edit times**, **Copy report**, **Merge**, **Rebuild from
+  raw**, **Delete**, with Delete set apart as the one that cannot be undone.
+  **Reset pacing** joins them while the service is live. The shared `/history`
+  link carries Copy report alone;
+- six figures, read left to right:
+
+  | | |
+  |---|---|
+  | Started | when the first counted item went live, and how early or late that was against the scheduled time |
+  | Planned | the counted items' planned total, and the time the service would end on it |
+  | Actual | what it ran, its difference against the plan, and when it ended |
+  | Avg overrun | the mean per-item difference, and how many items of how many ran over |
+  | Peak attendance | the most people in the room, and the peak in-room count |
+  | Peak *metric* | the loudest reading on the primary Smaart metric, named after the metric it read |
+
+  Started, Planned and Actual count up live while a service is recording. A
+  record with no attendance or no sound shows a dash, not a zero;
+- a nav over the three cards. The entries are ordinary links, so they work with
+  the keyboard and with middle-click, and the one you are looking at is
+  highlighted as you scroll.
+
+On a phone the header stacks and the six figures scroll sideways in their own
+row; the page itself never scrolls sideways.
+
+On a weekend a baptism session links to, a fourth **Baptisms** card appears
+between Rundown and Attendance. It is not in the nav — an entry that came and
+went by the week would read as a fault.
 
 ### The service chart
 
@@ -204,10 +244,15 @@ times, and per-person averages.
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
+The rundown itself is a table of every item as it ran: number, title, planned
+length, actual, the difference, and the times it started and ended. An item
+excluded from the timers is marked **not counted** and dimmed; one whose times
+were corrected is marked **edited**.
+
 **Edit times** also makes each item's own Started and Ended editable. An item
 that recorded wrong — a pre-roll that reads eleven minutes because the plan was
 still being shuffled in Planning Center — is corrected to what it actually ran,
-and the row's Actual, its delta, and the service's Actual and Avg overrun tiles
+and the row's Actual, its delta, and the header's Actual and Avg overrun figures
 all follow. A corrected row is marked **edited**, with the recorded times in its
 tooltip and a **Reset** beside it that puts them back.
 
@@ -219,7 +264,7 @@ correction has to fall inside the recording's own window and end after it starts
 — if the window itself is wrong, fix that first with the Start and End fields at
 the top.
 
-**Rebuild from raw**, beside the window editor, discards a recording's stored
+**Rebuild from raw**, in the header's action group, discards a recording's stored
 summaries and derives them again from the rows in the
 [data archive](../data-archive.md): item timings from the plan-item event rows,
 sound levels from the SPL samples, attendance from the record's own samples. For
