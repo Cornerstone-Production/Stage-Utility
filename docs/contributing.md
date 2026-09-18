@@ -229,6 +229,14 @@ npm run lint && npm run type-check && npm test && npm run build
 CI runs the same four. There is one long-standing lint warning
 (`patch-import.tsx:170`); anything beyond that is yours.
 
+Not every check runs on every pull request. The secret scan, the commit
+convention check and CodeQL run on all of them, and are required on `beta`.
+The build and tests skip a PR that touches only `docs/` and Markdown;
+dependency review runs only when `package.json` or the lockfile changes; the
+updater survival matrix runs only for the updater, the installers and its own
+scripts. Every push to `beta` and `main` still runs the full build, and the
+release workflow runs the whole gate again before it tags.
+
 Chain them with `&&`, not `;`. With `;` a failure scrolls past and the commit
 lands anyway — that is how a type error once reached `beta`.
 

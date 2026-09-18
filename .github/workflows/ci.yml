@@ -3,7 +3,14 @@ name: CI
 on:
   push:
     branches: [main, beta]
+  # A pull request that touches only documentation gets no build: nothing it
+  # changes is compiled or tested. Every push to beta and main still builds, and
+  # release.yml re-runs the whole gate before it tags, so a docs-only merge is
+  # still verified where it matters.
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   # Lets a specific commit be verified on demand — and lets release.yml verify
   # the version-bump commit it just pushed.
   #
