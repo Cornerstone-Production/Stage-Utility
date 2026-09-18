@@ -21,7 +21,7 @@ const teardown = installRenderDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
-const { HistoryChart, fitLabel, keepAxisLabels, AXIS_LABEL_GAP } = await import("./history-chart.js");
+const { HistoryChart, fitLabel, keepAxisLabels, keepMilestoneLabels, AXIS_LABEL_GAP, MARK_LABEL_OFFSET, MARK_LABEL_GAP } = await import("./history-chart.js");
 
 afterEach(cleanup);
 after(() => {
@@ -305,5 +305,66 @@ describe("the axis keep rule", () => {
     // The first tick sits ON plotX0, so half its label hangs off the left.
     assert.equal(keepAxisLabels(ticks, { ...opts, plotX0: 70 }).has(0), false);
     assert.equal(keepAxisLabels(ticks, { ...opts, plotX1: 520 }).has(9), false);
+  });
+});
+
+describe("two milestone labels that would touch", () => {
+  /** Six characters a piece, so a label's width is its length × 6. */
+  const measure = (s: string) => s.length * 6;
+  const PLOT_X1 = 600;
+
+  test("the LATER one keeps its words; the earlier shows only its triangle", () => {
+    // Exactly the collision on screen: two marks a week apart on a sixteen-week
+    // axis, printing "Wor…" hard against "Worth the Risk". An ellipsised stub
+    // beside a full label reads as one broken label and names neither mark.
+    const marks = [
+      { id: "a", label: "Worth the Risk" },
+      { id: "b", label: "Worth the Risk" },
+    ];
+    // 20px apart: nowhere near the 84px the label needs.
+    const kept = keepMilestoneLabels(marks, { xOf: (i) => 400 + i * 20, measure, plotX1: PLOT_X1 });
+    assert.deepEqual([...kept], ["b"], "the earlier mark must lose its label, not be truncated");
+  });
+
+  test("marks with room between them all keep their labels", () => {
+    // The positive half: the rule must not strip an axis that had no collision.
+    const marks = [
+      { id: "a", label: "Kickoff" },
+      { id: "b", label: "Baptism" },
+    ];
+    const kept = keepMilestoneLabels(marks, { xOf: (i) => 100 + i * 200, measure, plotX1: PLOT_X1 });
+    assert.deepEqual([...kept].sort(), ["a", "b"]);
+  });
+
+  test("dropping one frees the room before it", () => {
+    // Measured against the next LABELLED mark, not the next mark. The fixture
+    // is built so the two rules disagree on ONE label: `a` at 540 has 16px
+    // before `c` at 570, which fits its 12px label — but only 6px before `b` at
+    // 560, which does not. `b` is dropped, so `a` should be measured against
+    // `c` and keep its words.
+    const marks = [
+      { id: "a", label: "AB" },
+      { id: "b", label: "LongOne" },
+      { id: "c", label: "C" },
+    ];
+    const xs = [540, 560, 570];
+    const kept = keepMilestoneLabels(marks, { xOf: (i) => xs[i], measure, plotX1: PLOT_X1 });
+    assert.deepEqual([...kept].sort(), ["a", "c"], "the freed room was not given to the mark before it");
+  });
+
+  test("a label with no room at all against the plot edge is dropped whole", () => {
+    // Never ellipsised: the <title> and the accessible name carry it, so a
+    // dropped label is one hover or one tab away.
+    const marks = [{ id: "a", label: "Moved to two services and opened the east building" }];
+    const kept = keepMilestoneLabels(marks, { xOf: () => 560, measure, plotX1: PLOT_X1 });
+    assert.deepEqual([...kept], []);
+  });
+
+  test("the rule uses the constants, not a number typed twice", () => {
+    // Pins the offset and the gap to the behaviour, so moving one moves both.
+    const marks = [{ id: "a", label: "AB" }];
+    const exact = PLOT_X1 - measure("AB") - MARK_LABEL_OFFSET - MARK_LABEL_GAP;
+    assert.deepEqual([...keepMilestoneLabels(marks, { xOf: () => exact, measure, plotX1: PLOT_X1 })], ["a"]);
+    assert.deepEqual([...keepMilestoneLabels(marks, { xOf: () => exact + 1, measure, plotX1: PLOT_X1 })], []);
   });
 });

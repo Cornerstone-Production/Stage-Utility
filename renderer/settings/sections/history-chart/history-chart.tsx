@@ -241,6 +241,13 @@ export function HistoryChart({
   });
 
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
+  /** Which marks get WORDS. The rest are a triangle and a hover — see
+   *  keepMilestoneLabels. */
+  const labelledMarks = keepMilestoneLabels(drawnMarks, {
+    xOf: (i) => xOf(drawnMarks[i].t),
+    measure,
+    plotX1,
+  });
   const axisTicks = useMemo(
     () => (xAxis === "date" ? dateTicks(domainStart, domainEnd) : timeTicks(domainStart, domainEnd)),
     [domainStart, domainEnd, xAxis],
@@ -733,11 +740,10 @@ export function HistoryChart({
             label is never clipped and never overprints its neighbour. The
             <title> carries the full one, so hovering answers for the marks that
             could not be labelled as well as the ones that could. */}
-        {drawnMarks.map((m, i) => {
+        {drawnMarks.map((m) => {
           const x = xOf(m.t);
-          const nextX = i + 1 < drawnMarks.length ? xOf(drawnMarks[i + 1].t) : plotX1;
-          const room = Math.max(0, Math.min(nextX, plotX1) - x - 6);
-          const label = fitLabel(m.label, room, measure);
+          // Whole label or none — see keepMilestoneLabels.
+          const label = labelledMarks.has(m.id) ? m.label : "";
           const active = hoverMark === m.id;
           // A scoped mark takes its series' colour, so which line it is about is
           // readable without hovering it. An unscoped one stays neutral: a
@@ -785,18 +791,20 @@ export function HistoryChart({
               <rect x={x - 9} y={markY0} width={18} height={MARK_BAND_H} fill="transparent" />
               {(active || label) && (
                 <text
-                  x={x + 6}
+                  x={x + MARK_LABEL_OFFSET}
                   y={markY0 + 15}
                   data-milestone-label={m.id}
                   className="fill-fg-muted text-[11px]"
                   pointerEvents="none"
                 >
-                  {/* The hovered label is fitted to the SAME room, against the
-                      plot's right edge rather than the next mark — a long label
-                      on the last mark ran off the end of the SVG and was clipped
-                      by the viewBox, which is the one thing the lane's own label
-                      rule forbids. */}
-                  {active ? fitLabel(m.label, Math.max(room, plotX1 - x - 6), measure) : label}
+                  {/* A hovered mark shows its label whether or not it won one at
+                      rest — that is what hovering it is for — but fitted to the
+                      plot's right edge, because a long label on the last mark
+                      ran off the end of the SVG and was clipped by the viewBox,
+                      which is the one thing the lane's own label rule forbids. */}
+                  {active
+                    ? fitLabel(m.label, Math.max(0, plotX1 - x - MARK_LABEL_OFFSET), measure)
+                    : label}
                 </text>
               )}
             </g>
@@ -827,6 +835,50 @@ export function HistoryChart({
 /** How much air two axis labels need between them. Two that merely abut read as
  *  one word. */
 export const AXIS_LABEL_GAP = 6;
+
+/** How far a milestone's label sits right of its triangle, and how much air two
+ *  of them need between them. */
+export const MARK_LABEL_OFFSET = 6;
+export const MARK_LABEL_GAP = 8;
+
+/**
+ * Which milestones get a label. The triangle always draws.
+ *
+ * ALL OR NOTHING, and the LATER mark wins. Two marks a week apart on a
+ * sixteen-week axis used to give the earlier one an ellipsised stub — "Wor…"
+ * sitting against "Worth the Risk" — which reads as one broken label rather
+ * than as two marks, and names neither of them.
+ *
+ * So a mark is labelled only when its label fits WHOLE in the room before the
+ * next LABELLED mark, and the walk runs right to left so that the later of two
+ * colliding marks is the one that keeps its words. Later, because the right
+ * edge of this chart is the recent end: on a season of history the thing that
+ * happened most recently is the one being read.
+ *
+ * Dropping a label frees the room before it, so a run of three close marks can
+ * still label its last — not none of them.
+ *
+ * The full label is on the mark's `<title>` and its accessible name either way,
+ * so a dropped label is one hover or one tab away, never lost.
+ *
+ * Pure and exported for the same reason `keepAxisLabels` is: as a closure
+ * inside the component it could only be checked through a render that measures
+ * every string as zero, which is to say not at all.
+ */
+export function keepMilestoneLabels(
+  marks: readonly { id: string; label: string }[],
+  opts: { xOf: (index: number) => number; measure: (s: string) => number; plotX1: number },
+): Set<string> {
+  const kept = new Set<string>();
+  let nextLabelledX = opts.plotX1;
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const room = nextLabelledX - opts.xOf(i) - MARK_LABEL_OFFSET - MARK_LABEL_GAP;
+    if (opts.measure(marks[i].label) > room) continue;
+    kept.add(marks[i].id);
+    nextLabelledX = opts.xOf(i);
+  }
+  return kept;
+}
 
 /**
  * Which ticks get a LABEL. The tick itself always draws.

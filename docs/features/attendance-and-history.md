@@ -142,8 +142,12 @@ point per recording across up to 52 weeks, and reading a full record for each
 would be hundreds of files to answer one number apiece.
 
 **Milestones** are marked under that chart: a small triangle, a dashed guide up
-the plot, a short label where there is room for one, and the full label on hover.
-They come from two places, and draw alike:
+the plot, and the label where there is room for the whole of it. Where two marks
+are close enough that their labels would touch, the **later** one keeps its
+words and the earlier shows only its triangle — a truncated stub beside a full
+label reads as one broken label and names neither mark. Hovering or tabbing to
+any mark shows its label whatever it did at rest, so nothing is lost. They come
+from two places, and draw alike:
 
 - **Your own list**, in Settings → Advanced → Data → History milestones. A date,
   a label, and optionally one service type. "Moved to two services", "new
