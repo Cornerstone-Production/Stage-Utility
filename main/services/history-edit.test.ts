@@ -334,6 +334,66 @@ describe("editServiceWindow and recalcAttendance", () => {
     assert.equal((await attendanceStore.get(LIVE_KEY))?.samples.length, 1, "a sample past the taper survived");
   });
 
+  it("pulls an item time correction back inside the new window", async () => {
+    // The items are trimmed to the window; the corrections OVER them were not,
+    // so trimming an 85-minute recording to 15 minutes left a correction saying
+    // an item ended at 12:30 — an 85-minute row inside a 15-minute service, and
+    // the Actual tile with it. setItemTimes refuses exactly this when it is
+    // typed; a window edit produced it by the back door.
+    await serviceTimelineStore.upsert({
+      ...identity,
+      serviceKey: LIVE_KEY,
+      items: [
+        { itemId: "a", title: "Doors", sequence: 0, plannedLengthSec: null, startedAt: "2026-07-26T11:00:00.000Z", endedAt: "2026-07-26T11:10:00.000Z", actualDurationSec: 600 },
+      ],
+      itemTimeEdits: [{ itemId: "a", sequence: 0, endedAt: "2026-07-26T12:30:00.000Z", editedAt: "2026-07-26T13:00:00.000Z" }],
+    } as never);
+
+    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z" });
+
+    const tl = (await serviceTimelineStore.get(LIVE_KEY))!;
+    assert.equal(
+      tl.itemTimeEdits?.[0]?.endedAt,
+      "2026-07-26T11:15:00.000Z",
+      "the correction still points past the new end of the recording",
+    );
+    assert.equal(
+      applyItemTimeEdits(tl).record.items[0].actualDurationSec,
+      900,
+      "15 minutes, the most the window allows — not the 90 the correction asked for",
+    );
+  });
+
+  it("drops a correction whose run the window edit trimmed away, and says so", async () => {
+    await serviceTimelineStore.upsert({
+      ...identity,
+      serviceKey: LIVE_KEY,
+      items: [
+        { itemId: "a", title: "Doors", sequence: 0, plannedLengthSec: null, startedAt: "2026-07-26T11:00:00.000Z", endedAt: "2026-07-26T11:10:00.000Z", actualDurationSec: 600 },
+        { itemId: "b", title: "Message", sequence: 1, plannedLengthSec: null, startedAt: "2026-07-26T11:40:00.000Z", endedAt: "2026-07-26T11:50:00.000Z", actualDurationSec: 600 },
+      ],
+      itemTimeEdits: [{ itemId: "b", sequence: 1, endedAt: "2026-07-26T11:42:00.000Z", editedAt: "2026-07-26T13:00:00.000Z" }],
+    } as never);
+
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void warnings.push(a.map(String).join(" "));
+    try {
+      await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z" });
+    } finally {
+      console.warn = warn;
+    }
+
+    const tl = (await serviceTimelineStore.get(LIVE_KEY))!;
+    assert.equal(tl.items.length, 1, "precondition: the window edit dropped the Message item");
+    assert.equal(tl.itemTimeEdits, undefined, "its correction must go with it, not dangle");
+    assert.equal(
+      warnings.filter((l) => l.includes("[history]") && l.includes("b#1")).length,
+      1,
+      `the drop was not reported: ${JSON.stringify(warnings)}`,
+    );
+  });
+
   it("refuses a window edit while the service is recording", async () => {
     goLive();
     await assert.rejects(

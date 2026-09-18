@@ -228,6 +228,65 @@ export function carryItemTimeEdits(
 }
 
 /**
+ * Bring a record's corrections back inside its own window.
+ *
+ * `editServiceWindow` trims the items to the new window — dropping those that
+ * start after the end, and pulling back an end that overruns it — but the
+ * corrections sat outside that entirely. Trimming an 85-minute recording to 15
+ * minutes left a correction saying an item ended at 21:32, so the row read
+ * 85 minutes inside a 15-minute service, and the Actual tile with it. The route
+ * refuses exactly this when the operator types it (`setItemTimes` validates
+ * against the record's own window); a window edit could produce it by the back
+ * door.
+ *
+ * Clamped the way the ITEMS are clamped, not dropped wholesale: an operator who
+ * trims a trailing minute meant to trim the item too, and throwing their whole
+ * correction away over one second would be its own kind of data loss. A
+ * correction whose run is gone, or which cannot survive the clamp as a coherent
+ * span, is dropped and returned so the caller can say so.
+ *
+ * Reads the record's window AFTER the caller has applied the new start/end.
+ */
+export function clampItemTimeEdits(record: ServiceTimeline): CarriedItemTimeEdits {
+  const edits = record.itemTimeEdits ?? [];
+  if (edits.length === 0) return { edits: [], orphaned: [] };
+
+  const lo = Date.parse(record.startedAt);
+  const hi = record.endedAt ? Date.parse(record.endedAt) : Number.POSITIVE_INFINITY;
+  const clamp = (iso: string | undefined): string | undefined => {
+    if (iso == null) return undefined;
+    const t = Date.parse(iso);
+    // An unparseable stamp is not evidence about where it belongs, and moving it
+    // to a window edge would invent a time. Left for the drop test below.
+    if (!Number.isFinite(t)) return iso;
+    if (Number.isFinite(lo) && t < lo) return new Date(lo).toISOString();
+    if (Number.isFinite(hi) && t > hi) return new Date(hi).toISOString();
+    return iso;
+  };
+
+  const kept: ServiceItemTimeEdit[] = [];
+  const orphaned: ServiceItemTimeEdit[] = [];
+  for (const edit of edits) {
+    const item = record.items.find((x) => x.itemId === edit.itemId && x.sequence === edit.sequence);
+    if (!item) {
+      orphaned.push(edit); // its run was trimmed away with the window
+      continue;
+    }
+    const next: ServiceItemTimeEdit = { ...edit };
+    if (next.startedAt != null) next.startedAt = clamp(next.startedAt);
+    if (next.endedAt != null) next.endedAt = clamp(next.endedAt);
+    const effStart = Date.parse(next.startedAt ?? item.startedAt);
+    const effEnd = next.endedAt != null ? Date.parse(next.endedAt) : null;
+    if (effEnd != null && !(Number.isFinite(effStart) && Number.isFinite(effEnd) && effEnd > effStart)) {
+      orphaned.push(edit); // the clamp collapsed it; a zero or negative span is not a correction
+      continue;
+    }
+    kept.push(next);
+  }
+  return { edits: kept, orphaned };
+}
+
+/**
  * The one place an orphaned correction is reported.
  *
  * Logged where the orphaning HAPPENS — a rebuild, a merge, a window edit — and

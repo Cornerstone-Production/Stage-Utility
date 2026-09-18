@@ -19,7 +19,14 @@ import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
-import { bindItemTimeEdits, broadcastTimeline, overlaidTimeline, rekeyItemTimeEdits } from "./history-item-times.js";
+import {
+  bindItemTimeEdits,
+  broadcastTimeline,
+  clampItemTimeEdits,
+  logOrphanedItemTimeEdits,
+  overlaidTimeline,
+  rekeyItemTimeEdits,
+} from "./history-item-times.js";
 import { clockOf } from "./app-timezone.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -211,6 +218,13 @@ export async function editServiceWindow(
         }
       }
     }
+    // The items have been trimmed to the new window; the corrections OVER them
+    // had not been, so a recording trimmed to fifteen minutes could still show
+    // an eighty-five minute item. Clamped the same way the items just were.
+    const clamped = clampItemTimeEdits(tl);
+    logOrphanedItemTimeEdits(tl.serviceKey, "the new service window", clamped.orphaned);
+    if (clamped.edits.length) tl.itemTimeEdits = clamped.edits;
+    else delete tl.itemTimeEdits;
     await serviceTimelineStore.upsert(tl);
     broadcastTimeline(tl);
   }
