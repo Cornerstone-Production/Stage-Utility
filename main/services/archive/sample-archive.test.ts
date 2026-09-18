@@ -9,6 +9,7 @@ process.env.STAGE_UTILITY_DATA = dataDir;
 
 const { sampleArchive } = await import("./sample-archive.js");
 const { parseRows } = await import("../csv.js");
+const { readArchiveRows } = await import("./archive-rows.js");
 
 const CTX = { serviceKey: "st1:p1:t9", serviceDate: "2026-07-26" };
 
@@ -48,8 +49,54 @@ test("events land in their own file", async () => {
   sampleArchive.recordEvent(CTX, "pco", "item", "Welcome");
   await sampleArchive.flush();
   const r = await rows(CTX, "events.csv");
-  assert.deepEqual(r[0], ["at", "source", "kind", "detail"]);
-  assert.deepEqual(r[1].slice(1), ["pco", "item", "Welcome"]);
+  assert.deepEqual(r[0], ["at", "source", "kind", "detail", "itemId", "plannedLengthSec", "preService"]);
+  assert.deepEqual(r[1].slice(1), ["pco", "item", "Welcome", "", "", ""]);
+});
+
+// A timeline record is rebuilt from these rows, and a title is not an identity.
+// Without the id column the rebuild can only match on the title, which is the
+// fallback path, not the intended one.
+test("a plan-item event row carries the item id, planned length and pre-service flag", async () => {
+  const ctx = { serviceKey: "st1:p9:t1", serviceDate: "2026-07-26" };
+  sampleArchive.recordEvent(ctx, "pco", "item", "Welcome", {
+    itemId: "item-77",
+    plannedLengthSec: 300,
+    preService: true,
+  });
+  await sampleArchive.flush();
+  const r = await rows(ctx, "events.csv");
+  assert.deepEqual(r[0], ["at", "source", "kind", "detail", "itemId", "plannedLengthSec", "preService"]);
+  assert.deepEqual(r[1].slice(1), ["pco", "item", "Welcome", "item-77", "300", "true"]);
+});
+
+// One header for every event source. An automation row writing a narrower
+// header would roll the file on each alternation, and readArchiveRows
+// concatenates rolled files in FILE order — so a rebuild would walk the rows
+// out of time order.
+test("an automation event shares the item row's columns and does not roll the file", async () => {
+  const ctx = { serviceKey: "st1:p10:t1", serviceDate: "2026-07-26" };
+  sampleArchive.recordEvent(ctx, "pco", "item", "Welcome", {
+    itemId: "item-1",
+    plannedLengthSec: null,
+    preService: false,
+  });
+  sampleArchive.recordEvent(ctx, "automation", "fired", "House lights: ok");
+  sampleArchive.recordEvent(ctx, "pco", "item", "Song", {
+    itemId: "item-2",
+    plannedLengthSec: 240,
+    preService: false,
+  });
+  await sampleArchive.flush();
+  const dir = dirFor(ctx);
+  assert.deepEqual(
+    (await fs.readdir(dir)).filter((n) => n.startsWith("events")).sort(),
+    ["events.csv"],
+    "the event file rolled",
+  );
+  const r = await rows(ctx, "events.csv");
+  assert.equal(r.length, 4, "header + three rows in one file");
+  assert.deepEqual(r[2].slice(1), ["automation", "fired", "House lights: ok", "", "", ""]);
+  assert.deepEqual(r[3].slice(1), ["pco", "item", "Song", "item-2", "240", "false"]);
 });
 
 test("attendance lands in its own file", async () => {
@@ -90,6 +137,36 @@ test("an empty serviceKey writes nothing at all", async () => {
   await sampleArchive.writeManifest(none);
   await sampleArchive.flush();
   assert.deepEqual((await fs.readdir(path.join(dataDir, "archive"))).sort(), before);
+});
+
+// A service that started before the id/length columns shipped keeps its narrow
+// `events.csv`; the appender rolls to `events.2.csv` for the wider set. Both
+// have to read back, with the old rows simply absent in the new columns — the
+// rebuild's title-only fallback depends on getting them at all.
+test("an events file written before the new columns still reads back beside one written after", async () => {
+  const ctx = { serviceKey: "st1:p11:t1", serviceDate: "2026-07-26" };
+  const dir = dirFor(ctx);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "events.csv"),
+    "at,source,kind,detail\n2026-07-26T10:00:00.000Z,pco,item,Doors\n",
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(dir, "events.2.csv"),
+    "at,source,kind,detail,itemId,plannedLengthSec,preService\n" +
+      "2026-07-26T10:05:00.000Z,pco,item,Welcome,item-3,300,false\n",
+    "utf8",
+  );
+
+  const read = await readArchiveRows(dir, "events");
+  assert.ok(read, "the events source read back as absent");
+  assert.equal(read.length, 2);
+  assert.equal(read[0].detail, "Doors");
+  assert.equal(read[0].itemId, undefined, "an old row has no itemId key at all");
+  assert.equal(read[1].itemId, "item-3");
+  assert.equal(read[1].plannedLengthSec, "300");
+  assert.equal(read[1].preService, "false");
 });
 
 test("closeService releases the appenders so a later tick reopens cleanly", async () => {

@@ -120,11 +120,21 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
           this.lastItemId = live.currentItemId;
           itemChanged = true;
           if (this.currentKey) {
+            // The one place a plan-item transition reaches the raw layer, for
+            // BOTH item-shaped records — this recorder's and the timeline's,
+            // which share a serviceKey. So the row carries what a timeline
+            // rebuild needs (id, planned length, pre-service), not just a
+            // title: rebuildTimelineRecord is only as good as this row.
             sampleArchive.recordEvent(
               { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
               "pco",
               "item",
               live.label ?? live.currentItemId,
+              {
+                itemId: live.currentItemId,
+                plannedLengthSec: typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null,
+                preService: live.beforeServiceStart === true,
+              },
             );
           }
         }

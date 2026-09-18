@@ -8,12 +8,19 @@ recalculated later and a rebuilt machine can be given its history back.
 While a service is live, append-only CSVs are written under
 `<data>/archive/<date>_<serviceKey>/`:
 
-| File | One row per |
-|---|---|
-| `spl.csv` | 1 Hz reading, every metric on the row |
-| `attendance.csv` | people-counter poll |
-| `events.csv` | plan-item change, automation rule firing |
-| `manifest.json` | — schema version and the files present |
+| File | One row per | Columns |
+|---|---|---|
+| `spl.csv` | 1 Hz reading, every metric on the row | `at`, `itemId`, `item`, then one per metric |
+| `attendance.csv` | people-counter poll | `at`, then one per counter field |
+| `events.csv` | plan-item change, automation rule firing | `at`, `source`, `kind`, `detail`, `itemId`, `plannedLengthSec`, `preService` |
+| `manifest.json` | — schema version and the files present | — |
+
+An event row's last three columns describe the plan item on a `kind=item` row and
+are empty on every other kind. They are what lets a service's timing record be
+rebuilt from the raw rows rather than only from the title: a title is not an
+identity, and a planned length appears nowhere else in the raw layer. Rows written
+before those columns shipped keep their narrower file and still read back — the
+rebuild matches them to the stored record by title instead.
 
 Nothing is written outside a service.
 
