@@ -7,6 +7,7 @@ import { combineLeq } from "@main/services/spl-leq";
 import {
   CustomizePopover,
   HistoryChart,
+  addDefaultOnce,
   hasStoredChoice,
   readStoredKeys,
   seedStoredKeys,
@@ -144,9 +145,29 @@ const SOUND_SERIES = [
   // nothing on the page said which of the two was drawn.
   { key: "avg", label: "Leq" },
 ] as const;
-const SERIES_KEYS = SOUND_SERIES.map((s) => s.key);
+/**
+ * The lane's per-item peak tick, offered beside the two lines.
+ *
+ * SEPARATE from SOUND_SERIES because it is not a line and, unlike the two that
+ * are, it draws in BOTH modes — the raw sample series and the per-item step —
+ * so it is offered in both. It shares their storage entry: all three are "what
+ * is on the sound chart", one per-browser choice.
+ */
+const PEAK_MARKS_KEY = "peaks";
+const PEAK_MARKS_OPTION = { key: PEAK_MARKS_KEY, label: "Item peaks" } as const;
+const SERIES_KEYS = [...SOUND_SERIES.map((s) => s.key), PEAK_MARKS_KEY];
 const SERIES_STORAGE_KEY = "spl:visibleSeries";
-const DEFAULT_SERIES = ["max", "avg"];
+const DEFAULT_SERIES = ["max", "avg", PEAK_MARKS_KEY];
+/**
+ * A browser holding a stored `["max","avg"]` from before the peak ticks were
+ * switchable would never see the new default — a stored list wins, and it
+ * cannot contain a key that did not exist when it was written.
+ *
+ * Module scope, like attendance's, so it lands BEFORE the first `useStoredKeys`
+ * read. In an effect it would run after, and the first paint would show the
+ * ticks off. ONCE, so an operator who then unticks it keeps it unticked.
+ */
+addDefaultOnce(SERIES_STORAGE_KEY, PEAK_MARKS_KEY);
 
 /**
  * Which Smaart metrics this browser surfaces — the table's columns, the
@@ -562,6 +583,7 @@ export function SplDetail({
         series={series}
         items={laneItems}
         window={serviceWindowOf({ timeline, attendance })}
+        peakMarks={seriesKeys.includes(PEAK_MARKS_KEY)}
         yScale={{ kind: "db" }}
         figures={figures}
         live={live}
@@ -584,13 +606,26 @@ export function SplDetail({
           <CustomizePopover
             label="Customize sound"
             groups={[
-              { id: "lines", label: "Chart", options: hasRaw ? SOUND_SERIES.map((s) => ({ ...s })) : [] },
+              {
+                id: "lines",
+                label: "Chart",
+                // The two LINES only exist on the raw sample series. The peak
+                // ticks are drawn in both modes, so they are offered in both —
+                // an option that vanished on an old record would read as the
+                // marks being unexplainable rather than switchable.
+                options: [...(hasRaw ? SOUND_SERIES.map((s) => ({ ...s })) : []), { ...PEAK_MARKS_OPTION }],
+              },
               { id: "figures", label: "Figures", options: SOUND_FIGURES.map((f) => ({ ...f })) },
               { id: "metrics", label: "Smaart metrics", options: allKeys.map((k) => ({ key: k, label: k })) },
             ]}
-            selected={[...(hasRaw ? seriesKeys : []), ...figureKeys, ...shownMetrics]}
+            selected={[
+              ...(hasRaw ? seriesKeys : seriesKeys.filter((k) => k === PEAK_MARKS_KEY)),
+              ...figureKeys,
+              ...shownMetrics,
+            ]}
             onToggle={(key) => {
-              if (hasRaw && SERIES_KEYS.includes(key as (typeof SERIES_KEYS)[number])) return toggleSeries(key);
+              if (key === PEAK_MARKS_KEY) return toggleSeries(key);
+              if (hasRaw && SERIES_KEYS.includes(key)) return toggleSeries(key);
               if (FIGURE_KEYS.includes(key as (typeof FIGURE_KEYS)[number])) return toggleFigure(key);
               return toggleMetric(key);
             }}

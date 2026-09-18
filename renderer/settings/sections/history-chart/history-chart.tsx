@@ -119,6 +119,13 @@ export interface HistoryChartProps {
   xAxis?: "clock" | "date";
   /** Dated marks under the axis. See ChartMilestone. */
   milestones?: ChartMilestone[];
+  /**
+   * Whether an item's `peakLabel` draws its tick on the lane. Default true.
+   *
+   * A chart whose items carry no `peakLabel` never draws one whatever this
+   * says, so only the sound chart has anything to turn off.
+   */
+  peakMarks?: boolean;
 }
 
 const PAD_L = 44;
@@ -145,6 +152,7 @@ export function HistoryChart({
   nowMs,
   xAxis = "clock",
   milestones,
+  peakMarks = true,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -610,6 +618,25 @@ export function HistoryChart({
                 vectorEffect="non-scaling-stroke"
                 strokeDasharray={outline ? "3 2" : undefined}
               />
+              {/* Sound only: this item's loudest reading, marked on its block.
+                  FULL segment height, in the series colour. It was a 4px nub on
+                  the top edge, drawn to keep it off the item's own label, and
+                  what that produced was an unexplained blue chip nobody could
+                  identify. Drawn BEFORE the label instead, so the text reads
+                  over the tick rather than the tick being shortened to dodge it,
+                  and named "Item peak" in the legend below. */}
+              {peakMarks && seg.item.peakLabel && w > 8 && (
+                <line
+                  data-peak-mark={seg.item.itemId}
+                  x1={(seg.x0 + seg.x1) / 2}
+                  y1={y}
+                  x2={(seg.x0 + seg.x1) / 2}
+                  y2={y + LANE_ROW_H}
+                  stroke={shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
+                  strokeWidth={3}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
               {label.kind !== "none" && (
                 <text
                   x={seg.x0 + 6}
@@ -622,22 +649,6 @@ export function HistoryChart({
                 >
                   {label.text}
                 </text>
-              )}
-              {/* Sound only: this item's loudest reading, marked on its block. */}
-              {seg.item.peakLabel && w > 8 && (
-                <line
-                  data-peak-mark={seg.item.itemId}
-                  // The TOP EDGE, not the full height. A full-height tick drew
-                  // straight through the item's own label — "Trem|ble",
-                  // "What a|God" — which is worse than not marking it at all.
-                  x1={(seg.x0 + seg.x1) / 2}
-                  y1={y}
-                  x2={(seg.x0 + seg.x1) / 2}
-                  y2={y + 4}
-                  stroke={shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
-                  strokeWidth={3}
-                  vectorEffect="non-scaling-stroke"
-                />
               )}
             </g>
           );
@@ -773,6 +784,19 @@ export function HistoryChart({
             </button>
           );
         })}
+        {/* The lane's peak tick, NAMED. It shipped as an unlabelled coloured
+            chip on an item block, and the first thing anybody asked about the
+            sound chart was what it was. The swatch is the mark: a vertical bar
+            in the primary series' colour, the same thing drawn on the lane. */}
+        {peakMarks && items.some((it) => it.peakLabel) && (
+          <span data-legend-peak-mark className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-2.5 w-[3px] rounded-[1px]"
+              style={{ background: shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)" }}
+            />
+            Item peak
+          </span>
+        )}
         {(hasPre || hasPost) && (
           <span className="inline-flex items-center gap-1.5">
             <span

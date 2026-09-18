@@ -297,9 +297,11 @@ flat across the time it ran. A read that FAILS is not that: the chart says
 step as the whole answer, and the server logs the reason on a `[spl-series]`
 line.
 
-Either way an item's peak mark is a tick on the top edge of its block rather than
-at the loudest instant, because the instant is not in the per-item record; hover
-the block and the strip says what it peaked at.
+Either way an item's peak mark is a tick through the middle of its block rather
+than at the loudest instant, because the instant is not in the per-item record.
+It is drawn the full height of the block in the primary line's colour, named
+**Item peak** in the legend, and switched under Chart in Customize. Hover the
+block and the strip says what it peaked at.
 
 **The item lane** is two rows under the axis: pre-service items outlined above,
 in-service items filled below, each spanning the time it actually ran. A block is
