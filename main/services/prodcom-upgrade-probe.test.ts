@@ -38,6 +38,11 @@ class TestProdCom extends ProdComService {
   protected override get wsRetryIntervalMs(): number {
     return 60_000;
   }
+  /** The six-second wall-clock ceiling, in milliseconds, so the trickle case
+   *  takes one. */
+  protected override get probeDeadlineMs(): number {
+    return 400;
+  }
   protected override noteWebSocketDown(reason: string, detail: string | null = null): void {
     this.downs.push({ reason, detail });
     super.noteWebSocketDown(reason, detail);
@@ -46,17 +51,26 @@ class TestProdCom extends ProdComService {
 
 /** How the server answers the PROBE's upgrade request. The real client's upgrade
  *  is always dropped, so the client always reaches the never-opened path. */
-type ProbeAnswer = "refuse-426" | "accept-101" | "drop";
+type ProbeAnswer = "refuse-426" | "accept-101" | "drop" | "trickle" | "flood";
 
 async function serverAnswering(answer: ProbeAnswer): Promise<{
   port: number;
   upgrades: { userAgent: string | undefined }[];
+  sseOpens: () => number;
+  probeSocketClosed: () => boolean;
   close(): Promise<void>;
 }> {
   const upgrades: { userAgent: string | undefined }[] = [];
   const open = new Set<Duplex>();
+  const timers = new Set<ReturnType<typeof setInterval>>();
+  let sseOpens = 0;
+  /** Whether the client has dropped the probe's connection. Read off this end's
+   *  socket rather than polling `destroyed`: a peer that destroys its half shows
+   *  up here as 'close', or as the EPIPE the next write takes. */
+  let probeSocketGone = false;
   const server = http.createServer((req, res) => {
     if ((req.url ?? "").startsWith("/api/v1/transcript/stream")) {
+      sseOpens++;
       // The fallback the client opens after falling back: answered, and then it
       // sits there saying nothing for the length of the test.
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -79,8 +93,32 @@ async function serverAnswering(answer: ProbeAnswer): Promise<{
       socket.destroy(); // the real client: closes before open, code 1006
       return;
     }
+    socket.on("close", () => (probeSocketGone = true));
+    socket.on("error", () => (probeSocketGone = true));
     if (answer === "drop") {
       socket.destroy();
+      return;
+    }
+    if (answer === "trickle" || answer === "flood") {
+      // A refusal whose body never ends. Chunked, so there is no content-length
+      // to finish on, and every chunk resets Node's inactivity timeout — which
+      // is the whole reason the probe needs a wall-clock deadline as well.
+      socket.write(
+        "HTTP/1.1 503 Service Unavailable\r\ncontent-type: text/plain\r\n" +
+          "transfer-encoding: chunked\r\nConnection: close\r\n\r\n",
+      );
+      const piece = answer === "flood" ? "x".repeat(64) : ".";
+      const every = answer === "flood" ? 5 : 60;
+      const timer = setInterval(() => {
+        if (socket.destroyed) {
+          clearInterval(timer);
+          timers.delete(timer);
+          return;
+        }
+        socket.write(`${piece.length.toString(16)}\r\n${piece}\r\n`);
+      }, every);
+      timer.unref?.();
+      timers.add(timer);
       return;
     }
     if (answer === "accept-101") {
@@ -106,7 +144,11 @@ async function serverAnswering(answer: ProbeAnswer): Promise<{
   return {
     port: typeof address === "object" && address ? address.port : 0,
     upgrades,
+    sseOpens: () => sseOpens,
+    probeSocketClosed: () => probeSocketGone,
     close: async () => {
+      for (const t of timers) clearInterval(t);
+      timers.clear();
       for (const s of open) s.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
@@ -181,6 +223,69 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     // no status to report, and the fallback must still open.
     const { svc } = await against(t, "drop");
     assert.match(svc.downs[0]!.reason, /^(probe failed: |closed before open \(code )/);
+  });
+
+  it("gives up on a refusal whose body never ends, and opens the fallback anyway", async (t) => {
+    // THE CASE THAT COST THE CAPTIONS. Node's `timeout` option measures socket
+    // INACTIVITY, so a chunked body trickling forever resets it on every chunk:
+    // the probe never settled, the fallback never opened, and the single-flight
+    // flag stayed set so no later refusal could probe either. Reproduced with a
+    // 503 and one chunk per interval — the deadline is what ends it.
+    const server = await serverAnswering("trickle");
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await server.close();
+    });
+    svc.configure("127.0.0.1", server.port, null);
+
+    await eventually(() => svc.downs.length > 0, "the fallback decision to be made", 3000);
+    await eventually(() => server.sseOpens() > 0, "the SSE fallback to open", 3000);
+    // No status to report — the body never finished — so the bare close reason
+    // stands rather than a half-read one.
+    assert.match(svc.downs[0]!.reason, /closed before open \(code \d+\)$/);
+    assert.equal(probes(server), 1, "one probe per refusal, even when it has to be abandoned");
+  });
+
+  it("stops reading once it has enough of the body to name the refusal", async (t) => {
+    // The same endless body, arriving fast. There is nothing to learn past
+    // PROBE_BODY_BYTES, so the probe finishes on the bytes rather than waiting
+    // out its deadline — the status IS reported here, unlike the trickle above.
+    const server = await serverAnswering("flood");
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await server.close();
+    });
+    const started = Date.now();
+    svc.configure("127.0.0.1", server.port, null);
+
+    await eventually(() => svc.downs.length > 0, "the fallback decision to be made", 3000);
+    assert.equal(svc.downs[0]!.reason, "upgrade refused with HTTP 503 (Service Unavailable)");
+    assert.ok(
+      Date.now() - started < 400,
+      "the probe read to the end of an endless body instead of stopping at the cap",
+    );
+    assert.ok((svc.downs[0]!.detail ?? "").length <= 200, "more than the cap reached the log line");
+  });
+
+  it("stop() during a probe takes the probe's socket with it", async (t) => {
+    const server = await serverAnswering("trickle");
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await server.close();
+    });
+    svc.configure("127.0.0.1", server.port, null);
+    await eventually(() => probes(server) === 1, "the probe to go out");
+
+    svc.stop();
+    // Within a fraction of the probe's own deadline, which is 400 ms here: the
+    // deadline would eventually destroy this socket on its own, so a generous
+    // window would pass whether or not teardown() does anything. What is under
+    // test is that STOPPING takes the socket with it.
+    await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 150);
+    assert.equal(server.sseOpens(), 0, "a stopped service opened a fallback anyway");
   });
 
   it("does not probe when the WebSocket was up and dropped normally", async (t) => {

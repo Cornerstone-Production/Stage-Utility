@@ -103,10 +103,23 @@ const WS_RETRY_EVERY = 3;
  */
 const WS_RETRY_INTERVAL_MS = 5 * 60_000;
 
-/** How long the refused-upgrade probe may take. Same 4 s as every other
- *  one-shot read in this file (test(), getJson) — a diagnostic must not hold the
- *  fallback shut for longer than the thing it is diagnosing. */
+/** Socket-inactivity timeout for the refused-upgrade probe. Same 4 s as every
+ *  other one-shot read in this file (test(), getJson). NOT on its own enough —
+ *  see PROBE_DEADLINE_MS. */
 const PROBE_TIMEOUT_MS = 4000;
+
+/**
+ * Wall-clock ceiling on the whole probe, from the request going out to an answer
+ * or nothing.
+ *
+ * Node's `timeout` option measures INACTIVITY, and a peer that keeps sending
+ * resets it indefinitely: a refusal answered with a chunked body trickling one
+ * chunk a second holds the probe open for ever, and with it the fallback that is
+ * waiting on it. The deadline is the thing the peer cannot push back. Generous
+ * enough that a slow-but-finite answer still gets read, short enough that the
+ * captions are back inside a few seconds either way.
+ */
+const PROBE_DEADLINE_MS = 6000;
 
 /** How much of a refused handshake's body is worth keeping. Enough for
  *  ProdCom's own `{"error":{"code":…,"message":…}}`, short enough that a box
@@ -454,6 +467,10 @@ export class ProdComService extends ConnectionLifecycle {
   /** One refused-upgrade probe at a time — two sockets closing before open must
    *  not put two extra requests on a box that is already unhappy. */
   private wsProbeInFlight = false;
+  /** The probe's request while it is in flight, so teardown() can take its
+   *  socket with it rather than leaving it reading from a box the operator has
+   *  just disconnected from. */
+  private wsProbeRequest: http.ClientRequest | null = null;
   /** Bumped by teardown(), so work that was in flight when a stop() or a
    *  configure() landed can tell that it no longer speaks for this service. */
   private connectionEpoch = 0;
@@ -554,6 +571,9 @@ export class ProdComService extends ConnectionLifecycle {
   protected get wsRetryIntervalMs(): number {
     return WS_RETRY_INTERVAL_MS;
   }
+  protected get probeDeadlineMs(): number {
+    return PROBE_DEADLINE_MS;
+  }
 
   /** Test seam: whether the fallback's WebSocket retry is currently armed. */
   protected get wsRetryArmed(): boolean {
@@ -600,6 +620,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.clearWebSocketRetry();
     this.req?.destroy();
     this.req = null;
+    // A probe outlives the connection that started it otherwise: its result is
+    // already discarded by the epoch check, but the socket would go on reading.
+    this.wsProbeRequest?.destroy();
+    this.wsProbeRequest = null;
     this.closeSocket();
     this.onWebSocket = false;
     this.wsEnvelopeLogged = false;
@@ -1107,7 +1131,25 @@ export class ProdComService extends ConnectionLifecycle {
    * only on the line that actually prints.
    *
    * Never throws, and never rejects: a probe is diagnostics, and a failure to
-   * diagnose must not stop the fallback from opening.
+   * diagnose must not stop the fallback from opening. Three things enforce that,
+   * and each of them has been the difference between a fallback that opens and
+   * one that never does:
+   *
+   *   A DEADLINE, not Node's `timeout` option. That option fires on socket
+   *   INACTIVITY, so a box answering the refusal with a chunked body that
+   *   trickles a byte a second resets it for ever: reproduced in-process with a
+   *   503 and one chunk per second, the SSE stream had still not opened after
+   *   12 s, `wsProbeInFlight` was still true, and the captions were gone for the
+   *   rest of the service. `PROBE_DEADLINE_MS` is wall-clock from the request
+   *   going out and cannot be pushed back by the peer.
+   *
+   *   A CAP ON READING. Once PROBE_BODY_BYTES have arrived there is nothing more
+   *   to learn, so the response is finished there rather than read to its end —
+   *   an endless body is a diagnostic, not a download.
+   *
+   *   A HELD REFERENCE. `wsProbeRequest` is what teardown() destroys, so a
+   *   stop() or a configure() during a probe takes the socket with it instead of
+   *   leaving it running against a box the operator has just disconnected from.
    */
   private probeUpgrade(
     host: string,
@@ -1119,38 +1161,51 @@ export class ProdComService extends ConnectionLifecycle {
     return new Promise<{ reason: string; detail: string | null } | null>((resolve) => {
       let settled = false;
       let req: http.ClientRequest | null = null;
+      const deadline = setTimeout(() => done(null), this.probeDeadlineMs);
+      deadline.unref?.();
       const done = (result: { reason: string; detail: string | null } | null): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(deadline);
         this.wsProbeInFlight = false;
-        // Always, on every path. A probe socket left open holds its own 4 s
-        // timeout, which keeps the process's event loop busy for four seconds
-        // after the answer is already known — visible as a test that asserts in
-        // 4 ms and takes 4 s to finish.
+        this.wsProbeRequest = null;
+        // Always, on every path. A probe socket left open holds its own timeout,
+        // which keeps the process's event loop busy after the answer is already
+        // known — visible as a test that asserts in 4 ms and takes 4 s to finish.
         req?.destroy();
         resolve(result);
       };
 
-      req = http.request({
-        host,
-        port,
-        path: "/api/v1/ws",
-        method: "GET",
-        timeout: PROBE_TIMEOUT_MS,
-        headers: {
-          ...this.authHeaders(this.apiKey),
-          Connection: "Upgrade",
-          Upgrade: "websocket",
-          "Sec-WebSocket-Version": "13",
-          // A real key, because a box that validates the handshake would answer a
-          // constant one differently from the client's own request.
-          "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64"),
-          // Names itself, so this request is distinguishable from the real
-          // client's upgrade in ProdCom's own activity log (which records
-          // requests) — the live client sends `user-agent: node`.
-          "User-Agent": PROBE_USER_AGENT,
-        },
-      });
+      try {
+        req = http.request({
+          host,
+          port,
+          path: "/api/v1/ws",
+          method: "GET",
+          timeout: PROBE_TIMEOUT_MS,
+          headers: {
+            ...this.authHeaders(this.apiKey),
+            Connection: "Upgrade",
+            Upgrade: "websocket",
+            "Sec-WebSocket-Version": "13",
+            // A real key, because a box that validates the handshake would answer a
+            // constant one differently from the client's own request.
+            "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64"),
+            // Names itself, so this request is distinguishable from the real
+            // client's upgrade in ProdCom's own activity log (which records
+            // requests) — the live client sends `user-agent: node`.
+            "User-Agent": PROBE_USER_AGENT,
+          },
+        });
+      } catch (e) {
+        // http.request throws SYNCHRONOUSLY on a header value Node will not put
+        // on the wire (ERR_INVALID_CHAR — a newline or a non-latin1 character in
+        // an API key, which undici's WebSocket accepts). Uncaught, that rejection
+        // escapes probeThenFallBack and the fallback never opens at all.
+        done({ reason: `probe failed: ${errorMessage(e)}`, detail: null });
+        return;
+      }
+      this.wsProbeRequest = req;
 
       // 101: Node routes an accepted upgrade to 'upgrade', never to 'response'.
       req.on("upgrade", (_res, socket) => {
@@ -1162,10 +1217,6 @@ export class ProdComService extends ConnectionLifecycle {
         const code = res.statusCode ?? 0;
         const phrase = http.STATUS_CODES[code];
         let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => {
-          if (body.length < PROBE_BODY_BYTES) body += chunk;
-        });
         const finish = () => {
           res.destroy();
           done({
@@ -1173,11 +1224,19 @@ export class ProdComService extends ConnectionLifecycle {
             detail: body.slice(0, PROBE_BODY_BYTES).replace(/\s+/g, " ").trim() || null,
           });
         };
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          if (body.length >= PROBE_BODY_BYTES) return;
+          body += chunk;
+          // Enough to name the refusal: stop reading rather than following a
+          // body that may never end.
+          if (body.length >= PROBE_BODY_BYTES) finish();
+        });
         res.on("end", finish);
         res.on("error", finish);
       });
 
-      req.on("timeout", () => req.destroy(new Error("timed out")));
+      req.on("timeout", () => req?.destroy(new Error("timed out")));
       req.on("error", (e) => done({ reason: `probe failed: ${errorMessage(e)}`, detail: null }));
       req.end();
     });
