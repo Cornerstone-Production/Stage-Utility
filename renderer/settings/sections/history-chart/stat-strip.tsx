@@ -29,6 +29,9 @@ export interface StripItem {
   title: string;
   ran: string;
   planned: string;
+  /** Sound only: what this item peaked at, already formatted. The lane marks it
+   *  with a tick; the strip is where the NUMBER is read. */
+  peak?: string | null;
 }
 
 export interface StatStripProps {
@@ -78,6 +81,9 @@ export function StatStrip({ figures, hover, live, right }: StatStripProps) {
             { key: "__item", label: `Item ${hover.item.number}`, value: hover.item.title },
             { key: "__ran", label: "Ran", value: hover.item.ran },
             { key: "__planned", label: "Planned", value: hover.item.planned },
+            // Only when the caller has one. The attendance lane never does, and
+            // a "Peaked —" column on every hover is noise.
+            ...(hover.item.peak ? [{ key: "__peak", label: "Peaked at", value: hover.item.peak }] : []),
           ]
           : []),
       ]

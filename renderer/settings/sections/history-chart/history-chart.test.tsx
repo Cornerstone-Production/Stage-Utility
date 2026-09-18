@@ -309,11 +309,102 @@ describe("the live x domain", () => {
   });
 });
 
+describe("the legend", () => {
+  test("with a handler it is a row of toggles, each saying whether it is on", () => {
+    const toggled: string[] = [];
+    render(chart({
+      series: [series(), series({ id: "entries", label: "Total entries", role: "secondary", fill: false, on: false })],
+      onToggleSeries: (id) => toggled.push(id),
+    }));
+    const off = document.querySelector("[data-series-toggle='entries']") as HTMLButtonElement;
+    assert.equal(off.getAttribute("aria-pressed"), "false");
+    assert.equal(
+      (document.querySelector("[data-series-toggle='occupancy']") as HTMLButtonElement).getAttribute("aria-pressed"),
+      "true",
+    );
+    fireEvent.click(off);
+    assert.deepEqual(toggled, ["entries"]);
+  });
+
+  test("a series that is off is LISTED but not drawn", () => {
+    // Listed, because a legend that drops what is off can never turn it back on
+    // — which is the whole point of it being a toggle.
+    render(chart({
+      series: [series(), series({ id: "entries", label: "Total entries", role: "secondary", fill: false, on: false })],
+      onToggleSeries: () => {},
+    }));
+    assert.equal(document.querySelectorAll("[data-series-toggle='entries']").length, 1);
+    assert.equal(document.querySelectorAll("[data-series-line='entries']").length, 0);
+    assert.equal(document.querySelectorAll("[data-series-line='occupancy']").length, 1);
+  });
+
+  test("without a handler it is a plain legend, not a dead button", () => {
+    render(chart());
+    assert.equal(document.querySelectorAll("[data-series-toggle]").length, 0);
+  });
+
+  test("a dashed series gets a dashed swatch, a solid one a dot", () => {
+    // Two identical dots said the two lines were drawn alike when one is a
+    // dashed reference.
+    render(chart({
+      series: [series(), series({ id: "avg", label: "Avg", role: "secondary", fill: false, dashed: true })],
+      onToggleSeries: () => {},
+    }));
+    const solid = document.querySelector("[data-series-toggle='occupancy'] span") as HTMLElement;
+    const dashed = document.querySelector("[data-series-toggle='avg'] span") as HTMLElement;
+    assert.ok(solid.className.includes("rounded-full"), `solid swatch: ${solid.className}`);
+    assert.ok(dashed.className.includes("border-dashed"), `dashed swatch: ${dashed.className}`);
+    assert.ok(!dashed.className.includes("rounded-full"), "the dashed series got a dot");
+  });
+});
+
 describe("the item lane", () => {
   test("one block per item, pre-service items in their own row", () => {
     render(chart());
     const rows = [...document.querySelectorAll("[data-lane-row]")].map((g) => g.getAttribute("data-lane-row"));
     assert.deepEqual(rows, ["pre", "service", "service"]);
+  });
+
+  test("a pre-service item's extra lane pushes the service row DOWN, not onto it", () => {
+    // Seen on the 17 Sep record: "10 min Warning" (pre-service, stacked into
+    // lane 1 because it overlaps "Doors") landed on the same line as
+    // "VIDEO: Pre-roll" (in-service, lane 0), and the two drew on top of each
+    // other — the exact invisibility the stacking was added to fix, moved one
+    // row over. Every block must be on a line of its own or beside another
+    // block, never underneath one.
+    render(chart({
+      items: [
+        { ...ITEMS[0], itemId: "doors", title: "Doors", sequence: 0, preService: true, startedAt: new Date(T0).toISOString(), endedAt: new Date(T0 + 26 * MIN).toISOString() },
+        { ...ITEMS[0], itemId: "warn", title: "10 min Warning", sequence: 1, preService: true, startedAt: new Date(T0 + 16 * MIN).toISOString(), endedAt: new Date(T0 + 26 * MIN).toISOString() },
+        { ...ITEMS[1], itemId: "preroll", title: "VIDEO: Pre-roll", sequence: 2, preService: false, startedAt: new Date(T0 + 16 * MIN).toISOString(), endedAt: new Date(T0 + 27 * MIN).toISOString() },
+      ],
+    }));
+    const placed = [...document.querySelectorAll("[data-lane-row]")].map((g) => {
+      const r = g.querySelector("[data-lane-segment]") as SVGRectElement;
+      return {
+        id: r.getAttribute("data-lane-segment"),
+        y: Number(r.getAttribute("y")),
+        x0: Number(r.getAttribute("x")),
+        x1: Number(r.getAttribute("x")) + Number(r.getAttribute("width")),
+      };
+    });
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i];
+        const b = placed[j];
+        const sameLine = a.y === b.y;
+        const overlapX = a.x0 < b.x1 - 0.5 && b.x0 < a.x1 - 0.5;
+        assert.ok(
+          !(sameLine && overlapX),
+          `${a.id} and ${b.id} are stacked on line y=${a.y}: ${a.x0}-${a.x1} vs ${b.x0}-${b.x1}`,
+        );
+      }
+    }
+    // And the svg grew to hold the extra line, or the stacked block is clipped
+    // away and is invisible for a different reason.
+    const svg = document.querySelector("svg[role=img]") as SVGSVGElement;
+    const bottom = Math.max(...placed.map((p) => p.y)) + 16;
+    assert.ok(Number(svg.getAttribute("height")) >= bottom, `svg is ${svg.getAttribute("height")} tall, needs ${bottom}`);
   });
 
   test("a live item's block reaches the live edge instead of collapsing", () => {
@@ -324,6 +415,23 @@ describe("the item lane", () => {
     }));
     const seg = document.querySelector("[data-lane-segment='message']") as SVGRectElement;
     assert.ok(Number(seg.getAttribute("width")) > 50, `collapsed to ${seg.getAttribute("width")}`);
+  });
+
+  test("hovering an item with a peak puts the NUMBER in the strip", () => {
+    // A tick on a block with the number nowhere is a mark nobody can read.
+    render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
+    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
+    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    assert.ok(strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
+    assert.ok(strip.textContent?.includes("94 dB"), strip.textContent ?? "");
+  });
+
+  test("an item with no peak gets no empty Peaked column", () => {
+    render(chart());
+    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
+    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    assert.ok(strip.textContent?.includes("Item 3"), "the lane hover did not register");
+    assert.ok(!strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
   });
 
   test("a peak mark only where the caller gave one (the sound chart)", () => {

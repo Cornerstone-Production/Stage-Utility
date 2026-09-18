@@ -9,9 +9,16 @@
 
 import { useCallback, useState } from "react";
 
-/** Read a stored key list, dropping anything no longer offered. Returns
- *  `fallback` when nothing is stored, when the JSON is unreadable, or when every
- *  stored key has since been removed. */
+/**
+ * Read a stored key list, dropping anything no longer offered.
+ *
+ * `fallback` when nothing is stored or the value is unreadable. NOT when every
+ * stored key has since been removed — that lands on the empty list, exactly as
+ * an operator who unticked everything does, because the two are the same state
+ * and there is nothing in the store that tells them apart. (An earlier version
+ * of this comment claimed the all-removed case fell back; it never did, and
+ * saying so invited a change that would spring every default back on.)
+ */
 export function readStoredKeys(storageKey: string, allowed: readonly string[], fallback: string[]): string[] {
   try {
     const raw = localStorage.getItem(storageKey);
@@ -24,6 +31,42 @@ export function readStoredKeys(storageKey: string, allowed: readonly string[], f
     return clean;
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * Add a key to a stored selection ONCE, and remember that it was added.
+ *
+ * A new default reaches nobody who already has a stored selection: the stored
+ * list wins, and it cannot contain a key that did not exist when it was written.
+ * `average` landed exactly there — every operator with a chip selection from
+ * before this release would never have seen it.
+ *
+ * ONCE is the whole point. Adding it on every load would undo the operator's
+ * untick the next time they opened the page, which is worse than never offering
+ * it. The marker is a separate entry rather than a version number on the list,
+ * so a hand-edited or cleared selection does not re-run it.
+ *
+ * Returns nothing and throws nothing: a browser that refuses to write simply
+ * does not get the new default, which is the state it was already in.
+ */
+export function addDefaultOnce(storageKey: string, key: string): void {
+  const marker = `${storageKey}:added:${key}`;
+  try {
+    if (localStorage.getItem(marker)) return;
+    localStorage.setItem(marker, "1");
+    const raw = localStorage.getItem(storageKey);
+    // Nothing stored = this browser takes the DEFAULTS, which already carry the
+    // key. Writing a list here would freeze today's defaults for them forever.
+    if (!raw) return;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    const keys = parsed.filter((k): k is string => typeof k === "string");
+    if (keys.includes(key)) return;
+    localStorage.setItem(storageKey, JSON.stringify([...keys, key]));
+  } catch {
+    // Private mode, a full quota, a hostile profile. The operator keeps the
+    // selection they had; nothing is lost and nothing is silently rewritten.
   }
 }
 

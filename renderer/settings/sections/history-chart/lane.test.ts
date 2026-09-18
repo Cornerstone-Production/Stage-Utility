@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { LANE_LABEL_PADDING, laneLabel, laneSegments, segmentAt, type LaneItem } from "./lane.js";
+import { LANE_LABEL_PADDING, MAX_EXTRA_LANES, laneLabel, laneSegments, segmentAt, type LaneItem } from "./lane.js";
 
 /** A deterministic measurer: 6px per character, like a condensed 11px mono. */
 const measure = (s: string) => s.length * 6;
@@ -150,5 +150,75 @@ describe("segmentAt", () => {
 
   test("the other row is never hit", () => {
     assert.equal(segmentAt(segs, 100, "pre"), null);
+  });
+});
+
+describe("overlapping items", () => {
+  const t0 = Date.parse("2026-09-17T19:50:00.000Z");
+  const t1 = Date.parse("2026-09-17T21:30:00.000Z");
+  const opts = { domainStartMs: t0, domainEndMs: t1, liveEdgeMs: t1, plotX0: 40, plotX1: 640 };
+
+  /** The real shape on the 17 Sep record: "10 min Warning" opens before "Doors"
+   *  has closed, and "VIDEO: Pre-roll" before that one has. */
+  const overlapping: LaneItem[] = [
+    { itemId: "doors", title: "Doors", sequence: 0, startedAt: "2026-09-17T19:50:00.000Z", endedAt: "2026-09-17T20:16:00.000Z", preService: false, plannedSec: null, actualSec: null },
+    { itemId: "warn", title: "10 min Warning", sequence: 1, startedAt: "2026-09-17T20:06:00.000Z", endedAt: "2026-09-17T20:16:00.000Z", preService: false, plannedSec: null, actualSec: null },
+    { itemId: "preroll", title: "VIDEO: Pre-roll", sequence: 2, startedAt: "2026-09-17T20:07:00.000Z", endedAt: "2026-09-17T20:18:00.000Z", preService: false, plannedSec: null, actualSec: null },
+  ];
+
+  test("an overlapping block moves down a lane instead of hiding under one", () => {
+    // Drawn on one line, the block underneath is invisible, unlabelled and
+    // unreachable — and it is the one the operator is looking for, because an
+    // overlap is what went wrong.
+    const segs = laneSegments(overlapping, opts);
+    assert.deepEqual(segs.map((s) => s.lane), [0, 1, 2]);
+  });
+
+  test("a lane is reused once its last block has finished", () => {
+    const sequential: LaneItem[] = [
+      { ...overlapping[0], itemId: "a", startedAt: "2026-09-17T19:50:00.000Z", endedAt: "2026-09-17T20:00:00.000Z" },
+      { ...overlapping[0], itemId: "b", startedAt: "2026-09-17T20:00:00.000Z", endedAt: "2026-09-17T20:10:00.000Z" },
+      { ...overlapping[0], itemId: "c", startedAt: "2026-09-17T20:10:00.000Z", endedAt: "2026-09-17T20:20:00.000Z" },
+    ];
+    // A normal service is ONE line. Stacking abutting items would put a lane
+    // under every block on every service ever recorded.
+    assert.deepEqual(laneSegments(sequential, opts).map((s) => s.lane), [0, 0, 0]);
+  });
+
+  test("lanes are compared on the millisecond, not the rounded pixel", () => {
+    // Two items a second apart round to the same x on an hour-wide plot.
+    const tight: LaneItem[] = [
+      { ...overlapping[0], itemId: "a", startedAt: "2026-09-17T20:00:00.000Z", endedAt: "2026-09-17T20:00:01.000Z" },
+      { ...overlapping[0], itemId: "b", startedAt: "2026-09-17T20:00:01.000Z", endedAt: "2026-09-17T20:10:00.000Z" },
+    ];
+    assert.deepEqual(laneSegments(tight, opts).map((s) => s.lane), [0, 0]);
+  });
+
+  test("the stack stops growing at the cap", () => {
+    const many: LaneItem[] = Array.from({ length: 6 }, (_, i) => ({
+      ...overlapping[0],
+      itemId: `i${i}`,
+      sequence: i,
+      startedAt: `2026-09-17T20:0${i}:00.000Z`,
+      endedAt: "2026-09-17T21:00:00.000Z",
+    }));
+    const lanes = laneSegments(many, opts).map((s) => s.lane);
+    assert.equal(Math.max(...lanes), MAX_EXTRA_LANES);
+  });
+
+  test("the pre row stacks independently of the service row", () => {
+    const mixed: LaneItem[] = [
+      { ...overlapping[0], itemId: "p1", preService: true, startedAt: "2026-09-17T19:50:00.000Z", endedAt: "2026-09-17T20:10:00.000Z" },
+      { ...overlapping[0], itemId: "s1", preService: false, startedAt: "2026-09-17T19:55:00.000Z", endedAt: "2026-09-17T20:20:00.000Z" },
+    ];
+    assert.deepEqual(laneSegments(mixed, opts).map((s) => s.lane), [0, 0]);
+  });
+
+  test("hover returns the TOPMOST block, not whichever came last", () => {
+    // At 20:10 all three overlap. The one the pointer is actually over is the
+    // one in lane 0.
+    const segs = laneSegments(overlapping, opts);
+    const x = segs[0].x0 + (segs[0].x1 - segs[0].x0) * 0.8;
+    assert.equal(segmentAt(segs, x, "service")?.item.itemId, "doors");
   });
 });

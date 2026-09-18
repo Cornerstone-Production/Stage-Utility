@@ -2,7 +2,15 @@ import { useMemo } from "react";
 
 import { toast } from "../../components/ui";
 import { errorMessage } from "@main/services/errors";
-import { CustomizePopover, HistoryChart, useStoredKeys, type ChartSeries, type LaneItem } from "./history-chart";
+import {
+  CustomizePopover,
+  HistoryChart,
+  addDefaultOnce,
+  serviceWindowOf,
+  useStoredKeys,
+  type ChartSeries,
+  type LaneItem,
+} from "./history-chart";
 
 // Which chart series/overlays and at-rest figures to surface. Attendance has a
 // fixed, small set (not arbitrary per-item columns), so the keys are enumerated
@@ -36,6 +44,12 @@ const METRICS_STORAGE_KEY = "attendance:visibleMetrics";
  *  spec names: peak, lowest in service, average, samples. "Total entries"
  *  (cumulative) stays off unless picked. */
 const DEFAULT_METRICS = ["occupancy", "avg", "markers", "peak", "lowest", "average", "samples"];
+
+// `average` is new, and a new default reaches nobody who already has a stored
+// selection — the stored list wins and cannot name a key that did not exist
+// when it was written. Added once, at module load so it lands before the first
+// read, and never again: re-adding it every load would undo an untick.
+addDefaultOnce(METRICS_STORAGE_KEY, "average");
 
 /**
  * Attendance — browse past services and their recorded attendance/occupancy
@@ -76,9 +90,19 @@ export function servicePeakAttendance(rec: ServiceAttendance): number {
  */
 function averageOccupancy(rec: ServiceAttendance): number | null {
   const inService = rec.samples.filter((s) => !s.phase);
-  const use = inService.length ? inService : rec.samples;
-  if (!use.length) return null;
-  return Math.round(use.reduce((s, p) => s + p.occupancy, 0) / use.length);
+  // No in-service samples at all is NOT "average the ramp instead". It is a
+  // record that is still arriving, or one that never went live — the real case
+  // being the "arriving" row History shows up to an hour before the start. Peak
+  // reads 0 and Lowest reads — for that record, so an Average of 400 taken off
+  // the ramp is the one figure claiming a service happened.
+  //
+  // A LEGACY record — written before the phase tags existed — has no phase on
+  // ANY sample, so every one of them is in-service by this test and it reads
+  // exactly as it always did. That needs no second branch, and the branch that
+  // used to be here (fall back to every sample) was unreachable for legacy
+  // records and wrong for the arriving one.
+  if (!inService.length) return null;
+  return Math.round(inService.reduce((s, p) => s + p.occupancy, 0) / inService.length);
 }
 
 /** The full attendance detail — the chart module, its stat strip and its
@@ -108,38 +132,45 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
     [detail.samples],
   );
 
-  const series: ChartSeries[] = [];
-  if (shows("occupancy")) {
-    series.push({
+  // EVERY series the section offers, each carrying whether it is on. The chart
+  // draws the on ones and lists them ALL in the legend, which is what lets the
+  // legend turn one back on — see ChartSeries.on. The ids are the stored
+  // preference keys, so a legend click and a Customize tick are one action over
+  // one store and the two cannot disagree.
+  const series: ChartSeries[] = [
+    {
       id: "occupancy",
       label: "Attendance",
-      color: "var(--green-9)",
+      color: "var(--color-green-9)",
       role: "primary",
       fill: true,
+      on: shows("occupancy"),
       points: points.map((p) => ({ t: p.t, v: p.occupancy })),
-    });
-  }
-  if (shows("attendance")) {
-    series.push({
-      id: "entries",
+    },
+    {
+      id: "attendance",
       label: "Total entries",
       color: "var(--color-accent)",
       role: "secondary",
       dashed: true,
+      on: shows("attendance"),
       points: points.map((p) => ({ t: p.t, v: p.attendance })),
-    });
-  }
-  if (shows("avg") && avgOccupancy != null && points.length > 1) {
-    // A reference line, drawn as a two-point series rather than as its own kind
-    // of overlay — it shares the y scale, so it is a series by any other name.
+    },
+  ];
+  // A reference line, drawn as a two-point series rather than as its own kind of
+  // overlay — it shares the y scale, so it is a series by any other name. ABSENT
+  // rather than off when there is no average to reference: a legend entry that
+  // cannot be turned on is a dead control.
+  if (avgOccupancy != null && points.length > 1) {
     series.push({
       id: "avg",
       // "Avg", not "Avg 1,164": the strip prints the label and the value side by
       // side, and a label carrying the number read "AVG 1,164  1,164".
       label: "Avg",
-      color: "var(--green-11)",
+      color: "var(--color-green-11)",
       role: "secondary",
       dashed: true,
+      on: shows("avg"),
       // Two points two hours apart. Without this the default sampling-gap rule
       // broke it into two single-point runs and drew two dots at the edges of
       // the plot instead of a reference line.
@@ -189,11 +220,14 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
     <HistoryChart
       series={series}
       items={items}
-      window={{ startedAt: detail.serviceStartedAt ?? null, endedAt: detail.endedAt }}
+      // ONE window for both charts — see service-window.ts. Sound had its own
+      // and never hatched.
+      window={serviceWindowOf({ timeline, attendance: detail })}
       yScale={{ kind: "count" }}
       figures={figures}
       live={detail.endedAt == null}
       ariaLabel="Attendance and in-room occupancy over the service, with the plan's items"
+      onToggleSeries={toggleMetric}
       customize={
         <CustomizePopover
           label="Customize attendance"

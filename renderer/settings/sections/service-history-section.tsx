@@ -1127,7 +1127,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
           <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
           {spl ? (
-            <SplDetail detail={spl} timeline={detail} />
+            <SplDetail detail={spl} timeline={detail} attendance={attendance} />
           ) : (
             <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
           )}
@@ -1174,7 +1174,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
           <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
           {spl ? (
-            <SplDetail detail={spl} timeline={detail} />
+            <SplDetail detail={spl} timeline={detail} attendance={attendance} />
           ) : (
             <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
           )}

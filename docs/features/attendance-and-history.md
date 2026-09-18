@@ -86,17 +86,37 @@ planned for. While the service is still recording it reads `LIVE` with the curre
 values, and a pointer anywhere on the chart wins over that — you asked about that
 instant.
 
-**The plot** draws one line per series with no fill behind the plot area. Time
-before and after the service proper is hatched at 45°, with a hairline at each
-boundary, so the arrival ramp and the emptying-room taper are visibly not the
-service. A gap of more than three minutes in the samples breaks the line.
+**The plot** draws one line per series with no fill behind the plot area. The
+time axis is ticked every thirty minutes — every ten on a service under ninety —
+on the clock's own half hours, so a service starting at 19:47 is ticked at 20:00
+and 20:30.
+
+Time before and after the service proper is hatched at 45°, with a hairline at
+each boundary, so the arrival ramp and the emptying-room taper are visibly not
+the service. Both charts take that window from the same place: the first plan
+item that is not pre-service, and the attendance record's own end.
+
+A line breaks wherever more than three minutes of **sampling** is missing, since
+that means the counter was unreachable rather than that the room emptied. A line
+with no sampling behind it — a reference line, a per-item step — is never broken
+that way; it has no gap to have.
 
 Attendance plots people in the room, in green, with a dashed reference line at the
-service average. Sound plots one **step per plan item** — the item's Leq held flat
-across the time it ran — because that is what is recorded: the SPL recorder stores
-one figure per item, not a sample series. For the same reason an item's peak mark
-is a tick on the top edge of its block rather than at the loudest instant, which is
-not recorded. Its y axis is chosen to frame the levels, never anchored at 0 dB.
+service average.
+
+Sound plots the **recorded samples**: `spl.csv` holds a reading per second, and
+the chart reads them bucketed (see
+[`/api/spl/history/:key/series`](../reference/api.md)). The solid line is each
+bucket's loudest reading, with its gradient; the dashed line is each bucket's
+energy average. Its y axis is chosen to frame the levels, never anchored at 0 dB.
+While a service is recording the series is re-read every ten seconds, and
+immediately whenever the record itself changes.
+
+A service with **no raw rows** — recorded before the raw layer existed, or with
+its archive pruned — falls back to one step per plan item, each item's Leq held
+flat across the time it ran. Either way an item's peak mark is a tick on the top
+edge of its block rather than at the loudest instant, because the instant is not
+in the per-item record; hover the block and the strip says what it peaked at.
 
 **The item lane** is two rows under the axis: pre-service items outlined above,
 in-service items filled below, each spanning the time it actually ran. A block is
@@ -105,11 +125,22 @@ labelled with the item's full title when it fits, otherwise with its rundown num
 clipped or shortened, because a half-title names a different item. Below 600px the
 lane keeps only the in-service row and labels become numbers.
 
+Items that **overlap** — a reopened item, or a service whose occurrence split was
+missed — stack onto their own lines rather than hiding under one another, up to
+two extra. Hovering picks the topmost.
+
 **Customize** is the sliders button at the section's right. It holds which series
 to draw, which figures the strip shows at rest, and for sound which Smaart metrics
-to plot. The legend under the plot stays as a quick reading of what is on. The
-attendance choices are remembered per browser; the Smaart metric list is a server
-setting, shared by everyone.
+the table carries.
+
+The legend under the plot is the same choice as a row of buttons: clicking one
+turns that series off and on, and it stays in step with Customize because both
+write the same preference. A series that is off is still listed, struck through —
+a legend that dropped what was off could never turn it back on.
+
+The attendance choices and the sound chart's own two lines are remembered per
+browser (`attendance:visibleMetrics`, `spl:visibleFigures`, `spl:visibleSeries`);
+the Smaart metric list is a server setting, shared by everyone.
 
 While a service is recording, the chart grows with it: new samples extend the line
 in place, the newest stretch draws in, the live edge carries a pulsing dot, the
@@ -216,9 +247,13 @@ the room emptying. Both windows are set in Advanced.
 
 Only the service proper feeds peak, low, average and last; the ramp and taper
 would otherwise drag those figures toward an empty room — far enough that an
-average taken over the whole recording can come out below the recorded low. Where two services are close
-enough that one's taper overlaps the next one's ramp, the ramp wins — the room is
-filling for the next service, not emptying from the last.
+average over the whole recording can come out below the recorded low. A record
+with no in-service samples at all, one still arriving or one that never went
+live, has no average rather than the ramp's.
+
+Where two services are close enough that one's taper overlaps the next one's
+ramp, the ramp wins — the room is filling for the next service, not emptying
+from the last.
 
 A service shows up in History as soon as its attendance recording begins — up to
 60 minutes before the scheduled start by default (the arrival-ramp window above)

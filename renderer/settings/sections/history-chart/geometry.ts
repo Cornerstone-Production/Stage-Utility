@@ -20,6 +20,15 @@ export interface ChartSeries {
   role: "primary" | "secondary";
   /** Dashed where a secondary series shares the primary's scale. */
   dashed?: boolean;
+  /**
+   * False = listed in the legend, not drawn on the plot. Default true.
+   *
+   * The series array is the section's WHOLE offering, not just what is on, so
+   * the legend can turn one back on. Filtering before the chart would leave the
+   * legend unable to name a series the operator had switched off, which is the
+   * one thing a toggle has to be able to do.
+   */
+  on?: boolean;
   /** Gradient fill from the line down to the axis floor. Primary only. */
   fill?: boolean;
   /**
@@ -32,6 +41,15 @@ export interface ChartSeries {
    * Both pass `Infinity`: they have no sampling to have a gap in.
    */
   gapMs?: number;
+  /**
+   * Explicit runs, when a gap rule cannot express where the line should break.
+   *
+   * The per-item sound fallback is the case: consecutive items ABUT, so no gap
+   * rule separates them, and the line has to break between them anyway — one
+   * item's level is not a slope into the next one's. `points` stays the whole
+   * series, because hover reads the nearest sample from it.
+   */
+  runs?: ChartPoint[][];
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
 }

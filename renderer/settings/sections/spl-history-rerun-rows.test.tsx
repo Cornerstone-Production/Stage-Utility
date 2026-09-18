@@ -77,11 +77,14 @@ const DETAIL = {
 test("two runs of one item are two rows, with no duplicate-key warning", async () => {
   // The metric picker asks the server which metrics to surface on mount.
   const beforeFetch = globalThis.fetch;
-  globalThis.fetch = (async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ metrics: [METRIC] }),
-  })) as unknown as typeof fetch;
+  // Routed by URL. A single catch-all answer handed the SERIES route the
+  // visible-metrics body, and the section then read `.buckets` off it — a
+  // stub that answers everything with one shape tests the stub.
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/series")) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+    return { ok: true, status: 200, json: async () => ({ metrics: [METRIC] }) };
+  }) as unknown as typeof fetch;
   const errors: string[] = [];
   const beforeError = console.error;
   console.error = (...args: unknown[]) => {

@@ -67,6 +67,9 @@ export interface HistoryChartProps {
   customize?: React.ReactNode;
   /** Names the plot for a screen reader. */
   ariaLabel: string;
+  /** Makes the legend a toggle. Wire it to the SAME handler Customize uses, so
+   *  the two controls over one choice cannot disagree. */
+  onToggleSeries?: (id: string) => void;
   /** Test seam: the wall clock the live edge and a live item's block run to. */
   nowMs?: number;
 }
@@ -88,6 +91,7 @@ export function HistoryChart({
   live = false,
   customize,
   ariaLabel,
+  onToggleSeries,
   nowMs,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
@@ -124,10 +128,10 @@ export function HistoryChart({
   const plotY0 = PAD_T;
   const plotY1 = PAD_T + PLOT_H;
   const laneY0 = plotY1 + AXIS_H;
-  const laneRows = narrow ? 1 : 2;
-  const H = laneY0 + laneRows * LANE_ROW_H + (laneRows - 1) * LANE_GAP + 4;
 
-  const all = useMemo(() => series.flatMap((s) => s.points), [series]);
+  /** What is actually drawn. `series` is the whole offering — see ChartSeries.on. */
+  const shown = useMemo(() => series.filter((s) => s.on !== false), [series]);
+  const all = useMemo(() => shown.flatMap((s) => s.points), [shown]);
   const axis = useMemo(() => niceAxis(all.map((p) => p.v), yScale), [all, yScale]);
 
   const firstT = all.length ? Math.min(...all.map((p) => p.t)) : NaN;
@@ -162,6 +166,24 @@ export function HistoryChart({
     [items, domainStart, domainEnd, live, now, plotX0, plotX1],
   );
 
+  /**
+   * Where each row starts, once overlapping items have been stacked.
+   *
+   * The PRE row's extra lanes push the service row down. Without that they
+   * collide: a pre item in lane 1 and an in-service item in lane 0 both land on
+   * line 1 and draw on top of each other — which is the exact invisibility the
+   * stacking was added to fix, moved one row over. Seen on the 17 Sep record,
+   * where "10 min Warning" (pre, lane 1) sat underneath "VIDEO: Pre-roll".
+   */
+  const lastLaneIn = (row: "pre" | "service") =>
+    segments.reduce((m, seg) => (seg.row === row ? Math.max(m, seg.lane) : m), -1);
+  const preLines = narrow ? 0 : lastLaneIn("pre") + 1;
+  // The service row keeps its line even when no pre item was recorded, so the
+  // lane sits where it does on every other service.
+  const serviceLine = narrow ? 0 : Math.max(1, preLines);
+  const laneLines = serviceLine + Math.max(1, lastLaneIn("service") + 1);
+  const H = laneY0 + laneLines * LANE_ROW_H + (laneLines - 1) * LANE_GAP + 4;
+
   // The service window's hatch bands.
   const wStart = serviceWindow.startedAt ? Date.parse(serviceWindow.startedAt) : NaN;
   const wEnd = serviceWindow.endedAt ? Date.parse(serviceWindow.endedAt) : NaN;
@@ -179,7 +201,7 @@ export function HistoryChart({
     hoverX != null && hoverRow && hoverRow !== "plot" ? segmentAt(segments, hoverX, hoverRow) : null;
   const hoverValues = hoverT == null
     ? []
-    : series.flatMap((s) => {
+    : shown.flatMap((s) => {
       const i = nearestIndex(s.points, hoverT);
       if (i < 0) return [];
       return [{ label: s.label, value: fmt(s, s.points[i].v), color: s.color }];
@@ -195,13 +217,14 @@ export function HistoryChart({
           title: hoveredSegment.item.title || "Untitled",
           ran: fmtDur(hoveredSegment.item.actualSec),
           planned: fmtDur(hoveredSegment.item.plannedSec),
+          peak: hoveredSegment.item.peakLabel ?? null,
         }
         : null,
     };
   const liveStrip = live && all.length
     ? {
       time: formatClock(new Date(lastT).toISOString()),
-      values: series.flatMap((s) => {
+      values: shown.flatMap((s) => {
         const last = s.points[s.points.length - 1];
         return last ? [{ label: s.label, value: fmt(s, last.v), color: s.color }] : [];
       }),
@@ -269,7 +292,7 @@ export function HistoryChart({
           <pattern id={`${uid}-hatch`} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <line x1={0} y1={0} x2={0} y2={6} stroke="var(--color-line)" strokeWidth={1} />
           </pattern>
-          {series.filter((s) => s.fill).map((s) => (
+          {shown.filter((s) => s.fill).map((s) => (
             <linearGradient key={s.id} id={`${uid}-fill-${s.id}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={s.color} stopOpacity={0.22} />
               <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
@@ -327,8 +350,8 @@ export function HistoryChart({
         {/* Series. Every path is keyed by series id and run index and NEVER by
             sample count, so appending a sample updates `d` on the element that is
             already there instead of replacing it — see history-chart-live.test.tsx. */}
-        {series.map((s) => {
-          const runs = splitRuns(s.points, s.gapMs ?? GAP_MS);
+        {shown.map((s) => {
+          const runs = s.runs ?? splitRuns(s.points, s.gapMs ?? GAP_MS);
           return (
             <g key={s.id} data-series={s.id}>
               {s.fill
@@ -366,7 +389,7 @@ export function HistoryChart({
             thing the live guard exists to prevent. This one is keyed by the
             newest sample's timestamp, so it remounts (and replays) per append
             and takes the persistent path with it nowhere. */}
-        {live && !reduced && series.map((s) => {
+        {live && !reduced && shown.map((s) => {
           const n = s.points.length;
           if (n < 2) return null;
           const tail = s.points.slice(n - 2);
@@ -388,7 +411,7 @@ export function HistoryChart({
 
         {/* Live edge: a 4px dot at the newest sample of the primary series. */}
         {live && (() => {
-          const primary = series.find((s) => s.role === "primary") ?? series[0];
+          const primary = shown.find((s) => s.role === "primary") ?? shown[0];
           const last = primary?.points[primary.points.length - 1];
           if (!last) return null;
           return (
@@ -446,7 +469,7 @@ export function HistoryChart({
 
         {/* Item lane. */}
         {segments.filter((s) => s.visible && (!narrow || s.row === "service")).map((seg, i) => {
-          const row = narrow ? 0 : seg.row === "pre" ? 0 : 1;
+          const row = (seg.row === "pre" && !narrow ? 0 : serviceLine) + seg.lane;
           const y = laneY0 + row * (LANE_ROW_H + LANE_GAP);
           const w = Math.max(0, seg.x1 - seg.x0);
           const label = narrow
@@ -494,7 +517,7 @@ export function HistoryChart({
                   y1={y}
                   x2={(seg.x0 + seg.x1) / 2}
                   y2={y + 4}
-                  stroke={series.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
+                  stroke={shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
                   strokeWidth={3}
                   vectorEffect="non-scaling-stroke"
                 />
@@ -519,21 +542,45 @@ export function HistoryChart({
         )}
       </svg>
 
-      {/* The legend stays as the quick toggle for the series that are ON; the
-          full set lives in Customize. */}
+      {/* The legend IS the quick toggle. It lists every series the section
+          offers, drawn or not, and clicking one is the same action as ticking
+          it in Customize — `onToggleSeries` is wired to the same handler, so
+          the two can never disagree. Without a handler it is a plain legend. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption2 text-fg-muted">
-        {series.map((s) => (
-          <span key={s.id} className="inline-flex items-center gap-1.5">
-            {/* The swatch is the LINE: a dashed series gets a dashed rule, not
-                the same filled dot as the solid one beside it. Two identical
-                dots said the two lines were drawn alike when one is a dashed
-                reference. */}
-            {s.dashed
-              ? <span className="inline-block w-3 border-t border-dashed" style={{ borderColor: s.color }} />
-              : <span className="size-2.5 rounded-full" style={{ background: s.color }} />}
-            {s.label}
-          </span>
-        ))}
+        {series.map((s) => {
+          const on = s.on !== false;
+          const swatch = s.dashed
+            // The swatch is the LINE: a dashed series gets a dashed rule, not
+            // the same filled dot as the solid one beside it. Two identical
+            // dots said the two lines were drawn alike when one is a dashed
+            // reference.
+            ? <span className="inline-block w-3 border-t border-dashed" style={{ borderColor: s.color }} />
+            : <span className="size-2.5 rounded-full" style={{ background: s.color }} />;
+          if (!onToggleSeries) {
+            return (
+              <span key={s.id} className="inline-flex items-center gap-1.5">{swatch}{s.label}</span>
+            );
+          }
+          return (
+            <button
+              key={s.id}
+              type="button"
+              data-series-toggle={s.id}
+              aria-pressed={on}
+              onClick={() => onToggleSeries(s.id)}
+              className={cn(
+                "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
+                "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
+                // An off series stays legible — it is a control, not a
+                // disabled one — but reads as off at a glance.
+                !on && "opacity-45 line-through decoration-1",
+              )}
+            >
+              {swatch}
+              {s.label}
+            </button>
+          );
+        })}
         {(hasPre || hasPost) && (
           <span className="inline-flex items-center gap-1.5">
             <span

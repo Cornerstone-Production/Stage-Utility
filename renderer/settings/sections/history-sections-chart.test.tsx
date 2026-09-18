@@ -121,11 +121,79 @@ const SPL = {
   ],
 } as unknown as ServiceSplHistory;
 
+/** Two items that OVERLAP — the Doors / 10 min Warning shape the repair record
+ *  carries, where a reopened item's window runs back over the one before it. A
+ *  globally sorted edge list walks back and forth across the overlap and draws
+ *  a W through it. */
+const SPL_TWO_ITEMS = {
+  ...SPL,
+  items: [
+    {
+      itemId: "doors",
+      title: "Doors",
+      sequence: 0,
+      metrics: { LAeq: { max: 87, avg: null, leq: 77, count: 100 } },
+      maxSpl: 87,
+      leqSpl: 77,
+      sampleCount: 100,
+      startedAt: new Date(T0 - 25 * MIN).toISOString(),
+      endedAt: new Date(T0 + 5 * MIN).toISOString(),
+    },
+    {
+      itemId: "warning",
+      title: "10 min Warning",
+      sequence: 1,
+      metrics: { LAeq: { max: 79, avg: null, leq: 78, count: 60 } },
+      maxSpl: 79,
+      leqSpl: 78,
+      sampleCount: 60,
+      // Starts BEFORE the item above it ended.
+      startedAt: new Date(T0 - 10 * MIN).toISOString(),
+      endedAt: new Date(T0 + 1 * MIN).toISOString(),
+    },
+  ],
+} as unknown as ServiceSplHistory;
+
+
 function attendance() {
   return React.createElement(
     AttendanceDetail as unknown as React.FunctionComponent<Record<string, unknown>>,
     { detail: ATTENDANCE, timeline: TIMELINE },
   );
+}
+
+/**
+ * A fetch that answers the two routes the sound section calls, by URL.
+ *
+ * Routed, not a catch-all: one shape for every request handed the SERIES route
+ * the visible-metrics body, and a section reading `.buckets` off it threw. A
+ * stub that answers everything the same way tests the stub.
+ *
+ * `series: false` is the 404 an old record gets — the per-item fallback path.
+ */
+function splFetch({ series }: { series: boolean }): typeof fetch {
+  return (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/series")) {
+      if (!series) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          metric: "LAeq",
+          metrics: ["LAeq", "LCeq"],
+          bucketSec: 5,
+          // Twelve buckets across the Message item, climbing, with max above avg.
+          buckets: Array.from({ length: 12 }, (_, i) => ({
+            t: T0 + i * 3 * MIN,
+            max: 88 + i,
+            avg: 82 + i,
+          })),
+        }),
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ metrics: ["LAeq"] }) };
+  }) as unknown as typeof fetch;
 }
 
 /** React's scheduler queues with setImmediate; a Radix popover's teardown lands
@@ -207,11 +275,7 @@ test("unticking a figure in Customize survives a reload", async () => {
 
 test("the sound section draws the chart and offers its Smaart metrics in Customize", async () => {
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ metrics: ["LAeq"] }),
-  })) as unknown as typeof fetch;
+  globalThis.fetch = splFetch({ series: false });
   try {
     render(
       React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
@@ -234,6 +298,239 @@ test("the sound section draws the chart and offers its Smaart metrics in Customi
     const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
     assert.ok(popover.getByText("Smaart metrics"), "no Smaart metrics group");
     assert.ok(popover.getByText("LCeq"), "a recorded metric is missing from the picker");
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the sound chart plots the real sample series when the route has one", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: true });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL,
+        timeline: TIMELINE,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Bucket max as the primary with its gradient, bucket avg as the dashed
+    // secondary — NOT the per-item step, which draws one run per item.
+    const max = document.querySelector("[data-series-line='max']") as SVGPathElement;
+    const avg = document.querySelector("[data-series-line='avg']") as SVGPathElement;
+    assert.ok(max, "no peak line");
+    assert.ok(avg, "no average line");
+    assert.equal(max.getAttribute("stroke-width"), "1.8");
+    assert.equal(avg.getAttribute("stroke-dasharray"), "4 3");
+    assert.equal(document.querySelectorAll("[data-series-area='max']").length, 1, "the peak line has no gradient");
+    // Twelve buckets, one continuous run: the line does not break through the item.
+    assert.equal(document.querySelectorAll("[data-series-line='max']").length, 1);
+    assert.equal((max.getAttribute("d") ?? "").split("L").length, 12);
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a 404 falls back to the per-item step, one run per item", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: false });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL_TWO_ITEMS,
+        timeline: TIMELINE,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.equal(document.querySelectorAll("[data-series-line='max']").length, 0, "the raw line drew on a 404");
+    // TWO runs for two items, not one line walking between them: one item's
+    // level is not a slope into the next one's, and items that OVERLAP drew a W.
+    assert.equal(document.querySelectorAll("[data-series-line='LAeq']").length, 2);
+    // And NO gradient on the fallback. The raw line gets one (it is a real
+    // curve); a step to the axis floor of a dB scale would say only where the
+    // axis happens to start.
+    assert.equal(document.querySelectorAll("[data-series-area]").length, 0);
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the legend toggles a series, both ways, in step with Customize", async () => {
+  const first = render(attendance());
+  const legendOf = (id: string) => document.querySelector(`[data-series-toggle='${id}']`) as HTMLButtonElement;
+
+  assert.equal(legendOf("attendance").getAttribute("aria-pressed"), "false", "Total entries starts off");
+  assert.equal(document.querySelectorAll("[data-series-line='attendance']").length, 0);
+
+  // ON from the legend.
+  fireEvent.click(legendOf("attendance"));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  assert.equal(legendOf("attendance").getAttribute("aria-pressed"), "true");
+  assert.ok(document.querySelectorAll("[data-series-line='attendance']").length > 0, "the line did not draw");
+  // And Customize agrees, because it is the same store.
+  fireEvent.click(screen.getByLabelText("Customize attendance"));
+  const popover = within(screen.getByLabelText("Customize attendance", { selector: "[role='dialog']" }));
+  const row = popover.getByText("Total entries").closest("label") as HTMLElement;
+  assert.equal(row.querySelector("[role=checkbox]")?.getAttribute("aria-checked"), "true");
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  // OFF again from the legend.
+  fireEvent.click(legendOf("attendance"));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  assert.equal(legendOf("attendance").getAttribute("aria-pressed"), "false");
+  assert.equal(document.querySelectorAll("[data-series-line='attendance']").length, 0);
+
+  first.unmount();
+  await flushReact();
+});
+
+test("a record that is only arriving has no average at all", async () => {
+  // Peak reads 0 and Lowest reads "—" for a record with no in-service samples;
+  // an Average taken off the arrival ramp was the one figure claiming a service
+  // had happened. This is the "arriving" row History shows up to an hour before
+  // the start.
+  // Closed, not live: a LIVE record puts the strip in its LIVE state, which
+  // shows the current values rather than the at-rest figures. This is the other
+  // half of the same case — a record that closed having never gone live.
+  const arriving = {
+    ...ATTENDANCE,
+    serviceStartedAt: null,
+    peakOccupancy: 0,
+    minOccupancy: null,
+    samples: (ATTENDANCE as unknown as { samples: { phase?: string }[] }).samples.filter((s) => s.phase === "pre"),
+  } as unknown as ServiceAttendance;
+  render(
+    React.createElement(AttendanceDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+      detail: arriving,
+      timeline: null,
+    }),
+  );
+  const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+  const cells = [...strip.querySelectorAll(":scope > div")].map((c) => {
+    const spans = c.querySelectorAll("span");
+    return [spans[0]?.textContent, spans[1]?.textContent];
+  });
+  const average = cells.find(([label]) => label === "Average");
+  assert.ok(average, `no Average figure: ${JSON.stringify(cells)}`);
+  assert.equal(average?.[1], "—", `Average read ${average?.[1]}`);
+  cleanup();
+  await flushReact();
+});
+
+test("the SOUND chart hatches its ramp and taper, from the window attendance uses", async () => {
+  // It never did. Sound passed the SPL RECORDING's start as the service start,
+  // and SPL recording begins at the first plan item — usually "Doors" — so the
+  // window began exactly where the chart began and no band could draw. The two
+  // charts sit one above the other on the same x scale; a band on one and not
+  // the other reads as a difference in the data.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: false });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL_TWO_ITEMS,
+        timeline: {
+          items: [
+            {
+              itemId: "doors",
+              title: "Doors",
+              sequence: 0,
+              startedAt: new Date(T0 - 25 * MIN).toISOString(),
+              endedAt: new Date(T0 + 5 * MIN).toISOString(),
+              preService: true,
+            },
+            {
+              itemId: "warning",
+              title: "10 min Warning",
+              sequence: 1,
+              startedAt: new Date(T0 - 10 * MIN).toISOString(),
+              endedAt: new Date(T0 + 1 * MIN).toISOString(),
+              preService: false,
+            },
+          ],
+        },
+        attendance: { serviceStartedAt: null, endedAt: new Date(T0 + 1 * MIN).toISOString() },
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 1, "no pre-service hatch on sound");
+    assert.equal(document.querySelectorAll("[data-hatch='post']").length, 1, "no post-service hatch on sound");
+    cleanup();
+    await flushReact();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the SOUND chart hatches its ramp and taper, from the window attendance uses", async () => {
+  // It never did. Sound passed the SPL RECORDING's start as the service start,
+  // and SPL recording begins at the first plan item — usually "Doors" — so the
+  // window began exactly where the chart began and no band could draw. The two
+  // charts sit one above the other on the same x scale; a band on one and not
+  // the other reads as a difference in the data.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = splFetch({ series: false });
+  try {
+    render(
+      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        detail: SPL_TWO_ITEMS,
+        timeline: {
+          items: [
+            {
+              itemId: "doors",
+              title: "Doors",
+              sequence: 0,
+              startedAt: new Date(T0 - 25 * MIN).toISOString(),
+              endedAt: new Date(T0 + 5 * MIN).toISOString(),
+              preService: true,
+            },
+            {
+              itemId: "warning",
+              title: "10 min Warning",
+              sequence: 1,
+              startedAt: new Date(T0 - 10 * MIN).toISOString(),
+              endedAt: new Date(T0 + 1 * MIN).toISOString(),
+              preService: false,
+            },
+          ],
+        },
+        attendance: { serviceStartedAt: null, endedAt: new Date(T0 + 1 * MIN).toISOString() },
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 1, "no pre-service hatch on sound");
+    assert.equal(document.querySelectorAll("[data-hatch='post']").length, 1, "no post-service hatch on sound");
     cleanup();
     await flushReact();
   } finally {

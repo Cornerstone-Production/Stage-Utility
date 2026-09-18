@@ -21,7 +21,11 @@ export interface LaneItem {
   preService: boolean;
   plannedSec: number | null;
   actualSec: number | null;
-  /** Sound only: this item's loudest reading, as it should read in the strip. */
+  /** Sound only: this item's loudest reading, already formatted.
+   *
+   *  Does two things, and both are the point: it puts a tick on the block, and
+   *  it is what the stat strip says when that block is hovered. A tick with no
+   *  number anywhere is a mark nobody can read. */
   peakLabel?: string | null;
 }
 
@@ -29,11 +33,26 @@ export interface LaneItem {
 export interface LaneSegment {
   item: LaneItem;
   row: "pre" | "service";
+  /**
+   * How far BELOW its row this block is stacked, 0 for the row itself.
+   *
+   * Items can overlap — a recorder that reopened an item, a service whose
+   * occurrence split was missed, a hand-edited window — and two blocks on the
+   * same line then draw one on top of the other. The one underneath is
+   * invisible, unlabelled and unreachable: the hover took whichever came last.
+   * An overlapping block moves down a lane instead.
+   */
+  lane: number;
   x0: number;
   x1: number;
   /** false when the item's window falls entirely outside the drawn x domain. */
   visible: boolean;
 }
+
+/** How many extra lanes a row may grow. Past this an item shares the deepest
+ *  one: three stacked rows is already more lane than plot, and a service with
+ *  four simultaneous items has a recording problem, not a layout problem. */
+export const MAX_EXTRA_LANES = 2;
 
 /** What a segment is allowed to print. Never a truncated title — a clipped
  *  string reads as a different item, so the rule degrades to the number instead. */
@@ -87,15 +106,29 @@ export function laneSegments(
   const toX = (ms: number) => plotX0 + ((ms - domainStartMs) / span) * (plotX1 - plotX0);
   const clip = (x: number) => Math.min(plotX1, Math.max(plotX0, x));
   const out: LaneSegment[] = [];
+  /** The right edge in use in each lane of each row, so an overlapping block can
+   *  find the first lane it fits in. */
+  const busy = new Map<string, number[]>();
   for (const item of items) {
     const s = Date.parse(item.startedAt);
     if (!Number.isFinite(s)) continue;
     const rawEnd = item.endedAt ? Date.parse(item.endedAt) : liveEdgeMs;
     const e = Number.isFinite(rawEnd) ? Math.max(s, rawEnd) : liveEdgeMs;
     const visible = e >= domainStartMs && s <= domainEndMs;
+    const row: "pre" | "service" = item.preService ? "pre" : "service";
+    let ends = busy.get(row);
+    if (!ends) busy.set(row, (ends = []));
+    // The first lane whose last block has already finished. Compared on the
+    // MILLISECOND, not the pixel: two items a second apart round to the same x
+    // on an hour-wide plot, and stacking on that would put a lane under half
+    // the blocks of a perfectly normal service.
+    let lane = ends.findIndex((end) => end <= s);
+    if (lane === -1) lane = Math.min(ends.length, MAX_EXTRA_LANES);
+    ends[lane] = e;
     out.push({
       item,
-      row: item.preService ? "pre" : "service",
+      row,
+      lane,
       x0: clip(toX(s)),
       x1: clip(toX(e)),
       visible,
@@ -104,12 +137,18 @@ export function laneSegments(
   return out;
 }
 
-/** The segment under a plot x, or null. Later items win where blocks abut, so a
- *  boundary hover names the item that is starting rather than the one that ended. */
+/**
+ * The segment under a plot x, or null.
+ *
+ * The TOPMOST one — the smallest `lane` — because that is the block the pointer
+ * is over. Within one lane the later item wins, so a hover on a shared boundary
+ * names the item that is starting rather than the one that ended.
+ */
 export function segmentAt(segments: LaneSegment[], x: number, row: "pre" | "service"): LaneSegment | null {
   let hit: LaneSegment | null = null;
   for (const s of segments) {
-    if (s.visible && s.row === row && x >= s.x0 && x <= s.x1) hit = s;
+    if (!s.visible || s.row !== row || x < s.x0 || x > s.x1) continue;
+    if (!hit || s.lane <= hit.lane) hit = s;
   }
   return hit;
 }
