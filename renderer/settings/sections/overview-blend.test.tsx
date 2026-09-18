@@ -216,11 +216,26 @@ describe("the right-click menu", () => {
     assert.equal(/Sound summary|trend line/.test(txt), false, `the menu still hides a figure: ${txt}`);
   });
 
-  test("the menu is absent entirely when there is no metric to choose", (t) => {
-    // A menu with nothing in it is a right-click that opens an empty box.
+  test("there is no trigger and no button when there is no metric to choose", (t) => {
+    // Asserted on what the card OFFERS, not on what happens if you right-click
+    // anyway. The proof for this used to leave an empty menu mounted, and the
+    // whole test file then failed as a 31-second timeout instead of an
+    // assertion — a red that says nothing about the bug.
+    //
+    // The empty menu itself is now impossible: ContextMenu renders null for an
+    // empty list, pinned in context-menu-empty.test.tsx. This is the other half
+    // — the card does not advertise a menu it has nothing to put in.
     const view = show({ avgSpl: null, splDelta: null, splMetric: null, splMetrics: [] });
     t.after(() => cleanup());
+    assert.equal(
+      view.container.querySelector('[aria-label="Overview options"]'),
+      null,
+      "the touch affordance opens a menu with nothing in it",
+    );
     fireEvent.contextMenu(view.container.firstElementChild!.firstElementChild!, { clientX: 10, clientY: 10 });
-    assert.equal(document.querySelector('[role="menu"]'), null);
+    assert.equal(document.querySelector('[role="menu"]'), null, "a right-click opened an empty box");
+    // Closed explicitly, so nothing is left mounted for the next test — which
+    // is how the old proof turned into a hang.
+    fireEvent.keyDown(window, { key: "Escape" });
   });
 });
