@@ -98,7 +98,7 @@ export function perServiceAttendance(v: number, samples: AttendanceSample[]): nu
  * Records written before the phase tags existed have no phase on any sample, so
  * every sample counts — the same answer those records gave before.
  */
-function averageOccupancy(rec: ServiceAttendance): number | null {
+export function averageOccupancy(rec: ServiceAttendance): number | null {
   const inService = rec.samples.filter((s) => !s.phase);
   // No in-service samples at all is NOT "average the ramp instead". It is a
   // record that is still arriving, or one that never went live — the real case

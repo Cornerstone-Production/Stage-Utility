@@ -374,6 +374,35 @@ describe("the History service page", () => {
     );
   });
 
+  test("the pasted report quotes the same three numbers the Attendance card does", async () => {
+    // The report is the one surface an operator sends to somebody who cannot
+    // see the screen, so a figure it disagrees with the app about is the worst
+    // place for one. All three on its attendance line had drifted from the
+    // card: peak and entries were swapped, and the average was taken over EVERY
+    // sample — which is the bug `averageOccupancy` was written to fix, left
+    // behind in this copy. On the 17 Sep recording it printed "Avg in-room 781"
+    // for a service whose Lowest was 933.
+    const { buildReport } = await import("./service-history-section.js");
+    const { averageOccupancy } = await import("./attendance-history-section.js");
+    const rec = attendance() as unknown as ServiceAttendance;
+    const line = buildReport(timeline() as unknown as ServiceTimeline, rec, null)
+      .split("\n")
+      .find((l) => l.startsWith("Peak attendance"));
+    assert.ok(line, "the report has no attendance line");
+
+    assert.equal(
+      line,
+      `Peak attendance ${rec.peakOccupancy.toLocaleString()} · Entries ${rec.peakAttendance.toLocaleString()} · Avg in-room ${averageOccupancy(rec)!.toLocaleString()}`,
+      "every figure on the report's attendance line must be the one the app shows",
+    );
+    // And the thing that makes a wrong average obvious at a glance: a mean of
+    // the in-room count cannot be under the lowest in-room count recorded.
+    assert.ok(
+      averageOccupancy(rec)! >= rec.minOccupancy!,
+      `an average below the recorded low is not an average of the service: ${averageOccupancy(rec)} < ${rec.minOccupancy}`,
+    );
+  });
+
   test("the header's KPI row is not a live region; a chart strip is", async (t) => {
     installFetch();
     const view = await openTheService(ServiceHistorySection);

@@ -15,7 +15,7 @@ import { HistoryCalendar } from "../../components/history-calendar";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
-import { AttendanceDetail } from "./attendance-history-section";
+import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
 import { RecordingPill, ServiceHeader, overrunStats } from "./history-service-header";
 import {
@@ -155,7 +155,7 @@ export function describeRebuild(out: RebuildOutcome): string {
 
 /** Baptism sessions that overlap a service's recorded window. */
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
-function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
+export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
   const o = overrunStats(tl);
   const L: string[] = [];
@@ -172,7 +172,14 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
     L.push(`${i + 1}. ${it.title || "—"}  plan ${fmtDur(it.plannedLengthSec)}  actual ${it.endedAt == null ? "(live)" : fmtDur(it.actualDurationSec)}${d != null ? `  ${fmtDelta(d)}` : ""}`);
   });
   if (att) {
-    const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
+    // `averageOccupancy`, the SAME derivation the Attendance card's Average
+    // figure uses. This averaged every sample instead, which is the bug that
+    // function was written to fix — the arrival ramp and the emptying-room
+    // taper are both long and both near-empty, so the mean lands BELOW the
+    // recorded low. On the 17 Sep recording the pasted report said "Avg in-room
+    // 781" for a service whose Lowest was 933, under a card reading 1,164. The
+    // card was fixed and this copy drifted on.
+    const avgOcc = averageOccupancy(att);
     L.push("", "ATTENDANCE");
     // Attendance is people in the room; entries is how many came in during the
     // service. This had them swapped — a pasted report said "Peak attendance
