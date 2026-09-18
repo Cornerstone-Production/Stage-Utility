@@ -84,6 +84,24 @@ const WS_HEARTBEAT_TIMEOUT_MS = 90_000;
  */
 const WS_RETRY_EVERY = 3;
 
+/**
+ * While on the SSE fallback, also retry the WebSocket on this timer.
+ *
+ * WS_RETRY_EVERY alone is unreachable on a HEALTHY fallback: it only counts
+ * reconnects, and a quiet SSE stream that stays open never reconnects. On
+ * 18 Sep 2026 ProdCom refused every upgrade until it restarted at 00:38Z, and
+ * the client then sat on the fallback for a further 34 minutes — the stream was
+ * fine, so nothing counted, so nothing asked again.
+ *
+ * Both rules are kept. The counter is what handles a box that is dropping the
+ * fallback anyway (no point waiting five minutes when a reconnect is happening
+ * now); this is what handles the case the counter cannot see. Five minutes
+ * bounds the damage — the fallback has no keepalive, so the longer it is held
+ * the longer a dead box goes unnoticed — while costing one refused upgrade every
+ * five minutes against a box that genuinely has no WebSocket.
+ */
+const WS_RETRY_INTERVAL_MS = 5 * 60_000;
+
 const MAX_LINES = 100;
 
 /**
@@ -409,6 +427,9 @@ export class ProdComService extends ConnectionLifecycle {
   /** The WebSocket, when that is the live transport. */
   private ws: WebSocket | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Armed while the SSE fallback is the live transport — see
+   *  WS_RETRY_INTERVAL_MS. */
+  private wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** False once a WebSocket upgrade has failed, until WS_RETRY_EVERY reconnects
    *  later. Reset by configure(), so an operator who has just fixed the box gets
@@ -509,6 +530,14 @@ export class ProdComService extends ConnectionLifecycle {
   protected get reconnectMs(): number {
     return RECONNECT_MS;
   }
+  protected get wsRetryIntervalMs(): number {
+    return WS_RETRY_INTERVAL_MS;
+  }
+
+  /** Test seam: whether the fallback's WebSocket retry is currently armed. */
+  protected get wsRetryArmed(): boolean {
+    return this.wsRetryTimer !== null;
+  }
 
   /** Test seam: the REST prime (channels, then backfill) the current connection
    *  kicked off, so a test can await the same work instead of polling. */
@@ -544,6 +573,9 @@ export class ProdComService extends ConnectionLifecycle {
 
   protected override teardown(): void {
     this.clearIdleWatchdog();
+    // stop(), restart() and configure() all land here — one clear covers all
+    // three, the way the idle watchdog's does.
+    this.clearWebSocketRetry();
     this.req?.destroy();
     this.req = null;
     this.closeSocket();
@@ -612,6 +644,43 @@ export class ProdComService extends ConnectionLifecycle {
   private clearIdleWatchdog(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
+  }
+
+  /**
+   * Come back to the WebSocket on a clock while the fallback is live.
+   *
+   * Armed only while the fallback IS the live transport, so a box that has no
+   * WebSocket costs one refused upgrade every five minutes and nothing else.
+   *
+   * The reconnect has ONE owner, the lifecycle's scheduleReconnect(), which is
+   * why this drops the SSE request rather than opening a WebSocket beside it:
+   * connect() does not close the other transport, so a socket opened straight
+   * from here would leave the fallback streaming into the same buffer for as
+   * long as it stayed up. This is the idle watchdog's shape exactly (drop the
+   * request, then schedule), for the same reason.
+   *
+   * Nothing is logged per retry: countSseReconnect's debug line covers the
+   * counter's copy of this, the outage itself is already reported once by
+   * noteWebSocketDown, and `websocket is back` is the signal that matters.
+   */
+  private armWebSocketRetry(): void {
+    this.clearWebSocketRetry();
+    if (this.useWebSocket) return; // already on it, or already about to try
+    this.wsRetryTimer = setTimeout(() => {
+      this.wsRetryTimer = null;
+      if (!this.running || this.onWebSocket) return;
+      this.useWebSocket = true;
+      this.clearIdleWatchdog();
+      this.req?.destroy();
+      this.req = null;
+      this.scheduleReconnect();
+    }, this.wsRetryIntervalMs);
+    this.wsRetryTimer.unref?.();
+  }
+
+  private clearWebSocketRetry(): void {
+    if (this.wsRetryTimer) clearTimeout(this.wsRetryTimer);
+    this.wsRetryTimer = null;
   }
 
   /** Drop partials nothing has updated for PARTIAL_TTL_MS. Returns whether any went. */
@@ -889,6 +958,10 @@ export class ProdComService extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     this.clearIdleWatchdog();
+    // One connection attempt at a time owns the retry: it is re-armed when the
+    // fallback comes up, so a timer left over from the last stream cannot fire
+    // into an attempt that is already in flight.
+    this.clearWebSocketRetry();
     if (!this.running || !this.host || !this.port) return;
     if (this.useWebSocket) this.connectWebSocket(this.host, this.port);
     else this.connectSse(this.host, this.port);
@@ -924,6 +997,11 @@ export class ProdComService extends ConnectionLifecycle {
       if (this.ws !== ws) return;
       this.onWebSocket = true;
       this.sseReconnects = 0;
+      // No clearWebSocketRetry() here on purpose: the timer is a one-shot that
+      // nulls itself when it fires, is armed ONLY from the fallback's connected
+      // handler, and connect() clears it at the head of every attempt — so by
+      // the time a socket opens there is nothing left to clear. A line here
+      // could not be made to fail on any reachable state.
       this.noteWebSocketHealthy();
       this.report("connected", `Streaming from ${host}:${port}`);
       // Only the transcript stream is consumed here. The live box offers
@@ -1097,6 +1175,9 @@ export class ProdComService extends ConnectionLifecycle {
         this.priming = this.primeFromRest(host, port);
         res.setEncoding("utf8");
         this.armIdleWatchdog();
+        // A healthy fallback never reconnects, so the every-third-reconnect rule
+        // cannot fire — this is the clock that asks again anyway.
+        this.armWebSocketRetry();
 
         // Parse text/event-stream via the shared reader — a new one per
         // connection, so a partial event does not survive a reconnect. It caps the
