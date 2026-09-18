@@ -136,7 +136,11 @@ export function StatStrip({ figures, hover, live, right, announce = true, overla
         // the pointer entered. Out of flow it costs nothing at rest and moves
         // nothing on hover. `pointer-events-none` so it cannot eat the pointer
         // it exists to report on.
-        overlay && "pointer-events-none absolute inset-x-0 top-0 z-10 rounded-md bg-bg/90 backdrop-blur-sm",
+        // Sized to its text, not the plot's width, and see-through: a full-width
+        // opaque bar laid over the top of the plot hid the line exactly where a
+        // line is highest, which is the part a pointer there is asking about.
+        // Padding so the figures do not touch the box's edge.
+        overlay && "pointer-events-none absolute left-0 top-0 z-10 w-fit max-w-full rounded-md bg-bg/60 px-3 py-1.5 backdrop-blur-sm",
       )}
       data-history-strip={mode}
       // The strip is the section's live summary: a pointer move must be
