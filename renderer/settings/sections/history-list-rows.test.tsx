@@ -86,6 +86,52 @@ const NINE = timeline("weekend:plan-1:0900", "Sunday 9:00", "09:00:00", "10:20:0
 const ELEVEN = timeline("weekend:plan-1:1100", "Sunday 11:00", "11:00:00", "12:22:00");
 const ATT = [attendance(NINE.serviceKey, 1196, 2061), attendance(ELEVEN.serviceKey, 1402, 2310)];
 
+/**
+ * A recording that HAS sound, so the level figure is a real dB number.
+ *
+ * The guard over the level used to answer null for every SPL fetch, so both
+ * sides of the comparison were "—" and it would have passed just as happily on
+ * a row that never looked the record up at all. One of the two services carries
+ * a record and the other does not, which also keeps the "no sound recorded"
+ * case honest.
+ */
+const SPL = {
+  serviceKey: ELEVEN.serviceKey,
+  serviceTypeId: "weekend",
+  planId: "plan-1",
+  planTitle: "Sunday 11:00",
+  seriesTitle: "Rooted",
+  serviceDate: DAY,
+  serviceTimeId: ELEVEN.serviceKey,
+  serviceTimeStartsAt: iso("11:00:00"),
+  meterId: "meter-1",
+  metricKey: "LAeq 10",
+  startedAt: iso("11:00:00"),
+  endedAt: iso("12:22:00"),
+  items: [
+    {
+      itemId: "a",
+      title: "Welcome",
+      sequence: 0,
+      metrics: { "LAeq 10": { max: 96.4, avg: 90, leq: 91.2, count: 400 } },
+      maxSpl: 96.4,
+      sampleCount: 400,
+      startedAt: iso("11:00:00"),
+      endedAt: iso("11:06:00"),
+    },
+    {
+      itemId: "b",
+      title: "Worship",
+      sequence: 1,
+      metrics: { "LAeq 10": { max: 101.8, avg: 94, leq: 95.6, count: 900 } },
+      maxSpl: 101.8,
+      sampleCount: 900,
+      startedAt: iso("11:06:00"),
+      endedAt: iso("11:24:00"),
+    },
+  ],
+} as unknown as ServiceSplHistory;
+
 /** The real api.ts, routed by URL — the same approach history-arriving does. */
 function installFetch(): void {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
@@ -96,8 +142,9 @@ function installFetch(): void {
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
-    // Neither service recorded sound. `servicePeakLevel(null)` is "no-record",
-    // which the row prints as "—" — and which the service page prints too.
+    // The 11 o'clock recorded sound; the 9 did not. One row must print a real
+    // dB figure and the other the reason there is none.
+    if (url === `/api/spl/history/${encodeURIComponent(ELEVEN.serviceKey)}`) return ok(SPL);
     if (url.startsWith("/api/spl/history/")) return ok(null);
     return ok(null);
   };
@@ -157,15 +204,17 @@ describe("the All services day list", () => {
 
     for (const [i, record] of [ELEVEN, NINE].entries()) {
       const att = ATT.find((a) => a.serviceKey === record.serviceKey) ?? null;
-      const kpis = new Map(serviceKpis(record, att, null).map((k) => [k.key, k]));
+      const spl = record === ELEVEN ? SPL : null;
+      const kpis = new Map(serviceKpis(record, att, spl).map((k) => [k.key, k]));
       const drawn = figuresOf(rows[i]);
       // The identity, figure by figure: each drawn value is the header's own.
       assert.equal(drawn["Peak attendance"], kpis.get("attendance")!.value, "Peak attendance must be the header's");
       assert.equal(drawn["Ran"], kpis.get("actual")!.value, "Ran must be the header's Actual");
-      assert.equal(drawn["Peak level"], kpis.get("level")!.value, "the peak level must be the header's");
+      const levelLabel = kpis.get("level")!.label;
+      assert.equal(drawn[levelLabel], kpis.get("level")!.value, "the peak level must be the header's");
       // And the row's own extra: versus plan, which the header carries as a
       // sub-line of Actual.
-      const vsPlan = serviceRowFigures(record, att, null).figures.find((f) => f.key === "vs-plan");
+      const vsPlan = serviceRowFigures(record, att, spl).figures.find((f) => f.key === "vs-plan");
       assert.equal(drawn["vs plan"], vsPlan!.value, "vs plan must come from the same derivation");
       // The one figure that has been wrong before: attendance is people in the
       // ROOM, not the cumulative door count.
@@ -206,5 +255,61 @@ describe("the All services day list", () => {
       [],
       "the shared link must carry nothing that deletes a recording",
     );
+  });
+});
+
+describe("the level figure on a row", () => {
+  test("a service that recorded sound shows a dB number, named after the metric it read", async () => {
+    installFetch();
+    const view = await renderList();
+    const drawn = figuresOf(view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!);
+    // The loudest reading on the record, not an energy average and not a dash.
+    assert.ok(
+      Object.entries(drawn).some(([label, value]) => /^Peak LAeq 10$/.test(label) && value === "102 dB"),
+      `the row did not show the recorded peak as a dB figure: ${JSON.stringify(drawn)}`,
+    );
+  });
+
+  test("a service with no sound says WHY there is no number", async () => {
+    // The row stripped the level's note, so a bare "—" sent an operator to look
+    // at a meter that was fine. The note is the only thing that tells "nothing
+    // was recorded" from "you have this metric hidden in Sound".
+    installFetch();
+    const view = await renderList();
+    const row = view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!;
+    const drawn = figuresOf(row);
+    assert.equal(drawn["Peak level"], "—", `expected no level for the 9 o'clock: ${JSON.stringify(drawn)}`);
+    const notes = [...row.querySelectorAll("[data-row-figure-note]")].map((n) => n.textContent?.trim());
+    assert.deepEqual(notes, ["no sound recorded"], "a dash with no reason beside it");
+  });
+
+  test("a FAILED read says so, rather than borrowing the sentence for silence", async () => {
+    // Both used to land as null, so a server that was down told the operator
+    // their meter had not been recording. And it is logged, per key: a day where
+    // one of three services will not load is a different problem from a day
+    // where none of them will.
+    const warned: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
+    try {
+      installFetch();
+      const real = (globalThis as unknown as { fetch: (i: unknown) => Promise<unknown> }).fetch;
+      (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+        if (String(input).startsWith("/api/spl/history/")) throw new Error("socket hang up");
+        return real(input);
+      };
+      const view = await renderList();
+      const row = view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!;
+      const notes = [...row.querySelectorAll("[data-row-figure-note]")].map((n) => n.textContent?.trim());
+      assert.deepEqual(notes, ["sound unavailable"], "a failed read must not read as a service that recorded nothing");
+      assert.deepEqual(
+        warned.filter((l) => l.startsWith("[history] could not read the sound record")).length,
+        2,
+        `one [history] line per failed key, not one for the batch: ${warned.join(" | ")}`,
+      );
+      assert.ok(warned.some((l) => l.includes("socket hang up")), "the line must carry the reason");
+    } finally {
+      console.warn = realWarn;
+    }
   });
 });

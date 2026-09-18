@@ -135,7 +135,16 @@ export function serviceKpis(
   spl: ServiceSplHistory | null,
   now?: number,
 ): (StatFigure & { sub?: string })[] {
-  const { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel } = serviceFigureParts(timeline, spl, now);
+  return serviceKpisFrom(serviceFigureParts(timeline, spl, now), attendance);
+}
+
+/** The formatting half, over parts already derived — so a caller that wants
+ *  both the figures and a raw part does not derive everything twice. */
+function serviceKpisFrom(
+  parts: ReturnType<typeof serviceFigureParts>,
+  attendance: ServiceAttendance | null,
+): (StatFigure & { sub?: string })[] {
+  const { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel } = parts;
   return [
     {
       key: "started",
@@ -245,11 +254,15 @@ export function serviceRowFigures(
   now?: number,
 ): { started: StatFigure & { sub?: string }; figures: (StatFigure & { sub?: string })[] } {
   const live = timeline.endedAt == null;
-  const kpis = serviceKpis(timeline, attendance, spl, live ? now : undefined);
-  const by = new Map(kpis.map((k) => [k.key, k]));
+  const at = live ? now : undefined;
+  // ONE derivation. `serviceKpis` calls `serviceFigureParts` itself, and taking
+  // the delta from a second call ran `summarize` and `overrunStats` over every
+  // item of every row twice for one number that was already in hand.
+  const parts = serviceFigureParts(timeline, spl, at);
+  const by = new Map(serviceKpisFrom(parts, attendance).map((k) => [k.key, k]));
   const pick = (key: string): StatFigure & { sub?: string } =>
     by.get(key) ?? { key, label: key, value: "—" };
-  const { totalDelta } = serviceFigureParts(timeline, spl, live ? now : undefined);
+  const { totalDelta } = parts;
   const actual = pick("actual");
   return {
     started: pick("started"),
@@ -268,7 +281,10 @@ export function serviceRowFigures(
             color: totalDelta > 0 ? "var(--color-danger-11)" : undefined,
           },
         ]),
-      { ...pick("level"), sub: undefined },
+      // The level's `sub` is KEPT. It is the only thing that says WHY there is
+      // no number — "no sound recorded", "metric hidden in Sound" — and a row
+      // showing a bare "—" sends an operator to look at a meter that is fine.
+      pick("level"),
     ],
   };
 }
