@@ -323,7 +323,23 @@ export function computeOverview(
   // combine by energy, weighted by samples — the same rule that built each
   // service's own level, applied once more.
   const splInScope = splList.filter((r) => inTrendScope(r, activeType, asOf));
-  const splMetrics = [...new Set(splInScope.flatMap((r) => Object.keys(r.metrics)))].sort();
+  /**
+   * Metrics this card can actually report a level for — the ones with an Leq.
+   *
+   * `Object.keys(r.metrics)` offered every metric present, and the fold below
+   * takes Leq only, so a PEAK-ONLY metric could be offered, picked as the
+   * preferred default (`/laeq/i` matches "LAeq 1" whether or not it has an Leq),
+   * and produce a card with no level and nothing saying why. A summary carries
+   * peak-only metrics on purpose — a legacy capture has maxima and no Leq — so
+   * the offering has to be narrower than the data.
+   */
+  const splMetrics = [
+    ...new Set(
+      splInScope.flatMap((r) =>
+        Object.entries(r.metrics).filter(([, m]) => m.leq != null).map(([k]) => k),
+      ),
+    ),
+  ].sort();
   // The caller's choice only if it is really there. A metric saved into a layout
   // months ago can be one this meter no longer reports, and honouring it would
   // draw an empty line with no way to tell that from a quiet room.

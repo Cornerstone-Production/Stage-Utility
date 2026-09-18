@@ -1,5 +1,5 @@
 import { errorMessage } from "@main/services/errors";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -8,6 +8,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Trash2Icon, ClockIcon, DownloadIcon, EllipsisIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
+import { logToServer } from "../../lib/client-log";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
@@ -221,6 +222,10 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
  * service that hasn't gone live yet has attendance but no timeline. Union'd on
  * `serviceKey` so that service is still one row, not a missing one.
  */
+/** The three loads the page opens with. Named so a failure can be attributed to
+ *  one of them rather than to "history". */
+type HistoryLoad = "timeline" | "attendance" | "spl";
+
 interface HistoryRow {
   serviceKey: string;
   serviceDate: string;
@@ -329,25 +334,74 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       });
   }
 
-  function reload() {
+  /**
+   * Which of the three history loads FAILED, as opposed to came back empty.
+   *
+   * All three used to `.catch(() => set…([]))`, which is the same shape three
+   * times and the same lie three times: a server that was down, or a request
+   * that timed out, read as "No service timings recorded yet" and "No sound
+   * recorded yet". Three found, three changed. Each failure now names itself on
+   * a `[history]` line AND is visible on the surface it starved:
+   *
+   *   timeline / attendance   the empty state says the history could not be read
+   *   spl                     the Trends card says the sound summary is missing
+   */
+  const [loadFailed, setLoadFailed] = useState<ReadonlySet<HistoryLoad>>(new Set());
+  // Stable, all three of them: `reload` closes over these and the mount effect
+  // closes over `reload`, so anything rebuilt per render would make the effect
+  // a dependency of every render and reload the whole history on each one.
+  // Functional setState throughout, so none of them needs the current value.
+  const noteFailure = useCallback((which: HistoryLoad, what: string, err: unknown) => {
+    logToServer("history", `could not read ${what}: ${errorMessage(err)}`);
+    setLoadFailed((prev) => (prev.has(which) ? prev : new Set(prev).add(which)));
+  }, []);
+  /** A load that came back clears its own failure, so a retry that works stops
+   *  the page saying otherwise. */
+  const noteLoaded = useCallback((which: HistoryLoad) =>
+    setLoadFailed((prev) => {
+      if (!prev.has(which)) return prev;
+      const next = new Set(prev);
+      next.delete(which);
+      return next;
+    }), []);
+
+  const reload = useCallback(() => {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
-      .then((l) => setList(l))
-      .catch(() => setList([]));
-  }
+      .then((l) => {
+        setList(l);
+        noteLoaded("timeline");
+      })
+      .catch((e) => {
+        setList([]);
+        noteFailure("timeline", "the service timings", e);
+      });
+  }, [noteFailure, noteLoaded]);
   useEffect(() => {
     reload();
     invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((a) => setAttList(a ?? []))
-      .catch(() => setAttList([]));
+      .then((a) => {
+        setAttList(a ?? []);
+        noteLoaded("attendance");
+      })
+      .catch((e) => {
+        setAttList([]);
+        noteFailure("attendance", "the attendance history", e);
+      });
     invoke<SplServiceSummary[]>("spl:getSummary")
-      .then((r) => setSplList(r ?? []))
-      .catch(() => setSplList([]));
+      .then((r) => {
+        setSplList(r ?? []);
+        noteLoaded("spl");
+      })
+      .catch((e) => {
+        setSplList([]);
+        noteFailure("spl", "the sound summary", e);
+      });
     invoke<{ shown: boolean; metric: string | null }>("spl:getTrendPrefs")
       .then((p) => setSplTrend(p))
       .catch(() => {
         /* the chart draws without the line; the toggle is still offered */
       });
-  }, []);
+  }, [reload, noteFailure, noteLoaded]);
 
   // Live updates while a service is recording — refresh the open detail/list, the
   // attendance chart (samples), and SPL, all without a page reload.
@@ -636,7 +690,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // One line per key that failed, not one for the batch: a day where
             // one of three services will not load is a different problem from a
             // day where none of them will, and the line has to say which.
-            console.warn(`[history] could not read the sound record for ${key}: ${errorMessage(err)}`);
+            logToServer("history", `could not read the sound record for ${key}: ${errorMessage(err)}`);
             return [key, "error"] as const;
           }),
       ),
@@ -726,12 +780,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }
 
   if (rows.length === 0) {
+    // A failed READ is not an empty history. Both used to say "nothing has been
+    // recorded yet", which sends an operator to look at a recorder that is fine.
+    const unread = loadFailed.has("timeline") || loadFailed.has("attendance");
     return (
       <div className="py-8">
         <EmptyState
           icon={<ClockIcon />}
-          title="No service timings recorded yet"
-          hint="Item timings are captured automatically while a service runs in Planning Center Live — when each item goes live and how long it runs versus its planned length."
+          title={unread ? "The recorded history could not be read" : "No service timings recorded yet"}
+          hint={
+            unread
+              ? "The server did not answer. Nothing has been lost — reload the page, and see the server log for the reason."
+              : "Item timings are captured automatically while a service runs in Planning Center Live — when each item goes live and how long it runs versus its planned length."
+          }
         />
       </div>
     );
@@ -1286,7 +1347,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           of Sundays did, per service type, with the dates that explain a step
           marked under the axis. Everything below it — the Overview blend, the
           calendar and the day list — answers a narrower question. */}
-      <TrendsCard recordings={trendRecordings} />
+      <TrendsCard recordings={trendRecordings} soundUnavailable={loadFailed.has("spl")} />
 
       {/* Export builder — a collapsed disclosure so it never crowds the overview.
           Read-only, so it's available on the public /history page too. */}
@@ -1688,6 +1749,15 @@ export function OverviewBlend({
                 className="mt-2"
               />
             )}
+          </div>
+        ) : overview.splMetric ? (
+          // A metric was CHOSEN and produced nothing. That is worth a word —
+          // unlike "no metrics at all", which needs none, because there is
+          // nothing the operator asked for and did not get. Reached when every
+          // recording carrying the metric in scope is still running, so there is
+          // no settled level to average yet.
+          <div data-testid="spl-no-level" className="text-caption1 text-fg-subtle">
+            No level on {overview.splMetric} in this scope.
           </div>
         ) : null}
         {isCoarse && chartMenuItems.length > 0 && (
