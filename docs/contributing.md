@@ -179,8 +179,12 @@ How that turns into a number, and how a running server gets the result, is in
 
 `package.json` is bumped and committed forward, then tagged. **Nothing is ever
 force-pushed** — deployments track `beta` and a rewrite breaks their in-app updater.
-The workflow re-runs lint, type-check, tests and build before it tags, so a red build
-cannot become a release.
+The workflow runs lint, type-check, tests and build over the merged tree on every
+push to `beta` or `main`, releasable or not, and only then tags, so a red build
+cannot become a release. It is the one gate a push gets: the CI workflow runs on
+pull requests only, and the release PR from `beta` to `main` is skipped there
+because its head is a `beta` commit the release run has already verified and
+marked with a `build` status.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
 the body.
@@ -234,8 +238,10 @@ convention check and CodeQL run on all of them, and are required on `beta`.
 The build and tests skip a PR that touches only `docs/` and Markdown;
 dependency review runs only when `package.json` or the lockfile changes; the
 updater survival matrix runs only for the updater, the installers and its own
-scripts. Every push to `beta` and `main` still runs the full build, and the
-release workflow runs the whole gate again before it tags.
+scripts. A push to `beta` or `main` runs the gate once, in the release workflow,
+before it tags, and writes the result to the commit as a `build` status, red or
+green. The release PR from `beta` to `main` therefore shows no CI job of its own:
+its `build` is that status on the `beta` head.
 
 Chain them with `&&`, not `;`. With `;` a failure scrolls past and the commit
 lands anyway — that is how a type error once reached `beta`.
