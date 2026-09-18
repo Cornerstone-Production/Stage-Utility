@@ -50,6 +50,18 @@ export interface ChartSeries {
    * series, because hover reads the nearest sample from it.
    */
   runs?: ChartPoint[][];
+  /**
+   * Points marked individually, in the series colour, with no line through them.
+   *
+   * For a line whose nodes are a SUMMARY of several readings: the trend chart's
+   * line runs through each day's busiest service, and these are the services
+   * themselves. Without them a church with three Sunday services would see one
+   * point a week and no way to tell it stood for three.
+   *
+   * Not `points`, because `points` is what the line and the hover readout are
+   * built from and those must stay the summary.
+   */
+  dots?: ChartPoint[];
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
 }
