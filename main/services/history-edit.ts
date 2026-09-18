@@ -7,6 +7,7 @@
 
 import type { AttendanceSample } from "../types/history.js";
 import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
+import { mergeItemRuns } from "./archive/merge-records.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -417,8 +418,9 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     serviceTimelineStore.get(targetKey),
   ]);
   if (srcTl && tgtTl) {
-    const have = new Set(tgtTl.items.map((i) => i.itemId));
-    for (const it of srcTl.items) if (!have.has(it.itemId)) tgtTl.items.push(it);
+    // By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a
+    // source that ran an item twice contributed at most one of them.
+    tgtTl.items = mergeItemRuns(tgtTl.items, srcTl.items);
     tgtTl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
     tgtTl.items.forEach((it, i) => { it.sequence = i; });
     const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
@@ -495,8 +497,11 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     splHistoryStore.get(targetKey),
   ]);
   if (srcSpl && tgtSpl) {
-    const have = new Set(tgtSpl.items.map((i) => i.itemId));
-    for (const it of srcSpl.items) if (!have.has(it.itemId)) tgtSpl.items.push(it);
+    // By RUN, as the timeline above, and re-ordered by when each run actually
+    // started so a run taken from the source lands where it happened rather than
+    // after everything this box recorded.
+    tgtSpl.items = mergeItemRuns(tgtSpl.items, srcSpl.items);
+    tgtSpl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
     tgtSpl.items.forEach((it, i) => { it.sequence = i; });
     if (srcSpl.endedAt && (!tgtSpl.endedAt || Date.parse(srcSpl.endedAt) > Date.parse(tgtSpl.endedAt))) {
       tgtSpl.endedAt = srcSpl.endedAt;

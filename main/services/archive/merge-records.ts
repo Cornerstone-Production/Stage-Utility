@@ -26,6 +26,41 @@ export function mergeByKey<T>(mine: T[], theirs: T[], key: (v: T) => string | nu
   return [...mine, ...extra];
 }
 
+/**
+ * Union per-item entries, keeping the local entry where both sides have the
+ * same RUN of the same item.
+ *
+ * A plan item can appear more than once in one record — a reprise, or a second
+ * service whose occurrence split was missed — and `itemId` alone is therefore not
+ * an identity: keyed on it, a source recording with two runs of Doors
+ * contributed at most one, and the second was silently dropped by every merge
+ * path in the app.
+ *
+ * The key is the item id plus its RUN INDEX (the nth appearance of that id in
+ * that record), and deliberately NOT `sequence`. Each recording numbers its own
+ * items, and two boxes watching one service number them differently the moment
+ * one of them missed anything: keyed on `itemId:sequence`, the SAME run recorded
+ * by both sides fails to match and is taken again, so the merged record shows
+ * one item twice with two different levels and merging stops being idempotent.
+ * Run index matches those, and its own failure — two boxes that disagree about
+ * how many times an item ran — can only ever lose a run of that one item, never
+ * duplicate anything and never touch another item. Gaps are what a merge is for;
+ * invented duplicates are not.
+ */
+export function mergeItemRuns<T extends { itemId: string }>(mine: T[], theirs: T[]): T[] {
+  const runKeys = (items: T[]): string[] => {
+    const seenPerId = new Map<string, number>();
+    return items.map((i) => {
+      const n = seenPerId.get(i.itemId) ?? 0;
+      seenPerId.set(i.itemId, n + 1);
+      return `${i.itemId}#${n}`;
+    });
+  };
+  const mineKeys = new Set(runKeys(mine));
+  const theirKeys = runKeys(theirs);
+  return [...mine, ...theirs.filter((_, i) => !mineKeys.has(theirKeys[i]!))];
+}
+
 /** Fill fields that are null/undefined locally from the incoming record. Never
  *  replaces a value this box actually has. */
 export function fillMissingFields<T extends Record<string, unknown>>(mine: T, theirs: T, skip: string[] = []): T {
@@ -46,9 +81,9 @@ interface SplRecord {
   [k: string]: unknown;
 }
 
-/** Items this box never recorded are taken; items it has are left untouched. */
+/** Runs this box never recorded are taken; runs it has are left untouched. */
 export function mergeSplRecord(mine: SplRecord, theirs: SplRecord): SplRecord {
-  const merged = mergeByKey(mine.items ?? [], theirs.items ?? [], (i) => i.itemId);
+  const merged = mergeItemRuns(mine.items ?? [], theirs.items ?? []);
   return {
     ...fillMissingFields(mine, theirs, ["items"]),
     items: merged.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)),
@@ -105,7 +140,7 @@ interface TimelineRecord {
 }
 
 export function mergeTimelineRecord(mine: TimelineRecord, theirs: TimelineRecord): TimelineRecord {
-  const merged = mergeByKey(mine.items ?? [], theirs.items ?? [], (i) => i.itemId);
+  const merged = mergeItemRuns(mine.items ?? [], theirs.items ?? []);
   return {
     ...fillMissingFields(mine, theirs, ["items"]),
     items: merged.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)),
