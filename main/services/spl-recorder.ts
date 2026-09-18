@@ -14,6 +14,7 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { shouldRecordLive } from "./live-service-gate.js";
+import { scrub, scrubError } from "./scrub.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import {
@@ -87,7 +88,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
    */
   protected override async resumeRecord(existing: ServiceSplHistory): Promise<ServiceSplHistory> {
     const rebuilt = await rebuildSplRecord(existing).catch(() => null);
-    if (rebuilt) console.log(`[spl-recorder] rebuilt ${existing.serviceKey} from the archive on resume`);
+    if (rebuilt) console.log(`[spl-recorder] rebuilt ${scrub(existing.serviceKey)} from the archive on resume`);
     return rebuilt ?? existing;
   }
 
@@ -188,7 +189,9 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
       // max/Leq rather than having a second service's levels folded into it.
       if (prior) {
         console.log(
-          `[spl-recorder] "${title || itemId}" went live again ${Math.round((goingLiveAtMs - Date.parse(prior.endedAt!)) / 60_000)} min after its last run ended — recording it as a new entry`,
+          `[spl-recorder] "${scrub(title || itemId)}" went live again ` +
+            `${scrub(Math.round((goingLiveAtMs - Date.parse(prior.endedAt!)) / 60_000))} min after its last run ended — ` +
+            `recording it as a new entry`,
         );
       }
       item = {
@@ -271,7 +274,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
     void sampleArchive
       .writeManifest(ctx)
       .then(() => sampleArchive.closeService(ctx.serviceKey))
-      .catch((err) => console.error("[spl-recorder] archive close failed:", err));
+      .catch((err) => console.error("[spl-recorder] archive close failed:", scrubError(err)));
   }
 
 }

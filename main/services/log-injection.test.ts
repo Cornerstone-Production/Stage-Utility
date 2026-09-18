@@ -99,6 +99,12 @@ const REQUEST_FACING = [
   "rosstalk-routes.ts",
   "route-harness.ts",
   "scriptview-routes.ts",
+  // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
+  // carry-over lines. A title is typed into Planning Center and arrives here in
+  // an HTTP response body — outside data by every measure this file uses, and
+  // the same exposure pco-service.ts is scanned for.
+  "service-timeline-recorder.ts",
+  "spl-recorder.ts",
   "stage-controller.ts",
   "event-poll.ts",
   "state-routes.ts",
@@ -173,7 +179,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["rosstalk-manager.ts", DEVICE],
   ["scores-service.ts", DEVICE],
   ["sensource-service.ts", DEVICE],
-  ["service-timeline-recorder.ts", DEVICE],
   ["smaart-service.ts", DEVICE],
   ["tsl-service.ts", DEVICE],
   ["wireless-manager.ts", DEVICE],
@@ -212,7 +217,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["secrets.ts", UNAUDITED],
   ["service-recorder.ts", UNAUDITED],
   ["slots-store.ts", UNAUDITED],
-  ["spl-recorder.ts", UNAUDITED],
   ["stream-start-store.ts", UNAUDITED],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
@@ -282,6 +286,11 @@ function requestFacingFiles(): string[] {
     // logged nothing at all before the plan import, which is when it acquired
     // the exposure.
     path.join(HERE, "view-import.ts"),
+    // Both recorders log a Planning Center plan item TITLE — on the re-run line
+    // and, for the timeline, on the carried-over-item line. A title is typed
+    // into Planning Center and reaches this process in an HTTP response body.
+    path.join(HERE, "service-timeline-recorder.ts"),
+    path.join(HERE, "spl-recorder.ts"),
     ...inRoutes,
   ];
 }
