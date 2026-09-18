@@ -20,6 +20,7 @@
 // kept as a fallback for a box whose WebSocket will not come up, with that timer
 // intact, because on that path there is still nothing better to use.
 
+import * as crypto from "node:crypto";
 import * as http from "http";
 
 import type { TranscriptLineDTO } from "../types/stage.js";
@@ -101,6 +102,20 @@ const WS_RETRY_EVERY = 3;
  * five minutes against a box that genuinely has no WebSocket.
  */
 const WS_RETRY_INTERVAL_MS = 5 * 60_000;
+
+/** How long the refused-upgrade probe may take. Same 4 s as every other
+ *  one-shot read in this file (test(), getJson) — a diagnostic must not hold the
+ *  fallback shut for longer than the thing it is diagnosing. */
+const PROBE_TIMEOUT_MS = 4000;
+
+/** How much of a refused handshake's body is worth keeping. Enough for
+ *  ProdCom's own `{"error":{"code":…,"message":…}}`, short enough that a box
+ *  answering with an HTML error page cannot fill a log line. */
+const PROBE_BODY_BYTES = 200;
+
+/** What the probe calls itself, so it is not mistaken for the live client.
+ *  Exported because the tests separate the two by it. */
+export const PROBE_USER_AGENT = "stage-utility-upgrade-probe";
 
 const MAX_LINES = 100;
 
@@ -436,6 +451,12 @@ export class ProdComService extends ConnectionLifecycle {
    *  an immediate attempt rather than waiting out the counter. */
   private useWebSocket = true;
   private sseReconnects = 0;
+  /** One refused-upgrade probe at a time — two sockets closing before open must
+   *  not put two extra requests on a box that is already unhappy. */
+  private wsProbeInFlight = false;
+  /** Bumped by teardown(), so work that was in flight when a stop() or a
+   *  configure() landed can tell that it no longer speaks for this service. */
+  private connectionEpoch = 0;
   /** Whether the live connection is the WebSocket — drives which watchdog runs
    *  and which log lines make sense. */
   private onWebSocket = false;
@@ -572,6 +593,7 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   protected override teardown(): void {
+    this.connectionEpoch += 1;
     this.clearIdleWatchdog();
     // stop(), restart() and configure() all land here — one clear covers all
     // three, the way the idle watchdog's does.
@@ -1041,16 +1063,132 @@ export class ProdComService extends ConnectionLifecycle {
       }
       // It never opened. The box may be older than 2.3, may have the API off, or
       // may have rejected the key — the SSE stream is the only thing left to try.
-      this.fallBackToSse(host, port, ev.reason || `closed before open (code ${ev.code})`);
+      // Which of those it is does not survive Node's WebSocket (see
+      // probeUpgrade), so ask the same URL over plain HTTP before giving up.
+      void this.probeThenFallBack(host, port, ev.reason || `closed before open (code ${ev.code})`);
     };
   }
 
+  /**
+   * Diagnose the refused upgrade, then fall back.
+   *
+   * `epoch` is captured before the probe's awaits. A configure() or a stop()
+   * landing while the probe is in flight bumps it, and opening the SSE stream
+   * then would be opening a transport for a box this service has already let go
+   * — the same reason ensureRecord in service-recorder.ts captures a generation.
+   */
+  private async probeThenFallBack(host: string, port: number, bare: string): Promise<void> {
+    const epoch = this.connectionEpoch;
+    const probe = await this.probeUpgrade(host, port, bare);
+    if (epoch !== this.connectionEpoch) return;
+    this.fallBackToSse(host, port, probe?.reason ?? bare, probe?.detail ?? null);
+  }
+
+  /**
+   * Ask the WebSocket URL the same question over plain HTTP, and report what the
+   * box actually said.
+   *
+   * Node's WebSocket exposes NO HTTP status for a refused handshake: a 426, a 401
+   * and a box with no such route all arrive as `close` with code 1006 and an
+   * empty reason. For two days in September 2026 the only evidence of a ProdCom
+   * refusing every upgrade was `closed before open (code 1006)`, which says
+   * nothing about whether the API was off, the key was wrong or the build was too
+   * old. This is one extra request per refusal that turns that into
+   * `upgrade refused with HTTP 426 (Upgrade Required)`.
+   *
+   * The headers are a real RFC 6455 handshake, so a box that WOULD upgrade
+   * answers 101 here — which is itself a finding: the handshake is fine and the
+   * socket is dying after it, which is a different bug from a refusal.
+   *
+   * `reason` is the outage KIND for noteWebSocketDown's dedupe, so it carries
+   * only the status and its canonical phrase (from Node's own table, not the
+   * wire): no byte counts, no timestamps, nothing that varies per attempt. The
+   * body goes back separately as `detail`, scrubbed and truncated, and is logged
+   * only on the line that actually prints.
+   *
+   * Never throws, and never rejects: a probe is diagnostics, and a failure to
+   * diagnose must not stop the fallback from opening.
+   */
+  private probeUpgrade(
+    host: string,
+    port: number,
+    bare: string,
+  ): Promise<{ reason: string; detail: string | null } | null> {
+    if (this.wsProbeInFlight) return Promise.resolve(null);
+    this.wsProbeInFlight = true;
+    return new Promise<{ reason: string; detail: string | null } | null>((resolve) => {
+      let settled = false;
+      let req: http.ClientRequest | null = null;
+      const done = (result: { reason: string; detail: string | null } | null): void => {
+        if (settled) return;
+        settled = true;
+        this.wsProbeInFlight = false;
+        // Always, on every path. A probe socket left open holds its own 4 s
+        // timeout, which keeps the process's event loop busy for four seconds
+        // after the answer is already known — visible as a test that asserts in
+        // 4 ms and takes 4 s to finish.
+        req?.destroy();
+        resolve(result);
+      };
+
+      req = http.request({
+        host,
+        port,
+        path: "/api/v1/ws",
+        method: "GET",
+        timeout: PROBE_TIMEOUT_MS,
+        headers: {
+          ...this.authHeaders(this.apiKey),
+          Connection: "Upgrade",
+          Upgrade: "websocket",
+          "Sec-WebSocket-Version": "13",
+          // A real key, because a box that validates the handshake would answer a
+          // constant one differently from the client's own request.
+          "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64"),
+          // Names itself, so this request is distinguishable from the real
+          // client's upgrade in ProdCom's own activity log (which records
+          // requests) — the live client sends `user-agent: node`.
+          "User-Agent": PROBE_USER_AGENT,
+        },
+      });
+
+      // 101: Node routes an accepted upgrade to 'upgrade', never to 'response'.
+      req.on("upgrade", (_res, socket) => {
+        socket.destroy();
+        done({ reason: `upgrade accepted by a probe but the WebSocket ${bare}`, detail: null });
+      });
+
+      req.on("response", (res) => {
+        const code = res.statusCode ?? 0;
+        const phrase = http.STATUS_CODES[code];
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          if (body.length < PROBE_BODY_BYTES) body += chunk;
+        });
+        const finish = () => {
+          res.destroy();
+          done({
+            reason: `upgrade refused with HTTP ${code}${phrase ? ` (${phrase})` : ""}`,
+            detail: body.slice(0, PROBE_BODY_BYTES).replace(/\s+/g, " ").trim() || null,
+          });
+        };
+        res.on("end", finish);
+        res.on("error", finish);
+      });
+
+      req.on("timeout", () => req.destroy(new Error("timed out")));
+      req.on("error", (e) => done({ reason: `probe failed: ${errorMessage(e)}`, detail: null }));
+      req.end();
+    });
+  }
+
   /** Give up on the WebSocket for now and open the SSE stream instead. */
-  private fallBackToSse(host: string, port: number, reason: string): void {
+  private fallBackToSse(host: string, port: number, reason: string, detail: string | null = null): void {
     this.ws = null;
     this.onWebSocket = false;
     this.useWebSocket = false;
-    this.noteWebSocketDown(reason);
+    this.noteWebSocketDown(reason, detail);
     if (!this.running) return;
     this.connectSse(host, port);
   }
@@ -1060,13 +1198,17 @@ export class ProdComService extends ConnectionLifecycle {
    *
    * `reason` is the KIND, so a box that starts refusing the key after having
    * refused the upgrade is still news — but a thousand repeats of code 1006 are
-   * one line.
+   * one line. `detail` is whatever the box said in the body of a refused
+   * handshake (see probeUpgrade): it can vary per attempt, so it rides on the
+   * line rather than in the reason the dedupe keys on, and is only printed on the
+   * line that actually prints.
    */
-  protected noteWebSocketDown(reason: string): void {
+  protected noteWebSocketDown(reason: string, detail: string | null = null): void {
     const out = this.wsOutages.fail("websocket", reason, this.now());
     if (out.log) {
       console.warn(
-        `[prodcom] websocket unavailable (${scrub(reason)}) — falling back to the transcript SSE stream${out.note}`,
+        `[prodcom] websocket unavailable (${scrub(reason)}) — falling back to the transcript SSE stream${out.note}` +
+          (detail ? ` — the box said: ${scrub(detail)}` : ""),
       );
     }
   }

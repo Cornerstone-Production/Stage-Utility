@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
-import { ProdComService } from "./prodcom-service.js";
+import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubOptions } from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-18T23:50:00Z");
@@ -68,7 +68,11 @@ async function eventually(ready: () => boolean, what: string, timeoutMs = 4000):
   assert.fail(`timed out waiting for ${what}`);
 }
 
-const wsAttempts = (stub: ProdComStub): number => stub.requests.filter((r) => r.url === "/api/v1/ws").length;
+/** Real client upgrades only. The refused-upgrade probe (see
+ *  prodcom-upgrade-probe.test.ts) hits the same path, and counting it here would
+ *  make every refusal look like two attempts. */
+const wsAttempts = (stub: ProdComStub): number =>
+  stub.requests.filter((r) => r.url === "/api/v1/ws" && r.headers["user-agent"] !== PROBE_USER_AGENT).length;
 
 describe("the fallback retries the websocket on a timer", () => {
   it("attempts the websocket again while the SSE stream is quiet and healthy", async (t) => {
