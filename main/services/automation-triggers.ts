@@ -586,6 +586,30 @@ function overrunMinutes(v: unknown): number | null {
   return sec / 60;
 }
 
+/**
+ * Are two `service-timeline:history` payloads the same service occurrence?
+ *
+ * The channel is not per-service: it carries whichever record was last
+ * broadcast, and an operator correcting a recording in Settings pushes a
+ * HISTORICAL record down the same pipe the live one uses. Comparing a live
+ * `prev` against an edited historical `next` compares two different services,
+ * and the difference between them is not drift — it is two services. Every
+ * trigger on this channel has to establish it is looking at one service twice
+ * before it reads anything else.
+ *
+ * A record with no serviceKey on either side is not comparable and answers
+ * false, which is the safe direction: a trigger that does not fire is a missed
+ * cue, and a trigger that fires off a desk edit is a cue in the middle of
+ * somebody else's service.
+ */
+function sameService(prev: unknown, next: unknown): boolean {
+  const key = (v: unknown) =>
+    v && typeof v === "object" ? (v as { serviceKey?: unknown }).serviceKey : null;
+  const a = key(prev);
+  const b = key(next);
+  return typeof a === "string" && a.length > 0 && a === b;
+}
+
 /** The plan's rehearsal + service times off a live payload. */
 function planTimesOf(v: unknown): PlanTimeDTO[] {
   const p = v && typeof v === "object" ? (v as { planTimes?: unknown }).planTimes : null;
@@ -1087,9 +1111,14 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     label: "The service runs over plan by",
     channel: "service-timeline:history",
     params: [{ key: "minutes", label: "Minutes over", type: "number", min: 1, max: 120 }],
-    help: "Measured across finished items, so it is checked as each item ends.",
+    help: "Measured across finished items, so it is checked as each item ends. Only ever measured within one service.",
     didFire: (prev, next, params) => {
       if (prev === null) return false;
+      // Both readings must be the SAME occurrence. This channel carries any
+      // record that is broadcast, including a historical one an operator has
+      // just corrected in Settings — and the step from a live service's drift to
+      // a finished one's is not drift, it is two services.
+      if (!sameService(prev, next)) return false;
       return crossed(overrunMinutes(prev), overrunMinutes(next), Number(params.minutes), "above");
     },
   }),
