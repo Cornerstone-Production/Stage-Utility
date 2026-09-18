@@ -47,6 +47,12 @@ const EVENING: [string, string][] = [
   ["2026-09-18T02:31:25.180Z", "HOSTING/BENNY"],
 ];
 
+/** The first two rows, written down in the WRONG order. */
+const EVENTS_OUT_OF_ORDER: [string, string][] = [
+  ["2026-09-17T23:30:04.452Z", "10 min Warning"],
+  ["2026-09-17T23:23:48.789Z", "Doors"],
+];
+
 /** Where the second service starts — the second "Doors". */
 const SPLIT = "2026-09-18T00:50:36.021Z";
 const SERVICE_1_ENDED = "2026-09-18T00:43:15.189Z";
@@ -181,6 +187,26 @@ describe("rebuildTimelineRecord: identity of the items", () => {
         ["pco-2", null, false],
       ],
     );
+  });
+
+  // Rows reach a rebuild out of order in practice: a history merge rewrites two
+  // services' files into one, and readArchiveRows concatenates rolled files in
+  // FILE order. Out of order, every entry's end is the wrong row's time.
+  it("sorts the rows by time before walking them", () => {
+    const ordered = oldRows(EVENTS_OUT_OF_ORDER.slice().sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+    const reversed = oldRows(EVENTS_OUT_OF_ORDER);
+    assert.notDeepEqual(
+      reversed.map((r) => r.at),
+      ordered.map((r) => r.at),
+      "the fixture is already in order, so this proves nothing",
+    );
+
+    const out = rebuildTimelineRecord(record({ endedAt: "2026-09-17T23:40:00.000Z" }), reversed);
+
+    assert.deepEqual(shape(out.items), [
+      [0, "Doors", "2026-09-17T23:23:48.789Z", "2026-09-17T23:30:04.452Z"],
+      [1, "10 min Warning", "2026-09-17T23:30:04.452Z", "2026-09-17T23:40:00.000Z"],
+    ]);
   });
 
   it("ignores every row that is not a plan-item change", () => {
