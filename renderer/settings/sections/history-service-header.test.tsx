@@ -75,11 +75,13 @@ function timeline(overrides: Partial<ServiceTimeline> = {}): ServiceTimeline {
  * they diverge exactly as the real record does:
  *
  *   peakOccupancy (stored, in-service)     1,196  ← people in the room
- *   peakAttendance (stored, in-service)    1,727
- *   servicePeakAttendance (all samples)    2,061  ← cumulative door count
+ *   peakAttendance (stored, in-service)    1,727  ← came in during the service
+ *   max attendance across ALL samples      2,061  ← runs on through the taper
  *
  * The header showed 2,061 as "Peak attendance" with "1,196 in room" under it,
  * while the Attendance card below it showed 1,196 as PEAK and 2,061 as ENTRIES.
+ * Neither surface quotes 2,061 now: it answers "how many came in at any point
+ * around this service", which is not a figure anyone asked for.
  */
 function attendance(): ServiceAttendance {
   return {
@@ -185,7 +187,7 @@ describe("History service header", () => {
     // the bigger of the two on every real record — which is how the inversion
     // survived: 2,061 looked like a plausible "peak attendance".
     assert.equal(by("attendance").value, "1,196", "peak attendance is peak people IN THE ROOM");
-    assert.equal(by("attendance").sub, "2,061 entries", "the cumulative door count, named as entries");
+    assert.equal(by("attendance").sub, "1,727 entries", "how many came in DURING the service, the recorder's own figure");
     assert.equal(by("level").value, "102 dB", "the loudest item on the primary metric");
   });
 
@@ -301,7 +303,7 @@ describe("History service header", () => {
     const view = mount();
     const row = view.container.querySelector('[data-testid="service-kpis"]')!;
     const shown = text(row);
-    for (const line of ["+2:14 late", "2 of 3 over", "2,061 entries", "ends 21:02", "+1:00 vs plan"]) {
+    for (const line of ["+2:14 late", "2 of 3 over", "1,727 entries", "ends 21:02", "+1:00 vs plan"]) {
       assert.ok(shown.includes(line), `the KPI row must show "${line}"; it showed: ${shown}`);
     }
     // And each one is under its OWN figure, not concatenated somewhere else.
@@ -313,7 +315,7 @@ describe("History service header", () => {
     );
     assert.equal(subs.get("Started"), "+2:14 late");
     assert.equal(subs.get("Avg overrun"), "2 of 3 over");
-    assert.equal(subs.get("Peak attendance"), "2,061 entries");
+    assert.equal(subs.get("Peak attendance"), "1,727 entries");
   });
 
   test("the header publishes its height while mounted, and takes it back", () => {

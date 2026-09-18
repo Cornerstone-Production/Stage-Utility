@@ -24,7 +24,7 @@ import { cn } from "../../lib/cn";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { Button } from "../../components/ui";
 import { StatStrip, useStoredKeysVersion, type StatFigure } from "./history-chart";
-import { servicePeakAttendance } from "./attendance-history-section";
+
 import { SPL_METRICS_STORAGE_KEY, servicePeakLevel, type ServicePeakLevel } from "./spl-history-section";
 import { fmtDelta, fmtDur, fmtTime, isCountedItem, summarize } from "./overview-data";
 
@@ -166,22 +166,19 @@ export function serviceKpis(
        * which double-counts anyone who steps out and back — the two are
        * different numbers and this had them the wrong way round.
        *
-       * It read `servicePeakAttendance` as the value and `peakOccupancy` as
-       * "in room", so on the 17 Sep Salt Company recording the header said
-       * "Peak attendance 2,061 / 1,196 in room" while the Attendance card
-       * directly below it said "PEAK 1,196 / ENTRIES 2,061". Two figures, one
-       * page, labelled oppositely.
+       * It took a door count as the value and `peakOccupancy` as "in room", so
+       * on the 17 Sep Salt Company recording the header said "Peak attendance
+       * 2,061 / 1,196 in room" while the Attendance card directly below it said
+       * "PEAK 1,196 / ENTRIES 2,061". Two figures, one page, labelled
+       * oppositely.
        *
-       * The entries sub reads `servicePeakAttendance`, the SAME derivation the
-       * Attendance card's Entries figure uses, so the two cannot drift apart —
-       * the card computes it from the samples rather than reading the record's
-       * stored `peakAttendance`, and a header quoting the stored field instead
-       * would say 1,727 under a card saying 2,061 and reintroduce the fault
-       * one line down.
+       * Both figures are the recorder's own stored fields, which is also what
+       * the dashboard's people widgets read — so the header, the Attendance
+       * card, the pasted report and every layout now quote one number each.
        */
       label: "Peak attendance",
       value: attendance && attendance.peakOccupancy > 0 ? attendance.peakOccupancy.toLocaleString() : "—",
-      sub: attendance ? `${servicePeakAttendance(attendance).toLocaleString()} entries` : undefined,
+      sub: attendance ? `${attendance.peakAttendance.toLocaleString()} entries` : undefined,
     },
     {
       key: "level",

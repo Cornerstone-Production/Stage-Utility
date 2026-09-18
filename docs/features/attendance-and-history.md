@@ -98,7 +98,7 @@ bottom:
   | Planned | the counted items' planned total, and the time the service would end on it |
   | Actual | what it ran, its difference against the plan, and when it ended |
   | Avg overrun | the mean per-item difference, and how many items of how many ran over |
-  | Peak attendance | the most people in the room at once, and the service's cumulative entries — the same two figures the Attendance card calls Peak and Entries |
+  | Peak attendance | the most people in the room at once, and how many came in during the service — the same two figures the Attendance card calls Peak and Entries |
   | Peak *metric* | the loudest reading on the primary Smaart metric, named after the metric it read |
 
   Started, Planned and Actual count up live while a service is recording. A
@@ -289,8 +289,13 @@ continuous service rather than restarting at the seam.
 
 ## Attendance metrics
 
-**Attendance** is people in the room. **Entries** is the cumulative door count,
-which double-counts anyone who steps out and back — the two are kept separate.
+**Attendance** is people in the room. **Entries** is the door count, which
+double-counts anyone who steps out and back — the two are kept separate.
+
+A service's Entries is what the recorder counted **while the service was
+running**, so the arrival ramp before it and the emptying-room taper after it
+are not in it. History, the pasted report and the dashboard people widgets all
+read that one figure.
 
 Available on dashboards and custom layouts: in-room now, peak, low, per-service,
 day total, percent of capacity, and versus average. The layout objects are a

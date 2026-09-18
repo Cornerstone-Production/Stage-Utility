@@ -56,9 +56,10 @@ function timeline() {
   };
 }
 
-/** Pre, in-service and post samples, so peak-in-room (1,196), the stored
- *  in-service door count (1,727) and the all-samples door count (2,061) are
- *  three different numbers — see the cross-check below. */
+/** Pre, in-service and post samples, so peak-in-room (1,196), entries during
+ *  the service (1,727) and the door count taken across every sample (2,061)
+ *  are three different numbers — see the cross-check below. Only the first two
+ *  may reach the screen. */
 function attendance() {
   return {
     serviceKey: KEY,
@@ -350,7 +351,11 @@ describe("the History service page", () => {
     const card = figures(view.container.querySelector("#history-attendance")!);
 
     assert.equal(card.get("peak"), "1,196", "the Attendance card's own peak (fixture check)");
-    assert.equal(card.get("entries"), "2,061", "the Attendance card's own entries (fixture check)");
+    // 1,727, not the 2,061 the door count reaches once the taper is counted in.
+    // Entries means people who came in DURING the service; the fixture's last
+    // sample is `phase: "post"` and carries 2,061 precisely so a derivation
+    // that runs on past the end shows up here.
+    assert.equal(card.get("entries"), "1,727", "the Attendance card's own entries (fixture check)");
     assert.equal(
       header.get("peak attendance"),
       card.get("peak"),

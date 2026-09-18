@@ -15,7 +15,7 @@ import { HistoryCalendar } from "../../components/history-calendar";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
-import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
+import { AttendanceDetail } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
 import { RecordingPill, ServiceHeader, overrunStats } from "./history-service-header";
 import {
@@ -174,11 +174,12 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
   if (att) {
     const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
     L.push("", "ATTENDANCE");
-    // Attendance is people in the room; entries is the cumulative door count.
-    // This had them swapped, exactly as the header did — a pasted report said
-    // "Peak attendance 2,061 · Peak in-room 1,196" for a service the app's own
-    // Attendance card summarised as peak 1,196, entries 2,061.
-    L.push(`Peak attendance ${att.peakOccupancy.toLocaleString()} · Entries ${servicePeakAttendance(att).toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+    // Attendance is people in the room; entries is how many came in during the
+    // service. This had them swapped — a pasted report said "Peak attendance
+    // 2,061 · Peak in-room 1,196" for a service that recorded a peak of 1,196
+    // in the room and 1,727 through the doors. Both are the recorder's own
+    // stored fields, so the report and the screen cannot disagree.
+    L.push(`Peak attendance ${att.peakOccupancy.toLocaleString()} · Entries ${att.peakAttendance.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
   }
   if (spl && spl.items.length) {
     L.push("", "AUDIO — peak SPL (dB)");
