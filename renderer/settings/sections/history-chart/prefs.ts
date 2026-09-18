@@ -10,7 +10,49 @@
 // from the server value (seedStoredKeys) so nobody's existing selection is lost
 // in the move.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+/**
+ * Who wants to know when a stored key list changes.
+ *
+ * localStorage fires `storage` only in OTHER tabs, so two components in ONE tab
+ * reading the same entry never heard about each other's writes. That is not
+ * theoretical: the Sound card owns the Smaart metric choice, and the service
+ * header's "Peak <metric>" figure reads the same entry — switching metric in
+ * Customize relabelled the card and left the header quoting the old metric's
+ * level until the page was reopened.
+ */
+const listeners = new Map<string, Set<() => void>>();
+
+/** Tell everyone reading `storageKey` that it changed. */
+function notifyStoredKeys(storageKey: string): void {
+  for (const fn of listeners.get(storageKey) ?? []) fn();
+}
+
+/** Listen for writes to `storageKey` from anywhere in this tab. */
+export function subscribeStoredKeys(storageKey: string, fn: () => void): () => void {
+  let set = listeners.get(storageKey);
+  if (!set) listeners.set(storageKey, (set = new Set()));
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (set.size === 0) listeners.delete(storageKey);
+  };
+}
+
+/**
+ * A counter that increments whenever `storageKey` is written.
+ *
+ * For a reader that does not own the choice and only needs to recompute when it
+ * changes — the service header's peak-level figure reads the metric list
+ * through a plain function, not through `useStoredKeys`, and needs something to
+ * put in a `useMemo` dependency list.
+ */
+export function useStoredKeysVersion(storageKey: string): number {
+  const [n, setN] = useState(0);
+  useEffect(() => subscribeStoredKeys(storageKey, () => setN((v) => v + 1)), [storageKey]);
+  return n;
+}
 
 /** True when this browser has a stored choice at all — as opposed to an EMPTY
  *  one, which is a real choice and reads back as `[]`. Callers that offer a
@@ -125,12 +167,36 @@ export function useStoredKeys(
       setKeys(next);
       try {
         localStorage.setItem(storageKey, JSON.stringify(next));
+        // Everything else in this tab reading the same entry, including this
+        // hook mounted a second time elsewhere on the page. Announced AFTER the
+        // write so a listener re-reading sees the new value.
+        notifyStoredKeys(storageKey);
         return null;
       } catch (err) {
         return err instanceof Error ? err : new Error(String(err));
       }
     },
     [keys, storageKey],
+  );
+
+  /** The current `allowed`/`fallback`, for the subscription below. Both are
+   *  fresh arrays every render, so neither can be a dependency without
+   *  rebuilding the subscription on every one of them. Written in an effect
+   *  rather than during render — a ref assigned while rendering is a tear the
+   *  linter is right to refuse. */
+  const latest = useRef({ allowed, fallback });
+  useEffect(() => {
+    latest.current = { allowed, fallback };
+  });
+  // Another component wrote this entry — re-read, so two strips on one page
+  // cannot disagree about what is ticked. The writer's own `setKeys` above has
+  // already run; this lands on an equal list for it and changes nothing.
+  useEffect(
+    () =>
+      subscribeStoredKeys(storageKey, () => {
+        setKeys(readStoredKeys(storageKey, latest.current.allowed, latest.current.fallback));
+      }),
+    [storageKey],
   );
   /**
    * Re-read the store.

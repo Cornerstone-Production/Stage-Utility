@@ -115,6 +115,8 @@ const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const { ServiceHeader, serviceKpis } = await import("./history-service-header.js");
+const { SPL_METRICS_STORAGE_KEY } = await import("./spl-history-section.js");
+const { useStoredKeys } = await import("./history-chart/index.js");
 type ServiceHeaderProps = import("./history-service-header.js").ServiceHeaderProps;
 
 after(() => {
@@ -198,6 +200,77 @@ describe("History service header", () => {
     const kpis = serviceKpis(timeline(), null, null);
     assert.equal(kpis.find((k) => k.key === "attendance")!.value, "—");
     assert.equal(kpis.find((k) => k.key === "level")!.value, "—");
+  });
+
+  test("an absent level says WHICH kind of absent it is", () => {
+    const level = (rec: ServiceSplHistory | null) => serviceKpis(timeline(), null, rec).find((k) => k.key === "level")!;
+
+    // Nothing recorded.
+    assert.equal(level(null).sub, "no sound recorded");
+
+    // A record that carries metrics, with every one of them unticked. This is
+    // the case the single note got wrong: the service recorded plenty and was
+    // told it had recorded nothing, sending whoever read it to the meter.
+    localStorage.setItem(SPL_METRICS_STORAGE_KEY, JSON.stringify([]));
+    const hidden = level(spl());
+    assert.equal(hidden.value, "—");
+    assert.equal(hidden.sub, "metric hidden in Sound", "an unticked metric is not an unrecorded one");
+    localStorage.removeItem(SPL_METRICS_STORAGE_KEY);
+
+    // A record whose items carry no metric block at all.
+    const bare = spl();
+    (bare.items as unknown as { metrics?: unknown }[]).forEach((it) => delete it.metrics);
+    assert.equal(level({ ...bare, metricKey: null } as ServiceSplHistory).sub, "no metrics recorded");
+  });
+
+  test("the header follows the Sound card's metric choice", () => {
+    // `servicePeakLevel` reads localStorage, which React cannot see. The memo
+    // held on its other dependencies, so switching metric in the Sound card's
+    // Customize relabelled that card and left the header quoting the old one.
+    const twoMetrics = spl();
+    for (const it of twoMetrics.items as unknown as { metrics: Record<string, unknown> }[]) {
+      it.metrics["LCeq"] = { max: 108.4, avg: 99, leq: 100, count: 60 };
+    }
+    localStorage.setItem(SPL_METRICS_STORAGE_KEY, JSON.stringify(["SPL LAeq"]));
+
+    // Stands in for the Sound card, which owns this preference. It uses the
+    // SAME hook the real Customize popover is wired to, so the change travels
+    // the real write-and-announce path rather than a test-only back door.
+    let toggle: ((key: string) => Error | null) | null = null;
+    function SoundCardStandIn() {
+      const [, t] = useStoredKeys(SPL_METRICS_STORAGE_KEY, null, []);
+      toggle = t;
+      return null;
+    }
+    const view = render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ServiceHeader, {
+          timeline: timeline(),
+          attendance: attendance(),
+          spl: twoMetrics,
+          meta: "",
+          onBack: noop, onEditTimes: noop, onCopyReport: noop, onMerge: noop,
+          onRebuild: noop, onDelete: noop, onResetPacing: noop,
+        }),
+        React.createElement(SoundCardStandIn),
+      ),
+    );
+    const label = () =>
+      [...view.container.querySelectorAll('[data-testid="service-kpis"] [data-history-strip] > div')]
+        .map((d) => (d.children[0]?.textContent ?? "").trim())
+        .find((l) => l.startsWith("Peak ") && l !== "Peak attendance");
+    assert.equal(label(), "Peak SPL LAeq");
+
+    // Two acts, not two calls in one: `toggle` closes over the key list from
+    // the render it came from, so a second call inside the same act writes from
+    // the pre-toggle list and undoes the first — which is also true of two fast
+    // clicks in the real popover, and is the hook's behaviour, not this test's.
+    act(() => void toggle!("SPL LAeq")); // untick it, as a click in Customize does
+    act(() => void toggle!("LCeq")); // and tick the other
+    assert.equal(label(), "Peak LCeq", "the header must follow the metric the Sound card is showing");
+    localStorage.removeItem(SPL_METRICS_STORAGE_KEY);
   });
 
   test("the recording pill is there only while the record is open", () => {

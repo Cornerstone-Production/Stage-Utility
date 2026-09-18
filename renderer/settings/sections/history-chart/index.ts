@@ -10,7 +10,9 @@ export {
   hasStoredChoice,
   readStoredKeys,
   seedStoredKeys,
+  subscribeStoredKeys,
   useStoredKeys,
+  useStoredKeysVersion,
 } from "./prefs";
 export { serviceWindowOf, type ServiceWindow } from "./service-window";
 export {

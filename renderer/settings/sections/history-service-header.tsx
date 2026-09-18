@@ -23,9 +23,9 @@ import { ClockIcon, CopyIcon, GitMergeIcon, RotateCcwIcon, Trash2Icon, WrenchIco
 import { cn } from "../../lib/cn";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { Button } from "../../components/ui";
-import { StatStrip, type StatFigure } from "./history-chart";
+import { StatStrip, useStoredKeysVersion, type StatFigure } from "./history-chart";
 import { servicePeakAttendance } from "./attendance-history-section";
-import { servicePeakLevel } from "./spl-history-section";
+import { SPL_METRICS_STORAGE_KEY, servicePeakLevel, type ServicePeakLevel } from "./spl-history-section";
 import { fmtDelta, fmtDur, fmtTime, isCountedItem, summarize } from "./overview-data";
 
 /** Mean per-item over/under (seconds) + how many ran over, for items with both
@@ -51,6 +51,17 @@ export const SERVICE_SECTIONS = [
   { id: "history-attendance", label: "Attendance" },
   { id: "history-sound", label: "Sound" },
 ] as const;
+
+/** What the peak-level figure says when there is no level, per reason. `level`
+ *  has no note: the number is the answer. */
+const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
+  level: undefined,
+  "no-record": "no sound recorded",
+  "no-metrics": "no metrics recorded",
+  // Points at the control that fixes it, by the name on screen.
+  hidden: "metric hidden in Sound",
+  "no-samples": "no peak recorded",
+};
 
 /**
  * The six figures in the header row.
@@ -147,9 +158,13 @@ export function serviceKpis(
       key: "level",
       // Named after the metric it actually read, so a church metering LCeq is
       // not told it peaked at an LAeq it never recorded.
-      label: peakLevel ? `Peak ${peakLevel.metric}` : "Peak level",
-      value: peakLevel ? `${Math.round(peakLevel.db)} dB` : "—",
-      sub: peakLevel ? undefined : spl ? "no metric recorded" : undefined,
+      label: peakLevel.kind === "level" ? `Peak ${peakLevel.metric}` : "Peak level",
+      value: peakLevel.kind === "level" ? `${Math.round(peakLevel.db)} dB` : "—",
+      // WHY there is no level, because only one of these is a fault in the
+      // recording. "no metric recorded" used to cover all of them, so an
+      // operator who had unticked every metric in Customize was told the
+      // service had recorded no sound.
+      sub: LEVEL_EMPTY_NOTE[peakLevel.kind],
     },
   ];
 }
@@ -254,7 +269,21 @@ export function ServiceHeader({
   onResetPacing,
 }: ServiceHeaderProps) {
   const live = timeline.endedAt == null;
-  const kpis = useMemo(() => serviceKpis(timeline, attendance, spl, live ? now : undefined), [timeline, attendance, spl, live, now]);
+  // `serviceKpis` reads the Smaart metric selection through `servicePeakLevel`,
+  // and that selection is owned by the Sound card's Customize — a different
+  // component, whose write React knows nothing about. Without this in the
+  // dependency list the memo held, and switching metric relabelled the card
+  // while the header went on quoting the old metric's level.
+  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+  const kpis = useMemo(
+    () => {
+      // Read so the dependency is a real one and not "unnecessary" to the
+      // linter: the value is never used, the CHANGE is the whole point.
+      void metricsVersion;
+      return serviceKpis(timeline, attendance, spl, live ? now : undefined);
+    },
+    [timeline, attendance, spl, live, now, metricsVersion],
+  );
   const reduced = prefersReducedMotion();
 
   /**
