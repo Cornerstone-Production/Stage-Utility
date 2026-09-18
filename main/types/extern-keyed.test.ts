@@ -71,11 +71,32 @@ const EXPORTED: Record<string, object> = {
   KIND_DRAWS_TOP_BAR,
 };
 
+/**
+ * The names in EXPORTED, sorted, one per line. A count cannot tell a table
+ * added and a table removed from no change at all, and a sorted list merges
+ * cleanly when two branches each wrap a different table.
+ */
+const EXPECTED_TABLES = [
+  "AUTOMATION_ACTIONS",
+  "AUTOMATION_CONDITIONS",
+  "AUTOMATION_TRIGGERS",
+  "CAPABILITIES",
+  "KIND_DRAWS_TOP_BAR",
+  "LEGACY_TRANSLUCENT_GROUNDS",
+  "PVP_ACTIONS",
+  "ROSSTALK_COMMANDS",
+];
+
 describe("server tables keyed from outside this process", () => {
   it("covers exactly the exported ones", () => {
-    // Not a floor. Change this only alongside the list above, having decided
-    // whether the new table's keys arrive off disk, off HTTP or off the LAN.
-    assert.equal(Object.keys(EXPORTED).length, 8);
+    // Not a floor, and not a bare count. Change this only alongside the list
+    // above, having decided whether the new table's keys arrive off disk, off
+    // HTTP or off the LAN.
+    assert.deepEqual(
+      Object.keys(EXPORTED).sort(),
+      EXPECTED_TABLES,
+      "a table was added or removed; update EXPECTED_TABLES deliberately",
+    );
   });
 
   for (const [name, table] of Object.entries(EXPORTED)) {

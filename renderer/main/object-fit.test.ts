@@ -3,6 +3,7 @@ import { test, describe } from "node:test";
 import { readFileSync } from "node:fs";
 
 import { CAPABILITIES } from "@main/types/object-capabilities";
+import { LAYOUT_OBJECT_TYPES } from "@main/types/layout-object-types";
 import { IDIOM_TYPES } from "@main/types/readout-types.js";
 
 // What this file can and cannot prove, stated plainly, because a guard that
@@ -23,11 +24,13 @@ const SRC = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf
 const READOUT_SRC = readFileSync(new URL("./readout.tsx", import.meta.url), "utf8");
 
 describe("the object type registry", () => {
-  test("holds exactly 62 types", () => {
-    // An EXACT count, never a floor. A floor with slack is how three config
-    // stores went missing from every backup with the suite green. When this
-    // fails, the answer is not to bump the number: it is to run the browser
-    // sweep against the new type and then bump the number.
+  test("holds exactly the expected set of types", () => {
+    // An EXACT set, never a floor or a bare count. A floor with slack is how
+    // three config stores went missing from every backup with the suite
+    // green; a count is how two additions and one removal leave the number
+    // unchanged and the guard green. When this fails, the answer is not to
+    // update LAYOUT_OBJECT_TYPES blind: it is to run the browser sweep
+    // against the new type and then update it.
     //
     // The design doc said 38 while the registry held 41 — three types had been
     // added without anyone re-reading it.
@@ -36,7 +39,11 @@ describe("the object type registry", () => {
     // buttons at 110x149, bound, unbound and a three-word label, none of them
     // overflowing (scrollWidth within clientWidth), and a tap landed in the
     // automation log as `console`.
-    assert.equal(Object.keys(CAPABILITIES).length, 62);
+    assert.deepStrictEqual(
+      Object.keys(CAPABILITIES).sort(),
+      LAYOUT_OBJECT_TYPES,
+      "a type was added or removed; update LAYOUT_OBJECT_TYPES deliberately",
+    );
   });
 });
 

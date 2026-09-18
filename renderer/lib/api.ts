@@ -766,6 +766,22 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/integrations/${encodeURIComponent(id)}/test`);
     }
 
+    // ── YouTube device-flow connect ──────────────────────────────────────
+    case "youtube:connectStart":
+      return post<T>("/api/integrations/youtube/connect");
+
+    case "youtube:connectStatus":
+      return apiFetch<T>("/api/integrations/youtube/connect");
+
+    case "youtube:connectCancel":
+      return del<T>("/api/integrations/youtube/connect");
+
+    case "youtube:connectDisconnect":
+      return apiFetch<T>("/api/integrations/youtube/connect", {
+        method: "DELETE",
+        body: JSON.stringify({ disconnect: true }),
+      });
+
     // ── Wireless ───────────────────────────────────────────────────────
     case "wireless:listProviders":
       return apiFetch<T>("/api/wireless/providers");

@@ -63,9 +63,17 @@ describe("the form's password fields and the encrypted store agree", () => {
           `${d.id}.${key} is in SECRET_KEYS but the descriptor declares no such field`,
         );
         const field = d.configSchema.find((f) => f.key === key);
-        assert.equal(
-          field?.type,
-          "password",
+        // "oauth-device" is the one other type this test accepts: it is
+        // YouTube's connect row (see youtube-connect.ts), and like "password"
+        // it never puts the raw secret in a DOM input — the row shows only a
+        // masked "Connected" state, a code, or an error sentence. That claim is
+        // backed by youtube-connect-row.test.tsx's "opens a password input
+        // wired to onRawChange, closed by default" test: the ONLY input the
+        // row ever renders is type="password", behind an explicit "Paste a
+        // token instead" click, never the plain "text" a bare "oauth-device"
+        // acceptance here would otherwise wave through unchecked.
+        assert.ok(
+          field?.type === "password" || field?.type === "oauth-device",
           `${d.id}.${key} is a secret but its field is type "${field?.type}" — it is shown in the clear`,
         );
       }

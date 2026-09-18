@@ -21,9 +21,18 @@ function serverHydratedChannels(): string[] {
   return [...src.matchAll(/sseWrite\(\s*res\s*,\s*"([^"]+)"/g)].map((m) => m[1]);
 }
 
-test("the scan finds the server's hydrates at all", () => {
-  // Guards the regex — a silently-empty scan would make this file vacuous.
-  assert.ok(serverHydratedChannels().length >= 10, "expected to find sseWrite hydrate calls");
+test("the scan finds exactly the channels the client expects to be hydrated", () => {
+  // EXACT, not a floor. A floor with slack (`length >= 10`) cannot tell an
+  // added hydrate plus a removed one from no change, and it would not have
+  // caught an empty scan either — this pins the same set the two tests below
+  // check by direction, so a silently-empty scan (which would make both of
+  // those vacuous) fails here first.
+  assert.deepStrictEqual(
+    [...serverHydratedChannels()].sort(),
+    [...HYDRATED_CHANNELS].sort(),
+    "the server's hydrated channels and the client's HYDRATED_CHANNELS have drifted; " +
+      "update whichever one is stale, deliberately",
+  );
 });
 
 test("every channel the server hydrates is replayed to late subscribers", () => {

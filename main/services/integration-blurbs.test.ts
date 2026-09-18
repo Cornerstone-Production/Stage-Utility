@@ -34,7 +34,28 @@ describe("an integration's blurb is a blurb", () => {
   // Guards the list. A scan over an empty array passes every assertion below it,
   // which is how a check like this goes green while reading nothing.
   it("reads every integration the app ships", () => {
-    assert.equal(ALL.length, 16, `expected 16 integrations, read ${ALL.length}`);
+    assert.deepEqual(
+      ALL.map((d) => d.id).sort(),
+      [
+        "companion",
+        "obs",
+        "osc",
+        "planning-center",
+        "prodcom",
+        "propresenter",
+        "pvp",
+        "reaper",
+        "resi",
+        "ross-tsl",
+        "rosstalk",
+        "scores",
+        "sensource",
+        "smaart",
+        "wireless",
+        "youtube",
+      ],
+      "an integration was added or removed; update this list deliberately",
+    );
   });
 
   for (const d of ALL) {

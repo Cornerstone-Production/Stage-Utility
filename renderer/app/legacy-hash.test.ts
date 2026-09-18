@@ -44,8 +44,26 @@ describe("legacy settings hash links", () => {
   });
 
   test("covers every section the old panel had", () => {
-    // Asserted as an exact count, not a floor. A floor with slack is how a
-    // section goes missing and nobody notices until a bookmark breaks.
-    assert.equal(LEGACY_SECTION_IDS.length, 12);
+    // Asserted as an exact sorted list, not a bare count. A floor with slack is
+    // how a section goes missing and nobody notices until a bookmark breaks,
+    // and a count cannot tell an add plus a remove from no change.
+    assert.deepEqual(
+      [...LEGACY_SECTION_IDS].sort(),
+      [
+        "advanced",
+        "automation",
+        "baptisms",
+        "branding",
+        "connect",
+        "displays",
+        "integrations",
+        "patch",
+        "plan",
+        "scriptview",
+        "service-history",
+        "views",
+      ],
+      "a legacy hash section was added or removed; update this list deliberately",
+    );
   });
 });
