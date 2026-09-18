@@ -49,6 +49,46 @@ import { stageController } from "./stage-controller.js";
  */
 export const SERVICE_GAP_MS = 10 * 60_000;
 
+/** One entry in a record's per-item list, as the lookups below need to see it. */
+export interface RecordedItem {
+  itemId: string;
+  endedAt: string | null;
+}
+
+/**
+ * The LAST entry for `itemId`, or undefined.
+ *
+ * A plan item can legitimately appear more than once in a record — a song
+ * reprised, or a second service's pre-service item landing in the record before
+ * the occurrence split catches up. Entries are pushed in the order they went
+ * live, so the last match is the current run; `items.find` returns the FIRST,
+ * which is how a re-run rewrote a run that had already finished hours earlier.
+ */
+export function lastItemEntry<T extends RecordedItem>(items: T[], itemId: string): T | undefined {
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]!.itemId === itemId) return items[i];
+  return undefined;
+}
+
+/**
+ * Is an item going live again a step BACK to an entry still in play, or a
+ * genuine second run that deserves its own entry?
+ *
+ * A step back is what an operator does within a service — jump to the previous
+ * song, replay a video. It lands within seconds or minutes of the entry closing.
+ * An entry that closed more than SERVICE_GAP_MS ago is finished history: on
+ * 18 Sep 2026 a second service's items reopened the first service's, and the
+ * first item's recorded length grew to 6753 s.
+ *
+ * An entry never closed is the same run by definition — say yes, rather than
+ * pushing a duplicate alongside an entry that is still open.
+ */
+export function isStepBackTo(entry: RecordedItem, goingLiveAtMs: number): boolean {
+  if (!entry.endedAt) return true;
+  const endedMs = Date.parse(entry.endedAt);
+  if (!Number.isFinite(endedMs) || !Number.isFinite(goingLiveAtMs)) return true; // no clock to judge by
+  return goingLiveAtMs - endedMs < SERVICE_GAP_MS;
+}
+
 /** The identity every service record carries. */
 export interface ServiceRecord {
   serviceKey: string;

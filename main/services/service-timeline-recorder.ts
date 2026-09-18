@@ -16,7 +16,14 @@ import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { shouldRecordLive } from "./live-service-gate.js";
-import { ServiceRecorder, SERVICE_GAP_MS, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
+import {
+  ServiceRecorder,
+  SERVICE_GAP_MS,
+  isStepBackTo,
+  lastItemEntry,
+  type NewRecordContext,
+  type RecorderStore,
+} from "./service-recorder.js";
 
 /** "2d 3h" past a day, "3h 12m" under one — for the carry-over log line. Not
  *  fmtDuration from renderer/main/pco-timer.ts: that one is renderer-side and
@@ -92,14 +99,26 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     const id = live.currentItemId;
     const title = live.label ?? live.currentItemTitle ?? "";
     const planned = typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null;
-    const item = this.current.items.find((i) => i.itemId === id);
-    if (item) {
+    const liveStartMs = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
+    const goingLiveAtMs = Number.isFinite(liveStartMs) ? liveStartMs : Date.now();
+    // The LAST entry for this id, not the first: an item can run more than once.
+    const item = lastItemEntry(this.current.items, id);
+    if (item && isStepBackTo(item, goingLiveAtMs)) {
       // Operator stepped back to an earlier item — reopen it.
       if (title) item.title = title;
       if (planned != null) item.plannedLengthSec = planned;
       item.endedAt = null;
       item.actualDurationSec = null;
       return;
+    }
+    // Belt and braces for the occurrence split (see ensureRecord): an item whose
+    // last run finished more than SERVICE_GAP_MS ago is a RE-RUN, and gets its own
+    // entry rather than rewriting history. Without this a missed split let a second
+    // service silently overwrite the first service's timings in place.
+    if (item) {
+      console.log(
+        `[service-timeline] "${title || id}" went live again ${Math.round((goingLiveAtMs - Date.parse(item.endedAt!)) / 60_000)} min after its last run ended — recording it as a new entry`,
+      );
     }
     // A NEW item whose PCO live_start_at predates this record by more than the
     // same-service gap was already live in Planning Center before this record
@@ -110,7 +129,6 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     // that started within the gap is unchanged.
     let startedAt = live.liveStartAt ?? new Date().toISOString();
     let counted: boolean | undefined;
-    const liveStartMs = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
     const recordStartMs = Date.parse(this.current.startedAt);
     if (Number.isFinite(liveStartMs) && Number.isFinite(recordStartMs) && recordStartMs - liveStartMs > SERVICE_GAP_MS) {
       const carriedMs = recordStartMs - liveStartMs;
@@ -136,7 +154,9 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
   /** Close the outgoing item (this.lastItemId) and compute its actual duration. */
   private finalizePrevItem(): void {
     if (!this.current || !this.lastItemId) return;
-    const prev = this.current.items.find((i) => i.itemId === this.lastItemId);
+    // The LAST entry for the id — the run that was actually on air. `find` would
+    // close an earlier run of the same item and leave the live one open forever.
+    const prev = lastItemEntry(this.current.items, this.lastItemId);
     if (prev && !prev.endedAt) {
       const endMs = Date.now();
       prev.endedAt = new Date(endMs).toISOString();

@@ -231,15 +231,21 @@ export async function editServiceWindow(
 }
 
 /** Set a per-item override for whether it counts toward the service timers (wins
- *  over the auto buffer/pre-service default). */
+ *  over the auto buffer/pre-service default).
+ *
+ *  A plan item can appear in a record more than once — reprised, or run again in
+ *  a second service that landed here before the occurrence split caught up. The
+ *  override is a statement about the PLAN item, so it applies to every entry for
+ *  that id; `find` would have set it on one and left the row the operator clicked
+ *  unchanged. */
 export async function setItemCounted(serviceKey: string, itemId: string, counted: boolean): Promise<void> {
   assertNotLive(serviceKey, "edited");
   forgetAll(serviceKey); // see editServiceWindow
   const tl = await serviceTimelineStore.get(serviceKey);
   if (!tl) return;
-  const it = tl.items.find((x) => x.itemId === itemId);
-  if (!it) return;
-  it.counted = counted;
+  const hits = tl.items.filter((x) => x.itemId === itemId);
+  if (hits.length === 0) return;
+  for (const it of hits) it.counted = counted;
   await serviceTimelineStore.upsert(tl);
   broadcast("service-timeline:history", tl);
 }
