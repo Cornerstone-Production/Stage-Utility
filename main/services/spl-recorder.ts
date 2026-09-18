@@ -114,6 +114,13 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
         await this.ensureRecord(live, gapSinceLive);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
+        // One expression for the item's name, character-identical to openItem in
+        // service-timeline-recorder.ts. `live.label` alone is not it: PCO
+        // reports an item live with no label often enough, and this recorder
+        // then wrote the numeric ITEM ID into the archive row as the title and
+        // left its own item untitled — two records naming the same item two
+        // different things, and a rebuild matching on the id string.
+        const title = live.label ?? live.currentItemTitle ?? "";
         let itemChanged = false;
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem();
@@ -129,7 +136,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
               { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
               "pco",
               "item",
-              live.label ?? live.currentItemId,
+              title,
               {
                 itemId: live.currentItemId,
                 plannedLengthSec: typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null,
@@ -140,7 +147,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
         }
         this.recordSample(
           live.currentItemId,
-          live.label,
+          title,
           live.itemType ?? null,
           pickMeter(smaartService.getLatest()),
           // When PCO says this item went live, NOT our own clock — the same

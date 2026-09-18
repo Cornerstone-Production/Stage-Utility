@@ -76,4 +76,52 @@ describe("spl-recorder: the plan-item event row", () => {
     assert.equal(item[0].plannedLengthSec, "315", "the row does not carry the planned length");
     assert.equal(item[0].preService, "false", "the row does not carry the pre-service flag");
   });
+
+  // PCO reports an item live with no label often enough. Falling back to the
+  // ITEM ID put a number in the title column, so the archive and the timing
+  // record named the same item two different things and a title-only rebuild
+  // matched on a numeric string. The timeline recorder has always used
+  // currentItemTitle here; this one did not.
+  it("falls back to the item's title, not its id, when PCO sends no label", async () => {
+    const key = "st1:plan-1:t-11am";
+    held.current = {
+      serviceKey: key,
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceDate: SERVICE_DATE,
+      serviceTimeId: "t-11am",
+      serviceTimeStartsAt: null,
+      startedAt: "2026-09-20T16:00:00.000Z",
+      endedAt: null,
+      meterId: null,
+      metricKey: null,
+      items: [],
+    };
+    held.currentKey = key;
+    held.lastItemId = null;
+
+    await splRecorder.onLiveTick({
+      mode: "item",
+      currentItemId: "1223874288",
+      label: null,
+      currentItemTitle: "MEET & GREET",
+      lengthSec: 60,
+      beforeServiceStart: false,
+      liveStartAt: "2026-09-20T16:05:00.000Z",
+      serviceEnded: false,
+      serviceTimeId: "t-11am",
+      serviceTimeStartsAt: null,
+    } as never);
+    await sampleArchive.flush();
+
+    const rows = await readArchiveRows(serviceDirPath(key, SERVICE_DATE), "events");
+    const item = (rows ?? []).filter((r) => r.kind === "item");
+    assert.equal(item.length, 1, `expected one item row, got ${JSON.stringify(rows)}`);
+    assert.equal(item[0].detail, "MEET & GREET", "the row carries the item id as its title");
+    assert.notEqual(item[0].detail, "1223874288");
+    // And the recorder's OWN item agrees with the row it wrote.
+    assert.equal((held.current as { items: { title: string }[] }).items[0]?.title, "MEET & GREET");
+
+    splRecorder.forget(key);
+  });
 });
