@@ -44,6 +44,10 @@ class TestProdCom extends ProdComService {
   public settled(): Promise<void> {
     return this.priming;
   }
+  /** A reconnect, as scheduleReconnect() would run it. */
+  public reconnectNow(): Promise<void> {
+    return this.connect();
+  }
 }
 
 /** Long enough that ONE retry fires inside a settle window, so "exactly one
@@ -173,6 +177,20 @@ describe("the fallback retries the websocket on a timer", () => {
     stub.setRefuseWebSocket(false); // ProdCom is back
     await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
     assert.equal(svc.retryArmed, false, "the retry must be disarmed once the websocket is up");
+  });
+
+  it("a new connection attempt clears a retry left over from the last stream", async (t) => {
+    // The window this closes: the timer is armed by a fallback that has since
+    // dropped, a reconnect is already opening the next transport, and the timer
+    // fires into it — opening a socket beside a connect that is still in flight,
+    // and destroying a request that has not finished connecting. The retry is
+    // re-armed when the next fallback comes up, so clearing it here loses
+    // nothing.
+    const { svc } = await connected(t, { refuseWebSocket: true });
+    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+
+    await svc.reconnectNow();
+    assert.equal(svc.retryArmed, false, "a stale retry timer survived into the next connection attempt");
   });
 
   it("stop() clears the retry", async (t) => {

@@ -47,6 +47,10 @@ class TestProdCom extends ProdComService {
     this.downs.push({ reason, detail });
     super.noteWebSocketDown(reason, detail);
   }
+  /** A reconnect, as scheduleReconnect() would run it. */
+  public reconnectNow(): Promise<void> {
+    return this.connect();
+  }
 }
 
 /** How the server answers the PROBE's upgrade request. The real client's upgrade
@@ -286,6 +290,48 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     // test is that STOPPING takes the socket with it.
     await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 150);
     assert.equal(server.sseOpens(), 0, "a stopped service opened a fallback anyway");
+  });
+
+  it("a second refusal while a probe is in flight does not start a second probe", async (t) => {
+    // Two sockets closing before open — a reconnect landing on top of one that
+    // is still being diagnosed — must not put a second request on a box that is
+    // already unhappy. The trickle server holds the first probe open for the
+    // length of its deadline, which is the window this needs.
+    const server = await serverAnswering("trickle");
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await server.close();
+    });
+    svc.configure("127.0.0.1", server.port, null);
+    await eventually(() => probes(server) === 1, "the first probe to go out");
+
+    // A second attempt, refused the same way, while the first probe is still
+    // reading.
+    await svc.reconnectNow();
+    await eventually(() => svc.downs.length > 0, "a fallback decision", 3000);
+    assert.equal(probes(server), 1, "a second probe went out while one was already in flight");
+  });
+
+  it("a probe from a previous connection does not open a fallback for the new one", async (t) => {
+    // configure() to a different box while a probe is in flight. The probe's
+    // answer is about the OLD host, and acting on it would open a transcript
+    // stream against a box this service has already been pointed away from.
+    const old = await serverAnswering("trickle");
+    const next = await serverAnswering("refuse-426");
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await old.close();
+      await next.close();
+    });
+
+    svc.configure("127.0.0.1", old.port, null);
+    await eventually(() => probes(old) === 1, "the probe against the old box");
+    svc.configure("127.0.0.1", next.port, null); // the operator repoints it
+
+    await eventually(() => next.sseOpens() > 0, "the NEW box's fallback to open", 3000);
+    assert.equal(old.sseOpens(), 0, "the old box's probe opened a stream against a box we have left");
   });
 
   it("does not probe when the WebSocket was up and dropped normally", async (t) => {
