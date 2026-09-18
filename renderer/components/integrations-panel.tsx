@@ -13,6 +13,7 @@ import { ScoresTeamsPanel } from "../settings/panels/scores-teams-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CompanionInfoPanel } from "./companion-info-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
+import { YouTubeConnectRow } from "./youtube-connect-row";
 import { SenSourceScopePicker } from "./sensource-scope-picker";
 import { RossTslFeedsPanel } from "./ross-tsl-feeds-panel";
 import { ProPresenterInstancesPanel } from "./propresenter-instances-panel";
@@ -457,6 +458,19 @@ export function IntegrationDialog({
   // What a dismissal has to ask about: this form, plus every sub-panel buffer.
   const dirty = schemaDirty || panels.dirty;
 
+  // YouTube's connect row: nothing for it to use until the OAuth client is
+  // both SAVED (a blank clientId, or no clientSecret stored — read the same
+  // way handleSave omits an unchanged mask) and not mid-edit — typing over the
+  // secret and pressing Connect before Save would start an attempt against
+  // whatever was on disk a moment ago, not what is on screen.
+  const clientIdSaved = typeof pristine.clientId === "string" ? pristine.clientId.trim() : "";
+  const clientSecretSaved = typeof pristine.clientSecret === "string" ? pristine.clientSecret : "";
+  const connectFieldsUnready =
+    !clientIdSaved ||
+    !clientSecretSaved ||
+    localConfig.clientId !== pristine.clientId ||
+    localConfig.clientSecret !== pristine.clientSecret;
+
   function setField(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
   }
@@ -466,11 +480,13 @@ export function IntegrationDialog({
   async function handleSave(): Promise<boolean> {
     setIsSaving(true);
     try {
-      // Build config — skip password fields that still show the mask
+      // Build config — skip password (and oauth-device, YouTube's connect
+      // row, which carries the same masked secret underneath its disclosure)
+      // fields that still show the mask.
       const config: Record<string, unknown> = {};
       for (const field of descriptor.configSchema) {
         const v = localConfig[field.key];
-        if (field.type === "password" && typeof v === "string" && isMask(v)) {
+        if ((field.type === "password" || field.type === "oauth-device") && typeof v === "string" && isMask(v)) {
           // User hasn't changed this password — omit so the backend keeps the original
           continue;
         }
@@ -615,7 +631,14 @@ export function IntegrationDialog({
                   )}
                 </FieldContent>
 
-                {field.type === "select" ? (
+                {field.type === "oauth-device" ? (
+                  <YouTubeConnectRow
+                    disabled={connectFieldsUnready}
+                    disabledHint="Save the client ID and secret first"
+                    rawValue={value}
+                    onRawChange={(v) => setField(field.key, v)}
+                  />
+                ) : field.type === "select" ? (
                   <Select
                     value={typeof value === "string" ? value : ""}
                     onValueChange={(v: string) => setField(field.key, v)}

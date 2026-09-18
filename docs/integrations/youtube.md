@@ -37,29 +37,54 @@ means nothing to find, and this mode is the only one that can see them.
 ### My broadcasts (OAuth)
 
 1. The same project, with the same API enabled.
-2. **APIs & Services → OAuth consent screen**: External, then add the Google
-   account that owns the channel as a **test user**. The app never needs to be
-   published or verified — nobody but you signs in to it.
-3. Create an **OAuth client ID** of type *Web application*, and add
-   `https://developers.google.com/oauthplayground` as an authorised redirect URI.
-4. Open the [OAuth Playground](https://developers.google.com/oauthplayground).
-   Under the gear icon tick **Use your own OAuth credentials** and paste the
-   client ID and secret. In step 1 enter the scope
-   `https://www.googleapis.com/auth/youtube.readonly` and authorise as the
-   channel's account; in step 2 press **Exchange authorization code for
-   tokens** and copy the **refresh token**.
-5. Paste the client ID, client secret and refresh token below.
+2. **APIs & Services → OAuth consent screen**: External, then **Publish app**.
+   The seven-day token limit below is what *Testing* means; publishing removes
+   it. Google shows an "unverified app" warning on the way through, which is
+   fine for an app only you sign in to.
+3. **Credentials → Create credentials → OAuth client ID**, type **TVs and
+   Limited Input devices**. Copy the client ID and secret — this type has no
+   redirect URI to set.
+4. Stage Utility, **Settings → Integrations → YouTube**: paste the client ID
+   and secret, and **Save**.
+5. Press **Connect YouTube**. The row shows a code such as `GQVQ-SHNC` and the
+   address `google.com/device`. On a phone, open that address, sign in with the
+   channel's Google account, enter the code, and allow read-only access.
+6. Within a few seconds the row reads **Connected**, with the channel's name,
+   and the integration goes green.
 
-A token minted while the consent screen is in *Testing* expires after seven
-days, and one minted with the Playground's own credentials (the gear box left
-unticked) belongs to Google's project, not yours — either way the check fails
-with `invalid_grant` and the operator does step 4 again. Moving the consent
-screen to *In production* removes the seven-day limit; Google shows an
-"unverified app" warning on the way through, which is fine for an app only you
-sign in to.
+A **Web application** or **Desktop app** OAuth client cannot do this — Google
+answers `invalid_client` or `unauthorized_client`, and the row says so, naming
+the client type Connect needs.
+
+A token minted while the consent screen is in *Testing* still expires after
+seven days; the button does not change that, only how the token gets typed in.
+Google's error on expiry is `invalid_grant` either way, and the row can only
+repeat the advice above — Google gives this app no way to detect that the
+screen is in Testing before the token has already failed. Press **Connect
+YouTube** again to mint a new one.
 
 An API key cannot do this second job. "Are *my* broadcasts live" is a question
 about the signed-in channel, and only an OAuth token can answer it.
+
+Every step of a Connect attempt is on `/log` too, on a `[youtube] connect:` line
+— the code being issued, the approval and the channel it was approved for, a
+decline, an expired code, a cancellation, or whatever Google said. Disconnecting
+logs `[youtube] disconnected, refresh token cleared`. Neither the code nor the
+token ever appears on the line.
+
+#### Pasting a token instead
+
+The connection row has a **Paste a token instead** disclosure, for a refresh
+token minted the old way, in the [OAuth
+Playground](https://developers.google.com/oauthplayground): under the gear icon
+tick **Use your own OAuth credentials** and paste the client ID and secret; in
+step 1 enter the scope `https://www.googleapis.com/auth/youtube.readonly` and
+authorise as the channel's account; in step 2 press **Exchange authorization
+code for tokens** and copy the **refresh token** into the field. This still
+needs a client ID and secret of type *Web application*, with
+`https://developers.google.com/oauthplayground` as an authorised redirect URI —
+the Playground's own credentials mint a token that belongs to Google's project,
+not yours, and the check fails with `invalid_grant`.
 
 ## What it reports
 
