@@ -537,6 +537,10 @@ describe("what the All services page is made of", () => {
       .filter((g) => g.className.includes("ring-accent"))
       .map((g) => g.getAttribute("data-day-group"));
     assert.deepEqual(ringed, ["2026-09-06"], "the picked day's group is not marked");
+    // The ring stands off what it rings. At `p-2 -m-2` the day label and the
+    // rows touched the ring's edge; 12px is the inset that reads as a frame.
+    const ringedEl = view.container.querySelector('[data-day-group="2026-09-06"]') as HTMLElement;
+    assert.ok(/\bp-3\b/.test(ringedEl.className) && /-m-3\b/.test(ringedEl.className), `the ring has no inset from its content: ${ringedEl.className}`);
   });
 });
 

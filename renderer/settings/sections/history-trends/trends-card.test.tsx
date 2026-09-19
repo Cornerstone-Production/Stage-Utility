@@ -303,6 +303,13 @@ describe("the strip above the trends plot", () => {
     assert.ok(strip, "no strip at all — hover has nowhere to report");
     assert.ok(strip.className.includes("absolute"), `the strip is still in flow: ${strip.className}`);
     assert.ok(strip.className.includes("pointer-events-none"), "an overlaid strip must not eat the pointer");
+    // Sized to its text and see-through, with padding. A full-width opaque bar
+    // (`inset-x-0 bg-bg/90`) covered the line where it peaks; text flush against
+    // the box's edge (no `px-`) was the other half of the same report.
+    assert.ok(!strip.className.includes("inset-x-0"), `the strip still spans the plot's width: ${strip.className}`);
+    assert.ok(strip.className.includes("w-fit"), `the strip is not sized to its text: ${strip.className}`);
+    assert.ok(/\bpx-\d/.test(strip.className), `the strip's text has no side padding: ${strip.className}`);
+    assert.ok(!/bg-bg\/(9\d|100)\b/.test(strip.className), `the strip is opaque, so it hides the line under it: ${strip.className}`);
     assert.ok(
       strip.parentElement?.className.includes("relative"),
       `the strip's parent is not the positioning context: ${strip.parentElement?.className}`,

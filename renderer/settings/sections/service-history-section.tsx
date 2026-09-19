@@ -1444,7 +1444,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // read a month with the month right there beside it.
               className={cn(
                 "flex scroll-mt-4 flex-col gap-2 rounded-xl",
-                day === group.date && "bg-accent/6 ring-1 ring-accent/35 p-2 -m-2",
+                // 12px of air between the ring and what it rings; at 8px the day
+                // label and the rows touched the ring's edge.
+                day === group.date && "bg-accent/6 ring-1 ring-accent/35 p-3 -m-3",
               )}
             >
               <span className="text-caption1 text-fg-muted">{fmtDay(group.date)}</span>
