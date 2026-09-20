@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle } from "../../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -137,12 +137,16 @@ const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 
-after(() => {
+after(async () => {
   cleanup();
+  // The unmount's own passive effects are still on React's queue here. Drained
+  // while the DOM they read is still installed — without this the flush lands
+  // after teardown() and the FILE fails on `window is not defined` with every
+  // test in it passing. See settle() in test-dom.ts.
+  await settle();
   teardown();
 });
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 async function openTheService(Section: React.ComponentType) {
