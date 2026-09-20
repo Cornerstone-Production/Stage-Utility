@@ -139,6 +139,12 @@ carried no transcript` while that minute runs, and no recovery is announced unti
 a transcript entry actually arrives. A re-test that does deliver clears the
 verdict and keeps the socket.
 
+Consecutive re-tests **alternate** between sending the `subscribe` frame and not
+sending it, and the log line says which the next one will use. Neither shape is
+assumed permanent: a ProdCom build that fixes the subscription and requires the
+frame would otherwise be re-tested unsubscribed for ever, dropped a minute later
+every time, and cost a caption gap every half hour on a box that had been fixed.
+
 Everything the app learns about a box's WebSocket is forgotten when the
 integration is reconfigured or re-enabled, so an upgraded or replaced ProdCom
 gets a clean first attempt with the documented `subscribe` frame.

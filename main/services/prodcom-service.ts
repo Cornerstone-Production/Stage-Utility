@@ -1148,7 +1148,8 @@ export class ProdComService extends ConnectionLifecycle {
     if (this.wsSilentBox) {
       console.warn(
         `[prodcom] the websocket has carried no transcript in ${seconds}s and this box has failed ` +
-          `that test before — captions go back to the SSE fallback`,
+          `that test before — captions go back to the SSE fallback, and the next re-test will connect ` +
+          `${this.alternateSubscribeMode()}`,
       );
       this.fallBackToSse(host, port, SILENT_SOCKET_REASON);
       return;
@@ -1207,12 +1208,35 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsSilentBox = true;
     console.warn(
       `[prodcom] websocket delivered no transcript with or without the subscribe frame, while ProdCom has ` +
-        `at least ${answer.spoken} spoken line(s) since it opened — captions move to the SSE fallback, and ` +
+        `at least ${answer.spoken} spoken line(s) since it opened — captions move to the SSE fallback, ` +
         `the websocket is re-tested every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
         `${everyMs(this.wsRetryIntervalMs)}, and every ${WS_SILENT_RETRY_EVERY} reconnect(s) ` +
-        `instead of every ${WS_RETRY_EVERY}`,
+        `instead of every ${WS_RETRY_EVERY}, starting ${this.alternateSubscribeMode()}`,
     );
     this.fallBackToSse(host, port, SILENT_SOCKET_REASON);
+  }
+
+  /**
+   * Swap the subscription the NEXT socket to this box will use, and name it.
+   *
+   * wsSubscribeFilterSuspect used to be a one-way latch, cleared only by
+   * configure(). Once set, every re-test for the life of the process connected
+   * WITHOUT the subscribe frame — so if ProdCom ships a build that fixes the
+   * subscription and makes the frame mandatory, which is what its own OpenAPI
+   * document implies is the intent, every half-hourly re-test would open
+   * unsubscribed, receive nothing, be dropped by probation a minute later, and
+   * repeat: a caption gap every thirty minutes on a box that has been FIXED.
+   * That is precisely what widening the interval instead of removing it was
+   * meant to avoid.
+   *
+   * Alternating costs nothing — consecutive re-tests were going to happen anyway
+   * — and means the client cannot be permanently wrong about which of the two
+   * shapes this box wants. Called from both fallback paths, so the flip happens
+   * exactly once per re-test whichever one took it.
+   */
+  private alternateSubscribeMode(): string {
+    this.wsSubscribeFilterSuspect = !this.wsSubscribeFilterSuspect;
+    return this.wsSubscribeFilterSuspect ? "without the subscribe frame" : "with the subscribe frame";
   }
 
   /**

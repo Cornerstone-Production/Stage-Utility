@@ -602,6 +602,26 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     );
   });
 
+  it("alternates the subscription on consecutive re-tests", async (t) => {
+    // The mode used to latch: once a filtered socket had been shown silent,
+    // every re-test for the life of the process connected unsubscribed. A
+    // ProdCom build that fixes the subscription and makes the frame mandatory —
+    // what its own specification implies is the intent — would then be re-tested
+    // wrongly for ever, dropped by probation each time, and cost a caption gap
+    // every thirty minutes on a box that had been FIXED.
+    const { stub } = await silenced(t);
+    const before = subscribeFrames(stub);
+
+    // Two more re-tests, each dropped again by probation.
+    await eventually(() => stub.wsUpgrades >= 4, "two further re-tests", 12_000);
+
+    assert.ok(
+      subscribeFrames(stub) > before,
+      `every re-test connected unsubscribed, so a box that requires the frame can never come back ` +
+        `(${subscribeFrames(stub)} subscribe frames across ${stub.wsUpgrades} sockets)`,
+    );
+  });
+
   it("keeps the socket the moment a re-test delivers", async (t) => {
     // ProdCom fixed, upgraded or restarted. Nothing about the verdict is
     // permanent: one transcript entry over a socket clears it.
