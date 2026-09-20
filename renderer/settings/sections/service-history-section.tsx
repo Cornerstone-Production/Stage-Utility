@@ -91,7 +91,14 @@ const ROW_COLUMNS: {
   color?: string;
   caption: (label?: string) => string;
 }[] = [
-  { key: "attendance", heading: "Peak", color: "var(--color-green-9)", caption: () => "peak" },
+  // IN ROOM, both times, because the app tracks two attendance numbers and
+  // "Peak / peak" named neither of them. The value is `peakOccupancy` — the most
+  // people in the room at once — and the other is `peakAttendance`, the
+  // cumulative door count, which double-counts anyone who steps out and back.
+  // The service page's header has had them the wrong way round once already and
+  // its `attendance` KPI carries the note about it; this is the same number that
+  // KPI shows, said in the words that tell it apart.
+  { key: "attendance", heading: "In room", color: "var(--color-green-9)", caption: () => "peak in room" },
   { key: "actual", heading: "Ran", caption: (label) => label ?? "ran" },
   { key: "vs-plan", heading: "vs plan", caption: () => "vs plan" },
   { key: "level", heading: "Peak dB", caption: (label) => label?.replace(/^Peak\s+/i, "") ?? "dB" },

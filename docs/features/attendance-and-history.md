@@ -205,7 +205,7 @@ pill the service's own page carries sits after its plan title.
 
 | | |
 |---|---|
-| Peak | the most people in the room at once |
+| In room | the most people in the room at once, captioned *peak in room*. Named for the figure rather than for the reduction, because the app also tracks the cumulative door count and "peak" alone names either |
 | Ran | what the service ran; **Running**, counting up, while it is still recording |
 | vs plan | its difference against the planned total — a dash while recording, where most of a plan not yet run reads as a service running short |
 | Peak dB | the loudest reading on the primary Smaart metric, captioned with the metric it read |

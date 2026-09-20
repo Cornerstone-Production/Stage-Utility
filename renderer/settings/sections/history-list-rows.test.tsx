@@ -228,8 +228,8 @@ function gapOf(className: string): number {
 }
 
 /**
- * `{ attendance: { value: "1,196", caption: "peak" }, … }` for one row, keyed
- * by COLUMN.
+ * `{ attendance: { value: "1,196", caption: "peak in room" }, … }` for one row,
+ * keyed by COLUMN.
  *
  * Keyed by the column rather than by the caption, because the caption is no
  * longer the column's name: the value leads and the caption under it says what
@@ -716,10 +716,47 @@ describe("a row's columns", () => {
     const view = await renderList();
     const headings = [...(view.container.querySelector("[data-row-header]")?.children ?? [])]
       .map((c) => (c.textContent ?? "").trim());
-    assert.deepEqual(headings, ["When", "Service", "Peak", "Ran", "vs plan", "Peak dB", ""]);
+    assert.deepEqual(headings, ["When", "Service", "In room", "Ran", "vs plan", "Peak dB", ""]);
     const row = view.container.querySelector("[data-history-row]")!;
     // Two leading cells (When, Service), four figures, then the chevron — the
     // same seven tracks the heading spans.
     assert.equal(row.children.length, headings.length);
+  });
+
+  test("the in-room column says WHICH attendance figure it is, in both its labels", async () => {
+    // The app tracks two attendance numbers for one service: `peakOccupancy`,
+    // the most people in the room at once, and `peakAttendance`, the cumulative
+    // door count, which double-counts anyone who steps out and back. The column
+    // was headed "Peak" and captioned "peak", which names either of them — and
+    // the service page's header has had the two the wrong way round once
+    // already, printing 2,061 where it meant 1,196.
+    //
+    // WHAT THIS CANNOT SEE: whether the heading row wraps at the narrow end.
+    // jsdom loads no stylesheet and reports every box as 0. Driven in Chrome at
+    // 1440 and 900, where "IN ROOM" sits on one line in its 84px column.
+    installFetch();
+    const view = await renderList();
+    const headings = [...(view.container.querySelector("[data-row-header]")?.children ?? [])]
+      .map((c) => (c.textContent ?? "").trim());
+    const drawn = figuresOf(view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!);
+    // One label per line, so two branches renaming different ones conflict
+    // instead of merging silently.
+    const labels: [what: string, text: string][] = [
+      ["the caption under the value", drawn.attendance.caption],
+      ["the column heading", headings[2]],
+    ];
+    assert.deepEqual(
+      labels
+        .filter(([, text]) => !/in.room/i.test(text))
+        .map(([what, text]) => `${what} reads "${text}", which names either attendance figure`),
+      [],
+    );
+    // And the number under those labels is the in-room one — the same figure
+    // the service page's header quotes, not the door count beside it.
+    const att = ATT.find((a) => a.serviceKey === NINE.serviceKey)!;
+    const kpis = new Map(serviceKpis(NINE, att, null).map((k) => [k.key, k]));
+    assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "the row and the page quote different numbers");
+    assert.equal(drawn.attendance.value, att.peakOccupancy.toLocaleString());
+    assert.notEqual(drawn.attendance.value, att.peakAttendance.toLocaleString(), "the row is showing the door count");
   });
 });
