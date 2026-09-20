@@ -83,6 +83,12 @@ browser. The Chromium line appears there at every panel start.
   [The panel's browser](#the-panels-browser). The server's
   [`/log`](../ops/updates-and-logs.md) confirms it took:
   `[events] poll client <id> started`.
+- A clock or countdown reading wrong is not the panel's own clock showing
+  through: the page renders the server's time, not the panel's, and re-reads it
+  from every frame. The panel has no NTP and its clock drifts freely, which is
+  expected and does not reach the screen. `/log` says so once per page load when
+  the gap is more than a second — `[clock] this browser's clock is 7h 2m fast —
+  showing server time instead`.
 - The URL needs its scheme: `http://`, not `http:`.
 - The screen must be in **panel** mode. A console on a display-mode screen is
   refused by the server, and a wall layout on a panel draws buttons that do

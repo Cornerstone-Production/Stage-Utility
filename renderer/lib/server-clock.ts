@@ -279,7 +279,7 @@ export const serverClock = new ServerClock({
  * best-of filter would eventually reject a stale sample on its own, but only once
  * a fresher one is in the window beside it; at mount it can be the ONLY sample,
  * and would be adopted as the best of one. Hence the guard, and
- * server-clock.test.ts holds it.
+ * server-clock-hooks.test.tsx holds it.
  *
  * The mount value is compared by VALUE and stays excluded for the life of the
  * component, not just its first render: React remounts effects under StrictMode,
