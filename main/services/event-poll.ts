@@ -28,6 +28,18 @@ interface BufferedFrame extends PollFrame {
 }
 
 export interface PollResponse {
+  /**
+   * The server's clock as this answer was assembled, in epoch milliseconds.
+   *
+   * The client subtracts half its measured round trip from the gap between this
+   * and its own clock, which is the only way a polling client can correct for
+   * delivery delay: a frame can sit in the buffer below for the whole poll
+   * interval before anyone collects it, so the timestamp INSIDE a frame says
+   * when it was broadcast, not when it was sent. A panel reading the offset off
+   * a frame ran two seconds behind for exactly that reason. Stamped last, after
+   * the snapshot is built, because building one is the slowest thing here.
+   */
+  nowMs: number;
   /** The newest sequence number the client has now seen. It sends this back as
    *  `since` on its next poll. */
   seq: number;
@@ -148,9 +160,20 @@ export class EventPollHub {
     // channels had nothing cached for the other twenty-one and any later mount
     // sat blank until that channel happened to change. Frames after `since`
     // stay filtered; that is the per-broadcast firehose the filter exists for.
+
+    // One stamped exit, so the timestamp is always taken AFTER the work — a
+    // snapshot serializes the whole StageState, and stamping before it would
+    // hand the client a send time that is already milliseconds old.
+    const answer = (resync: boolean, frames: PollFrame[]): PollResponse => ({
+      nowMs: this.now(),
+      seq: this.lastSeq,
+      resync,
+      frames,
+    });
+
     const oldest = this.buffer.length > 0 ? this.buffer[0].seq : this.lastSeq + 1;
     if (since == null) {
-      return { seq: this.lastSeq, resync: false, frames: snapshot() };
+      return answer(false, snapshot());
     }
     // `returning` is the case the sequence numbers cannot see. record() is a
     // no-op with no clients attached, so while this cid was expired the counter
@@ -159,13 +182,13 @@ export class EventPollHub {
     // forever while the service ran on without it. The registry is the only
     // thing that knows a gap happened.
     if (returning || since + 1 < oldest || since > this.lastSeq) {
-      return { seq: this.lastSeq, resync: true, frames: snapshot() };
+      return answer(true, snapshot());
     }
     const frames: PollFrame[] = [];
     for (const f of this.buffer) {
       if (f.seq > since && wants(f.channel)) frames.push({ channel: f.channel, serialized: f.serialized });
     }
-    return { seq: this.lastSeq, resync: false, frames };
+    return answer(false, frames);
   }
 
   // ── client registry ────────────────────────────────────────────────────

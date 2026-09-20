@@ -111,8 +111,13 @@ nothing renders differently.
 Use it for an embedded browser that buffers or drops a long-lived response. The
 Ross Ultritouch's fallback browser is the case it was built for: it holds the
 event stream and releases a minute's worth of frames at once, so the panel shows
-a minute-old service and measures its clock offset a minute wrong. See
-[Ultritouch](integrations/ultritouch.md).
+a minute-old service. See [Ultritouch](integrations/ultritouch.md).
+
+Clocks and countdowns stay right on this transport. Each poll response carries
+the server's clock stamped as it is sent, and the page places the server against
+its own monotonic clock using half the round trip it just measured — so a frame
+that waited two seconds in the buffer costs nothing, and the page never reads
+the host's wall clock at all.
 
 The cost is one HTTP request per client every two seconds — about 43,000 a day
 against a stream's one connection — plus up to two seconds of latency on every

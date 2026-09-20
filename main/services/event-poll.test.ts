@@ -104,6 +104,46 @@ describe("event-poll buffer", () => {
 });
 
 describe("event-poll response", () => {
+  it("stamps the server's clock as the answer leaves, on every branch", () => {
+    // The client subtracts half its round trip from this to place the server's
+    // clock. It is the ONLY reading of that clock a polling client gets: a frame
+    // can sit in the buffer for the whole poll interval, so the timestamp inside
+    // a frame says when it was broadcast, not when it was sent. A branch that
+    // forgets the stamp leaves that panel on its own clock.
+    const c = clock();
+    const { hub } = hubWithClient({ now: c.now });
+    const snapshotAnswer = hub.buildPollResponse("c1", null, wantsAll, snapshot);
+    assert.equal(snapshotAnswer.nowMs, c.now(), "the snapshot branch was not stamped");
+
+    c.advance(5000);
+    for (let i = 0; i < 3; i++) hub.record("spl:metrics", { i });
+    const continuation = hub.buildPollResponse("c1", 1, wantsAll, snapshot);
+    assert.equal(continuation.resync, false);
+    assert.equal(continuation.nowMs, c.now(), "the continuation branch was not stamped");
+
+    c.advance(5000);
+    const resync = hub.buildPollResponse("c1", 999, wantsAll, snapshot);
+    assert.equal(resync.resync, true);
+    assert.equal(resync.nowMs, c.now(), "the resync branch was not stamped");
+  });
+
+  it("stamps AFTER the snapshot is built, not before", () => {
+    // Serializing a snapshot is the slowest thing in here — it carries the whole
+    // StageState — and a timestamp taken before it is already old by the time it
+    // is sent, which is the exact error this field exists to remove.
+    const c = clock();
+    const { hub } = hubWithClient({ now: c.now });
+    const r = hub.buildPollResponse("c1", null, wantsAll, () => {
+      c.advance(40); // the snapshot took 40ms to build
+      return snapshot();
+    });
+    assert.equal(
+      r.nowMs,
+      c.now(),
+      `stamped ${c.now() - r.nowMs}ms before the answer was ready — the client would read the server as that far behind`,
+    );
+  });
+
   it("answers a client with no position with the snapshot and no resync", () => {
     const { hub } = hubWithClient();
     const r = hub.buildPollResponse("c1", null, wantsAll, snapshot);

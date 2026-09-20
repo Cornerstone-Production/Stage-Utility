@@ -246,10 +246,17 @@ export class ServerClock {
   }
 }
 
-/** Monotonic milliseconds, or the wall clock where the platform has no
- *  `performance` (it is on every browser this runs on and on Node; the guard is
- *  for a test harness that stubs `globalThis` down to nothing). */
-function monotonicNow(): number {
+/**
+ * Monotonic milliseconds, or the wall clock where the platform has no
+ * `performance` (it is on every browser this runs on and on Node; the guard is
+ * for a test harness that stubs `globalThis` down to nothing).
+ *
+ * Exported because the poll transport measures its round trip with it. Both ends
+ * of that measurement and the clock it feeds have to read the SAME source — a
+ * round trip measured on the wall clock and applied to a monotonic offset is two
+ * different clocks in one subtraction.
+ */
+export function monotonicNow(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function"
     ? performance.now()
     : Date.now();

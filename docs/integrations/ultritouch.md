@@ -57,9 +57,7 @@ The Chromium browser could not be initialized
 and falls back to its own built-in browser. The page still renders — but that
 browser buffers a long-lived HTTP response and releases it in batches up to a
 minute later, which is exactly what the `/api/events` stream is. The panel then
-shows a minute-old service, and because it measures its clock offset from the
-timestamp on each frame as the frame arrives, every countdown on it is a minute
-out as well.
+shows a minute-old service.
 
 So a panel URL carries `?transport=poll`, which makes the page collect updates
 with a small request every two seconds instead. See

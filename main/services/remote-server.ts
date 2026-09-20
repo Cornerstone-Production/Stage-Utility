@@ -996,7 +996,7 @@ export class RemoteServer {
       // and JSON.stringify over the response object would parse-and-reserialize
       // the lot — including the full StageState with its base64 branding.
       const frames = result.frames.map((f) => `{"channel":${JSON.stringify(f.channel)},"data":${f.serialized}}`);
-      const body = `{"seq":${result.seq},"resync":${result.resync},"frames":[${frames.join(",")}]}`;
+      const body = `{"now":${result.nowMs},"seq":${result.seq},"resync":${result.resync},"frames":[${frames.join(",")}]}`;
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(body);
       return;

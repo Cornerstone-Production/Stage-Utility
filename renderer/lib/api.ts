@@ -6,6 +6,7 @@
 // The renderer is always served from the same origin as the HTTP server
 // (port 8788), so all paths here are relative.
 
+import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 
 type Params = Record<string, unknown> | undefined;
@@ -1460,6 +1461,9 @@ let pollFailures = 0;
 let pollInFlight = false;
 
 interface PollBody {
+  /** The server's clock as it assembled the answer. Absent from a server older
+   *  than the round-trip correction, which is why reading it is guarded. */
+  now?: number;
   seq: number;
   resync: boolean;
   frames: Array<{ channel: string; data: unknown }>;
@@ -1487,9 +1491,22 @@ async function pollOnce(): Promise<void> {
   pollInFlight = true;
   try {
     const since = pollSince === null ? "" : `&since=${pollSince}`;
+    const sentAt = monotonicNow();
     const res = await fetch(`/api/events/poll?cid=${encodeURIComponent(CLIENT_ID)}${since}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = (await res.json()) as PollBody;
+    // Read as text and stamp the arrival BEFORE parsing, then parse. `res.json()`
+    // would fold the parse into the measured round trip, and on a resync that
+    // parse is the whole StageState — half of it would be added to the clock
+    // offset as if it had been time on the wire.
+    const text = await res.text();
+    const rttMs = monotonicNow() - sentAt;
+    const body = JSON.parse(text) as PollBody;
+    // THE round-trip correction. This transport is the reason the clock needed
+    // one: a frame can sit in the server's buffer for the whole interval before
+    // anyone collects it, so the timestamp inside a frame is not a reading of
+    // the server's clock at all — `now` is, stamped as the answer was built.
+    // See renderer/lib/server-clock.ts.
+    if (typeof body.now === "number") serverClock.observe(body.now, rttMs);
     if (pollFailures > 0) {
       console.log(`[api] poll transport recovered after ${pollFailures} failed attempt(s)`);
       pollFailures = 0;
