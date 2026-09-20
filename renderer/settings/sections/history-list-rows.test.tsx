@@ -693,6 +693,16 @@ describe("a row's columns", () => {
       "Sunday 1:00",
       "the pill is not the plan title's own neighbour",
     );
+    // And CLIPPED with the title. SERVICE is the row's only flexible track, and
+    // between 640 and about 1,150px wide it resolves to ZERO — measured in
+    // Chrome: 238px at 1440, 78px at 1280, 0 from 1152 down. A pill does not
+    // shrink, so in a zero-width cell it paints over the figure in the next
+    // column instead of disappearing with the title beside it. jsdom lays out
+    // nothing, so what is asserted is the rule that clips it.
+    assert.ok(
+      /\boverflow-hidden\b/.test(pill.parentElement?.className ?? ""),
+      `the pill can paint outside the SERVICE column: ${pill.parentElement?.className}`,
+    );
     // The type has its line to itself and reads in full.
     assert.equal(
       (when.lastElementChild?.textContent ?? "").trim(),

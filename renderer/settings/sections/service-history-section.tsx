@@ -1577,7 +1577,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       to this RECORDING, and it is where the service page and the
                       arrival page both put it — after the title. */}
                   <span data-row-service className="flex min-w-0 flex-col">
-                    <span className="flex min-w-0 items-baseline gap-1.5">
+                    {/* `overflow-hidden`, because the pill does not shrink. The
+                        SERVICE track is the only flexible one, and between 640
+                        and about 1,150px wide it resolves to ZERO — the plan
+                        title has been clipped to nothing there since the row
+                        grid was built. A fixed-width pill in a zero-width cell
+                        paints over the figure in the next column instead of
+                        being clipped with the title beside it. */}
+                    <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
                       <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                       {live && <RecordingPill />}
                     </span>
