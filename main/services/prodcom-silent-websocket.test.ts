@@ -296,6 +296,38 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     assert.equal(svc.knownSilent, true, "a slow appliance clock hid a genuinely silent socket");
   });
 
+  it("does not apply a slow REST answer to the socket that replaced the one it was about", async (t) => {
+    // connectionEpoch is bumped only by teardown(), and an ordinary drop does
+    // not tear down — ws.onclose schedules a reconnect and the next socket opens
+    // without touching it. So the epoch check passes, `this.ws !== null` passes,
+    // and a verdict computed over socket A's window lands on socket B seconds
+    // into its life. In production the read has four seconds and the reconnect
+    // floor is one, so one slow transcript read during one drop is enough.
+    const { stub, svc } = await running(t, {
+      // Only the CHECK's reads are held, by its page size — priming stays fast,
+      // so the line below is spoken before the first check even fires. 1400 ms
+      // because the answer has to land AFTER the replacement socket is up, and
+      // service-window.ts floors every reconnect delay at one second: a shorter
+      // hold returns while `this.ws` is still null and no verdict is reachable,
+      // which is a test that proves nothing.
+      delayTranscriptMs: (url) => (url.searchParams.get("limit") === "20" ? 1400 : 0),
+    });
+    await speaks(stub, svc, spoken("said-while-the-first-socket-was-up"));
+
+    await eventually(() => silenceChecks(stub) >= 1, "the check to put a read in flight");
+    stub.wsDropAll();
+    await eventually(() => stub.wsUpgrades >= 2, "the replacement socket to open", 6000);
+    await sleep(1200); // past the held answer
+
+    assert.equal(
+      subscribeFrames(stub),
+      stub.wsUpgrades,
+      "a verdict about a socket that had already gone was applied to its replacement, " +
+        "which stopped sending the frame ProdCom's own specification defines",
+    );
+    assert.equal(svc.knownSilent, false, "a box was condemned on a window that was not its socket's");
+  });
+
   it("finds speech sitting behind a full page of typed lines", async (t) => {
     // `GET /api/v1/transcript` is ascending from the OLDEST row, so the check's
     // first page is the first twenty entries after the socket opened — not the

@@ -986,11 +986,24 @@ export class ProdComService extends ConnectionLifecycle {
     this.silenceTimer = null;
   }
 
-  /** Whether the check still has a question to ask: the WebSocket is the live
-   *  transport, it is still this service's socket, and it has delivered
-   *  nothing. Re-read after every await — a frame can land while REST is out. */
-  private get silenceCheckStillOpen(): boolean {
-    return this.running && this.onWebSocket && this.ws !== null && !this.wsDelivered;
+  /**
+   * Whether the check still has a question to ask ABOUT `ws`: the WebSocket is
+   * the live transport, `ws` is still the socket this service holds, and it has
+   * delivered nothing. Re-read after every await — a frame can land, or the
+   * socket can be replaced, while REST is out.
+   *
+   * Identity, not `this.ws !== null`, and the difference is the whole point.
+   * `connectionEpoch` is bumped only by teardown(), and an ordinary drop does
+   * not tear down — ws.onclose calls scheduleReconnect(), which opens the next
+   * socket without touching the epoch. So a REST answer about socket A, arriving
+   * after A dropped and B opened, passed a null check and a matching epoch and
+   * was applied to B seconds into its life: a verdict computed over a window
+   * that was not B's, condemning a box that may be working. In production the
+   * read has four seconds to run and the reconnect base is one, so it takes one
+   * slow transcript read coinciding with one drop.
+   */
+  private silenceCheckStillOpen(ws: WebSocket | null): boolean {
+    return this.running && this.onWebSocket && ws !== null && this.ws === ws && !this.wsDelivered;
   }
 
   /**
@@ -1121,7 +1134,10 @@ export class ProdComService extends ConnectionLifecycle {
   private async runSilenceCheck(): Promise<void> {
     const host = this.host;
     const port = this.port;
-    if (!this.silenceCheckStillOpen || !host || !port) return;
+    // The socket this verdict will be about, captured before any await so the
+    // re-checks below can tell it apart from whatever replaced it.
+    const ws = this.ws;
+    if (!this.silenceCheckStillOpen(ws) || !host || !port) return;
     const seconds = Math.round(this.wsSilenceCheckMs / 1000);
 
     // Probation. This box has already been shown to accept a socket and carry
@@ -1154,7 +1170,7 @@ export class ProdComService extends ConnectionLifecycle {
     // box this service has already let go.
     const epoch = this.connectionEpoch;
     const answer = await this.spokenLinesBeyond(host, port, baseline);
-    if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen) return;
+    if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
 
     if (!answer.ok) {
       // "No lines" and "could not ask" are indistinguishable from here, and
