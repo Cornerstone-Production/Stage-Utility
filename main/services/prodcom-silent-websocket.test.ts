@@ -1,0 +1,540 @@
+// A WebSocket that opens, heartbeats, and delivers no transcript at all.
+//
+// The incident (18–20 Sep 2026): prod's captions were empty for two days while
+// the ProdCom integration card read connected. The socket opened seven times,
+// got `{"type":"welcome"}` listing the transcript stream, sent the documented
+// `{"type":"subscribe","events":["transcript"]}`, and received not one transcript
+// frame — `handleWsFrame` logs the envelope once per connection and warns once on
+// an unrecognised frame, and NEITHER line is anywhere in prod's log. Meanwhile
+// `GET /api/v1/transcript` had the lines all along.
+//
+// Nothing noticed, because every liveness check in the service treats ANY frame
+// as proof of life and ProdCom's heartbeat kept arriving. So the SSE fallback —
+// which had carried captions for months — never engaged: from the client's view
+// nothing had dropped.
+//
+// Everything here runs the real client against fixtures/prodcom-stub.ts: real
+// sockets, real RFC 6455 frames, a real refused/accepted handshake, a real REST
+// API. Nothing on the network is contacted. The three intervals are overridden
+// through the service's own seams rather than with t.mock.timers, because faking
+// setTimeout underneath undici's WebSocket breaks the client itself — the same
+// reason prodcom-websocket.test.ts overrides its constants.
+//
+// NOT COVERED HERE, and deliberately: how the two new card messages LOOK. What is
+// asserted below is that the service reports them, which is the half that was
+// wrong — the row said `Streaming from host:port` over a transport carrying
+// nothing. What happens to them afterwards is CSS: ConnectionBadge caps the
+// message at `max-w-[14rem] sm:max-w-md` with `truncate` and puts the full text
+// in a hover tooltip, and both of those are invisible to jsdom, which loads no
+// stylesheet and measures every element as zero. An assertion about either would
+// pass whatever the stylesheet said. `Fallback stream — the websocket carried no
+// transcript` is 51 characters and will ellipsis on a narrow card; it leads with
+// the word that matters for that reason.
+
+import assert from "node:assert/strict";
+import { describe, it, type TestContext } from "node:test";
+
+import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
+import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
+import type { ConnState } from "./integration-base.js";
+
+const NOW = Date.parse("2026-09-20T13:22:28Z");
+
+/** The card message the service reports while captions are on the fallback
+ *  because the socket carried nothing. Written out rather than imported, so a
+ *  change to the string is a change to this file too. */
+const FALLBACK_CARD_MESSAGE = "Fallback stream — the websocket carried no transcript";
+/** And what it says for the minute a known-silent box's socket is re-tested. */
+const RETESTING_CARD_MESSAGE = "Re-testing the websocket that carried no transcript";
+
+class TestProdCom extends ProdComService {
+  public readonly reports: { state: ConnState; message: string | null }[] = [];
+
+  constructor() {
+    super();
+    this.setConnectionListener((state, message) => this.reports.push({ state, message }));
+  }
+
+  /**
+   * A fixed wall clock that nevertheless MOVES, in real time from the moment
+   * this service was constructed.
+   *
+   * Fixed so `?since=` and the four-hour horizon are deterministic against the
+   * stub's fixtures. Moving because OutageLog measures its settle window with
+   * this clock, and a frozen one makes every failure zero milliseconds old — so
+   * nothing ever settles, no recovery is ever reported, and the guard below on
+   * "a doomed re-test was announced as a recovery" could not go red either way.
+   */
+  private readonly startedAt = Date.now();
+  protected override now(): number {
+    return NOW + (Date.now() - this.startedAt);
+  }
+  /** Long: no case here is about the heartbeat, and the stub is deliberately
+   *  silent, so a short one would reconnect underneath every assertion. */
+  protected override get heartbeatTimeoutMs(): number {
+    return 30_000;
+  }
+  protected override get reconnectMs(): number {
+    return 25;
+  }
+  /** The real sixty seconds, in milliseconds. */
+  protected override get wsSilenceCheckMs(): number {
+    return 150;
+  }
+  /** The real five minutes. */
+  protected override get wsRetryIntervalMs(): number {
+    return 60;
+  }
+  /** The real half hour — 25x the narrow one, as 30 min is 6x 5 min, so
+   *  "the widened interval did not fire" is a statement about the widening. */
+  protected override get wsSilentRetryIntervalMs(): number {
+    return 1_500;
+  }
+  /**
+   * The outage log's real two-minute settle window, scaled to sit BELOW the
+   * re-test interval above exactly as two minutes sits below half an hour.
+   *
+   * Left at its default it would swallow the whole test: every failure and
+   * success here happens inside two minutes of the last, so `ok()` would never
+   * report a recovery and "the re-test was announced as a recovery" could not
+   * be observed either way.
+   */
+  protected override get wsOutageSettleMs(): number {
+    return 200;
+  }
+
+  public get onWebSocketNow(): boolean {
+    return this.onWebSocketTransport;
+  }
+  public get knownSilent(): boolean {
+    return this.boxKnownSilent;
+  }
+  public get retryArmed(): boolean {
+    return this.wsRetryArmed;
+  }
+  public settled(): Promise<void> {
+    return this.priming;
+  }
+  public texts(): string[] {
+    return this.getBuffer().map((l) => l.text);
+  }
+}
+
+const CHANNELS = [{ id: "CH-A", name: "Lead TB", color: "#00F900" }];
+
+/** A spoken line, dated AFTER the socket opens — which is the whole question the
+ *  check asks REST. */
+const spoken = (id: string, offsetMs = 30_000): StubEntry => ({
+  id,
+  channelId: "CH-A",
+  channelName: "Lead TB",
+  text: id,
+  source: "audio",
+  inProgress: false,
+  date: new Date(NOW + offsetMs).toISOString(),
+});
+
+/** A line that is NOT somebody speaking. An operator typing into a comms channel
+ *  is not evidence that the socket missed a caption. */
+const typed = (id: string, offsetMs = 30_000): StubEntry => ({ ...spoken(id, offsetMs), source: "typed" });
+
+async function running(t: TestContext, options: StubOptions = {}): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
+  const stub = await startProdComStub({ channels: CHANNELS, ...options });
+  const svc = new TestProdCom();
+  t.after(async () => {
+    svc.stop();
+    await stub.close();
+  });
+  svc.configure("127.0.0.1", stub.port, null);
+  return { stub, svc };
+}
+
+async function eventually(ready: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ready()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Run `fn` with console.log/warn captured. console.debug is left alone: it is
+ *  the level log-buffer does not capture, so nothing on it reaches `/log`. */
+async function withLogs(fn: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const log = console.log;
+  const warn = console.warn;
+  console.log = (...a: unknown[]) => lines.push(String(a[0]));
+  console.warn = (...a: unknown[]) => lines.push(String(a[0]));
+  try {
+    await fn();
+  } finally {
+    console.log = log;
+    console.warn = warn;
+  }
+  return lines;
+}
+
+/** Real client upgrades only. The refused-upgrade probe hits the same path (see
+ *  prodcom-upgrade-probe.test.ts) and counting it would make one refusal look
+ *  like two attempts. */
+const wsAttempts = (stub: ProdComStub): number =>
+  stub.requests.filter((r) => r.url === "/api/v1/ws" && r.headers["user-agent"] !== PROBE_USER_AGENT).length;
+
+/**
+ * Reads of `GET /api/v1/transcript` made BY THE SILENCE CHECK.
+ *
+ * Matched on the check's own page size, which backfill cannot produce: backfill
+ * asks for the spec's documented maximum of 200 and the check asks for 20. A
+ * plain count of transcript reads would be satisfied by the backfill every
+ * transport does on connect, and every assertion here about what the check did
+ * or did not cost would then be true whether or not the check ran at all.
+ */
+const silenceChecks = (stub: ProdComStub): number =>
+  stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && r.url.includes("limit=20&")).length;
+
+const subscribeFrames = (stub: ProdComStub): number =>
+  stub.wsReceived.filter((f) => f.includes('"subscribe"')).length;
+
+/** What the integration card has been told, in order, for the states that claim
+ *  captions are flowing. Position in this list is not asserted beyond the last
+ *  entry: report() is driven by a transport coming up, so a slow machine can put
+ *  one more or one fewer transition in the middle. */
+const cardMessages = (svc: TestProdCom): (string | null)[] =>
+  svc.reports.filter((r) => r.state === "connected").map((r) => r.message);
+
+describe("a websocket that delivers nothing is not a healthy connection", () => {
+  it("asks REST whether anything was missed, and does nothing when nobody has spoken", async (t) => {
+    // The quiet-room case, and the one that must not act: the socket has
+    // delivered nothing because there is nothing to deliver. ProdCom's history
+    // holds only a line from before the socket opened.
+    const { stub, svc } = await running(t, { entries: [spoken("said-before-we-connected", -120_000)] });
+    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    await svc.settled();
+
+    // Three check intervals, with heartbeats throughout, exactly as a quiet
+    // weeknight looks.
+    for (let i = 0; i < 6; i++) {
+      stub.wsPing();
+      await sleep(80);
+    }
+
+    assert.ok(
+      silenceChecks(stub) > 0,
+      "the check never asked REST anything — a socket delivering nothing was simply trusted",
+    );
+    assert.equal(svc.onWebSocketNow, true, "a socket with nothing to deliver was torn down anyway");
+    assert.equal(stub.sseOpens, 0, "the fallback was opened over a quiet room");
+    assert.equal(svc.knownSilent, false, "a quiet room was recorded as a broken box");
+  });
+
+  it("does not count a typed line as somebody speaking", async (t) => {
+    // `typed` and `automation` entries never become captions, so a socket that
+    // did not deliver one has missed nothing. Counting them would tear down a
+    // working transport every time an operator typed into a comms channel.
+    const { stub, svc } = await running(t, { entries: [typed("cam-2-go-wide")] });
+    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    await svc.settled();
+
+    await sleep(500);
+    assert.equal(svc.onWebSocketNow, true, "a typed comms message was treated as a missed caption");
+    assert.equal(stub.sseOpens, 0, "the fallback was opened because an operator typed something");
+  });
+
+  it("finds speech sitting behind a full page of typed lines", async (t) => {
+    // `GET /api/v1/transcript` is ascending from the OLDEST row, so the check's
+    // first page is the first twenty entries after the socket opened — not the
+    // most recent. `since` is the socket's open time and never advances, so a
+    // run of typed entries longer than a page at the head of that window would
+    // pin the check on "nobody spoke" for the life of the connection, however
+    // much was said afterwards.
+    const entries = [
+      ...Array.from({ length: 22 }, (_, i) => typed(`typed-${i}`, 10_000 + i)),
+      spoken("said-behind-the-typed-run", 40_000),
+    ];
+    const { stub, svc } = await running(t, { entries });
+    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    await svc.settled();
+
+    await eventually(() => stub.sseOpens >= 1, "the fallback to open once the speech is found", 6000);
+    assert.equal(svc.knownSilent, true, "the speech behind the typed run was never found");
+    assert.ok(
+      silenceChecks(stub) > 2,
+      `the check read only one page per attempt, so it can never see past the typed run ` +
+        `(${silenceChecks(stub)} reads)`,
+    );
+  });
+
+  it("reopens the socket without the subscribe frame when REST has lines it never delivered", async (t) => {
+    // The prod failure, and the hypothesis the fix tests first: ProdCom's
+    // `subscribe` acts as a filter and the filter is broken, so asking for
+    // ["transcript"] yields nothing while sending nothing yields everything.
+    let stub: ProdComStub | null = null;
+    let svc: TestProdCom | null = null;
+    const lines = await withLogs(async () => {
+      const c = await running(t, { entries: [spoken("said-while-the-socket-was-quiet")], subscribeFilterBroken: true });
+      stub = c.stub;
+      svc = c.svc;
+      await eventually(() => c.svc.onWebSocketNow, "the websocket to become the live transport");
+      await c.svc.settled();
+      assert.equal(subscribeFrames(c.stub), 1, "the first attempt must send the documented subscribe frame");
+
+      // The vendor bug: this goes to nobody, because the only open socket asked
+      // for the transcript stream.
+      c.stub.wsTranscript(spoken("swallowed-by-the-filter"));
+      await eventually(() => stub!.wsUpgrades >= 2, "the socket to be reopened");
+      await c.svc.settled();
+      // The reopened socket sent no subscribe frame, so the stub delivers to it.
+      c.stub.wsTranscript(spoken("arrived-with-no-filter"));
+      await eventually(() => c.svc.texts().includes("arrived-with-no-filter"), "the entry to land on the buffer");
+    });
+
+    assert.equal(subscribeFrames(stub!), 1, "the reopened socket sent the subscribe frame again");
+    assert.equal(svc!.onWebSocketNow, true, "the working socket was abandoned");
+    assert.equal(stub!.sseOpens, 0, "the fallback was opened without trying the socket unfiltered first");
+    assert.ok(
+      lines.some((l) => l.startsWith("[prodcom] websocket delivered no transcript in ")),
+      `expected the silent-socket line naming the missed lines, got: ${JSON.stringify(lines)}`,
+    );
+    assert.ok(
+      lines.some((l) =>
+        l.startsWith("[prodcom] the websocket delivers the transcript with no subscribe frame sent"),
+      ),
+      `expected the line naming which subscription worked, got: ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it("falls back to SSE when the socket is silent with and without the subscribe frame, and the card says so", async (t) => {
+    // The box accepts every upgrade and carries nothing on any of them. After
+    // both subscription modes have been tried, captions belong on the transport
+    // that works — and the integration row must stop claiming a healthy socket.
+    let stub: ProdComStub | null = null;
+    let svc: TestProdCom | null = null;
+    const lines = await withLogs(async () => {
+      const c = await running(t, { entries: [spoken("nobody-ever-saw-this-over-the-socket")] });
+      stub = c.stub;
+      svc = c.svc;
+      await eventually(() => c.svc.onWebSocketNow, "the websocket to become the live transport");
+      await eventually(() => c.stub.sseOpens >= 1, "the fallback to open", 6000);
+      await c.svc.settled();
+    });
+
+    assert.equal(svc!.onWebSocketNow, false, "the live transport is still the silent socket");
+    assert.equal(svc!.knownSilent, true, "the box was not recorded as one whose socket carries nothing");
+    assert.ok(
+      lines.some((l) =>
+        l.startsWith("[prodcom] websocket delivered no transcript with or without the subscribe frame"),
+      ),
+      `expected the fallback decision line, got: ${JSON.stringify(lines)}`,
+    );
+    // Waited for, not asserted on the spot: sseOpens above counts the SERVER
+    // accepting the stream, and the card is told when the CLIENT sees the 200.
+    await eventually(
+      () => cardMessages(svc!).at(-1) === FALLBACK_CARD_MESSAGE,
+      `the integration card to stop reporting a plain healthy stream while the socket is the reason ` +
+        `captions moved — it says ${JSON.stringify(cardMessages(svc!).at(-1))}`,
+    );
+    // The socket is SHUT, not just dropped on the floor. This is the one path
+    // that reaches fallBackToSse from a socket that actually opened; the other
+    // two come from one that never did, where nulling the reference and closing
+    // it were the same thing. Nulling alone leaves an open connection to the box
+    // for the life of the process, one per re-test, every half hour.
+    await eventually(() => stub!.openWebSockets === 0, "the silent socket to be closed");
+
+    // The fallback is a real path, not a placeholder: captions arrive on it.
+    stub!.sseSend(spoken("spoken-on-the-fallback"));
+    await eventually(() => svc!.texts().includes("spoken-on-the-fallback"), "an SSE event to land");
+  });
+
+  it("leaves a working socket alone, and never spends a REST call on it", async (t) => {
+    // The other half of the guard. A socket that has delivered is proven: the
+    // check is disarmed for that connection and asks nothing, however long it
+    // then sits quiet.
+    const { stub, svc } = await running(t, { entries: [spoken("in-prodcoms-history")] });
+    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    await svc.settled();
+
+    stub.wsTranscript(spoken("delivered-over-the-socket"));
+    await eventually(() => svc.texts().includes("delivered-over-the-socket"), "the entry to land");
+
+    for (let i = 0; i < 8; i++) {
+      stub.wsPing();
+      await sleep(60);
+    }
+    assert.equal(
+      silenceChecks(stub),
+      0,
+      "a socket that has already delivered was still being checked against REST",
+    );
+    assert.equal(svc.onWebSocketNow, true, "a proven socket was torn down");
+    assert.equal(stub.sseOpens, 0, "a proven socket fell back to SSE");
+  });
+
+  it("leaves the socket alone when REST cannot be asked, and says so", async (t) => {
+    // "No lines" and "could not ask" are indistinguishable from the client, and
+    // acting on the second is how a transport that is working gets torn down.
+    let stub: ProdComStub | null = null;
+    let svc: TestProdCom | null = null;
+    const lines = await withLogs(async () => {
+      const c = await running(t, { failTranscript: true });
+      stub = c.stub;
+      svc = c.svc;
+      await eventually(() => c.svc.onWebSocketNow, "the websocket to become the live transport");
+      await c.svc.settled();
+      await eventually(() => silenceChecks(c.stub) >= 1, "the check to ask REST");
+      await sleep(200);
+    });
+
+    assert.equal(svc!.onWebSocketNow, true, "a REST failure tore down a socket nothing was known about");
+    assert.equal(stub!.sseOpens, 0, "a REST failure opened the fallback");
+    assert.equal(svc!.knownSilent, false, "a REST failure was recorded as a verdict about the box");
+    assert.ok(
+      lines.some((l) => l.startsWith("[prodcom] could not check whether the websocket is missing transcript lines")),
+      `expected the could-not-ask line, got: ${JSON.stringify(lines)}`,
+    );
+  });
+});
+
+describe("a box whose socket carries nothing stops being preferred", () => {
+  /** Drive a box to the point where both subscription modes have been tried and
+   *  captions are on the fallback. */
+  async function silenced(t: TestContext): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
+    const { stub, svc } = await running(t, { entries: [spoken("never-delivered-over-a-socket")] });
+    await eventually(() => svc.knownSilent && !svc.onWebSocketNow, "the box to be known silent", 6000);
+    await eventually(() => stub.sseOpens >= 1, "the fallback to open");
+    // The CLIENT's signal, not the stub's: sseOpens counts the server accepting
+    // the stream, and the retry is armed when the client sees the 200, a tick or
+    // two later. Waiting on the server's side and then asserting on the client's
+    // is a race that only shows up under load.
+    await eventually(() => svc.retryArmed, "the widened retry to be armed on the fallback");
+    await svc.settled();
+    return { stub, svc };
+  }
+
+  it("widens the retry so captions are not dropped every few minutes to re-test it", async (t) => {
+    // The trap in the naive fix. The five-minute retry opens a socket BESIDE the
+    // fallback and its onopen destroys the SSE stream — so a box that accepts a
+    // socket and carries nothing produces a caption gap every five minutes, for
+    // ever, which is worse than steadily staying on the fallback.
+    const { stub } = await silenced(t);
+    const attempts = wsAttempts(stub);
+
+    // Eight narrow intervals (60 ms) — the old timer would have made several
+    // attempts and several caption gaps in this window. That SOMETHING still
+    // re-tests it is the next case, which waits for the re-test itself.
+    await sleep(500);
+    assert.equal(
+      wsAttempts(stub),
+      attempts,
+      "the narrow retry is still running against a box already known to carry nothing on its socket",
+    );
+    assert.equal(stub.sseOpens, 1, "the fallback was torn down to re-test a socket already known to be silent");
+  });
+
+  it("widens the reconnect counter too, so a flapping fallback does not re-test it every few seconds", async (t) => {
+    // There are TWO rules that come back to the WebSocket — the clock above and
+    // a count of SSE reconnects — and widening one while leaving the other is
+    // how the copies drift. A box that is dropping its fallback reconnects every
+    // few seconds, so the counter alone would re-open a known-silent socket, and
+    // cost a caption gap, several times a minute.
+    const stub = await startProdComStub({
+      channels: CHANNELS,
+      entries: [spoken("never-delivered-over-a-socket")],
+      // The fallback opens and ends at once, so reconnects are what this box
+      // does — which is exactly when the counter fires.
+      sseCloseImmediately: true,
+    });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+
+    await eventually(() => svc.knownSilent, "the box to be known silent", 6000);
+    const attempts = wsAttempts(stub);
+    // Five: past the every-third rule, short of the widened every-twentieth one.
+    // It takes about five seconds, because service-window.ts floors every
+    // reconnect delay at one second and the reconnectMs seam cannot go under it.
+    await eventually(() => stub.sseOpens >= 5, "the fallback to reconnect several times", 12_000);
+
+    assert.equal(
+      wsAttempts(stub),
+      attempts,
+      "the every-third-reconnect rule is still re-opening a socket already known to carry nothing",
+    );
+  });
+
+  it("re-tests it eventually, and drops it again without a REST call when it is still silent", async (t) => {
+    // Widened, not removed: useWebSocket is only ever turned back on by the two
+    // retry rules, so dropping them would leave a ProdCom fixed in place
+    // undiscovered until this server restarts. The re-test is on probation —
+    // the question has already been answered for this box, so no REST call is
+    // spent asking it again.
+    const { stub, svc } = await silenced(t);
+    const checksBefore = silenceChecks(stub);
+
+    const lines = await withLogs(async () => {
+      await eventually(() => svc.onWebSocketNow, "the widened retry to re-test the socket", 6000);
+      await eventually(() => !svc.onWebSocketNow, "the re-tested socket to be dropped again", 6000);
+    });
+    await eventually(() => stub.sseOpens >= 2, "the fallback to reopen");
+
+    assert.ok(
+      lines.some((l) => l.startsWith("[prodcom] the websocket has carried no transcript in ")),
+      `expected the probation line, got: ${JSON.stringify(lines)}`,
+    );
+    // A socket that opens on a box known to carry nothing has not recovered.
+    // Without this, every re-test prints "websocket is back" and then a fallback
+    // line, half an hour apart, for ever — the outage log's two-minute settle
+    // window cannot see a flap that slow.
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[prodcom] websocket is back")),
+      [],
+      "a re-test that was dropped a minute later was announced as a recovery",
+    );
+    assert.ok(
+      cardMessages(svc).includes(RETESTING_CARD_MESSAGE),
+      `the card claimed a healthy stream for the minute the known-silent socket was being re-tested: ` +
+        `${JSON.stringify(cardMessages(svc))}`,
+    );
+    assert.equal(
+      silenceChecks(stub),
+      checksBefore,
+      "the probation re-test spent a REST call re-asking a question already answered for this box",
+    );
+  });
+
+  it("keeps the socket the moment a re-test delivers", async (t) => {
+    // ProdCom fixed, upgraded or restarted. Nothing about the verdict is
+    // permanent: one transcript entry over a socket clears it.
+    const { stub, svc } = await silenced(t);
+    const lines = await withLogs(async () => {
+      await eventually(() => svc.onWebSocketNow, "the widened retry to re-test the socket", 6000);
+      stub.wsTranscript(spoken("the-box-was-fixed"));
+      await eventually(() => svc.texts().includes("the-box-was-fixed"), "the entry to land");
+      await sleep(300); // past the probation interval the previous case fails at
+    });
+
+    assert.equal(svc.onWebSocketNow, true, "a socket that delivered was dropped anyway");
+    assert.equal(svc.knownSilent, false, "the box is still recorded as silent after its socket delivered");
+    assert.ok(
+      lines.some((l) => l.startsWith("[prodcom] the websocket is carrying the transcript again")),
+      `expected the recovery line, got: ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it("forgets everything it learned when the integration is reconfigured", async (t) => {
+    // A different box, a different key, or an operator who has just upgraded
+    // ProdCom is on the other end now. configure() runs on enable too, so this
+    // is also what a disable/enable does.
+    const { stub, svc } = await silenced(t);
+    svc.configure("127.0.0.1", stub.port, null);
+
+    assert.equal(svc.knownSilent, false, "a verdict about the old box survived a reconfigure");
+    await eventually(() => svc.onWebSocketNow, "the fresh attempt to open a socket");
+    await eventually(() => subscribeFrames(stub) >= 2, "the fresh attempt to send the documented subscribe frame");
+  });
+});

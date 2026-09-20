@@ -17,6 +17,12 @@
 //   anything is happening. The transcript SSE stream, by contrast, sends nothing
 //   at all — 25 minutes held open produced zero bytes.
 //
+//   A socket that sends the documented `{"type":"subscribe","events":
+//   ["transcript"]}` frame can then receive no transcript entry at all, while
+//   REST goes on returning the same lines — seven connections over two days on
+//   prod, not one transcript frame. Modelled by `subscribeFilterBroken`, and it
+//   is what makes the silence guard fail when the client trusts the heartbeat.
+//
 // The WebSocket framing is hand-rolled (server frames unmasked, client frames
 // masked, per RFC 6455) because Node ships a WebSocket client but no server and
 // this repo has no `ws` dependency. Only what a test needs is implemented: text
@@ -105,6 +111,18 @@ export type StubOptions = {
   /** Open the SSE stream and immediately end it, so the client keeps
    *  reconnecting — a box whose transcript stream will not stay up. */
   sseCloseImmediately?: boolean;
+  /**
+   * Deliver transcript frames only to sockets that have NOT sent
+   * `{"type":"subscribe",…}`.
+   *
+   * The shape of the prod failure on ProdCom 2.3.2: the upgrade is accepted, the
+   * welcome frame lists the transcript stream, heartbeats arrive every 30 s, and
+   * a socket that asked for `["transcript"]` — which is what ProdCom's own
+   * OpenAPI document tells a client to send — then receives no transcript entry
+   * ever. REST has the same lines throughout. Off by default, because the
+   * default stub is a box whose subscribe works.
+   */
+  subscribeFilterBroken?: boolean;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -117,6 +135,9 @@ export type ProdComStub = {
   wsReceived: string[];
   /** How many WebSocket upgrades have been accepted. */
   wsUpgrades: number;
+  /** How many of those sockets are still open. A client that stops reading a
+   *  socket without closing it leaves this above zero. */
+  openWebSockets: number;
   /** How many SSE streams have been opened. */
   sseOpens: number;
   /** Start or stop failing the keyword endpoints AFTER the stub is running, so a
@@ -200,6 +221,26 @@ function decodeClientFrames(buf: Buffer): { texts: string[]; closed: boolean; re
 /** `/api/v1/channels/{id}/keywords`, capturing the id. */
 const CHANNEL_KEYWORDS = /^\/api\/v1\/channels\/([^/]+)\/keywords$/;
 
+/**
+ * The `type` of a client text frame, or null when the frame is not JSON with a
+ * string `type`.
+ *
+ * The failure is RETURNED, not swallowed: a frame this cannot read is simply not
+ * a subscribe, which is the only question the one caller asks, and there is no
+ * further caller to hand it to.
+ */
+function clientFrameType(text: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const type = (parsed as { type?: unknown }).type;
+  return typeof type === "string" ? type : null;
+}
+
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
   const entries = options.entries ?? [];
   const channels = options.channels ?? [];
@@ -207,6 +248,8 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
   const requests: StubRequest[] = [];
   const wsReceived: string[] = [];
   const sockets = new Set<Duplex>();
+  /** Sockets that have sent a subscribe frame — see `subscribeFilterBroken`. */
+  const subscribed = new Set<Duplex>();
   const sseStreams = new Set<http.ServerResponse>();
   const open = new Set<import("node:net").Socket>();
 
@@ -366,15 +409,25 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       pending = Buffer.concat([pending, chunk]);
       const { texts, closed, rest } = decodeClientFrames(pending);
       pending = rest;
-      for (const t of texts) wsReceived.push(t);
+      for (const t of texts) {
+        wsReceived.push(t);
+        if (clientFrameType(t) === "subscribe") subscribed.add(socket);
+      }
       if (texts.length) notify();
       if (closed) {
         sockets.delete(socket);
+        subscribed.delete(socket);
         socket.destroy();
       }
     });
-    socket.on("close", () => sockets.delete(socket));
-    socket.on("error", () => sockets.delete(socket));
+    socket.on("close", () => {
+      sockets.delete(socket);
+      subscribed.delete(socket);
+    });
+    socket.on("error", () => {
+      sockets.delete(socket);
+      subscribed.delete(socket);
+    });
 
     // ProdCom sends this immediately on upgrade, before any subscribe arrives.
     socket.write(
@@ -420,6 +473,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     get wsUpgrades() {
       return state.wsUpgrades;
     },
+    get openWebSockets() {
+      return sockets.size;
+    },
     get sseOpens() {
       return state.sseOpens;
     },
@@ -431,14 +487,25 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       state.refuseWebSocket = refuse;
     },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
-    wsTranscript: (entry, wrap = "data") =>
-      wsSend(JSON.stringify(wrap === "top" ? { type: "transcript", ...entry } : { type: "transcript", data: entry })),
+    wsTranscript: (entry, wrap = "data") => {
+      const text = JSON.stringify(
+        wrap === "top" ? { type: "transcript", ...entry } : { type: "transcript", data: entry },
+      );
+      const frame = encodeTextFrame(text);
+      for (const s of sockets) {
+        // The vendor bug: a socket that ASKED for the transcript stream is the
+        // one that does not get it.
+        if (options.subscribeFilterBroken && subscribed.has(s)) continue;
+        s.write(frame);
+      }
+    },
     sseSend: (entry) => {
       for (const s of sseStreams) s.write(`data: ${JSON.stringify(entry)}\n\n`);
     },
     wsDropAll: () => {
       for (const s of sockets) s.destroy();
       sockets.clear();
+      subscribed.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),
     waitForSse: (n, timeoutMs = 4000) => until(() => state.sseOpens >= n, `${n} SSE stream(s)`, timeoutMs),

@@ -25,8 +25,11 @@ retried in about four seconds.
 ProdCom sends a `{"type":"ping"}` heartbeat over that socket every 30 seconds
 whether or not anyone is speaking, and the app answers it. Three missed
 heartbeats (90 s of total silence) means the box is gone, not that the room is
-quiet, so the connection is dropped and reopened. This is the only liveness
-check the WebSocket path needs.
+quiet, so the connection is dropped and reopened.
+
+A heartbeat proves the box is alive; it does not prove the subscription is
+delivering. See [A socket that carries nothing](#a-socket-that-carries-nothing)
+for the check that covers the difference.
 
 On (re)connect the app primes itself from REST, in this order:
 
@@ -63,6 +66,37 @@ display picks its own colour.
 If a key is required, it is sent as `Authorization: Bearer <key>` — the one
 security scheme the specification declares.
 
+### A socket that carries nothing
+
+A ProdCom build can accept the upgrade, list the transcript stream in its welcome
+frame, answer every heartbeat, and then deliver no transcript entry at all — while
+`GET /api/v1/transcript` goes on returning the same lines. Nothing about the
+connection looks wrong from the client's side, so without a specific check the
+captions display simply stays empty and the integration card reads connected.
+
+While the WebSocket is the live transport and has delivered **no** transcript
+entry, the app asks REST one question at the one-minute mark: are there entries
+whose `source` is `audio`, dated after this socket opened? Typed and automation
+entries do not count — they never become captions, so a socket that did not
+deliver one has missed nothing.
+
+- **Nothing spoken** — nothing was missed. The question is asked again a minute
+  later.
+- **REST could not be asked** — nothing happens, and the log says so. "No lines"
+  and "could not ask" are not the same answer, and acting on the second is how a
+  transport that is working gets torn down.
+- **Lines the socket never delivered** — the socket is reopened **without** the
+  `subscribe` frame, on the theory that ProdCom's own subscription filter is what
+  swallowed them. If that socket then delivers, captions stay on the WebSocket
+  and the log records which subscription worked.
+- **Silent both ways** — captions move to the SSE fallback, and the integration
+  card says `Fallback stream — the websocket carried no transcript` rather than
+  claiming a healthy socket.
+
+The first transcript entry over a socket ends the check for that connection: a
+socket that is carrying the transcript is never asked again and costs no further
+REST calls.
+
 ### The SSE fallback
 
 If the WebSocket will not come up, the app falls back to the older
@@ -79,6 +113,22 @@ does not, the fallback is untouched and nothing else happens — no reconnect, n
 re-read of channels or keywords, no backfill, and no second refusal diagnosis.
 So a box that genuinely has no WebSocket costs one refused upgrade every five
 minutes and nothing more.
+
+Both rules widen — to every 20 reconnects and every 30 minutes — once a box has
+been shown to [accept a socket and carry nothing on
+it](#a-socket-that-carries-nothing). A refused upgrade is free, by the paragraph
+above; a socket that *opens* is not, because opening it drops the fallback and it
+is then given a minute to prove itself. On such a box the re-test is on
+probation: it must deliver a transcript entry within that minute or captions go
+straight back to the fallback, with no REST call, because the question has
+already been answered for this box. The card reads `Re-testing the websocket that
+carried no transcript` while that minute runs, and no recovery is announced until
+a transcript entry actually arrives. A re-test that does deliver clears the
+verdict and keeps the socket.
+
+Everything the app learns about a box's WebSocket is forgotten when the
+integration is reconfigured or re-enabled, so an upgraded or replaced ProdCom
+gets a clean first attempt with the documented `subscribe` frame.
 
 That stream sends no keepalive of any kind, so on that path a dropped cable is
 caught by TCP keepalive probing the box every 30 s, and a box
@@ -98,6 +148,18 @@ The `/log` page has the evidence when something looks wrong:
 
 - `[prodcom] websocket open — streams offered: …` on every connection
 - `[prodcom] no websocket frame for 90s — heartbeat missed …` when the box goes
+- `[prodcom] websocket delivered no transcript in 60s while ProdCom has at least
+  N spoken line(s) since it opened — reopening it without the subscribe frame`,
+  and then either `[prodcom] the websocket delivers the transcript with no
+  subscribe frame sent …` when that works, or `[prodcom] websocket delivered no
+  transcript with or without the subscribe frame …` naming the new retry cadence
+  when it does not. `[prodcom] the websocket has carried no transcript in 60s and
+  this box has failed that test before …` is a later re-test being dropped, and
+  `[prodcom] the websocket is carrying the transcript again …` is one that came
+  good. `[prodcom] could not check whether the websocket is missing transcript
+  lines (…)` means REST did not answer and nothing was changed. The
+  "nothing was said, so nothing was missed" case is `console.debug`, so it is in
+  the terminal and deliberately not on `/log`
 - `[prodcom] websocket unavailable (…) — falling back to the transcript SSE stream`
   once per outage, not once per retry, with a reminder carrying the attempt count
   every 15 minutes while it lasts, and `[prodcom] websocket is back …` when it
