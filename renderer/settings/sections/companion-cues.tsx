@@ -40,7 +40,7 @@ import {
   readFingerprint,
   shortLocation,
 } from "@main/services/companion-fingerprint";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, DownloadIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
@@ -214,9 +214,16 @@ export function CueButtonStatus({ params }: { params: Record<string, string | nu
   //
   // The SERVER's clock: `lastSeenAt` is stamped by companion-reconcile, so a
   // console an hour out would say "4 hours ago" about something seen three hours
-  // ago. Before the first reading lands it is the host's clock, which is what
-  // this said before and the only answer available.
-  const [nowMs] = useState(() => serverClock.now());
+  // ago.
+  //
+  // Read ONCE MORE when the clock is first set, which is the one moment reading
+  // it at mount cannot survive: on a cold page load the clock has not been set
+  // yet, `serverClock.now()` is the host's clock by design, and a value fixed
+  // there would keep the drift for the life of the page — the exact bug, on the
+  // exact path a settings page takes. `subscribe` fires on the first reading and
+  // on a step, and on nothing else, so a settled clock costs this row nothing.
+  const [nowMs, setNowMs] = useState(() => serverClock.now());
+  useEffect(() => serverClock.subscribe(() => setNowMs(serverClock.now())), []);
   const said = buttonStatusText(readFingerprint(params), nowMs);
   if (!said) return null;
   return (
