@@ -75,11 +75,20 @@ the day's services. Open a service for its own page, described after it.
 ### All services
 
 **Trends** leads the page. One tile per service type, showing a sparkline of the
-busiest service on each of the last eight **days** that type recorded, the
-average across them, and the change against the days before.
+last eight **days** that type recorded, the figure for the latest of those days,
+and the change against the days drawn beside it.
 
-The change is **absolute**, not a percentage — *+71 vs prior 8*, or *+1.2 dB vs
-prior 8* under the sound measure — because that is the number you can act on:
+The unit is a **day**, never a recording. A church running a 9, an 11 and a 6
+records three figures every Sunday and the tile shows one, captioned *latest day
+total* — or *latest day peak* under the sound measure:
+
+| | |
+|---|---|
+| **Attendance** | the day's services **added up**. The question a trend asks is "how many came", and the three services are three congregations |
+| **Sound** | the day's **loudest single recording**. Decibels are logarithmic, so adding two services' peaks is not louder, it is meaningless |
+
+The change is **absolute**, not a percentage — *+71 vs prior 7*, or *+1.2 dB vs
+prior 7* under the sound measure — because that is the number you can act on:
 seventy more people is a van, six percent is a conversation. It is green when it
 rises and red when it falls.
 
@@ -87,11 +96,12 @@ It is the difference between the two figures it is derived from, both rounded to
 the precision the tile prints — whole people, tenths of a decibel — so it can
 never disagree with the number above it.
 
-The comparison uses whatever prior days there are, up to eight, and says how
-many. Below **three** prior days it reads *no prior window yet* instead: one or
-two readings are not an average, and a change off them is noise wearing a
-direction. Because the count is always on the label, a thin comparison is
-visible as one rather than passed off as a full eight. The tiles sort busiest
+The comparison is the latest day against the average of the other days in the
+same eight-day window — the ones drawn beside it on the sparkline — and it says
+how many it used. Below **three** prior days it reads *no prior window yet*
+instead: one or two readings are not an average, and a change off them is noise
+wearing a direction. Because the count is always on the label, a thin comparison
+is visible as one rather than passed off as a full seven. The tiles sort busiest
 first, and the first type seen in that order takes the first colour in the
 palette.
 
@@ -102,26 +112,23 @@ The switch at the top right chooses what is plotted:
 | **Attendance** | peak people in the room, the default |
 | **Sound** | the loudest reading on your primary Smaart metric — the same metric a day-list row names, chosen the same way |
 
-Everything below follows the switch: the tiles average decibels, the axis
-becomes a dB band framed on the levels rather than anchored at 0, and the
-figures above the plot read *Loudest* instead of *Busiest*. A service type that
-recorded attendance and no sound keeps its tile and says *no sound recorded*
-rather than disappearing when you switch. The choice is remembered per browser.
+Everything below follows the switch: the tiles read decibels, the axis becomes a
+dB band framed on the levels rather than anchored at 0, and a day is the loudest
+recording on it rather than the sum. A service type that recorded attendance and
+no sound keeps its tile and says *no sound recorded* rather than disappearing
+when you switch. The choice is remembered per browser.
 
-Everything is counted **per day, at the day's highest reading** — the busiest
-service, or the loudest. A church running a 9, an 11 and a 6 records three
-figures every Sunday, and attendance is people in the room: summing them
-double-counts the family who came to one, and averaging them answers "how full
-was a service" when a trend asks "how many came". A peak level does not average
-either. The tile's average and a point on the line below it are the same kind of
-number for that reason.
+A recording with no figure under the current measure is skipped rather than
+counted as zero, so a Sunday where two of three services had a counter running
+is the total of those two.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
 or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
-each day's highest reading, and every line is the same weight: they are peers,
-not a measurement and its references. A recording with nothing under the current
-measure is not plotted at all, because a service nobody counted is not a service
-of nobody, and one with no meter running is not a silent one.
+the same daily figures, one node per recorded day, and every line is the same
+weight: they are peers, not a measurement and its references. The tile's headline
+and the last node on its line are the same number. A recording with nothing under
+the current measure is not plotted at all, because a service nobody counted is
+not a service of nobody, and one with no meter running is not a silent one.
 
 Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
 change figure, its line, its legend swatch and its milestones. The colour is

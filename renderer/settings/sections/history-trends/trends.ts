@@ -37,32 +37,54 @@ export function measureOf(measure: TrendMeasure): (r: TrendRecording) => number 
   return measure === "sound" ? (r) => r.peakDb : (r) => r.peakOccupancy;
 }
 
-/** How many DAYS a tile averages, and the most it compares them against. */
+/**
+ * How a measure's several recordings on ONE DAY become the one figure a tile
+ * prints and a node on the line sits at.
+ *
+ * ATTENDANCE ADDS UP. A church running a 9, an 11 and a 6 held three services
+ * that Sunday and the question a trend answers is "how many came", so the three
+ * add together. Taking the busiest of them answered "how full was the fullest
+ * service", which is a different question and one the service page already
+ * answers per service.
+ *
+ * SOUND MUST NOT. Decibels are logarithmic: adding two services' peak levels is
+ * not louder, it is meaningless, and three services at 100 dB would print 300 dB
+ * on the card. A day's level is the loudest single recording on it.
+ *
+ * ONE table, read by the tiles and by the chart's line, so the two cannot come
+ * to different figures for one day — and read by `TrendMeasure`, so a third
+ * measure cannot be added without saying which of the two it is.
+ */
+export const DAY_FIGURE: Record<TrendMeasure, "sum" | "loudest"> = {
+  attendance: "sum",
+  sound: "loudest",
+};
+
+/** How many DAYS a tile draws, and the most its change can compare against. */
 export const TREND_WINDOW = 8;
 
 /**
  * The fewest prior days a comparison may rest on.
  *
- * The prior window used to have to be FULL — eight days — which meant a church
- * saw no change figure until it had recorded sixteen Sundays, four months in.
- * The tile was right and useless for a season.
+ * The prior window used to have to be FULL, which meant a church saw no change
+ * figure until it had recorded sixteen Sundays, four months in. The tile was
+ * right and useless for a season.
  *
  * Three, because the tile says how many days it actually compared against —
  * "vs prior 3" — so a thin comparison is transparent rather than passed off as
- * eight, and the reader can discount it themselves. Below three there is
- * nothing to discount: one or two readings are not an average, and a percentage
- * off them is noise wearing a direction.
+ * a full one, and the reader can discount it themselves. Below three there is
+ * nothing to discount: one or two readings are not an average, and a change off
+ * them is noise wearing a direction.
  *
- * Four was the first attempt and left the three-month archive this was built
- * against showing no change on any tile — its busiest service type has eleven
- * recorded days, which is eight recent and three prior. A floor nothing real
- * clears is a figure nobody ever sees.
+ * The prior days are the OTHER days in the tile's own window — the ones drawn
+ * beside the latest on the sparkline — so what the change was measured against
+ * is the picture the reader is already looking at.
  */
 export const MIN_PRIOR_DAYS = 3;
 
-/** One day of one service type: the busiest that day, and when the day's first
- *  recording started. */
-export interface DayPeak {
+/** One day of one service type, reduced to the figure that day is worth under
+ *  the current measure, and when the day's first recording started. */
+export interface TrendDay {
   /** `YYYY-MM-DD`. */
   date: string;
   /** Epoch ms of the day's FIRST recording — where the line's node sits.
@@ -71,7 +93,8 @@ export interface DayPeak {
    *  is supposed to run through, which reads as the line leading the services
    *  rather than summarising them. */
   t: number;
-  /** The busiest recording that day. */
+  /** The day's figure: every recording ADDED UP for attendance, the LOUDEST
+   *  single one for sound. See DAY_FIGURE for why the two differ. */
   v: number;
   /** How many recordings that day fed it. */
   count: number;
@@ -80,34 +103,42 @@ export interface DayPeak {
 export interface TypeTrend {
   serviceTypeId: string | null;
   name: string;
-  /** The last `TREND_WINDOW` DAYS that recorded a peak, oldest first — the
-   *  sparkline's points and the figures below it. */
-  recent: DayPeak[];
-  /** Mean of `recent`, rounded. Null when `recent` is empty. */
-  average: number | null;
+  /** The last `TREND_WINDOW` DAYS this type recorded a figure on, oldest first
+   *  — the sparkline's points, and the window the change is taken inside. */
+  recent: TrendDay[];
   /**
-   * Mean of the up-to-`TREND_WINDOW` days before `recent`, rounded. Null when
-   * there are fewer than `MIN_PRIOR_DAYS` of them.
+   * The MOST RECENT recorded day's figure, rounded. Null when `recent` is empty.
    *
-   * Below that floor the "average" is one or two readings and a change off it
-   * is noise wearing a direction; above it the tile compares against whatever
-   * it HAS, up to eight, and says how many — a thin comparison is labelled, not
-   * hidden and not dressed up as a full one.
+   * The headline used to be the mean of the whole window, which answered "what
+   * is a normal Sunday here" — a question that does not change week to week and
+   * a number that therefore never moved. What an operator opens this tab for is
+   * the Sunday that just happened.
+   */
+  latest: number | null;
+  /**
+   * Mean of the OTHER days in `recent` — the up-to-`TREND_WINDOW - 1` days drawn
+   * beside the latest on the sparkline — rounded. Null when there are fewer than
+   * `MIN_PRIOR_DAYS` of them.
+   *
+   * Below that floor the "average" is one or two readings and a change off it is
+   * noise wearing a direction; above it the tile compares against whatever it
+   * HAS and says how many — a thin comparison is labelled, not hidden and not
+   * dressed up as a full one.
    */
   priorAverage: number | null;
   /**
-   * The same two means, UNROUNDED.
+   * The same two figures, UNROUNDED.
    *
    * The tile rounds them to the precision it prints — whole people, tenths of a
    * decibel — and takes the change as the difference of those two rounded
    * numbers, so what it shows is always exactly the difference between the two
-   * figures it is derived from. A change taken from unrounded means prints "+1"
+   * figures it is derived from. A change taken from unrounded values prints "+1"
    * beside two numbers that are equal on screen, which is the bug the old
    * percentage had.
    *
    * Null on exactly the same condition as their rounded pair.
    */
-  averageRaw: number | null;
+  latestRaw: number | null;
   priorAverageRaw: number | null;
   /** How many days the change is measured against. Zero when there is none. */
   priorCount: number;
@@ -125,26 +156,27 @@ function byTime(a: TrendRecording, b: TrendRecording): number {
 }
 
 /**
- * One entry per DAY a type recorded, carrying that day's busiest service.
+ * One entry per DAY a type recorded, carrying what that day is worth under this
+ * measure — see DAY_FIGURE: the day's recordings added up for attendance, the
+ * loudest of them for sound.
  *
  * The trend LINE runs through these, not through every recording. A church with
  * three Sunday services plots three points a week within a couple of hours of
  * each other, and joining them drew a sawtooth — 9am 1,400, 11am 700, 6pm 1,100
- * and back again — in which a real week-to-week trend was invisible. The
- * individual recordings are still drawn, as dots; the line is the week.
+ * and back again — in which a real week-to-week trend was invisible.
  *
- * The MAXIMUM rather than the sum or the mean, because attendance is people in
- * the room: summing double-counts the family who came to one of the three, and
- * a mean answers "how full was a service" when the question a trend asks is
- * "how many came".
+ * A recording with NOTHING under this measure is skipped rather than counted as
+ * zero: a service nobody counted is not a service of nobody, and a day where two
+ * of three services had a counter running is the sum of those two.
+ *
+ * `measure` rather than a picker function, so the reading taken and the way the
+ * day's readings combine come from ONE argument and cannot be mismatched — a
+ * caller cannot ask for decibels and get them summed.
  */
-export function dailyPeaks(
-  recordings: TrendRecording[],
-  /** Which reading to take. The MAXIMUM is right for both: the busiest service
-   *  of the day, and the loudest. */
-  pick: (r: TrendRecording) => number | null = (r) => r.peakOccupancy,
-): DayPeak[] {
-  const byDay = new Map<string, DayPeak>();
+export function dailyValues(recordings: TrendRecording[], measure: TrendMeasure = "attendance"): TrendDay[] {
+  const pick = measureOf(measure);
+  const add = DAY_FIGURE[measure] === "sum";
+  const byDay = new Map<string, TrendDay>();
   for (const r of recordings) {
     const v = pick(r);
     if (v == null || !Number.isFinite(r.t)) continue;
@@ -153,7 +185,7 @@ export function dailyPeaks(
       byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, v, count: 1 });
       continue;
     }
-    hit.v = Math.max(hit.v, v);
+    hit.v = add ? hit.v + v : Math.max(hit.v, v);
     hit.t = Math.min(hit.t, r.t);
     hit.count += 1;
   }
@@ -168,10 +200,10 @@ export function dailyPeaks(
  */
 export function typeTrends(
   recordings: TrendRecording[],
-  opts: { window?: number; pick?: (r: TrendRecording) => number | null } = {},
+  opts: { window?: number; measure?: TrendMeasure } = {},
 ): TypeTrend[] {
   const window = opts.window ?? TREND_WINDOW;
-  const pick = opts.pick ?? ((r: TrendRecording) => r.peakOccupancy);
+  const measure = opts.measure ?? "attendance";
   const byType = new Map<string, TrendRecording[]>();
   const names = new Map<string, string>();
   for (const r of recordings) {
@@ -182,35 +214,38 @@ export function typeTrends(
   }
   const out: TypeTrend[] = [];
   for (const [key, all] of byType) {
-    // The SAME derivation the chart's line uses, so the tile's average and a
-    // point on the line are the same kind of number. They were not: the average
-    // was over every recording and the line was too, and once the line became
+    // The SAME derivation the chart's line uses, so the tile's headline and the
+    // last node on the line are the same number. They were not: the headline was
+    // a mean over every recording and the line was too, and once the line became
     // per-day the tile would have been quoting a different statistic under it.
-    const days = dailyPeaks(all.slice().sort(byTime), pick);
+    const days = dailyValues(all.slice().sort(byTime), measure);
     // A type with NO reading under this measure keeps its tile, with a null
-    // average — the card says "no sound recorded" rather than dropping the
+    // headline — the card says "no sound recorded" rather than dropping the
     // whole type the moment you switch measure, which reads as the service type
     // having disappeared. A type with no recordings at all is still no tile.
     const recent = days.slice(-window);
-    const prior = days.slice(Math.max(0, days.length - window * 2), days.length - recent.length);
-    const average = mean(recent.map((d) => d.v));
+    // The latest day, and the days drawn beside it on the sparkline. The change
+    // is measured inside the window the reader can see, so "vs prior 7" names
+    // seven nodes that are on screen rather than an older window that is not.
+    const latest = recent.length ? recent[recent.length - 1].v : null;
+    const prior = recent.slice(0, -1);
     const priorMean = prior.length >= MIN_PRIOR_DAYS ? mean(prior.map((d) => d.v)) : null;
-    const rounded = average == null ? null : Math.round(average);
+    const rounded = latest == null ? null : Math.round(latest);
     const priorRounded = priorMean == null ? null : Math.round(priorMean);
-    /** Both windows have a number, and the prior one is something to compare
+    /** Both figures are there, and the prior one is something to compare
      *  against. Narrows for the type checker as well as reading once. */
     const comparable = rounded != null && priorRounded != null && priorRounded > 0;
     out.push({
       serviceTypeId: key || null,
       name: names.get(key) ?? "Services",
       recent,
-      average: rounded,
+      latest: rounded,
       priorAverage: priorRounded,
       // A prior average of ZERO is not something to claim a comparison
       // against. One condition, read by all three, so a tile cannot read "no
-      // prior window yet" beside a count of 8 — a label for a comparison that
+      // prior window yet" beside a count of 7 — a label for a comparison that
       // was not made.
-      averageRaw: comparable ? average : null,
+      latestRaw: comparable ? latest : null,
       priorAverageRaw: comparable ? priorMean : null,
       priorCount: comparable ? prior.length : 0,
     });
@@ -218,7 +253,7 @@ export function typeTrends(
   // Busiest first: the weekend service leads, and a once-a-year type does not
   // take the left-hand tile because its name sorts early. A type with nothing
   // to show under this measure sorts last, not into the middle.
-  return out.sort((a, b) => (b.average ?? -Infinity) - (a.average ?? -Infinity));
+  return out.sort((a, b) => (b.latest ?? -Infinity) - (a.latest ?? -Infinity));
 }
 
 /** A mark under the Trends chart. `kind` decides nothing about how it draws —
@@ -331,8 +366,9 @@ export const DEFAULT_RANGE_WEEKS: RangeWeeks = 16;
 export function withinRange(
   recordings: TrendRecording[],
   weeks: number,
-  pick: (r: TrendRecording) => number | null = (r) => r.peakOccupancy,
+  measure: TrendMeasure = "attendance",
 ): TrendRecording[] {
+  const pick = measureOf(measure);
   const plotted = recordings.filter((r) => pick(r) != null && Number.isFinite(r.t));
   if (!plotted.length) return [];
   const newest = Math.max(...plotted.map((r) => r.t));

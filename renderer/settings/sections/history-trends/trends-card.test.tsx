@@ -102,20 +102,20 @@ describe("how a change reads", () => {
   });
 
   test("the change is the difference of the tile's own two numbers", async () => {
-    // Taken from the UNROUNDED means it prints a change beside two numbers that
-    // are equal on screen. The fixture is built so the two rules disagree: the
-    // prior window means 999.625 and the recent one 1000.375, so both round to
-    // 1,000 — a change of 0 — while the raw difference is 0.75, which rounds to
-    // "+1". The tile must read 0.
+    // Taken from the UNROUNDED figures it prints a change beside two numbers
+    // that are equal on screen. The fixture is built so the two rules disagree:
+    // the prior window means 1000.43 and the latest day is 1,000, so both round
+    // to 1,000 — a change of 0 — while the raw difference rounds to "−0". The
+    // tile must read 0.
     const view = await renderCard(straddlingRound());
     const tile = view.container.querySelector("[data-trend-tile]")!;
-    const avg = tile.querySelector("[data-trend-average]")!.textContent;
+    const headline = tile.querySelector("[data-trend-latest]")!.textContent;
     const change = tile.querySelector("[data-trend-change]")!.textContent ?? "";
     view.unmount();
-    assert.equal(avg, "1,000");
+    assert.equal(headline, "1,000");
     assert.ok(
       change.startsWith("0 "),
-      `two windows that both round to 1,000 must read 0, not "${change}"`,
+      `two figures that both round to 1,000 must read 0, not "${change}"`,
     );
   });
 
@@ -142,6 +142,72 @@ describe("how a change reads", () => {
     assert.ok(downText.startsWith("−"), `the fixture did not fall: ${downText}`);
     assert.ok(downClass.includes("text-danger-11"), `a fall is not red: ${downClass}`);
   });
+});
+
+describe("a day with three services", () => {
+  /** The number of points a drawn line carries — one `M` or `L` each. */
+  function nodesOn(view: ReturnType<typeof render>, id: string): number {
+    const d = view.container.querySelector(`[data-series-line="${id}"]`)?.getAttribute("d") ?? "";
+    return [...d.matchAll(/[ML]/g)].length;
+  }
+
+  /** The chart's y-axis labels, as numbers. */
+  function axis(view: ReturnType<typeof render>): number[] {
+    return [...view.container.querySelectorAll("text")]
+      .map((n) => (n.textContent ?? "").replace(/,/g, ""))
+      .filter((t) => /^\d+$/.test(t))
+      .map(Number);
+  }
+
+  test("adds up into one point, on the tile AND on the line", async () => {
+    // A church running a 9, an 11 and a 6 at 1,400 / 700 / 1,100 had 3,200
+    // people that Sunday. The card used to print 1,400 — the busiest of the
+    // three — on the tile and plot the same, so a day's second and third
+    // services were nowhere on the page.
+    //
+    // WHAT THIS CANNOT SEE: the drawn pixels. jsdom loads no stylesheet, so the
+    // chart falls back to its 640px default and the plot's real shape is
+    // invisible. What it CAN read is what was handed to the SVG — how many
+    // points the path carries and how high the axis had to reach — and those
+    // are what a summed day changes. Driven in Chrome at 1440 as well.
+    const view = await renderCard(threeServicesADay());
+    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
+    assert.equal(
+      tile.querySelector("[data-trend-latest]")?.textContent,
+      "3,200",
+      "the tile is still showing one service of the day",
+    );
+    assert.equal(nodesOn(view, "weekend"), 5, "the line drew a node per recording, not per day");
+    // The axis had to make room for a summed day. A plot of the busiest service
+    // alone tops out around 1,400 and could never reach here.
+    assert.ok(
+      Math.max(...axis(view)) >= 3200,
+      `the line is not plotting day totals — the axis only reaches ${Math.max(...axis(view))}`,
+    );
+    view.unmount();
+  });
+
+  test("but its LEVEL is one recording's, on the tile and on the line", async () => {
+    // Decibels do not add. Three services at 96, 99 and 104 are a 104 dB day,
+    // and summing them would put 299 dB on the card and an axis to match.
+    const view = await renderCard(threeServicesADay());
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.equal(
+      view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent,
+      "104.0 dB",
+    );
+    assert.equal(nodesOn(view, "weekend"), 5, "the line drew a node per recording, not per day");
+    assert.deepEqual(
+      axis(view).filter((v) => v > 120),
+      [],
+      `the sound axis is framing summed levels: ${axis(view).join(", ")}`,
+    );
+    view.unmount();
+  });
+
 });
 
 describe("a milestone's scope, from the store to the drawn mark", () => {
@@ -209,13 +275,13 @@ describe("the measure switch", () => {
       view.container.querySelector('[data-trend-measure="attendance"]')?.getAttribute("aria-pressed"),
       "true",
     );
-    assert.equal(view.container.querySelector("[data-trend-average]")?.textContent, "1,000");
+    assert.equal(view.container.querySelector("[data-trend-latest]")?.textContent, "1,000");
   });
 
   test("switching to sound puts the tiles in decibels", async () => {
     const view = await renderCard(alternating());
     await click(view, "sound");
-    const avg = view.container.querySelector("[data-trend-average]")?.textContent ?? "";
+    const avg = view.container.querySelector("[data-trend-latest]")?.textContent ?? "";
     assert.match(avg, /^[\d.]+ dB$/, `the tile did not switch to decibels: "${avg}"`);
     assert.equal(
       view.container.querySelector('[data-trend-measure="sound"]')?.getAttribute("aria-pressed"),
@@ -234,7 +300,7 @@ describe("the measure switch", () => {
       "true",
       "the card came back on attendance after the operator chose sound",
     );
-    assert.match(second.container.querySelector("[data-trend-average]")?.textContent ?? "", /dB$/);
+    assert.match(second.container.querySelector("[data-trend-latest]")?.textContent ?? "", /dB$/);
   });
 
   test("the axis is a dB band, never anchored at zero", async () => {
@@ -264,7 +330,7 @@ describe("the measure switch", () => {
     await click(view, "sound");
     assert.deepEqual(names().sort(), ["evening", "weekend"], "a type went missing when the measure changed");
     const evening = view.container.querySelector('[data-trend-tile="evening"]')!;
-    assert.equal(evening.querySelector("[data-trend-average]")?.textContent, "—");
+    assert.equal(evening.querySelector("[data-trend-latest]")?.textContent, "—");
     assert.equal(evening.querySelector("[data-trend-change]")?.textContent, "no sound recorded");
   });
 });
@@ -624,9 +690,34 @@ function straddlingRound(): TrendRecording[] {
   }));
 }
 
+/** Five Sundays, each running a 9, an 11 and a 6 at 1,400 / 700 / 1,100 people
+ *  and 96 / 99 / 104 dB — the shape of a church the day figure has to get
+ *  right: 3,200 in the room across the day, and a 104 dB day. */
+function threeServicesADay(): TrendRecording[] {
+  const DAY = 24 * 60 * 60_000;
+  const start = Date.parse("2026-01-04T15:00:00Z");
+  const out: TrendRecording[] = [];
+  for (let w = 0; w < 5; w++) {
+    const day = start + w * 7 * DAY;
+    [[1400, 96], [700, 99], [1100, 104]].forEach(([people, db], i) => {
+      out.push({
+        serviceKey: `weekend:${w}:${i}`,
+        serviceTypeId: "weekend",
+        serviceTypeName: "Weekend",
+        serviceDate: new Date(day).toISOString().slice(0, 10),
+        t: day + i * 2 * 60 * 60_000,
+        seriesTitle: null,
+        peakOccupancy: people,
+        peakDb: db,
+      });
+    });
+  }
+  return out;
+}
+
 /** Sixteen days of one service type, so a tile has a prior window and prints a
  *  real change figure. `peak` drifts by a point a week so the two windows are
- *  not equal and the percentage is not "0%". */
+ *  not equal and the change is not "0". */
 function longRun(typeId: string, peak: number): TrendRecording[] {
   const DAY = 24 * 60 * 60_000;
   const start = Date.parse("2026-01-04T15:00:00Z");

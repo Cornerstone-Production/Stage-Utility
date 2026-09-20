@@ -1,8 +1,13 @@
 // trends-card.tsx — the card that leads All services.
 //
-// One tile per service type (a sparkline of the last eight peaks, the average,
-// the change against the eight before), then one full-width chart across the
-// chosen range with every type on it and milestones under the axis.
+// One tile per service type (a sparkline of the last eight recorded days, the
+// latest of those days, the change against the seven beside it), then one
+// full-width chart across the chosen range with every type on it and milestones
+// under the axis.
+//
+// A DAY, not a recording, is the unit everywhere here — and what a day is worth
+// differs by measure: attendance adds that day's services up, sound takes the
+// loudest of them, because decibels do not add. See DAY_FIGURE in trends.ts.
 //
 // EVERYTHING HERE IS COMPUTED FROM RECORDS THE PAGE ALREADY HOLDS. The list
 // loads `serviceTimeline:list` and `attendance:listHistory` to draw the calendar
@@ -37,8 +42,7 @@ import {
 } from "./series-colors";
 import {
   DEFAULT_RANGE_WEEKS,
-  dailyPeaks,
-  measureOf,
+  dailyValues,
   RANGE_WEEKS,
   TREND_WINDOW,
   trendMilestones,
@@ -104,7 +108,7 @@ const TREND_LINE_WIDTH = 2;
 /**
  * How many decimals a measure prints. Whole people; tenths of a decibel.
  *
- * ONE definition, read by the tile's average AND by its change, so the change
+ * ONE definition, read by the tile's headline AND by its change, so the change
  * is always exactly the difference between the two figures it came from. Two
  * precisions is how "+1" ends up beside two numbers that are equal on screen.
  */
@@ -196,7 +200,6 @@ export function TrendsCard({
   }
 
   const sound = measure === "sound";
-  const pick = useMemo(() => measureOf(measure), [measure]);
   /** How many decimals this measure prints — see DECIMALS. */
   const dp = DECIMALS[measure];
   /** Counts read with separators; levels read to a tenth of a decibel, which is
@@ -204,8 +207,8 @@ export function TrendsCard({
   const fmtValue = (v: number) =>
     sound ? `${atPrecision(v, dp).toFixed(dp)} dB` : atPrecision(v, dp).toLocaleString();
 
-  const tiles = useMemo(() => typeTrends(recordings, { pick }), [recordings, pick]);
-  const ranged = useMemo(() => withinRange(recordings, weeks, pick), [recordings, weeks, pick]);
+  const tiles = useMemo(() => typeTrends(recordings, { measure }), [recordings, measure]);
+  const ranged = useMemo(() => withinRange(recordings, weeks, measure), [recordings, weeks, measure]);
 
   /**
    * One colour per service type, stable across measure, range and sort.
@@ -277,19 +280,21 @@ export function TrendsCard({
       // fortnight apart because a service was a fortnight apart, not because
       // anything went unmeasured. Without this every point would be its own run.
       gapMs: Infinity,
-      // The line runs through each day's BUSIEST service. Three Sunday services
-      // plotted as three points drew a sawtooth — 9am 1,400, 11am 700, 6pm
-      // 1,100 and back again, every week — in which a real week-to-week trend
-      // was invisible. The individual recordings were also drawn, as scatter
-      // dots; they read as noise nobody could name and are gone.
-      points: dailyPeaks(byType.get(key) ?? [], pick).map((d) => ({ t: d.t, v: d.v })),
+      // One node per DAY, at the figure that day is worth — see DAY_FIGURE.
+      // Three Sunday services plotted as three points drew a sawtooth — 9am
+      // 1,400, 11am 700, 6pm 1,100 and back again, every week — in which a real
+      // week-to-week trend was invisible. The individual recordings were also
+      // drawn, as scatter dots; they read as noise nobody could name and are
+      // gone. The SAME call the tiles make, so the last node on a line and the
+      // number on the tile above it cannot differ.
+      points: dailyValues(byType.get(key) ?? [], measure).map((d) => ({ t: d.t, v: d.v })),
       format: fmtValue,
     }));
     // `fmtValue` is a fresh closure every render; what it depends on is the
-    // measure, which `pick` already carries. `colorOf` reads `colorIndexes`,
-    // which IS a dependency.
+    // measure, which IS a dependency. `colorOf` reads `colorIndexes`, which is
+    // one too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranged, tiles, hidden, pick, colorIndexes]);
+  }, [ranged, tiles, hidden, measure, colorIndexes]);
 
   /** The tiles that are DRAWN. `hidden` keys a type by its series id, which is
    *  the type id or "all" for the no-type bucket — the same key the series and
@@ -420,14 +425,16 @@ export function TrendsCard({
         </div>
       </div>
 
-      {/* What the card is, in one line. The tiles and the plot below it answer
-          two different questions and neither says which recordings it read, so
-          without this the "avg peak" on a tile is a number with no window. On
-          its own row rather than beside the title: the measure and range
-          controls take that space. */}
+      {/* What the card is, in one line: what a DAY is worth under this measure,
+          and how many days a tile draws. Without it the figure on a tile is a
+          number with no window, and "added up" against "the loudest" is the
+          whole difference between the two measures. On its own row rather than
+          beside the title: the measure and range controls take that space. */}
       <p data-trends-subtitle className="-mt-3 text-caption2 text-fg-subtle">
-        {sound ? "Peak level" : "Peak attendance"} per service type, last {TREND_WINDOW} recordings each
-        {" · milestones from your list and series changes"}
+        {sound
+          ? "Peak level per service type, each day's loudest recording"
+          : "Attendance per service type, each day's services added up"}
+        {` · last ${TREND_WINDOW} days · milestones from your list and series changes`}
       </p>
 
       {tiles.length === 0 ? (
@@ -459,20 +466,26 @@ export function TrendsCard({
                   color={colorOf(t.serviceTypeId ?? "")}
                   width={90}
                   height={34}
-                  label={`${t.name}: the ${sound ? "loudest" : "busiest"} service of each of the last ${t.recent.length} days it recorded`}
+                  label={`${t.name}: ${sound ? "the loudest recording" : "every service added up"} on each of the last ${t.recent.length} days it recorded`}
                 />
                 <div className="flex min-w-0 flex-col gap-0.5">
+                {/* WHAT THE NUMBER IS, not what it averages. "avg peak" named a
+                    mean over the whole window; the figure under it is now ONE
+                    day — the latest this type recorded — so the label says which
+                    day, and how that day's recordings came to one number. Under
+                    sound they cannot be added, so it says "peak" there and
+                    "total" for attendance. */}
                 <span className="truncate text-caption2 text-fg-subtle">
-                  {t.name} · avg {sound ? "peak level" : "peak"}
+                  {t.name} · latest day {sound ? "peak" : "total"}
                 </span>
                 <div className="flex flex-wrap items-baseline gap-2">
-                  <span data-trend-average className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">
-                    {t.average == null ? "—" : fmtValue(t.average)}
+                  <span data-trend-latest className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">
+                    {t.latest == null ? "—" : fmtValue(t.latest)}
                   </span>
                   {/* No change until there is something to compare against. A
                       tile with one window of recordings says so rather than
                       printing a figure derived from nothing. */}
-                  {t.averageRaw != null && t.priorAverageRaw != null ? (
+                  {t.latestRaw != null && t.priorAverageRaw != null ? (
                     // UP is good and DOWN is not, so the change is green or red
                     // rather than the series colour — the series colour is
                     // already carried by the sparkline beside it, and spending
@@ -483,7 +496,7 @@ export function TrendsCard({
                     // measure's own precision, so it is always exactly the gap
                     // between the number above it and the one it names.
                     (() => {
-                      const delta = atPrecision(t.averageRaw, dp) - atPrecision(t.priorAverageRaw, dp);
+                      const delta = atPrecision(t.latestRaw, dp) - atPrecision(t.priorAverageRaw, dp);
                       return (
                         <span
                           data-trend-change
@@ -501,7 +514,7 @@ export function TrendsCard({
                       {/* A type with nothing under THIS measure keeps its tile
                           and says so, rather than vanishing when you switch —
                           which reads as the service type having disappeared. */}
-                      {t.average != null
+                      {t.latest != null
                         ? "no prior window yet"
                         // A tile with no level because the SUMMARY would not
                         // load is not a service type that recorded no sound.
@@ -548,8 +561,8 @@ export function TrendsCard({
             onSeriesContextMenu={openMenu}
             ariaLabel={
               sound
-                ? `Peak level per recording over the last ${weeks} weeks`
-                : `Peak attendance per recording over the last ${weeks} weeks`
+                ? `The loudest recording of each day over the last ${weeks} weeks`
+                : `Each day's services added up over the last ${weeks} weeks`
             }
             emptyNote={
               sound
