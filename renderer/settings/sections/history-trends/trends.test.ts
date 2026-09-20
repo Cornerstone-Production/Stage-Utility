@@ -251,9 +251,26 @@ describe("a service type's trend tile", () => {
     assert.equal(tile.latest, 120);
   });
 
-  test("one tile per service type, busiest first", () => {
+  test("one tile per service type, ordered by the figure the tile SHOWS", () => {
     const tiles = typeTrends([...weekly("evening", [90, 95]), ...weekly("weekend", [800, 820])]);
     assert.deepEqual(tiles.map((t) => t.serviceTypeId), ["weekend", "evening"]);
+  });
+
+  test("the order follows the LATEST day, not an average across the window", () => {
+    // The two rules disagree on this fixture: weekend averages 1,000 against
+    // evening's 375, and evening's latest day is 1,200 against weekend's 1,000.
+    // The tile shows the latest day, so the order has to follow that — a tile
+    // reading 380 above one reading 3,541 gives no account of itself. The
+    // ordinary fixture above has both rules agreeing and cannot tell them apart.
+    const tiles = typeTrends([
+      ...weekly("weekend", Array(4).fill(1000)),
+      ...weekly("evening", [100, 100, 100, 1200]),
+    ]);
+    assert.deepEqual(
+      tiles.map((t) => [t.serviceTypeId, t.latest]),
+      [["evening", 1200], ["weekend", 1000]],
+      "the tiles are ordered by something other than the number on them",
+    );
   });
 
   test("the tile's window is the same derivation the chart's line runs through", () => {

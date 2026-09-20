@@ -1,9 +1,9 @@
 // trends.ts — the arithmetic behind the Trends card, with no React and no DOM.
 //
 // Kept separate from the components for the same reason geometry.ts is: the
-// parts that can be WRONG — which recordings a tile averages, what it compares
-// them against, where a milestone lands — are tested as arithmetic rather than
-// through a render jsdom cannot lay out.
+// parts that can be WRONG — what a day is worth, which day a tile leads with,
+// what it compares that against, where a milestone lands — are tested as
+// arithmetic rather than through a render jsdom cannot lay out.
 
 import { isCalendarDate } from "@main/services/calendar-date";
 
@@ -32,8 +32,10 @@ export interface TrendRecording {
 /** What the card is plotting. Two measures, one derivation. */
 export type TrendMeasure = "attendance" | "sound";
 
-/** The reading a measure takes from a recording. */
-export function measureOf(measure: TrendMeasure): (r: TrendRecording) => number | null {
+/** The reading a measure takes from a recording. MODULE-PRIVATE: every export
+ *  here takes the measure itself, so a caller cannot pair one measure's reading
+ *  with another's day rule — see DAY_FIGURE. */
+function measureOf(measure: TrendMeasure): (r: TrendRecording) => number | null {
   return measure === "sound" ? (r) => r.peakDb : (r) => r.peakOccupancy;
 }
 
@@ -54,13 +56,21 @@ export function measureOf(measure: TrendMeasure): (r: TrendRecording) => number 
  * ONE table, read by the tiles and by the chart's line, so the two cannot come
  * to different figures for one day — and read by `TrendMeasure`, so a third
  * measure cannot be added without saying which of the two it is.
+ *
+ * THE HOME OVERVIEW CARD ALREADY SUMS A DAY THIS WAY — `attPoints` in
+ * overview-data.ts, "value = TOTAL attendance across that day's services". Its
+ * shape is different enough that it cannot call `dailyValues` (it carries a
+ * per-service breakdown, a live flag and an SPL reading per day), so the sum
+ * lives in two places and they have to move together. They now agree; before
+ * this they did not, and one page's weekend was three times the other's.
  */
 export const DAY_FIGURE: Record<TrendMeasure, "sum" | "loudest"> = {
   attendance: "sum",
   sound: "loudest",
 };
 
-/** How many DAYS a tile draws, and the most its change can compare against. */
+/** How many DAYS a tile draws. The change compares the latest of them against
+ *  the rest, so at most `TREND_WINDOW - 1` days are ever compared against. */
 export const TREND_WINDOW = 8;
 
 /**
@@ -193,7 +203,8 @@ export function dailyValues(recordings: TrendRecording[], measure: TrendMeasure 
 }
 
 /**
- * One tile per service type, busiest first.
+ * One tile per service type, ordered by the figure the tile SHOWS — the latest
+ * recorded day, highest first.
  *
  * A type with no plotted recording at all is dropped: a tile reading "—" for
  * every figure is a row of nothing taking up the width of a real one.
@@ -250,9 +261,19 @@ export function typeTrends(
       priorCount: comparable ? prior.length : 0,
     });
   }
-  // Busiest first: the weekend service leads, and a once-a-year type does not
-  // take the left-hand tile because its name sorts early. A type with nothing
-  // to show under this measure sorts last, not into the middle.
+  // BY THE NUMBER ON THE TILE, so the order a reader sees is the order of the
+  // figures they are reading. Sorting by anything else — an average across the
+  // window, say — puts a tile showing 380 above one showing 3,541 and gives no
+  // account of why. The weekend service still leads, and a once-a-year type
+  // still does not take the left-hand tile because its name sorts early.
+  //
+  // This order also seeds the COLOUR assignment, once, on a browser that has
+  // never drawn this card — see assignColorIndexes. After that it is frozen, so
+  // two types crossing over on one day re-orders the tiles and leaves every
+  // colour where it was.
+  //
+  // A type with nothing to show under this measure sorts last, not into the
+  // middle.
   return out.sort((a, b) => (b.latest ?? -Infinity) - (a.latest ?? -Infinity));
 }
 

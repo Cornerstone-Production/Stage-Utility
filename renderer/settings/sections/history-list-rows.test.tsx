@@ -228,6 +228,19 @@ function gapOf(className: string): number {
 }
 
 /**
+ * Any spacing or gap token behind a VARIANT — `sm:p-4`, `hover:gap-2`.
+ *
+ * `spacingOf` and `gapOf` read the unconditional ones only: a variant's value
+ * depends on a media query or a state jsdom does not have, and silently reading
+ * the base value instead would make the clearance arithmetic below quietly wrong
+ * at exactly the width somebody added the variant for. Asserted as empty rather
+ * than handled, so the next person to add one is told the helper cannot see it.
+ */
+function variantSpacing(className: string): string[] {
+  return className.split(/\s+/).filter((t) => /:-?(?:[pm][xytrbl]?|gap)-[\d.]+$/.test(t));
+}
+
+/**
  * `{ attendance: { value: "1,196", caption: "peak in room" }, … }` for one row,
  * keyed by COLUMN.
  *
@@ -603,6 +616,11 @@ describe("what the All services page is made of", () => {
     // of the card at once.
     const ringedEl = view.container.querySelector('[data-day-group="2026-09-06"]') as HTMLElement;
     const card = view.container.querySelector("[data-services-card]") as HTMLElement;
+    assert.deepEqual(
+      [...variantSpacing(ringedEl.className), ...variantSpacing(card.className)].sort(),
+      [],
+      "the arithmetic below cannot read a spacing token behind a variant",
+    );
     const ring = spacingOf(ringedEl.className);
     const cardPad = spacingOf(card.className).pad;
     const gap = gapOf(card.className);

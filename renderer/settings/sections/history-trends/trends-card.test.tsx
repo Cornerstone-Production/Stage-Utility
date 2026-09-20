@@ -437,6 +437,14 @@ describe("the hover readout", () => {
     // One line in both states, so the row cannot grow when the readout is
     // longer than the sentence it replaced.
     assert.ok(/\btruncate\b/.test(after.className), `the readout row can wrap: ${after.className}`);
+    // And still ANNOUNCED. The strip this replaced was a polite live region;
+    // a row that changes under the pointer and never says so leaves a screen
+    // reader on the at-rest sentence forever.
+    assert.deepEqual(
+      [after.getAttribute("role"), after.getAttribute("aria-live")],
+      ["status", "polite"],
+      "the readout is not a live region any more",
+    );
     view.unmount();
   });
 

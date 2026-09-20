@@ -379,7 +379,9 @@ export function HistoryChart({
    * fresh object every render, so depending on it directly would fire on every
    * one of them.
    */
-  const reportedHover = all.length ? hoverStrip : null;
+  // Nothing to report when nobody asked, so the two service-page charts — which
+  // draw a strip and pass no `onHover` — never pay for the serialisation below.
+  const reportedHover = onHover && all.length ? hoverStrip : null;
   const hoverKey = reportedHover ? JSON.stringify(reportedHover) : "";
   const onHoverRef = useRef(onHover);
   useEffect(() => {

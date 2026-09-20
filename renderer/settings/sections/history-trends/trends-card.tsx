@@ -224,10 +224,10 @@ export function TrendsCard({
    * One colour per service type, stable across measure, range and sort.
    *
    * The ORDER a type is first seen in decides its colour, and that order is the
-   * tiles' — busiest first — so the weekend service leads in the palette's lead
-   * colour and a once-a-year type does not take the green because its id sorts
-   * early. Sorting by id gave a church its midweek service in green and its
-   * weekend in the third colour.
+   * tiles' — by the figure each tile shows, highest first — so the weekend
+   * service leads in the palette's lead colour and a once-a-year type does not
+   * take the green because its id sorts early. Sorting by id gave a church its
+   * midweek service in green and its weekend in the third colour.
    *
    * Only the FIRST sighting uses this order; after that the assignment is
    * frozen and persisted, so re-sorting on a measure switch, a quiet type
@@ -446,15 +446,28 @@ export function TrendsCard({
           overlay existed to avoid. On its own row rather than beside the title —
           the measure and range controls take that space, and a readout up there
           would push them. */}
-      <p data-trends-subtitle className="-mt-3 truncate text-caption2 text-fg-subtle">
+      <p
+        data-trends-subtitle
+        // A POLITE LIVE REGION, as the strip this replaced was. Its whole job in
+        // the second state is to answer "what is under the pointer", and a
+        // screen reader that is never told the row changed hears the at-rest
+        // sentence forever. `polite`, so the announcement queues behind whatever
+        // is being read rather than interrupting it, and the at-rest sentence is
+        // not announced on arrival because a live region only reports CHANGES.
+        role="status"
+        aria-live="polite"
+        className="-mt-3 truncate text-caption2 text-fg-subtle"
+      >
         {hover != null ? (
           <span data-trends-readout>
             <span className="font-mono tabular-nums text-fg">{hover.time}</span>
             {/* Each visible type in its OWN colour — the same colour as its
                 line, its tile and its legend swatch, which is what tells you
                 which of three lines you are reading. */}
-            {hover.values.map((v) => (
-              <span key={v.label} data-readout-series={v.label} style={{ color: v.color }}>
+            {/* Keyed by POSITION, not by label: two service types can carry the
+                same name, and a duplicate key drops one of them. */}
+            {hover.values.map((v, i) => (
+              <span key={i} data-readout-series={v.label} style={{ color: v.color }}>
                 {" · "}
                 {v.label} <span className="font-mono tabular-nums">{v.value}</span>
               </span>

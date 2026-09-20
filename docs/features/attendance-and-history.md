@@ -101,9 +101,12 @@ same eight-day window — the ones drawn beside it on the sparkline — and it s
 how many it used. Below **three** prior days it reads *no prior window yet*
 instead: one or two readings are not an average, and a change off them is noise
 wearing a direction. Because the count is always on the label, a thin comparison
-is visible as one rather than passed off as a full seven. The tiles sort busiest
-first, and the first type seen in that order takes the first colour in the
-palette.
+is visible as one rather than passed off as a full seven.
+
+The tiles are ordered by the figure each one shows — the latest day, highest
+first — so the order you read is the order of the numbers in it. The first type
+seen in that order takes the first colour in the palette, once, and the
+assignment is then frozen.
 
 The switch at the top right chooses what is plotted:
 
@@ -136,11 +139,11 @@ assigned per service type the first time it is seen and then persisted, so it
 does not follow the sort order — it does not change when you switch measure or
 range, when a quiet type has a loud week, or when a type misses a week.
 
-**Point at the chart** and the card's subtitle becomes the readout: the day under
-the cursor, then each drawn service type's figure there, in that type's own
-colour. Moving off puts the sentence back. It replaces a line that is already
-there rather than being drawn over the plot, so nothing covers the lines and the
-card does not change height.
+**Point at the chart** and the card's subtitle becomes the readout: the date the
+pointer is on, then each drawn service type's figure at its nearest recorded day,
+in that type's own colour. Moving off puts the sentence back. It replaces a line
+that is already there rather than being drawn over the plot, so nothing covers
+the lines and the card does not change height.
 
 **Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
 tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
