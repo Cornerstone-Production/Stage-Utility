@@ -228,6 +228,22 @@ function gapOf(className: string): number {
 }
 
 /**
+ * How far a `ring-N` is PAINTED outside the padding box, in px.
+ *
+ * Tailwind's ring is a box-shadow, not a border: it adds nothing to the layout
+ * and draws entirely outside the box `spacingOf` measures. A clearance taken
+ * from the box alone is that much too generous — the arithmetic said 12px and 4px
+ * where the painted edge really stands at 11px and 3px. Read off the class so it
+ * stays exact if the ring ever gets thicker; `ring` with no number is 3px, which
+ * is Tailwind's own default.
+ */
+function ringWidthOf(className: string): number {
+  const m = /(?:^|\s)ring(?:-(\d+))?(?:\s|$)/.exec(className);
+  if (!m) return 0;
+  return m[1] == null ? 3 : Number(m[1]);
+}
+
+/**
  * Any spacing or gap token behind a VARIANT — `sm:p-4`, `hover:gap-2`.
  *
  * `spacingOf` and `gapOf` read the unconditional ones only: a variant's value
@@ -628,13 +644,20 @@ describe("what the All services page is made of", () => {
       ring.pad.top >= 12 && ring.pad.left >= 12,
       `the ring has no inset from its own content: ${ringedEl.className}`,
     );
-    // One clearance per line, sorted by what the ring is standing off, so two
-    // branches adding different edges conflict instead of merging silently.
+    // THE PAINTED EDGE, not the box. A Tailwind ring is a box-shadow drawn
+    // outside the padding box, so every clearance is one ring-width shorter than
+    // the boxes suggest: the real figures at 1440 are 11px and 3px, not 12 and 4.
+    const paint = ringWidthOf(ringedEl.className);
+    // One clearance per EDGE per line, sorted by what the ring is standing off,
+    // so two branches adding different edges conflict instead of merging
+    // silently — and so a branch changing `-mx-3` to `-mr-4` cannot pass on the
+    // strength of the left side alone.
     const clearances: [what: string, clear: number, floor: number][] = [
-      ["the card's bottom padding, under the last day of a month", cardPad.bottom - ring.pull.bottom, 12],
-      ["the card's side padding", cardPad.left - ring.pull.left, 4],
-      ["the day group above it, or the Recorded services header", gap - ring.pull.top, 12],
-      ["the day group below it", gap - ring.pull.bottom, 12],
+      ["the card's bottom padding, under the last day of a month", cardPad.bottom - ring.pull.bottom - paint, 11],
+      ["the card's left padding", cardPad.left - ring.pull.left - paint, 3],
+      ["the card's right padding", cardPad.right - ring.pull.right - paint, 3],
+      ["the day group above it, or the Recorded services header", gap - ring.pull.top - paint, 11],
+      ["the day group below it", gap - ring.pull.bottom - paint, 11],
     ];
     // Every failing edge at once, not the first: the bug put the ring hard
     // against four different things, and a one-at-a-time assertion would have
