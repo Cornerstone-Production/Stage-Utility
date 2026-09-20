@@ -205,6 +205,21 @@ const subscribeFrames = (stub: ProdComStub): number =>
 const cardMessages = (svc: TestProdCom): (string | null)[] =>
   svc.reports.filter((r) => r.state === "connected").map((r) => r.message);
 
+/**
+ * Somebody speaks while the socket is up.
+ *
+ * The rows appear on ProdCom AFTER this connection took its baseline, which is
+ * what "a line the socket never delivered" means. Seeding them through
+ * `entries` instead puts them in the history the connection started from, where
+ * they are not missed lines at all — and a guard built that way would pass on a
+ * client that never noticed anything.
+ */
+async function speaks(stub: ProdComStub, svc: TestProdCom, ...rows: StubEntry[]): Promise<void> {
+  await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+  await svc.settled();
+  for (const row of rows) stub.addEntry(row);
+}
+
 describe("a websocket that delivers nothing is not a healthy connection", () => {
   it("asks REST whether anything was missed, and does nothing when nobody has spoken", async (t) => {
     // The quiet-room case, and the one that must not act: the socket has
@@ -234,13 +249,51 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // `typed` and `automation` entries never become captions, so a socket that
     // did not deliver one has missed nothing. Counting them would tear down a
     // working transport every time an operator typed into a comms channel.
-    const { stub, svc } = await running(t, { entries: [typed("cam-2-go-wide")] });
-    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
-    await svc.settled();
+    const { stub, svc } = await running(t);
+    await speaks(stub, svc, typed("cam-2-go-wide"));
 
     await sleep(500);
     assert.equal(svc.onWebSocketNow, true, "a typed comms message was treated as a missed caption");
     assert.equal(stub.sseOpens, 0, "the fallback was opened because an operator typed something");
+  });
+
+  it("does not tear down a healthy socket because ProdCom's clock runs fast", async (t) => {
+    // A ProdCom is an appliance and its clock is its own — the Ultritouch panel
+    // on this network is about seven hours fast with no NTP. So any question of
+    // the form "is there a row newer than <a time from OUR clock>" is decided on
+    // the difference between two clocks, not on whether anybody spoke.
+    //
+    // Here: one line genuinely spoken two minutes BEFORE the socket opened, on a
+    // box stamping ten minutes fast, and silence afterwards. Nothing was missed.
+    const skew = 10 * 60_000;
+    const { stub, svc } = await running(t, {
+      now: () => NOW + skew,
+      entries: [spoken("said-before-we-connected-on-a-fast-box", -120_000 + skew)],
+    });
+    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    await svc.settled();
+
+    await eventually(() => silenceChecks(stub) >= 2, "the check to run twice");
+    assert.equal(svc.onWebSocketNow, true, "a healthy socket was torn down by a clock difference");
+    assert.equal(stub.sseOpens, 0, "captions were moved to the fallback by a clock difference");
+    assert.equal(svc.knownSilent, false, "a fast appliance clock was recorded as a broken ProdCom");
+  });
+
+  it("still catches a silent socket when ProdCom's clock runs slow", async (t) => {
+    // The mirror, and the worse half: a box stamping ten minutes SLOW makes every
+    // row look older than the socket, so a time-based question answers "nobody
+    // spoke" for ever and the bug this whole check exists for goes undetected
+    // with the suite green.
+    const skew = -10 * 60_000;
+    const { stub, svc } = await running(t, { now: () => NOW + skew });
+    await speaks(stub, svc, spoken("said-while-the-socket-was-quiet-on-a-slow-box", 30_000 + skew));
+    // Once for the subscribed socket, once for the unsubscribed one it is
+    // reopened as — each has to be shown silent while somebody is speaking.
+    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await speaks(stub, svc, spoken("and-again-on-the-unsubscribed-socket", 60_000 + skew));
+
+    await eventually(() => stub.sseOpens >= 1, "the fallback to open", 6000);
+    assert.equal(svc.knownSilent, true, "a slow appliance clock hid a genuinely silent socket");
   });
 
   it("finds speech sitting behind a full page of typed lines", async (t) => {
@@ -250,13 +303,14 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // run of typed entries longer than a page at the head of that window would
     // pin the check on "nobody spoke" for the life of the connection, however
     // much was said afterwards.
-    const entries = [
+    const said = [
       ...Array.from({ length: 22 }, (_, i) => typed(`typed-${i}`, 10_000 + i)),
       spoken("said-behind-the-typed-run", 40_000),
     ];
-    const { stub, svc } = await running(t, { entries });
-    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
-    await svc.settled();
+    const { stub, svc } = await running(t);
+    await speaks(stub, svc, ...said);
+    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await speaks(stub, svc, ...said.map((e) => ({ ...e, id: `${e.id}-again` })));
 
     await eventually(() => stub.sseOpens >= 1, "the fallback to open once the speech is found", 6000);
     assert.equal(svc.knownSilent, true, "the speech behind the typed run was never found");
@@ -274,11 +328,10 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     let stub: ProdComStub | null = null;
     let svc: TestProdCom | null = null;
     const lines = await withLogs(async () => {
-      const c = await running(t, { entries: [spoken("said-while-the-socket-was-quiet")], subscribeFilterBroken: true });
+      const c = await running(t, { subscribeFilterBroken: true });
       stub = c.stub;
       svc = c.svc;
-      await eventually(() => c.svc.onWebSocketNow, "the websocket to become the live transport");
-      await c.svc.settled();
+      await speaks(c.stub, c.svc, spoken("said-while-the-socket-was-quiet"));
       assert.equal(subscribeFrames(c.stub), 1, "the first attempt must send the documented subscribe frame");
 
       // The vendor bug: this goes to nobody, because the only open socket asked
@@ -313,10 +366,12 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     let stub: ProdComStub | null = null;
     let svc: TestProdCom | null = null;
     const lines = await withLogs(async () => {
-      const c = await running(t, { entries: [spoken("nobody-ever-saw-this-over-the-socket")] });
+      const c = await running(t);
       stub = c.stub;
       svc = c.svc;
-      await eventually(() => c.svc.onWebSocketNow, "the websocket to become the live transport");
+      await speaks(c.stub, c.svc, spoken("nobody-ever-saw-this-over-the-socket"));
+      await eventually(() => c.stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+      await speaks(c.stub, c.svc, spoken("nor-this-one-over-the-unsubscribed-socket", 60_000));
       await eventually(() => c.stub.sseOpens >= 1, "the fallback to open", 6000);
       await c.svc.settled();
     });
@@ -378,11 +433,14 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     let stub: ProdComStub | null = null;
     let svc: TestProdCom | null = null;
     const lines = await withLogs(async () => {
-      const c = await running(t, { failTranscript: true });
+      const c = await running(t);
       stub = c.stub;
       svc = c.svc;
-      await eventually(() => c.svc.onWebSocketNow, "the websocket to become the live transport");
-      await c.svc.settled();
+      // Primed first, so this connection HAS a baseline and the check genuinely
+      // asks — then the endpoint goes away under it. Starting with it broken
+      // would exercise the no-baseline path instead, which is a different thing.
+      await speaks(c.stub, c.svc, spoken("said-while-the-socket-was-quiet"));
+      c.stub.setFailTranscript(true);
       await eventually(() => silenceChecks(c.stub) >= 1, "the check to ask REST");
       await sleep(200);
     });
@@ -401,7 +459,10 @@ describe("a box whose socket carries nothing stops being preferred", () => {
   /** Drive a box to the point where both subscription modes have been tried and
    *  captions are on the fallback. */
   async function silenced(t: TestContext): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
-    const { stub, svc } = await running(t, { entries: [spoken("never-delivered-over-a-socket")] });
+    const { stub, svc } = await running(t);
+    await speaks(stub, svc, spoken("never-delivered-over-a-socket"));
+    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await speaks(stub, svc, spoken("nor-over-the-unsubscribed-one", 60_000));
     await eventually(() => svc.knownSilent && !svc.onWebSocketNow, "the box to be known silent", 6000);
     await eventually(() => stub.sseOpens >= 1, "the fallback to open");
     // The CLIENT's signal, not the stub's: sseOpens counts the server accepting
@@ -441,7 +502,6 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // cost a caption gap, several times a minute.
     const stub = await startProdComStub({
       channels: CHANNELS,
-      entries: [spoken("never-delivered-over-a-socket")],
       // The fallback opens and ends at once, so reconnects are what this box
       // does — which is exactly when the counter fires.
       sseCloseImmediately: true,
@@ -452,6 +512,9 @@ describe("a box whose socket carries nothing stops being preferred", () => {
       await stub.close();
     });
     svc.configure("127.0.0.1", stub.port, null);
+    await speaks(stub, svc, spoken("never-delivered-over-a-socket"));
+    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await speaks(stub, svc, spoken("nor-over-the-unsubscribed-one", 60_000));
 
     await eventually(() => svc.knownSilent, "the box to be known silent", 6000);
     const attempts = wsAttempts(stub);

@@ -123,6 +123,17 @@ export type StubOptions = {
    * default stub is a box whose subscribe works.
    */
   subscribeFilterBroken?: boolean;
+  /**
+   * ProdCom's own wall clock, for every `meta.timestamp` this stub emits.
+   *
+   * A ProdCom is an appliance and its clock is its own: the Ultritouch panel on
+   * this network runs about seven hours fast with no NTP. Anything this app
+   * decides by comparing one of ProdCom's timestamps against its own clock is
+   * therefore deciding on the difference between two clocks, and a test that
+   * leaves them in step cannot see it. Defaults to the host clock, so every
+   * existing case is unaffected.
+   */
+  now?: () => number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -148,6 +159,19 @@ export type ProdComStub = {
    *  ProdCom that was mid-restart and now accepts it, which is the case the
    *  fallback's retry timer exists for. */
   setRefuseWebSocket(refuse: boolean): void;
+  /**
+   * Append a row to `GET /api/v1/transcript` AFTER the stub is running — what
+   * happens on the box when somebody speaks.
+   *
+   * Seeding a row through `entries` instead puts it in ProdCom's history before
+   * the client ever connects, which is a different thing entirely and cannot
+   * stand in for it: "a line the socket never delivered" means a line that
+   * appeared while the socket was up.
+   */
+  addEntry(entry: StubEntry): void;
+  /** Start or stop failing `GET /api/v1/transcript` AFTER the stub is running,
+   *  so a test can let a connection prime and then break the endpoint under it. */
+  setFailTranscript(fail: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -242,9 +266,12 @@ function clientFrameType(text: string): string | null {
 }
 
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
-  const entries = options.entries ?? [];
+  // Mutable: addEntry() appends to it while the stub is running.
+  const entries = [...(options.entries ?? [])];
   const channels = options.channels ?? [];
   const channelKeywords = options.channelKeywords ?? {};
+  /** ProdCom's clock, which is not this process's — see StubOptions.now. */
+  const peerNow = (): string => new Date(options.now ? options.now() : Date.now()).toISOString();
   const requests: StubRequest[] = [];
   const wsReceived: string[] = [];
   const sockets = new Set<Duplex>();
@@ -258,6 +285,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     sseOpens: 0,
     failKeywords: options.failKeywords === true,
     refuseWebSocket: options.refuseWebSocket === true,
+    failTranscript: options.failTranscript === true,
   };
   const waiters: (() => void)[] = [];
   const notify = () => {
@@ -283,7 +311,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       res.end(
         JSON.stringify({
           data: { version: "2.3.2", platform: "stub", channelCount: channels.length },
-          meta: { timestamp: new Date().toISOString() },
+          meta: { timestamp: peerNow() },
         }),
       );
       return;
@@ -299,7 +327,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
         ? channels.map((c) => ({ ...c, keywords: channelKeywords[c.id] ?? [] }))
         : channels;
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data: rows, meta: { timestamp: new Date().toISOString() } }));
+      res.end(JSON.stringify({ data: rows, meta: { timestamp: peerNow() } }));
       return;
     }
 
@@ -312,12 +340,12 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       const scoped = CHANNEL_KEYWORDS.exec(url.pathname);
       const data = scoped ? (channelKeywords[decodeURIComponent(scoped[1]!)] ?? []) : (options.keywords ?? []);
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data, meta: { timestamp: new Date().toISOString() } }));
+      res.end(JSON.stringify({ data, meta: { timestamp: peerNow() } }));
       return;
     }
 
     if (url.pathname === "/api/v1/transcript") {
-      if (options.failTranscript) {
+      if (state.failTranscript) {
         res.writeHead(500, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
         return;
@@ -338,7 +366,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
         JSON.stringify({
           data: page,
           meta: {
-            timestamp: new Date().toISOString(),
+            timestamp: peerNow(),
             totalCount: filtered.length,
             hasMore: offset + page.length < filtered.length,
           },
@@ -485,6 +513,13 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     setRefuseWebSocket: (refuse: boolean) => {
       state.refuseWebSocket = refuse;
+    },
+    addEntry: (entry: StubEntry) => {
+      entries.push(entry);
+      notify();
+    },
+    setFailTranscript: (fail: boolean) => {
+      state.failTranscript = fail;
     },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
     wsTranscript: (entry, wrap = "data") => {

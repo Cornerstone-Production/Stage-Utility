@@ -75,10 +75,23 @@ connection looks wrong from the client's side, so without a specific check the
 captions display simply stays empty and the integration card reads connected.
 
 While the WebSocket is the live transport and has delivered **no** transcript
-entry, the app asks REST one question at the one-minute mark: are there entries
-whose `source` is `audio`, dated after this socket opened? Typed and automation
-entries do not count — they never become captions, so a socket that did not
-deliver one has missed nothing.
+entry, the app asks REST one question at the one-minute mark: has ProdCom
+recorded any `source: audio` entries beyond the ones it already held when this
+socket opened? Typed and automation entries do not count — they never become
+captions, so a socket that did not deliver one has missed nothing.
+
+The question is asked as a **row count**, not as a time. On connect the app reads
+`meta.totalCount` from `GET /api/v1/transcript`, and the check then reads the
+rows past that offset. No timestamp is compared on either side, because a ProdCom
+is an appliance whose clock is its own: a box running fast would answer "yes" for
+lines spoken before the socket ever opened and get a healthy connection torn
+down, and a box running slow would answer "no" for ever and hide the very failure
+this check exists to catch. A row count has neither failure — ProdCom's
+transcript is append-only and ascending from the oldest entry, so rows beyond the
+baseline are exactly the rows added since.
+
+If the count cannot be read the check does nothing at all for that connection,
+and says so on connect.
 
 - **Nothing spoken** — nothing was missed. The question is asked again a minute
   later.
@@ -156,7 +169,9 @@ The `/log` page has the evidence when something looks wrong:
   when it does not. `[prodcom] the websocket has carried no transcript in 60s and
   this box has failed that test before …` is a later re-test being dropped, and
   `[prodcom] the websocket is carrying the transcript again …` is one that came
-  good. `[prodcom] could not check whether the websocket is missing transcript
+  good. `[prodcom] could not read the transcript row count (…)` on connect means
+  this connection has no baseline and the check will not run at all for it.
+  `[prodcom] could not check whether the websocket is missing transcript
   lines (…)` means REST did not answer and nothing was changed. The
   "nothing was said, so nothing was missed" case is `console.debug`, so it is in
   the terminal and deliberately not on `/log`
