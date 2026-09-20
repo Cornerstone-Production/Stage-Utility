@@ -1529,7 +1529,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 )
                 : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
-            const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
+            // The item count whether or not it is recording. The subtitle used
+            // to read "recording\u2026" instead while a record was open, which is
+            // the one thing on the row the pill beside the title already says \u2014
+            // and it cost the reader the only place the row says how many items
+            // have run so far.
+            const under = [s.seriesTitle, itemCount].filter(Boolean).join(" \u00b7 ");
             // FIXED columns, so the header above the group lines up with every
             // row under it. The figures are picked by key rather than taken in
             // order: a live recording has no `vs plan`, and closing the gap
@@ -1550,18 +1555,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       it is not in the mockup, and it is one of the six KPIs on
                       the service page's own header, where it has the room to
                       say what it is measured against. */}
-                  <span className="flex min-w-0 flex-col">
+                  <span data-row-when className="flex min-w-0 flex-col">
                     <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
                       {started.value}
                     </span>
+                    <span className="truncate text-[11px] text-fg-subtle">{s.serviceTypeName ?? ""}</span>
+                  </span>
+                  {/* SERVICE: the plan title — with the recording pill after it
+                      while the record is open — then its series and item count.
+                      The pill sat in the WHEN column beside the service type,
+                      where the two of them shared 104px: the pill does not
+                      shrink, so the type took what was left and "Weekend" read
+                      as "W…". It belongs here anyway. It says what is happening
+                      to this RECORDING, and it is where the service page and the
+                      arrival page both put it — after the title. */}
+                  <span data-row-service className="flex min-w-0 flex-col">
                     <span className="flex min-w-0 items-baseline gap-1.5">
-                      <span className="truncate text-[11px] text-fg-subtle">{s.serviceTypeName ?? ""}</span>
+                      <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                       {live && <RecordingPill />}
                     </span>
-                  </span>
-                  {/* SERVICE: the plan title, then its series and item count. */}
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                     {under && <span className="truncate text-[11px] text-fg-subtle">{under}</span>}
                   </span>
                   {ROW_COLUMNS.map((col) => {

@@ -200,7 +200,8 @@ to that day's group and rings it; it does not hide the rest of the month.
 A column header is drawn once, under the first day's label, then a row per
 service: the start time with the service type under it, the plan title with its
 series and item count under that, and four figures. Each figure's caption sits
-under its value.
+under its value. While a recording is still open, the same green **recording**
+pill the service's own page carries sits after its plan title.
 
 | | |
 |---|---|

@@ -657,6 +657,58 @@ describe("a row's columns", () => {
     assert.equal(drawn.level.caption, "no sound recorded", `Peak dB landed in the wrong column: ${JSON.stringify(drawn)}`);
   });
 
+  test("a LIVE row's recording pill sits after the plan title, not in the WHEN column", async () => {
+    // The pill does not shrink — it is a fixed badge — and in the WHEN column it
+    // shared 104px with the service type. The type took whatever was left and
+    // "Weekend" read as "W…", on the one row an operator is most likely to be
+    // looking at.
+    //
+    // WHAT THIS CANNOT SEE: the ellipsis. `truncate` is a stylesheet rule and
+    // jsdom loads none, so the type's text content is "Weekend" whether it is
+    // squeezed to nothing or not. What it CAN see is the structure that did the
+    // squeezing: which column the pill is in, and whether anything shares the
+    // type's line. Driven in Chrome at 1440 and 900 as well.
+    const LIVE = {
+      ...timeline("weekend:plan-1:1300", "Sunday 1:00", "13:00:00", "14:00:00"),
+      endedAt: null,
+    } as unknown as ServiceTimeline;
+    installFetch({ extra: [LIVE] });
+    const view = await renderList();
+    const live = view.container.querySelector(`[data-history-row="${LIVE.serviceKey}"]`) as HTMLElement;
+    assert.ok(live, "the live recording did not render");
+
+    const when = live.querySelector("[data-row-when]") as HTMLElement;
+    const service = live.querySelector("[data-row-service]") as HTMLElement;
+    assert.equal(
+      when.querySelectorAll('[data-testid="recording-pill"]').length,
+      0,
+      `the pill is still in the WHEN column, squeezing the service type: ${when.textContent}`,
+    );
+    const pill = service.querySelector('[data-testid="recording-pill"]');
+    assert.ok(pill, `the live row lost its recording pill altogether: ${service.textContent}`);
+    // Beside the TITLE, on the first line — not stranded on the series line
+    // under it, which is where "recording…" used to be.
+    assert.equal(
+      pill.parentElement?.firstElementChild?.textContent,
+      "Sunday 1:00",
+      "the pill is not the plan title's own neighbour",
+    );
+    // The type has its line to itself and reads in full.
+    assert.equal(
+      (when.lastElementChild?.textContent ?? "").trim(),
+      "Weekend",
+      `something is sharing the service type's line: ${when.lastElementChild?.textContent}`,
+    );
+    // And the subtitle is back to what it says on a finished row: the pill
+    // already says it is recording, and "recording…" cost the reader the only
+    // place the row counts the items that have run.
+    assert.equal(
+      (service.lastElementChild?.textContent ?? "").trim(),
+      "Rooted · 2 items",
+      "a live row's subtitle must count its items, not repeat the pill",
+    );
+  });
+
   test("the header names the same columns, in the same order, as the rows carry", async () => {
     // A heading one column left of its figures is the failure. Asserted as the
     // two lists rather than as a screenshot, because jsdom lays out nothing.
