@@ -64,7 +64,7 @@ const AT = Date.parse(T);
 
 const draw = (l: PvpLayerDTO, showProgress = true): string =>
   renderToStaticMarkup(
-    <PvpLayerRow layer={l} sampledAt={T} now={AT} skewMs={0} showProgress={showProgress} />,
+    <PvpLayerRow layer={l} sampledAt={T} now={AT} showProgress={showProgress} />,
   );
 
 const EMPTY = {
@@ -288,7 +288,7 @@ describe("emptyReason", () => {
 
 describe("PvpObject", () => {
   const render = (config: Config, status: PvpStatusDTO | null): string =>
-    renderToStaticMarkup(<PvpObject config={config} status={status} now={AT} skewMs={0} H={1080} />);
+    renderToStaticMarkup(<PvpObject config={config} status={status} now={AT} H={1080} />);
   const live: PvpStatusDTO = { connected: true, layers: FIXTURE_LAYERS, sampledAt: T, imageDurationSec: 20 };
 
   test("draws one row per visible layer", () => {

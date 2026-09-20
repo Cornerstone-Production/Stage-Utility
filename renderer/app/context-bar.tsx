@@ -22,8 +22,8 @@
 // ladder's promises intact. Below 640px both are hidden and the phone's own top
 // bar carries them, exactly as it always has.
 
-import { useEffect, useState } from "react";
-import { useServerSkew } from "@renderer/lib/use-server-skew";
+import { useState } from "react";
+import { useServerClock } from "@renderer/lib/server-clock";
 import { useDashboardState } from "../main/use-dashboard-state";
 import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
@@ -81,7 +81,6 @@ export interface BarItemContext {
   /** The server's clock minus this browser's. The recording item reads OBS's
    *  interpolated record clock off a server-stamped anchor, so it needs the same
    *  correction the countdown above it already applies. */
-  skewMs: number;
   obs: ReturnType<typeof useObsState>;
   reaper: ReturnType<typeof useReaperState>;
   integrations: ReturnType<typeof useIntegrations>;
@@ -105,16 +104,12 @@ export interface ContextBarState {
 /**
  * The bar's derived state. Pure, so it is testable without rendering.
  *
- * `skewMs` is `Date.parse(pcoLive.serverNow) - Date.now()` from the last
- * pco:live - the server sends serverNow for exactly this. A laptop whose clock
- * has drifted otherwise runs a timer that disagrees with the one on the wall.
+ * `now` is the SERVER's clock, corrected in renderer/lib/server-clock.ts - a
+ * laptop whose clock has drifted otherwise runs a timer that disagrees with the
+ * one on the wall.
  */
-export function contextBarState(
-  pcoLive: PcoLiveDTO | null,
-  now: number,
-  skewMs: number,
-): ContextBarState {
-  const timer = computePcoTimer(pcoLive, now, skewMs);
+export function contextBarState(pcoLive: PcoLiveDTO | null, now: number): ContextBarState {
+  const timer = computePcoTimer(pcoLive, now);
   if (!timer) return { isLive: false, isOver: false, itemTitle: null, timerText: null };
   return {
     // LIVE means an ITEM is running, not merely that there is something to count.
@@ -145,20 +140,13 @@ export function useBarContext(): BarItemContext {
   const youtube = useYouTubeState();
   const scores = useScoresState();
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    // Cleanup is load-bearing: the operator app is a persistent shell, so an
-    // interval that outlives its component runs for the whole service.
-    return () => clearInterval(id);
-  }, []);
+  // The SERVER's clock, ticking once a second. Every reading below is against a
+  // server-stamped instant — the bar's own clock face included — so a console
+  // whose clock has drifted must not report the drift as the time.
+  const now = useServerClock(pcoLive?.serverNow);
 
-  // Skew between this client and the server, recomputed whenever a pco:live
-  // arrives. Same pattern as dashboard-view.tsx.
-  const skewMs = useServerSkew(pcoLive?.serverNow);
-
-  const bar = contextBarState(pcoLive, now, skewMs);
-  return { state, bar, now, skewMs, obs, reaper, integrations, resi, youtube, scores };
+  const bar = contextBarState(pcoLive, now);
+  return { state, bar, now, obs, reaper, integrations, resi, youtube, scores };
 }
 
 /** The strip's own layout. Shared with the configurator's preview, so a bar that
@@ -425,7 +413,7 @@ export function integrationHealth(states: readonly IntegrationState[] | undefine
  * to drop, and dropping one brings back a bar that rearranges itself.
  */
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
-  const { state, bar, now, skewMs, obs, reaper, integrations, resi, youtube } = ctx;
+  const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
   switch (id) {
     case "clock": {
       // THE SECONDS ARE THE ONE PLACE THE LADDER TOUCHES DIGITS, and it is worth
@@ -597,7 +585,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     case "recording": {
       // The same indicator Home draws, from the same function — including
       // "connected but not rolling", which is the state worth surfacing.
-      const ind = recordIndicator(recorders(obs, reaper, now, skewMs));
+      const ind = recordIndicator(recorders(obs, reaper, now));
       // Offline is not worth a colour, and neither is standby: it is what the
       // bar sits in all week. Rolling is the thing worth saying, and it gets the
       // green the streaming item beside it uses.

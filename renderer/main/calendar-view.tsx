@@ -598,10 +598,10 @@ export function CalendarView({
   interactive?: boolean;
   /**
    * The caller's corrected clock, where it already holds one — an embedded tile
-   * passes `ctx.now + ctx.skewMs`. Omit it and this subscribes for its own, which
-   * is the same clock: what must never happen is the component answering "which
-   * square is today" from the raw browser clock, because the DISPLAY route is a
-   * wall Pi on a LAN with no NTP.
+   * passes `ctx.now`. Omit it and this subscribes for its own, which is the same
+   * clock: what must never happen is the component answering "which square is
+   * today" from the raw browser clock, because the DISPLAY route is a wall Pi on
+   * a LAN with no NTP.
    */
   nowMs?: number;
 }) {
@@ -640,8 +640,8 @@ export function CalendarView({
    * CORRECTED, not `Date.now()`. A minute is enough for both things it decides:
    * the highlight moves between events, and the day rolls over. A one-second tick
    * would re-render the whole grid sixty times as often for a change nobody can
-   * see — and `useCorrectedNow` keeps that cadence, because it quantises the skew
-   * to whole seconds rather than re-rendering on every `pco:live` push.
+   * see — and `useCorrectedNow` keeps that cadence whatever the push rate, because
+   * it reads the page's clock on its own interval rather than on every frame.
    *
    * Off entirely when the caller passed one, so an embedded tile does not run a
    * second clock beside the one it is already handing down.

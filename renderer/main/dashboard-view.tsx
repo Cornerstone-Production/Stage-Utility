@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
@@ -9,7 +8,7 @@ import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
-import { useServerSkew } from "@renderer/lib/use-server-skew";
+import { useServerClock } from "@renderer/lib/server-clock";
 
 interface DashboardViewProps {
   displayId: string;
@@ -41,16 +40,10 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const transcript = useTranscript();
   const spl = useSplState();
 
-  // One ticking clock drives both the wall clock and the live countdown.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  // Skew between this client and the server, recomputed whenever a pco:live
-  // arrives, so the countdown matches the server clock even if this kiosk drifts.
-  const skewMs = useServerSkew(pcoLive?.serverNow);
+  // One ticking clock drives both the wall clock and the live countdown, and it
+  // is the SERVER's — see renderer/lib/server-clock.ts. A kiosk whose own clock
+  // has drifted must not report the drift as the time.
+  const now = useServerClock(pcoLive?.serverNow);
 
   if (isLoading) {
     return (
@@ -81,7 +74,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const ampm = hh < 12 ? "AM" : "PM";
 
   // PCO live timer: counts down on fixed-length items, up otherwise.
-  const timer = computePcoTimer(pcoLive, now, skewMs);
+  const timer = computePcoTimer(pcoLive, now);
   const over = !!timer?.over;
 
   const pro = propresenter;

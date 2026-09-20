@@ -41,7 +41,7 @@ import { invoke, onNotification } from "../../lib/api";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
-import { usePvpState, usePvpSkewMs } from "../../main/use-pvp-state";
+import { usePvpState } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
 import { PvpNowObject, type PvpNowLabel } from "../../main/pvp-now";
@@ -557,13 +557,11 @@ export function RecentServicesCard({
 export function LiveStatusCard({
   pcoLive,
   now,
-  skewMs,
 }: {
   pcoLive: PcoLiveDTO | null;
   now: number;
-  skewMs: number;
 }) {
-  const timer = computePcoTimer(pcoLive, now, skewMs);
+  const timer = computePcoTimer(pcoLive, now);
   // The idiom, like every other card. This was the last one drawing its own
   // markup — a clamp()'d timer with its label sitting BESIDE it on the baseline
   // and the next item below, which is the same three pieces of information the
@@ -590,22 +588,20 @@ export function LiveStatusCard({
 export function RecordingCard({
   recorder = "any",
   now,
-  skewMs,
   showElapsed = true,
 }: {
   recorder?: string;
-  /** The clock comes DOWN, from the one tick the page already runs — the same
+  /** The SERVER's clock, from the one tick the page already runs — the same
    *  argument StreamingCard makes below. OBS's record timecode is interpolated
-   *  from a server-stamped anchor now rather than pushed once a second, so this
-   *  card needs both the tick and the skew to read it. */
+   *  from a server-stamped anchor rather than pushed once a second, so a card
+   *  reading its own browser's clock would draw recording that never happened. */
   now: number;
-  skewMs: number;
   /** Home's "Elapsed time" switch. Off, the card drops the running timecode and
    *  keeps the state — the same thing the same switch does to the streaming card
    *  beside it, which is why it carries the same name. */
   showElapsed?: boolean;
 }) {
-  const list = recorders(useObsState(), useReaperState(), now, skewMs);
+  const list = recorders(useObsState(), useReaperState(), now);
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
   // Only LIVE takes a colour. Everything else is the page's own foreground, the
@@ -687,9 +683,6 @@ export function SplCard({ meterId }: { meterId?: string | null } = {}) {
  */
 export function PvpCard({ now, showProgress = false }: { now: number; showProgress?: boolean }) {
   const pvp = usePvpState();
-  // PVP's own clock offset rather than the PCO-derived one this card is handed:
-  // the countdown below must not go wrong because Planning Center is down.
-  const skewMs = usePvpSkewMs(pvp);
   const rows = visibleLayers(pvp?.layers ?? [], { type: "pvp-layers", show: "with-content" });
   // playbackRate, never isPlaying — the one rule this integration turns on.
   const rolling = rows.filter((l) => l.playbackRate > 0).length;
@@ -740,7 +733,6 @@ export function PvpCard({ now, showProgress = false }: { now: number; showProgre
             layer={l}
             sampledAt={pvp.sampledAt}
             now={now}
-            skewMs={skewMs}
             showProgress={showProgress}
           />
         ))}
@@ -776,7 +768,6 @@ export function PvpNowCard({
   countStills?: boolean;
 }) {
   const pvp = usePvpState();
-  const skewMs = usePvpSkewMs(pvp);
   return (
     <div className={STAT_CARD}>
       {/* No `align`: PvpNowObject passes it to Readout, which defaults to LEFT,
@@ -787,7 +778,6 @@ export function PvpNowCard({
         config={{ showProgress, showNextCue, compact, nowLabel, countStills }}
         status={pvp}
         now={now}
-        skewMs={skewMs}
         align="center"
         uniform
       />
@@ -946,7 +936,6 @@ export function HomeCard({
   state,
   pcoLive,
   now,
-  skewMs,
   onlineOutputIds,
   secondsToStart,
   hoverSuppressed = false,
@@ -963,7 +952,6 @@ export function HomeCard({
   state: StageState;
   pcoLive: PcoLiveDTO | null;
   now: number;
-  skewMs: number;
   /**
    * Output ids with a live heartbeat, from `useDisplayPresence` by way of
    * `LayoutRenderCtx.onlineOutputIds` — the single supplier, on every path.
@@ -983,13 +971,13 @@ export function HomeCard({
   const c = config;
   switch (c.type) {
     case "home-live-status":
-      return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
+      return <LiveStatusCard pcoLive={pcoLive} now={now} />;
     case "home-recording":
-      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} skewMs={skewMs} showElapsed={c.showElapsed ?? true} />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":
-      return <RecordingCard recorder="OBS" now={now} skewMs={skewMs} />;
+      return <RecordingCard recorder="OBS" now={now} />;
     case "home-recording-reaper":
-      return <RecordingCard recorder="REAPER" now={now} skewMs={skewMs} />;
+      return <RecordingCard recorder="REAPER" now={now} />;
     case "home-streaming":
       return (
         <StreamingCard

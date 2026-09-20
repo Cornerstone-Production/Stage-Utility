@@ -115,8 +115,32 @@ export class ServerClock {
   private slewFromMs = 0;
   private slewStartedAtMs = 0;
   private slewing = false;
+  private readonly listeners = new Set<() => void>();
 
   constructor(private readonly src: ServerClockSources) {}
+
+  /**
+   * Be told when the clock STEPS, so a surface can redraw on the frame the
+   * correction arrives in rather than waiting out its own tick.
+   *
+   * Steps only. A slew is under a second and the next tick picks it up; calling
+   * back on every eased correction would re-render every subscriber on every
+   * pco:live push, at up to 1 Hz through a service, for a change nobody can see.
+   * The first reading on a page is a step, which is the one that matters: a
+   * calendar on a minute tick would otherwise mark the wrong square for a minute
+   * after the frame that said so had already arrived.
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private announceStep(): void {
+    // Copied before iterating: a listener that unsubscribes during the callback
+    // is the ordinary React unmount, and mutating the set under its own iterator
+    // is how one subscriber costs the next one its call.
+    for (const fn of [...this.listeners]) fn();
+  }
 
   /**
    * Take one reading of the server's clock.
@@ -162,6 +186,9 @@ export class ServerClock {
   /** Forget everything. For a test, and for nothing else — a page has one clock
    *  for its whole life. */
   reset(): void {
+    // Subscribers are deliberately kept: a listener belongs to a mounted
+    // component, and forgetting it here would leave that component reading a
+    // clock that never tells it anything again.
     this.samples.length = 0;
     this.targetOffsetMs = null;
     this.slewing = false;
@@ -187,6 +214,7 @@ export class ServerClock {
       if (Math.abs(hostErrMs) >= SERVER_CLOCK_STEP_MS) {
         this.src.log(`this browser's clock is ${describeOffset(hostErrMs)} — showing server time instead`);
       }
+      this.announceStep();
       return "step";
     }
     const diff = target - current;
@@ -194,6 +222,7 @@ export class ServerClock {
       this.targetOffsetMs = target;
       this.slewing = false;
       this.src.log(`stepped ${describeOffset(diff)} to follow the server`);
+      this.announceStep();
       return "step";
     }
     this.slewFromMs = current;
@@ -277,6 +306,13 @@ export function useServerNow(intervalMs = 1000, enabled = true): number {
     const id = setInterval(() => setNow(serverClock.now()), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs, enabled]);
+  // And redraw on a correction rather than at the next tick. A calendar ticks
+  // once a MINUTE, so without this a display whose clock is days out marks the
+  // wrong square for a minute after the frame that said so has arrived.
+  useEffect(() => {
+    if (!enabled) return;
+    return serverClock.subscribe(() => setNow(serverClock.now()));
+  }, [enabled]);
   return now;
 }
 

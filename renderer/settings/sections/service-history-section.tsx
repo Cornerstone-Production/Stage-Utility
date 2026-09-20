@@ -9,6 +9,7 @@ import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
+import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
 import { confirm, EmptyState, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
@@ -602,12 +603,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // (an attendance-only selection never populates `detail` at all).
   const detailLive = detail != null ? detail.endedAt == null : attendance != null && attendance.endedAt == null;
   const listLive = rows.some((r) => (r.timeline ?? r.attendance)?.endedAt == null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    if (!detailLive && !listLive) return;
-    const t = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [detailLive, listLive]);
+  // The SERVER's clock: every figure this feeds is measured against a
+  // server-stamped `startedAt`, so a console whose clock has drifted would add
+  // the drift to the in-progress item's elapsed time.
+  const nowTick = useServerNow(1000, detailLive || listLive);
 
   // Synchronous, so the panel clears in the same render the selection does —
   // it never shows the previous service's numbers under an empty selection.

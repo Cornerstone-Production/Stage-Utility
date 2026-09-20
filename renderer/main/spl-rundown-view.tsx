@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Loader2Icon } from "lucide-react";
+import { useServerClock } from "@renderer/lib/server-clock";
 
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -49,11 +50,9 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
   const history = useSplHistory();
   const spl = useSplState();
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  // The SERVER's clock: the header draws a wall clock, and this route is a wall
+  // Pi on a LAN with no NTP. See renderer/lib/server-clock.ts.
+  const now = useServerClock(pcoLive?.serverNow);
   // Rebuild only when the recorded history changes, not on every 1 Hz clock tick.
   // Must stay above the early returns below (Rules of Hooks).
   const maxByItem = useMemo(() => {

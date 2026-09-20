@@ -9,6 +9,7 @@ import { Button, confirm, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { formatClock } from "../lib/clock-format";
+import { useServerNow } from "../lib/server-clock";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -27,7 +28,6 @@ function fmtDate(iso: string): string {
  */
 export function BaptismOperator() {
   const state = useBaptismState();
-  const [now, setNow] = useState(() => Date.now());
   const [sessions, setSessions] = useState<BaptismSession[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,11 +44,10 @@ export function BaptismOperator() {
   // Paused = a phase is running but its clock is not. The readout keeps showing what
   // was banked, so a paused timer looks stopped rather than looking broken.
   const paused = !!state && state.phase !== "idle" && !state.segmentStartedAt;
-  useEffect(() => {
-    if (!segStart) return;
-    const id = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(id);
-  }, [segStart]);
+  // The SERVER's clock. `segmentStartedAt` is stamped by the server, so a
+  // console whose own clock has drifted would report the drift as elapsed time —
+  // and the same segment reads differently here and on the display object.
+  const now = useServerNow(250, !!segStart);
 
   async function act(channel: string, after?: () => void, payload?: Record<string, unknown>) {
     setBusy(true);

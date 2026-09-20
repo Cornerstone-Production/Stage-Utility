@@ -61,7 +61,7 @@ const status = (layers: PvpLayerDTO[], over: Partial<PvpStatusDTO> = {}): PvpSta
 const draw = (
   s: PvpStatusDTO | null,
   config: PvpNowConfig = {},
-): string => renderToStaticMarkup(<PvpNowObject config={config} status={s} now={AT} skewMs={0} />);
+): string => renderToStaticMarkup(<PvpNowObject config={config} status={s} now={AT} />);
 
 describe("which layer it reads", () => {
   const three = [layer({ uuid: "a", name: "Top", ...EMPTY }), layer({ uuid: "b", name: "Middle" }), layer({ uuid: "c", name: "Bottom" })];
