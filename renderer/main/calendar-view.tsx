@@ -268,9 +268,8 @@ function DaySquare({
 /**
  * The month, drawn. Pure — everything it needs arrives as a prop.
  *
- * @param nowMs the client's best idea of the current instant, already skew
- *   corrected where the caller has a server clock. Used only to decide which
- *   square is today and which event is running.
+ * @param nowMs the current instant on the SERVER's clock. Used only to decide
+ *   which square is today and which event is running.
  */
 /** The month chevrons' wiring. Supplied only where controls are live. */
 export interface CalendarNav {

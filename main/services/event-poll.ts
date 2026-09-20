@@ -3,9 +3,10 @@
 // Some embedded browsers cannot hold a server-sent event stream. The Ross
 // Ultritouch's DashBoard fallback browser buffers `GET /api/events` and releases
 // its frames in batches up to a minute late, so a panel on it renders a
-// minute-old service and mis-measures its clock skew by the same minute. Such a
-// client opts into `?transport=poll` instead and asks
-// `GET /api/events/poll?cid=…&since=…` every couple of seconds.
+// minute-old service. Such a client opts into `?transport=poll` instead and asks
+// `GET /api/events/poll?cid=…&since=…` every couple of seconds — which, unlike a
+// pushed frame, is a request/response pair the client can time, so `nowMs` below
+// lets it place the server's clock exactly.
 //
 // Here: the recent-broadcast ring buffer those polls read from, and the registry
 // of which poll clients are currently alive (so subscriber-gated producers count

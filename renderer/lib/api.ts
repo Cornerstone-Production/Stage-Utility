@@ -984,10 +984,12 @@ const sseListeners: SseListener[] = [];
  * Ultritouch renders its Browser component in DashBoard's fallback browser
  * (its Chromium will not start on the panel's Linux), and that browser buffers
  * /api/events and releases the frames in batches up to a minute late — so the
- * panel showed a minute-old service and measured its clock skew a minute wrong.
+ * panel showed a minute-old service.
  *
  * Off by default and deliberately not sticky: a held stream is cheaper and
- * immediate, and this costs one request per client every two seconds.
+ * immediate, and this costs one request per client every two seconds. What it
+ * buys back is the only measurable round trip in the app: see the `now` handling
+ * in `pollOnce`, which is what keeps the clock on a panel right.
  */
 const POLL_TRANSPORT = (() => {
   try {
