@@ -29,7 +29,7 @@ import { cn } from "../../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
-import { HistoryChart, useStoredKeys, type ChartMilestone } from "../history-chart";
+import { HistoryChart, useStoredKeys, type ChartMilestone, type StripHover } from "../history-chart";
 import { toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
@@ -174,6 +174,16 @@ export function TrendsCard({
    * the reason is in the console and the fact is on screen.
    */
   const [milestonesFailed, setMilestonesFailed] = useState(false);
+  /**
+   * What the pointer is on, taken OUT of the chart — see HistoryChart.onHover.
+   *
+   * The chart used to print this itself, in a box laid over the top-left of the
+   * plot. Narrowed to its text and made see-through it was still in front of the
+   * line, and the top-left is where a rising line ends up. It goes on the card's
+   * subtitle row instead: a line that is already there, already one line high,
+   * and already the place the card explains itself.
+   */
+  const [hover, setHover] = useState<StripHover | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -425,16 +435,39 @@ export function TrendsCard({
         </div>
       </div>
 
-      {/* What the card is, in one line: what a DAY is worth under this measure,
-          and how many days a tile draws. Without it the figure on a tile is a
-          number with no window, and "added up" against "the loudest" is the
-          whole difference between the two measures. On its own row rather than
-          beside the title: the measure and range controls take that space. */}
-      <p data-trends-subtitle className="-mt-3 text-caption2 text-fg-subtle">
-        {sound
-          ? "Peak level per service type, each day's loudest recording"
-          : "Attendance per service type, each day's services added up"}
-        {` · last ${TREND_WINDOW} days · milestones from your list and series changes`}
+      {/* ONE ROW, TWO JOBS. At rest it says what the card is: what a DAY is
+          worth under this measure, and how many days a tile draws — without it
+          the figure on a tile is a number with no window, and "added up"
+          against "the loudest" is the whole difference between the two
+          measures. Under the pointer the same row becomes the chart's readout,
+          so nothing is laid over the plot and the whole line stays visible.
+          `truncate`, so it is one line in both states: a readout that wrapped
+          would push the plot down under the cursor, which is the motion the old
+          overlay existed to avoid. On its own row rather than beside the title —
+          the measure and range controls take that space, and a readout up there
+          would push them. */}
+      <p data-trends-subtitle className="-mt-3 truncate text-caption2 text-fg-subtle">
+        {hover != null ? (
+          <span data-trends-readout>
+            <span className="font-mono tabular-nums text-fg">{hover.time}</span>
+            {/* Each visible type in its OWN colour — the same colour as its
+                line, its tile and its legend swatch, which is what tells you
+                which of three lines you are reading. */}
+            {hover.values.map((v) => (
+              <span key={v.label} data-readout-series={v.label} style={{ color: v.color }}>
+                {" · "}
+                {v.label} <span className="font-mono tabular-nums">{v.value}</span>
+              </span>
+            ))}
+          </span>
+        ) : (
+          <>
+            {sound
+              ? "Peak level per service type, each day's loudest recording"
+              : "Attendance per service type, each day's services added up"}
+            {` · last ${TREND_WINDOW} days · milestones from your list and series changes`}
+          </>
+        )}
       </p>
 
       {tiles.length === 0 ? (
@@ -546,14 +579,10 @@ export function TrendsCard({
             // Busiest, which is a fourth summary of the same recordings the
             // tiles above it already summarise per service type — and a blend
             // across types, which is the statistic the tiles exist to avoid.
-            // The strip still answers a HOVER: what a point on a line is, and
-            // which recording it belongs to.
             figures={[]}
-            // With no at-rest figures the strip must not take a row of layout:
-            // in flow it is a void the height of a figure between the tiles and
-            // the plot at rest, and a chart that jumps down under the cursor on
-            // hover. Overlaid it costs nothing and moves nothing.
-            stripOverlay
+            // So there is no strip at all, and the hover comes back here to be
+            // drawn on the subtitle row. See `hover` above.
+            onHover={setHover}
             onToggleSeries={(id) => {
               const err = toggleHidden(id);
               if (err) toast.error(`Couldn't remember that: ${err.message}`);

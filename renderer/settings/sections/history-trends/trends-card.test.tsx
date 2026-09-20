@@ -16,7 +16,20 @@ import { installRenderDom } from "../../../test-dom.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, act } = await import("@testing-library/react");
+// jsdom's getBoundingClientRect is all zeros, and the chart REFUSES to map a
+// pointer against a zero-width box — it would map every x to NaN. Give every
+// element a box so a pointer move over the plot means an instant. The chart's
+// own WIDTH still comes from `clientWidth`, which jsdom leaves at 0, so it
+// draws at its 640px default: SVG_W matches that on purpose.
+const SVG_W = 640;
+Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+  configurable: true,
+  value() {
+    return { left: 0, top: 0, right: SVG_W, bottom: 217, width: SVG_W, height: 217, x: 0, y: 0, toJSON() {} };
+  },
+});
+
+const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
 const { TrendsCard, absChange } = await import("./trends-card.js");
@@ -352,50 +365,130 @@ function silentType(): TrendRecording[] {
 }
 
 
-describe("the strip above the trends plot", () => {
-  test("is OUT OF FLOW, so an empty one costs no space and a hover moves nothing", async () => {
-    // With no at-rest figures the strip is zero-high at rest. In flow that is
-    // either a void the height of a figure between the tiles and the plot — a
-    // reserved 44px, which is what shipped — or a chart that jumps down under
-    // the cursor the moment the pointer arrives.
+describe("the hover readout", () => {
+  /** The CHART's svg. `querySelector("svg")` finds the first tile's sparkline —
+   *  every tile has one, and they come first in the DOM. */
+  function plotOf(view: ReturnType<typeof render>): SVGSVGElement {
+    const svg = view.container.querySelector("[data-series-line]")?.closest("svg");
+    assert.ok(svg, "the chart drew no line, so there is nothing to hover");
+    return svg as SVGSVGElement;
+  }
+
+  /** The readout the subtitle row becomes under the pointer. Asserted rather
+   *  than dereferenced, so a card that reports nothing fails with a sentence
+   *  instead of a TypeError from the line after it. */
+  function readoutIn(row: HTMLElement): HTMLElement {
+    const readout = row.querySelector("[data-trends-readout]");
+    assert.ok(readout, `hovering the plot said nothing: "${row.textContent}"`);
+    return readout as HTMLElement;
+  }
+
+  /** Point at the middle of the plot, then hand back the card's subtitle row. */
+  async function hoverPlot(view: ReturnType<typeof render>): Promise<HTMLElement> {
+    const svg = plotOf(view);
+    await act(async () => {
+      fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 60 });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    return view.container.querySelector("[data-trends-subtitle]") as HTMLElement;
+  }
+
+  test("nothing is drawn over the plot at all — the chart has no strip", async () => {
+    // The readout was a box laid over the top-left of the plot. Narrowed to its
+    // text and made see-through it was still in FRONT of the line, and the
+    // top-left is where a rising line ends up — the part a pointer there is
+    // asking about.
     //
-    // WHAT THIS CANNOT SEE: the resulting 16px. jsdom loads no stylesheet and
-    // measures every box as 0, so a geometry assertion here would pass on any
-    // layout at all. The gap was measured in Chrome at 1440 — tiles bottom 202,
-    // chart top 218 — and what is asserted here is the structure that produces
-    // it: the strip is positioned, and its parent is the positioning context.
+    // WHAT THIS CANNOT SEE: what covers what. jsdom loads no stylesheet, paints
+    // nothing and measures every box as 0, so no assertion here can tell whether
+    // one element is on top of another. What it CAN do is deny the structure
+    // that made it possible: there is no strip, and nothing inside the card is
+    // taken out of flow to sit over the plot. Driven in Chrome at 1440.
     const view = await renderCard(twoTypes());
-    const strip = view.container.querySelector("[data-history-strip]") as HTMLElement;
-    assert.ok(strip, "no strip at all — hover has nowhere to report");
-    assert.ok(strip.className.includes("absolute"), `the strip is still in flow: ${strip.className}`);
-    assert.ok(strip.className.includes("pointer-events-none"), "an overlaid strip must not eat the pointer");
-    // Sized to its text and see-through, with padding. A full-width opaque bar
-    // (`inset-x-0 bg-bg/90`) covered the line where it peaks; text flush against
-    // the box's edge (no `px-`) was the other half of the same report.
-    assert.ok(!strip.className.includes("inset-x-0"), `the strip still spans the plot's width: ${strip.className}`);
-    assert.ok(strip.className.includes("w-fit"), `the strip is not sized to its text: ${strip.className}`);
-    assert.ok(/\bpx-\d/.test(strip.className), `the strip's text has no side padding: ${strip.className}`);
-    assert.ok(!/bg-bg\/(9\d|100)\b/.test(strip.className), `the strip is opaque, so it hides the line under it: ${strip.className}`);
-    assert.ok(
-      strip.parentElement?.className.includes("relative"),
-      `the strip's parent is not the positioning context: ${strip.parentElement?.className}`,
+    // Counted, not compared. `assert.equal(<a DOM node>, null)` puts the node
+    // in the AssertionError, and serialising a jsdom element graph for the diff
+    // takes the whole heap: the run is SIGKILLed with no message at all, which
+    // is a guard that cannot report the bug it caught.
+    assert.equal(
+      view.container.querySelectorAll("[data-history-strip]").length,
+      0,
+      "the chart is still drawing a strip; the card is drawing the readout too",
+    );
+    const overlaid = [...view.container.querySelectorAll("[class]")]
+      .map((el) => el.className)
+      .filter((c) => typeof c === "string" && /\babsolute\b/.test(c));
+    assert.deepEqual(overlaid, [], `something is still laid over the plot: ${overlaid.join(" | ")}`);
+    view.unmount();
+  });
+
+  test("hovering replaces the card's subtitle, and adds no row to do it", async () => {
+    const view = await renderCard(twoTypes());
+    const before = view.container.querySelector("[data-trends-subtitle]") as HTMLElement;
+    assert.match(before.textContent ?? "", /per service type/, "the subtitle is not the at-rest sentence");
+    assert.ok(!before.querySelector("[data-trends-readout]"), "a readout at rest");
+
+    const after = await hoverPlot(view);
+    // THE SAME ELEMENT. A second row appearing under the subtitle is a row of
+    // height added, which pushes the plot down under the cursor.
+    assert.ok(after === before, "the readout is a new element, not the subtitle's own row");
+    assert.equal(view.container.querySelectorAll("[data-trends-subtitle]").length, 1);
+    readoutIn(after);
+    assert.doesNotMatch(after.textContent ?? "", /per service type/, "the subtitle is still there beside the readout");
+    // One line in both states, so the row cannot grow when the readout is
+    // longer than the sentence it replaced.
+    assert.ok(/\btruncate\b/.test(after.className), `the readout row can wrap: ${after.className}`);
+    view.unmount();
+  });
+
+  test("it names the day and every VISIBLE type's value, each in its own colour", async () => {
+    const view = await renderCard(twoTypes());
+    const readout = readoutIn(await hoverPlot(view));
+    const text = (readout.textContent ?? "").replace(/\s+/g, " ");
+    // A date, not a time of day: the axis under the pointer is dates, and this
+    // answered "2:32 pm" on sixteen weeks of Sundays.
+    assert.match(text, /^[A-Z][a-z]{2} \d+ /, `the readout does not lead with the day: "${text}"`);
+    for (const id of ["weekend", "evening"]) {
+      assert.match(text, new RegExp(id), `${id} is not in the readout: "${text}"`);
+    }
+    // Each type's figure in the SAME colour as its line — which is what tells
+    // you which of several lines you are reading.
+    const colored = [...readout.querySelectorAll("[data-readout-series]")].map((el) => [
+      el.getAttribute("data-readout-series"),
+      (el as HTMLElement).style.color,
+    ]);
+    assert.deepEqual(
+      colored.sort(),
+      [
+        ["evening", view.container.querySelector('[data-series-line="evening"]')!.getAttribute("stroke")],
+        ["weekend", view.container.querySelector('[data-series-line="weekend"]')!.getAttribute("stroke")],
+      ].sort(),
+      "a type's value is not in its line's colour",
     );
     view.unmount();
   });
 
-  test("carries no at-rest figures — the tiles are the summary", async () => {
-    // It read Services / Average peak / Busiest: a fourth summary of the same
-    // recordings the tiles already summarise, and a BLEND across service types,
-    // which is the statistic the per-type tiles exist to avoid.
+  test("a type switched off is not in it", async () => {
+    // The readout reports what is DRAWN. A hidden type reporting a value is a
+    // figure for a line that is not on the chart.
+    await withTwoTypes(async (view, toggle) => {
+      await toggle("evening");
+      const readout = readoutIn(await hoverPlot(view));
+      const text = (readout.textContent ?? "").replace(/\s+/g, " ");
+      assert.match(text, /weekend/, `the drawn type is missing: "${text}"`);
+      assert.doesNotMatch(text, /evening/, `a hidden type is still in the readout: "${text}"`);
+    });
+  });
+
+  test("moving off the plot puts the subtitle back", async () => {
     const view = await renderCard(twoTypes());
-    const strip = view.container.querySelector("[data-history-strip]") as HTMLElement;
-    assert.ok(strip, "the strip element is gone entirely — hover has nowhere to report");
-    assert.equal(strip.dataset.historyStrip, "rest");
-    assert.deepEqual(
-      [...strip.children].map((c) => (c.textContent ?? "").trim()).filter(Boolean),
-      [],
-      `the trends strip is still showing figures: ${strip.textContent}`,
-    );
+    const row = await hoverPlot(view);
+    readoutIn(row);
+    await act(async () => {
+      fireEvent.pointerLeave(plotOf(view));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.ok(!row.querySelector("[data-trends-readout]"), "the readout stayed after the pointer left");
+    assert.match(row.textContent ?? "", /per service type/, "the subtitle did not come back");
     view.unmount();
   });
 });

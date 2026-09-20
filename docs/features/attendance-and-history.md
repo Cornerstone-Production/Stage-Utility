@@ -136,10 +136,16 @@ assigned per service type the first time it is seen and then persisted, so it
 does not follow the sort order — it does not change when you switch measure or
 range, when a quiet type has a loud week, or when a type misses a week.
 
+**Point at the chart** and the card's subtitle becomes the readout: the day under
+the cursor, then each drawn service type's figure there, in that type's own
+colour. Moving off puts the sentence back. It replaces a line that is already
+there rather than being drawn over the plot, so nothing covers the lines and the
+card does not change height.
+
 **Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
 tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
-and the figures above the plot together; its legend entry stays, dimmed, and
-clicking it brings the type back. The choice is remembered per browser.
+and the readout together; its legend entry stays, dimmed, and clicking it brings
+the type back. The choice is remembered per browser.
 
 The sound measure reads each recording's peak from the **SPL summary**, which
 this page already loads — not from the per-item records. Recordings made before
@@ -303,6 +309,9 @@ item's block and it adds that item's number, title, what it ran and what it was
 planned for. While the service is still recording it reads `LIVE` with the current
 values, and a pointer anywhere on the chart wins over that — you asked about that
 instant.
+
+A chart with no at-rest figures carries no strip: the Trends chart hands its
+readout to the card's subtitle line instead, so nothing sits over the plot.
 
 **The plot** draws one line per series with no fill behind the plot area. The
 time axis is ticked every thirty minutes — every ten on a service under ninety —

@@ -41,7 +41,7 @@ import {
 } from "./geometry";
 import { laneLabel, laneSegments, segmentAt, type LaneItem, type LaneSegment } from "./lane";
 import { makeTextMeasurer } from "./measure-text";
-import { StatStrip, type StatFigure } from "./stat-strip";
+import { StatStrip, type StatFigure, type StripHover } from "./stat-strip";
 
 /** Sampling gap past which the line breaks rather than spanning the silence. */
 const GAP_MS = 3 * 60_000;
@@ -137,14 +137,20 @@ export interface HistoryChartProps {
    */
   peakMarks?: boolean;
   /**
-   * Draw the stat strip OVER the plot instead of above it.
+   * Take the hovered instant and draw it YOURSELF, instead of the chart drawing
+   * a stat strip at all.
    *
-   * For a chart with no at-rest figures: in flow an empty strip is either a
-   * void the height of a figure between whatever is above the chart and the
-   * plot, or a chart that jumps down under the cursor the moment the pointer
-   * arrives. See StatStrip.overlay. Only the Trends card passes it.
+   * For a chart with no at-rest figures, where a strip is empty until the
+   * pointer arrives: in flow that is a void the height of a figure, and out of
+   * flow it is a box laid over the top of the plot — which is in front of the
+   * line exactly where the line is highest. A caller that already has a line of
+   * its own to lend takes the readout instead. Called with null when the
+   * pointer leaves, and again when the chart unmounts.
+   *
+   * Only the Trends card passes it, and passing it is what removes the strip:
+   * a chart cannot both hand the hover over and print it.
    */
-  stripOverlay?: boolean;
+  onHover?: (hover: StripHover | null) => void;
 }
 
 const PAD_L = 44;
@@ -173,7 +179,7 @@ export function HistoryChart({
   milestones,
   peakMarks = true,
   onSeriesContextMenu,
-  stripOverlay = false,
+  onHover,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -329,10 +335,14 @@ export function HistoryChart({
       if (i < 0) return [];
       return [{ label: s.label, value: fmt(s, s.points[i].v), color: s.color }];
     });
-  const hoverStrip = hoverT == null
+  const hoverStrip: StripHover | null = hoverT == null
     ? null
     : {
-      time: formatClock(new Date(hoverT).toISOString()),
+      // `axisText`, which is what the AXIS under the pointer is labelled in —
+      // a time of day on a service's chart, a date on a trend's. It was
+      // `formatClock` whatever the axis, so hovering sixteen weeks of Sundays
+      // answered "2:32 pm", a reading of a scale this chart does not have.
+      time: axisText(hoverT),
       values: hoverValues,
       item: hoveredSegment
         ? {
@@ -346,13 +356,44 @@ export function HistoryChart({
     };
   const liveStrip = live && all.length
     ? {
-      time: formatClock(new Date(lastT).toISOString()),
+      time: axisText(lastT),
       values: shown.flatMap((s) => {
         const last = s.points[s.points.length - 1];
         return last ? [{ label: s.label, value: fmt(s, last.v), color: s.color }] : [];
       }),
     }
     : null;
+
+  /**
+   * Hand the hovered instant to a caller that draws it ITSELF, instead of
+   * drawing a strip.
+   *
+   * The Trends card puts it on its own subtitle line, where it replaces a
+   * sentence rather than covering the plot: a readout laid over the top of the
+   * chart hid the line exactly where a line is highest, which is the part a
+   * pointer there is asking about, and no amount of narrowing or transparency
+   * stopped it being in front of the data.
+   *
+   * From an EFFECT, keyed on the readout's CONTENT: calling a parent's setState
+   * during this component's render is a React warning, and `hoverStrip` is a
+   * fresh object every render, so depending on it directly would fire on every
+   * one of them.
+   */
+  const reportedHover = all.length ? hoverStrip : null;
+  const hoverKey = reportedHover ? JSON.stringify(reportedHover) : "";
+  const onHoverRef = useRef(onHover);
+  useEffect(() => {
+    onHoverRef.current = onHover;
+  }, [onHover]);
+  useEffect(() => {
+    onHoverRef.current?.(reportedHover);
+    // `reportedHover` is rebuilt every render; `hoverKey` is what is IN it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverKey]);
+  // A chart that goes away leaves no readout behind it. Without this the card
+  // keeps whatever was last under the pointer, as a sentence that has lost the
+  // thing it was describing.
+  useEffect(() => () => onHoverRef.current?.(null), []);
 
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     const svg = svgRef.current;
@@ -467,7 +508,7 @@ export function HistoryChart({
       // chart stayed at its 640px default: a half-width plot letterboxed in the
       // middle of a 1,256px card, for the rest of the page's life.
       <div className="flex flex-col gap-3" ref={hostRef}>
-        <StatStrip figures={figures} hover={null} live={null} right={customize} />
+        {!onHover && <StatStrip figures={figures} hover={null} live={null} right={customize} />}
         <div
           className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted"
           onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
@@ -480,8 +521,10 @@ export function HistoryChart({
   }
 
   return (
-    <div className={cn("flex flex-col gap-3", stripOverlay && "relative")} ref={hostRef}>
-      <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} overlay={stripOverlay} />
+    <div className="flex flex-col gap-3" ref={hostRef}>
+      {/* No strip at all when the caller is drawing the readout itself — see
+          `onHover`. An empty one in flow is a void the height of a figure. */}
+      {!onHover && <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} />}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}

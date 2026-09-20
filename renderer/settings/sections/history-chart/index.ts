@@ -11,7 +11,7 @@ export {
   type HistoryChartProps,
 } from "./history-chart";
 export { CustomizePopover, type CustomizeGroup, type CustomizeOption } from "./customize";
-export { StatStrip, type StatFigure, type StripValue } from "./stat-strip";
+export { StatStrip, type StatFigure, type StripHover, type StripValue } from "./stat-strip";
 export {
   addDefaultOnce,
   hasStoredChoice,
