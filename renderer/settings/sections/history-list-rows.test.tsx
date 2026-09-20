@@ -179,6 +179,54 @@ async function renderList(readOnly = false) {
   return view;
 }
 
+type Edge = "top" | "bottom" | "left" | "right";
+const EDGES: Edge[] = ["top", "bottom", "left", "right"];
+/** Which edges a Tailwind axis suffix touches: `p-3` all four, `py-3` two. */
+const AXIS: Record<string, Edge[]> = {
+  "": EDGES,
+  x: ["left", "right"],
+  y: ["top", "bottom"],
+  t: ["top"],
+  b: ["bottom"],
+  l: ["left"],
+  r: ["right"],
+};
+
+/**
+ * The padding a rendered class list ADDS and the margin it PULLS BACK, per
+ * edge, in px.
+ *
+ * Tailwind's spacing scale is 0.25rem a step, so `p-3` is 12px and `py-3.5` is
+ * 14px. Read off the element's own `class` attribute rather than off this
+ * repository's source, so a class that arrives through a helper, a variant or a
+ * `cn()` branch still counts — and the LAST token for an edge wins, which is
+ * what `cn`'s tailwind-merge leaves behind.
+ *
+ * A negative margin is the interesting half: it is how a ring comes to be drawn
+ * outside the box the layout gave it, in space that belongs to its neighbour.
+ */
+function spacingOf(className: string): { pad: Record<Edge, number>; pull: Record<Edge, number> } {
+  const pad: Record<Edge, number> = { top: 0, bottom: 0, left: 0, right: 0 };
+  const pull: Record<Edge, number> = { top: 0, bottom: 0, left: 0, right: 0 };
+  for (const token of className.split(/\s+/)) {
+    const m = /^(-?)([pm])([xytrbl]?)-([\d.]+)$/.exec(token);
+    if (!m) continue;
+    const [, sign, kind, axis, size] = m;
+    const px = Number(size) * 4;
+    for (const edge of AXIS[axis]) {
+      if (kind === "p") pad[edge] = px;
+      else pull[edge] = sign === "-" ? px : -px;
+    }
+  }
+  return { pad, pull };
+}
+
+/** The `gap-N` a flex column puts between its children, in px. */
+function gapOf(className: string): number {
+  const m = /(?:^|\s)gap-([\d.]+)(?:\s|$)/.exec(className);
+  return m ? Number(m[1]) * 4 : 0;
+}
+
 /**
  * `{ attendance: { value: "1,196", caption: "peak" }, … }` for one row, keyed
  * by COLUMN.
@@ -537,10 +585,48 @@ describe("what the All services page is made of", () => {
       .filter((g) => g.className.includes("ring-accent"))
       .map((g) => g.getAttribute("data-day-group"));
     assert.deepEqual(ringed, ["2026-09-06"], "the picked day's group is not marked");
-    // The ring stands off what it rings. At `p-2 -m-2` the day label and the
-    // rows touched the ring's edge; 12px is the inset that reads as a frame.
+
+    // ── The ring stands clear of everything around it ──
+    //
+    // WHAT THIS CANNOT SEE: the pixels. jsdom loads no stylesheet and reports
+    // every box as 0, so a geometry assertion would pass on any layout at all.
+    // What it CAN do is the arithmetic those pixels come out of, off the class
+    // attribute the element actually rendered: Tailwind's spacing scale is
+    // 0.25rem a step, so the padding a group adds and the margin it pulls back
+    // are both readable numbers, and the clearance is their difference against
+    // the gap and padding of the card the group sits in. Measured in Chrome at
+    // 1440 as well — the ring's top edge sits 12px under the Export button.
+    //
+    // The defect: at `p-3 -m-3` the ring drew 12px OUTSIDE its own box on all
+    // four edges, into gaps of 8px (the card's `gap-2`) and padding of 14px. It
+    // touched the Recorded services header, the next day group and the bottom
+    // of the card at once.
     const ringedEl = view.container.querySelector('[data-day-group="2026-09-06"]') as HTMLElement;
-    assert.ok(/\bp-3\b/.test(ringedEl.className) && /-m-3\b/.test(ringedEl.className), `the ring has no inset from its content: ${ringedEl.className}`);
+    const card = view.container.querySelector("[data-services-card]") as HTMLElement;
+    const ring = spacingOf(ringedEl.className);
+    const cardPad = spacingOf(card.className).pad;
+    const gap = gapOf(card.className);
+    assert.ok(
+      ring.pad.top >= 12 && ring.pad.left >= 12,
+      `the ring has no inset from its own content: ${ringedEl.className}`,
+    );
+    // One clearance per line, sorted by what the ring is standing off, so two
+    // branches adding different edges conflict instead of merging silently.
+    const clearances: [what: string, clear: number, floor: number][] = [
+      ["the card's bottom padding, under the last day of a month", cardPad.bottom - ring.pull.bottom, 12],
+      ["the card's side padding", cardPad.left - ring.pull.left, 4],
+      ["the day group above it, or the Recorded services header", gap - ring.pull.top, 12],
+      ["the day group below it", gap - ring.pull.bottom, 12],
+    ];
+    // Every failing edge at once, not the first: the bug put the ring hard
+    // against four different things, and a one-at-a-time assertion would have
+    // been four runs to find that out.
+    assert.deepEqual(
+      clearances
+        .filter(([, clear, floor]) => clear < floor)
+        .map(([what, clear, floor]) => `the ring is ${clear}px from ${what}; it needs ${floor}px`),
+      [],
+    );
   });
 });
 

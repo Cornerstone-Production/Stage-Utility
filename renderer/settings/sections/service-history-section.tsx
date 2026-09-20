@@ -1416,7 +1416,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             border, radius and padding. It was flat on the page, so the one
             column an operator reads down was the only thing on the tab that did
             not sit on a surface. */}
-        <section data-services-card className="su-card min-w-0 flex flex-col gap-2 px-4 py-3.5">
+        {/* `gap-3`, one card gap, between the header and the day groups and
+            between one day group and the next. It is the clearance the selected
+            day's ring stands in — see the ring's own note below — and 8px was
+            less than the ring's own 12px inset, so the ring had nowhere to be. */}
+        <section data-services-card className="su-card min-w-0 flex flex-col gap-3 px-4 py-3.5">
           {/* The card's own header: what the list is, what it is showing, and
               the Export control. Export used to be a full-width disclosure of
               its own above the calendar — a builder for a thing you do twice a
@@ -1453,7 +1457,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 "flex scroll-mt-4 flex-col gap-2 rounded-xl",
                 // 12px of air between the ring and what it rings; at 8px the day
                 // label and the rows touched the ring's edge.
-                day === group.date && "bg-accent/6 ring-1 ring-accent/35 p-3 -m-3",
+                //
+                // THE VERTICAL INSET IS REAL SPACE, NOT BORROWED. `-m-3` pulled
+                // all four edges back, so the ring drew 12px outside its own box
+                // into whatever sat next to it: the card's header and the Export
+                // button above, the next day group below, the card's own bottom
+                // padding at the end of a month. Every one of those gaps is
+                // smaller than 12px, so the ring touched all of them at once.
+                // Only the SIDES still borrow, from the card's 16px of padding,
+                // which leaves 4px and keeps every row aligned with the rows of
+                // the days above and below it — a selected group indented 12px
+                // from its neighbours is the other way this reads as broken.
+                day === group.date && "bg-accent/6 ring-1 ring-accent/35 -mx-3 px-3 py-3",
               )}
             >
               <span className="text-caption1 text-fg-muted">{fmtDay(group.date)}</span>
