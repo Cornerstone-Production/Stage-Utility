@@ -17,22 +17,44 @@ import { parseReleaseSections } from "../main/services/update/release-notes.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "release-notes.mjs");
-const NOTES_DIR = path.join(HERE, "..", "docs", "release-notes");
-const OVERRIDE_DIR = path.join(NOTES_DIR, "overrides");
+
+/** The notices and overrides this repository actually ships. Read, never written. */
+const SHIPPED_NOTES_DIR = path.join(HERE, "..", "docs", "release-notes");
+const SHIPPED_OVERRIDE_DIR = path.join(SHIPPED_NOTES_DIR, "overrides");
+
+/**
+ * Where the fixtures go instead — one throwaway tree per test PROCESS.
+ *
+ * These tests need a notice file and an override file on disk, and they used to
+ * write them into SHIPPED_NOTES_DIR because that is the only place the generator
+ * looked. Two copies of the suite running at once then shared one `9.9.7.json`:
+ * each clobbered the other's contents and deleted it out from under the other's
+ * run, and the exact-list scan over the shipped overrides found a neighbour's
+ * temp file and went red. Sixteen concurrent copies failed sixteen times.
+ *
+ * `STAGE_UTILITY_RELEASE_NOTES_DIR` (see release-notes.mjs) points the generator
+ * here, so nothing outside this process can see a fixture or be surprised by one.
+ */
+const FIXTURE_NOTES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-docs-"));
+const FIXTURE_OVERRIDE_DIR = path.join(FIXTURE_NOTES_DIR, "overrides");
+after(() => fs.rmSync(FIXTURE_NOTES_DIR, { recursive: true, force: true }));
+
+/** The generator's environment, pointed at this process's fixture tree. */
+const notesEnv = { ...process.env, STAGE_UTILITY_RELEASE_NOTES_DIR: FIXTURE_NOTES_DIR };
 
 function notesFor(version: string, from: string, cwd?: string): string {
-  return execFileSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd });
+  return execFileSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd, env: notesEnv });
 }
 
 /** The same, but survivable: an override problem is meant to exit non-zero. */
 function runNotes(version: string, from: string, cwd?: string) {
-  const r = spawnSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd });
+  const r = spawnSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd, env: notesEnv });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 /** Put an override file in place for one run, then take it away again. */
 function withOverride<T>(at: string, body: unknown, run: () => T): T {
-  fs.mkdirSync(OVERRIDE_DIR, { recursive: true });
+  fs.mkdirSync(FIXTURE_OVERRIDE_DIR, { recursive: true });
   fs.writeFileSync(at, typeof body === "string" ? body : JSON.stringify(body, null, 2));
   try {
     return run();
@@ -108,9 +130,9 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
   commit("slugBang", "feat(patch)!: a display without a slug now redirects");
   git("tag", "v1.1.0");
   git("tag", "v1.1.0-beta.1");
-  // Second names for the same two releases. The override tests write a file
-  // into the REAL docs/release-notes/overrides, so the fixture needs a version
-  // this repository will never publish — 1.1.0.json could one day be somebody's.
+  // Second names for the same two releases, so the override tests name a version
+  // this repository will never publish — an override file is keyed by version, and
+  // 1.1.0.json reading as a fixture only works while 1.1.0 is nobody's release.
   git("tag", "v9.9.7");
   git("tag", "v9.9.7-beta.1");
   // A branch sitting on a fix that IS in range. Without a SHA check an override
@@ -123,8 +145,8 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
 describe("release notes", () => {
   it("prepends the notice for a version that has one, above everything generated", () => {
     const version = "9.9.9-notice-test";
-    const file = path.join(NOTES_DIR, `${version}.md`);
-    fs.mkdirSync(NOTES_DIR, { recursive: true });
+    const file = path.join(FIXTURE_NOTES_DIR, `${version}.md`);
+    fs.mkdirSync(FIXTURE_NOTES_DIR, { recursive: true });
     fs.writeFileSync(file, "> **Read this first.** One manual step.\n");
     try {
       const out = notesFor(version, "v1.9.4");
@@ -149,13 +171,31 @@ describe("release notes", () => {
   it("ships a notice for 1.10.0, the release that needs one", () => {
     // Packaged installs on 1.9.x cannot self-update to it — in-app updates for
     // them are new IN 1.10.0 — so it must say so, with the command.
-    const file = path.join(NOTES_DIR, "1.10.0.md");
+    const file = path.join(SHIPPED_NOTES_DIR, "1.10.0.md");
     assert.ok(fs.existsSync(file), "docs/release-notes/1.10.0.md must exist");
     const text = fs.readFileSync(file, "utf8");
     assert.match(text, /install\.sh/, "must give the Linux/macOS command");
     assert.match(text, /install\.ps1/, "must give the Windows command");
     assert.match(text, /brew upgrade/, "must give the Homebrew command");
     assert.match(text, /checkout/i, "must say a git checkout needs none of it");
+  });
+
+  it("finds the shipped notices without being told where they are", () => {
+    // Every other test here points the generator at FIXTURE_NOTES_DIR, so this
+    // is the only one left that exercises the default — `docs/release-notes`
+    // beside the script. Without it, a generator that had stopped reading the
+    // real directory altogether would keep the whole file green.
+    //
+    // Matched on the notice's own first line, read from the file rather than
+    // copied here, so the assertion cannot drift from it. The first draft of
+    // this test looked for `install.sh` and was VACUOUS: the generated Install
+    // section carries the same command, so it passed with the default path
+    // pointed at a directory that does not exist.
+    const firstLine = fs.readFileSync(path.join(SHIPPED_NOTES_DIR, "1.10.0.md"), "utf8")
+      .trim().split("\n")[0];
+    const out = execFileSync("node", [SCRIPT, "1.10.0", "v1.9.4"], { encoding: "utf8" });
+    assert.ok(out.includes(firstLine), `the shipped 1.10.0 notice never reached the notes: ${firstLine}`);
+    assert.ok(out.indexOf(firstLine) < out.indexOf("## Install"), "and it must still come first");
   });
 });
 
@@ -253,8 +293,8 @@ describe("an override for a Beta-only decision that can no longer be made in the
   after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
 
   const VERSION = "9.9.7";
-  const file = path.join(OVERRIDE_DIR, `${VERSION}.json`);
-  const preFile = path.join(OVERRIDE_DIR, `${VERSION}-beta.1.json`);
+  const file = path.join(FIXTURE_OVERRIDE_DIR, `${VERSION}.json`);
+  const preFile = path.join(FIXTURE_OVERRIDE_DIR, `${VERSION}-beta.1.json`);
 
   it("shows a fix whose Beta-only trailer is wrong", () => {
     // The 1.18.0 case: a fix to behaviour the last stable release really had,
@@ -421,13 +461,13 @@ describe("the overrides in docs/release-notes/overrides", () => {
   }
 
   it("are exactly the releases that declare one", () => {
-    const found = fs.readdirSync(OVERRIDE_DIR).filter((f) => f.endsWith(".json")).sort();
+    const found = fs.readdirSync(SHIPPED_OVERRIDE_DIR).filter((f) => f.endsWith(".json")).sort();
     assert.deepEqual(found, VERSIONS_WITH_OVERRIDES.map((v) => `${v}.json`));
   });
 
   it("each name a commit this repository carries, and say why", () => {
     for (const v of VERSIONS_WITH_OVERRIDES) {
-      const list = JSON.parse(fs.readFileSync(path.join(OVERRIDE_DIR, `${v}.json`), "utf8")) as Override[];
+      const list = JSON.parse(fs.readFileSync(path.join(SHIPPED_OVERRIDE_DIR, `${v}.json`), "utf8")) as Override[];
       assert.ok(list.length, `${v}.json is empty`);
       for (const e of list) {
         assert.equal(typeof e.betaOnly, "boolean", `${v}.json: ${e.commit} has no direction`);
@@ -444,7 +484,7 @@ describe("the overrides in docs/release-notes/overrides", () => {
   it("1.18.0 corrects the three trailers the release review found", () => {
     // Frozen on purpose: a shipped release's overrides stop changing. Matched by
     // the SUBJECT git reports for the SHA, so a wrong SHA cannot satisfy it.
-    const list = JSON.parse(fs.readFileSync(path.join(OVERRIDE_DIR, "1.18.0.json"), "utf8")) as Override[];
+    const list = JSON.parse(fs.readFileSync(path.join(SHIPPED_OVERRIDE_DIR, "1.18.0.json"), "utf8")) as Override[];
     assert.equal(list.length, 3);
     const bySubject = new Map(list.map((e) => [subjectOf(e.commit), e]));
 
@@ -694,7 +734,7 @@ describe("a release too big for one page", () => {
 describe("an override names a commit, not a name for one", () => {
   const repo = buildRepo();
   after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
-  const file = path.join(OVERRIDE_DIR, "9.9.7.json");
+  const file = path.join(FIXTURE_OVERRIDE_DIR, "9.9.7.json");
 
   it("a branch name stops the release, even one sitting on a fix in range", () => {
     // `movable` points at a fix this release carries, so without the check the

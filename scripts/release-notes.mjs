@@ -33,6 +33,27 @@ if (!version) {
 }
 
 /**
+ * Where the hand-written notices and the Beta-only overrides live.
+ *
+ * Normally `docs/release-notes` in this checkout, found from the script's own
+ * location rather than the caller's cwd — the generator reads the repo it ships
+ * in, whatever directory the workflow runs it from.
+ *
+ * `STAGE_UTILITY_RELEASE_NOTES_DIR` points it at a different tree. That exists
+ * for the tests: they need a notice file and an override file on disk, and
+ * writing those into the real `docs/release-notes` made two copies of the suite
+ * running at once clobber each other's fixtures and each other's deletes. The
+ * exact-list scan over the shipped overrides then found a neighbour's temp file
+ * and went red. Nothing in the release workflow sets it.
+ */
+function releaseNotesDir() {
+  const override = process.env.STAGE_UTILITY_RELEASE_NOTES_DIR;
+  if (override) return override;
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  return path.join(here, "..", "docs", "release-notes");
+}
+
+/**
  * A hand-written notice for one release, prepended above everything generated.
  *
  * Some releases need a sentence no commit range can produce — "this one needs
@@ -43,13 +64,12 @@ if (!version) {
  * docs/release-notes/1.10.0.md → shown on the v1.10.0 release, and nowhere else.
  */
 function upgradeNotice(v) {
-  const here = path.dirname(new URL(import.meta.url).pathname);
   try {
     // Trailing newline restored after the trim: the generated sections each end
     // in one and are joined with another, which is what puts a blank line
     // between them. A fully-trimmed notice left the next heading butted
     // straight onto its last line of prose.
-    return readFileSync(path.join(here, "..", "docs", "release-notes", `${v}.md`), "utf8").trim() + "\n";
+    return readFileSync(path.join(releaseNotesDir(), `${v}.md`), "utf8").trim() + "\n";
   } catch {
     return ""; // the ordinary case: nothing special about this release
   }
@@ -201,8 +221,7 @@ const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
  * @returns {Map<string, {betaOnly: boolean, reason: string, given: string}>} by full SHA
  */
 function betaOnlyOverrides(v) {
-  const here = path.dirname(new URL(import.meta.url).pathname);
-  const file = path.join(here, "..", "docs", "release-notes", "overrides", `${v}.json`);
+  const file = path.join(releaseNotesDir(), "overrides", `${v}.json`);
   const shown = path.posix.join("docs/release-notes/overrides", `${v}.json`);
 
   let text;
