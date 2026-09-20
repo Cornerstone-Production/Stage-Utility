@@ -602,6 +602,48 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     );
   });
 
+  it("adopting the retry's socket does not open a second one beside it", async (t) => {
+    // The beside-retry's onopen destroys the SSE request to adopt the socket.
+    // That destroy reaches connectSse's own error handler, which reads it as the
+    // stream dropping: countSseReconnect(), then scheduleReconnect(), then
+    // connect() — which assigns over `this.ws` while the adopted socket is still
+    // live. closeSocket() can no longer reach it, so it is leaked for the life of
+    // the process. Pre-existing, but before the silent-socket work the beside
+    // path only ran on genuine recovery; it now runs every half hour for ever on
+    // a box whose socket carries nothing.
+    const stub = await startProdComStub({ channels: CHANNELS, refuseWebSocket: true });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+
+    stub.setRefuseWebSocket(false); // ProdCom is back
+    await eventually(() => svc.onWebSocketNow, "the retry's socket to be adopted");
+    // Delivering disarms the check, so nothing else in this file can drop it.
+    stub.wsTranscript(spoken("proof-the-box-works"));
+    await eventually(() => svc.texts().includes("proof-the-box-works"), "the entry to land");
+
+    const attempts = wsAttempts(stub);
+    // Past the reconnect floor, which service-window.ts holds at one second.
+    await sleep(1500);
+    // Two assertions because there are two halves, and each is separately
+    // reachable: the deliberate destroy must not be READ as a drop (no further
+    // attempt at all), and connectWebSocket must not assign over a live socket
+    // if one ever does happen (nothing leaked). Asserting only the second passes
+    // on a client that still churns a socket a second after every adoption.
+    assert.equal(
+      wsAttempts(stub),
+      attempts,
+      "destroying our own SSE request to adopt the socket was read as the stream dropping, " +
+        "and the reconnect it scheduled dialled the box again",
+    );
+    assert.equal(stub.openWebSockets, 1, "a second socket was opened beside the adopted one and leaked");
+    assert.equal(svc.onWebSocketNow, true, "the adopted socket was lost");
+  });
+
   it("alternates the subscription on consecutive re-tests", async (t) => {
     // The mode used to latch: once a filtered socket had been shown silent,
     // every re-test for the life of the process connected unsubscribed. A
@@ -630,7 +672,11 @@ describe("a box whose socket carries nothing stops being preferred", () => {
       await eventually(() => svc.onWebSocketNow, "the widened retry to re-test the socket", 6000);
       stub.wsTranscript(spoken("the-box-was-fixed"));
       await eventually(() => svc.texts().includes("the-box-was-fixed"), "the entry to land");
-      await sleep(300); // past the probation interval the previous case fails at
+      // Past the one-second reconnect floor, not merely past the probation
+      // interval. At 300 ms this passed while the beside-retry was opening a
+      // second socket over the adopted one about a second later — the guard
+      // looked before the damage, which is why that leak survived a whole review.
+      await sleep(1500);
     });
 
     assert.equal(svc.onWebSocketNow, true, "a socket that delivered was dropped anyway");

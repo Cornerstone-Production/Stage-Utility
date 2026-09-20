@@ -840,8 +840,7 @@ export class ProdComService extends ConnectionLifecycle {
     // stop(), restart() and configure() all land here — one clear covers all
     // three, the way the idle watchdog's does.
     this.clearWebSocketRetry();
-    this.req?.destroy();
-    this.req = null;
+    this.dropFallbackStream();
     // A probe outlives the connection that started it otherwise: its result is
     // already discarded by the epoch check, but the socket would go on reading.
     this.wsProbeRequest?.destroy();
@@ -909,12 +908,28 @@ export class ProdComService extends ConnectionLifecycle {
       } else {
         console.warn(`[prodcom] no transcript data for ${STREAM_IDLE_MS / 1000}s — treating the stream as dead`);
         this.report("error", "Transcript stream went silent — reconnecting");
-        this.req?.destroy();
-        this.req = null;
+        this.dropFallbackStream();
       }
       this.scheduleReconnect();
     }, ms);
     this.idleTimer.unref?.();
+  }
+
+  /**
+   * Let the SSE fallback's request go, deliberately.
+   *
+   * The field is nulled BEFORE the destroy, which is what makes the
+   * `if (this.req !== req) return;` guards in connectSse fire: destroying our own
+   * request reaches that request's own error handler, and without this it read as
+   * the stream DROPPING — countSseReconnect(), then scheduleReconnect(), then
+   * connect(), which assigned over a live `this.ws`. Exactly the rule
+   * closeSocket() has always followed for the WebSocket: drop the handlers first,
+   * then close.
+   */
+  private dropFallbackStream(): void {
+    const req = this.req;
+    this.req = null;
+    req?.destroy();
   }
 
   private clearIdleWatchdog(): void {
@@ -1564,6 +1579,17 @@ export class ProdComService extends ConnectionLifecycle {
    */
   private connectWebSocket(host: string, port: number, opts: { besideFallback?: boolean } = {}): void {
     const beside = opts.besideFallback === true;
+    // Never assign over a live socket: that puts it beyond closeSocket()'s reach
+    // for the life of the process.
+    //
+    // Belt-and-braces, and deliberately kept as such. With the `this.req !== req`
+    // guards in connectSse there is no longer a reachable path that arrives here
+    // holding a live socket, so this line cannot be made to fail a test and no
+    // guard claims it does. It is one line standing between an assignment and a
+    // leaked connection that already got through one review, and the rule it
+    // states — close before you replace — is the same one closeSocket() itself
+    // follows.
+    this.closeSocket();
     const url = `ws://${host}:${port}/api/v1/ws`;
     let ws: WebSocket;
     try {
@@ -1587,8 +1613,7 @@ export class ProdComService extends ConnectionLifecycle {
         // The retry's socket is up: drop the fallback before adopting it, so the
         // two never feed the same buffer.
         this.clearIdleWatchdog();
-        this.req?.destroy();
-        this.req = null;
+        this.dropFallbackStream();
         this.useWebSocket = true;
       }
       this.onWebSocket = true;
@@ -1958,6 +1983,7 @@ export class ProdComService extends ConnectionLifecycle {
         headers: { ...this.authHeaders(this.apiKey), Accept: "text/event-stream" },
       },
       (res) => {
+        if (this.req !== req) return;
         const code = res.statusCode ?? 0;
         if (code < 200 || code >= 300) {
           res.destroy();
@@ -1998,16 +2024,19 @@ export class ProdComService extends ConnectionLifecycle {
             console.warn(`[prodcom] transcript buffer exceeded ${SSE_MAX_BUFFER} bytes — resyncing`),
         });
         res.on("data", (chunk: string) => {
+          if (this.req !== req) return;
           this.armIdleWatchdog();
           for (const event of reader.push(chunk)) this.handleSseEvent(event);
         });
         res.on("end", () => {
+          if (this.req !== req) return;
           this.clearIdleWatchdog();
           this.report("disconnected", null);
           this.countSseReconnect();
           this.scheduleReconnect();
         });
         res.on("error", () => {
+          if (this.req !== req) return;
           this.clearIdleWatchdog();
           this.countSseReconnect();
           this.scheduleReconnect();
@@ -2018,6 +2047,7 @@ export class ProdComService extends ConnectionLifecycle {
     // The real liveness check on this path — see SOCKET_KEEPALIVE_MS.
     keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
     req.on("error", (e) => {
+      if (this.req !== req) return;
       // A watchdog armed by the dying stream must not outlive it, or it can
       // destroy the NEXT request while it is still connecting.
       this.clearIdleWatchdog();
