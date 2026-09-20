@@ -195,6 +195,23 @@ const wsAttempts = (stub: ProdComStub): number =>
 const silenceChecks = (stub: ProdComStub): number =>
   stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && r.url.includes("limit=20&")).length;
 
+/**
+ * Reads the check made BEYOND its first page, on a connection whose baseline is
+ * zero.
+ *
+ * `running()` seeds no history, so the first socket's baseline row count is 0 and
+ * the check's pages fall at offset 0, 20, 40. `offset=20` is therefore a read the
+ * paging loop can only have made by paging, and a client that reads one page per
+ * attempt never produces it however many attempts it makes — which a count of
+ * reads would not distinguish.
+ */
+const pagedReads = (stub: ProdComStub): number =>
+  stub.requests.filter((r) => {
+    if (!r.url.startsWith("/api/v1/transcript?")) return false;
+    const params = new URL(r.url, "http://stub").searchParams;
+    return params.get("limit") === "20" && params.get("offset") === "20";
+  }).length;
+
 const subscribeFrames = (stub: ProdComStub): number =>
   stub.wsReceived.filter((f) => f.includes('"subscribe"')).length;
 
@@ -330,27 +347,33 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
 
   it("finds speech sitting behind a full page of typed lines", async (t) => {
     // `GET /api/v1/transcript` is ascending from the OLDEST row, so the check's
-    // first page is the first twenty entries after the socket opened — not the
-    // most recent. `since` is the socket's open time and never advances, so a
-    // run of typed entries longer than a page at the head of that window would
-    // pin the check on "nobody spoke" for the life of the connection, however
-    // much was said afterwards.
+    // first page is the first twenty rows added since the socket opened — not
+    // the most recent. The baseline never advances, so a run of typed rows
+    // longer than a page at the head of that window would pin the check on
+    // "nobody spoke" for the life of the connection, however much was said
+    // afterwards.
     const said = [
       ...Array.from({ length: 22 }, (_, i) => typed(`typed-${i}`, 10_000 + i)),
       spoken("said-behind-the-typed-run", 40_000),
     ];
     const { stub, svc } = await running(t);
     await speaks(stub, svc, ...said);
+
+    // That the check reads BEYOND its first page, asserted before any outcome
+    // and on the request the paging loop can only make by paging. The outcome
+    // assertions below cannot stand in for this: in the single-page world they
+    // are never reached, because the `eventually` for the fallback times out
+    // first — so an assertion after them is decoration whatever it says.
+    await eventually(
+      () => pagedReads(stub) >= 1,
+      "the check to read past its first page — a single-page read can never see behind the typed run",
+    );
+
     await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
     await speaks(stub, svc, ...said.map((e) => ({ ...e, id: `${e.id}-again` })));
 
     await eventually(() => stub.sseOpens >= 1, "the fallback to open once the speech is found", 6000);
     assert.equal(svc.knownSilent, true, "the speech behind the typed run was never found");
-    assert.ok(
-      silenceChecks(stub) > 2,
-      `the check read only one page per attempt, so it can never see past the typed run ` +
-        `(${silenceChecks(stub)} reads)`,
-    );
   });
 
   it("reopens the socket without the subscribe frame when REST has lines it never delivered", async (t) => {
