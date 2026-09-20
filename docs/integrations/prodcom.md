@@ -104,7 +104,11 @@ and says so on connect.
   and the log records which subscription worked.
 - **Silent both ways** — captions move to the SSE fallback, and the integration
   card says `Fallback stream — the websocket carried no transcript` rather than
-  claiming a healthy socket.
+  claiming a healthy socket. That message describes why captions moved **this
+  time**, not what is known about the box: a later attempt on the same ProdCom
+  that is refused outright reports the ordinary `Streaming from host:port`, since
+  a refused upgrade is a different failure from a socket that opens and says
+  nothing.
 
 The first transcript entry over a socket ends the check for that connection: a
 socket that is carrying the transcript is never asked again and costs no further
@@ -178,9 +182,11 @@ The `/log` page has the evidence when something looks wrong:
   good. `[prodcom] could not read the transcript row count (…)` on connect means
   this connection has no baseline and the check will not run at all for it.
   `[prodcom] could not check whether the websocket is missing transcript
-  lines (…)` means REST did not answer and nothing was changed. The
-  "nothing was said, so nothing was missed" case is `console.debug`, so it is in
-  the terminal and deliberately not on `/log`
+  lines (…)` means REST did not answer and nothing was changed — once per outage
+  with a reminder every 15 minutes, not once per check, and
+  `[prodcom] the silent-socket check can reach ProdCom again` when it recovers.
+  The "nothing was said, so nothing was missed" case is `console.debug`, so it is
+  in the terminal and deliberately not on `/log`
 - `[prodcom] websocket unavailable (…) — falling back to the transcript SSE stream`
   once per outage, not once per retry, with a reminder carrying the attempt count
   every 15 minutes while it lasts, and `[prodcom] websocket is back …` when it

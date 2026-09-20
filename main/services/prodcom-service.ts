@@ -651,6 +651,11 @@ export class ProdComService extends ConnectionLifecycle {
    */
   private wsSilentBox = false;
 
+  /** Whether the CURRENT spell on the fallback began because a socket opened and
+   *  carried nothing, as opposed to one that would not open at all. Only the
+   *  card reads it; wsSilentBox is what the retry rules read. */
+  private fellBackSilent = false;
+
   /** False once a WebSocket upgrade has failed, until WS_RETRY_EVERY reconnects
    *  later. Reset by configure(), so an operator who has just fixed the box gets
    *  an immediate attempt rather than waiting out the counter. */
@@ -824,6 +829,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsOutages.forget();
     this.wsSubscribeFilterSuspect = false;
     this.wsSilentBox = false;
+    this.fellBackSilent = false;
     this.resetReport();
     this.restart();
   }
@@ -1153,7 +1159,10 @@ export class ProdComService extends ConnectionLifecycle {
     // re-checks below can tell it apart from whatever replaced it.
     const ws = this.ws;
     if (!this.silenceCheckStillOpen(ws) || !host || !port) return;
-    const seconds = Math.round(this.wsSilenceCheckMs / 1000);
+    // everyMs, not Math.round(ms / 1000): the seam these tests override is
+    // milliseconds, and raw rounding prints "in 0s" for it. The helper exists
+    // for exactly that.
+    const quiet = everyMs(this.wsSilenceCheckMs);
 
     // Probation. This box has already been shown to accept a socket and carry
     // nothing on it, with AND without the subscribe frame, so the burden of
@@ -1162,7 +1171,7 @@ export class ProdComService extends ConnectionLifecycle {
     // the question was answered the first time.
     if (this.wsSilentBox) {
       console.warn(
-        `[prodcom] the websocket has carried no transcript in ${seconds}s and this box has failed ` +
+        `[prodcom] the websocket has carried no transcript in ${quiet} and this box has failed ` +
           `that test before — captions go back to the SSE fallback, and the next re-test will connect ` +
           `${this.alternateSubscribeMode()}`,
       );
@@ -1176,7 +1185,7 @@ export class ProdComService extends ConnectionLifecycle {
     // would bury the rest of the log.
     const baseline = this.wsBaselineRows;
     if (baseline === null) {
-      console.debug(`[prodcom] websocket quiet for ${seconds}s, but this connection has no transcript baseline`);
+      console.debug(`[prodcom] websocket quiet for ${quiet}, but this connection has no transcript baseline`);
       this.armSilenceCheck();
       return;
     }
@@ -1191,17 +1200,28 @@ export class ProdComService extends ConnectionLifecycle {
     if (!answer.ok) {
       // "No lines" and "could not ask" are indistinguishable from here, and
       // acting on the second is how a transport that is working gets torn down.
-      console.warn(
-        `[prodcom] could not check whether the websocket is missing transcript lines (${scrub(answer.error)}) — ` +
-          `leaving it alone and asking again in ${seconds}s`,
-      );
+      //
+      // Through OutageLog, like every other repeated failure in this file: the
+      // check re-arms every interval, so an unreachable REST endpoint under a
+      // socket that is up wrote this line 1440 times a day into a 10,000-line
+      // ring. First failure, a reminder every fifteen minutes carrying the
+      // count, and one line when it comes back.
+      const out = this.wsOutages.fail("silence-check", answer.error, this.now());
+      if (out.log) {
+        console.warn(
+          `[prodcom] could not check whether the websocket is missing transcript lines ` +
+            `(${scrub(answer.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+        );
+      }
       this.armSilenceCheck();
       return;
     }
+    const askable = this.wsOutages.ok("silence-check", this.now());
+    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
     if (answer.spoken === 0) {
       // Nothing was said, so nothing was missed. debug, not log: a quiet room is
       // not an event, and this repeats for as long as the room stays quiet.
-      console.debug(`[prodcom] websocket quiet for ${seconds}s, and ProdCom has no spoken lines since it opened`);
+      console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
       this.armSilenceCheck();
       return;
     }
@@ -1213,7 +1233,7 @@ export class ProdComService extends ConnectionLifecycle {
       // right the socket keeps working for every site running this build.
       this.wsSubscribeFilterSuspect = true;
       console.warn(
-        `[prodcom] websocket delivered no transcript in ${seconds}s while ProdCom has at least ` +
+        `[prodcom] websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
           `${answer.spoken} spoken line(s) since it opened — reopening it without the subscribe frame`,
       );
       this.reopenWebSocketUnsubscribed(host, port);
@@ -1853,6 +1873,12 @@ export class ProdComService extends ConnectionLifecycle {
    * the top of the stream being opened below.
    */
   private fallBackToSse(host: string, port: number, reason: string, detail: string | null = null): void {
+    // What the card will say, decided by why we are falling back rather than by
+    // what is known about the box. Keyed on wsSilentBox alone, a known-silent
+    // box whose re-test was REFUSED — which arrives here through
+    // probeThenFallBack — put "the websocket carried no transcript" on the row
+    // about a socket that never opened.
+    this.fellBackSilent = reason === SILENT_SOCKET_REASON;
     this.clearIdleWatchdog();
     this.closeSocket();
     this.onWebSocket = false;
@@ -2005,7 +2031,7 @@ export class ProdComService extends ConnectionLifecycle {
         // transport, and that is what the message names.
         this.report(
           "connected",
-          this.wsSilentBox ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${host}:${port}`,
+          this.fellBackSilent ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${host}:${port}`,
         );
         this.priming = this.primeFromRest(host, port);
         res.setEncoding("utf8");

@@ -37,6 +37,7 @@ import { describe, it, type TestContext } from "node:test";
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
+import { DEFAULT_RECONNECT_SCHEDULE, serviceWindow } from "./service-window.js";
 
 const NOW = Date.parse("2026-09-20T13:22:28Z");
 
@@ -149,13 +150,15 @@ async function running(t: TestContext, options: StubOptions = {}): Promise<{ stu
   return { stub, svc };
 }
 
-async function eventually(ready: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
+/** `what` may be a thunk, for a message that should describe the state AT
+ *  FAILURE rather than the state when the wait started. */
+async function eventually(ready: () => boolean, what: string | (() => string), timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (ready()) return;
     await new Promise((r) => setTimeout(r, 5));
   }
-  assert.fail(`timed out waiting for ${what}`);
+  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -503,9 +506,19 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     assert.equal(svc!.onWebSocketNow, true, "a REST failure tore down a socket nothing was known about");
     assert.equal(stub!.sseOpens, 0, "a REST failure opened the fallback");
     assert.equal(svc!.knownSilent, false, "a REST failure was recorded as a verdict about the box");
-    assert.ok(
-      lines.some((l) => l.startsWith("[prodcom] could not check whether the websocket is missing transcript lines")),
-      `expected the could-not-ask line, got: ${JSON.stringify(lines)}`,
+    const couldNotAsk = lines.filter((l) =>
+      l.startsWith("[prodcom] could not check whether the websocket is missing transcript lines"),
+    );
+    assert.ok(couldNotAsk.length >= 1, `expected the could-not-ask line, got: ${JSON.stringify(lines)}`);
+    // Once per outage, not once per interval. The check re-arms every interval,
+    // so an unreachable REST endpoint under a socket that is up wrote this line
+    // 1440 times a day into a 10,000-line ring, burying everything else an
+    // operator opened /log to read. Every other repeated failure in this service
+    // goes through OutageLog; this one did not.
+    assert.equal(
+      couldNotAsk.length,
+      1,
+      `the could-not-ask line repeats per check rather than per outage: ${JSON.stringify(couldNotAsk)}`,
     );
   });
 });
@@ -513,8 +526,11 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
 describe("a box whose socket carries nothing stops being preferred", () => {
   /** Drive a box to the point where both subscription modes have been tried and
    *  captions are on the fallback. */
-  async function silenced(t: TestContext): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
-    const { stub, svc } = await running(t);
+  async function silenced(
+    t: TestContext,
+    options: StubOptions = {},
+  ): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
+    const { stub, svc } = await running(t, options);
     await speaks(stub, svc, spoken("never-delivered-over-a-socket"));
     await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
     await speaks(stub, svc, spoken("nor-over-the-unsubscribed-one", 60_000));
@@ -665,6 +681,37 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     );
     assert.equal(stub.openWebSockets, 1, "a second socket was opened beside the adopted one and leaked");
     assert.equal(svc.onWebSocketNow, true, "the adopted socket was lost");
+  });
+
+  it("names the refusal, not silence, when a known-silent box then refuses the upgrade", async (t) => {
+    // Two different failures reach the fallback and the card described both as
+    // the first, because the message was keyed on what was known about the BOX
+    // rather than on why captions moved THIS time. A refused upgrade arrives
+    // through probeThenFallBack, and the row then read "the websocket carried no
+    // transcript" about a socket that never opened.
+    //
+    // Reaching it needs the reconnect counter rather than the clock: the clock's
+    // attempt is made beside the live fallback and a refusal there changes
+    // nothing at all, by design. The counter's attempt replaces the transport,
+    // so its refusal is the one that re-reports the card.
+    //
+    // service-window.ts floors every reconnect at one second, which would make
+    // twenty of them a twenty-second test. Switched off for this case only, and
+    // restored after — the floor is not what is under test here.
+    const schedule = { ...DEFAULT_RECONNECT_SCHEDULE, enabled: false };
+    serviceWindow.setSchedule(schedule);
+    t.after(() => serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE }));
+
+    const { stub, svc } = await silenced(t, { sseCloseImmediately: true });
+    stub.setRefuseWebSocket(true);
+
+    await eventually(
+      () => cardMessages(svc).at(-1) !== FALLBACK_CARD_MESSAGE,
+      () =>
+        `the card to stop blaming a silent socket for an upgrade that was refused — ` +
+        `it says ${JSON.stringify(cardMessages(svc).at(-1))}`,
+      15_000,
+    );
   });
 
   it("alternates the subscription on consecutive re-tests", async (t) => {
