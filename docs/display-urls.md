@@ -113,11 +113,19 @@ Ross Ultritouch's fallback browser is the case it was built for: it holds the
 event stream and releases a minute's worth of frames at once, so the panel shows
 a minute-old service. See [Ultritouch](integrations/ultritouch.md).
 
-Clocks and countdowns stay right on this transport. Each poll response carries
-the server's clock stamped as it is sent, and the page places the server against
-its own monotonic clock using half the round trip it just measured — so a frame
-that waited two seconds in the buffer costs nothing, and the page never reads
-the host's wall clock at all.
+Clocks and countdowns stay right on this transport, and they settle faster than
+on the stream. Each poll response carries the server's clock stamped as it is
+sent, and the page places the server against its own monotonic clock using half
+the round trip it just measured — so a frame that waited two seconds in the
+buffer costs nothing, the first poll is enough, and the page never reads the
+host's wall clock again.
+
+A page on the **stream** has no round trip to measure, so it takes its reading
+from two Planning Center frames rather than one: a single frame cannot be told
+apart from a replayed one, and the connect-time burst carries whatever each
+channel was last broadcast with. Until the second frame arrives — at most one
+15-second keepalive — the page shows the machine's own clock. On a machine with
+no NTP that is visible, and `?transport=poll` is the answer.
 
 The cost is one HTTP request per client every two seconds — about 43,000 a day
 against a stream's one connection — plus up to two seconds of latency on every
