@@ -5,6 +5,14 @@
 // cannot lay out would tell us nothing about any of it. What IS visual — the
 // tile grid's wrap, a milestone label colliding with its neighbour, the accent
 // on a hovered mark — was driven in Chrome and is named in trends-card.tsx.
+//
+// NOT HERE: that the TILE and the chart's LINE are drawn from one derivation.
+// A test in this file cannot check it — the line's points are built in
+// trends-card.tsx, and nothing in this file renders. One that compared
+// `typeTrends`'s own output against `dailyValues` lived here and read as if it
+// did: reverting the card's series to one node per recording left it green.
+// "adds up into one point, on the tile AND on the line" in trends-card.test.tsx
+// is the guard, and it goes red on exactly that.
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -273,17 +281,6 @@ describe("a service type's trend tile", () => {
     );
   });
 
-  test("the tile's window is the same derivation the chart's line runs through", () => {
-    // The tile and the line are drawn from ONE function. They were not: the
-    // headline was a mean over every recording while the line was per-day, and
-    // the card quoted a statistic that appeared nowhere on it.
-    const recs = sundays("weekend", 6, [1000, 500, 800]);
-    const [tile] = typeTrends(recs);
-    assert.deepEqual(
-      tile.recent.map((d) => [d.t, d.v]),
-      dailyValues(recs, "attendance").slice(-TREND_WINDOW).map((d) => [d.t, d.v]),
-    );
-  });
 });
 
 describe("milestones", () => {
