@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { EventPollHub, POLL_CLIENT_TTL_MS, type PollFrame } from "./event-poll.js";
+import { EventPollHub, POLL_CLIENT_TTL_MS, serializePollResponse, type PollFrame } from "./event-poll.js";
 
 /** A movable clock, so 60 s of buffer age costs no wall time. */
 function clock(start = 1_000_000) {
@@ -125,6 +125,27 @@ describe("event-poll response", () => {
     const resync = hub.buildPollResponse("c1", 999, wantsAll, snapshot);
     assert.equal(resync.resync, true);
     assert.equal(resync.nowMs, c.now(), "the resync branch was not stamped");
+  });
+
+  it("puts the stamp on the wire under the key the client reads", () => {
+    // THE SEAM. `nowMs` here and `"now"` on the client had nothing holding them
+    // together: renaming either left the other compiling and every test green,
+    // and every polling panel would have dropped silently back to its own host
+    // clock. This runs the serializer remote-server actually emits with, and
+    // renderer/lib/poll-transport.test.ts reads the same key back off a response.
+    const c = clock();
+    const { hub } = hubWithClient({ now: c.now });
+    const r = hub.buildPollResponse("c1", null, wantsAll, snapshot);
+    const wire = JSON.parse(serializePollResponse(r, ['{"channel":"pco:live","data":{}}'])) as {
+      now?: number;
+      seq?: number;
+      resync?: boolean;
+      frames?: unknown[];
+    };
+    assert.equal(wire.now, c.now(), "the server's clock is not on the wire under `now`");
+    assert.equal(wire.seq, r.seq);
+    assert.equal(wire.resync, r.resync);
+    assert.equal(wire.frames?.length, 1, "a frame that is already JSON must be spliced in, not re-encoded");
   });
 
   it("stamps AFTER the snapshot is built, not before", () => {

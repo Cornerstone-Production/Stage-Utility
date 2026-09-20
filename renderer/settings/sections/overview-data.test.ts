@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { computeOverview, summarize, computeTrend, computeSplDelta, preferredSplMetric } from "./overview-data.js";
+import { serverClock } from "../../lib/server-clock.js";
 import { leqOf } from "@main/services/spl-leq";
 import type { SplServiceSummary } from "@main/types/stage";
 
@@ -425,5 +426,36 @@ describe("which metrics the card offers", () => {
     );
     assert.deepEqual(out.splMetrics, ["SPL A Fast"]);
     assert.equal(out.splMetric, "SPL A Fast");
+  });
+});
+
+describe("the default clock these take", () => {
+  // `summarize` and `computeOverview` take `now` optionally, and the callers that
+  // omit it — Home's recent-services card, the report builder — are exactly the
+  // ones that would measure a LIVE service against the browser's clock. A default
+  // is not untestable, and calling it one was wrong: seed the page's clock, leave
+  // the argument off, and read the figure that depends on it.
+  test("an in-progress item is measured on the SERVER's clock, not the browser's", () => {
+    const realNow = Date.now;
+    try {
+      // The console is an hour fast. The server is not.
+      const serverNow = Date.parse("2026-07-26T10:01:00Z");
+      Date.now = () => serverNow + 3_600_000;
+      serverClock.reset();
+      serverClock.observe(serverNow, 20); // a round-trip-measured reading syncs at once
+
+      const live = svc({
+        endedAt: null,
+        items: [item({ startedAt: "2026-07-26T10:00:00Z", endedAt: null, actualDurationSec: null })],
+      });
+      const s = summarize(live);
+      assert.ok(
+        Math.abs(s.actual - 60) <= 2,
+        `an in-progress item was measured against the browser clock: actual=${Math.round(s.actual)}s, expected ~60s`,
+      );
+    } finally {
+      Date.now = realNow;
+      serverClock.reset();
+    }
   });
 });

@@ -416,15 +416,20 @@ export class ServerClock {
     return "slew";
   }
 
-  /** The offset in force at monotonic instant `at`, mid-slew included. */
+  /**
+   * The offset in force at monotonic instant `at`, mid-slew included.
+   *
+   * PURE. It used to clear `slewing` when an ease had finished, which made
+   * `now()` — called from render, by every surface — mutate module state during
+   * render. React's rule against that is the same one history-chart.tsx already
+   * carries a note about. A finished ease returns the target either way; the
+   * flag is cleared where a decision is actually made, in retarget().
+   */
   private offsetAt(at: number): number | null {
     if (this.targetOffsetMs === null) return null;
     if (!this.slewing) return this.targetOffsetMs;
     const k = (at - this.slewStartedAtMs) / SERVER_CLOCK_SLEW_MS;
-    if (k >= 1) {
-      this.slewing = false;
-      return this.targetOffsetMs;
-    }
+    if (k >= 1) return this.targetOffsetMs;
     if (k <= 0) return this.slewFromMs;
     return this.slewFromMs + (this.targetOffsetMs - this.slewFromMs) * k;
   }

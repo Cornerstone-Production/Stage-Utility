@@ -77,10 +77,11 @@ import { prefersReducedMotion } from "../lib/use-slide-on-move";
 export interface BarItemContext {
   state: StageState | null | undefined;
   bar: ContextBarState;
+  /** The SERVER's clock, ticking once a second. Every reading on the strip is
+   *  against an instant the server stamped — the clock face, the countdown, the
+   *  stream elapsed time, and OBS's record clock, which is interpolated from a
+   *  server-stamped anchor rather than pushed. See renderer/lib/server-clock.ts. */
   now: number;
-  /** The server's clock minus this browser's. The recording item reads OBS's
-   *  interpolated record clock off a server-stamped anchor, so it needs the same
-   *  correction the countdown above it already applies. */
   obs: ReturnType<typeof useObsState>;
   reaper: ReturnType<typeof useReaperState>;
   integrations: ReturnType<typeof useIntegrations>;

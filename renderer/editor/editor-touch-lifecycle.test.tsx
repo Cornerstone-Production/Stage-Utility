@@ -121,7 +121,7 @@ function mount(interactive = true, objects: unknown[] = OBJECTS): Harness {
       gridOn: false,
       alignOn: false,
       locked: false,
-      ctx: { now: Date.now(), skewMs: 0, H: 0, interactive: false },
+      ctx: { now: Date.now(), H: 0, interactive: false },
       ndiSource: null,
       interactive,
       onSelect: (id: string | null) => selects.push(id),

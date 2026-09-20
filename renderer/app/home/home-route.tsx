@@ -305,8 +305,8 @@ export function HomeRoute() {
 
   const state = s.stageState;
   // Seconds to the service start, for the pre-service window. computePcoTimer
-  // already does the skew-corrected maths for both modes, so this reads the
-  // countdown it produces rather than parsing targetAt again.
+  // already does the maths for both modes against the server's clock, so this
+  // reads the countdown it produces rather than parsing targetAt again.
   const timer = computePcoTimer(pcoLive, now);
   const secondsToStart = timer?.mode === "preservice" ? timer.seconds : null;
   const mode = homeMode(pcoLiveKnown, pcoLive, secondsToStart);

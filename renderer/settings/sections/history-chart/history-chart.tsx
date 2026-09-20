@@ -995,6 +995,11 @@ function numberOnly(seg: LaneSegment, width: number, measure: (t: string) => num
  * server-recorded instant: a console an hour fast would otherwise draw an hour of
  * empty axis on a chart whose counter is perfectly current. See
  * renderer/lib/server-clock.ts.
+ *
+ * This READS that clock; it does not feed it. Inside the operator shell the
+ * context bar does. On `/history`, which is chromeless, nothing does, and this
+ * falls back to the host's clock — no worse than what it replaced, and not the
+ * correction the paragraph above would otherwise promise.
  */
 function useWallClock(enabled: boolean, override?: number): number {
   const now = useServerNow(15_000, enabled && override == null);

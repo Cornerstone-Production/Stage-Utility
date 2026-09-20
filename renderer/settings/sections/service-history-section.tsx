@@ -606,6 +606,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // The SERVER's clock: every figure this feeds is measured against a
   // server-stamped `startedAt`, so a console whose clock has drifted would add
   // the drift to the in-progress item's elapsed time.
+  //
+  // READS the page's clock, and something else has to have FED it. That holds on
+  // every page inside the operator shell, whose context bar feeds it from
+  // `pco:live`. It does NOT hold on `/history`, which is chromeless and carries
+  // no context bar: nothing in that subtree feeds the clock, so it falls back to
+  // the host's — the same answer this had before, and no worse, but not the
+  // correction this comment would otherwise promise. The fix is a server-stamped
+  // field on the hello frame, which is its own change.
   const nowTick = useServerNow(1000, detailLive || listLive);
 
   // Synchronous, so the panel clears in the same render the selection does —

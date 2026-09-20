@@ -50,6 +50,26 @@ export interface PollResponse {
   frames: PollFrame[];
 }
 
+/**
+ * The poll response, as the wire carries it.
+ *
+ * Assembled by string concatenation rather than `JSON.stringify`: every frame is
+ * ALREADY a JSON string, and stringifying the response object would parse and
+ * reserialize the lot — including the whole StageState with its base64 branding.
+ *
+ * It lives HERE, beside the shape it serializes, because the seam between
+ * `nowMs` on this side and `"now"` on the client's had nothing holding it
+ * together. Renaming either left the other compiling and every test green, and
+ * every polling panel would have dropped silently back to its own host clock —
+ * the one failure this field exists to prevent, arriving with no symptom a test
+ * could see.
+ *
+ * @param frames each already a `{"channel":…,"data":…}` JSON string.
+ */
+export function serializePollResponse(r: PollResponse, frames: readonly string[]): string {
+  return `{"now":${r.nowMs},"seq":${r.seq},"resync":${r.resync},"frames":[${frames.join(",")}]}`;
+}
+
 /** Most recent broadcasts kept for replay. Bounds memory when a client stops
  *  polling without saying so — the 4 Hz spl:metrics channel alone would fill
  *  anything larger within seconds. */
