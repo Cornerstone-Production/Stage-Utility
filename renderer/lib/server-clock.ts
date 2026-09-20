@@ -17,12 +17,19 @@
 //  - Where there is a request/response pair — the poll transport issues one every
 //    couple of seconds and knows when it sent and when it heard back — the round
 //    trip is measurable and half of it is added back: the classic
-//    `offset = serverSend + rtt/2 - clientReceive`.
+//    `offset = serverSend + rtt/2 - clientReceive`. Its residual error is
+//    TWO-signed, at ±rtt/2 on an asymmetric round trip, so these are selected by
+//    minimum round trip and never by offset.
 //  - Where there is no pairing (a pushed SSE frame, the pco:live keepalive) the
 //    delay is unmeasurable but its SIGN is not: it only ever biases the estimate
 //    DOWN. So across a window of recent samples the LARGEST offset is the
 //    least-delayed and therefore the truest, and that is the one kept — not the
 //    newest.
+//
+// The two live in separate pools for exactly that reason. One filter over both
+// picked the most positively biased paired sample and latched it: a single
+// stalled poll set the clock two seconds fast and held it there for the whole
+// window, which is worse than the newest-sample rule it replaced.
 //
 // HOST CLOCK. Between corrections the displayed time used to advance off
 // `Date.now()`, which on the panel this was measured on is seven hours fast and
@@ -84,11 +91,35 @@ export interface ServerClockSources {
 }
 
 interface Sample {
-  /** `serverMs (+ rtt/2) - mono` — where the server's clock sits relative to the
-   *  monotonic one. Biased LOW by any delivery delay not accounted for. */
+  /** Where the server's clock sits relative to the monotonic one. */
   offsetMs: number;
   /** The monotonic reading this sample was taken at. */
   atMs: number;
+  /** The round trip it was measured over. Paired pool only. */
+  rttMs: number;
+}
+
+/**
+ * The paired sample with the smallest round trip, newest breaking a tie.
+ *
+ * NTP's max-delay filter. The smallest round trip is the one whose ±rtt/2
+ * asymmetry bound is tightest, and — unlike selecting on the offset — a stalled
+ * request is rejected on the measurement that identifies it rather than on the
+ * error it produced. With a steady round trip every sample ties and the newest
+ * wins, which is what a delay-corrected reading should do.
+ */
+function bestPaired(pool: readonly Sample[]): number {
+  let best = pool[0];
+  for (const s of pool) if (s.rttMs <= best.rttMs) best = s;
+  return best.offsetMs;
+}
+
+/** The largest unpaired offset in the window: delivery delay only ever biases an
+ *  unpaired reading DOWN, so the largest is the least delayed. */
+function bestUnpaired(pool: readonly Sample[]): number {
+  let best = pool[0].offsetMs;
+  for (const s of pool) if (s.offsetMs > best) best = s.offsetMs;
+  return best;
 }
 
 /** What `observe` did with a reading. Returned so a caller — and a test — can
@@ -109,7 +140,22 @@ function describeOffset(ms: number): string {
 }
 
 export class ServerClock {
-  private readonly samples: Sample[] = [];
+  /**
+   * TWO POOLS, never one.
+   *
+   * A paired sample's residual error is two-signed at ±rtt/2 on an asymmetric
+   * round trip; an unpaired one's is one-signed, downward, by the delivery
+   * delay. Selecting the MAXIMUM offset is right for the second and actively
+   * wrong for the first — it picks the most positively biased outlier, so one
+   * stalled poll set the clock two seconds FAST and the maximum then latched it
+   * there for the whole window while twelve healthy polls were ignored.
+   *
+   * So: a paired sample is chosen by MINIMUM round trip, an unpaired one by
+   * maximum offset. Paired wins outright when both pools have something: it is
+   * the only reading that knows its own delay.
+   */
+  private readonly paired: Sample[] = [];
+  private readonly unpaired: Sample[] = [];
   /** Where the clock is heading. null until the first usable reading. */
   private targetOffsetMs: number | null = null;
   private slewFromMs = 0;
@@ -154,11 +200,12 @@ export class ServerClock {
   observe(serverMs: number, rttMs?: number): ServerClockAction {
     if (!Number.isFinite(serverMs)) return "ignored";
     const at = this.src.mono();
-    const half = rttMs != null && Number.isFinite(rttMs) && rttMs >= 0 ? rttMs / 2 : 0;
-    this.samples.push({ offsetMs: serverMs + half - at, atMs: at });
-    this.dropStale(at);
-    let best = this.samples[0].offsetMs;
-    for (const s of this.samples) if (s.offsetMs > best) best = s.offsetMs;
+    const isPaired = rttMs != null && Number.isFinite(rttMs) && rttMs >= 0;
+    if (isPaired) this.paired.push({ offsetMs: serverMs + rttMs / 2 - at, atMs: at, rttMs });
+    else this.unpaired.push({ offsetMs: serverMs - at, atMs: at, rttMs: Number.POSITIVE_INFINITY });
+    this.dropOld(this.paired, at);
+    this.dropOld(this.unpaired, at);
+    const best = this.paired.length > 0 ? bestPaired(this.paired) : bestUnpaired(this.unpaired);
     return this.retarget(best, at);
   }
 
@@ -189,19 +236,20 @@ export class ServerClock {
     // Subscribers are deliberately kept: a listener belongs to a mounted
     // component, and forgetting it here would leave that component reading a
     // clock that never tells it anything again.
-    this.samples.length = 0;
+    this.paired.length = 0;
+    this.unpaired.length = 0;
     this.targetOffsetMs = null;
     this.slewing = false;
     this.slewFromMs = 0;
     this.slewStartedAtMs = 0;
   }
 
-  /** Samples are pushed in monotonic order, so the stale ones are a prefix. The
-   *  reading just pushed is `at` old, so this can never empty the array. */
-  private dropStale(at: number): void {
+  /** Samples are pushed in monotonic order, so the out-of-window ones are a
+   *  prefix. */
+  private dropOld(pool: Sample[], at: number): void {
     let drop = 0;
-    while (drop < this.samples.length && this.samples[drop].atMs < at - SERVER_CLOCK_WINDOW_MS) drop++;
-    if (drop > 0) this.samples.splice(0, drop);
+    while (drop < pool.length && pool[drop].atMs < at - SERVER_CLOCK_WINDOW_MS) drop++;
+    if (drop > 0) pool.splice(0, drop);
   }
 
   private retarget(target: number, at: number): ServerClockAction {

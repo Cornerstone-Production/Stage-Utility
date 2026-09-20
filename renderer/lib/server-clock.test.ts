@@ -62,6 +62,16 @@ class World {
     this.clock.observe(stamped, rttMs);
   }
 
+  /** Deliver a pair whose two legs are UNEQUAL. The stamp is honest; what the
+   *  client cannot see is that the round trip it measured was lopsided, which is
+   *  the whole source of a paired sample's residual error. */
+  deliverPairedAsymmetric(outMs: number, backMs: number): void {
+    this.advance(outMs);
+    const stamped = this.serverMs;
+    this.advance(backMs);
+    this.clock.observe(stamped, outMs + backMs);
+  }
+
   /** How far the clock's answer is from true server time. */
   errorMs(): number {
     return this.clock.now() - this.serverMs;
@@ -114,6 +124,41 @@ describe("ServerClock — delivery delay", () => {
       w.errorMs() <= -400,
       `a maximum older than the ${SERVER_CLOCK_WINDOW_MS}ms window must be dropped; ` +
         `the clock is off by ${w.errorMs()}ms, i.e. still holding it`,
+    );
+  });
+
+  test("a stalled request does not latch the clock fast", () => {
+    // THE regression this pool split exists for. A paired sample's residual is
+    // two-signed at ±rtt/2 on an asymmetric round trip, so selecting the biggest
+    // offset picks the most positively biased outlier and then holds it for the
+    // whole window. One stalled poll — 4 s out, answered instantly — used to set
+    // the clock ~2 s fast and keep it there while every healthy poll was ignored.
+    const w = new World();
+    w.deliverPaired(20);
+    w.deliverPairedAsymmetric(4000, 0);
+    for (let i = 0; i < 10; i++) {
+      w.advance(2000);
+      w.deliverPaired(20);
+    }
+    assert.ok(
+      Math.abs(w.errorMs()) <= 20,
+      `ten healthy polls after one stalled request, the clock is still ${w.errorMs()}ms out — ` +
+        `the stalled sample was latched instead of being rejected on its round trip`,
+    );
+  });
+
+  test("with a steady round trip the newest paired sample is the one used", () => {
+    // The tie-break, and it is not decoration: every sample ties on rtt in the
+    // ordinary case, and a delay-corrected reading should follow the newest.
+    const w = new World();
+    w.deliverPaired(20);
+    w.advance(2000);
+    w.serverMs += 400; // the server's clock nudged forward between polls
+    w.deliverPaired(20);
+    w.advance(SERVER_CLOCK_SLEW_MS + 10); // 400ms is under the step, so it eases
+    assert.ok(
+      Math.abs(w.errorMs()) <= 20,
+      `the clock ignored a newer sample with the same round trip; it is ${w.errorMs()}ms out`,
     );
   });
 
