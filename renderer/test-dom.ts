@@ -11,6 +11,7 @@
 //   ...
 //   teardown();
 
+import { act } from "react";
 import { JSDOM } from "jsdom";
 
 /** Globals a React render expects to find. */
@@ -161,4 +162,41 @@ export function installRenderDom({ clientHeight }: { clientHeight?: number } = {
     delete g.IS_REACT_ACT_ENVIRONMENT;
     teardown();
   };
+}
+
+/**
+ * Let React finish everything the last interaction started.
+ *
+ * A bare `await new Promise((r) => setTimeout(r, 0))` does not. React commits a
+ * render and, when that commit leaves passive effects to run, hands the flush to
+ * the `scheduler` package rather than running it inline — and the first thing
+ * that deferred callback does is read `window.event`. The scheduler drives it
+ * from a `setImmediate`, yielding whenever it exceeds its frame budget, so how
+ * many macrotask turns it needs is a function of how busy the machine is. Two
+ * turns is a guess that holds on an idle box.
+ *
+ * When it does not hold, the flush lands after the file's last hook has pulled
+ * the DOM down, `window` is gone, and the file fails with
+ * `ReferenceError: window is not defined` while every test in it passes — there
+ * is no test left to attribute it to. That is a rare failure under `npm test`
+ * alone and a repeatable one with several suites running at once.
+ *
+ * `act` is the fix rather than more turns, and it is a different KIND of answer:
+ * inside an act scope React queues its work on act's own queue instead of the
+ * scheduler, and awaiting the scope drains it. The wait is on the work being
+ * done, not on a number of turns being enough.
+ *
+ * Call it wherever a test would otherwise wait a turn for a fetch, an SSE push
+ * or an effect to land:
+ *
+ *   FakeEventSource.last.push("attendance:history", record);
+ *   await settle();
+ *
+ * and once more in the hook that tears the DOM down, after `cleanup()`, so
+ * anything the unmount scheduled runs while the DOM it expects is still there.
+ */
+export async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
