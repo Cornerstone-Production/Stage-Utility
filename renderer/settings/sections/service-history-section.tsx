@@ -18,7 +18,7 @@ import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
+import { RecordingDot, RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion } from "./history-chart";
 import { TrendsCard } from "./history-trends/trends-card";
 import type { TrendRecording } from "./history-trends/trends";
@@ -1563,8 +1563,21 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       the service page's own header, where it has the room to
                       say what it is measured against. */}
                   <span data-row-when className="flex min-w-0 flex-col">
-                    <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
-                      {started.value}
+                    {/* The live DOT rides with the start time, and the pill in
+                        the SERVICE column says the word.
+                        Not redundant — belt and braces on purpose. SERVICE is
+                        the grid's only flexible track and it resolves to ZERO
+                        between 640 and about 1,150px wide, where the pill is
+                        clipped away with the plan title beside it. WHEN is a
+                        fixed 104px and is the leftmost column, so it is the one
+                        place a marker cannot be squeezed out of. Six pixels
+                        beside a 42px time, rather than the 84px pill that used
+                        to live here and truncated "Weekend" to "W…". */}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
+                        {started.value}
+                      </span>
+                      {live && <RecordingDot label="recording" />}
                     </span>
                     <span className="truncate text-[11px] text-fg-subtle">{s.serviceTypeName ?? ""}</span>
                   </span>

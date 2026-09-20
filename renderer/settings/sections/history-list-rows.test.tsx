@@ -721,6 +721,29 @@ describe("a row's columns", () => {
       /\boverflow-hidden\b/.test(pill.parentElement?.className ?? ""),
       `the pill can paint outside the SERVICE column: ${pill.parentElement?.className}`,
     );
+    // WHICH MEANS THE PILL IS NOT ENOUGH ON ITS OWN. Clipped away, the row has
+    // nothing left saying it is live except a RAN caption that is itself near
+    // the clipping edge. The dot rides with the start time instead, in WHEN —
+    // a fixed 104px track, and the leftmost, so it is the one cell that cannot
+    // be squeezed out. Six pixels beside a 42px time, not the 84px pill that
+    // used to live there.
+    const dot = when.querySelector('[data-testid="recording-dot"]');
+    assert.ok(dot, `no live marker survives a zero-width SERVICE column: ${when.textContent}`);
+    assert.equal(
+      dot.previousElementSibling?.textContent,
+      when.firstElementChild?.firstElementChild?.textContent,
+      "the live dot is not beside the start time",
+    );
+    // Named, not just coloured: six green pixels are not a fact a screen reader
+    // or a colour-blind operator can read.
+    assert.equal(dot.getAttribute("aria-label"), "recording", "the live dot has no accessible name");
+    // And GONE on a finished row, or it says every row is recording.
+    const done = view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`) as HTMLElement;
+    assert.equal(
+      done.querySelectorAll('[data-testid="recording-dot"]').length,
+      0,
+      "a finished recording is wearing the live dot",
+    );
     // The type has its line to itself and reads in full.
     assert.equal(
       (when.lastElementChild?.textContent ?? "").trim(),
