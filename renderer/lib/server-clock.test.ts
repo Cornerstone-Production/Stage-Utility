@@ -18,7 +18,9 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import {
+  SERVER_CLOCK_MAX_BACKWARD_MS,
   SERVER_CLOCK_SLEW_MS,
+  SERVER_CLOCK_STALE_MS,
   SERVER_CLOCK_STEP_MS,
   SERVER_CLOCK_WINDOW_MS,
   ServerClock,
@@ -72,9 +74,34 @@ class World {
     this.clock.observe(stamped, outMs + backMs);
   }
 
+  /** Two prompt unpaired frames a second and a half apart — the least a clock
+   *  that has never been set will take. See SERVER_CLOCK_MIN_SPREAD_MS. */
+  syncUnpaired(): void {
+    this.deliver(0);
+    this.advance(1500);
+    this.deliver(0);
+  }
+
   /** How far the clock's answer is from true server time. */
   errorMs(): number {
     return this.clock.now() - this.serverMs;
+  }
+
+  /**
+   * Read the clock once a second for `seconds`, and return the worst change
+   * between consecutive readings. Negative means the digits on the wall went
+   * backwards.
+   */
+  worstTickMs(seconds: number): number {
+    let worst = Number.POSITIVE_INFINITY;
+    let last = this.clock.now();
+    for (let i = 0; i < seconds; i++) {
+      this.advance(1000);
+      const next = this.clock.now();
+      worst = Math.min(worst, next - last);
+      last = next;
+    }
+    return worst;
   }
 }
 
@@ -112,18 +139,20 @@ describe("ServerClock — delivery delay", () => {
 
   test("a sample older than the window stops being the best answer", () => {
     const w = new World();
-    w.deliver(10); // a good one
-    // Long enough that the good sample has fallen out of the window, then only
-    // delayed ones. The clock follows them rather than holding the old maximum.
+    w.syncUnpaired(); // prompt frames, so the clock is on true time
+    // Long enough that those have fallen out of the window, then only delayed
+    // ones. The clock follows them down rather than holding the old maximum.
     w.advance(SERVER_CLOCK_WINDOW_MS + 1000);
     for (let i = 0; i < 3; i++) {
       w.deliver(600);
       w.advance(1000);
     }
+    // Bounded on BOTH sides: `<= -400` alone passes for a clock that dropped by
+    // any amount at all, including one that threw the window away entirely.
     assert.ok(
-      w.errorMs() <= -400,
-      `a maximum older than the ${SERVER_CLOCK_WINDOW_MS}ms window must be dropped; ` +
-        `the clock is off by ${w.errorMs()}ms, i.e. still holding it`,
+      w.errorMs() <= -400 && w.errorMs() >= -800,
+      `a maximum older than the ${SERVER_CLOCK_WINDOW_MS}ms window must be dropped and the clock must ` +
+        `settle on the 600ms-delayed ones; it is off by ${w.errorMs()}ms`,
     );
   });
 
@@ -166,6 +195,73 @@ describe("ServerClock — delivery delay", () => {
     const w = new World();
     assert.equal(w.clock.observe(Number.NaN), "ignored");
     assert.equal(w.clock.synced(), false);
+  });
+});
+
+describe("ServerClock — a replayed frame is not a reading", () => {
+  test("a hello burst cannot sync a clock that has never been set", () => {
+    // The SSE hello burst hands a fresh connection every hydrated channel at
+    // once, each carrying whatever it was last broadcast with — `pco:live` can be
+    // five minutes old outside a service window, and it is NOT flagged as a
+    // replay on the wire. Several such frames arrive in the same tick, so
+    // "several samples" is no protection; "several samples spread over time" is.
+    const w = new World();
+    const stale = w.serverMs - 5 * 60_000;
+    assert.equal(w.clock.observe(stale), "waiting");
+    assert.equal(w.clock.observe(stale + 900), "waiting", "a second frame from the same burst is not corroboration");
+    assert.equal(
+      w.clock.synced(),
+      false,
+      `the clock adopted a hello-burst frame; it now reads ${w.errorMs()}ms out and blames the browser for it`,
+    );
+    assert.deepEqual(w.logs, [], "and it must not say the operator's clock is five minutes slow on the strength of it");
+  });
+
+  test("the next real frame after the burst is what sets it", () => {
+    const w = new World();
+    w.clock.observe(w.serverMs - 5 * 60_000); // the burst
+    w.advance(15_000); // the keepalive, one LIVE_KEEPALIVE_MS later
+    w.deliver(0);
+    assert.equal(w.clock.synced(), true, "a frame a keepalive after the burst is a real reading and must be taken");
+    assert.ok(Math.abs(w.errorMs()) <= 20, `the clock should be on the server's time, it is ${w.errorMs()}ms out`);
+  });
+
+  test("one round-trip-measured sample syncs on its own, immediately", () => {
+    // It carries its own delay measurement, so there is nothing to corroborate —
+    // and a polling panel must not spend a keepalive on its own host clock.
+    const w = new World();
+    w.deliverPaired(40);
+    assert.equal(w.clock.synced(), true);
+    assert.ok(Math.abs(w.errorMs()) <= 5);
+  });
+
+  test("a replayed frame arriving after sync is refused, not pooled", () => {
+    // The warm case: a component mounting mid-session is handed the client's own
+    // replay cache, whose `serverNow` says when the frame was FIRST seen.
+    const w = new World();
+    w.syncUnpaired();
+    const before = w.errorMs();
+    assert.equal(w.clock.observe(w.serverMs - 5 * 60_000), "stale");
+    assert.ok(
+      Math.abs(w.errorMs() - before) <= 5,
+      `a five-minute-old replay moved the clock by ${w.errorMs() - before}ms`,
+    );
+  });
+
+  test("but refusing is suspended rather than locking the clock out", () => {
+    // A freshness test with no escape is a lock-out: a clock that had latched
+    // high would refuse every sample that disagreed with it and never come down.
+    // Once the window has emptied, the next sample is the only evidence there is
+    // and must be taken — the backward clamp is what stops it being believed all
+    // at once.
+    const w = new World();
+    w.syncUnpaired();
+    w.advance(SERVER_CLOCK_WINDOW_MS + 1000);
+    assert.notEqual(
+      w.clock.observe(w.serverMs - 3 * SERVER_CLOCK_STALE_MS),
+      "stale",
+      "the clock refused the only sample left and can now never be corrected",
+    );
   });
 });
 
@@ -233,7 +329,7 @@ describe("ServerClock — slew and step", () => {
     // and the best that is left is a delayed one. 999ms is the largest such drop
     // that still eases, and at that size the displayed clock must PAUSE rather
     // than ever tick backwards.
-    w.deliver(0);
+    w.syncUnpaired();
     w.advance(SERVER_CLOCK_WINDOW_MS + 1000);
     w.deliver(SERVER_CLOCK_STEP_MS - 1);
     let last = w.clock.now();
@@ -273,6 +369,66 @@ describe("ServerClock — slew and step", () => {
     w.clock.observe(w.serverMs, 0);
     assert.equal(w.logs.length, 1, `a step is worth one line, got ${JSON.stringify(w.logs)}`);
     assert.match(w.logs[0], /stepped/);
+  });
+
+  test("a batched stream released a minute late does not tick the display backwards", () => {
+    // The default Ultritouch. Not on `?transport=poll`, so DashBoard's fallback
+    // browser holds the event stream and releases a minute of frames at once. A
+    // frame released 62 s late used to move the display back 62 s between two
+    // one-second frames — a stage clock counting up for a minute and then jumping
+    // back a minute.
+    const w = new World();
+    w.syncUnpaired();
+    w.advance(SERVER_CLOCK_WINDOW_MS + 2000); // the window empties while the browser buffers
+    w.deliver(62_000);
+    const worst = w.worstTickMs(10);
+    assert.ok(
+      worst >= 0,
+      `THE DISPLAY TICKED BACKWARD ${worst}ms between two one-second frames; a stage clock may pause, never reverse`,
+    );
+  });
+
+  test("a backward correction is clamped, and says so once", () => {
+    const w = new World();
+    w.syncUnpaired();
+    w.advance(SERVER_CLOCK_WINDOW_MS + 2000);
+    const before = w.errorMs();
+    w.deliver(62_000);
+    w.advance(SERVER_CLOCK_SLEW_MS + 10);
+    const moved = w.errorMs() - before;
+    assert.ok(
+      moved >= -SERVER_CLOCK_MAX_BACKWARD_MS - 5,
+      `one correction moved the clock back ${-moved}ms; the clamp is ${SERVER_CLOCK_MAX_BACKWARD_MS}ms`,
+    );
+    const clamped = w.logs.filter((l) => /holding the clock back/.test(l));
+    assert.equal(clamped.length, 1, `expected one line about the clamp, got ${JSON.stringify(w.logs)}`);
+    // And a second clamped correction in the same episode adds nothing: a
+    // display left against a stream a minute behind would otherwise write a line
+    // per frame for as long as it lasted.
+    w.advance(1000);
+    w.deliver(62_000);
+    assert.equal(w.logs.filter((l) => /holding the clock back/.test(l)).length, 1);
+  });
+
+  test("a genuine backward server clock is followed, a clamp at a time", () => {
+    // The cost of the clamp, stated: a server whose clock really moved back is
+    // converged on rather than jumped to. Refusing to converge at all was the
+    // alternative and would leave a display permanently fast.
+    //
+    // It takes the WINDOW plus one clamp per second of change: the pre-change
+    // samples are still the maximum until they age out, which is the same
+    // property that makes a single late frame harmless.
+    const w = new World();
+    w.syncUnpaired();
+    w.serverMs -= 4000; // somebody set the server's clock back four seconds
+    for (let i = 0; i < 30; i++) {
+      w.advance(2000);
+      w.deliver(0);
+    }
+    assert.ok(
+      Math.abs(w.errorMs()) <= 50,
+      `the clock never converged on the server's new time; it is ${w.errorMs()}ms out`,
+    );
   });
 
   test("a host clock that is hours out says so on the first sample", () => {

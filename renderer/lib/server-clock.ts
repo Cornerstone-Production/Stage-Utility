@@ -31,6 +31,12 @@
 // stalled poll set the clock two seconds fast and held it there for the whole
 // window, which is worse than the newest-sample rule it replaced.
 //
+// A FRAME IS NOT ALWAYS A READING. The SSE hello burst hands a fresh connection
+// every hydrated channel at once, carrying whatever each was last broadcast
+// with, and the server neither restamps it nor flags it as a replay. So a clock
+// that has never been set will not take a lone unpaired sample, and a clock that
+// has will refuse one stamped implausibly far behind its own reading.
+//
 // HOST CLOCK. Between corrections the displayed time used to advance off
 // `Date.now()`, which on the panel this was measured on is seven hours fast and
 // gaining about two hours a day. It ticked off that, then snapped back every
@@ -39,24 +45,30 @@
 // host clock that runs fast, runs slow or steps does not move the display at all.
 //
 // CORRECTIONS. A small correction is eased in rather than applied at once, so
-// nothing visibly jumps; a large one is applied immediately, because easing a
-// genuine clock step at a rate that never reverses would leave the display
-// visibly wrong for as long as the error itself.
+// nothing visibly jumps; a large FORWARD one is applied immediately, because
+// easing a genuine clock step at a rate that never reverses would leave the
+// display visibly wrong for as long as the error itself. A BACKWARD correction
+// is never applied at once and never moves the clock more than a second: the
+// displayed time on a stage is allowed to pause and is not allowed to reverse.
 
 import { useEffect, useRef, useState } from "react";
 
 import { logToServer } from "./client-log";
 
 /**
- * How far back samples are kept for the best-of filter.
+ * How far back samples are kept, in both pools.
  *
- * Two full `pco:live` keepalives (LIVE_KEEPALIVE_MS is 15 s), so even the
- * quietest channel — a display sitting outside a service window, where the only
- * thing moving `serverNow` is the keepalive — always has more than one sample to
- * choose between. On the polling transport it holds fifteen round-trip-corrected
- * ones. It is also the bound on the other direction: a genuine BACKWARD change
- * to the server's clock lowers every later sample, and the stale maximum from
- * before it cannot outlive the window.
+ * Two full `pco:live` keepalives (LIVE_KEEPALIVE_MS is 15 s), so a display
+ * INSIDE a service window — where `serverNow` moves on every push — always has
+ * several unpaired samples to choose between, and a polling client holds fifteen
+ * round-trip-measured ones. Outside a service window, or with Planning Center
+ * unconfigured, there may be one or none: the filter degrades to the single
+ * sample it has, which is why the freshness test below exists rather than
+ * relying on there being a better sample beside it.
+ *
+ * It is also the bound on the other direction: a genuine BACKWARD change to the
+ * server's clock lowers every later sample, and the stale maximum from before it
+ * cannot outlive the window.
  */
 export const SERVER_CLOCK_WINDOW_MS = 30_000;
 
@@ -78,6 +90,62 @@ export const SERVER_CLOCK_STEP_MS = 1_000;
 /** How long a small correction is eased in over. See SERVER_CLOCK_STEP_MS. */
 export const SERVER_CLOCK_SLEW_MS = 1_000;
 
+/**
+ * The most the displayed clock may be moved BACKWARD by one correction.
+ *
+ * SERVER_CLOCK_STEP_MS governs the ease; it says nothing about a step, and a
+ * backward step of any size used to land at once. An Ultritouch NOT on
+ * `?transport=poll` — which is the default — is served by DashBoard's fallback
+ * browser, which holds the event stream and releases a minute of frames in one
+ * batch. A frame released 62 s late moved the display back 62 s between two
+ * one-second frames: a stage clock that counts up for a minute and then jumps
+ * back a minute, which is the failure that matters on a wall.
+ *
+ * So a backward correction is never stepped. It is eased like any other, and the
+ * movement is clamped to this, which equals SERVER_CLOCK_SLEW_MS — so the
+ * displayed rate stays at or above 0 and the clock pauses rather than reverses.
+ * A genuine backward change to the server's clock is followed at this much per
+ * sample: on the polling transport that is 1 s every 2 s, and the clamp says so
+ * on `/log` the first time it engages, so a large one is visible rather than
+ * silent.
+ */
+export const SERVER_CLOCK_MAX_BACKWARD_MS = 1_000;
+
+/**
+ * How far behind the clock's own reading an unpaired sample may be stamped
+ * before it is refused rather than pooled.
+ *
+ * An unpaired sample carries no measurement of its own delay, so a badly delayed
+ * one is indistinguishable from a server clock that moved back — except by size.
+ * Five seconds is generous enough for a `pco:live` frame collected inside a poll
+ * response (up to one 2 s interval old by design) and for an SSE hiccup, and
+ * tight enough to refuse the two readings that are not readings at all: a
+ * replayed hello-burst frame minutes old, and a minute's worth of stream
+ * released in one batch.
+ *
+ * Refusal is suspended when it would leave the pool empty. Otherwise a clock
+ * that had latched too high would refuse every sample that disagreed with it and
+ * never come down — the lock-out a freshness test invites if it has no escape.
+ */
+export const SERVER_CLOCK_STALE_MS = 5_000;
+
+/**
+ * How far apart two unpaired samples must arrive before they can sync a clock
+ * that has never been set.
+ *
+ * The SSE hello burst hands a fresh connection every hydrated channel at once,
+ * carrying whatever each was last broadcast with — `pco:live` can be five
+ * minutes old outside a service window. Those frames arrive in the same tick, so
+ * the rule "two samples, at least a second apart" cannot be satisfied by a burst
+ * however many channels it carries, and can be satisfied by the next real frame.
+ * One unpaired sample says nothing about its own delay; two, separated in time,
+ * bound it.
+ *
+ * A round-trip-measured sample syncs on its own and immediately: it carries its
+ * own delay measurement, so there is nothing to corroborate.
+ */
+export const SERVER_CLOCK_MIN_SPREAD_MS = 1_000;
+
 /** What the clock reads its two times and writes its log through. Injected so a
  *  test drives the real class with a clock it controls rather than sleeping. */
 export interface ServerClockSources {
@@ -98,6 +166,21 @@ interface Sample {
   /** The round trip it was measured over. Paired pool only. */
   rttMs: number;
 }
+
+/** What `observe` did with a reading. Returned so a caller — and a test — can
+ *  tell each outcome apart. */
+export type ServerClockAction =
+  | "step"
+  | "slew"
+  /** Not a number, so not a reading. */
+  | "ignored"
+  /** Stamped further behind the clock's own reading than a delivery could
+   *  plausibly account for — pooling it would drag the clock backwards. */
+  | "stale"
+  /** Pooled, but the clock has never been set and this is the only unpaired
+   *  sample, or the only ones are from a single burst. Nothing to corroborate a
+   *  first reading with, so nothing is set. */
+  | "waiting";
 
 /**
  * The paired sample with the smallest round trip, newest breaking a tie.
@@ -122,10 +205,6 @@ function bestUnpaired(pool: readonly Sample[]): number {
   return best;
 }
 
-/** What `observe` did with a reading. Returned so a caller — and a test — can
- *  tell a step from a slew from a reading that was not usable at all. */
-export type ServerClockAction = "step" | "slew" | "ignored";
-
 /** Rough duration, signed, for a log line: "7h 2m fast", "2.4s slow". */
 function describeOffset(ms: number): string {
   const dir = ms >= 0 ? "fast" : "slow";
@@ -148,11 +227,15 @@ export class ServerClock {
    * delay. Selecting the MAXIMUM offset is right for the second and actively
    * wrong for the first — it picks the most positively biased outlier, so one
    * stalled poll set the clock two seconds FAST and the maximum then latched it
-   * there for the whole window while twelve healthy polls were ignored.
+   * there for the whole window while twelve healthy polls were ignored. That is
+   * worse than trusting the newest sample, which self-corrects on the next one.
    *
-   * So: a paired sample is chosen by MINIMUM round trip, an unpaired one by
-   * maximum offset. Paired wins outright when both pools have something: it is
-   * the only reading that knows its own delay.
+   * So: a paired sample is chosen by MINIMUM round trip, which is the standard
+   * max-delay filter and rejects the stalled poll on the measurement that
+   * actually identifies it rather than on the offset it produced. An unpaired one
+   * is chosen by maximum offset, where the one-signed argument holds. Paired wins
+   * outright when both pools have something: it is the only reading that knows
+   * its own delay.
    */
   private readonly paired: Sample[] = [];
   private readonly unpaired: Sample[] = [];
@@ -161,6 +244,9 @@ export class ServerClock {
   private slewFromMs = 0;
   private slewStartedAtMs = 0;
   private slewing = false;
+  /** True while consecutive corrections are hitting the backward clamp, so the
+   *  log line is written once per episode rather than once per sample. */
+  private clamping = false;
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly src: ServerClockSources) {}
@@ -201,10 +287,28 @@ export class ServerClock {
     if (!Number.isFinite(serverMs)) return "ignored";
     const at = this.src.mono();
     const isPaired = rttMs != null && Number.isFinite(rttMs) && rttMs >= 0;
-    if (isPaired) this.paired.push({ offsetMs: serverMs + rttMs / 2 - at, atMs: at, rttMs });
-    else this.unpaired.push({ offsetMs: serverMs - at, atMs: at, rttMs: Number.POSITIVE_INFINITY });
     this.dropOld(this.paired, at);
     this.dropOld(this.unpaired, at);
+
+    // Refuse an unpaired sample stamped further behind our own reading than a
+    // delivery could account for — unless refusing it would leave nothing, in
+    // which case it is the only evidence there is and the backward clamp in
+    // retarget() is what keeps it from being believed all at once.
+    if (!isPaired && this.targetOffsetMs !== null) {
+      const reading = at + this.offsetAt(at)!;
+      const behind = reading - serverMs;
+      const havePooled = this.paired.length > 0 || this.unpaired.length > 0;
+      if (behind > SERVER_CLOCK_STALE_MS && havePooled) return "stale";
+    }
+
+    if (isPaired) this.paired.push({ offsetMs: serverMs + rttMs / 2 - at, atMs: at, rttMs });
+    else this.unpaired.push({ offsetMs: serverMs - at, atMs: at, rttMs: Number.POSITIVE_INFINITY });
+
+    // A clock that has never been set will not take a lone unpaired reading: see
+    // SERVER_CLOCK_MIN_SPREAD_MS. Pooled first, so the sample that arrives next
+    // is corroborated by this one rather than starting over.
+    if (this.targetOffsetMs === null && this.paired.length === 0 && !this.corroborated()) return "waiting";
+
     const best = this.paired.length > 0 ? bestPaired(this.paired) : bestUnpaired(this.unpaired);
     return this.retarget(best, at);
   }
@@ -240,6 +344,7 @@ export class ServerClock {
     this.unpaired.length = 0;
     this.targetOffsetMs = null;
     this.slewing = false;
+    this.clamping = false;
     this.slewFromMs = 0;
     this.slewStartedAtMs = 0;
   }
@@ -250,6 +355,15 @@ export class ServerClock {
     let drop = 0;
     while (drop < pool.length && pool[drop].atMs < at - SERVER_CLOCK_WINDOW_MS) drop++;
     if (drop > 0) pool.splice(0, drop);
+  }
+
+  /** Two unpaired samples far enough apart in arrival to bound each other's
+   *  delay. See SERVER_CLOCK_MIN_SPREAD_MS. */
+  private corroborated(): boolean {
+    if (this.unpaired.length < 2) return false;
+    const first = this.unpaired[0].atMs;
+    const last = this.unpaired[this.unpaired.length - 1].atMs;
+    return last - first >= SERVER_CLOCK_MIN_SPREAD_MS;
   }
 
   private retarget(target: number, at: number): ServerClockAction {
@@ -266,16 +380,38 @@ export class ServerClock {
       return "step";
     }
     const diff = target - current;
-    if (Math.abs(diff) >= SERVER_CLOCK_STEP_MS) {
+
+    // FORWARD. Large enough is a genuine change — a host step, a resume from
+    // sleep, the server's clock being set — and lands at once.
+    if (diff >= SERVER_CLOCK_STEP_MS) {
       this.targetOffsetMs = target;
       this.slewing = false;
+      this.clamping = false;
       this.src.log(`stepped ${describeOffset(diff)} to follow the server`);
       this.announceStep();
       return "step";
     }
+
+    // BACKWARD, at any size, is never stepped and never moves further than
+    // SERVER_CLOCK_MAX_BACKWARD_MS at once: the displayed clock pauses instead of
+    // ticking backwards. See that constant for the panel this is about.
+    let move = diff;
+    if (diff < -SERVER_CLOCK_MAX_BACKWARD_MS) {
+      move = -SERVER_CLOCK_MAX_BACKWARD_MS;
+      if (!this.clamping) {
+        this.clamping = true;
+        this.src.log(
+          `holding the clock back: the server reads ${describeOffset(diff)} of where this display had it, ` +
+            `easing rather than jumping`,
+        );
+      }
+    } else if (diff >= 0) {
+      this.clamping = false;
+    }
+
     this.slewFromMs = current;
     this.slewStartedAtMs = at;
-    this.targetOffsetMs = target;
+    this.targetOffsetMs = current + move;
     this.slewing = true;
     return "slew";
   }
