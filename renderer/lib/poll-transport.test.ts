@@ -95,6 +95,9 @@ let perfNow = 1000;
 (globalThis as { performance?: unknown }).performance = { now: () => perfNow };
 /** Milliseconds each leg of a poll costs. Zero unless a case sets it. */
 let legMs = 0;
+/** Milliseconds PARSING the body costs, charged only by `json()` — which is what
+ *  a real `Response.json()` does, and the reason the client does not use it. */
+let parseMs = 0;
 
 (globalThis as { fetch?: unknown }).fetch = async (url: unknown) => {
   const href = String(url);
@@ -112,10 +115,13 @@ let legMs = 0;
   return {
     ok: true,
     text: async () => {
-      perfNow += legMs; // the response leg
+      perfNow += legMs; // the response leg, and nothing else
       return JSON.stringify(body);
     },
-    json: async () => body,
+    json: async () => {
+      perfNow += legMs + parseMs; // the leg AND the parse, as a browser's does
+      return body;
+    },
   };
 };
 
@@ -366,6 +372,10 @@ describe("?transport=poll", () => {
     // round trip cost because it issued the request.
     serverClock.reset();
     legMs = 400; // 800 ms round trip, split evenly
+    // And a slow parse, which is what a resync costs: the whole StageState. It is
+    // charged by `json()` only — the client reads the body as text and stamps the
+    // arrival before parsing, so this must not reach the measurement at all.
+    parseMs = 600;
     answer = async () => ({ now: EPOCH + perfNow, seq: 400, resync: false, frames: [] });
     firePoll();
     await flush();
@@ -377,10 +387,13 @@ describe("?transport=poll", () => {
     );
     assert.ok(
       Math.abs(offBy) <= 5,
-      `the clock is ${offBy}ms off the server; without the round-trip correction it sits ${-legMs}ms behind`,
+      `the clock is ${offBy}ms off the server. Without the round-trip correction it sits ${-legMs}ms behind; ` +
+        `with the body read by res.json() it sits ${-parseMs / 2}ms behind, because the parse lands in both the ` +
+        `measured round trip and the arrival instant and the two do not cancel`,
     );
 
     legMs = 0;
+    parseMs = 0;
     serves({ seq: 401, resync: false, frames: [] });
     firePoll();
     await flush();

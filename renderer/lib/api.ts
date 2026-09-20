@@ -1496,10 +1496,13 @@ async function pollOnce(): Promise<void> {
     const sentAt = monotonicNow();
     const res = await fetch(`/api/events/poll?cid=${encodeURIComponent(CLIENT_ID)}${since}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    // Read as text and stamp the arrival BEFORE parsing, then parse. `res.json()`
-    // would fold the parse into the measured round trip, and on a resync that
-    // parse is the whole StageState — half of it would be added to the clock
-    // offset as if it had been time on the wire.
+    // Read as text, stamp the arrival, THEN parse. `res.json()` reads the body
+    // and parses it in one call, so the parse lands inside both the measured
+    // round trip and the arrival instant — and the two do not cancel. With a
+    // parse of `p`, the offset comes out `p/2` SLOW, because the arrival moves
+    // by the whole `p` while the round trip contributes only half of it. On a
+    // resync that parse is the whole StageState, which is exactly when it is
+    // worst.
     const text = await res.text();
     const rttMs = monotonicNow() - sentAt;
     const body = JSON.parse(text) as PollBody;
