@@ -32,11 +32,24 @@ export interface TrendRecording {
 /** What the card is plotting. Two measures, one derivation. */
 export type TrendMeasure = "attendance" | "sound";
 
-/** The reading a measure takes from a recording. MODULE-PRIVATE: every export
- *  here takes the measure itself, so a caller cannot pair one measure's reading
- *  with another's day rule — see DAY_FIGURE. */
+/**
+ * The reading a measure takes from a recording.
+ *
+ * MODULE-PRIVATE: every export here takes the measure itself, so a caller cannot
+ * pair one measure's reading with another's day rule — see DAY_FIGURE.
+ *
+ * A TABLE, not a ternary. `measure === "sound" ? peakDb : peakOccupancy` gave a
+ * third measure attendance's reading by default and compiled clean; keyed by
+ * `TrendMeasure` it is a compile error until the new measure says what it reads,
+ * which is the same rule DAY_FIGURE and COMPARABLE_ABOVE are under.
+ */
+const MEASURE_READING: Record<TrendMeasure, (r: TrendRecording) => number | null> = {
+  attendance: (r) => r.peakOccupancy,
+  sound: (r) => r.peakDb,
+};
+
 function measureOf(measure: TrendMeasure): (r: TrendRecording) => number | null {
-  return measure === "sound" ? (r) => r.peakDb : (r) => r.peakOccupancy;
+  return MEASURE_READING[measure];
 }
 
 /**
@@ -67,6 +80,27 @@ function measureOf(measure: TrendMeasure): (r: TrendRecording) => number | null 
 export const DAY_FIGURE: Record<TrendMeasure, "sum" | "loudest"> = {
   attendance: "sum",
   sound: "loudest",
+};
+
+/**
+ * The value a comparison basis must EXCEED for the change to be worth printing.
+ *
+ * A separate table from DAY_FIGURE because it is a separate assumption, and it
+ * was hidden in a bare `> 0` in `typeTrends`: fine for the two measures that
+ * exist, and silently wrong for a signed one. Keyed by `TrendMeasure` so a third
+ * measure cannot be added without deciding it, the same way DAY_FIGURE makes it
+ * decide sum-or-loudest.
+ *
+ * Zero for both today. Nobody in the room is not a week to measure this one
+ * against — it is a counter that was off, not a congregation of none — and a
+ * meter reads 60 to 110 dB, so 0 dB is a broken capture rather than a quiet
+ * room. A metric that can legitimately sit at or below zero (anything signed —
+ * a dB difference, a delta against a target) would set its own floor here and
+ * get a comparison the other two correctly refuse.
+ */
+export const COMPARABLE_ABOVE: Record<TrendMeasure, number> = {
+  attendance: 0,
+  sound: 0,
 };
 
 /** How many DAYS a tile draws. The change compares the latest of them against
@@ -245,7 +279,7 @@ export function typeTrends(
     const priorRounded = priorMean == null ? null : Math.round(priorMean);
     /** Both figures are there, and the prior one is something to compare
      *  against. Narrows for the type checker as well as reading once. */
-    const comparable = rounded != null && priorRounded != null && priorRounded > 0;
+    const comparable = rounded != null && priorRounded != null && priorRounded > COMPARABLE_ABOVE[measure];
     out.push({
       serviceTypeId: key || null,
       name: names.get(key) ?? "Services",
