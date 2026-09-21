@@ -47,16 +47,30 @@ function weekly(
     seriesTitle: opts.series?.[i] ?? null,
     peakOccupancy: p,
     peakDb: opts.db?.[i] ?? null,
+    complete: true,
   }));
 }
 
-/** `weeks` Sundays, each running the services in `perDay` (peaks, in order,
- *  two hours apart) — the shape a church with a 9, an 11 and a 6 records. */
-function sundays(typeId: string, weeks: number, perDay: number[]): TrendRecording[] {
+/**
+ * `weeks` Sundays, each running the services in `perDay` (peaks, in order, two
+ * hours apart) — the shape a church with a 9, an 11 and a 6 records.
+ *
+ * `doneOnLastDay` is how many of the FINAL day's services have ended; the rest
+ * are still running. Every fixture in this file used to be finished days only,
+ * which is why a partial Sunday could be compared against whole ones for a whole
+ * release without a test noticing.
+ */
+function sundays(
+  typeId: string,
+  weeks: number,
+  perDay: number[],
+  opts: { doneOnLastDay?: number } = {},
+): TrendRecording[] {
   const start = Date.parse("2026-01-04T09:00:00Z");
   const out: TrendRecording[] = [];
   for (let w = 0; w < weeks; w++) {
     const day = start + w * 7 * DAY;
+    const done = w === weeks - 1 ? opts.doneOnLastDay ?? perDay.length : perDay.length;
     perDay.forEach((peak, i) => {
       out.push({
         serviceKey: `${typeId}:${w}:${i}`,
@@ -67,6 +81,7 @@ function sundays(typeId: string, weeks: number, perDay: number[]): TrendRecordin
         seriesTitle: null,
         peakOccupancy: peak,
         peakDb: 90 + i,
+        complete: i < done,
       });
     });
   }
@@ -147,7 +162,7 @@ describe("a service type's trend tile", () => {
     assert.equal(tile.recent.length, TREND_WINDOW);
     assert.equal(tile.latest, 120, "the tile is averaging its window again");
     assert.equal(tile.priorAverage, 100);
-    assert.equal(tile.priorCount, TREND_WINDOW - 1, "the change compares against the rest of the drawn window");
+    assert.equal(tile.serviceCount, 1, "one service a week, so the slice is one");
     assert.equal(delta(tile), 20, "120 against 100 is +20 people");
   });
 
@@ -170,15 +185,17 @@ describe("a service type's trend tile", () => {
     assert.equal(delta(tile), 400, "2,700 against 2,300");
   });
 
-  test("the change never looks past the window the sparkline draws", () => {
-    // A leading run of 10s must not drag the comparison down: only the days
-    // drawn beside the latest count, so what the change was measured against is
-    // the picture the reader is already looking at.
-    const [tile] = typeTrends(weekly("weekend", [...Array(10).fill(10), ...Array(7).fill(200), 300]));
-    assert.equal(tile.latest, 300);
-    assert.equal(tile.priorCount, TREND_WINDOW - 1);
-    assert.equal(tile.priorAverage, 200);
-    assert.equal(delta(tile), 100, "300 against 200 is +100");
+  test("the change runs over ALL of it, not the window the sparkline draws", () => {
+    // The sparkline holds eight days; the comparison holds every day on record.
+    // Eleven Sundays at 100 then one at 200: bounded by the window the basis
+    // would be seven days of 100 and identical, so the fixture is built to tell
+    // the two apart — 11 prior days is the answer only an all-time basis gives.
+    const [tile] = typeTrends(weekly("weekend", [...Array(11).fill(100), 200]));
+    assert.equal(tile.recent.length, TREND_WINDOW, "the sparkline still draws a window");
+    assert.equal(tile.latest, 200);
+    assert.equal(tile.priorCount, 11, "the basis was clipped to the sparkline's window");
+    assert.equal(tile.priorAverage, 100);
+    assert.equal(delta(tile), 100, "200 against 100 is +100");
   });
 
   test("it compares against the prior days it HAS, once there are three", () => {
@@ -199,11 +216,11 @@ describe("a service type's trend tile", () => {
         // Four days is the first history that compares: the latest, and three
         // before it.
         [4, 0, 3, 100],
-        // A full window is the latest and the seven drawn beside it.
+        // And from there it keeps every prior day, however long the history —
+        // the sparkline's window bounds the drawing, not the arithmetic.
         [8, 0, 7, 100],
-        [9, 0, 7, 100],
-        // Never more than the window, however long the history.
-        [20, 0, 7, 100],
+        [9, 0, 8, 100],
+        [20, 0, 19, 100],
       ],
     );
   });
@@ -235,9 +252,11 @@ describe("a service type's trend tile", () => {
     assert.equal(delta(below), null);
     assert.equal(delta(atFloor), 0);
     assert.equal(atFloor.priorCount, MIN_PRIOR_DAYS);
+    // TREND_WINDOW bounds the SPARKLINE and nothing else: the basis keeps every
+    // prior day, which here is one short of three windows.
     const long = typeTrends(weekly("weekend", Array(TREND_WINDOW * 3).fill(100)))[0];
     assert.equal(long.recent.length, TREND_WINDOW);
-    assert.equal(long.priorCount, TREND_WINDOW - 1);
+    assert.equal(long.priorCount, TREND_WINDOW * 3 - 1);
   });
 
   test("a type with one recorded day shows no change at all", () => {
@@ -281,6 +300,135 @@ describe("a service type's trend tile", () => {
     );
   });
 
+});
+
+describe("a day that is only part way through", () => {
+  /**
+   * Six finished Sundays of 1,000 + 500 + 800, then a seventh with `done` of
+   * its three services ended.
+   *
+   * The three differ, deliberately: the first-one basis (1,000), the first-two
+   * basis (1,500) and the whole-day basis (2,300) are three different numbers,
+   * so a comparison taken at the wrong slice cannot come out right by accident.
+   */
+  function partSunday(done: number, last: number[] = [1100, 600, 900]): TrendRecording[] {
+    const older = sundays("weekend", 6, [1000, 500, 800]);
+    const newer = sundays("weekend", 1, last, { doneOnLastDay: done }).map((r, i) => ({
+      ...r,
+      serviceKey: `later:${i}`,
+      serviceDate: new Date(Date.parse(`${r.serviceDate}T00:00:00Z`) + 42 * DAY).toISOString().slice(0, 10),
+      t: r.t + 42 * DAY,
+    }));
+    return [...older, ...newer];
+  }
+
+  test("ONE of three done compares against prior FIRST services, not whole days", () => {
+    // The defect this exists for: a Sunday morning with the 9 o'clock finished
+    // showing 1,100 against a basis of 2,300 — every week reading as a collapse
+    // of half the church until the evening service ends.
+    const [tile] = typeTrends(partSunday(1));
+    assert.equal(tile.serviceCount, 1, "the day counted services that had not finished");
+    assert.equal(tile.latest, 1100, "the headline is not the finished service on its own");
+    assert.equal(tile.priorAverage, 1000, "the basis is not the prior days' FIRST service");
+    assert.equal(delta(tile), 100, "1,100 against 1,000");
+    assert.equal(tile.priorCount, 6);
+  });
+
+  test("TWO of three done compares against prior first TWO", () => {
+    const [tile] = typeTrends(partSunday(2));
+    assert.equal(tile.serviceCount, 2);
+    assert.equal(tile.latest, 1700, "1,100 + 600");
+    assert.equal(tile.priorAverage, 1500, "1,000 + 500");
+    assert.equal(delta(tile), 200);
+  });
+
+  test("all three done compares against whole days again", () => {
+    const [tile] = typeTrends(partSunday(3));
+    assert.equal(tile.serviceCount, 3);
+    assert.equal(tile.latest, 2600, "1,100 + 600 + 900");
+    assert.equal(tile.priorAverage, 2300);
+    assert.equal(delta(tile), 300);
+  });
+
+  test("a day with NOTHING finished falls back to the last day that did", () => {
+    // Zero is not the answer at five past nine. The tile shows last Sunday and
+    // dates itself to it, rather than reporting a church of nobody every week
+    // between the doors opening and the first service ending.
+    const [tile] = typeTrends(partSunday(0));
+    assert.equal(tile.serviceCount, 3, "it counted a service that had not finished");
+    assert.equal(tile.latest, 2300, "the tile is showing the unfinished day");
+    assert.equal(tile.latestDate, "2026-02-08", "the tile is dated the day it is not showing");
+    assert.equal(delta(tile), 0, "five identical prior Sundays, so no change");
+  });
+
+  test("FIVE services work, and nothing here knows the number three", () => {
+    // N comes from the data. A church running five must work with no code
+    // change, and one that adds a sixth gets it the first Sunday it finishes.
+    const five = [400, 500, 600, 700, 800];
+    const older = sundays("weekend", 5, five);
+    const newer = sundays("weekend", 1, [450, 550, 650, 750, 850], { doneOnLastDay: 4 }).map((r, i) => ({
+      ...r,
+      serviceKey: `later:${i}`,
+      serviceDate: new Date(Date.parse(`${r.serviceDate}T00:00:00Z`) + 35 * DAY).toISOString().slice(0, 10),
+      t: r.t + 35 * DAY,
+    }));
+    const [tile] = typeTrends([...older, ...newer]);
+    assert.equal(tile.serviceCount, 4, "four of five finished");
+    assert.equal(tile.latest, 2400, "450 + 550 + 650 + 750");
+    assert.equal(tile.priorAverage, 2200, "400 + 500 + 600 + 700");
+    assert.equal(delta(tile), 200);
+  });
+
+  test("a prior day that never ran N services is left out of the basis", () => {
+    // A Sunday that only ever held two has no third service to offer. Averaging
+    // its two into a three-service comparison drags the basis down for a reason
+    // that is nothing to do with attendance.
+    const three = sundays("weekend", 4, [1000, 500, 800]);
+    const twoOnly = sundays("weekend", 1, [1000, 500]).map((r, i) => ({
+      ...r,
+      serviceKey: `short:${i}`,
+      serviceDate: "2026-02-08",
+      t: Date.parse("2026-02-08T09:00:00Z") + i * 2 * 60 * 60_000,
+    }));
+    const latest = sundays("weekend", 1, [1100, 600, 900]).map((r, i) => ({
+      ...r,
+      serviceKey: `latest:${i}`,
+      serviceDate: "2026-02-15",
+      t: Date.parse("2026-02-15T09:00:00Z") + i * 2 * 60 * 60_000,
+    }));
+    const [tile] = typeTrends([...three, ...twoOnly, ...latest]);
+    assert.equal(tile.serviceCount, 3);
+    assert.equal(tile.priorCount, 4, "the two-service Sunday was counted in a three-service comparison");
+    assert.equal(tile.priorAverage, 2300, "a short day dragged the basis down");
+  });
+
+  test("SOUND takes the loudest of the first N, and still never adds", () => {
+    // The partial-day rule reaches sound too, and it must not turn into a sum on
+    // the way. `sundays` gives each service 90, 91, 92 dB in order, so a summed
+    // first-two would be 181 and a summed day 273.
+    const [tile] = typeTrends(partSunday(2), { measure: "sound" });
+    assert.equal(tile.serviceCount, 2);
+    assert.equal(tile.latest, 91, "the loudest of the first two, not their sum");
+    assert.equal(tile.priorAverage, 91);
+    assert.deepEqual(
+      tile.recent.map((d) => d.v).filter((v) => v > 120),
+      [],
+      `a day's level was summed: ${tile.recent.map((d) => d.v).join(", ")} dB`,
+    );
+  });
+});
+
+describe("a recording that is still running", () => {
+  test("is in nothing — not the tile, not the sparkline, not the line", () => {
+    // A half-finished 9 o'clock is not a smaller 9 o'clock. Counting it makes
+    // the headline climb while you watch it and the comparison meaningless.
+    const recs = sundays("weekend", 4, [1000, 500, 800], { doneOnLastDay: 0 });
+    assert.equal(dailyValues(recs, "attendance").length, 3, "an unfinished day is on the line");
+    assert.equal(withinRange(recs, 52).length, 9, "an unfinished recording is in the plotted range");
+    const [tile] = typeTrends(recs);
+    assert.equal(tile.recent.length, 3, "an unfinished day is on the sparkline");
+    assert.equal(tile.latestDate, "2026-01-18", "the tile is dated an unfinished day");
+  });
 });
 
 describe("milestones", () => {

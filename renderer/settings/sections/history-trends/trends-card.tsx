@@ -127,6 +127,27 @@ function fmtDayShort(day: string): string {
   return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * What a tile's change was measured against: "first 3 services, 11 days".
+ *
+ * TWO facts, because either alone misleads. The SLICE, since a Sunday with one
+ * of three services finished is compared against other Sundays' first service
+ * and "+40" off that is not the same claim as "+40" off a whole day. And the
+ * DAY COUNT, which is the number of prior days that actually ran that many
+ * services — a comparison resting on four days has to say four rather than be
+ * passed off as a season's worth.
+ *
+ * "first service" rather than "first 1 services" at N = 1, which is the common
+ * case on a Sunday morning and the one an operator reads most.
+ *
+ * Exported for its own test: it is the sentence that has to stay honest, and the
+ * truncation on the tile means a browser will not always show all of it.
+ */
+export function basisLabel(serviceCount: number, priorDays: number): string {
+  const slice = serviceCount === 1 ? "first service" : `first ${serviceCount} services`;
+  return `${slice}, ${priorDays} day${priorDays === 1 ? "" : "s"}`;
+}
+
 /** Round to a measure's own precision. */
 function atPrecision(v: number, dp: number): number {
   const f = 10 ** dp;
@@ -574,9 +595,15 @@ export function TrendsCard({
                           className={cn("text-caption1", delta >= 0 ? "text-ok-11" : "text-danger-11")}
                         >
                           {absChange(delta, dp, sound ? " dB" : "")}{" "}
-                          {/* The REAL count, never the window it would like to
-                              have. A tile comparing against four days says four. */}
-                          <span className="text-fg-subtle">vs prior {t.priorCount}</span>
+                          {/* WHAT WAS ACTUALLY COMPARED, both halves of it. The
+                              slice, because "+40" against a Sunday with one of
+                              three services done means something different from
+                              "+40" against a whole one, and the reader cannot
+                              tell which without it. And the REAL number of prior
+                              days that had that many services to offer, never
+                              the count it would like to have had — a comparison
+                              resting on four days says four. */}
+                          <span className="text-fg-subtle">vs {basisLabel(t.serviceCount, t.priorCount)}</span>
                         </span>
                       );
                     })()

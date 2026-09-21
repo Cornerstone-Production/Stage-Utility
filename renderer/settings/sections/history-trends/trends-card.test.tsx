@@ -32,7 +32,7 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
-const { TrendsCard, absChange } = await import("./trends-card.js");
+const { TrendsCard, absChange, basisLabel } = await import("./trends-card.js");
 const { TooltipProvider } = await import("../../../components/ui/index.js");
 type TrendRecording = import("./trends.js").TrendRecording;
 
@@ -235,6 +235,86 @@ describe("a day with three services", () => {
 
 });
 
+describe("a Sunday that is only part way through", () => {
+  /** Six finished Sundays of 1,000 + 500 + 800, then a seventh with `done`
+   *  of its three ended. The three slices differ — 1,000, 1,500, 2,300 — so a
+   *  comparison taken at the wrong one cannot come out right by accident. */
+  function partSunday(done: number): TrendRecording[] {
+    const DAY = 24 * 60 * 60_000;
+    const start = Date.parse("2026-01-04T15:00:00Z");
+    const out: TrendRecording[] = [];
+    for (let w = 0; w < 7; w++) {
+      const day = start + w * 7 * DAY;
+      const peaks = w === 6 ? [1100, 600, 900] : [1000, 500, 800];
+      peaks.forEach((peak, i) => {
+        out.push({
+          serviceKey: `weekend:${w}:${i}`,
+          serviceTypeId: "weekend",
+          serviceTypeName: "Weekend",
+          serviceDate: new Date(day).toISOString().slice(0, 10),
+          t: day + i * 2 * 60 * 60_000,
+          seriesTitle: null,
+          peakOccupancy: peak,
+          peakDb: null,
+          complete: w < 6 || i < done,
+        });
+      });
+    }
+    return out;
+  }
+
+  test("shows what has finished, against other Sundays' first services", async () => {
+    // The defect: a Sunday morning with the 9 o'clock done reading 1,100 against
+    // a basis of 2,300 — the whole church appearing to halve, every week, until
+    // the evening service ends.
+    const view = await renderCard(partSunday(1));
+    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
+    assert.equal(tile.querySelector("[data-trend-latest]")?.textContent, "1,100");
+    const change = (tile.querySelector("[data-trend-change]")?.textContent ?? "").replace(/\s+/g, " ");
+    assert.equal(change.trim(), "+100 vs first service, 6 days", `the tile read "${change}"`);
+    view.unmount();
+  });
+
+  test("the label counts the SLICE as well as the days", async () => {
+    // "vs prior 7" counted days and nothing else, so "+40" off a one-service
+    // morning and "+40" off a whole Sunday read identically.
+    const view = await renderCard(partSunday(2));
+    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
+    assert.equal(tile.querySelector("[data-trend-latest]")?.textContent, "1,700");
+    const change = (tile.querySelector("[data-trend-change]")?.textContent ?? "").replace(/\s+/g, " ");
+    assert.equal(change.trim(), "+200 vs first 2 services, 6 days", `the tile read "${change}"`);
+    view.unmount();
+  });
+
+  test("a morning with nothing finished shows last Sunday, and is dated it", async () => {
+    // Zero is not the answer at five past nine.
+    const view = await renderCard(partSunday(0));
+    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
+    assert.equal(tile.querySelector("[data-trend-latest]")?.textContent, "2,300");
+    assert.equal(
+      tile.querySelector("[data-trend-latest-date]")?.textContent,
+      new Date("2026-02-08T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      "the tile is dated the unfinished morning it is not showing",
+    );
+    view.unmount();
+  });
+
+  test("the label reads for one service, for several, and for one day", () => {
+    // The sentence that has to stay honest, and the one a browser will not
+    // always show all of. One case per line.
+    assert.deepEqual(
+      [[1, 6], [2, 6], [3, 11], [5, 1], [4, 0]].map(([n, d]) => basisLabel(n, d)),
+      [
+        "first service, 6 days",
+        "first 2 services, 6 days",
+        "first 3 services, 11 days",
+        "first 5 services, 1 day",
+        "first 4 services, 0 days",
+      ],
+    );
+  });
+});
+
 describe("a milestone's scope, from the store to the drawn mark", () => {
   test("the card hands the chart the service type the milestone was scoped to", () => {
     // The one leg neither trends.test.ts nor the chart's own tests can see:
@@ -373,6 +453,7 @@ function silentType(): TrendRecording[] {
     seriesTitle: null,
     peakOccupancy: 200 + i,
     peakDb: null,
+    complete: true,
   }));
 }
 
@@ -734,6 +815,7 @@ function alternating(): TrendRecording[] {
     // A level on every recording but the last two, so the sound measure has
     // something to plot and one type-less gap to step over.
     peakDb: i < 14 ? 94 + (i % 4) : null,
+    complete: true,
   }));
 }
 
@@ -808,6 +890,7 @@ function straddlingRound(): TrendRecording[] {
     seriesTitle: null,
     peakOccupancy: p,
     peakDb: null,
+    complete: true,
   }));
 }
 
@@ -830,6 +913,7 @@ function threeServicesADay(): TrendRecording[] {
         seriesTitle: null,
         peakOccupancy: people,
         peakDb: db,
+        complete: true,
       });
     });
   }
@@ -851,6 +935,7 @@ function longRun(typeId: string, peak: number): TrendRecording[] {
     seriesTitle: null,
     peakOccupancy: peak + i,
     peakDb: 90 + (i % 5),
+    complete: true,
   }));
 }
 
@@ -869,6 +954,7 @@ function twoTypes(typeId?: string, peak?: number): TrendRecording[] {
       seriesTitle: null,
       peakOccupancy: p,
       peakDb: 95,
+      complete: true,
     }));
   if (typeId != null) return of(typeId, peak ?? 100);
   return [...of("weekend", 1000), ...of("evening", 200)];

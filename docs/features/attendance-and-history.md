@@ -76,7 +76,7 @@ the day's services. Open a service for its own page, described after it.
 
 **Trends** leads the page. One tile per service type, showing a sparkline of the
 last eight **days** that type recorded, the figure for the latest of those days,
-and the change against the days drawn beside it.
+and how that figure compares against every day before it.
 
 The unit is a **day**, never a recording. A church running a 9, an 11 and a 6
 records three figures every Sunday and the tile shows one, captioned *latest day
@@ -89,21 +89,41 @@ week:
 | **Attendance** | the day's services **added up**. The question a trend asks is "how many came", and the three services are three congregations |
 | **Sound** | the day's **loudest single recording**. Decibels are logarithmic, so adding two services' peaks is not louder, it is meaningless |
 
-The change is **absolute**, not a percentage — *+71 vs prior 7*, or *+1.2 dB vs
-prior 7* under the sound measure — because that is the number you can act on:
-seventy more people is a van, six percent is a conversation. It is green when it
-rises and red when it falls.
+Only a **completed** recording counts — towards the tile, the sparkline and the
+chart's line alike. A service still running joins the trend when it ends, so the
+figure holds still through a service and steps when it finishes rather than
+climbing while you watch it.
+
+The change is **absolute**, not a percentage — *+71 vs first 3 services, 11
+days*, or *+1.2 dB* under the sound measure — because that is the number you can
+act on: seventy more people is a van, six percent is a conversation. It is green
+when it rises and red when it falls.
 
 It is the difference between the two figures it is derived from, both rounded to
 the precision the tile prints — whole people, tenths of a decibel — so it can
 never disagree with the number above it.
 
-The comparison is the latest day against the average of the other days in the
-same eight-day window — the ones drawn beside it on the sparkline — and it says
-how many it used. Below **three** prior days it reads *no prior window yet*
+**The comparison is like for like, by service count.** A Sunday with one of three
+services finished shows that one service, and is compared against the average of
+every prior Sunday's **first** service — not against their full three, which
+would read as the church halving every week until the evening service ends. Two
+finished compares against prior first twos, three against prior threes, and so on
+for any number: a church running five works the same way, and one that adds a
+fourth gets it counted the first Sunday it finishes.
+
+A prior day only feeds the average if it ran **at least as many** services as the
+day being compared, so a Sunday that only ever held two does not drag a
+three-service comparison down for a reason that has nothing to do with
+attendance. A morning that has finished nothing yet falls back to the last day
+that did, and the date beside the figure says which.
+
+The basis is **every day on record**, not the eight the sparkline draws and not
+the chart's range — the range buttons govern the chart below and nothing else.
+The label names both halves of what was compared: the slice and how many prior
+days met it. Below **three** qualifying days it reads *no prior window yet*
 instead: one or two readings are not an average, and a change off them is noise
 wearing a direction. Because the count is always on the label, a thin comparison
-is visible as one rather than passed off as a full seven.
+is visible as one rather than passed off as a season's worth.
 
 The tiles are ordered by the figure each one shows — the latest day, highest
 first — so the order you read is the order of the numbers in it. The first type
@@ -128,8 +148,9 @@ counted as zero, so a Sunday where two of three services had a counter running
 is the total of those two.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
-or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
-the same daily figures, one node per recorded day, and every line is the same
+or 52 weeks, defaulting to 16, remembered per browser. The range is the chart's
+alone; it does not narrow what a tile's change is measured against. The **line**
+runs through the same daily figures, one node per recorded day, and every line is the same
 weight: they are peers, not a measurement and its references. The tile's headline
 and the last node on its line are the same number. A recording with nothing under
 the current measure is not plotted at all, because a service nobody counted is

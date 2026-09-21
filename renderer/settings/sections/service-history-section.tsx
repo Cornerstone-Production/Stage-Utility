@@ -589,6 +589,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
           peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
           peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
+          // HAS IT ENDED. The same test the row beside it calls `live`, off the
+          // same record: the timeline when there is one, otherwise the arrival
+          // ramp's own. A trend counts nothing that is still running — see
+          // TrendRecording.complete — so the figure holds still through a
+          // service and steps when it ends, and a Sunday with one of three done
+          // is compared against other Sundays' first service rather than their
+          // full three.
+          complete: r.timeline ? r.timeline.endedAt != null : r.attendance?.endedAt != null,
         };
       });
     },

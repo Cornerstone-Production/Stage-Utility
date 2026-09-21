@@ -27,6 +27,19 @@ export interface TrendRecording {
    *  metric. Null when nothing was recorded, or when this browser surfaces no
    *  metric the recording carries — the same rule the day-list rows apply. */
   peakDb: number | null;
+  /**
+   * The recording has ENDED.
+   *
+   * Nothing in this module counts a service that is still running: not the
+   * tiles, not the sparkline, not the chart's line. A half-finished 9 o'clock is
+   * not a smaller 9 o'clock, and a figure that climbs while you watch it cannot
+   * be compared against anything. It joins the trend when it ends.
+   *
+   * It is also what makes a partial Sunday comparable — see `typeTrends`. With
+   * one of three services done the day counts ONE, and the comparison is against
+   * other days' first service rather than against their full three.
+   */
+  complete: boolean;
 }
 
 /** What the card is plotting. Two measures, one derivation. */
@@ -103,8 +116,9 @@ export const COMPARABLE_ABOVE: Record<TrendMeasure, number> = {
   sound: 0,
 };
 
-/** How many DAYS a tile draws. The change compares the latest of them against
- *  the rest, so at most `TREND_WINDOW - 1` days are ever compared against. */
+/** How many DAYS a tile's SPARKLINE draws. Nothing else is bounded by it — the
+ *  change runs over every day on record, and the chart under the tiles is
+ *  bounded by the range control instead. */
 export const TREND_WINDOW = 8;
 
 /**
@@ -114,15 +128,17 @@ export const TREND_WINDOW = 8;
  * figure until it had recorded sixteen Sundays, four months in. The tile was
  * right and useless for a season.
  *
- * Three, because the tile says how many days it actually compared against —
- * "vs prior 3" — so a thin comparison is transparent rather than passed off as
- * a full one, and the reader can discount it themselves. Below three there is
- * nothing to discount: one or two readings are not an average, and a change off
- * them is noise wearing a direction.
+ * Three, because the tile says how many days it actually compared against — "vs
+ * first 3 services, 11 days" — so a thin comparison is transparent rather than
+ * passed off as a solid one, and the reader can discount it themselves. Below
+ * three there is nothing to discount: one or two readings are not an average,
+ * and a change off them is noise wearing a direction.
  *
- * The prior days are the OTHER days in the tile's own window — the ones drawn
- * beside the latest on the sparkline — so what the change was measured against
- * is the picture the reader is already looking at.
+ * The days it counts are the ones that QUALIFY: prior days of this type that ran
+ * at least as many services as the day being compared. A church with a long
+ * history can still fall under this floor the first Sunday it runs a fourth
+ * service, and the tile says "no prior window yet" rather than comparing four
+ * services against three.
  */
 export const MIN_PRIOR_DAYS = 3;
 
@@ -147,35 +163,66 @@ export interface TrendDay {
 export interface TypeTrend {
   serviceTypeId: string | null;
   name: string;
-  /** The last `TREND_WINDOW` DAYS this type recorded a figure on, oldest first
-   *  — the sparkline's points, and the window the change is taken inside. */
+  /** The last `TREND_WINDOW` DAYS this type completed a recording on, oldest
+   *  first — the sparkline's points. The CHANGE is not taken inside this window;
+   *  it runs over every day on record. See `priorAverage`. */
   recent: TrendDay[];
   /**
-   * The MOST RECENT recorded day's figure, rounded. Null when `recent` is empty.
+   * The latest day that has COMPLETED a recording, reduced by this measure.
+   * Null when the type has completed none.
    *
    * The headline used to be the mean of the whole window, which answered "what
    * is a normal Sunday here" — a question that does not change week to week and
    * a number that therefore never moved. What an operator opens this tab for is
    * the Sunday that just happened.
+   *
+   * A service still running is not in it. The figure holds still through a
+   * service and steps when it ends, and a morning that has finished nothing
+   * falls back to the last day that did rather than reading zero.
    */
   latest: number | null;
   /**
-   * The `YYYY-MM-DD` that `latest` belongs to. Null when `recent` is empty.
+   * The `YYYY-MM-DD` that `latest` belongs to. Null when the type has completed
+   * no recording.
    *
    * On the tile beside the figure, because "latest day" is a relative phrase: a
    * type that has not recorded for three weeks shows a three-week-old number and
-   * nothing on screen says so.
+   * nothing on screen says so. It is also the honest answer when a Sunday
+   * morning has finished nothing yet and the tile has fallen back to last week.
    */
   latestDate: string | null;
   /**
-   * Mean of the OTHER days in `recent` — the up-to-`TREND_WINDOW - 1` days drawn
-   * beside the latest on the sparkline — rounded. Null when there are fewer than
-   * `MIN_PRIOR_DAYS` of them.
+   * How many services `latest` is the sum of — N, the size of the slice the
+   * comparison is like-for-like on.
    *
-   * Below that floor the "average" is one or two readings and a change off it is
+   * Taken from the data, never a literal: a church running five services works
+   * with no change, and one that adds a fourth gets it counted the first Sunday
+   * it finishes. Zero when nothing has completed.
+   *
+   * The tile prints it, because "+40" against a partial Sunday means something
+   * different from "+40" against a whole one and the reader cannot tell which
+   * without it.
+   */
+  serviceCount: number;
+  /**
+   * What `latest` is measured against: the mean, over EVERY prior day this type
+   * recorded, of that day's first `serviceCount` services — counting only days
+   * that ran at least that many. Rounded. Null below `MIN_PRIOR_DAYS` of them.
+   *
+   * All time, not a window. "How does this morning compare" is a question about
+   * the whole record, and the eight-day window the sparkline draws was never
+   * more than what fits on a tile.
+   *
+   * LIKE FOR LIKE. A Sunday with one of three services done is compared against
+   * other Sundays' FIRST service, not against their full three — otherwise every
+   * Sunday reads as a collapse until the evening service ends. And a day that
+   * only ever ran two is left out of a three-service comparison rather than
+   * dragging the average down for a reason that is not about attendance.
+   *
+   * Below the floor the "average" is one or two readings and a change off it is
    * noise wearing a direction; above it the tile compares against whatever it
    * HAS and says how many — a thin comparison is labelled, not hidden and not
-   * dressed up as a full one.
+   * dressed up as a solid one.
    */
   priorAverage: number | null;
   /**
@@ -192,7 +239,8 @@ export interface TypeTrend {
    */
   latestRaw: number | null;
   priorAverageRaw: number | null;
-  /** How many days the change is measured against. Zero when there is none. */
+  /** How many prior days met the `serviceCount`-or-more bar and fed
+   *  `priorAverage`. Zero when there is no comparison. */
   priorCount: number;
 }
 
@@ -226,22 +274,72 @@ function byTime(a: TrendRecording, b: TrendRecording): number {
  * caller cannot ask for decibels and get them summed.
  */
 export function dailyValues(recordings: TrendRecording[], measure: TrendMeasure = "attendance"): TrendDay[] {
+  return dayServices(recordings, measure).map((d) => ({
+    date: d.date,
+    t: d.t,
+    v: combineFirst(d.values, d.values.length, measure),
+    count: d.values.length,
+  }));
+}
+
+/** One day of one service type, with what each COMPLETED recording on it was
+ *  worth under this measure, in start order. */
+interface DayServices {
+  date: string;
+  /** Epoch ms of the day's first counted recording. */
+  t: number;
+  /** Oldest first, so `values[0]` is the day's first service. */
+  values: number[];
+}
+
+/**
+ * A day's completed recordings, per day, oldest first — the shape every
+ * derivation here is built on.
+ *
+ * ORDER MATTERS, which is why this exists beside `dailyValues` rather than under
+ * it: comparing a partial Sunday like for like means taking each prior day's
+ * FIRST N services, and a day reduced to one number has thrown that away.
+ *
+ * A recording is skipped when it is still running, or when it has nothing under
+ * this measure. A service nobody counted is not a service of nobody, and a day
+ * where two of three services had a counter running is worth those two.
+ */
+function dayServices(recordings: TrendRecording[], measure: TrendMeasure): DayServices[] {
   const pick = measureOf(measure);
-  const add = DAY_FIGURE[measure] === "sum";
-  const byDay = new Map<string, TrendDay>();
+  const byDay = new Map<string, { date: string; t: number; entries: { t: number; v: number }[] }>();
   for (const r of recordings) {
     const v = pick(r);
-    if (v == null || !Number.isFinite(r.t)) continue;
+    if (v == null || !r.complete || !Number.isFinite(r.t)) continue;
     const hit = byDay.get(r.serviceDate);
     if (!hit) {
-      byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, v, count: 1 });
+      byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, entries: [{ t: r.t, v }] });
       continue;
     }
-    hit.v = add ? hit.v + v : Math.max(hit.v, v);
+    hit.entries.push({ t: r.t, v });
     hit.t = Math.min(hit.t, r.t);
-    hit.count += 1;
   }
-  return [...byDay.values()].sort((a, b) => a.t - b.t);
+  return [...byDay.values()]
+    .sort((a, b) => a.t - b.t)
+    .map((d) => ({
+      date: d.date,
+      t: d.t,
+      values: d.entries.slice().sort((a, b) => a.t - b.t).map((e) => e.v),
+    }));
+}
+
+/**
+ * The first `n` of a day's services, brought together the way this measure
+ * allows — see DAY_FIGURE.
+ *
+ * ONE function for the tile's headline and for every day in its comparison
+ * basis, so a partial Sunday and the days it is measured against are reduced
+ * identically. Sound takes the loudest of the first n; it never adds them.
+ */
+function combineFirst(values: number[], n: number, measure: TrendMeasure): number {
+  const take = values.slice(0, n);
+  return DAY_FIGURE[measure] === "sum"
+    ? take.reduce((a, b) => a + b, 0)
+    : Math.max(...take);
 }
 
 /**
@@ -271,18 +369,47 @@ export function typeTrends(
     // last node on the line are the same number. They were not: the headline was
     // a mean over every recording and the line was too, and once the line became
     // per-day the tile would have been quoting a different statistic under it.
-    const days = dailyValues(all.slice().sort(byTime), measure);
+    const sorted = all.slice().sort(byTime);
+    // ALL TIME, not the window and not the range control. The comparison basis
+    // is every day this type ever recorded; the window below is only what the
+    // sparkline draws, and the range buttons only govern the chart under it.
+    const everyDay = dayServices(sorted, measure);
+    // The SAME derivation the chart's line uses, so the tile's headline and the
+    // last node on the line are the same number. They were not: the headline was
+    // a mean over every recording and the line was too, and once the line became
+    // per-day the tile would have been quoting a different statistic under it.
+    const days = dailyValues(sorted, measure);
     // A type with NO reading under this measure keeps its tile, with a null
     // headline — the card says "no sound recorded" rather than dropping the
     // whole type the moment you switch measure, which reads as the service type
     // having disappeared. A type with no recordings at all is still no tile.
     const recent = days.slice(-window);
-    // The latest day, and the days drawn beside it on the sparkline. The change
-    // is measured inside the window the reader can see, so "vs prior 7" names
-    // seven nodes that are on screen rather than an older window that is not.
-    const latest = recent.length ? recent[recent.length - 1].v : null;
-    const prior = recent.slice(0, -1);
-    const priorMean = prior.length >= MIN_PRIOR_DAYS ? mean(prior.map((d) => d.v)) : null;
+
+    // ── The partial-day comparison ──
+    //
+    // THE HEADLINE IS THE LATEST DAY THAT HAS FINISHED SOMETHING, and N is how
+    // many services it has finished. A Sunday with one of three done counts one;
+    // a Sunday still on its first counts nothing and the tile falls back to the
+    // last day that did finish a service, rather than reading zero all morning.
+    //
+    // THE BASIS IS LIKE FOR LIKE. Comparing a one-service morning against other
+    // days' full three says every Sunday has collapsed, every Sunday, until the
+    // evening service ends. So the basis is the first N services of each PRIOR
+    // day — and only of days that ran N or more, because a day that only ever
+    // held two has no third service to offer and would drag the average down for
+    // a reason that is not about attendance at all.
+    //
+    // N is the data's, never a literal: a church running five works with no
+    // change here, and a church that adds a fourth next year gets the fourth
+    // counted the first Sunday it finishes.
+    const latestDay = everyDay.length ? everyDay[everyDay.length - 1] : null;
+    const serviceCount = latestDay ? latestDay.values.length : 0;
+    const latest = latestDay ? combineFirst(latestDay.values, serviceCount, measure) : null;
+    const basisDays = everyDay.slice(0, -1).filter((d) => d.values.length >= serviceCount);
+    const priorMean = basisDays.length >= MIN_PRIOR_DAYS
+      ? mean(basisDays.map((d) => combineFirst(d.values, serviceCount, measure)))
+      : null;
+
     const rounded = latest == null ? null : Math.round(latest);
     const priorRounded = priorMean == null ? null : Math.round(priorMean);
     /** Both figures are there, and the prior one is something to compare
@@ -293,15 +420,16 @@ export function typeTrends(
       name: names.get(key) ?? "Services",
       recent,
       latest: rounded,
-      latestDate: recent.length ? recent[recent.length - 1].date : null,
+      latestDate: latestDay?.date ?? null,
+      serviceCount,
       priorAverage: priorRounded,
       // A prior average of ZERO is not something to claim a comparison
       // against. One condition, read by all three, so a tile cannot read "no
-      // prior window yet" beside a count of 7 — a label for a comparison that
+      // prior window yet" beside a count of 11 — a label for a comparison that
       // was not made.
       latestRaw: comparable ? latest : null,
       priorAverageRaw: comparable ? priorMean : null,
-      priorCount: comparable ? prior.length : 0,
+      priorCount: comparable ? basisDays.length : 0,
     });
   }
   // BY THE NUMBER ON THE TILE, so the order a reader sees is the order of the
@@ -433,7 +561,11 @@ export function withinRange(
   measure: TrendMeasure = "attendance",
 ): TrendRecording[] {
   const pick = measureOf(measure);
-  const plotted = recordings.filter((r) => pick(r) != null && Number.isFinite(r.t));
+  // `complete` here as well as in `dayServices`, so the range is measured back
+  // from the newest FINISHED recording. Without it a service that started this
+  // morning sets the window's right-hand edge and then contributes no node,
+  // which on the 8-week range can push a real week off the left.
+  const plotted = recordings.filter((r) => pick(r) != null && r.complete && Number.isFinite(r.t));
   if (!plotted.length) return [];
   const newest = Math.max(...plotted.map((r) => r.t));
   const from = newest - weeks * 7 * 24 * 60 * 60_000;
