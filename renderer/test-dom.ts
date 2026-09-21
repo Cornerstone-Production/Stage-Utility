@@ -11,6 +11,7 @@
 //   ...
 //   teardown();
 
+import { act } from "react";
 import { JSDOM } from "jsdom";
 
 /** Globals a React render expects to find. */
@@ -161,4 +162,71 @@ export function installRenderDom({ clientHeight }: { clientHeight?: number } = {
     delete g.IS_REACT_ACT_ENVIRONMENT;
     teardown();
   };
+}
+
+/**
+ * Let React finish everything the last interaction started.
+ *
+ * A bare `await new Promise((r) => setTimeout(r, 0))` does not. React commits a
+ * render and, when that commit leaves passive effects to run, hands the flush to
+ * the `scheduler` package rather than running it inline — and the first thing
+ * that deferred callback does is read `window.event`. The scheduler drives it
+ * from a `setImmediate`, yielding whenever it exceeds its frame budget, so how
+ * many macrotask turns it needs is a function of how busy the machine is. Two
+ * turns is a guess that holds on an idle box.
+ *
+ * When it does not hold, the flush lands after the file's last hook has pulled
+ * the DOM down, `window` is gone, and the file fails with
+ * `ReferenceError: window is not defined` while every test in it passes — there
+ * is no test left to attribute it to. That is a rare failure under `npm test`
+ * alone and a repeatable one with several suites running at once.
+ *
+ * `act` is the fix rather than more turns, and it is a different KIND of answer:
+ * inside an act scope React queues its work on act's own queue instead of the
+ * scheduler, and awaiting the scope drains it. The wait is on the work being
+ * done, not on a number of turns being enough.
+ *
+ * Call it wherever a test would otherwise wait a turn for a fetch, an SSE push
+ * or an effect to land:
+ *
+ *   FakeEventSource.last.push("attendance:history", record);
+ *   await settle();
+ *
+ * and once more in the hook that tears the DOM down — which is what
+ * unmountAndTeardown below is for.
+ */
+export async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+/**
+ * The whole body of a component test file's final `after()` hook.
+ *
+ * Unmount, let React finish, THEN take the DOM away. That order is the point:
+ * an unmount leaves its own passive effects on React's queue, and the flush
+ * reads `window`. Tear the DOM down in the same tick and the flush lands on a
+ * `window` that no longer exists — the file fails with
+ * `ReferenceError: window is not defined` and every test in it passes, because
+ * by then there is no test left to blame.
+ *
+ *   after(() => unmountAndTeardown(cleanup, teardown));
+ *
+ * `cleanup` is Testing Library's, `teardown` the one installDom returned. They
+ * are arguments rather than something this module holds because `cleanup` comes
+ * from an `await import("@testing-library/react")` that has not run yet when
+ * installDom is called.
+ *
+ * This is four lines and it was four copies before it was one — the same count,
+ * and the same reasoning, as the installRenderDom note above. One copy had
+ * already drifted to naming its own test count in prose.
+ */
+export async function unmountAndTeardown(
+  cleanup: () => void,
+  teardown: () => void,
+): Promise<void> {
+  cleanup();
+  await settle();
+  teardown();
 }

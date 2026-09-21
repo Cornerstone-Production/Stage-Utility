@@ -20,6 +20,12 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
+import { settle, unmountAndTeardown } from "../test-dom.js";
+
+// Without this React neither act-wraps a render nor warns about an update
+// outside act — which is why this file reported no undrained work while
+// carrying the crash recorded at `rowControls` below.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const DEST = readFileSync(new URL("./destinations.tsx", import.meta.url), "utf8");
 
@@ -67,8 +73,10 @@ describe("the shared /history link", () => {
     // so the page the shared link resolves to is asked directly what it offers.
     const { installDom } = await import("../test-dom.js");
     const teardown = installDom();
+    // After installDom, which puts the globals Testing Library reads on load,
+    // and before the try, so `cleanup` is in scope for the finally.
+    const { render, cleanup } = await import("@testing-library/react");
     try {
-      const { render, cleanup } = await import("@testing-library/react");
       const React = (await import("react")).default;
       const { TooltipProvider } = await import("../components/ui/index.js");
       const { ServiceHeader } = await import("../settings/sections/history-service-header.js");
@@ -107,9 +115,8 @@ describe("the shared /history link", () => {
         ["Copy report"],
         "the shared link must offer nothing that changes or deletes a recording",
       );
-      cleanup();
     } finally {
-      teardown();
+      await unmountAndTeardown(cleanup, teardown);
     }
   });
 
@@ -124,6 +131,8 @@ describe("the shared /history link", () => {
     // as a named entry, not as a changed number.
     const { installDom } = await import("../test-dom.js");
     const teardown = installDom();
+    // As above: after installDom, before the try.
+    const { render, cleanup } = await import("@testing-library/react");
     try {
       (globalThis as unknown as { EventSource: unknown }).EventSource = class {
         readyState = 1;
@@ -155,7 +164,6 @@ describe("the shared /history link", () => {
         if (url === "/api/baptism/sessions") return ok([]);
         return ok(null);
       };
-      const { render, cleanup } = await import("@testing-library/react");
       const React = (await import("react")).default;
       const { TooltipProvider } = await import("../components/ui/index.js");
       const { ServiceHistorySection } = await import("../settings/sections/service-history-section.js");
@@ -164,12 +172,18 @@ describe("the shared /history link", () => {
         const view = render(
           React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly })),
         );
-        // Four turns, not two: the list and the attendance list settle first,
+        // Four turns, not one: the list and the attendance list settle first,
         // and only THEN does the selected day's row set kick off its per-row
         // SPL fetches (the rows' peak level is the service page's own figure).
-        // Leaving those in flight tore the DOM down under them, and the pending
-        // work surfaced as "window is not defined" after the test had passed.
-        for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+        // One fetch starting another genuinely needs another turn — act drains
+        // React's queue, not the network.
+        //
+        // What act does fix is the other half of the crash this comment used to
+        // describe: turns alone left React's passive-effect flush queued, the
+        // DOM went away under it, and "window is not defined" failed the file
+        // after every test in it had passed. Four MORE turns was the same guess
+        // with a bigger number.
+        for (let i = 0; i < 4; i++) await settle();
         const labels = [...view.container.querySelectorAll("button[aria-label]")]
           .map((b) => b.getAttribute("aria-label")!)
           .filter((l) => /recording/i.test(l))
@@ -191,7 +205,7 @@ describe("the shared /history link", () => {
         "the shared link's list must carry nothing that deletes a recording",
       );
     } finally {
-      teardown();
+      await unmountAndTeardown(cleanup, teardown);
     }
   });
 });

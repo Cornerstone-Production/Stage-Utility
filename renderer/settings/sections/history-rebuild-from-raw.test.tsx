@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -119,12 +119,8 @@ function mountSection(Section: React.ComponentType) {
   );
 }
 
-after(() => {
-  cleanup();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 const text = (el: HTMLElement) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 const button = (root: HTMLElement, label: string) =>
   [...root.querySelectorAll("button")].find((b) => text(b as HTMLElement) === label) as HTMLElement | undefined;

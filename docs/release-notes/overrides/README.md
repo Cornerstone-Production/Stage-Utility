@@ -30,3 +30,8 @@ override is applied.
 
 Anything wrong here fails the release rather than generating notes without it.
 See [Correcting a trailer after the commit is on `beta`](../../contributing.md#correcting-a-trailer-after-the-commit-is-on-beta).
+
+`STAGE_UTILITY_RELEASE_NOTES_DIR` points the generator at a different
+`release-notes` directory, overrides and notices together. It exists so the
+tests can put fixtures somewhere private instead of in this one; the release
+workflow does not set it, and an override placed anywhere but here is not read.

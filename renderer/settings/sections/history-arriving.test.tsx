@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -131,8 +131,7 @@ function installFetch(state: { list: unknown[]; attList: unknown[] }) {
   };
 }
 
-const { render, cleanup } = await import("@testing-library/react");
-const { fireEvent } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 
@@ -150,12 +149,7 @@ function mountSection(Section: React.ComponentType) {
   );
 }
 
-after(() => {
-  cleanup();
-  teardown();
-});
-
-const settle = () => new Promise((r) => setTimeout(r, 0));
+after(() => unmountAndTeardown(cleanup, teardown));
 
 /** Everything a rendered node says, whitespace flattened. */
 const text = (el: HTMLElement) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -186,7 +180,6 @@ describe("History: a service still in its arrival ramp", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    await settle();
 
     const txt = text(view.container);
     assert.ok(txt.includes("Sunday Gathering"), `the attendance-only row never rendered: ${txt}`);
@@ -204,12 +197,10 @@ describe("History: a service still in its arrival ramp", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    await settle();
 
     const row = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Sunday Gathering"));
     assert.ok(row, "the row's button never rendered");
     fireEvent.click(row!);
-    await settle();
     await settle();
 
     const txt = text(view.container);
@@ -224,7 +215,6 @@ describe("History: a service still in its arrival ramp", () => {
     installFetch({ list: [], attList: [arrivingAttendance()] });
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
-    await settle();
     await settle();
 
     const txt = text(view.container);
@@ -264,11 +254,9 @@ describe("History: a service still in its arrival ramp", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    await settle();
     assert.ok(text(view.container).includes("Midweek"), "precondition: yesterday selected first");
 
-    FakeEventSource.last?.push("attendance:history", arrivingAttendance());
-    await settle();
+    await act(async () => FakeEventSource.last?.push("attendance:history", arrivingAttendance()));
     await settle();
 
     // Asserted on the SELECTION, not on which rows are present. The list shows
@@ -285,7 +273,6 @@ describe("History: a service still in its arrival ramp", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    await settle();
     assert.ok(text(view.container).includes("Midweek"), "precondition: yesterday selected");
 
     // Operator clicks yesterday explicitly (the one day with data), then today's
@@ -293,8 +280,7 @@ describe("History: a service still in its arrival ramp", () => {
     const dayButton = view.container.querySelector("button[aria-label$='service']") as HTMLElement;
     assert.ok(dayButton, "no calendar day button to pick");
     fireEvent.click(dayButton);
-    FakeEventSource.last?.push("attendance:history", arrivingAttendance());
-    await settle();
+    await act(async () => FakeEventSource.last?.push("attendance:history", arrivingAttendance()));
     await settle();
 
     // Again on the SELECTION. Today's ramp appearing in the list is fine and
@@ -309,7 +295,6 @@ describe("History: a service still in its arrival ramp", () => {
     installFetch({ list: [], attList: [arrivingAttendance()] });
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
-    await settle();
     await settle();
 
     assert.ok(text(view.container).includes("arriving"), "precondition: row should start out captioned 'arriving'");
@@ -338,8 +323,7 @@ describe("History: a service still in its arrival ramp", () => {
         },
       ],
     };
-    FakeEventSource.last!.push("service-timeline:history", timeline);
-    await settle();
+    await act(async () => FakeEventSource.last!.push("service-timeline:history", timeline));
     await settle();
 
     const txt = text(view.container);
