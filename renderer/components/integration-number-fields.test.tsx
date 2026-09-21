@@ -28,17 +28,47 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 1049 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, integrationCard, until } = await import(
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, idle, integrationCard, until } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
 const { IntegrationsPanel } = await import("./integrations-panel.js");
 const { initialConfig, numberFieldValue } = await import("./integration-number-fields.js");
+
+/** Like settle(), but for a wait that needs a specific real-world duration. */
+function settleFor(ms: number): Promise<void> {
+  return act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+}
+
+/**
+ * Like until(), but safe for a condition that depends on React having
+ * actually committed a render. Each wait is its OWN short act() scope,
+ * closed before the condition is checked again: one continuous act() around
+ * the whole poll would hold back the very update the condition is waiting
+ * to see.
+ */
+async function actUntil(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    if (ok()) return;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    if (ok()) return;
+    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
+  }
+}
 
 let server = installFakeServer();
 
@@ -47,12 +77,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 /** One number field, and what the form seeds it with on a fresh install. */
 interface Seeded {
@@ -267,9 +297,16 @@ function dialogNow(): HTMLElement {
 async function openCard(id: string, config: Record<string, unknown> = {}): Promise<void> {
   server = installFakeServer(Object.keys(config).length ? { [id]: { config } } : {});
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
+  // and sixteen cards' worth of Switch primitives settle their own state
+  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
+  // idle()'s condition reads react-query's cache, not anything React holds
+  // back.
+  await act(async () => {
+    await idle();
+  });
   fireEvent.click(await integrationCard(c.container, id));
-  await settle(60);
+  await settleFor(60);
   assert.ok(document.querySelector('[role="dialog"]'), `the ${id} dialog did not open`);
 }
 
@@ -315,7 +352,7 @@ async function save(id: string): Promise<Record<string, unknown>> {
   // edit the test made was then overwritten by handleSave's own re-seed landing
   // late. The label going back to "Save" says isSaving is false; `disabled`
   // saying so too says the form and the state the server answered with agree.
-  await until(
+  await actUntil(
     () => saveButton()?.disabled === true && saveButton()?.textContent?.trim() === "Save",
     () => `${id} never finished saving — Save reads "${saveButton()?.textContent?.trim()}"`,
   );
@@ -366,7 +403,7 @@ describe("an unset number field, opened and saved", () => {
       // so this is the operator reopening a field that now HAS a value and
       // emptying it — the path that used to be impossible, because the box
       // sprang back to a number on blur.
-      await until(() => box(key).value === "900", () => `${id}.${key} never showed the saved value`);
+      await actUntil(() => box(key).value === "900", () => `${id}.${key} never showed the saved value`);
       fireEvent.change(box(key), { target: { value: "" } });
       fireEvent.blur(box(key));
       const cleared = await save(id);
