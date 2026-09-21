@@ -20,6 +20,7 @@ import { describe, test } from "node:test";
 import {
   MIN_PRIOR_DAYS,
   TREND_WINDOW,
+  appZoneOf,
   dailyValues,
   seriesChangeMilestones,
   trendMilestones,
@@ -587,6 +588,29 @@ describe("what day it is", () => {
       clock: { now: times[2] + 90 * 60_000, today: day, serviceTimesToday: times },
     })[0];
     assert.equal(after.state, "finished", "the day never finished, even past its last service time");
+  });
+
+  test("the zone comes off stage state in the SERVER's order, the browser last", () => {
+    // The near miss: `state.timezone ?? <this browser's zone>`. With nothing
+    // configured the server falls back to ITS host, not the viewer's, so a UTC
+    // box read from a laptop in Chicago had the page ending Sunday five hours
+    // before the server did. One case per line.
+    assert.deepEqual(
+      [
+        appZoneOf({ timezone: "America/Denver", hostTimezone: "UTC" }, "America/Chicago"),
+        appZoneOf({ timezone: null, hostTimezone: "UTC" }, "America/Chicago"),
+        appZoneOf({ timezone: null, hostTimezone: null }, "America/Chicago"),
+        appZoneOf(null, "America/Chicago"),
+        appZoneOf(undefined, "America/Chicago"),
+      ],
+      [
+        "America/Denver",
+        "UTC",
+        "America/Chicago",
+        "America/Chicago",
+        "America/Chicago",
+      ],
+    );
   });
 
   test("a rehearsal is not a service still to come", () => {

@@ -208,6 +208,25 @@ export interface TrendClock {
  * to come, and treating it as one would hold the tile in its partial-day mode
  * all day.
  */
+/**
+ * Which zone a browser should answer "what day is it" in.
+ *
+ * In the server's own order: the operator's SETTING first, then the SERVER's
+ * host clock, which is what `appTimeZone()` resolves to when nothing is set.
+ *
+ * The last fallback is this browser's own zone, and it is only reached when
+ * stage state has not arrived yet. Reaching for it sooner is the bug: a UTC
+ * server viewed from a laptop in Chicago would have the page deciding the day
+ * ended five hours before the server did, and the two would disagree about
+ * which Sunday a 7pm service belongs to.
+ */
+export function appZoneOf(
+  state: { timezone?: string | null; hostTimezone?: string | null } | null | undefined,
+  browserZone: TimeZone,
+): TimeZone {
+  return state?.timezone ?? state?.hostTimezone ?? browserZone;
+}
+
 export function trendClock(
   now: number,
   zone: TimeZone,

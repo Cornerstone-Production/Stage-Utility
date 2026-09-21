@@ -23,7 +23,7 @@ import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-histo
 import { RecordingDot, RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion } from "./history-chart";
 import { TrendsCard } from "./history-trends/trends-card";
-import { trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
+import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
   summarize,
   fmtDur,
@@ -662,11 +662,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * A browser cannot ask for the app's zone, so `appTimeZone()` in here would
    * answer the wrong question: a kiosk running UTC would decide Sunday ended at
    * 7pm, which is the failure this repo has actually been bitten by. The server
-   * already publishes the setting on stage state; `hostTimeZone()` is the
-   * fallback the server itself uses when nothing is configured.
+   * publishes both halves of its own answer on stage state — the setting and
+   * the host clock it falls back to — and `appZoneOf` reads them in that order.
+   * This browser's zone is the last resort, for the render before state lands.
    */
   const { state: stageState } = useStageState();
-  const zone = stageState?.timezone ?? hostTimeZone();
+  const zone = appZoneOf(stageState, hostTimeZone());
   /** Rebuilt on every tick the page already takes, so "still to come" stops
    *  being true the moment the day's last service time passes. */
   const clock = useMemo<TrendClock>(
