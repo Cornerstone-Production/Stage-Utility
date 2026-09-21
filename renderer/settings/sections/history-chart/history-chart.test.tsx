@@ -228,6 +228,102 @@ describe("a day that has not finished", () => {
     assert.equal([...(solid?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 60);
   });
 
+  // A DAY STILL FILLING, at two readings. The first point is pinned high so the
+  // y axis is framed by it and does not reframe between the two renders — two
+  // `cy` values off two different scales are not comparable, and a guard that
+  // compares them passes or fails on the axis rather than on the node.
+  const filling = (v: number) => chart({
+    xAxis: "date",
+    series: [{
+      ...series(),
+      provisional: true,
+      points: [
+        { t: T0, v: 5000 },
+        { t: T0 + 60 * MIN, v: 3000 },
+        { t: T0 + 120 * MIN, v },
+      ],
+    }],
+  });
+  const nodeY = () => Number(document.querySelector("[data-provisional-node]")?.getAttribute("cy"));
+  const tailEndY = () => {
+    const d = document.querySelector("[data-series-provisional] path")?.getAttribute("d") ?? "";
+    const ys = [...d.matchAll(/[ML][\d.-]+,([\d.-]+)/g)].map((m) => Number(m[1]));
+    return ys[ys.length - 1];
+  };
+
+  test("a broadcast EASES the node rather than stepping it", async () => {
+    // "Slowly building" is the requirement. A step is a twitch: the reading
+    // lands, the node teleports, and an hour of a service filling reads as a
+    // dozen jerks rather than as a room filling.
+    //
+    // WHAT THIS CANNOT SEE: the glide. jsdom paints nothing. What it CAN see is
+    // that the render in which a bigger reading ARRIVES still draws the node
+    // where it was — which is the whole difference between easing and stepping,
+    // and is false for any implementation that jumps. Driven in Chrome over a
+    // real broadcast sequence; the node was caught mid-climb between two
+    // readings of the same service.
+    // Where it ends up, off a fresh render at the new value, so nothing here
+    // depends on a tween having finished. Taken FIRST and unmounted: two charts
+    // in the document at once and `document.querySelector` reads the older one.
+    const probe = render(filling(2000));
+    const settled = nodeY();
+    probe.unmount();
+
+    const view = render(filling(1000));
+    const before = nodeY();
+    assert.notEqual(before, settled, "the fixture does not move the node at all");
+
+    view.rerender(filling(2000));
+    assert.equal(nodeY(), before, "the node jumped straight to the new reading");
+    // And it gets there.
+    await new Promise((r) => setTimeout(r, 900));
+    assert.equal(nodeY(), settled, "the node never arrived at the new reading");
+    view.unmount();
+  });
+
+  test("the dashed segment grows WITH the node, never ahead of it", async () => {
+    // The segment is drawn to the eased value too. Drawn to the target instead,
+    // the line would arrive first and the node would chase it up a dashed
+    // stretch that already exists — which reads as the node lagging, not as the
+    // day building.
+    // TO ONE DECIMAL, because `linePathD` writes coordinates with toFixed(1)
+    // and a circle's cy is the raw float. The question is whether they are the
+    // same value, not whether they are the same string.
+    const node1dp = () => Number(nodeY().toFixed(1));
+    const view = render(filling(1000));
+    view.rerender(filling(2000));
+    assert.equal(tailEndY(), node1dp(), "the segment ran ahead of its node on arrival");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(tailEndY(), node1dp(), "the segment and its node parted mid-ease");
+    // Dashed throughout, not only once it settles.
+    assert.match(
+      document.querySelector("[data-series-provisional] path")?.getAttribute("stroke-dasharray") ?? "",
+      /\d/,
+      "the segment lost its dash while easing",
+    );
+    view.unmount();
+  });
+
+  test("REDUCED MOTION lands the reading immediately", () => {
+    // No tween at all under reduced motion — `useEasedValue` holds no state when
+    // `ms` is 0, so there is nothing that can be left part-way.
+    const real = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (q: string) => ({ matches: q.includes("reduce"), media: q, addEventListener() {}, removeEventListener() {} }),
+    });
+    try {
+      const view = render(filling(1000));
+      const before = nodeY();
+      view.rerender(filling(2000));
+      assert.notEqual(nodeY(), before, "reduced motion left the node easing");
+      assert.equal(tailEndY(), Number(nodeY().toFixed(1)), "the segment did not land with its node");
+      view.unmount();
+    } finally {
+      Object.defineProperty(window, "matchMedia", { configurable: true, value: real });
+    }
+  });
+
   test("a series that is NOT provisional carries neither", () => {
     render(chart({ xAxis: "date" }));
     assert.equal(document.querySelectorAll("[data-series-provisional]").length, 0);

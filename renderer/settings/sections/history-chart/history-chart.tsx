@@ -240,7 +240,7 @@ export function HistoryChart({
   // empty axis, not stop time.
   const rightT = live ? Math.max(lastT, now) : lastT;
   const targetEnd = Number.isFinite(firstT) ? (live ? tenMinuteDomainEnd(firstT, rightT) : rightT) : NaN;
-  const domainEnd = useEasedValue(targetEnd, live && !reduced ? 600 : 0);
+  const domainEnd = useEasedValue(targetEnd, live && !reduced ? EASE_MS : 0);
   const domainStart = firstT;
   const span = domainEnd - domainStart || 1;
 
@@ -680,42 +680,13 @@ export function HistoryChart({
         })}
 
         {/* The segment into a day that has not finished, and its node.
-            DASHED and MARKED, not animated on its own: the beat is the same
-            `su-history-pulse` the live edge uses and the same `reduced` gate, so
-            there is one live vocabulary in this module rather than two. It
-            updates because the card re-renders when the recording does — the
-            attendance channel is already wired to this page. */}
-        {shown.map((s) => {
-          if (!s.provisional || s.points.length < 2) return null;
-          const tail = s.points.slice(-2);
-          const width = s.width ?? (s.role === "primary" ? 1.8 : 1.2);
-          return (
-            <g key={`${s.id}-prov`} data-series-provisional={s.id}>
-              <path
-                d={linePathD(tail, project)}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={width}
-                strokeDasharray="5 4"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-              />
-              {/* Hollow, so it reads as a reading not yet taken rather than as
-                  one more node on the line. */}
-              <circle
-                data-provisional-node={s.id}
-                cx={xOf(tail[1].t)}
-                cy={yOf(tail[1].v)}
-                r={3.5}
-                fill="var(--color-bg)"
-                stroke={s.color}
-                strokeWidth={width}
-                vectorEffect="non-scaling-stroke"
-                className={reduced ? undefined : "su-history-pulse"}
-              />
-            </g>
-          );
-        })}
+            One CHILD COMPONENT per series because it holds a hook — the value
+            eases toward each new reading instead of stepping to it. */}
+        {shown.map((s) =>
+          s.provisional && s.points.length >= 2
+            ? <ProvisionalTail key={`${s.id}-prov`} series={s} xOf={xOf} yOf={yOf} reduced={reduced} />
+            : null,
+        )}
 
         {/* The stretch that just arrived, drawn in over 200ms on top of the line
             it is already part of.
@@ -1127,6 +1098,71 @@ function useWallClock(enabled: boolean, override?: number): number {
   const now = useServerNow(15_000, enabled && override == null);
   return override ?? now;
 }
+
+/**
+ * The dashed tail into a day that is still filling, and its node.
+ *
+ * ITS OWN COMPONENT so it can hold a hook. The node EASES to each new reading
+ * rather than snapping to it: a broadcast lands every few seconds and a service
+ * fills over an hour, so stepping reads as a twitch where the requirement is a
+ * day slowly building. The dashed segment is drawn to the eased value too, so
+ * the line grows with the node instead of arriving ahead of it.
+ *
+ * SAME MACHINERY as the x domain — `useEasedValue`, one easeOutCubic, one
+ * `EASE_MS` — rather than a second animator. Under `prefers-reduced-motion`
+ * `ms` is 0, which in that hook means no state at all: the value lands on the
+ * render it arrives in.
+ *
+ * DASHED and MARKED regardless. The beat is the same `su-history-pulse` the
+ * live edge uses and the same `reduced` gate; the dash is the information and
+ * survives reduced motion, the beat is decoration and does not.
+ *
+ * ONE FRAME of the target before the ease begins, because `useEasedValue` sets
+ * its tween from an effect and an effect runs after paint. At a reading's worth
+ * of movement that is a pixel or two for 16ms, and fixing it would mean a
+ * layout effect in machinery the service chart shares.
+ */
+function ProvisionalTail({ series, xOf, yOf, reduced }: {
+  series: ChartSeries;
+  xOf: (t: number) => number;
+  yOf: (v: number) => number;
+  reduced: boolean;
+}): React.ReactElement {
+  const tail = series.points.slice(-2);
+  const v = useEasedValue(tail[1].v, reduced ? 0 : EASE_MS);
+  const width = series.width ?? (series.role === "primary" ? 1.8 : 1.2);
+  const project = (p: ChartPoint) => ({ x: xOf(p.t), y: yOf(p.v) });
+  return (
+    <g data-series-provisional={series.id}>
+      <path
+        d={linePathD([tail[0], { t: tail[1].t, v }], project)}
+        fill="none"
+        stroke={series.color}
+        strokeWidth={width}
+        strokeDasharray="5 4"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* Hollow, so it reads as a reading not yet taken rather than as one more
+          node on the line. */}
+      <circle
+        data-provisional-node={series.id}
+        cx={xOf(tail[1].t)}
+        cy={yOf(v)}
+        r={3.5}
+        fill="var(--color-bg)"
+        stroke={series.color}
+        strokeWidth={width}
+        vectorEffect="non-scaling-stroke"
+        className={reduced ? undefined : "su-history-pulse"}
+      />
+    </g>
+  );
+}
+
+/** How long an eased value takes to arrive. One constant for the x domain and
+ *  for a day still filling, so the module moves at one speed. */
+const EASE_MS = 600;
 
 /**
  * Ease toward `target` over `ms`; `ms <= 0` means no motion at all.
