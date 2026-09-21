@@ -126,9 +126,12 @@ says which.
 In this order:
 
 1. Something of that type is **still recording** — not finished.
-2. The date is **not today** in the app's time zone — finished. Its own
-   time zone setting, never the browser's or the host's: most Linux images
-   run UTC, where the calendar date rolls at 7pm in Chicago.
+2. The date is **not today** in the app's time zone — finished. The setting
+   under Advanced, falling back to the **server's** clock when it is left on
+   "follow server clock" — never the zone of the browser you happen to be
+   looking from. Most Linux images run UTC, where the calendar date rolls at
+   7pm in Chicago, and a laptop in Chicago reading a UTC server would otherwise
+   end Sunday five hours before the server did.
 3. It is today, and **no service time Planning Center lists for today has yet to
    start** — finished.
 
