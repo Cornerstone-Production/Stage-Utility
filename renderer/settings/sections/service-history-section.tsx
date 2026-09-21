@@ -1467,6 +1467,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             selected={day}
             onPick={pickDay}
             onMonthChange={setViewMonth}
+            zone={zone}
           />
         </div>
 

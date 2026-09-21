@@ -1,12 +1,23 @@
 // Which square History's calendar rings as today is answered on the SERVER's
-// clock, exactly as the Planning Center calendar's is.
+// clock, in the APP's zone, exactly as the Planning Center calendar's is.
 //
-// This is the same reading calendar-clock.test.tsx guards one component over,
-// and it was missed by a sweep that looked for `Date.now()` — this one said
-// `new Date()`. Everything it is compared against comes from the server: the
-// recorded service days it shades, and the month it will not page past. A
-// console whose clock has drifted rings a day that is not today and refuses
-// months that exist.
+// Two separate bugs have lived here, and this file guards both:
+//
+// - The INSTANT was wrong: a console whose clock has drifted used to ring a day
+//   that is not today. Fixed by reading `serverClock.now()` instead of
+//   `Date.now()`, and it was missed by a sweep that looked for `Date.now()` —
+//   this one said `new Date()`.
+// - The CALENDAR FIELDS were wrong, even once the instant was right:
+//   `getFullYear`/`getMonth`/`getDate` read the RUNTIME's own zone, not the
+//   app's. Reproduced on a real server with a correct, synced clock and only
+//   the browser's zone set to Pacific/Auckland against a server on
+//   America/Chicago: the calendar rang 2026-09-22 while the server's day was
+//   2026-09-21, with no clock skew involved at all. Fixed by reading the `zone`
+//   prop through `zonedParts`/`zonedDateKey` (main/services/app-timezone.ts),
+//   the same helper Trends and the PCO calendar already read theirs through.
+//
+// Everything this is compared against comes from the server: the recorded
+// service days it shades, and the month it will not page past.
 //
 // The clock is read once, at mount, and deliberately not ticked: a calendar that
 // repaints because midnight passed under a stationary cursor is not worth a
@@ -105,5 +116,57 @@ describe("History's calendar rings the server's today", () => {
       await settle();
     });
     assert.equal(ringedToday(container), dayOf(DRIFTED));
+  });
+});
+
+describe("History's calendar rings the day in the APP's zone, not this runtime's own", () => {
+  /**
+   * One instant, two zones that disagree about what day it is — with no clock
+   * skew anywhere in this block; `serverClock` is given the true instant both
+   * times. Chosen to reproduce the field report exactly: a server on
+   * America/Chicago at 2026-09-21 20:00 local, read from a console set to
+   * Pacific/Auckland, where the same instant is already 2026-09-22 13:00.
+   */
+  const INSTANT = Date.parse("2026-09-22T01:00:00.000Z");
+  const CHICAGO_DAY = "2026-09-21";
+  const AUCKLAND_DAY = "2026-09-22";
+
+  test("the two fixture zones disagree, so this file proves something", () => {
+    assert.notEqual(CHICAGO_DAY, AUCKLAND_DAY);
+  });
+
+  /**
+   * Renders the SAME instant under each zone in turn. On the buggy code the
+   * `zone` prop does not exist, so both renders would ring whatever day this
+   * test runner's own environment zone reads at INSTANT — a single fixed
+   * value that cannot equal both CHICAGO_DAY and AUCKLAND_DAY, since they are
+   * different strings. So at least one of these two assertions goes red on
+   * the bug regardless of which zone the runner itself happens to be in.
+   */
+  async function ringedFor(zone: string): Promise<string | null> {
+    serverClock.reset();
+    serverClock.observe(INSTANT, 0);
+    let container!: HTMLElement;
+    await act(async () => {
+      const view = render(
+        React.createElement(HistoryCalendar, {
+          counts: new Map<string, number>(),
+          selected: null,
+          onPick: () => {},
+          zone,
+        } as never),
+      );
+      container = view.container;
+      await settle();
+    });
+    return ringedToday(container);
+  }
+
+  test("THE GUARD: America/Chicago rings its own day at this instant", async () => {
+    assert.equal(await ringedFor("America/Chicago"), CHICAGO_DAY);
+  });
+
+  test("THE GUARD: Pacific/Auckland rings its own, later day at the SAME instant", async () => {
+    assert.equal(await ringedFor("Pacific/Auckland"), AUCKLAND_DAY);
   });
 });
