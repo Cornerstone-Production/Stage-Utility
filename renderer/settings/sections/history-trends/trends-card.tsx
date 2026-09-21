@@ -46,8 +46,8 @@ import {
   dailyValues,
   RANGE_WEEKS,
   rangeLabel,
+  rangeSpan,
   weeksOf,
-  TREND_WINDOW,
   trendMilestones,
   typeTrends,
   withinRange,
@@ -564,7 +564,11 @@ export function TrendsCard({
             {sound
               ? "Peak level per service type, each day's loudest recording"
               : "Attendance per service type, each day's services added up"}
-            {` · last ${TREND_WINDOW} days · milestones from your list and series changes`}
+            {/* THE RANGE, not a fixed window. The sentence used to say "last 8
+                days" — the sparkline's window — while the tile beside it
+                compared 11 and the chart drew everything: three numbers on one
+                card describing one thing, no two agreeing. */}
+            {` · ${rangeSpan(weeks)}, drawn and compared · milestones from your list and series changes`}
           </>
         )}
       </p>

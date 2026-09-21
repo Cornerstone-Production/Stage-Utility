@@ -217,11 +217,14 @@ describe("a service type's trend tile", () => {
     assert.equal(delta(tile), 400, "2,700 against 2,300");
   });
 
-  test("the change runs over ALL of it, not the window the sparkline draws", () => {
-    // The sparkline holds eight days; the comparison holds every day on record.
-    // Eleven Sundays at 100 then one at 200: bounded by the window the basis
-    // would be seven days of 100 and identical, so the fixture is built to tell
-    // the two apart — 11 prior days is the answer only an all-time basis gives.
+  test("the SPARKLINE's window does not clip the change, whatever the range is", () => {
+    // Two different bounds, and only one of them applies to the basis. The
+    // sparkline holds eight days; the comparison holds every day in the RANGE
+    // — all of them here, since this call passes no range.
+    // Eleven Sundays at 100 then one at 200: bounded by the sparkline's window
+    // the basis would be seven days of 100 and identical, so the fixture is
+    // built to tell the two apart — 11 prior days is the answer only an
+    // unclipped basis gives.
     const [tile] = typeTrends(weekly("weekend", [...Array(11).fill(100), 200]));
     assert.equal(tile.recent.length, TREND_WINDOW, "the sparkline still draws a window");
     assert.equal(tile.latest, 200);

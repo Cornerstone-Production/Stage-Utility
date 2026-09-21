@@ -76,7 +76,9 @@ the day's services. Open a service for its own page, described after it.
 
 **Trends** leads the page. One tile per service type, showing a sparkline of the
 last eight **days** that type recorded, the figure for the latest of those days,
-and how that figure compares against every day before it.
+and how that figure compares against the days before it **within the selected
+range** — the same 8 / 16 / 52 weeks or All that bounds the chart below, named
+in the card's subtitle.
 
 The unit is a **day**, never a recording. A church running a 9, an 11 and a 6
 records three figures every Sunday and the tile shows one, captioned *latest day

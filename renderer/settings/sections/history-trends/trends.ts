@@ -119,9 +119,10 @@ export const COMPARABLE_ABOVE: Record<TrendMeasure, number> = {
   sound: 0,
 };
 
-/** How many DAYS a tile's SPARKLINE draws. Nothing else is bounded by it — the
- *  change runs over every day on record, and the chart under the tiles is
- *  bounded by the range control instead. */
+/** How many DAYS a tile's SPARKLINE draws, and the only thing this bounds. The
+ *  change and the chart are both bounded by the RANGE CONTROL — see `rangeSpan`
+ *  — so the sparkline is the last eight days the range contains, not the last
+ *  eight on record. */
 export const TREND_WINDOW = 8;
 
 /**
@@ -835,6 +836,18 @@ export function weeksOf(range: RangeWeeks): number {
 /** What a range choice reads as on its button. */
 export function rangeLabel(range: RangeWeeks): string {
   return range === "all" ? "All" : `${range}w`;
+}
+
+/**
+ * What a range choice reads as in a SENTENCE — the card's subtitle.
+ *
+ * "8w" is a button and "last 8 weeks" is prose, and All needs a different shape
+ * of phrase entirely: "last all weeks" is not a thing, and "last 0 weeks" is
+ * worse. The subtitle used to name a fixed eight-day window, which was true when
+ * the tile averaged one and is now three numbers on one card that disagree.
+ */
+export function rangeSpan(range: RangeWeeks): string {
+  return range === "all" ? "every recorded day" : `last ${range} weeks`;
 }
 
 /** Recordings inside the chosen range, measured back from the newest one rather

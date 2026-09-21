@@ -441,6 +441,43 @@ describe("the range control", () => {
     view.unmount();
   });
 
+  test("the SUBTITLE names the range, and every choice reads differently", async () => {
+    // The card carried three numbers for one thing and no two agreed: the
+    // subtitle said "last 8 days" (the sparkline's window), the tile said
+    // "vs 11 full days", and the chart drew everything. Caught in Chrome with
+    // All selected; the subtitle is the one that was lying.
+    //
+    // EXACT, one line per choice, so a range added on one branch and a wording
+    // change on another cannot merge into a green suite that says nothing.
+    const view = await renderCard(longRun("weekend", 1000));
+    const read = async (label: string) => {
+      const b = [...view.container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Trend range"] button')]
+        .find((x) => (x.textContent ?? "").trim() === label);
+      assert.ok(b, `no ${label} button`);
+      await act(async () => {
+        b.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      return (view.container.querySelector("[data-trends-subtitle]")?.textContent ?? "")
+        .replace(/\s+/g, " ").trim();
+    };
+    assert.deepEqual(
+      [
+        await read("8w"),
+        await read("16w"),
+        await read("52w"),
+        await read("All"),
+      ],
+      [
+        "Attendance per service type, each day's services added up · last 8 weeks, drawn and compared · milestones from your list and series changes",
+        "Attendance per service type, each day's services added up · last 16 weeks, drawn and compared · milestones from your list and series changes",
+        "Attendance per service type, each day's services added up · last 52 weeks, drawn and compared · milestones from your list and series changes",
+        "Attendance per service type, each day's services added up · every recorded day, drawn and compared · milestones from your list and series changes",
+      ],
+    );
+    view.unmount();
+  });
+
   test("changing it changes the basis AND the count the label reports", async () => {
     // One control for the chart and the tile. `longRun` is sixteen weekly days,
     // so an 8-week range reaches eight of the fifteen prior ones and All reaches
