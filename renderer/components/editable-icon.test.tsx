@@ -44,7 +44,7 @@ const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Toaster } = await import("./ui/toast.js");
 const { saveIcon } = await import("./editable-icon.js");
-const { until } = await import("../test-fixtures/integrations-harness.js");
+const { until, actUntil } = await import("../test-fixtures/integrations-harness.js");
 
 beforeEach(() => {
   failWith = null;
@@ -62,14 +62,15 @@ describe("storing a chosen glyph", () => {
     failWith = new Error("the icon store is read-only");
 
     saveIcon("display-invented-1", "Star");
-    // NOT until(): that polls document.body.textContent, and the toast's own
-    // state update is what WOULD satisfy it — wrapped in one continuous act()
-    // scope, that update is queued rather than flushed, so the poll waits on
-    // exactly the paint act() is holding back and times out at 5000ms every
-    // time. A fixed wait works here because the fake fetch above rejects
-    // through a plain .then()/.catch() chain — microtasks only — so one
-    // act()-wrapped macrotask turn is well past when the toast lands.
-    await settle();
+    // actUntil(), not until(): the condition reads rendered text, so every
+    // update React lands between polls has to be inside an act scope or it is
+    // reported as escaping one. Wrapping a single until() in one continuous
+    // act() is the trap — React would hold back the very toast the poll is
+    // waiting to see, and it would spin to its 5000ms cap every time.
+    await actUntil(
+      () => /Could not change the icon/.test(document.body.textContent ?? ""),
+      () => "a refused save never reached the operator as a toast",
+    );
 
     assert.match(
       document.body.textContent ?? "",
