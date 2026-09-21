@@ -7,6 +7,7 @@ import {
   TEN_MINUTES_MS,
   areaPathD,
   linePathD,
+  dateTicks,
   nearestIndex,
   niceAxis,
   splitRuns,
@@ -152,6 +153,31 @@ describe("path builders", () => {
 
   test("one point has no area", () => {
     assert.equal(areaPathD([{ t: 1, v: 1 }], project, 100), "");
+  });
+});
+
+describe("dateTicks over a long range", () => {
+  const WEEK = 7 * 24 * 60 * 60_000;
+  const from = Date.parse("2020-01-05T12:00:00Z");
+  const span = (weeks: number) => dateTicks(from, from + weeks * WEEK).length;
+
+  test("the tick count stays readable however far back All reaches", () => {
+    // A fixed 4-week step is a season's axis and a smear at three years: 156
+    // weeks of it is 39 ticks, a mark every 49px on a 1,900px plot, which reads
+    // as hatching rather than as an axis.
+    // One span per line, so two branches adding different ones merge cleanly.
+    const counts = [8, 16, 52, 156, 520].map((w) => [w, span(w)]);
+    assert.deepEqual(
+      counts.filter(([, n]) => (n as number) > 20),
+      [],
+      `an axis nobody can read: ${JSON.stringify(counts)}`,
+    );
+    // And not so few that the axis says nothing either.
+    assert.deepEqual(
+      counts.filter(([, n]) => (n as number) < 4),
+      [],
+      `an axis with almost no ticks: ${JSON.stringify(counts)}`,
+    );
   });
 });
 

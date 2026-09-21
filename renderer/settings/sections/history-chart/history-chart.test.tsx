@@ -205,6 +205,70 @@ describe("the stat strip", () => {
   });
 });
 
+describe("a day that has not finished", () => {
+  const provisional = () => chart({
+    series: [{ ...series(), provisional: true }],
+    xAxis: "date",
+  });
+
+  test("its last segment is dashed and its node marked; the rest of the line is not", () => {
+    // WHAT THIS CANNOT SEE: the dashes. jsdom paints nothing and loads no
+    // stylesheet. What it CAN read is what was handed to the SVG — which path
+    // carries the dash array, which node is marked, and that the solid path
+    // stops one point short. Driven in Chrome at 1440.
+    render(provisional());
+    const solid = document.querySelector("[data-series-line]");
+    const prov = document.querySelector("[data-series-provisional]");
+    assert.ok(prov, "no provisional segment at all");
+    assert.ok(prov.querySelector("[data-provisional-node]"), "the provisional node is missing");
+    assert.match(prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "", /\d/);
+    assert.equal(solid?.getAttribute("stroke-dasharray"), null, "the whole line went dashed");
+    // 61 points, 60 of them solid: the newest comes off the line and is drawn
+    // by the dashed segment instead.
+    assert.equal([...(solid?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 60);
+  });
+
+  test("a series that is NOT provisional carries neither", () => {
+    render(chart({ xAxis: "date" }));
+    assert.equal(document.querySelectorAll("[data-series-provisional]").length, 0);
+    assert.equal([...(document.querySelector("[data-series-line]")?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 61);
+  });
+
+  test("REDUCED MOTION drops the pulse, and keeps the dash", () => {
+    // The dash is the information; the beat is decoration. Under
+    // prefers-reduced-motion the mark must still say "not done yet".
+    const real = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (q: string) => ({ matches: q.includes("reduce"), media: q, addEventListener() {}, removeEventListener() {} }),
+    });
+    try {
+      render(provisional());
+      const node = document.querySelector("[data-provisional-node]");
+      assert.ok(node, "no provisional node under reduced motion");
+      assert.equal(node.getAttribute("class"), null, "the pulse animation survived reduced motion");
+      assert.match(
+        document.querySelector("[data-series-provisional] path")?.getAttribute("stroke-dasharray") ?? "",
+        /\d/,
+        "reduced motion took the dash away with the animation",
+      );
+    } finally {
+      Object.defineProperty(window, "matchMedia", { configurable: true, value: real });
+    }
+  });
+
+  test("and the pulse is there when motion is allowed", () => {
+    // The other half: a guard that only ever sees "no class" would pass on a
+    // node that never pulsed at all.
+    render(provisional());
+    assert.match(
+      document.querySelector("[data-provisional-node]")?.getAttribute("class") ?? "",
+      /su-history-pulse/,
+      "the provisional node never pulses",
+    );
+  });
+});
+
 describe("handing the hover to the caller instead of drawing a strip", () => {
   /** Every value the chart reported, in order. */
   function reporter() {

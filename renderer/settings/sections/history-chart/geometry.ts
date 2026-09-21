@@ -62,6 +62,18 @@ export interface ChartSeries {
   width?: number;
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
+  /**
+   * The LAST point is still moving, and the segment into it is not finished.
+   *
+   * Drawn dashed with its node marked, so a glance reads "not done yet" rather
+   * than "collapsed" — a Sunday whose evening service is half over is genuinely
+   * a smaller number than last Sunday, and a solid line into it says the wrong
+   * thing about why.
+   *
+   * Distinct from `dashed`, which dashes the WHOLE series to separate two lines
+   * sharing one scale. A series can be both.
+   */
+  provisional?: boolean;
 }
 
 /** What the y axis counts. `db` never floors at zero — 0 dB is not a floor a
@@ -264,7 +276,16 @@ export function dateTicks(startMs: number, endMs: number): number[] {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
   const WEEK = 7 * 24 * 60 * 60_000;
   const weeks = (endMs - startMs) / WEEK;
-  const stepWeeks = weeks <= 14 ? 1 : weeks <= 30 ? 2 : 4;
+  // The step grows with the span so the tick COUNT stays in the low teens at any
+  // range. A 4-week step is right for a season and a smear at three years: 156
+  // weeks of it is 39 ticks, a mark every 49px, which reads as hatching rather
+  // than as an axis. A quarter, then a half-year, keeps it to a dozen or so
+  // however far back the All range reaches.
+  const stepWeeks = weeks <= 14 ? 1
+    : weeks <= 30 ? 2
+      : weeks <= 60 ? 4
+        : weeks <= 200 ? 13
+          : 26;
   const out: number[] = [];
   // Start on the first local midnight at or after the domain start, then step
   // in whole days so a daylight-saving shift cannot drift the ticks by an hour.

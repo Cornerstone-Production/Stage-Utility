@@ -270,9 +270,21 @@ export function HistoryChart({
     () => (xAxis === "date" ? dateTicks(domainStart, domainEnd) : timeTicks(domainStart, domainEnd)),
     [domainStart, domainEnd, xAxis],
   );
+  /**
+   * A tick's words. Dates on a trend, times of day on a service.
+   *
+   * THE YEAR APPEARS once the domain crosses one, which the All range routinely
+   * does: "Sep 20" beside "Sep 20" a year apart is two identical labels on one
+   * axis, and a reader has nothing to tell them apart with.
+   */
+  const spansYears = Number.isFinite(domainStart) && Number.isFinite(domainEnd)
+    && new Date(domainStart).getFullYear() !== new Date(domainEnd).getFullYear();
   const axisText = (t: number) =>
     xAxis === "date"
-      ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      ? new Date(t).toLocaleDateString(
+        undefined,
+        spansYears ? { month: "short", year: "numeric" } : { month: "short", day: "numeric" },
+      )
       : formatClock(new Date(t).toISOString());
 
   const labelledTicks = useMemo(
@@ -632,7 +644,12 @@ export function HistoryChart({
             sample count, so appending a sample updates `d` on the element that is
             already there instead of replacing it — see history-chart-live.test.tsx. */}
         {shown.map((s) => {
-          const runs = s.runs ?? splitRuns(s.points, s.gapMs ?? GAP_MS);
+          // A PROVISIONAL last point comes off the solid line and is drawn as
+          // its own dashed segment below, so every earlier stretch stays solid.
+          // `s.points` is left whole: hover still reads the nearest sample from
+          // it, and the readout must be able to answer about the day in progress.
+          const drawn = s.provisional && s.points.length > 1 ? s.points.slice(0, -1) : s.points;
+          const runs = s.runs ?? splitRuns(drawn, s.gapMs ?? GAP_MS);
           return (
             <g key={s.id} data-series={s.id}>
               {s.fill
@@ -658,6 +675,44 @@ export function HistoryChart({
                   vectorEffect="non-scaling-stroke"
                 />
               ))}
+            </g>
+          );
+        })}
+
+        {/* The segment into a day that has not finished, and its node.
+            DASHED and MARKED, not animated on its own: the beat is the same
+            `su-history-pulse` the live edge uses and the same `reduced` gate, so
+            there is one live vocabulary in this module rather than two. It
+            updates because the card re-renders when the recording does — the
+            attendance channel is already wired to this page. */}
+        {shown.map((s) => {
+          if (!s.provisional || s.points.length < 2) return null;
+          const tail = s.points.slice(-2);
+          const width = s.width ?? (s.role === "primary" ? 1.8 : 1.2);
+          return (
+            <g key={`${s.id}-prov`} data-series-provisional={s.id}>
+              <path
+                d={linePathD(tail, project)}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={width}
+                strokeDasharray="5 4"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* Hollow, so it reads as a reading not yet taken rather than as
+                  one more node on the line. */}
+              <circle
+                data-provisional-node={s.id}
+                cx={xOf(tail[1].t)}
+                cy={yOf(tail[1].v)}
+                r={3.5}
+                fill="var(--color-bg)"
+                stroke={s.color}
+                strokeWidth={width}
+                vectorEffect="non-scaling-stroke"
+                className={reduced ? undefined : "su-history-pulse"}
+              />
             </g>
           );
         })}
