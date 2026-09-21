@@ -503,7 +503,7 @@ export function HistoryChart({
         <span data-legend-peak-mark className="inline-flex items-center gap-1.5">
           <span
             className="inline-block h-2.5 w-[3px] rounded-[1px]"
-            style={{ background: shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)" }}
+            style={{ background: primarySeriesColor(shown) }}
           />
           Item peak
         </span>
@@ -668,7 +668,7 @@ export function HistoryChart({
                   d={linePathD(run, project)}
                   fill="none"
                   stroke={s.color}
-                  strokeWidth={s.width ?? (s.role === "primary" ? 1.8 : 1.2)}
+                  strokeWidth={seriesLineWidth(s)}
                   strokeDasharray={s.dashed ? "4 3" : undefined}
                   strokeLinejoin="round"
                   strokeLinecap="round"
@@ -707,7 +707,7 @@ export function HistoryChart({
               d={linePathD(tail, project)}
               fill="none"
               stroke={s.color}
-              strokeWidth={s.width ?? (s.role === "primary" ? 1.8 : 1.2)}
+              strokeWidth={seriesLineWidth(s)}
               strokeLinecap="round"
               pathLength={1}
               vectorEffect="non-scaling-stroke"
@@ -813,7 +813,7 @@ export function HistoryChart({
                   y1={y}
                   x2={(seg.x0 + seg.x1) / 2}
                   y2={y + LANE_ROW_H}
-                  stroke={shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)"}
+                  stroke={primarySeriesColor(shown)}
                   strokeWidth={3}
                   vectorEffect="non-scaling-stroke"
                 />
@@ -1063,6 +1063,20 @@ function fmt(s: ChartSeries, v: number): string {
   return s.format ? s.format(v) : Math.round(v).toLocaleString();
 }
 
+/** A series' drawn stroke width — see ChartSeries.role. ONE definition, read by
+ *  the line itself, its live draw-in stretch and its provisional tail, so the
+ *  three cannot draw at different weights. */
+function seriesLineWidth(s: ChartSeries): number {
+  return s.width ?? (s.role === "primary" ? 1.8 : 1.2);
+}
+
+/** The primary series' colour, or the accent token when there is none — what a
+ *  mark that belongs to no particular series (the lane's peak tick, its legend
+ *  swatch) draws in. */
+function primarySeriesColor(shown: readonly ChartSeries[]): string {
+  return shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)";
+}
+
 function axisLabel(v: number, scale: YScale): string {
   return scale.kind === "db" ? String(Math.round(v)) : v.toLocaleString();
 }
@@ -1130,7 +1144,7 @@ function ProvisionalTail({ series, xOf, yOf, reduced }: {
 }): React.ReactElement {
   const tail = series.points.slice(-2);
   const v = useEasedValue(tail[1].v, reduced ? 0 : EASE_MS);
-  const width = series.width ?? (series.role === "primary" ? 1.8 : 1.2);
+  const width = seriesLineWidth(series);
   const project = (p: ChartPoint) => ({ x: xOf(p.t), y: yOf(p.v) });
   return (
     <g data-series-provisional={series.id}>
