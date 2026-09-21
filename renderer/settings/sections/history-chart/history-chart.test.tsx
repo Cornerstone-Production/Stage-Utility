@@ -127,10 +127,25 @@ function chart(props: Partial<React.ComponentProps<typeof HistoryChart>> = {}) {
   );
 }
 
+/**
+ * The strip, or a sentence saying it is not there.
+ *
+ * `document.querySelector(...) as HTMLElement` reads null as an element and the
+ * next line dies on `.dataset`, so a chart that stops drawing a strip at all
+ * failed ten tests with `Cannot read properties of null` and named nothing. It
+ * does go red; it just does not say what broke, which is the failure mode this
+ * module's own hover work complained about elsewhere.
+ */
+function stripEl(): HTMLElement {
+  const el = document.querySelector("[data-history-strip]");
+  assert.ok(el, "the chart drew no stat strip at all — nothing here can be read off it");
+  return el as HTMLElement;
+}
+
 describe("the stat strip", () => {
   test("at rest it shows the chosen figures, and only those", () => {
     render(chart());
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "rest");
     for (const f of FIGURES) assert.ok(strip.textContent?.includes(f.label), `${f.label} missing`);
     assert.ok(!strip.textContent?.includes("Live"));
@@ -138,7 +153,7 @@ describe("the stat strip", () => {
 
   test("a figure the operator unticked is not in the strip", () => {
     render(chart({ figures: FIGURES.filter((f) => f.key !== "samples") }));
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(!strip.textContent?.includes("Samples"));
     assert.ok(strip.textContent?.includes("Peak"));
   });
@@ -147,7 +162,7 @@ describe("the stat strip", () => {
     render(chart());
     const svg = document.querySelector("svg") as SVGSVGElement;
     fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 80 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "hover");
     assert.ok(strip.textContent?.includes("Time"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("Attendance"), strip.textContent ?? "");
@@ -160,7 +175,7 @@ describe("the stat strip", () => {
     const svg = document.querySelector("svg") as SVGSVGElement;
     fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 80 });
     fireEvent.pointerLeave(svg);
-    assert.equal((document.querySelector("[data-history-strip]") as HTMLElement).dataset.historyStrip, "rest");
+    assert.equal(stripEl().dataset.historyStrip, "rest");
   });
 
   test("hovering a lane segment names the item, its number, and what it ran against plan", () => {
@@ -168,7 +183,7 @@ describe("the stat strip", () => {
     const svg = document.querySelector("svg") as SVGSVGElement;
     // Three quarters across = 20:45, inside Message; y in the lower lane row.
     fireEvent.pointerMove(svg, { clientX: 480, clientY: 205 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(strip.textContent?.includes("Item 3"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("Message"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("Planned"), strip.textContent ?? "");
@@ -177,7 +192,7 @@ describe("the stat strip", () => {
 
   test("while recording it reads LIVE with the current values", () => {
     render(chart({ live: true }));
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "live");
     assert.ok(strip.textContent?.includes("Live"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("160"), strip.textContent ?? "");
@@ -186,7 +201,7 @@ describe("the stat strip", () => {
   test("a hover wins over LIVE — the operator asked about that instant", () => {
     render(chart({ live: true }));
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 200, clientY: 80 });
-    assert.equal((document.querySelector("[data-history-strip]") as HTMLElement).dataset.historyStrip, "hover");
+    assert.equal(stripEl().dataset.historyStrip, "hover");
   });
 });
 
@@ -532,7 +547,7 @@ describe("the item lane", () => {
     // A tick on a block with the number nowhere is a mark nobody can read.
     render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("94 dB"), strip.textContent ?? "");
   });
@@ -540,7 +555,7 @@ describe("the item lane", () => {
   test("an item with no peak gets no empty Peaked column", () => {
     render(chart());
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(strip.textContent?.includes("Item 3"), "the lane hover did not register");
     assert.ok(!strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
   });
