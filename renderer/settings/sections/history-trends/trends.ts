@@ -631,16 +631,14 @@ export function typeTrends(
   }
   const out: TypeTrend[] = [];
   for (const [key, all] of byType) {
-    // The SAME derivation the chart's line uses, so the tile's headline and the
-    // last node on the line are the same number. They were not: the headline was
-    // a mean over every recording and the line was too, and once the line became
-    // per-day the tile would have been quoting a different statistic under it.
+    // ONE derivation, shared by `everyDay` (the headline and its comparison
+    // basis, below) and `days` (the sparkline and the chart's line), so the
+    // tile's headline and the last node on the line are the same number. They
+    // were not: the headline was a mean over every recording and the line was
+    // too, and once the line became per-day the tile would have been quoting a
+    // different statistic under it.
     const sorted = all.slice().sort(byTime);
     const everyDay = dayServices(sorted, measure);
-    // The SAME derivation the chart's line uses, so the tile's headline and the
-    // last node on the line are the same number. They were not: the headline was
-    // a mean over every recording and the line was too, and once the line became
-    // per-day the tile would have been quoting a different statistic under it.
     const days = dailyValues(sorted, measure, clock);
     // A type with NO reading under this measure keeps its tile, with a null
     // headline — the card says "no sound recorded" rather than dropping the
