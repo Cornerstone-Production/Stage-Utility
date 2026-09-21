@@ -16,9 +16,14 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 10 updates land outside act — which is why it was
+// cleared the first time round.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** A fake EventSource that hands the test its channel listeners to fire. */
 class FakeEventSource {
@@ -54,16 +59,12 @@ class FakeEventSource {
   text: async () => "{}",
 });
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { useStatusChannel } = await import("./use-status-channel.js");
 const { __resetReplayCacheForTests } = await import("../lib/api.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
-after(async () => {
-  await settle();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
   cleanup();
   // api.ts's replay cache is module-level and outlives a case, so without this a
@@ -112,7 +113,7 @@ describe("useStatusChannel publish ordering", () => {
     const seen = mount(() => read.promise, "obs:status");
     await settle();
 
-    FakeEventSource.last!.push("obs:status", { connected: true, recording: true, rev: 7 });
+    await act(async () => FakeEventSource.last!.push("obs:status", { connected: true, recording: true, rev: 7 }));
     await settle();
     assert.equal(seen.value?.recording, true, "the push should have been applied");
 
@@ -134,7 +135,7 @@ describe("useStatusChannel publish ordering", () => {
     const seen = mount(() => read.promise, "reaper:status");
     await settle();
 
-    FakeEventSource.last!.push("reaper:status", { connected: true, recording: false, rev: 3 });
+    await act(async () => FakeEventSource.last!.push("reaper:status", { connected: true, recording: false, rev: 3 }));
     await settle();
 
     read.resolve({ connected: true, recording: true, rev: 4 });
@@ -152,7 +153,7 @@ describe("useStatusChannel publish ordering", () => {
     const seen = mount(() => read.promise, "spl:metrics");
     await settle();
 
-    FakeEventSource.last!.push("spl:metrics", { connected: true, recording: false, rev: 5 });
+    await act(async () => FakeEventSource.last!.push("spl:metrics", { connected: true, recording: false, rev: 5 }));
     await settle();
 
     read.resolve({ connected: true, recording: true, rev: 5 });
@@ -171,7 +172,7 @@ describe("useStatusChannel publish ordering", () => {
 
     // First subscriber, so the connect-time frame lands in api.ts's replay cache.
     const off = onNotification("youtube:status", () => {});
-    FakeEventSource.last!.push("youtube:status", { connected: true, recording: false, rev: 2 });
+    await act(async () => FakeEventSource.last!.push("youtube:status", { connected: true, recording: false, rev: 2 }));
     await settle();
 
     // Now a component mounts into that already-open stream. Its read is current
@@ -206,7 +207,7 @@ describe("useStatusChannel publish ordering", () => {
     const seen = mount(() => read.promise, "osc:feedback");
     await settle();
 
-    FakeEventSource.last!.push("osc:feedback", { connected: true, recording: true });
+    await act(async () => FakeEventSource.last!.push("osc:feedback", { connected: true, recording: true }));
     await settle();
     assert.equal(seen.value?.recording, true, "the push should have been applied");
 
@@ -232,7 +233,7 @@ describe("useStatusChannel publish ordering", () => {
     // A first subscriber, so the frame lands in api.ts's replay cache, then goes
     // away — which is when the server stops updating what is cached.
     const off = onNotification("baptism:state", () => {});
-    FakeEventSource.last!.push("baptism:state", { connected: true, recording: false });
+    await act(async () => FakeEventSource.last!.push("baptism:state", { connected: true, recording: false }));
     await settle();
     off();
 
