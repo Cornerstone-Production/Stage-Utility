@@ -17,9 +17,13 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 5 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
@@ -42,7 +46,7 @@ function installFetch(h: Handler): void {
   }) as typeof fetch;
 }
 
-after(() => teardown());
+after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => {
   cleanup();
   globalThis.fetch = realFetch;
@@ -202,7 +206,9 @@ describe("polling", () => {
     }));
     await mount({ pollMs: 10 });
     const afterMount = calls.length;
-    await new Promise((r) => setTimeout(r, 50));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     assert.ok(calls.length > afterMount, "no further GET was made while pending");
   });
 
@@ -218,9 +224,13 @@ describe("polling", () => {
     });
     await mount({ pollMs: 10 });
     // Let it poll past the point where it should have flipped to connected.
-    await new Promise((r) => setTimeout(r, 80));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
     const countWhenConnected = calls.length;
-    await new Promise((r) => setTimeout(r, 80));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
     assert.equal(calls.length, countWhenConnected, "polling continued after the row reported connected");
   });
 });

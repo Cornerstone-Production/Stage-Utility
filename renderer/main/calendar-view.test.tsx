@@ -24,10 +24,14 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { after, afterEach, beforeEach, describe, it, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import type { CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 12 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // CalendarMonth is handed its grid and fetches nothing; CalendarView does, and
 // the navigation suite at the bottom reads what it asked for. The stub also keeps
@@ -128,11 +132,7 @@ function grid(byDate: Record<string, CalendarEventDTO[]> = {}): CalendarGrid {
   return { monthLabel: "August 2026", days, zone: ZONE, unplaceable: 0 };
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
-after(async () => {
-  await settle();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
   cleanup();
   sent = [];
@@ -658,7 +658,11 @@ describe("paging is per screen, and the current month stays live", () => {
   // setTimeout(0), which is enough for a component handed its data and not for
   // one that fetches it.
   const mounted = async () => {
-    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+    }
   };
 
   /**
@@ -670,7 +674,11 @@ describe("paging is per screen, and the current month stays live", () => {
    * the current-month guard first passed with the live path broken.
    */
   const pastDebounce = async () => {
-    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 60));
+    for (let i = 0; i < 8; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 60));
+      });
+    }
   };
 
   /** Two mounted CalendarViews over the same view id, as two screens would be. */

@@ -35,9 +35,13 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 1 update lands outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // The panel's saved-colour row reads the shared stage state, so a render of it
 // opens a request and an SSE stream. Both are answered with nothing: this file
@@ -67,12 +71,7 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { ColorField } = await import("./color-field.js");
 const { PaletteIcon } = await import("lucide-react");
 
-const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-
-after(async () => {
-  await settle();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(async () => {
   cleanup();
   await settle();

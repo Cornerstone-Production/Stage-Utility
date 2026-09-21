@@ -31,10 +31,15 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import type { ReleaseSection } from "@main/services/update/release-notes";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 90 updates land outside act — which is why it was
+// cleared the first time round.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class StubEventSource {
   readyState = 0;
@@ -58,8 +63,7 @@ const { render, screen, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { UpdateNotices } = await import("./update-notices.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
-after(async () => { await settle(); teardown(); });
+after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => { cleanup(); notice = null; });
 afterEach(async () => { cleanup(); await settle(); });
 

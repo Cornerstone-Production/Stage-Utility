@@ -10,9 +10,13 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 8 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class NoStream {
   close() {}
   addEventListener() {}
@@ -20,7 +24,7 @@ class NoStream {
 }
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
@@ -29,10 +33,7 @@ type CuesLive = import("./use-cue-live.js").CuesLive;
 type ManifestSwitch = CuesLive["manifest"]["switches"][number];
 type LiveState = import("./use-cue-live.js").LiveState;
 
-after(() => {
-  cleanup();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
 function live(over: Partial<ManifestSwitch> = {}, state?: LiveState): CuesLive {
   const sw: ManifestSwitch = {
@@ -79,8 +80,15 @@ function mount(cues: CuesLive | null, cue: string, interactive = true) {
  * it schedules. Two macrotasks rather than one — with a single tick the last
  * setState landed after the test had ended, and node:test reported the render
  * as "asynchronous activity after the test ended" once the dom was torn down.
+ *
+ * act()-wrapped so that setState lands on React's own queue instead of the
+ * scheduler — without it, the same race can land the flush after teardown
+ * instead of merely after the test.
  */
-const settle = () => new Promise((r) => setTimeout(r, 20));
+const settle = () =>
+  act(async () => {
+    await new Promise((r) => setTimeout(r, 20));
+  });
 
 const stateOf = (container: HTMLElement) =>
   container.querySelector("[data-state]")?.getAttribute("data-state");

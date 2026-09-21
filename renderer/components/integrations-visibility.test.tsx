@@ -9,12 +9,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 419 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, assertAbsent, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -31,12 +35,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 /**
  * A loaded page.
@@ -55,7 +59,7 @@ after(async () => {
 async function panel(overrides: Record<string, Partial<IntegrationState>> = {}) {
   server = installFakeServer(overrides);
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  await actIdle();
   return c;
 }
 

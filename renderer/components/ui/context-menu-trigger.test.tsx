@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { after, afterEach, test, describe, mock } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, unmountAndTeardown } from "../../test-dom.js";
 
 // installDom() first, then the DOM-dependent modules by dynamic import — same
 // order context-menu.test.tsx uses, and for the same reason: a static import of
 // React/testing-library would evaluate before the DOM exists.
 const teardown = installDom();
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 3 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { useContextMenuTrigger, LONG_PRESS_MS, MOVE_CANCEL_PX } = await import("./context-menu-trigger.js");
 
@@ -65,7 +69,7 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
     try {
       touchDown(el, 42, 84);
       assert.equal(onOpen.mock.callCount(), 0, "must not open before the hold completes");
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onOpen.mock.callCount(), 1, "must open once the hold completes");
       assert.deepEqual(onOpen.mock.calls[0].arguments[0], { x: 42, y: 84 });
     } finally {
@@ -82,11 +86,11 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       touchDown(el);
-      mock.timers.tick(300);
+      act(() => mock.timers.tick(300));
       touchUp(el);
       // Run out whatever time remains — a lingering timer must have been
       // cancelled by the release, not merely delayed.
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onOpen.mock.callCount(), 0, "a release before the hold completes must not open the menu");
     } finally {
       mock.timers.reset();
@@ -103,7 +107,7 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
     try {
       touchDown(el, 0, 0);
       touchMove(el, MOVE_CANCEL_PX + 2, 0);
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onOpen.mock.callCount(), 0, "movement past the threshold must cancel the press");
     } finally {
       mock.timers.reset();
@@ -119,7 +123,7 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       fireEvent.pointerDown(el, { pointerId: 1, pointerType: "mouse", clientX: 10, clientY: 10 });
-      mock.timers.tick(LONG_PRESS_MS * 2);
+      act(() => mock.timers.tick(LONG_PRESS_MS * 2));
       assert.equal(onOpen.mock.callCount(), 0, "a mouse press must never open a long-press menu");
     } finally {
       mock.timers.reset();
@@ -135,7 +139,7 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       touchDown(el);
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onOpen.mock.callCount(), 1);
       touchUp(el);
     } finally {
@@ -170,12 +174,12 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
     mock.timers.enable({ apis: ["setTimeout", "Date"] });
     try {
       touchDown(el);
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onOpen.mock.callCount(), 1);
       touchCancel(el);
       // Well past the 700ms window a click from the SAME press would still be
       // suppressed inside.
-      mock.timers.tick(1000);
+      act(() => mock.timers.tick(1000));
     } finally {
       mock.timers.reset();
       await flushReact();
@@ -201,4 +205,4 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
 // `onOpen.mock.callCount()` was 1, not the asserted 0). Reverted immediately
 // after — see the PR description for the failing-run transcript.
 
-after(() => teardown());
+after(() => unmountAndTeardown(cleanup, teardown));
