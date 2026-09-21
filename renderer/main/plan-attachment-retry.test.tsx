@@ -12,10 +12,6 @@
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
-// The global `setImmediate` is what a measurement probe (and, in principle,
-// any other code) can monkey-patch; the node:timers export cannot be reached
-// that way, and is what stays real when mock.timers fakes setTimeout below.
-import { setImmediate as nativeSetImmediate } from "node:timers";
 
 import { installRenderDom, unmountAndTeardown } from "../test-dom.js";
 
@@ -37,7 +33,7 @@ afterEach(() => cleanup());
 async function flush() {
   for (let i = 0; i < 4; i++) {
     await act(async () => {
-      await new Promise((r) => nativeSetImmediate(r));
+      await new Promise((r) => setImmediate(r));
     });
   }
 }
