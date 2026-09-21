@@ -18,9 +18,13 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 27 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** jsdom ships no EventSource, and useStageState subscribes to one. */
 (globalThis as unknown as { EventSource: unknown }).EventSource = class {
@@ -74,21 +78,21 @@ let checklistReads = 0;
   return ok({});
 };
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { usePlanChecklist, __resetForTests } = await import("./use-plan-checklist.js");
 const stage = await import("./use-stage-state.js");
 
 /** The mount fetch settles through several macrotasks before the rows land. */
 const settled = async () => {
-  for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 6; i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
 };
 
-after(async () => {
-  cleanup();
-  await settled();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
 beforeEach(() => {
   cleanup();

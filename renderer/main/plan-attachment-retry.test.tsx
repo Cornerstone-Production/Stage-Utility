@@ -12,8 +12,12 @@
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
+// The global `setImmediate` is what a measurement probe (and, in principle,
+// any other code) can monkey-patch; the node:timers export cannot be reached
+// that way, and is what stays real when mock.timers fakes setTimeout below.
+import { setImmediate as nativeSetImmediate } from "node:timers";
 
-import { installRenderDom } from "../test-dom.js";
+import { installRenderDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installRenderDom({ clientHeight: 270 });
 
@@ -24,7 +28,7 @@ const { TooltipProvider } = await import("../components/ui/tooltip-provider.js")
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 const { ObjectContent, PLAN_ATTACHMENT_RETRY_MS } = await import("./layout-renderer.js");
 
-after(() => teardown());
+after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
 /** Let resolved fetch promises and React's state updates land. setImmediate is
@@ -33,7 +37,7 @@ afterEach(() => cleanup());
 async function flush() {
   for (let i = 0; i < 4; i++) {
     await act(async () => {
-      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => nativeSetImmediate(r));
     });
   }
 }
@@ -76,10 +80,10 @@ describe("a plan attachment that fails to load", () => {
 
     let expected = 1;
     for (const gap of PLAN_ATTACHMENT_RETRY_MS) {
-      mock.timers.tick(gap - 1);
+      act(() => mock.timers.tick(gap - 1));
       await flush();
       assert.equal(f.calls.length, expected, `retried before its ${gap}ms gap was up`);
-      mock.timers.tick(1);
+      act(() => mock.timers.tick(1));
       await flush();
       expected += 1;
       assert.equal(f.calls.length, expected, `did not retry after ${gap}ms — a failed plot stays failed until a refresh`);
@@ -87,7 +91,7 @@ describe("a plan attachment that fails to load", () => {
 
     // Bounded. A file that is really gone must not be hammered for the rest of
     // the service.
-    mock.timers.tick(10 * 60_000);
+    act(() => mock.timers.tick(10 * 60_000));
     await flush();
     assert.equal(f.calls.length, expected, "kept retrying past the schedule");
   });
@@ -103,7 +107,7 @@ describe("a plan attachment that fails to load", () => {
     await flush();
     assert.equal(f.calls.length, 1);
     assert.match(view.container.textContent ?? "", /No "stage plot" on this plan/);
-    mock.timers.tick(10 * 60_000);
+    act(() => mock.timers.tick(10 * 60_000));
     await flush();
     assert.equal(f.calls.length, 1, "a 404 was retried as if it were a transient failure");
   });
