@@ -12,10 +12,14 @@ import assert from "node:assert/strict";
 import { after, afterEach, test, describe, mock } from "node:test";
 
 import type { LayoutObject } from "@main/types/views";
-import { installDom } from "../../test-dom.js";
+import { installDom, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 2 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { HomeCardCell } = await import("./home-grid.js");
 const { LONG_PRESS_MS } = await import("../../components/ui/context-menu-trigger.js");
@@ -65,7 +69,7 @@ describe("a Home card's menu on touch", () => {
     try {
       touchDown(cell, 100, 100);
       assert.equal(onMenu.mock.callCount(), 0, "must not open before the hold completes");
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onMenu.mock.callCount(), 1, "a completed long press must open the card's menu");
       assert.equal(onMenu.mock.calls[0].arguments[0], CARD);
       assert.deepEqual(onMenu.mock.calls[0].arguments[1], { x: 100, y: 100 });
@@ -94,7 +98,7 @@ describe("a Home card's menu on touch", () => {
       // the time a finger has moved this far.
       touchMove(cell, 120, 100);
       touchUp(cell, 120, 100);
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onMenu.mock.callCount(), 0, "movement past the cancel threshold must not open the menu");
     } finally {
       mock.timers.reset();
@@ -157,7 +161,7 @@ describe("a Home card's menu on touch", () => {
       touchDown(handle, 100, 100);
       touchMove(handle, 105, 100);
       assert.equal(onDragStart.mock.callCount(), 1, "5px must be enough to start the real drag");
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onMenu.mock.callCount(), 0, "a live drag must suppress the long-press menu");
     } finally {
       mock.timers.reset();
@@ -191,7 +195,7 @@ describe("a Home card's menu on touch", () => {
       touchDown(handle, 100, 100);
       touchMove(handle, 100 + DRAG_START_PX, 100);
       assert.equal(onDragStart.mock.callCount(), 1, "the drag's own threshold must have started it");
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onMenu.mock.callCount(), 0, "the explicit cancel() must have stopped the long press");
     } finally {
       mock.timers.reset();
@@ -218,13 +222,13 @@ describe("a Home card's menu on touch", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       fireEvent.pointerDown(innerButton, { pointerId: 1, pointerType: "touch", clientX: 100, clientY: 100 });
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onMenu.mock.callCount(), 0, "a hold on an inner control must not open the card's menu");
 
       // The plain card body still opens the menu — the guard is scoped to
       // controls, not the whole card.
       touchDown(cell, 100, 100);
-      mock.timers.tick(LONG_PRESS_MS);
+      act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onMenu.mock.callCount(), 1, "a hold on the card body must still open the menu");
       // Unmounted here, inside the SAME fake-timer window the two presses
       // above ran in — two `setPressing` renders (one per touchDown) left
@@ -239,4 +243,4 @@ describe("a Home card's menu on touch", () => {
   });
 });
 
-after(() => teardown());
+after(() => unmountAndTeardown(cleanup, teardown));

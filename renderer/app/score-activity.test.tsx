@@ -35,11 +35,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 2 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const { createScoreActivity, SCORE_HOLD_MS, scoreActivity } =
   await import("./score-activity-store.js");
 const { ScoreActivityHost, ScoreCapsule, capsuleView, layoutStack, liveIndex, scoredSide } =
@@ -53,9 +57,7 @@ const { contrastRatio, formatColor, parseColor } = await import("../components/u
 // exactly when they fail on purpose.
 afterEach(() => cleanup());
 
-after(() => {
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
 const TEAM = (id: string, score: number | null): ScoreTeamDTO => ({
   id,
@@ -888,8 +890,10 @@ describe("what the panel shows", () => {
     rerender(<ScoreActivityHost scores={scoreInGameTwo(NEXT_REV())} />);
     assert.equal(container.querySelectorAll("[data-score-card]").length, 1);
 
-    scoreActivity.toggle(); // closes the score-opened panel
-    scoreActivity.toggle(); // and opens it by hand
+    act(() => {
+      scoreActivity.toggle(); // closes the score-opened panel
+      scoreActivity.toggle(); // and opens it by hand
+    });
     rerender(<ScoreActivityHost scores={{ ...twoGames(1), scoreRev: 1 }} />);
     assert.equal(
       container.querySelectorAll("[data-score-card]").length,

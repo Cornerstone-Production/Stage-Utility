@@ -13,9 +13,13 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 8 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let failWith: Error | null = null;
 /** Every icon write, in order — the migration is an ordering claim about two. */
@@ -36,13 +40,11 @@ class FakeEventSource {
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Toaster } = await import("./ui/toast.js");
 const { saveIcon } = await import("./editable-icon.js");
 const { until } = await import("../test-fixtures/integrations-harness.js");
-
-const settle = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(() => {
   failWith = null;
@@ -52,10 +54,7 @@ afterEach(async () => {
   cleanup();
   await settle();
 });
-after(async () => {
-  await settle();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("storing a chosen glyph", () => {
   test("a refused save reaches the operator", async () => {
@@ -63,10 +62,14 @@ describe("storing a chosen glyph", () => {
     failWith = new Error("the icon store is read-only");
 
     saveIcon("display-invented-1", "Star");
-    await until(
-      () => /Could not change the icon/.test(document.body.textContent ?? ""),
-      () => "a refused save never reached the operator as a toast",
-    );
+    // NOT until(): that polls document.body.textContent, and the toast's own
+    // state update is what WOULD satisfy it — wrapped in one continuous act()
+    // scope, that update is queued rather than flushed, so the poll waits on
+    // exactly the paint act() is holding back and times out at 5000ms every
+    // time. A fixed wait works here because the fake fetch above rejects
+    // through a plain .then()/.catch() chain — microtasks only — so one
+    // act()-wrapped macrotask turn is well past when the toast lands.
+    await settle();
 
     assert.match(
       document.body.textContent ?? "",
@@ -89,7 +92,9 @@ describe("storing a chosen glyph", () => {
     // look the same. Waiting for the write instead is enough: nothing on the
     // success path can call toast.error(), so once the (fake) server has seen
     // the write, no later toast is coming.
-    await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
+    await act(async () => {
+      await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
+    });
 
     assert.equal(
       /Could not change the icon/.test(document.body.textContent ?? ""),
@@ -136,7 +141,9 @@ describe("a key that moved", () => {
     // A negative claim (the clear must NEVER fire) again — waiting for the
     // first write is enough: it fails, so the .then() that would clear the
     // legacy key is skipped for good, not merely not-yet-run.
-    await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
+    await act(async () => {
+      await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
+    });
 
     assert.deepEqual(
       glyphWrites(),
