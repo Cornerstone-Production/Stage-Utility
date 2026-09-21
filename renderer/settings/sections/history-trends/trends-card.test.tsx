@@ -32,9 +32,8 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
-const { TrendsCard, absChange, basisLabel } = await import("./trends-card.js");
+const { TrendsCard, pctChange, pctLabel, basisLabel } = await import("./trends-card.js");
 type TrendClock = import("./trends.js").TrendClock;
-type TrendState = import("./trends.js").TrendState;
 const { TooltipProvider } = await import("../../../components/ui/index.js");
 type TrendRecording = import("./trends.js").TrendRecording;
 
@@ -83,45 +82,67 @@ describe("a sparkline that does not move", () => {
 });
 
 describe("how a change reads", () => {
-  test("it is an ABSOLUTE difference, and a zero carries no sign", () => {
-    // Absolute, not a percentage: "seventy more people" is a van, "+6%" is a
-    // conversation. A sign in front of zero claims a direction the number
-    // denies, and which of "+0" and "−0" you got depended on the sign of a
-    // difference too small to print.
+  test("it is a PERCENTAGE, and a zero carries no sign", () => {
+    // Percentage, not an absolute figure — this card printed an absolute
+    // change for a while; see pctChange's own comment for why it came back. A
+    // sign in front of zero claims a direction the number denies, and which
+    // of "+0%" and "−0%" you got depended on the sign of a difference too
+    // small to print.
     // One case per line, so two branches adding different ones merge cleanly.
     assert.deepEqual(
       [
-        [0, 0, ""],
-        [0.4, 0, ""],
-        [-0.4, 0, ""],
-        [71, 0, ""],
-        [-71, 0, ""],
-        [1234, 0, ""],
-        [1.24, 1, " dB"],
-        [-1.24, 1, " dB"],
-        [0.04, 1, " dB"],
-      ].map(([d, dp, unit]) => [d, absChange(d as number, dp as number, unit as string)]),
+        [0, 0],
+        [0.4, 0],
+        [-0.4, 0],
+        [8, 0],
+        [-8, 0],
+        [8.44, 1],
+        [-8.44, 1],
+        [0.04, 1],
+      ].map(([pct, dp]) => [pct, pctLabel(pct as number, dp as number)]),
       [
-        [0, "0"],
-        [0.4, "0"],
-        [-0.4, "0"],
-        [71, "+71"],
-        [-71, "−71"],
-        // Counts read with separators; a decibel does not.
-        [1234, "+1,234"],
-        [1.24, "+1.2 dB"],
-        [-1.24, "−1.2 dB"],
-        [0.04, "0.0 dB"],
+        [0, "0%"],
+        [0.4, "0%"],
+        [-0.4, "0%"],
+        [8, "+8%"],
+        [-8, "−8%"],
+        [8.44, "+8.4%"],
+        [-8.44, "−8.4%"],
+        [0.04, "0.0%"],
       ],
     );
   });
 
-  test("the change is the difference of the tile's own two numbers", async () => {
-    // Taken from the UNROUNDED figures it prints a change beside two numbers
-    // that are equal on screen. The fixture is built so the two rules disagree:
-    // the prior window means 1000.43 and the latest day is 1,000, so both round
-    // to 1,000 — a change of 0 — while the raw difference rounds to "−0". The
-    // tile must read 0.
+  test("a basis of zero or less produces no percentage", () => {
+    // An absolute difference never had to guard this: 10 minus 0 is a fine
+    // number. Dividing by it is not — a NEW failure mode this figure
+    // introduces on top of it. Every basis that reaches here in production
+    // already cleared trends.ts's COMPARABLE_ABOVE, so this is a second,
+    // explicit floor rather than the only one.
+    assert.deepEqual(
+      [
+        pctChange(110, 100, 0),
+        pctChange(90, 0, 0),
+        pctChange(90, -10, 0),
+      ],
+      [10, null, null],
+    );
+  });
+
+  test("the percentage is taken from the tile's own two ROUNDED numbers", () => {
+    // Taken from the raw figures, a percentage prints a residual beside two
+    // numbers that read identically on screen. 99.6 and 100.4 both round to
+    // 100 at whole-point precision — the tile must read 0% — while the RAW
+    // ratio, (99.6 - 100.4) / 100.4, is a real −0.8% that would print "−1%"
+    // at the same precision: a visible, wrongly-signed change beside two
+    // numbers a reader cannot tell apart.
+    assert.equal(pctChange(99.6, 100.4, 0), 0, "two figures that round to 100 must compare at exactly 0%");
+  });
+
+  test("the change is a percentage of the tile's own two ROUNDED numbers", async () => {
+    // The rounding-order fix itself is proven at the unit level above. This is
+    // the end-to-end sanity check, through the real render: two figures that
+    // land on the SAME number print an unsigned 0%, not a signed residual.
     const view = await renderCard(straddlingRound());
     const tile = view.container.querySelector("[data-trend-tile]")!;
     const headline = tile.querySelector("[data-trend-latest]")!.textContent;
@@ -129,8 +150,8 @@ describe("how a change reads", () => {
     view.unmount();
     assert.equal(headline, "1,000");
     assert.ok(
-      change.startsWith("0 "),
-      `two figures that both round to 1,000 must read 0, not "${change}"`,
+      change.startsWith("0% "),
+      `two equal figures must read 0%, not "${change}"`,
     );
   });
 
@@ -297,16 +318,23 @@ describe("a Sunday morning on the card", () => {
     // 2,300 — the whole church appearing to halve, every week, until the
     // evening service ends. N is services STARTED, so the day climbs while the
     // second fills rather than sitting flat on the first.
+    //
+    // The basis reads 12, not 6: the SAME six prior Sundays as the whole-day
+    // case below, but a first-two slice of them is 12 services, not 18 — a
+    // count of DAYS could not tell the two bases apart, and used to read 6
+    // for both.
     const view = await renderCard(partSunday(1, true), { clock: clockAt(1) });
     assert.equal(figure(view), "1,700", "1,100 finished plus the 600 in the room now");
-    assert.equal(change(view), "+200 vs first 2 services, 6 days", `the tile read "${change(view)}"`);
+    assert.equal(change(view), "+13% vs 12 prior services", `the tile read "${change(view)}"`);
     view.unmount();
   });
 
   test("the LAST service running: it counts live, against whole days", async () => {
+    // Same six prior Sundays as the case above; their WHOLE totals are 18
+    // services, not the 12 a first-two slice of them is worth.
     const view = await renderCard(partSunday(2, true), { clock: clockAt(2) });
     assert.equal(figure(view), "2,600", "the service on air is not in the figure");
-    assert.equal(change(view), "+300 vs 6 full days", `the tile read "${change(view)}"`);
+    assert.equal(change(view), "+13% vs 18 prior services", `the tile read "${change(view)}"`);
     view.unmount();
   });
 
@@ -321,27 +349,21 @@ describe("a Sunday morning on the card", () => {
     done.unmount();
   });
 
-  test("the label names the mode, so the three states never read alike by accident", () => {
-    // The sentence that has to stay honest, and the one a browser will not
-    // always show all of. One case per line.
+  test("the label is one number, in services — singular only at exactly one", () => {
+    // basisLabel no longer takes a mode: counting the basis in services
+    // already carries the earlier-services/whole-day distinction (see the two
+    // tests above, 12 against 18 on the SAME six prior Sundays), so the
+    // sentence around the number is one shape for every state. One case per
+    // line, sorted, so two branches adding different ones merge cleanly.
     assert.deepEqual(
-      ([
-        ["earlier-services", 1, 6],
-        ["earlier-services", 2, 6],
-        ["earlier-services", 5, 1],
-        ["earlier-services", 4, 0],
-        ["last-service-live", 3, 11],
-        ["finished", 3, 11],
-        ["finished", 2, 1],
-      ] as [TrendState, number, number][]).map(([s, n, d]) => basisLabel(s, n, d)),
+      [1, 2, 3, 12, 18, 22].map(basisLabel),
       [
-        "first service, 6 days",
-        "first 2 services, 6 days",
-        "first 5 services, 1 day",
-        "first 4 services, 0 days",
-        "11 full days",
-        "11 full days",
-        "1 full day",
+        "1 prior service",
+        "2 prior services",
+        "3 prior services",
+        "12 prior services",
+        "18 prior services",
+        "22 prior services",
       ],
     );
   });
@@ -496,8 +518,11 @@ describe("the range control", () => {
     };
     const eight = await pick("8w");
     const all = await pick("All");
-    assert.equal(eight, "+4 vs 8 full days", `8w read "${eight}"`);
-    assert.equal(all, "+8 vs 15 full days", `All read "${all}"`);
+    // Absolute +4 against a basis of 1,011 and +8 against 1,007 — small
+    // percentages of a large basis, and one service a week so the basis in
+    // SERVICES is the same 8 and 15 the basis in days used to read.
+    assert.equal(eight, "0% vs 8 prior services", `8w read "${eight}"`);
+    assert.equal(all, "+1% vs 15 prior services", `All read "${all}"`);
     view.unmount();
   });
 

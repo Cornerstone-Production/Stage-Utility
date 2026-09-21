@@ -98,9 +98,9 @@ beside the figure always says which.
 
 | | The figure | Compared against | Label reads |
 |---|---|---|---|
-| **More services still to come** | every service **started**, the finished ones plus the room right now | every prior day's **first N**, counting only days that ran N or more | *first 2 services, 10 days* |
-| **The last service is running** | the same — every service started | prior completed days' **full totals** | *10 full days* |
-| **The day is over** | the day's full total | prior completed days' **full totals** | *10 full days* |
+| **More services still to come** | every service **started**, the finished ones plus the room right now | every prior day's **first N**, counting only days that ran N or more | *20 prior services* |
+| **The last service is running** | the same — every service started | prior completed days' **full totals** | *30 prior services* |
+| **The day is over** | the day's full total | prior completed days' **full totals** | *30 prior services* |
 
 **N is services started, not services finished.** A service on air counts from
 its first reading, wherever it sits in the day, so the figure climbs through the
@@ -154,22 +154,29 @@ Rehearsal times are not service times and never hold a day open.
 
 #### The change figure
 
-It is **absolute**, not a percentage — *+71 vs first 3 services, 11 days*, or
-*+1.2 dB* under the sound measure — because that is the number you can act on:
-seventy more people is a van, six percent is a conversation. Green when it rises,
-red when it falls.
+It is a **percentage** of the basis it is compared against — *+13% vs 12 prior
+services*. Signed, green when it rises, red when it falls. Whole points for
+attendance; tenths of a point for sound, where a real swing across a service is
+usually a few percent or less and a whole point would round it away.
 
-It is the difference between the two figures it is derived from, both rounded to
-the precision the tile prints — whole people, tenths of a decibel — so it can
-never disagree with the number above it.
+It is taken from the two figures the tile itself prints, both rounded to the
+precision they show — whole people, tenths of a decibel — before the percentage
+is taken, so it can never disagree with the numbers above it.
+
+**The basis is counted in services, not days.** A first-N comparison and a
+whole-day comparison can rest on the exact same prior days and still be worth a
+different number: ten prior days is 20 services under a first-two basis, and
+however many those ten days actually ran under a whole-day one. Counting
+services carries that distinction on its own, with no separate word for which
+basis produced it. The count is always the real one — taken only from services
+that fed the average, never the day count times N — so a prior day a first-N
+basis excludes for running too few services contributes nothing to it either.
 
 **The range control governs it.** 8, 16 or 52 weeks, or All — the same buttons
 that bound the chart, so a tile is compared against exactly the completed days
 drawn underneath it. Below **three** qualifying days it reads *no prior window
 yet* instead: one or two readings are not an average, and a change off them is
-noise wearing a direction. The label always names the real day count, so a thin
-basis is visible as one rather than passed off as a season's worth — which
-matters most at the 8-week range.
+noise wearing a direction.
 
 The tiles are ordered by the figure each one shows — the latest day, highest
 first — so the order you read is the order of the numbers in it. The first type

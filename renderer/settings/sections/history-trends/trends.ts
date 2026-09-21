@@ -411,20 +411,36 @@ export interface TypeTrend {
    * The same two figures, UNROUNDED.
    *
    * The tile rounds them to the precision it prints — whole people, tenths of a
-   * decibel — and takes the change as the difference of those two rounded
-   * numbers, so what it shows is always exactly the difference between the two
-   * figures it is derived from. A change taken from unrounded values prints "+1"
-   * beside two numbers that are equal on screen, which is the bug the old
-   * percentage had.
+   * decibel — and takes the change as a PERCENTAGE of those two rounded
+   * numbers, so a change taken from two figures that read identically on
+   * screen is always exactly 0%. A percentage taken from the raw values instead
+   * prints a residual off two numbers a reader cannot tell apart, which is the
+   * bug the card's percentage had before this figure was added and the card
+   * printed an absolute difference instead for a while.
    *
    * Null on exactly the same condition as their rounded pair.
    */
   latestRaw: number | null;
   priorAverageRaw: number | null;
-  /** How many prior days actually fed `priorAverage` — in range, and over the
-   *  `serviceCount` bar where the state applies one. Zero when there is no
-   *  comparison. */
-  priorCount: number;
+  /**
+   * How many prior SERVICES actually fed `priorAverage` — never days.
+   *
+   * A whole-day basis and a first-N basis can both rest on the SAME prior
+   * days and still be worth a different number: eleven prior days is 11×N
+   * services under a first-N basis, and whatever those eleven days actually
+   * ran under a whole-day one — a completed two-service summer Sunday beside
+   * three-service ones does not contribute the same count as either
+   * neighbour. Counting services rather than days carries that distinction on
+   * its own, so the label needs no separate word for which basis produced it
+   * — see `basisLabel` in trends-card.tsx.
+   *
+   * Never days times N: taken by summing what each basis day actually
+   * contributed to `priorMean`, the same slice `combineFirst` itself took, so
+   * the count cannot drift from the average it is claiming to describe.
+   *
+   * Zero when there is no comparison — see `priorAverage`.
+   */
+  priorServiceCount: number;
 }
 
 function mean(values: number[]): number | null {
@@ -676,9 +692,16 @@ export function typeTrends(
     const basisDays = basisOf(state) === "whole-day"
       ? inRange
       : inRange.filter((d) => d.values.length >= serviceCount);
+    /** How many of ONE basis day's services feed the comparison: every one of
+     *  them for a whole-day basis, or the first `serviceCount` for a first-N
+     *  basis. Capped at what the day actually ran — which the filter above
+     *  already guarantees is at least `serviceCount` for a first-N basis, but
+     *  the cap keeps this correct even if that ever changes, and it is
+     *  exactly the slice `combineFirst` itself takes. */
+    const basisSlice = (d: DayServices): number =>
+      basisOf(state) === "whole-day" ? d.values.length : Math.min(d.values.length, serviceCount);
     const priorMean = basisDays.length >= MIN_PRIOR_DAYS
-      ? mean(basisDays.map((d) =>
-        combineFirst(d.values, basisOf(state) === "whole-day" ? d.values.length : serviceCount, measure)))
+      ? mean(basisDays.map((d) => combineFirst(d.values, basisSlice(d), measure)))
       : null;
 
     const rounded = latest == null ? null : Math.round(latest);
@@ -701,7 +724,11 @@ export function typeTrends(
       // was not made.
       latestRaw: comparable ? latest : null,
       priorAverageRaw: comparable ? priorMean : null,
-      priorCount: comparable ? basisDays.length : 0,
+      // SUMMED, not days times N: a whole-day basis's prior days do not all
+      // run the same count, so only adding up each day's own contribution to
+      // `priorMean` — never a multiplication — stays correct when the mix is
+      // uneven, e.g. a two-service summer Sunday beside three-service ones.
+      priorServiceCount: comparable ? basisDays.reduce((sum, d) => sum + basisSlice(d), 0) : 0,
     });
   }
   // BY THE NUMBER ON THE TILE, so the order a reader sees is the order of the

@@ -213,7 +213,8 @@ describe("a service type's trend tile", () => {
     assert.deepEqual(tile.recent.map((d) => d.v), [2300, 2300, 2300, 2300, 2700], "five DAYS, not fifteen recordings");
     assert.equal(tile.latest, 2700, "the latest day's total, not its busiest service");
     assert.equal(tile.priorAverage, 2300);
-    assert.equal(tile.priorCount, 4);
+    // SERVICES, not days: four whole three-service Sundays is 12, not 4.
+    assert.equal(tile.priorServiceCount, 12);
     assert.equal(delta(tile), 400, "2,700 against 2,300");
   });
 
@@ -228,7 +229,7 @@ describe("a service type's trend tile", () => {
     const [tile] = typeTrends(weekly("weekend", [...Array(11).fill(100), 200]));
     assert.equal(tile.recent.length, TREND_WINDOW, "the sparkline still draws a window");
     assert.equal(tile.latest, 200);
-    assert.equal(tile.priorCount, 11, "the basis was clipped to the sparkline's window");
+    assert.equal(tile.priorServiceCount, 11, "the basis was clipped to the sparkline's window");
     assert.equal(tile.priorAverage, 100);
     assert.equal(delta(tile), 100, "200 against 100 is +100");
   });
@@ -239,7 +240,7 @@ describe("a service type's trend tile", () => {
     // One line per case, so two branches adding different ones merge cleanly.
     const at = (n: number) => {
       const [tile] = typeTrends(weekly("weekend", Array(n).fill(100)));
-      return [n, delta(tile), tile.priorCount, tile.priorAverage];
+      return [n, delta(tile), tile.priorServiceCount, tile.priorAverage];
     };
     assert.deepEqual(
       [1, 2, 3, 4, 8, 9, 20].map(at),
@@ -261,20 +262,20 @@ describe("a service type's trend tile", () => {
   });
 
   test("a prior average of zero is no comparison, and says so in both fields", () => {
-    // `change` already refused to divide by it. `priorCount` did not, so a tile
+    // `change` already refused to divide by it. `priorServiceCount` did not, so a tile
     // could read "no prior window yet" beside a count of 4 — a label for a
     // comparison that was never made. One condition, read by both.
     const [tile] = typeTrends(weekly("weekend", [...Array(4).fill(0), 150]));
     assert.equal(tile.priorAverage, 0, "the window is there and its average really is zero");
     assert.equal(delta(tile), null, "a zero prior window is not something to compare against");
-    assert.equal(tile.priorCount, 0, "so nothing was compared against, and the label must not claim otherwise");
+    assert.equal(tile.priorServiceCount, 0, "so nothing was compared against, and the label must not claim otherwise");
   });
 
   test("a thin comparison reports the count it actually used", () => {
-    // The label reads "vs prior 3". It must be the REAL number, not the window
-    // the tile would like to have had.
+    // The label reads "vs 3 prior services". It must be the REAL number, not
+    // the window the tile would like to have had.
     const [tile] = typeTrends(weekly("weekend", [...Array(3).fill(100), 150]));
-    assert.equal(tile.priorCount, 3);
+    assert.equal(tile.priorServiceCount, 3);
     assert.equal(tile.priorAverage, 100);
     assert.equal(tile.latest, 150);
     assert.equal(delta(tile), 50, "150 against 100 is +50");
@@ -286,12 +287,12 @@ describe("a service type's trend tile", () => {
     const atFloor = typeTrends(weekly("weekend", Array(MIN_PRIOR_DAYS + 1).fill(100)))[0];
     assert.equal(delta(below), null);
     assert.equal(delta(atFloor), 0);
-    assert.equal(atFloor.priorCount, MIN_PRIOR_DAYS);
+    assert.equal(atFloor.priorServiceCount, MIN_PRIOR_DAYS);
     // TREND_WINDOW bounds the SPARKLINE and nothing else: the basis keeps every
     // prior day, which here is one short of three windows.
     const long = typeTrends(weekly("weekend", Array(TREND_WINDOW * 3).fill(100)))[0];
     assert.equal(long.recent.length, TREND_WINDOW);
-    assert.equal(long.priorCount, TREND_WINDOW * 3 - 1);
+    assert.equal(long.priorServiceCount, TREND_WINDOW * 3 - 1);
   });
 
   test("a type with one recorded day shows no change at all", () => {
@@ -302,7 +303,7 @@ describe("a service type's trend tile", () => {
     const [one] = typeTrends(weekly("weekend", [250]));
     assert.equal(one.latest, 250, "one recorded day still has a figure — itself");
     assert.equal(delta(one), null, "with nothing before it, there is no change to show");
-    assert.equal(one.priorCount, 0);
+    assert.equal(one.priorServiceCount, 0);
     assert.deepEqual(typeTrends([]), [], "no recordings at all is no tile, not an empty one");
   });
 
@@ -372,7 +373,10 @@ describe("one Sunday morning, in its three states", () => {
     assert.equal(tile.latest, 1700, "1,100 finished + the 600 in the room now");
     assert.equal(tile.priorAverage, 1500, "the basis is not the prior days' first TWO");
     assert.equal(delta(tile), 200, "1,700 against 1,500");
-    assert.equal(tile.priorCount, 6);
+    // SERVICES, not days: six prior Sundays' first TWO is 12, not 6 — see the
+    // "THE LAST SERVICE RUNNING" case below, whose whole-day basis covers the
+    // same six Sundays and is worth 18.
+    assert.equal(tile.priorServiceCount, 12);
   });
 
   test("and the comparison CLOSES as that service fills, rather than diverging", () => {
@@ -414,8 +418,8 @@ describe("one Sunday morning, in its three states", () => {
     const live = typeTrends(sunday(1, true), { clock: clock(1) })[0];
     const ended = typeTrends(sunday(2, false), { clock: clock(1) })[0];
     assert.deepEqual(
-      [live.latest, live.serviceCount, live.priorAverage, live.priorCount],
-      [ended.latest, ended.serviceCount, ended.priorAverage, ended.priorCount],
+      [live.latest, live.serviceCount, live.priorAverage, live.priorServiceCount],
+      [ended.latest, ended.serviceCount, ended.priorAverage, ended.priorServiceCount],
       "the tile moved when service two ended",
     );
     // What DOES change: the day stops being drawn dashed only when the DAY ends,
@@ -433,6 +437,12 @@ describe("one Sunday morning, in its three states", () => {
     assert.equal(tile.latest, 2600, "1,100 + 600 + the 900 still in the room");
     assert.equal(tile.priorAverage, 2300, "the basis is not prior days' whole totals");
     assert.equal(delta(tile), 300);
+    // THE GUARD ON THE WHOLE POINT OF COUNTING SERVICES: the same six prior
+    // Sundays as "SERVICE TWO OF THREE RUNNING" above, but a whole-day basis
+    // is worth 18 services (six days of three) where that first-N basis was
+    // worth 12 (six days of two). Counting DAYS could not tell the two bases
+    // apart — both would have read 6.
+    assert.equal(tile.priorServiceCount, 18);
   });
 
   test("and the figure and its basis do not JUMP when that service ends", () => {
@@ -441,8 +451,8 @@ describe("one Sunday morning, in its three states", () => {
     const done = typeTrends(sunday(3, false), { clock: clock(3) })[0];
     assert.equal(done.state, "finished");
     assert.deepEqual(
-      [done.latest, done.priorAverage, done.priorCount],
-      [live.latest, live.priorAverage, live.priorCount],
+      [done.latest, done.priorAverage, done.priorServiceCount],
+      [live.latest, live.priorAverage, live.priorServiceCount],
       "the tile moved when the last service ended",
     );
   });
@@ -517,7 +527,9 @@ describe("one Sunday morning, in its three states", () => {
     });
     assert.equal(tile.state, "earlier-services");
     assert.equal(tile.serviceCount, 3, "two finished and a third on air");
-    assert.equal(tile.priorCount, 4, "the one-service Sunday was counted in a three-service comparison");
+    // Four qualifying Sundays of three is 12 — the short, one-service Sunday
+    // contributes NONE of it, not even the one service it has.
+    assert.equal(tile.priorServiceCount, 12, "the one-service Sunday leaked a service into a three-service comparison");
     assert.equal(tile.priorAverage, 2300, "a short day dragged the basis down");
   });
 
@@ -544,7 +556,12 @@ describe("one Sunday morning, in its three states", () => {
     assert.equal(tile.state, "finished");
     assert.equal(tile.latest, 1500, "the day's own two services");
     // Four whole 2,300 days and one whole 1,500 day: (4*2300 + 1500)/5 = 2140.
-    assert.equal(tile.priorCount, 5, "a prior day was excluded for running fewer services");
+    // No day is excluded from a whole-day basis — the point of this fixture —
+    // but they do not all run the SAME count: four threes and one two is 14
+    // services, never 5 times any single N. Days times today's N (2) would
+    // say 10; days times the OTHER Sundays' N (3) would say 15. Only summing
+    // each day's own contribution gets 14.
+    assert.equal(tile.priorServiceCount, 14, "a prior day was excluded, or counted at the wrong size, for running fewer services");
     assert.equal(tile.priorAverage, 2140);
     assert.equal(delta(tile), -640, "the summer drop is visible, which is the point");
   });
@@ -576,7 +593,7 @@ describe("the range control governs the comparison", () => {
     // exactly the days drawn under it.
     const at = (weeks: number | undefined) => {
       const [tile] = typeTrends(rising(), { weeks });
-      return [weeks ?? "all", tile.priorCount];
+      return [weeks ?? "all", tile.priorServiceCount];
     };
     // One line per range, so two branches adding different ones merge cleanly.
     assert.deepEqual(
@@ -836,7 +853,7 @@ describe("the sound measure", () => {
     );
     assert.equal(tile.latest, 100);
     assert.equal(tile.priorAverage, 94);
-    assert.equal(tile.priorCount, MIN_PRIOR_DAYS, "the relaxed floor applies to sound too");
+    assert.equal(tile.priorServiceCount, MIN_PRIOR_DAYS, "the relaxed floor applies to sound too");
     assert.equal(delta(tile), 6);
   });
 

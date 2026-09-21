@@ -41,7 +41,6 @@ import {
   writeColorAssignment,
 } from "./series-colors";
 import {
-  basisOf,
   DEFAULT_RANGE_WEEKS,
   dailyValues,
   RANGE_WEEKS,
@@ -56,7 +55,6 @@ import {
   type TrendClock,
   type TrendMeasure,
   type TrendRecording,
-  type TrendState,
 } from "./trends";
 
 /** The range choice, per browser — a view preference, like every other one in
@@ -123,6 +121,27 @@ const TREND_LINE_WIDTH = 2;
 const DECIMALS: Record<TrendMeasure, number> = { attendance: 0, sound: 1 };
 
 /**
+ * Decimal places a tile's CHANGE PERCENTAGE prints at.
+ *
+ * A SEPARATE decision from DECIMALS, even though today's values match it:
+ * DECIMALS answers "how precisely does this measure's own unit print," and
+ * reusing it here would let a third measure inherit a percentage precision
+ * nobody actually chose for it. Keyed by TrendMeasure for the same reason
+ * DECIMALS is, and the same reason DAY_FIGURE and COMPARABLE_ABOVE are in
+ * trends.ts: a third measure cannot be added without deciding it.
+ *
+ * Attendance: whole points. A congregation runs from dozens to thousands, so
+ * a point of percentage is already a handful of people — finer than that is
+ * false precision on a figure nobody can act on to that resolution.
+ *
+ * Sound: tenths. Decibels live in a narrow band, roughly 60 to 110, so most
+ * real swings across a service are a few percent or less. Whole-percent
+ * rounding would print "0%" for a change the absolute figure used to show as
+ * real movement — a quarter of a decibel against a 90 dB basis is 0.3%.
+ */
+const PCT_DECIMALS: Record<TrendMeasure, number> = { attendance: 0, sound: 1 };
+
+/**
  * "Sep 20" from a `YYYY-MM-DD`.
  *
  * The same words and the same order the chart's date axis uses under it, so the
@@ -136,37 +155,28 @@ function fmtDayShort(day: string): string {
 }
 
 /**
- * What a tile's change was measured against.
+ * "22 prior services" — what a tile's percentage change was measured against.
  *
- * THE SAME TILE MEANS THREE DIFFERENT THINGS ACROSS A MORNING — see TrendState —
- * so the label has to say which, or a reader is left guessing whether the figure
- * beside it is comparing slices or whole days:
+ * ONE shape for both comparison modes. The two-clause label this replaced —
+ * "first 2 services, 11 days" beside "11 full days" — spelled out in words
+ * which basis was in use, because the day count alone could not tell them
+ * apart: eleven prior days reads the same whether the tile is comparing
+ * first-twos or whole totals. Counting the basis in SERVICES instead carries
+ * that distinction on its own — the same eleven prior days is 22 services
+ * under a first-two basis, and however many those eleven days actually ran
+ * under a whole-day one — so the number differs correctly between the two
+ * modes and the sentence around it never has to say which produced it. See
+ * `priorServiceCount` in trends.ts for how the count itself is taken.
  *
- *   earlier-services   "first 2 services, 10 days"
- *   last-service-live  "11 days"
- *   finished           "11 days"
+ * "prior service" rather than "prior services" only at exactly one, which
+ * MIN_PRIOR_DAYS keeps out of reach today but costs nothing to spell right.
  *
- * The last two read alike on purpose: they ARE the same comparison, and the
- * number does not move when the service ends.
- *
- * The DAY COUNT is always there, and always the real one — a comparison resting
- * on four days says four rather than being passed off as a season's worth. That
- * matters more now the range can be narrowed to eight weeks.
- *
- * "first service" rather than "first 1 services" at N = 1, which is the common
- * case on a Sunday morning and the one an operator reads most.
- *
- * Exported for its own test: it is the sentence that has to stay honest, and the
- * truncation on the tile means a browser will not always show all of it.
+ * Exported for its own test: the number has to stay honest about a thin
+ * comparison, and the sentence around it is what a browser will not always
+ * show in full.
  */
-export function basisLabel(state: TrendState, serviceCount: number, priorDays: number): string {
-  const days = `${priorDays} day${priorDays === 1 ? "" : "s"}`;
-  // FULL, spelled out, because the alternative is a slice: "vs 11 days" beside
-  // "vs first 2 services, 10 days" leaves a reader to infer the mode from what
-  // the label does NOT say, and the two states are worth different numbers.
-  if (basisOf(state) === "whole-day") return `${priorDays} full day${priorDays === 1 ? "" : "s"}`;
-  const slice = serviceCount === 1 ? "first service" : `first ${serviceCount} services`;
-  return `${slice}, ${days}`;
+export function basisLabel(priorServices: number): string {
+  return `${priorServices} prior service${priorServices === 1 ? "" : "s"}`;
 }
 
 /** Round to a measure's own precision. */
@@ -176,21 +186,41 @@ function atPrecision(v: number, dp: number): number {
 }
 
 /**
- * "+71" / "−71" / "+1.2 dB", the absolute change a tile prints.
+ * The signed percentage `rawLatest` differs from `rawBasis`, taking BOTH to
+ * `dp` — the same rounding the tile's two figures print at — before dividing.
+ * Null when the basis, at that rounding, is zero or negative.
  *
- * A change that comes out at nothing is "0", not "+0" or "−0": a sign in front
- * of zero claims a direction the number denies, and which of the two you got
- * depended on the sign of a difference too small to print.
+ * ROUNDED FIRST is not optional. A percentage taken from the raw figures
+ * prints a residual off two numbers that read identically on screen — see
+ * `latestRaw` in trends.ts, which names this as the bug the card's
+ * percentage had before it was dropped for an absolute figure for a while.
+ * Two displayed-equal numbers must come out at exactly 0%.
  *
- * Absolute rather than a percentage because that is the number an operator can
- * act on — "seventy more people" is a van, "+6%" is a conversation.
+ * The null case does not fire for attendance or sound today — every basis
+ * that reaches here already cleared COMPARABLE_ABOVE in trends.ts — but a
+ * division is a new failure mode a subtraction never had, and a future
+ * signed measure that sets its own floor at or below zero must not have a
+ * percentage printed against it anyway.
  */
-export function absChange(delta: number, dp: number, unit = ""): string {
-  const v = atPrecision(delta, dp);
+export function pctChange(rawLatest: number, rawBasis: number, dp: number): number | null {
+  const basis = atPrecision(rawBasis, dp);
+  if (basis <= 0) return null;
+  const latest = atPrecision(rawLatest, dp);
+  return ((latest - basis) / basis) * 100;
+}
+
+/**
+ * "+8%" / "−8%" / "0%" — `pct` printed at `dp` decimal places.
+ *
+ * Signed the way this card's absolute change used to be, and unsigned at
+ * exactly zero for the same reason: a sign in front of zero claims a
+ * direction the number denies.
+ */
+export function pctLabel(pct: number, dp: number): string {
+  const v = atPrecision(pct, dp);
   const body = Math.abs(v).toFixed(dp);
-  const withSeparators = dp === 0 ? Number(body).toLocaleString() : body;
-  if (v === 0) return `${withSeparators}${unit}`;
-  return `${v > 0 ? "+" : "−"}${withSeparators}${unit}`;
+  if (v === 0) return `${body}%`;
+  return `${v > 0 ? "+" : "−"}${body}%`;
 }
 
 export function TrendsCard({
@@ -277,6 +307,9 @@ export function TrendsCard({
   const sound = measure === "sound";
   /** How many decimals this measure prints — see DECIMALS. */
   const dp = DECIMALS[measure];
+  /** How many decimals this measure's CHANGE PERCENTAGE prints — see
+   *  PCT_DECIMALS, a separate decision from `dp`. */
+  const pctDp = PCT_DECIMALS[measure];
   /** Counts read with separators; levels read to a tenth of a decibel, which is
    *  the precision the change beside them is worth quoting to. */
   const fmtValue = (v: number) =>
@@ -633,51 +666,45 @@ export function TrendsCard({
                   {/* No change until there is something to compare against. A
                       tile with one window of recordings says so rather than
                       printing a figure derived from nothing. */}
-                  {t.latestRaw != null && t.priorAverageRaw != null ? (
+                  {(() => {
+                    const pct = t.latestRaw != null && t.priorAverageRaw != null
+                      ? pctChange(t.latestRaw, t.priorAverageRaw, dp)
+                      : null;
                     // UP is good and DOWN is not, so the change is green or red
                     // rather than the series colour — the series colour is
                     // already carried by the sparkline beside it, and spending
                     // it twice on one tile leaves the direction, which is the
                     // thing being read, with no colour at all.
-                    //
-                    // The difference of the two ROUNDED figures, at the
-                    // measure's own precision, so it is always exactly the gap
-                    // between the number above it and the one it names.
-                    (() => {
-                      const delta = atPrecision(t.latestRaw, dp) - atPrecision(t.priorAverageRaw, dp);
-                      return (
-                        <span
-                          data-trend-change
-                          className={cn("text-caption1", delta >= 0 ? "text-ok-11" : "text-danger-11")}
-                        >
-                          {absChange(delta, dp, sound ? " dB" : "")}{" "}
-                          {/* WHAT WAS ACTUALLY COMPARED, both halves of it. The
-                              slice, because "+40" against a Sunday with one of
-                              three services done means something different from
-                              "+40" against a whole one, and the reader cannot
-                              tell which without it. And the REAL number of prior
-                              days that had that many services to offer, never
-                              the count it would like to have had — a comparison
-                              resting on four days says four. */}
-                          <span className="text-fg-subtle">vs {basisLabel(t.state, t.serviceCount, t.priorCount)}</span>
-                        </span>
-                      );
-                    })()
-                  ) : (
-                    <span data-trend-change className="text-caption1 text-fg-subtle">
-                      {/* A type with nothing under THIS measure keeps its tile
-                          and says so, rather than vanishing when you switch —
-                          which reads as the service type having disappeared. */}
-                      {t.latest != null
-                        ? "no prior window yet"
-                        // A tile with no level because the SUMMARY would not
-                        // load is not a service type that recorded no sound.
-                        // Same lie as the empty plot's, one level down.
-                        : sound
-                          ? soundUnavailable ? "sound unavailable" : "no sound recorded"
-                          : "no attendance recorded"}
-                    </span>
-                  )}
+                    return pct != null ? (
+                      <span
+                        data-trend-change
+                        className={cn("text-caption1", pct >= 0 ? "text-ok-11" : "text-danger-11")}
+                      >
+                        {pctLabel(pct, pctDp)}{" "}
+                        {/* THE REAL number of prior SERVICES that fed the
+                            average, never the count it would like to have had
+                            — a comparison resting on 12 services says 12. See
+                            `priorServiceCount` in trends.ts. */}
+                        <span className="text-fg-subtle">vs {basisLabel(t.priorServiceCount)}</span>
+                      </span>
+                    ) : (
+                      <span data-trend-change className="text-caption1 text-fg-subtle">
+                        {/* A type with nothing under THIS measure keeps its tile
+                            and says so, rather than vanishing when you switch —
+                            which reads as the service type having disappeared.
+                            The same fallback also covers a basis `pctChange`
+                            refused to divide by — see its own comment. */}
+                        {t.latest != null
+                          ? "no prior window yet"
+                          // A tile with no level because the SUMMARY would not
+                          // load is not a service type that recorded no sound.
+                          // Same lie as the empty plot's, one level down.
+                          : sound
+                            ? soundUnavailable ? "sound unavailable" : "no sound recorded"
+                            : "no attendance recorded"}
+                      </span>
+                    );
+                  })()}
                 </div>
                 </div>
               </div>
