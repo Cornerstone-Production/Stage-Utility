@@ -141,10 +141,6 @@ function dayGroupId(day: string): string {
   return `history-day-${day}`;
 }
 
-
-
-/** Tailwind text color for a trend tone (semantic status tokens). */
-
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
 function toTimeInput(iso: string | null): string {
   if (!iso) return "";
@@ -209,11 +205,6 @@ export function editedTooltip(it: ServiceTimelineItem): string {
   return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
 }
 
-
-
-
-
-
 /** One record's share of a Rebuild from raw — mirrors RebuiltRecord in
  *  main/services/history-edit.ts. */
 interface RebuiltRecord {
@@ -251,7 +242,6 @@ export function describeRebuild(out: RebuildOutcome): string {
   return parts.join(" · ");
 }
 
-/** Baptism sessions that overlap a service's recorded window. */
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
 export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
