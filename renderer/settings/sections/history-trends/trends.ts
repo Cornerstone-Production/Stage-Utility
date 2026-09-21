@@ -31,14 +31,16 @@ export interface TrendRecording {
   /**
    * The recording has ENDED.
    *
-   * Nothing in this module counts a service that is still running: not the
-   * tiles, not the sparkline, not the chart's line. A half-finished 9 o'clock is
-   * not a smaller 9 o'clock, and a figure that climbs while you watch it cannot
-   * be compared against anything. It joins the trend when it ends.
+   * WHICH service is running decides what this module does with it — see
+   * `stateOf`. An EARLIER service still on air is counted by nothing: a
+   * half-finished 9 o'clock is not a smaller 9 o'clock, and with one of three
+   * done the day is worth one service and is compared against other days' first
+   * one rather than their full three.
    *
-   * It is also what makes a partial Sunday comparable — see `typeTrends`. With
-   * one of three services done the day counts ONE, and the comparison is against
-   * other days' first service rather than against their full three.
+   * The LAST service of the day is the exception, and it is counted live. The
+   * day's figure climbs as the room fills, against whole days, so that the
+   * number does not jump the moment the service ends — the only thing that
+   * changes then is that the line stops being dashed.
    */
   complete: boolean;
 }
@@ -334,9 +336,11 @@ export interface TypeTrend {
    * a number that therefore never moved. What an operator opens this tab for is
    * the Sunday that just happened.
    *
-   * A service still running is not in it. The figure holds still through a
-   * service and steps when it ends, and a morning that has finished nothing
-   * falls back to the last day that did rather than reading zero.
+   * An EARLIER service still running is not in it, so the figure steps as each
+   * one ends rather than climbing mid-service against a basis it cannot be
+   * compared to. The day's LAST service is, and that one climbs on purpose. A
+   * morning that has finished nothing and has more to come falls back to the
+   * last day that did rather than reading zero.
    */
   latest: number | null;
   /**
@@ -499,9 +503,16 @@ interface DayServices {
  */
 function countedFor(day: DayServices, state: TrendState): { values: number[]; provisional: boolean } {
   const live = day.running[day.running.length - 1];
+  // PROVISIONAL is "this figure is not final", which is true of ANY day that is
+  // not over — the one climbing right now, and equally the one that will step
+  // when its next service ends. Only the first of those counts a live value;
+  // both need the line into them drawn dashed, because a solid line into a
+  // Sunday with one of three services done draws a cliff the tile beside it
+  // spends its whole label denying.
+  const provisional = state !== "finished";
   return state === "last-service-live" && live != null
-    ? { values: [...day.values, live.v], provisional: true }
-    : { values: day.values, provisional: false };
+    ? { values: [...day.values, live.v], provisional }
+    : { values: day.values, provisional };
 }
 
 /**
@@ -512,9 +523,11 @@ function countedFor(day: DayServices, state: TrendState): { values: number[]; pr
  * it: comparing a partial Sunday like for like means taking each prior day's
  * FIRST N services, and a day reduced to one number has thrown that away.
  *
- * A recording is skipped when it is still running, or when it has nothing under
- * this measure. A service nobody counted is not a service of nobody, and a day
- * where two of three services had a counter running is worth those two.
+ * A recording with nothing under this measure is skipped: a service nobody
+ * counted is not a service of nobody, and a day where two of three services had
+ * a counter running is worth those two. A recording that is still RUNNING is
+ * kept aside in `running` rather than dropped — whether it counts depends on
+ * whether it is the day's last, which is `stateOf`'s question, not this one's.
  */
 function dayServices(recordings: TrendRecording[], measure: TrendMeasure): DayServices[] {
   const pick = measureOf(measure);

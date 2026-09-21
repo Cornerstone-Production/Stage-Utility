@@ -615,11 +615,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
           // HAS IT ENDED. The same test the row beside it calls `live`, off the
           // same record: the timeline when there is one, otherwise the arrival
-          // ramp's own. A trend counts nothing that is still running — see
-          // TrendRecording.complete — so the figure holds still through a
-          // service and steps when it ends, and a Sunday with one of three done
-          // is compared against other Sundays' first service rather than their
-          // full three.
+          // ramp's own. What a trend DOES with that depends on which service is
+          // running — see `stateOf` in trends.ts. An earlier service still on
+          // air is not counted and the day is compared by its finished ones; the
+          // LAST service of the day is counted live, against whole days, so the
+          // figure does not jump the moment it ends.
           complete: r.timeline ? r.timeline.endedAt != null : r.attendance?.endedAt != null,
         };
       });

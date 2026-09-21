@@ -649,6 +649,20 @@ describe("a recording that is still running", () => {
     assert.equal(last.provisional, true, "the node is not marked as still moving");
     assert.deepEqual(days.slice(0, -1).map((d) => d.provisional), [false, false, false]);
   });
+
+  test("a day with EARLIER services still to run is provisional too, without counting one", () => {
+    // Driven in Chrome and it is why this exists: with one of three services
+    // done the line plunged from ~3,500 to 1,252 in a solid stroke, drawing
+    // exactly the collapse the tile beside it spends its whole label denying.
+    // Provisional is "not final", not "climbing" — the two differ in whether a
+    // live value is counted, not in whether the day is over.
+    const recs = sundays("weekend", 4, [1000, 500, 800], { done: 1, running: true });
+    const days = dailyValues(recs, "attendance", sundayClock(4, 3, 1));
+    const last = days[days.length - 1];
+    assert.equal(last.v, 1000, "the service on air was counted into an earlier-services day");
+    assert.equal(last.provisional, true, "the line into a part-finished day draws solid");
+    assert.deepEqual(days.slice(0, -1).map((d) => d.provisional), [false, false, false]);
+  });
 });
 
 

@@ -346,7 +346,9 @@ export function TrendsCard({
     // blue on Attendance and green on Sound.
     const order = tiles.map((t) => t.serviceTypeId ?? "").filter((k) => byType.has(k));
     for (const k of byType.keys()) if (!order.includes(k)) order.push(k);
-    return order.map((key, i) => ({
+    return order.map((key, i) => {
+      const days = dailyValues(byType.get(key) ?? [], measure, clock);
+      return {
       id: key || "all",
       label: tiles.find((t) => (t.serviceTypeId ?? "") === key)?.name ?? "Services",
       color: colorOf(key),
@@ -371,13 +373,19 @@ export function TrendsCard({
       // drawn, as scatter dots; they read as noise nobody could name and are
       // gone. The SAME call the tiles make, so the last node on a line and the
       // number on the tile above it cannot differ.
-      points: dailyValues(byType.get(key) ?? [], measure, clock).map((d) => ({ t: d.t, v: d.v })),
+      points: days.map((d) => ({ t: d.t, v: d.v })),
       // The final segment draws dashed with its node marked while the day it
       // runs into is still going — see TrendState. A glance then reads "not done
-      // yet" rather than "collapsed".
-      provisional: tiles.find((t) => (t.serviceTypeId ?? "") === key)?.state === "last-service-live",
+      // yet" rather than "collapsed", which is what a solid line into a Sunday
+      // with one of three services done actually draws.
+      //
+      // Off the LAST PLOTTED DAY, not off the tile's state: the tile falls back
+      // to an older day when today has nothing finished yet, and reading its
+      // state here would dash a day that ended weeks ago.
+      provisional: days[days.length - 1]?.provisional === true,
       format: fmtValue,
-    }));
+      };
+    });
     // `fmtValue` is a fresh closure every render; what it depends on is the
     // measure, which IS a dependency. `colorOf` reads `colorIndexes`, which is
     // one too.

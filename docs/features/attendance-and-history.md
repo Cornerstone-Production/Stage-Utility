@@ -193,10 +193,12 @@ the current measure is not plotted at all, because a service nobody counted is
 not a service of nobody, and one with no meter running is not a silent one.
 
 The segment running into a day that has **not finished** is drawn dashed, with a
-hollow node on its end, and both move as the room fills. A solid line into a
-Sunday whose evening service is half over would read as a collapse rather than as
-a morning in progress. Under `prefers-reduced-motion` the node stops pulsing and
-the dash stays: the dash is the information.
+hollow node on its end. A solid line into a Sunday with one of three services
+done plunges from three thousand to one, drawing a collapse that the tile beside
+it spends its whole label denying; dashed, the same node reads "not done yet".
+Both states get it — the one climbing as the room fills, and the one that will
+step when its next service ends. Under `prefers-reduced-motion` the node stops
+pulsing and the dash stays: the dash is the information, the beat is decoration.
 
 Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
 change figure, its line, its legend swatch and its milestones. The colour is

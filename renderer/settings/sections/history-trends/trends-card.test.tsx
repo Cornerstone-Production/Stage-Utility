@@ -374,6 +374,20 @@ describe("a Sunday morning on the card", () => {
     view.unmount();
   });
 
+  test("a day with EARLIER services still to run is dashed too", async () => {
+    // Driven in Chrome and it is why this exists: with one of three done the
+    // line plunged from ~3,500 to 1,252 in a SOLID stroke, drawing the collapse
+    // the tile beside it spends its whole label denying. Dashed, the same node
+    // reads "not done yet".
+    const view = await renderCard(partSunday(1, true), { clock: clockAt(1) });
+    const prov = view.container.querySelector('[data-series-provisional="weekend"]');
+    assert.ok(prov, "a part-finished day is drawn as if it were final");
+    assert.match(prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "", /\d/);
+    // And it counts NOTHING live: the tile is the first service's figure alone.
+    assert.equal(figure(view), "1,100");
+    view.unmount();
+  });
+
   test("a finished day carries no provisional segment at all", async () => {
     const view = await renderCard(partSunday(3, false), { clock: clockAt(3) });
     assert.equal(
