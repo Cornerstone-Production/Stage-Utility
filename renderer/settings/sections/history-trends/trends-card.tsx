@@ -22,6 +22,12 @@
 // are all invisible to it. Those were driven in Chrome at 1280 and 600, light
 // and dark, against a real three-month archive. The arithmetic is tested in
 // trends.test.ts and the mark geometry in the chart module's own tests.
+//
+// THE CHANGE LABEL'S OWN WIDTH IS THE SAME BLIND SPOT: the tests below assert
+// its TEXT ("+13% vs 12 prior services"), never whether it fits the tile
+// without wrapping — jsdom cannot measure that. It is one clause shorter than
+// the label it replaced, but that is an expectation, not something this
+// session drove in a browser to confirm.
 
 import { useEffect, useMemo, useState } from "react";
 
