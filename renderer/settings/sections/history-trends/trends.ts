@@ -160,6 +160,14 @@ export interface TypeTrend {
    */
   latest: number | null;
   /**
+   * The `YYYY-MM-DD` that `latest` belongs to. Null when `recent` is empty.
+   *
+   * On the tile beside the figure, because "latest day" is a relative phrase: a
+   * type that has not recorded for three weeks shows a three-week-old number and
+   * nothing on screen says so.
+   */
+  latestDate: string | null;
+  /**
    * Mean of the OTHER days in `recent` — the up-to-`TREND_WINDOW - 1` days drawn
    * beside the latest on the sparkline — rounded. Null when there are fewer than
    * `MIN_PRIOR_DAYS` of them.
@@ -285,6 +293,7 @@ export function typeTrends(
       name: names.get(key) ?? "Services",
       recent,
       latest: rounded,
+      latestDate: recent.length ? recent[recent.length - 1].date : null,
       priorAverage: priorRounded,
       // A prior average of ZERO is not something to claim a comparison
       // against. One condition, read by all three, so a tile cannot read "no

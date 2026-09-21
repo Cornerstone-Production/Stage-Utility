@@ -197,6 +197,18 @@ describe("a day with three services", () => {
       Math.max(...axis(view)) >= 3200,
       `the line is not plotting day totals — the axis only reaches ${Math.max(...axis(view))}`,
     );
+    // AND IT SAYS WHICH DAY. "latest day" is relative: a type that has not
+    // recorded for three weeks shows a three-week-old figure, and without the
+    // date nothing on screen says so. The fixture's last Sunday is the fifth
+    // from 4 Jan 2026 — 1 Feb — and the tile must name it rather than any other
+    // day in the window.
+    const dated = tile.querySelector("[data-trend-latest-date]")?.textContent ?? "";
+    assert.ok(dated, `the tile does not say which day it is showing: ${tile.textContent}`);
+    assert.equal(
+      dated,
+      new Date("2026-02-01T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      "the tile is dated some other day than the one its figure came from",
+    );
     view.unmount();
   });
 

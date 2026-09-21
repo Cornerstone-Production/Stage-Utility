@@ -114,6 +114,19 @@ const TREND_LINE_WIDTH = 2;
  */
 const DECIMALS: Record<TrendMeasure, number> = { attendance: 0, sound: 1 };
 
+/**
+ * "Sep 20" from a `YYYY-MM-DD`.
+ *
+ * The same words and the same order the chart's date axis uses under it, so the
+ * date on a tile and the date under the node it names read alike. Parsed at
+ * local midnight, not as a bare ISO date: `new Date("2026-09-20")` is UTC and
+ * lands on the 19th west of Greenwich.
+ */
+function fmtDayShort(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 /** Round to a measure's own precision. */
 function atPrecision(v: number, dp: number): number {
   const f = 10 ** dp;
@@ -521,8 +534,20 @@ export function TrendsCard({
                     day, and how that day's recordings came to one number. Under
                     sound they cannot be added, so it says "peak" there and
                     "total" for attendance. */}
-                <span className="truncate text-caption2 text-fg-subtle">
-                  {t.name} · latest day {sound ? "peak" : "total"}
+                {/* WHICH day, on the tile. "latest day" is a relative phrase and
+                    a type that has not recorded for three weeks shows a
+                    three-week-old figure under it with nothing on screen saying
+                    so. The date is pinned and the NAME truncates, so on a narrow
+                    tile the date is the last thing lost rather than the first. */}
+                <span className="flex items-baseline gap-1.5 text-caption2 text-fg-subtle">
+                  <span className="truncate">
+                    {t.name} · latest day {sound ? "peak" : "total"}
+                  </span>
+                  {t.latestDate && (
+                    <span data-trend-latest-date className="shrink-0 tabular-nums">
+                      {fmtDayShort(t.latestDate)}
+                    </span>
+                  )}
                 </span>
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span data-trend-latest className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">

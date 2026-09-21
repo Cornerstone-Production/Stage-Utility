@@ -80,7 +80,9 @@ and the change against the days drawn beside it.
 
 The unit is a **day**, never a recording. A church running a 9, an 11 and a 6
 records three figures every Sunday and the tile shows one, captioned *latest day
-total* — or *latest day peak* under the sound measure:
+total* — or *latest day peak* under the sound measure — with the date of that day
+beside it, so a type that has not recorded for three weeks does not read as this
+week:
 
 | | |
 |---|---|
