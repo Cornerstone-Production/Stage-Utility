@@ -225,8 +225,14 @@ function serviceKpisFrom(
        * Both figures are the recorder's own stored fields, which is also what
        * the dashboard's people widgets read — so the header, the Attendance
        * card, the pasted report and every layout now quote one number each.
+       *
+       * "PEAK IN ROOM", the All services row's own words for this same figure,
+       * so one number has one name on both pages. "Peak attendance" was true and
+       * did not distinguish itself from the door count beside it, which is the
+       * pair this comment exists about. The mockup says "peak attendance"; it is
+       * superseded on this point, and the spec says so.
        */
-      label: "Peak attendance",
+      label: "Peak in room",
       value: attendance && attendance.peakOccupancy > 0 ? attendance.peakOccupancy.toLocaleString() : "—",
       sub: attendance ? `${attendance.peakAttendance.toLocaleString()} entries` : undefined,
     },

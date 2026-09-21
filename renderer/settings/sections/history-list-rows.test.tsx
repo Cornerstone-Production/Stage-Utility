@@ -830,6 +830,16 @@ describe("a row's columns", () => {
     const att = ATT.find((a) => a.serviceKey === NINE.serviceKey)!;
     const kpis = new Map(serviceKpis(NINE, att, null).map((k) => [k.key, k]));
     assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "the row and the page quote different numbers");
+    // AND CALL IT THE SAME THING. One number with two names across two pages is
+    // the confusion this column was relabelled to end; the service page said
+    // "Peak attendance" while the row said "In room". Asserted as a shared word
+    // rather than a shared string, because the row has the room for a heading
+    // and a caption and the header has one label.
+    assert.match(
+      kpis.get("attendance")!.label,
+      /in.room/i,
+      `the service page calls it "${kpis.get("attendance")!.label}" while the row says "${headings[2]} / ${drawn.attendance.caption}"`,
+    );
     assert.equal(drawn.attendance.value, att.peakOccupancy.toLocaleString());
     assert.notEqual(drawn.attendance.value, att.peakAttendance.toLocaleString(), "the row is showing the door count");
   });

@@ -312,7 +312,7 @@ bottom:
   | Planned | the counted items' planned total, and the time the service would end on it |
   | Actual | what it ran, its difference against the plan, and when it ended |
   | Avg overrun | the mean per-item difference, and how many items of how many ran over |
-  | Peak attendance | the most people in the room at once, and how many came in during the service — the same two figures the Attendance card calls Peak and Entries |
+  | Peak in room | the most people in the room at once, and how many came in during the service — the same two figures the Attendance card calls Peak and Entries, and the same words the All services row uses |
   | Peak *metric* | the loudest reading on the primary Smaart metric, named after the metric it read |
 
   Started, Planned and Actual count up live while a service is recording. A
