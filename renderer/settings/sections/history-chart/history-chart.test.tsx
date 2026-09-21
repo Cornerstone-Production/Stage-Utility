@@ -190,6 +190,44 @@ describe("the stat strip", () => {
   });
 });
 
+describe("handing the hover to the caller instead of drawing a strip", () => {
+  /** Every value the chart reported, in order. */
+  function reporter() {
+    const seen: ({ time: string } | null)[] = [];
+    return { seen, onHover: (h: { time: string } | null) => seen.push(h) };
+  }
+
+  test("a chart that goes away reports null, so nothing is left describing it", () => {
+    // The Trends card draws the readout on its own subtitle row. A chart that
+    // unmounts with a hover still set — the measure switched, the range emptied,
+    // the tab left — leaves that row holding a sentence about a plot that is no
+    // longer on the page.
+    const { seen, onHover } = reporter();
+    const view = render(chart({ onHover }));
+    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: SVG_W / 2, clientY: 80 });
+    assert.ok(seen.at(-1), `the chart never reported a hover, so unmounting proves nothing: ${JSON.stringify(seen)}`);
+    view.unmount();
+    assert.equal(
+      seen.at(-1),
+      null,
+      `unmounting left the last readout standing: ${JSON.stringify(seen.at(-1))}`,
+    );
+  });
+
+  test("and it stops drawing a strip, because the caller is drawing one", () => {
+    // The other half of the same contract: a chart cannot both hand the hover
+    // over and print it, or the Trends card gets two readouts and one of them
+    // is over the plot.
+    const { onHover } = reporter();
+    render(chart({ onHover }));
+    assert.equal(
+      document.querySelectorAll("[data-history-strip]").length,
+      0,
+      "the chart is drawing a strip as well as reporting the hover",
+    );
+  });
+});
+
 describe("the plot", () => {
   test("hatches the time before and after the service window", () => {
     render(chart());
