@@ -14,18 +14,11 @@ const teardown = installDom();
 // as clean while 244 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, integrationCard } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
-
-/** Like settle(), but for a wait that needs a specific real-world duration. */
-function settleFor(ms: number): Promise<void> {
-  return act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
-}
 
 let server = installFakeServer();
 
@@ -50,14 +43,7 @@ async function openYoutube(config: Record<string, unknown>): Promise<HTMLElement
     { "/api/integrations/youtube/connect": { status: "idle" } },
   );
   const c = render(withQueryClient(<IntegrationsPanel />));
-  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
-  // and sixteen cards' worth of Switch primitives settle their own state
-  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
-  // idle()'s condition reads react-query's cache, not anything React holds
-  // back.
-  await act(async () => {
-    await idle();
-  });
+  await actIdle();
   fireEvent.click(await integrationCard(c.container, "youtube"));
   await settleFor(60);
   const content = document.querySelector<HTMLElement>('[role="dialog"]');

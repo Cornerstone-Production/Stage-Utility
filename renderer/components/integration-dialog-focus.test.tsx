@@ -28,8 +28,8 @@ const teardown = installDom();
 // as clean while 100 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, until, idle, integrationCard } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, until, actUntil, integrationCard, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -47,28 +47,6 @@ after(() =>
     teardown();
   }),
 );
-
-/**
- * Like until(), but safe for a condition that depends on React having
- * actually committed a render — closing this dialog crosses several
- * animation frames before focus lands, and each intervening re-render
- * happens outside any single fireEvent's own act() wrap. Each wait is its
- * OWN short act() scope, closed before the condition is checked again: one
- * continuous act() around the whole poll would hold back the very update
- * the condition is waiting to see (confirmed the hard way — see
- * editable-icon.test.tsx's history for the same trap).
- */
-async function actUntil(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
-  const deadline = Date.now() + capMs;
-  for (;;) {
-    if (ok()) return;
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 5));
-    });
-    if (ok()) return;
-    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
-  }
-}
 
 /** Where focus is, in a few words — never the node itself. See the note below. */
 const where = (el: Element | null): string => {
@@ -102,17 +80,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  // act()-wrapped around the whole wait, not just a flush tacked on after it:
-  // idle() polls the query cache with a plain, unwrapped setTimeout loop, and
-  // sixteen cards' worth of Switch primitives settle their own state while
-  // that loop is running — every one of those renders was landing outside any
-  // wrapper. Confirmed no deadlock risk before relying on it: idle()'s
-  // condition reads react-query's cache, which updates independent of
-  // anything React holds back, unlike a DOM-text condition (see actUntil's
-  // note above).
-  await act(async () => {
-    await idle();
-  });
+  await actIdle();
   return c;
 }
 

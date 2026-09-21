@@ -24,19 +24,14 @@ const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const React = await import("react");
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, assertAbsent, integrationCard } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, assertAbsent, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel, integrationFlashId } = await import("./integrations-panel.js");
 
 /** Like the shared settle(), but for a wait that needs a specific real-world
  *  duration. */
-function settle(ms = 0): Promise<void> {
-  return act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
-}
 
 let server = installFakeServer();
 
@@ -77,7 +72,7 @@ async function controlled(initial: string | null) {
   // change, so clearing it there wiped the very call under test.
   seen.length = 0;
   const c = render(withQueryClient(<Controlled initial={initial} />));
-  await settle(60);
+  await settleFor(60);
   return c;
 }
 
@@ -107,7 +102,7 @@ describe("the panel opens whatever it is told to", () => {
   test("clicking a card reports the id up rather than opening on its own", async () => {
     const c = await controlled(null);
     fireEvent.click(await integrationCard(c.container, "reaper"));
-    await settle(60);
+    await settleFor(60);
     assert.deepEqual(seen, ["reaper"], "the panel did not tell its parent which card was clicked");
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
@@ -115,7 +110,7 @@ describe("the panel opens whatever it is told to", () => {
   test("closing reports null up", async () => {
     await controlled("reaper");
     fireEvent.keyDown(dialog()!, { key: "Escape" });
-    await settle(60);
+    await settleFor(60);
     assert.deepEqual(seen, [null]);
     assertAbsent(dialog(), "the dialog stayed open after the parent was told to close it");
   });
@@ -123,16 +118,9 @@ describe("the panel opens whatever it is told to", () => {
   test("uncontrolled still works, and is what every other caller gets", async () => {
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    // act()-wrapped: idle() polls the query cache with a plain setTimeout
-    // loop, and sixteen cards' worth of Switch primitives settle their own
-    // state while that loop runs, outside any wrapper otherwise. No deadlock
-    // risk — idle()'s condition reads react-query's cache, not anything
-    // React holds back.
-    await act(async () => {
-      await idle();
-    });
+    await actIdle();
     fireEvent.click(await integrationCard(c.container, "reaper"));
-    await settle(60);
+    await settleFor(60);
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
 });

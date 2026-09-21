@@ -24,22 +24,11 @@ const teardown = installDom();
 // as clean while 155 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, assertAbsent, integrationCard } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, assertAbsent, integrationCard, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
-
-/** idle() polls the query cache with a plain setTimeout loop, and sixteen
- *  cards' worth of Switch primitives settle their own state while that loop
- *  runs — every one of those renders lands outside any wrapper otherwise. No
- *  deadlock risk: idle()'s condition reads react-query's cache, which
- *  updates independent of anything React holds back. */
-function loaded(): Promise<void> {
-  return act(async () => {
-    await idle();
-  });
-}
 
 let server = installFakeServer();
 
@@ -74,7 +63,7 @@ describe("a draft survives the card moving between groups", () => {
     // OBS starts dormant: the exact position the bug was reported from.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await loaded();
+    await actIdle();
 
     fireEvent.click((await tile(c, "obs")));
     await settle();
@@ -111,7 +100,7 @@ describe("a draft survives the card moving between groups", () => {
     // whichever component rendered it — so this compares the node itself.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await loaded();
+    await actIdle();
     fireEvent.click((await tile(c, "obs")));
     await settle();
 
@@ -135,7 +124,7 @@ describe("a draft survives the card moving between groups", () => {
     // the edit, and a value that reappeared later would be a surprise.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await loaded();
+    await actIdle();
 
     fireEvent.click((await tile(c, "obs")));
     await settle();

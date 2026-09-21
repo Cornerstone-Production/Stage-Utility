@@ -12,8 +12,8 @@ const teardown = installDom();
 // as clean while 286 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, blankState, assertAbsent, integrationCard } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, blankState, assertAbsent, integrationCard, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -40,14 +40,7 @@ after(() =>
 async function panel(overrides: Record<string, Partial<IntegrationState>> = {}) {
   server = installFakeServer(overrides);
   const c = render(withQueryClient(<IntegrationsPanel />));
-  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
-  // and sixteen cards' worth of Switch primitives settle their own state
-  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
-  // idle()'s condition reads react-query's cache, not anything React holds
-  // back.
-  await act(async () => {
-    await idle();
-  });
+  await actIdle();
   return c;
 }
 

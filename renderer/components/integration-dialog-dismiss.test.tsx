@@ -18,8 +18,8 @@ const teardown = installDom();
 // as clean while 88 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, blankState, assertAbsent } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, blankState, assertAbsent, settleFor } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -27,14 +27,6 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
 );
 const { IntegrationDialog } = await import("./integrations-panel.js");
 const { StrictMode } = await import("react");
-
-/** Like settle(), but for a wait that needs a specific real-world duration —
- *  catching a save mid-flight, or outlasting an artificial network delay. */
-function settleFor(ms: number): Promise<void> {
-  return act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
-}
 
 const OBS = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.id === "obs")!;
 const PROPRESENTER = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.id === "propresenter")!;

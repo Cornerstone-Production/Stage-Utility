@@ -17,8 +17,8 @@ const teardown = installDom();
 // as clean while 2097 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, assertAbsent, integrationCard } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, assertAbsent, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -26,13 +26,6 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
 );
 const { WIDE_DIALOG_IDS, WIDE_PANEL_ATTR } = await import("./integration-dialog-size.js");
 const { IntegrationsPanel } = await import("./integrations-panel.js");
-
-/** Like settle(), but for a wait that needs a specific real-world duration. */
-function settle(ms = 0): Promise<void> {
-  return act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
-}
 
 let server = installFakeServer();
 
@@ -53,16 +46,9 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function open(id: string) {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
-  // and sixteen cards' worth of Switch primitives settle their own state
-  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
-  // idle()'s condition reads react-query's cache, not anything React holds
-  // back.
-  await act(async () => {
-    await idle();
-  });
+  await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
-  await settle(60);
+  await settleFor(60);
   const d = dialog();
   assert.ok(d, `the ${id} dialog did not open`);
   return d;
@@ -183,7 +169,7 @@ describe("the dialog footer", () => {
     fireEvent.change(content.querySelector<HTMLInputElement>('[data-config-field="host"] input')!, {
       target: { value: "192.0.2.31" },
     });
-    await settle();
+    await settleFor();
     assert.equal(save.disabled, false);
     assert.equal(discard.disabled, false);
   });

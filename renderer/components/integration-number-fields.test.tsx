@@ -36,39 +36,13 @@ const teardown = installDom();
 // as clean while 1049 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, integrationCard, until } = await import(
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, integrationCard, until, actUntil, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
 const { IntegrationsPanel } = await import("./integrations-panel.js");
 const { initialConfig, numberFieldValue } = await import("./integration-number-fields.js");
-
-/** Like settle(), but for a wait that needs a specific real-world duration. */
-function settleFor(ms: number): Promise<void> {
-  return act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
-}
-
-/**
- * Like until(), but safe for a condition that depends on React having
- * actually committed a render. Each wait is its OWN short act() scope,
- * closed before the condition is checked again: one continuous act() around
- * the whole poll would hold back the very update the condition is waiting
- * to see.
- */
-async function actUntil(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
-  const deadline = Date.now() + capMs;
-  for (;;) {
-    if (ok()) return;
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 5));
-    });
-    if (ok()) return;
-    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
-  }
-}
 
 let server = installFakeServer();
 
@@ -297,14 +271,7 @@ function dialogNow(): HTMLElement {
 async function openCard(id: string, config: Record<string, unknown> = {}): Promise<void> {
   server = installFakeServer(Object.keys(config).length ? { [id]: { config } } : {});
   const c = render(withQueryClient(<IntegrationsPanel />));
-  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
-  // and sixteen cards' worth of Switch primitives settle their own state
-  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
-  // idle()'s condition reads react-query's cache, not anything React holds
-  // back.
-  await act(async () => {
-    await idle();
-  });
+  await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
   await settleFor(60);
   assert.ok(document.querySelector('[role="dialog"]'), `the ${id} dialog did not open`);

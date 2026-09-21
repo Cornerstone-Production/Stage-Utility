@@ -19,7 +19,7 @@ const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, idle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, assertAbsent, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const flashModule = await import("../app/flash.js");
@@ -29,11 +29,6 @@ const { readinessChecks } = await import("../app/home/readiness.js");
 
 /** Like the shared settle(), but for a wait that needs a specific real-world
  *  duration. */
-function settle(ms = 0): Promise<void> {
-  return act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
-  });
-}
 
 let server = installFakeServer();
 
@@ -57,14 +52,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
-  // and sixteen cards' worth of Switch primitives settle their own state
-  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
-  // idle()'s condition reads react-query's cache, not anything React holds
-  // back.
-  await act(async () => {
-    await idle();
-  });
+  await actIdle();
   return c;
 }
 
@@ -76,7 +64,7 @@ describe("a reveal opens the named integration", () => {
     // its pending target. Left set, it seeds the NEXT panel this file mounts and
     // opens a dialog nobody asked for — which is the pending-seed path working
     // as designed, and a leak between tests.
-    await settle(RESOLVE_MS);
+    await settleFor(RESOLVE_MS);
     assert.match(dialog()?.textContent ?? "", /OBS Studio/);
   });
 
@@ -84,7 +72,7 @@ describe("a reveal opens the named integration", () => {
     // Three call sites hardcode this string rather than deriving it.
     await panel();
     act(() => flashModule.flashTarget("pco-credentials"));
-    await settle(RESOLVE_MS);
+    await settleFor(RESOLVE_MS);
     assert.match(dialog()?.textContent ?? "", /Planning Center/);
   });
 
@@ -98,20 +86,20 @@ describe("a reveal opens the named integration", () => {
     assert.equal(card.getAttribute("data-flash-id"), integrationFlashId("reaper"));
 
     act(() => flashModule.flashTarget(integrationFlashId("reaper")));
-    await settle(RESOLVE_MS);
+    await settleFor(RESOLVE_MS);
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
 
   test("an unknown flash id opens nothing and does not throw", async () => {
     await panel();
     act(() => flashModule.flashTarget("something-else-entirely"));
-    await settle();
+    await settleFor();
     assertAbsent(dialog(), "an unknown flash id opened a dialog");
     // flashTarget keeps looking for up to FIND_TIMEOUT_MS before giving up. Let
     // that run out while the DOM still exists: torn down underneath it, its next
     // frame throws "document is not defined" from a callback nothing is awaiting
     // and takes the whole file with it.
-    await settle(1400);
+    await settleFor(1400);
   });
 });
 
