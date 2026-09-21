@@ -99,7 +99,17 @@ async function withLogs(fn: () => Promise<void>): Promise<string[]> {
   return lines;
 }
 
-const isTranscriptPage = (r: { url: string }) => r.url.startsWith("/api/v1/transcript?");
+/**
+ * A BACKFILL page, matched on its page size.
+ *
+ * `GET /api/v1/transcript` has three callers now: backfill at the spec's maximum
+ * of 200, the silent-socket check's baseline read at `limit=1`, and the check
+ * itself at `limit=20`. A bare path match counts all three, and every assertion
+ * in this file about which pages backfill asked for would then be describing
+ * somebody else's requests.
+ */
+const isTranscriptPage = (r: { url: string }) =>
+  r.url.startsWith("/api/v1/transcript?") && new URL(r.url, "http://stub").searchParams.get("limit") === "200";
 const pageParams = (stub: ProdComStub, name: string) =>
   stub.requests.filter(isTranscriptPage).map((r) => new URL(r.url, "http://stub").searchParams.get(name));
 

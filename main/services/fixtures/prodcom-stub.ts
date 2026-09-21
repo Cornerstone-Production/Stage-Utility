@@ -17,6 +17,12 @@
 //   anything is happening. The transcript SSE stream, by contrast, sends nothing
 //   at all — 25 minutes held open produced zero bytes.
 //
+//   A socket that sends the documented `{"type":"subscribe","events":
+//   ["transcript"]}` frame can then receive no transcript entry at all, while
+//   REST goes on returning the same lines — seven connections over two days on
+//   prod, not one transcript frame. Modelled by `subscribeFilterBroken`, and it
+//   is what makes the silence guard fail when the client trusts the heartbeat.
+//
 // The WebSocket framing is hand-rolled (server frames unmasked, client frames
 // masked, per RFC 6455) because Node ships a WebSocket client but no server and
 // this repo has no `ws` dependency. Only what a test needs is implemented: text
@@ -105,6 +111,42 @@ export type StubOptions = {
   /** Open the SSE stream and immediately end it, so the client keeps
    *  reconnecting — a box whose transcript stream will not stay up. */
   sseCloseImmediately?: boolean;
+  /**
+   * Deliver transcript frames only to sockets that have NOT sent
+   * `{"type":"subscribe",…}`.
+   *
+   * The shape of the prod failure on ProdCom 2.3.2: the upgrade is accepted, the
+   * welcome frame lists the transcript stream, heartbeats arrive every 30 s, and
+   * a socket that asked for `["transcript"]` — which is what ProdCom's own
+   * OpenAPI document tells a client to send — then receives no transcript entry
+   * ever. REST has the same lines throughout. Off by default, because the
+   * default stub is a box whose subscribe works.
+   */
+  subscribeFilterBroken?: boolean;
+  /**
+   * ProdCom's own wall clock, for every `meta.timestamp` this stub emits.
+   *
+   * A ProdCom is an appliance and its clock is its own: the Ultritouch panel on
+   * this network runs about seven hours fast with no NTP. Anything this app
+   * decides by comparing one of ProdCom's timestamps against its own clock is
+   * therefore deciding on the difference between two clocks, and a test that
+   * leaves them in step cannot see it. Defaults to the host clock, so every
+   * existing case is unaffected.
+   */
+  now?: () => number;
+  /**
+   * How long to hold a `GET /api/v1/transcript` answer open before sending it,
+   * decided per request. Return 0 for no delay.
+   *
+   * A real read has up to four seconds (getJson's timeout) and the client's
+   * reconnect floor is one second, so a socket can drop and be REPLACED while
+   * one of these is still in flight. Without a delay a test cannot open that
+   * window at all — the stub answers in microseconds. A predicate rather than a
+   * flat number because the client has three callers on this endpoint and a test
+   * usually wants to slow exactly one of them; the stub stays ignorant of which
+   * is which.
+   */
+  delayTranscriptMs?: (url: URL) => number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -117,6 +159,9 @@ export type ProdComStub = {
   wsReceived: string[];
   /** How many WebSocket upgrades have been accepted. */
   wsUpgrades: number;
+  /** How many of those sockets are still open. A client that stops reading a
+   *  socket without closing it leaves this above zero. */
+  openWebSockets: number;
   /** How many SSE streams have been opened. */
   sseOpens: number;
   /** Start or stop failing the keyword endpoints AFTER the stub is running, so a
@@ -127,6 +172,19 @@ export type ProdComStub = {
    *  ProdCom that was mid-restart and now accepts it, which is the case the
    *  fallback's retry timer exists for. */
   setRefuseWebSocket(refuse: boolean): void;
+  /**
+   * Append a row to `GET /api/v1/transcript` AFTER the stub is running — what
+   * happens on the box when somebody speaks.
+   *
+   * Seeding a row through `entries` instead puts it in ProdCom's history before
+   * the client ever connects, which is a different thing entirely and cannot
+   * stand in for it: "a line the socket never delivered" means a line that
+   * appeared while the socket was up.
+   */
+  addEntry(entry: StubEntry): void;
+  /** Start or stop failing `GET /api/v1/transcript` AFTER the stub is running,
+   *  so a test can let a connection prime and then break the endpoint under it. */
+  setFailTranscript(fail: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -200,13 +258,38 @@ function decodeClientFrames(buf: Buffer): { texts: string[]; closed: boolean; re
 /** `/api/v1/channels/{id}/keywords`, capturing the id. */
 const CHANNEL_KEYWORDS = /^\/api\/v1\/channels\/([^/]+)\/keywords$/;
 
+/**
+ * The `type` of a client text frame, or null when the frame is not JSON with a
+ * string `type`.
+ *
+ * The failure is RETURNED, not swallowed: a frame this cannot read is simply not
+ * a subscribe, which is the only question the one caller asks, and there is no
+ * further caller to hand it to.
+ */
+function clientFrameType(text: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const type = (parsed as { type?: unknown }).type;
+  return typeof type === "string" ? type : null;
+}
+
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
-  const entries = options.entries ?? [];
+  // Mutable: addEntry() appends to it while the stub is running.
+  const entries = [...(options.entries ?? [])];
   const channels = options.channels ?? [];
   const channelKeywords = options.channelKeywords ?? {};
+  /** ProdCom's clock, which is not this process's — see StubOptions.now. */
+  const peerNow = (): string => new Date(options.now ? options.now() : Date.now()).toISOString();
   const requests: StubRequest[] = [];
   const wsReceived: string[] = [];
   const sockets = new Set<Duplex>();
+  /** Sockets that have sent a subscribe frame — see `subscribeFilterBroken`. */
+  const subscribed = new Set<Duplex>();
   const sseStreams = new Set<http.ServerResponse>();
   const open = new Set<import("node:net").Socket>();
 
@@ -215,7 +298,10 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     sseOpens: 0,
     failKeywords: options.failKeywords === true,
     refuseWebSocket: options.refuseWebSocket === true,
+    failTranscript: options.failTranscript === true,
   };
+  /** Responses already held once by `transcriptDelayMs`. */
+  const held = new WeakSet<http.ServerResponse>();
   const waiters: (() => void)[] = [];
   const notify = () => {
     for (const w of waiters.splice(0)) w();
@@ -225,8 +311,13 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     !options.requireBearer || headers["authorization"] === `Bearer ${options.requireBearer}`;
 
   const server = http.createServer((req, res) => {
-    requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
-    notify();
+    // On arrival, and only once: a held answer (see delayTranscriptMs) re-enters
+    // this handler, and counting it twice would tell a test two reads happened
+    // where one did.
+    if (!held.has(res)) {
+      requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
+      notify();
+    }
     const url = new URL(req.url ?? "/", "http://stub");
 
     if (!authorized(req.headers)) {
@@ -240,7 +331,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       res.end(
         JSON.stringify({
           data: { version: "2.3.2", platform: "stub", channelCount: channels.length },
-          meta: { timestamp: new Date().toISOString() },
+          meta: { timestamp: peerNow() },
         }),
       );
       return;
@@ -256,7 +347,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
         ? channels.map((c) => ({ ...c, keywords: channelKeywords[c.id] ?? [] }))
         : channels;
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data: rows, meta: { timestamp: new Date().toISOString() } }));
+      res.end(JSON.stringify({ data: rows, meta: { timestamp: peerNow() } }));
       return;
     }
 
@@ -269,12 +360,21 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       const scoped = CHANNEL_KEYWORDS.exec(url.pathname);
       const data = scoped ? (channelKeywords[decodeURIComponent(scoped[1]!)] ?? []) : (options.keywords ?? []);
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data, meta: { timestamp: new Date().toISOString() } }));
+      res.end(JSON.stringify({ data, meta: { timestamp: peerNow() } }));
       return;
     }
 
     if (url.pathname === "/api/v1/transcript") {
-      if (options.failTranscript) {
+      // Marked per response, not by a counter: re-emitting the request runs this
+      // handler again, so anything shared would hold the same answer for ever.
+      const delay = held.has(res) ? 0 : (options.delayTranscriptMs?.(url) ?? 0);
+      if (delay > 0) {
+        held.add(res);
+        const timer = setTimeout(() => server.emit("request", req, res), delay);
+        timer.unref?.();
+        return;
+      }
+      if (state.failTranscript) {
         res.writeHead(500, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
         return;
@@ -295,7 +395,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
         JSON.stringify({
           data: page,
           meta: {
-            timestamp: new Date().toISOString(),
+            timestamp: peerNow(),
             totalCount: filtered.length,
             hasMore: offset + page.length < filtered.length,
           },
@@ -366,15 +466,25 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       pending = Buffer.concat([pending, chunk]);
       const { texts, closed, rest } = decodeClientFrames(pending);
       pending = rest;
-      for (const t of texts) wsReceived.push(t);
+      for (const t of texts) {
+        wsReceived.push(t);
+        if (clientFrameType(t) === "subscribe") subscribed.add(socket);
+      }
       if (texts.length) notify();
       if (closed) {
         sockets.delete(socket);
+        subscribed.delete(socket);
         socket.destroy();
       }
     });
-    socket.on("close", () => sockets.delete(socket));
-    socket.on("error", () => sockets.delete(socket));
+    socket.on("close", () => {
+      sockets.delete(socket);
+      subscribed.delete(socket);
+    });
+    socket.on("error", () => {
+      sockets.delete(socket);
+      subscribed.delete(socket);
+    });
 
     // ProdCom sends this immediately on upgrade, before any subscribe arrives.
     socket.write(
@@ -420,6 +530,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     get wsUpgrades() {
       return state.wsUpgrades;
     },
+    get openWebSockets() {
+      return sockets.size;
+    },
     get sseOpens() {
       return state.sseOpens;
     },
@@ -430,15 +543,33 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     setRefuseWebSocket: (refuse: boolean) => {
       state.refuseWebSocket = refuse;
     },
+    addEntry: (entry: StubEntry) => {
+      entries.push(entry);
+      notify();
+    },
+    setFailTranscript: (fail: boolean) => {
+      state.failTranscript = fail;
+    },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
-    wsTranscript: (entry, wrap = "data") =>
-      wsSend(JSON.stringify(wrap === "top" ? { type: "transcript", ...entry } : { type: "transcript", data: entry })),
+    wsTranscript: (entry, wrap = "data") => {
+      const text = JSON.stringify(
+        wrap === "top" ? { type: "transcript", ...entry } : { type: "transcript", data: entry },
+      );
+      const frame = encodeTextFrame(text);
+      for (const s of sockets) {
+        // The vendor bug: a socket that ASKED for the transcript stream is the
+        // one that does not get it.
+        if (options.subscribeFilterBroken && subscribed.has(s)) continue;
+        s.write(frame);
+      }
+    },
     sseSend: (entry) => {
       for (const s of sseStreams) s.write(`data: ${JSON.stringify(entry)}\n\n`);
     },
     wsDropAll: () => {
       for (const s of sockets) s.destroy();
       sockets.clear();
+      subscribed.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),
     waitForSse: (n, timeoutMs = 4000) => until(() => state.sseOpens >= n, `${n} SSE stream(s)`, timeoutMs),
