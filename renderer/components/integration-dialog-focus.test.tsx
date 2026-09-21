@@ -20,12 +20,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 100 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, until, idle , integrationCard } = await import(
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, until, idle, integrationCard } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -37,12 +41,34 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
+
+/**
+ * Like until(), but safe for a condition that depends on React having
+ * actually committed a render — closing this dialog crosses several
+ * animation frames before focus lands, and each intervening re-render
+ * happens outside any single fireEvent's own act() wrap. Each wait is its
+ * OWN short act() scope, closed before the condition is checked again: one
+ * continuous act() around the whole poll would hold back the very update
+ * the condition is waiting to see (confirmed the hard way — see
+ * editable-icon.test.tsx's history for the same trap).
+ */
+async function actUntil(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    if (ok()) return;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    if (ok()) return;
+    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
+  }
+}
 
 /** Where focus is, in a few words — never the node itself. See the note below. */
 const where = (el: Element | null): string => {
@@ -76,7 +102,17 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  // act()-wrapped around the whole wait, not just a flush tacked on after it:
+  // idle() polls the query cache with a plain, unwrapped setTimeout loop, and
+  // sixteen cards' worth of Switch primitives settle their own state while
+  // that loop is running — every one of those renders was landing outside any
+  // wrapper. Confirmed no deadlock risk before relying on it: idle()'s
+  // condition reads react-query's cache, which updates independent of
+  // anything React holds back, unlike a DOM-text condition (see actUntil's
+  // note above).
+  await act(async () => {
+    await idle();
+  });
   return c;
 }
 
@@ -86,17 +122,17 @@ describe("focus returns to the card", () => {
     const before = (await card(c, "reaper"));
     before.focus();
     fireEvent.click(before);
-    await until(
+    await actUntil(
       () => dialog() !== null,
       () => "clicking the card opened no dialog",
     );
 
     fireEvent.keyDown(dialog()!, { key: "Escape" });
-    await until(
+    await actUntil(
       () => dialog() === null,
       () => "Escape did not close the dialog",
     );
-    await until(
+    await actUntil(
       () => document.activeElement === find(c, "reaper"),
       () => `focus did not come back to the card — it is on ${where(document.activeElement)}`,
     );
@@ -109,12 +145,14 @@ describe("focus returns to the card", () => {
     const before = (await card(c, "reaper"));
     before.focus();
     fireEvent.click(before);
-    await until(
+    await actUntil(
       () => dialog() !== null,
       () => "clicking the card opened no dialog",
     );
 
     fireEvent.click(dialog()!.querySelector<HTMLElement>('[aria-label="Enable REAPER"]')!);
+    // Plain until(), not actUntil(): this checks the fake SERVER's own state
+    // map, which updates independently of anything React holds back.
     await until(
       () => server.states.get("reaper")?.enabled === true,
       () => "enabling REAPER never reached the server",
@@ -131,7 +169,7 @@ describe("focus returns to the card", () => {
     // is a different sequence, not a faster version of this one — and one this
     // test has never covered. The old fixed 30ms here was waiting for the move
     // without saying so; this says so.
-    await until(
+    await actUntil(
       () => {
         const now = find(c, "reaper");
         return now !== null && now !== before;
@@ -140,11 +178,11 @@ describe("focus returns to the card", () => {
     );
 
     fireEvent.keyDown(dialog()!, { key: "Escape" });
-    await until(
+    await actUntil(
       () => dialog() === null,
       () => "Escape did not close the dialog",
     );
-    await until(
+    await actUntil(
       () => document.activeElement === find(c, "reaper"),
       () =>
         `the operator was left with no caret anywhere after the card moved groups — focus is on ${where(document.activeElement)}`,

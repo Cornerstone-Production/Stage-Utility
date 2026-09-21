@@ -15,12 +15,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 8 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, blankState } = await import(
+const { installFakeServer, withQueryClient, blankState } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { WIDE_DIALOG_IDS, WIDE_PANEL_ATTR, integrationDialogClass } = await import(
@@ -40,12 +44,10 @@ beforeEach(() => {
   server = installFakeServer();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
+after(() => unmountAndTeardown(cleanup, () => {
   server.restore();
   teardown();
-});
+}));
 
 /** Each repeater panel, paired with the integration whose dialog holds it. */
 const REPEATER_PANELS: [string, () => React.ReactElement][] = [
