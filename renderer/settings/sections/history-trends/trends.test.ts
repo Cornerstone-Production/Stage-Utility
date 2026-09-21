@@ -359,17 +359,42 @@ describe("one Sunday morning, in its three states", () => {
   /** The clock for that seventh Sunday: three services on the plan, `at` running. */
   const clock = (at: number) => sundayClock(7, 3, at);
 
-  test("SERVICE TWO OF THREE RUNNING uses first-N, not a whole-day basis", () => {
-    // A whole-day basis here shows a deficit that CANNOT close: the third
-    // service has not run. Every Sunday would read as the church halving until
-    // the evening service ended, which is the defect this whole rule exists for.
+  test("SERVICE TWO OF THREE RUNNING counts it, against prior days' first TWO", () => {
+    // N is services STARTED, not services finished, so the day climbs while the
+    // second service fills instead of sitting flat on the first.
+    //
+    // A whole-day basis here would show a deficit that CANNOT close: the third
+    // service has not run at all. Every Sunday would read as the church halving
+    // until the evening service ended, which is the defect this rule exists for.
     const [tile] = typeTrends(sunday(1, true), { clock: clock(1) });
     assert.equal(tile.state, "earlier-services");
-    assert.equal(tile.serviceCount, 1, "it counted a service that had not finished");
-    assert.equal(tile.latest, 1100, "the headline is not the finished service on its own");
-    assert.equal(tile.priorAverage, 1000, "the basis is not the prior days' FIRST service");
-    assert.equal(delta(tile), 100, "1,100 against 1,000");
+    assert.equal(tile.serviceCount, 2, "the service on air is not counted");
+    assert.equal(tile.latest, 1700, "1,100 finished + the 600 in the room now");
+    assert.equal(tile.priorAverage, 1500, "the basis is not the prior days' first TWO");
+    assert.equal(delta(tile), 200, "1,700 against 1,500");
     assert.equal(tile.priorCount, 6);
+  });
+
+  test("and the comparison CLOSES as that service fills, rather than diverging", () => {
+    // The claim the first-N basis rests on: today's partly-filled service N
+    // climbs toward the average of prior days' COMPLETE first N and lands near
+    // it. If the basis were prior days' whole totals the gap would widen all
+    // morning instead — this is the guard on which of the two is in use.
+    //
+    // Prior first-two is 1,500. Today's first service finished at 1,100, so the
+    // second filling 0 -> 600 walks the change from -400 to +200.
+    const filling = (peak: number) =>
+      sunday(1, true).map((r) =>
+        r.serviceKey === "weekend:6:1" ? { ...r, peakOccupancy: peak } : r,
+      );
+    const deltas = [0, 150, 300, 450, 600].map((peak) => delta(typeTrends(filling(peak), { clock: clock(1) })[0]));
+    assert.deepEqual(deltas, [-400, -250, -100, 50, 200]);
+    // Strictly closing, never widening — the shape, not just the endpoints.
+    assert.deepEqual(
+      deltas.filter((d, i) => i > 0 && Math.abs(d) > Math.abs(deltas[i - 1]) && deltas[i - 1] < 0),
+      [],
+      `the gap widened as the room filled: ${JSON.stringify(deltas)}`,
+    );
   });
 
   test("BETWEEN services, with one still to come, is the same rule", () => {
@@ -380,6 +405,22 @@ describe("one Sunday morning, in its three states", () => {
     assert.equal(tile.latest, 1700, "1,100 + 600");
     assert.equal(tile.priorAverage, 1500, "1,000 + 500");
     assert.equal(delta(tile), 200);
+  });
+
+  test("nothing jumps when an EARLIER service ends either", () => {
+    // The second service full at 600 and the second service ended at 600 are
+    // the same day to this: the only difference is which array the value sits
+    // in. A jump here would be the staircase the live count exists to remove.
+    const live = typeTrends(sunday(1, true), { clock: clock(1) })[0];
+    const ended = typeTrends(sunday(2, false), { clock: clock(1) })[0];
+    assert.deepEqual(
+      [live.latest, live.serviceCount, live.priorAverage, live.priorCount],
+      [ended.latest, ended.serviceCount, ended.priorAverage, ended.priorCount],
+      "the tile moved when service two ended",
+    );
+    // What DOES change: the day stops being drawn dashed only when the DAY ends,
+    // not when a service does.
+    assert.equal(live.state, ended.state, "the state changed when a service ended");
   });
 
   test("THE LAST SERVICE RUNNING counts it live, against whole days", () => {
@@ -406,15 +447,31 @@ describe("one Sunday morning, in its three states", () => {
     );
   });
 
-  test("a morning with NOTHING to show falls back to the last day that had some", () => {
-    // Service one of three on air and nothing finished. There is no figure for
-    // today, so the tile shows last Sunday and dates itself to it rather than
-    // reading zero all morning.
+  test("the FIRST service of three, on air, already builds the day", () => {
+    // It used to read last Sunday all morning until a service ended. A day that
+    // shows nothing until 10:30 is not a day building.
     const [tile] = typeTrends(sunday(0, true), { clock: clock(0) });
+    assert.equal(tile.state, "earlier-services");
+    assert.equal(tile.latestDate, "2026-02-15", "the tile is still dated last Sunday");
+    assert.equal(tile.serviceCount, 1, "one service started");
+    assert.equal(tile.latest, 1100, "the room right now");
+    assert.equal(tile.priorAverage, 1000, "against prior days' FIRST service");
+    assert.equal(delta(tile), 100);
+  });
+
+  test("a morning with no READING yet still falls back to the last day that had one", () => {
+    // The fallback that remains, and the only one that can: a counter that has
+    // not reported. A service on air with no figure is not a service of nobody,
+    // so the day is not drawn at zero — the tile shows last Sunday and dates
+    // itself to it.
+    const blind = sunday(0, true).map((r) =>
+      r.serviceKey === "weekend:6:0" ? { ...r, peakOccupancy: null } : r,
+    );
+    const [tile] = typeTrends(blind, { clock: clock(0) });
     assert.equal(tile.state, "finished", "it is showing a day that is still going");
     assert.equal(tile.latest, 2300, "the tile is showing the unfinished morning");
     assert.equal(tile.latestDate, "2026-02-08", "the tile is dated the day it is not showing");
-    assert.equal(delta(tile), 0, "five identical prior Sundays, so no change");
+    assert.equal(delta(tile), 0, "six identical prior Sundays, so no change");
   });
 
   test("FIVE services work, and nothing here knows the number three", () => {
@@ -426,10 +483,10 @@ describe("one Sunday morning, in its three states", () => {
       .filter((r) => r.serviceKey.startsWith("weekend:5:"));
     const [tile] = typeTrends([...older, ...newer], { clock: sundayClock(6, 5, 3) });
     assert.equal(tile.state, "earlier-services", "the fifth service is still to come");
-    assert.equal(tile.serviceCount, 3, "three of five finished");
-    assert.equal(tile.latest, 1650, "450 + 550 + 650");
-    assert.equal(tile.priorAverage, 1500, "400 + 500 + 600");
-    assert.equal(delta(tile), 150);
+    assert.equal(tile.serviceCount, 4, "three finished and a fourth on air");
+    assert.equal(tile.latest, 2400, "450 + 550 + 650 + the 750 in the room now");
+    assert.equal(tile.priorAverage, 2200, "400 + 500 + 600 + 700");
+    assert.equal(delta(tile), 200);
   });
 
   test("a prior day that never ran N services is left out of a FIRST-N basis", () => {
@@ -459,9 +516,9 @@ describe("one Sunday morning, in its three states", () => {
       },
     });
     assert.equal(tile.state, "earlier-services");
-    assert.equal(tile.serviceCount, 2, "the running service was counted");
-    assert.equal(tile.priorCount, 4, "the one-service Sunday was counted in a two-service comparison");
-    assert.equal(tile.priorAverage, 1500, "a short day dragged the basis down");
+    assert.equal(tile.serviceCount, 3, "two finished and a third on air");
+    assert.equal(tile.priorCount, 4, "the one-service Sunday was counted in a three-service comparison");
+    assert.equal(tile.priorAverage, 2300, "a short day dragged the basis down");
   });
 
   test("a FINISHED two-service day sits in the same average as three-service days", () => {
@@ -497,7 +554,7 @@ describe("one Sunday morning, in its three states", () => {
     // would be 181 and a summed whole day 273.
     const earlier = typeTrends(sunday(1, true), { measure: "sound", clock: clock(1) })[0];
     assert.equal(earlier.state, "earlier-services");
-    assert.equal(earlier.latest, 90, "the loudest of the first one, not a sum");
+    assert.equal(earlier.latest, 91, "the loudest of the two started, not their sum of 181");
     const live = typeTrends(sunday(2, true), { measure: "sound", clock: clock(2) })[0];
     assert.equal(live.state, "last-service-live");
     assert.equal(live.latest, 92, "the loudest of the day including the one on air");
@@ -628,19 +685,21 @@ describe("what day it is", () => {
 });
 
 describe("a recording that is still running", () => {
-  test("is on no line and no sparkline until it is the day's last service", () => {
-    // A half-finished 9 o'clock is not a smaller 9 o'clock. Counting it on the
-    // line makes every earlier node a different kind of number from the newest.
+  test("is on the line from ANY position in the day, not only as its last service", () => {
+    // The requirement: an in-progress day builds. Counting only the day's last
+    // service left the node flat at the completed sum through the morning and
+    // stepping when one ended — a staircase, not a day filling.
     const recs = sundays("weekend", 4, [1000, 500, 800], { done: 0, running: true });
     const clock = sundayClock(4, 3, 0);
-    assert.equal(dailyValues(recs, "attendance", clock).length, 3, "an unfinished day is on the line");
-    // The recording is still IN range — the chart has to be handed it, or the
-    // day's last service could never be drawn live. What keeps it off the line
-    // is `dailyValues`, one decision in one place.
+    const days = dailyValues(recs, "attendance", clock);
+    assert.equal(days.length, 4, "the day whose FIRST service is on air is missing from the line");
+    assert.equal(days[days.length - 1].v, 1000, "the node is not the room right now");
+    assert.equal(days[days.length - 1].provisional, true, "the node is not marked as still moving");
+    // The recording has to reach the chart at all, which is `withinRange`'s job.
     assert.equal(withinRange(recs, 52).length, 10, "the running recording was dropped before the chart saw it");
     const [tile] = typeTrends(recs, { clock });
-    assert.equal(tile.recent.length, 3, "an unfinished day is on the sparkline");
-    assert.equal(tile.latestDate, "2026-01-18", "the tile is dated an unfinished day");
+    assert.equal(tile.recent.length, 4, "an unfinished day is off the sparkline");
+    assert.equal(tile.latestDate, "2026-01-25", "the tile is not dated the day being built");
   });
 
   test("but the day's LAST service is, and its node says it is provisional", () => {
@@ -653,7 +712,7 @@ describe("a recording that is still running", () => {
     assert.deepEqual(days.slice(0, -1).map((d) => d.provisional), [false, false, false]);
   });
 
-  test("a day with EARLIER services still to run is provisional too, without counting one", () => {
+  test("a day with EARLIER services still to run is provisional too", () => {
     // Driven in Chrome and it is why this exists: with one of three services
     // done the line plunged from ~3,500 to 1,252 in a solid stroke, drawing
     // exactly the collapse the tile beside it spends its whole label denying.
@@ -662,7 +721,7 @@ describe("a recording that is still running", () => {
     const recs = sundays("weekend", 4, [1000, 500, 800], { done: 1, running: true });
     const days = dailyValues(recs, "attendance", sundayClock(4, 3, 1));
     const last = days[days.length - 1];
-    assert.equal(last.v, 1000, "the service on air was counted into an earlier-services day");
+    assert.equal(last.v, 1500, "1,000 finished plus the 500 in the room now");
     assert.equal(last.provisional, true, "the line into a part-finished day draws solid");
     assert.deepEqual(days.slice(0, -1).map((d) => d.provisional), [false, false, false]);
   });

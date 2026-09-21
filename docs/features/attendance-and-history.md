@@ -98,30 +98,37 @@ beside the figure always says which.
 
 | | The figure | Compared against | Label reads |
 |---|---|---|---|
-| **More services still to come** | the services that have **finished**, added up | every prior day's **first N**, counting only days that ran N or more | *first 2 services, 10 days* |
-| **The last service is running** | the finished ones **plus the room right now**, climbing | prior completed days' **full totals** | *10 full days* |
+| **More services still to come** | every service **started**, the finished ones plus the room right now | every prior day's **first N**, counting only days that ran N or more | *first 2 services, 10 days* |
+| **The last service is running** | the same — every service started | prior completed days' **full totals** | *10 full days* |
 | **The day is over** | the day's full total | prior completed days' **full totals** | *10 full days* |
 
-The middle row reads as a deficit that closes as the room fills — a "how are we
-tracking" number, and red for much of the hour on purpose. It shares its basis
-with the row below it, so **the number does not jump when the last service
-ends**; only the dashed line and its hollow node go away.
+**N is services started, not services finished.** A service on air counts from
+its first reading, wherever it sits in the day, so the figure climbs through the
+morning rather than holding flat and stepping each time a service ends. Nothing
+moves at the moment a service *ends*, either: the value simply stops changing.
+
+The first two rows read as a deficit that closes as the room fills — a "how are
+we tracking" number, and red for much of the hour on purpose. The last two share
+a basis, so **the number does not jump when the last service ends**; only the
+dashed line and its hollow node go away.
 
 The first row is first-N because a full-day basis there shows a gap that
-**cannot** close: the services that would close it have not run, so every Sunday
-would read as the church halving until the evening service ended. A prior day
-only feeds a first-N average if it ran at least that many services — a Sunday
-that only ever held two has no third to offer, and averaging its two in would
-drag the figure down for a reason that is nothing to do with attendance.
+**cannot** close: the services that would close it have not run at all, so every
+Sunday would read as the church halving until the evening service ended.
+First-N closes honestly instead — today's part-filled service N climbs toward
+the average of prior days' *complete* first N and lands near it. A prior day
+only feeds that average if it ran at least N services: a Sunday that only ever
+held two has no third to offer, and averaging its two in would drag the figure
+down for a reason that is nothing to do with attendance.
 
 A finished day is compared **whole against whole**, whatever each day ran. A
 completed two-service summer Sunday is a two-service Sunday, not a partial three,
 and comparing first-twos would hide exactly the seasonal change you are looking
 for.
 
-A morning that has nothing to show yet — first of three on air, nothing finished
-— falls back to the last day that had something, and the date beside the figure
-says which.
+A morning falls back to the last day that had a figure only when it has none of
+its own — a counter that has not reported yet, rather than a service that has
+not finished. The date beside the figure says which day is being shown.
 
 #### How a day is judged finished
 
@@ -198,12 +205,17 @@ the current measure is not plotted at all, because a service nobody counted is
 not a service of nobody, and one with no meter running is not a silent one.
 
 The segment running into a day that has **not finished** is drawn dashed, with a
-hollow node on its end. A solid line into a Sunday with one of three services
-done plunges from three thousand to one, drawing a collapse that the tile beside
-it spends its whole label denying; dashed, the same node reads "not done yet".
-Both states get it — the one climbing as the room fills, and the one that will
-step when its next service ends. Under `prefers-reduced-motion` the node stops
-pulsing and the dash stays: the dash is the information, the beat is decoration.
+hollow node on its end, and it **builds as the day does**. A solid line into a
+Sunday with one of three services done plunges from three thousand to one,
+drawing a collapse that the tile beside it spends its whole label denying;
+dashed, the same node reads "not done yet".
+
+Each reading **eases** into place over about half a second rather than jumping,
+and the dashed segment grows with the node instead of arriving ahead of it, so
+an hour of a service filling reads as a room filling rather than as a dozen
+twitches. Under `prefers-reduced-motion` the reading lands immediately, the node
+stops pulsing, and the dash stays: the dash is the information, the motion is
+decoration.
 
 Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
 change figure, its line, its legend swatch and its milestones. The colour is

@@ -292,13 +292,14 @@ describe("a Sunday morning on the card", () => {
   const figure = (view: ReturnType<typeof render>) =>
     view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent;
 
-  test("service two of three running: what has finished, against prior first ones", async () => {
-    // The defect this exists for: a Sunday morning with the 9 o'clock done
-    // reading 1,100 against a basis of 2,300 — the whole church appearing to
-    // halve, every week, until the evening service ends.
+  test("service two of three running: it counts, against prior first TWOs", async () => {
+    // The defect this exists for: a Sunday morning reading against a basis of
+    // 2,300 — the whole church appearing to halve, every week, until the
+    // evening service ends. N is services STARTED, so the day climbs while the
+    // second fills rather than sitting flat on the first.
     const view = await renderCard(partSunday(1, true), { clock: clockAt(1) });
-    assert.equal(figure(view), "1,100");
-    assert.equal(change(view), "+100 vs first service, 6 days", `the tile read "${change(view)}"`);
+    assert.equal(figure(view), "1,700", "1,100 finished plus the 600 in the room now");
+    assert.equal(change(view), "+200 vs first 2 services, 6 days", `the tile read "${change(view)}"`);
     view.unmount();
   });
 
@@ -383,8 +384,8 @@ describe("a Sunday morning on the card", () => {
     const prov = view.container.querySelector('[data-series-provisional="weekend"]');
     assert.ok(prov, "a part-finished day is drawn as if it were final");
     assert.match(prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "", /\d/);
-    // And it counts NOTHING live: the tile is the first service's figure alone.
-    assert.equal(figure(view), "1,100");
+    // And it counts the service on air, from the second position as from the last.
+    assert.equal(figure(view), "1,700");
     view.unmount();
   });
 

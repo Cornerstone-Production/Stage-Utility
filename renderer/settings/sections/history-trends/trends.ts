@@ -31,16 +31,17 @@ export interface TrendRecording {
   /**
    * The recording has ENDED.
    *
-   * WHICH service is running decides what this module does with it — see
-   * `stateOf`. An EARLIER service still on air is counted by nothing: a
-   * half-finished 9 o'clock is not a smaller 9 o'clock, and with one of three
-   * done the day is worth one service and is compared against other days' first
-   * one rather than their full three.
+   * A service on air is counted from its first reading whatever position it
+   * holds — the day builds all morning rather than holding flat and stepping
+   * each time one ends. So this does NOT decide whether a recording counts. It
+   * decides two other things:
    *
-   * The LAST service of the day is the exception, and it is counted live. The
-   * day's figure climbs as the room fills, against whole days, so that the
-   * number does not jump the moment the service ends — the only thing that
-   * changes then is that the line stops being dashed.
+   *   N, the number of services STARTED, which is what a first-N basis compares
+   *   against — one finished plus one on air is a first-TWO comparison;
+   *
+   *   and, through `stateOf`, WHICH basis: prior days' first N while a service
+   *   is still to come, prior days' whole totals once the day's last one is
+   *   running and after it ends.
    */
   complete: boolean;
 }
@@ -337,11 +338,10 @@ export interface TypeTrend {
    * a number that therefore never moved. What an operator opens this tab for is
    * the Sunday that just happened.
    *
-   * An EARLIER service still running is not in it, so the figure steps as each
-   * one ends rather than climbing mid-service against a basis it cannot be
-   * compared to. The day's LAST service is, and that one climbs on purpose. A
-   * morning that has finished nothing and has more to come falls back to the
-   * last day that did rather than reading zero.
+   * A service still running IS in it, from any position in the day, so the
+   * figure climbs through the morning. It falls back to the last day that had a
+   * figure only when today has none at all — a counter that has not reported
+   * yet, rather than a service that has not finished.
    */
   latest: number | null;
   /**
@@ -463,8 +463,8 @@ export function dailyValues(
 ): TrendDay[] {
   const days = dayServices(recordings, measure);
   // ONE derivation with the tile's, so the last node on the line and the number
-  // on the tile above it are the same figure in every one of the three states —
-  // including the one where the figure counts a service that is still running.
+  // on the tile above it are the same figure in every one of the three states,
+  // including while a service is on air and the figure is climbing.
   return days
     .map((d) => {
       const counted = countedFor(d, stateOf(d, clock));
@@ -476,9 +476,9 @@ export function dailyValues(
         provisional: counted.provisional,
       };
     })
-    // A day whose only service is still running and is NOT the day's last has
-    // nothing finished to draw. It is not a day of zero people; it is a day the
-    // line has not reached.
+    // A day with no reading at all — a counter that has not reported, not a
+    // service that has not finished. It is not a day of zero people; it is a
+    // day the line has not reached.
     .filter((d) => d.count > 0);
 }
 
@@ -511,7 +511,11 @@ function countedFor(day: DayServices, state: TrendState): { values: number[]; pr
   // Sunday with one of three services done draws a cliff the tile beside it
   // spends its whole label denying.
   const provisional = state !== "finished";
-  return state === "last-service-live" && live != null
+  // FROM ANY POSITION. The running service is counted whether it is the day's
+  // first or its last, so the figure climbs all morning instead of sitting flat
+  // at the completed sum and stepping when a service ends — a staircase, not a
+  // day building.
+  return live != null
     ? { values: [...day.values, live.v], provisional }
     : { values: day.values, provisional };
 }
