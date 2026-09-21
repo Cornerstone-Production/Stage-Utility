@@ -282,25 +282,27 @@ describe("the plot", () => {
 });
 
 describe("the live x domain", () => {
-  test("nine more minutes of samples do not move the right edge", () => {
+  // Shared by both tests below: a service growing one sample a minute, and the
+  // DRAWN DOMAIN at each point — not the axis labels and not the last tick.
+  //
+  // Both of those pass on the bug. A tick hard against an edge has its label
+  // dropped, so a label read returns "" on exactly the short domain this
+  // starts from; and the last TICK is the last half-hour INSIDE the domain,
+  // which does not move when the domain moves by a minute. Proved: with
+  // tenMinuteDomainEnd removed, the last-tick version of this test stayed
+  // green.
+  const points = (n: number) => Array.from({ length: n }, (_, i) => ({ t: T0 + i * MIN, v: 100 + i }));
+  const at = (n: number) => chart({
+    live: true,
+    nowMs: T0 + n * MIN,
+    series: [series({ points: points(n + 1) })],
+  });
+  const rightEdge = () => (document.querySelector("svg[role=img]") as SVGSVGElement).getAttribute("data-domain-end") ?? "";
+
+  test("nine more minutes of samples do not move the right edge", async () => {
     // The domain steps by TEN minutes while recording. Without that it tracks
     // the newest sample, so the whole curve slides leftward once every 30
     // seconds for an hour — the chart is never still while a service runs.
-    const points = (n: number) => Array.from({ length: n }, (_, i) => ({ t: T0 + i * MIN, v: 100 + i }));
-    const at = (n: number) => chart({
-      live: true,
-      nowMs: T0 + n * MIN,
-      series: [series({ points: points(n + 1) })],
-    });
-    // Read the DRAWN DOMAIN, not the axis labels and not the last tick.
-    //
-    // Both of those pass on the bug. A tick hard against an edge has its label
-    // dropped, so a label read returns "" on exactly the short domain this
-    // starts from; and the last TICK is the last half-hour INSIDE the domain,
-    // which does not move when the domain moves by a minute. Proved: with
-    // tenMinuteDomainEnd removed, the last-tick version of this test stayed
-    // green.
-    const rightEdge = () => (document.querySelector("svg[role=img]") as SVGSVGElement).getAttribute("data-domain-end") ?? "";
     const view = render(at(1));
     const before = rightEdge();
     assert.notEqual(before, "");
@@ -310,8 +312,31 @@ describe("the live x domain", () => {
     }
     // And it DOES move once the next ten-minute step is crossed, or the guard
     // would also pass on an axis that never moves at all.
+    //
+    // AFTER THE EASE, not on the render. `useEasedValue` seeds its tween at the
+    // old value in a layout effect, so the step is painted where it was and
+    // glides — asserting on the render itself would read the old edge and call
+    // a working ease a broken step.
     view.rerender(at(12));
+    await new Promise((r) => setTimeout(r, 900));
     assert.notEqual(rightEdge(), before, "the axis never stepped");
+  });
+
+  test("the step is painted where the domain WAS, not where it is going", () => {
+    // Guards the paint-order bug directly, where the sibling test above
+    // cannot: `useEasedValue` used to seed its starting value from a plain
+    // effect, which runs AFTER the browser paints. So the render carrying the
+    // new target painted AT the target, and only the first animation frame —
+    // a real timer here, not something a synchronous rerender() flushes —
+    // dropped it back to glide from. The sibling test waits 900ms before
+    // reading the domain, long enough for the ease to finish either way, so a
+    // reverted fix still leaves it green. This reads with NO wait, right on
+    // the render that crosses the ten-minute boundary, which is the one
+    // render the bug is in.
+    const view = render(at(1));
+    const before = rightEdge();
+    view.rerender(at(12));
+    assert.equal(rightEdge(), before, "the render after the step painted at the target instead of easing from where it was");
   });
 });
 

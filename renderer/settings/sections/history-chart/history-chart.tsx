@@ -19,7 +19,7 @@
 // what is arithmetic (geometry.ts, lane.ts) and what is structural (which
 // elements exist, that the path element survives a live append).
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../../lib/cn";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
@@ -1024,11 +1024,17 @@ function useEasedValue(target: number, ms: number): number {
   const [tween, setTween] = useState<number | null>(null);
   const fromRef = useRef(target);
 
-  useEffect(() => {
+  // A LAYOUT effect, and it seeds the tween synchronously. The render in which
+  // a new value arrives would otherwise be PAINTED at that value, and the first
+  // animation frame 16ms later would drop back to the old one and ease forward
+  // from there — a flick backwards on every step, which is what a stepping
+  // animation looks like when you try to ease it after the fact.
+  useLayoutEffect(() => {
     if (!Number.isFinite(target)) return;
     const from = fromRef.current;
     fromRef.current = target;
     if (ms <= 0 || !Number.isFinite(from) || from === target || typeof requestAnimationFrame !== "function") return;
+    setTween(from);
     const start = Date.now();
     let raf = requestAnimationFrame(function tick() {
       const k = Math.min(1, (Date.now() - start) / ms);
