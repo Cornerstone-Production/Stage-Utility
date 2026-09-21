@@ -414,7 +414,15 @@ describe("the hover readout", () => {
       0,
       "the chart is still drawing a strip; the card is drawing the readout too",
     );
-    const overlaid = [...view.container.querySelectorAll("[class]")]
+    // THE PLOT'S OWN WRAPPER, not the whole card. The overlay was positioned
+    // against the chart's flex column — the element that held both the strip and
+    // the svg — so that is the only subtree where "out of flow" can mean "over
+    // the line". Scanning the card caught it, but it would also have caught a
+    // popover or a tooltip somebody added to the tiles for a reason that has
+    // nothing to do with covering the plot.
+    const chart = plotOf(view).parentElement as HTMLElement;
+    assert.ok(chart, "the plot has no wrapper, so this asserts nothing");
+    const overlaid = [chart, ...chart.querySelectorAll("[class]")]
       .map((el) => el.className)
       .filter((c) => typeof c === "string" && /\babsolute\b/.test(c));
     assert.deepEqual(overlaid, [], `something is still laid over the plot: ${overlaid.join(" | ")}`);
