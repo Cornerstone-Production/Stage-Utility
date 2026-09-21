@@ -282,7 +282,7 @@ describe("the plot", () => {
 });
 
 describe("the live x domain", () => {
-  test("nine more minutes of samples do not move the right edge", () => {
+  test("nine more minutes of samples do not move the right edge", async () => {
     // The domain steps by TEN minutes while recording. Without that it tracks
     // the newest sample, so the whole curve slides leftward once every 30
     // seconds for an hour — the chart is never still while a service runs.
@@ -310,7 +310,13 @@ describe("the live x domain", () => {
     }
     // And it DOES move once the next ten-minute step is crossed, or the guard
     // would also pass on an axis that never moves at all.
+    //
+    // AFTER THE EASE, not on the render. `useEasedValue` seeds its tween at the
+    // old value in a layout effect, so the step is painted where it was and
+    // glides — asserting on the render itself would read the old edge and call
+    // a working ease a broken step.
     view.rerender(at(12));
+    await new Promise((r) => setTimeout(r, 900));
     assert.notEqual(rightEdge(), before, "the axis never stepped");
   });
 });

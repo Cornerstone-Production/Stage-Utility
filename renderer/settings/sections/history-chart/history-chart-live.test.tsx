@@ -239,6 +239,12 @@ describe("a growing service", () => {
   });
 
   test("more samples reach further across the plot", async () => {
+    // Motion off, for the reason recorded on the clock test below: this asks a
+    // GEOMETRY question, and the x-domain tween leaves a requestAnimationFrame
+    // chain running past the assertion. It seeds its tween in a layout effect
+    // now, so the window in which an append and a tween overlap is a render
+    // wider than it was, and this failed once under full-suite load.
+    reducedMotion(true);
     await act(async () => {
       container = render(<LiveHarness initial={openRecord(5)} />).container;
     });
