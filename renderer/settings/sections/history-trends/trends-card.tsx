@@ -41,17 +41,22 @@ import {
   writeColorAssignment,
 } from "./series-colors";
 import {
+  basisOf,
   DEFAULT_RANGE_WEEKS,
   dailyValues,
   RANGE_WEEKS,
+  rangeLabel,
+  weeksOf,
   TREND_WINDOW,
   trendMilestones,
   typeTrends,
   withinRange,
   type RangeWeeks,
   type StoredMilestone,
+  type TrendClock,
   type TrendMeasure,
   type TrendRecording,
+  type TrendState,
 } from "./trends";
 
 /** The range choice, per browser — a view preference, like every other one in
@@ -92,8 +97,11 @@ function remember(key: string, value: string): void {
 
 function storedRange(): RangeWeeks {
   try {
-    const raw = Number(localStorage.getItem(RANGE_KEY));
-    return (RANGE_WEEKS as readonly number[]).includes(raw) ? (raw as RangeWeeks) : DEFAULT_RANGE_WEEKS;
+    const raw = localStorage.getItem(RANGE_KEY) ?? "";
+    // The stored value is the choice's own spelling — "8" or "all" — so a
+    // browser that kept "16" from before All existed still reads as 16.
+    const hit = (RANGE_WEEKS as readonly (number | string)[]).find((w) => String(w) === raw);
+    return (hit as RangeWeeks | undefined) ?? DEFAULT_RANGE_WEEKS;
   } catch {
     return DEFAULT_RANGE_WEEKS;
   }
@@ -128,14 +136,22 @@ function fmtDayShort(day: string): string {
 }
 
 /**
- * What a tile's change was measured against: "first 3 services, 11 days".
+ * What a tile's change was measured against.
  *
- * TWO facts, because either alone misleads. The SLICE, since a Sunday with one
- * of three services finished is compared against other Sundays' first service
- * and "+40" off that is not the same claim as "+40" off a whole day. And the
- * DAY COUNT, which is the number of prior days that actually ran that many
- * services — a comparison resting on four days has to say four rather than be
- * passed off as a season's worth.
+ * THE SAME TILE MEANS THREE DIFFERENT THINGS ACROSS A MORNING — see TrendState —
+ * so the label has to say which, or a reader is left guessing whether the figure
+ * beside it is comparing slices or whole days:
+ *
+ *   earlier-services   "first 2 services, 10 days"
+ *   last-service-live  "11 days"
+ *   finished           "11 days"
+ *
+ * The last two read alike on purpose: they ARE the same comparison, and the
+ * number does not move when the service ends.
+ *
+ * The DAY COUNT is always there, and always the real one — a comparison resting
+ * on four days says four rather than being passed off as a season's worth. That
+ * matters more now the range can be narrowed to eight weeks.
  *
  * "first service" rather than "first 1 services" at N = 1, which is the common
  * case on a Sunday morning and the one an operator reads most.
@@ -143,9 +159,14 @@ function fmtDayShort(day: string): string {
  * Exported for its own test: it is the sentence that has to stay honest, and the
  * truncation on the tile means a browser will not always show all of it.
  */
-export function basisLabel(serviceCount: number, priorDays: number): string {
+export function basisLabel(state: TrendState, serviceCount: number, priorDays: number): string {
+  const days = `${priorDays} day${priorDays === 1 ? "" : "s"}`;
+  // FULL, spelled out, because the alternative is a slice: "vs 11 days" beside
+  // "vs first 2 services, 10 days" leaves a reader to infer the mode from what
+  // the label does NOT say, and the two states are worth different numbers.
+  if (basisOf(state) === "whole-day") return `${priorDays} full day${priorDays === 1 ? "" : "s"}`;
   const slice = serviceCount === 1 ? "first service" : `first ${serviceCount} services`;
-  return `${slice}, ${priorDays} day${priorDays === 1 ? "" : "s"}`;
+  return `${slice}, ${days}`;
 }
 
 /** Round to a measure's own precision. */
@@ -174,6 +195,15 @@ export function absChange(delta: number, dp: number, unit = ""): string {
 
 export function TrendsCard({
   recordings,
+  /**
+   * What the card knows about NOW — see TrendClock.
+   *
+   * Passed in rather than read here, because "what day is it" belongs to the
+   * APP's zone and a browser cannot ask for that: the zone is a server setting.
+   * Omitted (a test, or a surface with no live state) means the card judges every
+   * day by its recordings alone.
+   */
+  clock = null,
   /** The page's SPL summary load failed, so `peakDb` is null everywhere for a
    *  reason that has nothing to do with what was recorded. Without this the
    *  sound measure reads "No sound recorded yet" at a church that records it
@@ -181,6 +211,7 @@ export function TrendsCard({
   soundUnavailable = false,
 }: {
   recordings: TrendRecording[];
+  clock?: TrendClock | null;
   soundUnavailable?: boolean;
 }) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
@@ -251,8 +282,17 @@ export function TrendsCard({
   const fmtValue = (v: number) =>
     sound ? `${atPrecision(v, dp).toFixed(dp)} dB` : atPrecision(v, dp).toLocaleString();
 
-  const tiles = useMemo(() => typeTrends(recordings, { measure }), [recordings, measure]);
-  const ranged = useMemo(() => withinRange(recordings, weeks, measure), [recordings, weeks, measure]);
+  // THE RANGE GOVERNS BOTH. The tile's comparison basis and the chart's domain
+  // come from one control, so a tile is measured against exactly the days drawn
+  // under it and the relationship needs no explaining.
+  const tiles = useMemo(
+    () => typeTrends(recordings, { measure, weeks: weeksOf(weeks), clock: clock ?? undefined }),
+    [recordings, measure, weeks, clock],
+  );
+  const ranged = useMemo(
+    () => withinRange(recordings, weeksOf(weeks), measure),
+    [recordings, weeks, measure],
+  );
 
   /**
    * One colour per service type, stable across measure, range and sort.
@@ -331,14 +371,18 @@ export function TrendsCard({
       // drawn, as scatter dots; they read as noise nobody could name and are
       // gone. The SAME call the tiles make, so the last node on a line and the
       // number on the tile above it cannot differ.
-      points: dailyValues(byType.get(key) ?? [], measure).map((d) => ({ t: d.t, v: d.v })),
+      points: dailyValues(byType.get(key) ?? [], measure, clock).map((d) => ({ t: d.t, v: d.v })),
+      // The final segment draws dashed with its node marked while the day it
+      // runs into is still going — see TrendState. A glance then reads "not done
+      // yet" rather than "collapsed".
+      provisional: tiles.find((t) => (t.serviceTypeId ?? "") === key)?.state === "last-service-live",
       format: fmtValue,
     }));
     // `fmtValue` is a fresh closure every render; what it depends on is the
     // measure, which IS a dependency. `colorOf` reads `colorIndexes`, which is
     // one too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranged, tiles, hidden, measure, colorIndexes]);
+  }, [ranged, tiles, hidden, measure, colorIndexes, clock]);
 
   /** The tiles that are DRAWN. `hidden` keys a type by its series id, which is
    *  the type id or "all" for the no-type bucket — the same key the series and
@@ -462,7 +506,7 @@ export function TrendsCard({
                 weeks === w ? "bg-fill text-fg" : "text-fg-muted hover:bg-fill hover:text-fg",
               )}
             >
-              {w}w
+              {rangeLabel(w)}
             </button>
           ))}
         </div>
@@ -603,7 +647,7 @@ export function TrendsCard({
                               days that had that many services to offer, never
                               the count it would like to have had — a comparison
                               resting on four days says four. */}
-                          <span className="text-fg-subtle">vs {basisLabel(t.serviceCount, t.priorCount)}</span>
+                          <span className="text-fg-subtle">vs {basisLabel(t.state, t.serviceCount, t.priorCount)}</span>
                         </span>
                       );
                     })()

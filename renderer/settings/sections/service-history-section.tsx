@@ -5,6 +5,8 @@ import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { hostTimeZone } from "@main/services/app-timezone";
+import { useStageState } from "../../main/use-stage-state";
 import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -21,7 +23,7 @@ import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-histo
 import { RecordingDot, RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion } from "./history-chart";
 import { TrendsCard } from "./history-trends/trends-card";
-import type { TrendRecording } from "./history-trends/trends";
+import { trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
   summarize,
   fmtDur,
@@ -563,6 +565,28 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    *  value. */
   const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
 
+  /**
+   * Planning Center's times for the ACTIVE plan, straight off the live channel.
+   *
+   * The Trends card needs them to answer one question: is another service still
+   * to come today? Without it a Sunday between the 11 o'clock and the 6 reads as
+   * a finished two-service day and is compared against whole three-service ones
+   * — the collapse the partial-day rule exists to prevent.
+   *
+   * `pco:live` carries `planTimes` in EVERY mode, and the SSE hello burst
+   * replays the current frame on subscribe, so this is populated without asking
+   * for anything: no extra request, no new route.
+   */
+  const [planTimes, setPlanTimes] = useState<{ timeType: string; startsAt: string }[]>([]);
+  useEffect(
+    () =>
+      onNotification("pco:live", (p) => {
+        const times = (p as { planTimes?: { timeType: string; startsAt: string }[] } | null)?.planTimes;
+        setPlanTimes(times ?? []);
+      }),
+    [],
+  );
+
   const trendRecordings = useMemo<TrendRecording[]>(
     () => {
       // Read so the subscription is not "unused". The VALUE is never wanted;
@@ -630,6 +654,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // correction this comment would otherwise promise. The fix is a server-stamped
   // field on the hello frame, which is its own change.
   const nowTick = useServerNow(1000, detailLive || listLive);
+
+  /**
+   * The zone every "what day is it" here is answered in — the operator's
+   * setting, from the server, NOT the browser's.
+   *
+   * A browser cannot ask for the app's zone, so `appTimeZone()` in here would
+   * answer the wrong question: a kiosk running UTC would decide Sunday ended at
+   * 7pm, which is the failure this repo has actually been bitten by. The server
+   * already publishes the setting on stage state; `hostTimeZone()` is the
+   * fallback the server itself uses when nothing is configured.
+   */
+  const { state: stageState } = useStageState();
+  const zone = stageState?.timezone ?? hostTimeZone();
+  /** Rebuilt on every tick the page already takes, so "still to come" stops
+   *  being true the moment the day's last service time passes. */
+  const clock = useMemo<TrendClock>(
+    () => trendClock(nowTick, zone, planTimes),
+    [nowTick, zone, planTimes],
+  );
 
   // Synchronous, so the panel clears in the same render the selection does —
   // it never shows the previous service's numbers under an empty selection.
@@ -1410,7 +1453,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           length, overrun, peak, level — is on the service page's own KPI row
           against the service it belongs to, where it means something specific.
           Export moved into the Recorded services header; it is not removed. */}
-      <TrendsCard recordings={trendRecordings} soundUnavailable={loadFailed.has("spl")} />
+      <TrendsCard recordings={trendRecordings} clock={clock} soundUnavailable={loadFailed.has("spl")} />
 
       {/* Calendar (sticky) beside the month's services. The calendar decides
           which month both of them are about. There is no "Selected: …" summary

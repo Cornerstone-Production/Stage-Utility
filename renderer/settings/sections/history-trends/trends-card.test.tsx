@@ -33,6 +33,8 @@ const { render, cleanup, act, fireEvent } = await import("@testing-library/react
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
 const { TrendsCard, absChange, basisLabel } = await import("./trends-card.js");
+type TrendClock = import("./trends.js").TrendClock;
+type TrendState = import("./trends.js").TrendState;
 const { TooltipProvider } = await import("../../../components/ui/index.js");
 type TrendRecording = import("./trends.js").TrendRecording;
 
@@ -235,24 +237,34 @@ describe("a day with three services", () => {
 
 });
 
-describe("a Sunday that is only part way through", () => {
-  /** Six finished Sundays of 1,000 + 500 + 800, then a seventh with `done`
-   *  of its three ended. The three slices differ — 1,000, 1,500, 2,300 — so a
-   *  comparison taken at the wrong one cannot come out right by accident. */
-  function partSunday(done: number): TrendRecording[] {
-    const DAY = 24 * 60 * 60_000;
-    const start = Date.parse("2026-01-04T15:00:00Z");
+describe("a Sunday morning on the card", () => {
+  const DAY = 24 * 60 * 60_000;
+  const FIRST = Date.parse("2026-01-04T15:00:00Z");
+  const GAP = 2 * 60 * 60_000;
+
+  /**
+   * Six finished Sundays of 1,000 + 500 + 800, then a seventh part way through:
+   * `done` of its three ended, and the next one on air if `running`. Anything
+   * after that has no record, because a service that has not started has not
+   * recorded anything.
+   *
+   * The slices differ deliberately — first-one 1,000, first-two 1,500, whole day
+   * 2,300 — so a comparison taken at the wrong one cannot come out right by
+   * accident.
+   */
+  function partSunday(done: number, running: boolean): TrendRecording[] {
     const out: TrendRecording[] = [];
     for (let w = 0; w < 7; w++) {
-      const day = start + w * 7 * DAY;
+      const day = FIRST + w * 7 * DAY;
       const peaks = w === 6 ? [1100, 600, 900] : [1000, 500, 800];
-      peaks.forEach((peak, i) => {
+      const upTo = w < 6 ? 3 : Math.min(done + (running ? 1 : 0), 3);
+      peaks.slice(0, upTo).forEach((peak, i) => {
         out.push({
           serviceKey: `weekend:${w}:${i}`,
           serviceTypeId: "weekend",
           serviceTypeName: "Weekend",
           serviceDate: new Date(day).toISOString().slice(0, 10),
-          t: day + i * 2 * 60 * 60_000,
+          t: day + i * GAP,
           seriesTitle: null,
           peakOccupancy: peak,
           peakDb: null,
@@ -263,57 +275,201 @@ describe("a Sunday that is only part way through", () => {
     return out;
   }
 
-  test("shows what has finished, against other Sundays' first services", async () => {
-    // The defect: a Sunday morning with the 9 o'clock done reading 1,100 against
-    // a basis of 2,300 — the whole church appearing to halve, every week, until
-    // the evening service ends.
-    const view = await renderCard(partSunday(1));
-    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
-    assert.equal(tile.querySelector("[data-trend-latest]")?.textContent, "1,100");
-    const change = (tile.querySelector("[data-trend-change]")?.textContent ?? "").replace(/\s+/g, " ");
-    assert.equal(change.trim(), "+100 vs first service, 6 days", `the tile read "${change}"`);
+  /** That seventh Sunday's clock: three services on the plan, `at` running. */
+  function clockAt(at: number): TrendClock {
+    const day = FIRST + 6 * 7 * DAY;
+    return {
+      now: day + at * GAP + 30 * 60_000,
+      today: new Date(day).toISOString().slice(0, 10),
+      serviceTimesToday: [0, 1, 2].map((i) => day + i * GAP),
+    };
+  }
+
+  const change = (view: ReturnType<typeof render>) =>
+    (view.container.querySelector('[data-trend-tile="weekend"] [data-trend-change]')?.textContent ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const figure = (view: ReturnType<typeof render>) =>
+    view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent;
+
+  test("service two of three running: what has finished, against prior first ones", async () => {
+    // The defect this exists for: a Sunday morning with the 9 o'clock done
+    // reading 1,100 against a basis of 2,300 — the whole church appearing to
+    // halve, every week, until the evening service ends.
+    const view = await renderCard(partSunday(1, true), { clock: clockAt(1) });
+    assert.equal(figure(view), "1,100");
+    assert.equal(change(view), "+100 vs first service, 6 days", `the tile read "${change(view)}"`);
     view.unmount();
   });
 
-  test("the label counts the SLICE as well as the days", async () => {
-    // "vs prior 7" counted days and nothing else, so "+40" off a one-service
-    // morning and "+40" off a whole Sunday read identically.
-    const view = await renderCard(partSunday(2));
-    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
-    assert.equal(tile.querySelector("[data-trend-latest]")?.textContent, "1,700");
-    const change = (tile.querySelector("[data-trend-change]")?.textContent ?? "").replace(/\s+/g, " ");
-    assert.equal(change.trim(), "+200 vs first 2 services, 6 days", `the tile read "${change}"`);
+  test("the LAST service running: it counts live, against whole days", async () => {
+    const view = await renderCard(partSunday(2, true), { clock: clockAt(2) });
+    assert.equal(figure(view), "2,600", "the service on air is not in the figure");
+    assert.equal(change(view), "+300 vs 6 full days", `the tile read "${change(view)}"`);
     view.unmount();
   });
 
-  test("a morning with nothing finished shows last Sunday, and is dated it", async () => {
-    // Zero is not the answer at five past nine.
-    const view = await renderCard(partSunday(0));
-    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
-    assert.equal(tile.querySelector("[data-trend-latest]")?.textContent, "2,300");
-    assert.equal(
-      tile.querySelector("[data-trend-latest-date]")?.textContent,
-      new Date("2026-02-08T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      "the tile is dated the unfinished morning it is not showing",
-    );
-    view.unmount();
+  test("and the tile does not move when that service ends", async () => {
+    // Deliberate continuity: only the dash and the provisional node go away.
+    const live = await renderCard(partSunday(2, true), { clock: clockAt(2) });
+    const before = [figure(live), change(live)];
+    live.unmount();
+    try { localStorage.clear(); } catch { /* jsdom always has one */ }
+    const done = await renderCard(partSunday(3, false), { clock: clockAt(3) });
+    assert.deepEqual([figure(done), change(done)], before, "the tile jumped when the last service ended");
+    done.unmount();
   });
 
-  test("the label reads for one service, for several, and for one day", () => {
+  test("the label names the mode, so the three states never read alike by accident", () => {
     // The sentence that has to stay honest, and the one a browser will not
     // always show all of. One case per line.
     assert.deepEqual(
-      [[1, 6], [2, 6], [3, 11], [5, 1], [4, 0]].map(([n, d]) => basisLabel(n, d)),
+      ([
+        ["earlier-services", 1, 6],
+        ["earlier-services", 2, 6],
+        ["earlier-services", 5, 1],
+        ["earlier-services", 4, 0],
+        ["last-service-live", 3, 11],
+        ["finished", 3, 11],
+        ["finished", 2, 1],
+      ] as [TrendState, number, number][]).map(([s, n, d]) => basisLabel(s, n, d)),
       [
         "first service, 6 days",
         "first 2 services, 6 days",
-        "first 3 services, 11 days",
         "first 5 services, 1 day",
         "first 4 services, 0 days",
+        "11 full days",
+        "11 full days",
+        "1 full day",
       ],
     );
   });
+
+  test("the segment into the running day is DASHED, and every earlier one is not", async () => {
+    // A solid line into a Sunday whose evening service is half over says the
+    // church collapsed. Dashed, with a hollow node, it reads "not done yet".
+    //
+    // WHAT THIS CANNOT SEE: the dashes. jsdom paints nothing. What it CAN read
+    // is what was handed to the SVG — which path carries the dash array, which
+    // node is marked, and that the solid path stops one point short. Driven in
+    // Chrome at 1440.
+    const view = await renderCard(partSunday(2, true), { clock: clockAt(2) });
+    const solid = view.container.querySelector('[data-series-line="weekend"]');
+    const prov = view.container.querySelector('[data-series-provisional="weekend"]');
+    assert.ok(prov, "the day on air has no provisional segment");
+    assert.ok(prov.querySelector("[data-provisional-node]"), "the provisional node is missing");
+    assert.match(
+      prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "",
+      /\d/,
+      "the provisional segment is not dashed",
+    );
+    assert.equal(
+      solid?.getAttribute("stroke-dasharray"),
+      null,
+      "the whole line went dashed, not just the segment into the day on air",
+    );
+    // Seven days of data, six of them on the solid line: the newest comes off it
+    // and is drawn by the dashed segment instead.
+    assert.equal([...(solid?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 6);
+    view.unmount();
+  });
+
+  test("a finished day carries no provisional segment at all", async () => {
+    const view = await renderCard(partSunday(3, false), { clock: clockAt(3) });
+    assert.equal(
+      view.container.querySelectorAll("[data-series-provisional]").length,
+      0,
+      "a finished day is still drawn as if it were running",
+    );
+    assert.equal([...(view.container.querySelector('[data-series-line="weekend"]')?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 7);
+    view.unmount();
+  });
+
+  test("a live attendance update moves the node and the tile together", async () => {
+    // It updates through the morning off the page's own attendance channel; the
+    // card re-renders with a bigger figure on the service that is on air.
+    const at = (peak: number) =>
+      partSunday(2, true).map((r) =>
+        r.serviceKey === "weekend:6:2" ? { ...r, peakOccupancy: peak } : r,
+      );
+    // AGAINST THE PRIOR DAYS IN THE SAME RENDER, not against the other render's
+    // pixels: the y axis reframes as the figure grows, so two absolute `cy`
+    // values from two charts can land on the same number while the node has
+    // genuinely moved. A 2,000 day sits BELOW a 2,300 one and a 2,600 day sits
+    // above it, and that is true whatever the axis did.
+    const nodeVsPriorDay = (view: ReturnType<typeof render>) => {
+      const node = Number(view.container.querySelector("[data-provisional-node]")?.getAttribute("cy"));
+      const d = view.container.querySelector('[data-series-line="weekend"]')?.getAttribute("d") ?? "";
+      const ys = [...d.matchAll(/[ML][\d.]+,([\d.]+)/g)].map((m) => Number(m[1]));
+      return { node, priorDay: ys[ys.length - 1] };
+    };
+    const early = await renderCard(at(300), { clock: clockAt(2) });
+    assert.equal(figure(early), "2,000", "1,100 + 600 + 300 in the room so far");
+    const low = nodeVsPriorDay(early);
+    assert.ok(low.node > low.priorDay, `2,000 should sit below a 2,300 day: ${JSON.stringify(low)}`);
+    early.unmount();
+    try { localStorage.clear(); } catch { /* jsdom always has one */ }
+    const later = await renderCard(at(900), { clock: clockAt(2) });
+    assert.equal(figure(later), "2,600", "the figure did not climb with the room");
+    const high = nodeVsPriorDay(later);
+    assert.ok(high.node < high.priorDay, `2,600 should sit above a 2,300 day: ${JSON.stringify(high)}`);
+    later.unmount();
+  });
 });
+
+describe("the range control", () => {
+  test("offers All, and it draws every day", async () => {
+    const view = await renderCard(longRun("weekend", 1000));
+    const labels = [...view.container.querySelectorAll('[role="group"][aria-label="Trend range"] button')]
+      .map((b) => (b.textContent ?? "").trim());
+    // One entry per line, so two branches adding different ranges conflict.
+    assert.deepEqual(labels, ["8w", "16w", "52w", "All"]);
+    view.unmount();
+  });
+
+  test("changing it changes the basis AND the count the label reports", async () => {
+    // One control for the chart and the tile. `longRun` is sixteen weekly days,
+    // so an 8-week range reaches eight of the fifteen prior ones and All reaches
+    // all fifteen.
+    const view = await renderCard(longRun("weekend", 1000));
+    const pick = async (label: string) => {
+      const b = [...view.container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Trend range"] button')]
+        .find((x) => (x.textContent ?? "").trim() === label);
+      assert.ok(b, `no ${label} button`);
+      await act(async () => {
+        b.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      return (view.container.querySelector("[data-trend-change]")?.textContent ?? "").replace(/\s+/g, " ").trim();
+    };
+    const eight = await pick("8w");
+    const all = await pick("All");
+    assert.equal(eight, "+4 vs 8 full days", `8w read "${eight}"`);
+    assert.equal(all, "+8 vs 15 full days", `All read "${all}"`);
+    view.unmount();
+  });
+
+  test("All is remembered across a remount", async () => {
+    const first = await renderCard(longRun("weekend", 1000));
+    const b = [...first.container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Trend range"] button')]
+      .find((x) => (x.textContent ?? "").trim() === "All")!;
+    await act(async () => {
+      b.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.equal(localStorage.getItem("history:trendRangeWeeks"), "all");
+    cleanup();
+    const second = await renderCard(longRun("weekend", 1000));
+    assert.equal(
+      [...second.container.querySelectorAll('[role="group"][aria-label="Trend range"] button')]
+        .find((x) => x.getAttribute("aria-pressed") === "true")?.textContent?.trim(),
+      "All",
+      "the card came back on 16w after the operator chose All",
+    );
+    second.unmount();
+  });
+});
+
 
 describe("a milestone's scope, from the store to the drawn mark", () => {
   test("the card hands the chart the service type the milestone was scoped to", () => {
@@ -851,7 +1007,10 @@ function alternating(): TrendRecording[] {
   }));
 }
 
-async function renderCard(recordings: TrendRecording[], opts: { milestones?: "fail" } = {}) {
+async function renderCard(
+  recordings: TrendRecording[],
+  opts: { milestones?: "fail"; clock?: TrendClock } = {},
+) {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
     if (String(input) === "/api/history/milestones") {
       if (opts.milestones === "fail") throw new Error("nope");
@@ -862,7 +1021,7 @@ async function renderCard(recordings: TrendRecording[], opts: { milestones?: "fa
   let view!: ReturnType<typeof render>;
   await act(async () => {
     view = render(
-      React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings })),
+      React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings, clock: opts.clock ?? null })),
     );
     for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0));
   });

@@ -6,6 +6,7 @@
 // arithmetic rather than through a render jsdom cannot lay out.
 
 import { isCalendarDate } from "@main/services/calendar-date";
+import { zonedDateKey, type TimeZone } from "@main/services/app-timezone";
 
 /** One recording, reduced to what a trend is drawn from. Built from the same
  *  `rows` the day list and the calendar are built from; nothing here is fetched
@@ -142,6 +143,136 @@ export const TREND_WINDOW = 8;
  */
 export const MIN_PRIOR_DAYS = 3;
 
+/**
+ * Which of three things a tile is showing, across one Sunday morning.
+ *
+ * `earlier-services` — a service is running, or the room is between services,
+ * and MORE are still to come. The figure is what has finished; the basis is
+ * prior days' FIRST N, counting only days that ran N or more. A full-day basis
+ * here shows a deficit that cannot close, because the services that would close
+ * it have not run: every Sunday would read as the church halving until the
+ * evening service ended.
+ *
+ * `last-service-live` — the LAST service of the day is running. The figure
+ * counts it live, climbing as the room fills, and the basis switches to prior
+ * completed days' FULL totals. It reads as a deficit that closes through the
+ * hour — a "how are we tracking" number, red for much of it on purpose.
+ *
+ * `finished` — the day is over. The full total against prior completed days'
+ * full totals. DELIBERATELY THE SAME BASIS as the step before it, so the number
+ * does not jump when the last service ends; only the dash and the provisional
+ * node go away.
+ *
+ * A completed two-service summer Sunday IS a two-service Sunday, which is why
+ * `finished` compares whole days whatever they ran: comparing its first two
+ * against other days' first two would hide exactly the seasonal change an
+ * operator is looking for.
+ */
+export type TrendState = "earlier-services" | "last-service-live" | "finished";
+
+/** Which comparison the state implies: whole days, or each day's first N. */
+export function basisOf(state: TrendState): "whole-day" | "first-n" {
+  return state === "earlier-services" ? "first-n" : "whole-day";
+}
+
+/**
+ * What the card knows about NOW — the only thing in this module that is not
+ * derived from the recordings.
+ *
+ * It is passed in rather than read, because the answer to "what day is it"
+ * belongs to the APP's time zone and the browser cannot ask for that: the zone
+ * is a server setting. A UTC box rolls its calendar date at 19:00 in Chicago,
+ * which once stopped every recorder mid-service, so a `new Date().getDate()`
+ * anywhere near this decision is the bug and not a shortcut. Build it with
+ * `trendClock`.
+ */
+export interface TrendClock {
+  /** Epoch ms. */
+  now: number;
+  /** Today's calendar date in the app's zone, `YYYY-MM-DD`. */
+  today: string;
+  /** Epoch ms of every service time Planning Center lists for TODAY, whether or
+   *  not it has started. Empty when Planning Center has nothing to say. */
+  serviceTimesToday: number[];
+}
+
+/**
+ * The clock, built in the APP's zone rather than the host's.
+ *
+ * `zone` comes from the server (`state.timezone`, the operator's setting) and is
+ * passed explicitly, exactly as the calendar grid does it: `appTimeZone()` in a
+ * browser answers the BROWSER's zone, which is the wrong question. A kiosk
+ * running UTC would otherwise decide Sunday ended at 7pm.
+ *
+ * Only `time_type: "service"` counts. A rehearsal at 8am is not a service still
+ * to come, and treating it as one would hold the tile in its partial-day mode
+ * all day.
+ */
+export function trendClock(
+  now: number,
+  zone: TimeZone,
+  planTimes: readonly { timeType: string; startsAt: string }[] = [],
+): TrendClock {
+  const today = zonedDateKey(now, zone);
+  const serviceTimesToday = planTimes
+    .filter((p) => p.timeType === "service")
+    .map((p) => Date.parse(p.startsAt))
+    .filter((t) => Number.isFinite(t) && zonedDateKey(t, zone) === today);
+  return { now, today, serviceTimesToday };
+}
+
+/**
+ * Is this day over?
+ *
+ * THE RULE, in the order it is applied, because an operator will ask why today
+ * is or is not being compared:
+ *
+ *   1. Anything still RECORDING means no. A running service is the one piece of
+ *      evidence that needs no clock at all.
+ *   2. With no clock, yes. The arithmetic tests pass none, and the data is then
+ *      all there is to go on.
+ *   3. Any date that is not today in the app's zone, yes. Yesterday is over.
+ *   4. Today: yes only once no service time Planning Center lists for today is
+ *      still to start.
+ *
+ * Step 4 is the fallback as well as the rule: when Planning Center has nothing
+ * to say — the integration is off, or no plan is selected — the list is empty,
+ * nothing is "still to start", and today is judged finished the moment its last
+ * recording ends. That is the honest answer from the evidence available, and it
+ * is what the docs say.
+ */
+function dayIsOver(date: string, clock: TrendClock | null): boolean {
+  if (!clock) return true;
+  if (date !== clock.today) return true;
+  return !clock.serviceTimesToday.some((t) => t > clock.now);
+}
+
+/**
+ * Which of the three states a day is in.
+ *
+ * NOTHING RUNNING is the easy half: the day is either over or waiting for a
+ * service that has not started, and `dayIsOver` decides which.
+ *
+ * SOMETHING RUNNING turns on whether it is the day's LAST service, because that
+ * is what makes its figure worth counting live — nothing else is coming to close
+ * the gap. Planning Center's service times for the day answer it; where they are
+ * unavailable, or the day is not today and so those times are about some other
+ * day, a running service IS the last one. With three services and no Planning
+ * Center, that means the first one running is treated as the last: the figure
+ * counts live and the basis is whole days, which reads as a deficit until the
+ * day catches up. Said plainly in the docs, because it is what an operator with
+ * the integration off will see.
+ */
+function stateOf(day: DayServices, clock: TrendClock | null): TrendState {
+  const running = day.running;
+  if (!running.length) return dayIsOver(day.date, clock) ? "finished" : "earlier-services";
+  const last = running[running.length - 1];
+  const moreToCome = clock != null
+    && day.date === clock.today
+    && clock.serviceTimesToday.some((t) => t > last.t);
+  return moreToCome ? "earlier-services" : "last-service-live";
+}
+
 /** One day of one service type, reduced to the figure that day is worth under
  *  the current measure, and when the day's first recording started. */
 export interface TrendDay {
@@ -158,14 +289,22 @@ export interface TrendDay {
   v: number;
   /** How many recordings that day fed it. */
   count: number;
+  /**
+   * `v` includes a service that is still recording and will keep moving.
+   *
+   * Only ever the newest day, and only while that day's LAST service is running
+   * — see TrendState. The chart draws the segment into it dashed and its node
+   * marked, so a glance reads "not done yet" rather than "collapsed".
+   */
+  provisional: boolean;
 }
 
 export interface TypeTrend {
   serviceTypeId: string | null;
   name: string;
-  /** The last `TREND_WINDOW` DAYS this type completed a recording on, oldest
-   *  first — the sparkline's points. The CHANGE is not taken inside this window;
-   *  it runs over every day on record. See `priorAverage`. */
+  /** The last `TREND_WINDOW` DAYS this type has a figure for, oldest first — the
+   *  sparkline's points. The CHANGE is not taken inside this window: it runs
+   *  over the operator's chosen range. See `priorAverage`. */
   recent: TrendDay[];
   /**
    * The latest day that has COMPLETED a recording, reduced by this measure.
@@ -192,37 +331,56 @@ export interface TypeTrend {
    */
   latestDate: string | null;
   /**
-   * How many services `latest` is the sum of — N, the size of the slice the
-   * comparison is like-for-like on.
+   * How many services `latest` counts. Zero when there is nothing to show.
+   *
+   * Includes the one still recording while `state` is `last-service-live`.
    *
    * Taken from the data, never a literal: a church running five services works
    * with no change, and one that adds a fourth gets it counted the first Sunday
-   * it finishes. Zero when nothing has completed.
+   * it finishes.
    *
-   * The tile prints it, because "+40" against a partial Sunday means something
-   * different from "+40" against a whole one and the reader cannot tell which
-   * without it.
+   * The tile prints it while `state` is `earlier-services`, because "+40"
+   * against a Sunday with more services still to come means something different
+   * from "+40" against a whole one, and the reader cannot tell which without it.
    */
   serviceCount: number;
   /**
-   * What `latest` is measured against: the mean, over EVERY prior day this type
-   * recorded, of that day's first `serviceCount` services — counting only days
-   * that ran at least that many. Rounded. Null below `MIN_PRIOR_DAYS` of them.
+   * Which of the three things the tile is showing. See TrendState.
    *
-   * All time, not a window. "How does this morning compare" is a question about
-   * the whole record, and the eight-day window the sparkline draws was never
-   * more than what fits on a tile.
+   * Read twice by the card: for the LABEL, which must never leave a reader
+   * guessing whether the figure beside it compares slices or whole days; and for
+   * the CHART, which draws the segment into a `last-service-live` day dashed
+   * with its node marked provisional.
+   */
+  state: TrendState;
+  /**
+   * What `latest` is measured against: the mean over the prior days of this type
+   * that are INSIDE THE CHOSEN RANGE, rounded. Null below `MIN_PRIOR_DAYS` of
+   * them.
    *
-   * LIKE FOR LIKE. A Sunday with one of three services done is compared against
-   * other Sundays' FIRST service, not against their full three — otherwise every
-   * Sunday reads as a collapse until the evening service ends. And a day that
-   * only ever ran two is left out of a three-service comparison rather than
-   * dragging the average down for a reason that is not about attendance.
+   * THE RANGE IS THE OPERATOR'S — 8, 16 or 52 weeks, or All. The card's own
+   * control, the same one that bounds the chart below the tiles, so a tile is
+   * compared against exactly the days drawn under it. One control, and the
+   * relationship is visible rather than documented.
+   *
+   * WHAT each prior day contributes follows `state`:
+   *
+   *   whole days, while the last service runs and after it ends. A completed
+   *   two-service summer Sunday belongs in the same average as a three-service
+   *   one — that IS the seasonal change, and hiding it was the point of asking.
+   *
+   *   each day's first `serviceCount`, and only days that ran that many, while
+   *   earlier services are still to come. A Sunday with one of three done is
+   *   compared against other Sundays' FIRST service, or every Sunday reads as a
+   *   collapse until the evening ends; and a day that only ever ran two is left
+   *   out of a three-service comparison rather than dragging the average down
+   *   for a reason that is nothing to do with attendance.
    *
    * Below the floor the "average" is one or two readings and a change off it is
    * noise wearing a direction; above it the tile compares against whatever it
    * HAS and says how many — a thin comparison is labelled, not hidden and not
-   * dressed up as a solid one.
+   * dressed up as a solid one. That matters more now the range can be narrowed
+   * to eight weeks.
    */
   priorAverage: number | null;
   /**
@@ -239,8 +397,9 @@ export interface TypeTrend {
    */
   latestRaw: number | null;
   priorAverageRaw: number | null;
-  /** How many prior days met the `serviceCount`-or-more bar and fed
-   *  `priorAverage`. Zero when there is no comparison. */
+  /** How many prior days actually fed `priorAverage` — in range, and over the
+   *  `serviceCount` bar where the state applies one. Zero when there is no
+   *  comparison. */
   priorCount: number;
 }
 
@@ -273,23 +432,57 @@ function byTime(a: TrendRecording, b: TrendRecording): number {
  * day's readings combine come from ONE argument and cannot be mismatched — a
  * caller cannot ask for decibels and get them summed.
  */
-export function dailyValues(recordings: TrendRecording[], measure: TrendMeasure = "attendance"): TrendDay[] {
-  return dayServices(recordings, measure).map((d) => ({
-    date: d.date,
-    t: d.t,
-    v: combineFirst(d.values, d.values.length, measure),
-    count: d.values.length,
-  }));
+export function dailyValues(
+  recordings: TrendRecording[],
+  measure: TrendMeasure = "attendance",
+  clock: TrendClock | null = null,
+): TrendDay[] {
+  const days = dayServices(recordings, measure);
+  // ONE derivation with the tile's, so the last node on the line and the number
+  // on the tile above it are the same figure in every one of the three states —
+  // including the one where the figure counts a service that is still running.
+  return days
+    .map((d) => {
+      const counted = countedFor(d, stateOf(d, clock));
+      return {
+        date: d.date,
+        t: d.t,
+        v: combineFirst(counted.values, counted.values.length, measure),
+        count: counted.values.length,
+        provisional: counted.provisional,
+      };
+    })
+    // A day whose only service is still running and is NOT the day's last has
+    // nothing finished to draw. It is not a day of zero people; it is a day the
+    // line has not reached.
+    .filter((d) => d.count > 0);
 }
 
 /** One day of one service type, with what each COMPLETED recording on it was
  *  worth under this measure, in start order. */
 interface DayServices {
   date: string;
-  /** Epoch ms of the day's first counted recording. */
+  /** Epoch ms of the day's first recording, finished or not. */
   t: number;
-  /** Oldest first, so `values[0]` is the day's first service. */
+  /** COMPLETED services, oldest first, so `values[0]` is the day's first. */
   values: number[];
+  /** Services still recording, oldest first. Carried rather than dropped so the
+   *  day's LAST one can be counted live — see TrendState. */
+  running: { t: number; v: number }[];
+}
+
+/**
+ * What a day is worth in the state it is in, and whether that figure is still
+ * moving.
+ *
+ * ONE function, read by the tile and by the chart's line, so a state cannot mean
+ * one thing on the tile and another on the node under it.
+ */
+function countedFor(day: DayServices, state: TrendState): { values: number[]; provisional: boolean } {
+  const live = day.running[day.running.length - 1];
+  return state === "last-service-live" && live != null
+    ? { values: [...day.values, live.v], provisional: true }
+    : { values: day.values, provisional: false };
 }
 
 /**
@@ -306,24 +499,27 @@ interface DayServices {
  */
 function dayServices(recordings: TrendRecording[], measure: TrendMeasure): DayServices[] {
   const pick = measureOf(measure);
-  const byDay = new Map<string, { date: string; t: number; entries: { t: number; v: number }[] }>();
+  type Bucket = { date: string; t: number; done: { t: number; v: number }[]; live: { t: number; v: number }[] };
+  const byDay = new Map<string, Bucket>();
   for (const r of recordings) {
     const v = pick(r);
-    if (v == null || !r.complete || !Number.isFinite(r.t)) continue;
-    const hit = byDay.get(r.serviceDate);
+    if (v == null || !Number.isFinite(r.t)) continue;
+    let hit = byDay.get(r.serviceDate);
     if (!hit) {
-      byDay.set(r.serviceDate, { date: r.serviceDate, t: r.t, entries: [{ t: r.t, v }] });
-      continue;
+      hit = { date: r.serviceDate, t: r.t, done: [], live: [] };
+      byDay.set(r.serviceDate, hit);
     }
-    hit.entries.push({ t: r.t, v });
+    (r.complete ? hit.done : hit.live).push({ t: r.t, v });
     hit.t = Math.min(hit.t, r.t);
   }
+  const byStart = (a: { t: number }, b: { t: number }) => a.t - b.t;
   return [...byDay.values()]
-    .sort((a, b) => a.t - b.t)
+    .sort(byStart)
     .map((d) => ({
       date: d.date,
       t: d.t,
-      values: d.entries.slice().sort((a, b) => a.t - b.t).map((e) => e.v),
+      values: d.done.slice().sort(byStart).map((e) => e.v),
+      running: d.live.slice().sort(byStart),
     }));
 }
 
@@ -351,10 +547,27 @@ function combineFirst(values: number[], n: number, measure: TrendMeasure): numbe
  */
 export function typeTrends(
   recordings: TrendRecording[],
-  opts: { window?: number; measure?: TrendMeasure } = {},
+  opts: { window?: number; measure?: TrendMeasure; weeks?: number; clock?: TrendClock } = {},
 ): TypeTrend[] {
   const window = opts.window ?? TREND_WINDOW;
   const measure = opts.measure ?? "attendance";
+  const clock = opts.clock ?? null;
+  /**
+   * The left edge of the COMPARISON, from the operator's own range control.
+   *
+   * Measured back from the newest recording rather than from the clock — the
+   * same rule `withinRange` draws the chart by, so a tile's basis and the
+   * picture under it cover one span and the relationship needs no explaining.
+   * A history that stops in June must still compare when it is opened in
+   * September.
+   *
+   * Omitted, or `Infinity` for All, means no bound at all. The arithmetic tests
+   * pass none; the card always passes the operator's choice.
+   */
+  const cutoff = opts.weeks == null || !Number.isFinite(opts.weeks)
+    ? -Infinity
+    : Math.max(-Infinity, ...recordings.filter((r) => Number.isFinite(r.t)).map((r) => r.t))
+      - opts.weeks * 7 * 24 * 60 * 60_000;
   const byType = new Map<string, TrendRecording[]>();
   const names = new Map<string, string>();
   for (const r of recordings) {
@@ -370,44 +583,65 @@ export function typeTrends(
     // a mean over every recording and the line was too, and once the line became
     // per-day the tile would have been quoting a different statistic under it.
     const sorted = all.slice().sort(byTime);
-    // ALL TIME, not the window and not the range control. The comparison basis
-    // is every day this type ever recorded; the window below is only what the
-    // sparkline draws, and the range buttons only govern the chart under it.
     const everyDay = dayServices(sorted, measure);
     // The SAME derivation the chart's line uses, so the tile's headline and the
     // last node on the line are the same number. They were not: the headline was
     // a mean over every recording and the line was too, and once the line became
     // per-day the tile would have been quoting a different statistic under it.
-    const days = dailyValues(sorted, measure);
+    const days = dailyValues(sorted, measure, clock);
     // A type with NO reading under this measure keeps its tile, with a null
     // headline — the card says "no sound recorded" rather than dropping the
     // whole type the moment you switch measure, which reads as the service type
     // having disappeared. A type with no recordings at all is still no tile.
     const recent = days.slice(-window);
 
-    // ── The partial-day comparison ──
+    // ── Which day the tile is about, and in which of the three states ──
     //
-    // THE HEADLINE IS THE LATEST DAY THAT HAS FINISHED SOMETHING, and N is how
-    // many services it has finished. A Sunday with one of three done counts one;
-    // a Sunday still on its first counts nothing and the tile falls back to the
-    // last day that did finish a service, rather than reading zero all morning.
+    // The newest day that has SOMETHING to show: services that have finished, or
+    // a last service running whose figure is worth counting live. A Sunday on
+    // its first of three with nothing finished has neither, so the tile falls
+    // back to last Sunday and dates itself to it rather than reading zero all
+    // morning.
+    let latestDay: DayServices | null = null;
+    let state: TrendState = "finished";
+    let counted: { values: number[]; provisional: boolean } = { values: [], provisional: false };
+    for (let i = everyDay.length - 1; i >= 0; i--) {
+      const day = everyDay[i];
+      const dayState = stateOf(day, clock);
+      const c = countedFor(day, dayState);
+      if (!c.values.length) continue;
+      latestDay = day;
+      state = dayState;
+      counted = c;
+      break;
+    }
+    const serviceCount = counted.values.length;
+    const latest = latestDay ? combineFirst(counted.values, serviceCount, measure) : null;
+
+    // ── What it is measured against ──
     //
-    // THE BASIS IS LIKE FOR LIKE. Comparing a one-service morning against other
-    // days' full three says every Sunday has collapsed, every Sunday, until the
-    // evening service ends. So the basis is the first N services of each PRIOR
-    // day — and only of days that ran N or more, because a day that only ever
-    // held two has no third service to offer and would drag the average down for
-    // a reason that is not about attendance at all.
+    // WHOLE DAYS once the last service is running and after it ends, so the
+    // number does not jump when it ends. FIRST N while earlier services are
+    // still to come, because a whole-day basis then shows a deficit that cannot
+    // close — the services that would close it have not run.
+    //
+    // A prior day only counts toward a first-N basis if it ran N or more: a day
+    // that only ever held two has no third service to offer and would drag the
+    // average down for a reason that is nothing to do with attendance. Against
+    // WHOLE days that bar is deliberately absent, because a completed
+    // two-service summer Sunday belongs in the average exactly as it is.
     //
     // N is the data's, never a literal: a church running five works with no
-    // change here, and a church that adds a fourth next year gets the fourth
-    // counted the first Sunday it finishes.
-    const latestDay = everyDay.length ? everyDay[everyDay.length - 1] : null;
-    const serviceCount = latestDay ? latestDay.values.length : 0;
-    const latest = latestDay ? combineFirst(latestDay.values, serviceCount, measure) : null;
-    const basisDays = everyDay.slice(0, -1).filter((d) => d.values.length >= serviceCount);
+    // change here, and one that adds a fourth gets it the first Sunday it
+    // finishes.
+    const before = latestDay == null ? [] : everyDay.slice(0, everyDay.indexOf(latestDay));
+    const inRange = before.filter((d) => d.t >= cutoff && d.values.length > 0);
+    const basisDays = basisOf(state) === "whole-day"
+      ? inRange
+      : inRange.filter((d) => d.values.length >= serviceCount);
     const priorMean = basisDays.length >= MIN_PRIOR_DAYS
-      ? mean(basisDays.map((d) => combineFirst(d.values, serviceCount, measure)))
+      ? mean(basisDays.map((d) =>
+        combineFirst(d.values, basisOf(state) === "whole-day" ? d.values.length : serviceCount, measure)))
       : null;
 
     const rounded = latest == null ? null : Math.round(latest);
@@ -422,6 +656,7 @@ export function typeTrends(
       latest: rounded,
       latestDate: latestDay?.date ?? null,
       serviceCount,
+      state,
       priorAverage: priorRounded,
       // A prior average of ZERO is not something to claim a comparison
       // against. One condition, read by all three, so a tile cannot read "no
@@ -547,10 +782,28 @@ export function trendMilestones(
     .sort((a, b) => a.t - b.t);
 }
 
-/** The range control's options, in weeks. 16 is the default: a season. */
-export const RANGE_WEEKS = [8, 16, 52] as const;
+/**
+ * The range control's options. 16 weeks is the default: a season.
+ *
+ * `"all"` rather than a very large number of weeks, so the intent survives a
+ * round trip through localStorage and the label can say "All" without a special
+ * case at the button. `weeksOf` turns a choice into the number every derivation
+ * here wants.
+ */
+export const RANGE_WEEKS = [8, 16, 52, "all"] as const;
 export type RangeWeeks = (typeof RANGE_WEEKS)[number];
 export const DEFAULT_RANGE_WEEKS: RangeWeeks = 16;
+
+/** A range choice as a number of weeks. All is `Infinity`, which every cutoff
+ *  here already reads as "no bound". */
+export function weeksOf(range: RangeWeeks): number {
+  return range === "all" ? Infinity : range;
+}
+
+/** What a range choice reads as on its button. */
+export function rangeLabel(range: RangeWeeks): string {
+  return range === "all" ? "All" : `${range}w`;
+}
 
 /** Recordings inside the chosen range, measured back from the newest one rather
  *  than from the clock: a history that stops in June should still draw when it
@@ -561,13 +814,16 @@ export function withinRange(
   measure: TrendMeasure = "attendance",
 ): TrendRecording[] {
   const pick = measureOf(measure);
-  // `complete` here as well as in `dayServices`, so the range is measured back
-  // from the newest FINISHED recording. Without it a service that started this
-  // morning sets the window's right-hand edge and then contributes no node,
-  // which on the 8-week range can push a real week off the left.
-  const plotted = recordings.filter((r) => pick(r) != null && r.complete && Number.isFinite(r.t));
+  const plotted = recordings.filter((r) => pick(r) != null && Number.isFinite(r.t));
   if (!plotted.length) return [];
-  const newest = Math.max(...plotted.map((r) => r.t));
+  // THE EDGE IS THE NEWEST FINISHED RECORDING, but a running one still comes
+  // back. Measuring the edge from a service that started this morning and then
+  // contributes no node can push a real week off the left of an 8-week range;
+  // dropping the running recording ALTOGETHER is worse, because the day's last
+  // service is exactly what `dailyValues` counts live to draw the provisional
+  // node. Two different questions, and they had one answer.
+  const finished = plotted.filter((r) => r.complete);
+  const newest = Math.max(...(finished.length ? finished : plotted).map((r) => r.t));
   const from = newest - weeks * 7 * 24 * 60 * 60_000;
   return plotted.filter((r) => r.t >= from).sort(byTime);
 }

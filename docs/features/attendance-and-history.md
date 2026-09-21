@@ -89,41 +89,75 @@ week:
 | **Attendance** | the day's services **added up**. The question a trend asks is "how many came", and the three services are three congregations |
 | **Sound** | the day's **loudest single recording**. Decibels are logarithmic, so adding two services' peaks is not louder, it is meaningless |
 
-Only a **completed** recording counts — towards the tile, the sparkline and the
-chart's line alike. A service still running joins the trend when it ends, so the
-figure holds still through a service and steps when it finishes rather than
-climbing while you watch it.
+#### What the tile means across a Sunday
 
-The change is **absolute**, not a percentage — *+71 vs first 3 services, 11
-days*, or *+1.2 dB* under the sound measure — because that is the number you can
-act on: seventy more people is a van, six percent is a conversation. It is green
-when it rises and red when it falls.
+The same tile means three different things through a morning, and the label
+beside the figure always says which.
+
+| | The figure | Compared against | Label reads |
+|---|---|---|---|
+| **More services still to come** | the services that have **finished**, added up | every prior day's **first N**, counting only days that ran N or more | *first 2 services, 10 days* |
+| **The last service is running** | the finished ones **plus the room right now**, climbing | prior completed days' **full totals** | *10 full days* |
+| **The day is over** | the day's full total | prior completed days' **full totals** | *10 full days* |
+
+The middle row reads as a deficit that closes as the room fills — a "how are we
+tracking" number, and red for much of the hour on purpose. It shares its basis
+with the row below it, so **the number does not jump when the last service
+ends**; only the dashed line and its hollow node go away.
+
+The first row is first-N because a full-day basis there shows a gap that
+**cannot** close: the services that would close it have not run, so every Sunday
+would read as the church halving until the evening service ended. A prior day
+only feeds a first-N average if it ran at least that many services — a Sunday
+that only ever held two has no third to offer, and averaging its two in would
+drag the figure down for a reason that is nothing to do with attendance.
+
+A finished day is compared **whole against whole**, whatever each day ran. A
+completed two-service summer Sunday is a two-service Sunday, not a partial three,
+and comparing first-twos would hide exactly the seasonal change you are looking
+for.
+
+A morning that has nothing to show yet — first of three on air, nothing finished
+— falls back to the last day that had something, and the date beside the figure
+says which.
+
+#### How a day is judged finished
+
+In this order:
+
+1. Something of that type is **still recording** — not finished.
+2. The date is **not today** in the app's time zone — finished. Its own
+   time zone setting, never the browser's or the host's: most Linux images
+   run UTC, where the calendar date rolls at 7pm in Chicago.
+3. It is today, and **no service time Planning Center lists for today has yet to
+   start** — finished.
+
+Where Planning Center has nothing to say — the integration is off, or no plan is
+selected — the list is empty, so today is judged finished the moment its last
+recording ends, and a running service is treated as the day's last. With three
+services and no Planning Center that means the morning's first service is counted
+live against whole days, which reads as a deficit until the day catches up.
+
+Rehearsal times are not service times and never hold a day open.
+
+#### The change figure
+
+It is **absolute**, not a percentage — *+71 vs first 3 services, 11 days*, or
+*+1.2 dB* under the sound measure — because that is the number you can act on:
+seventy more people is a van, six percent is a conversation. Green when it rises,
+red when it falls.
 
 It is the difference between the two figures it is derived from, both rounded to
 the precision the tile prints — whole people, tenths of a decibel — so it can
 never disagree with the number above it.
 
-**The comparison is like for like, by service count.** A Sunday with one of three
-services finished shows that one service, and is compared against the average of
-every prior Sunday's **first** service — not against their full three, which
-would read as the church halving every week until the evening service ends. Two
-finished compares against prior first twos, three against prior threes, and so on
-for any number: a church running five works the same way, and one that adds a
-fourth gets it counted the first Sunday it finishes.
-
-A prior day only feeds the average if it ran **at least as many** services as the
-day being compared, so a Sunday that only ever held two does not drag a
-three-service comparison down for a reason that has nothing to do with
-attendance. A morning that has finished nothing yet falls back to the last day
-that did, and the date beside the figure says which.
-
-The basis is **every day on record**, not the eight the sparkline draws and not
-the chart's range — the range buttons govern the chart below and nothing else.
-The label names both halves of what was compared: the slice and how many prior
-days met it. Below **three** qualifying days it reads *no prior window yet*
-instead: one or two readings are not an average, and a change off them is noise
-wearing a direction. Because the count is always on the label, a thin comparison
-is visible as one rather than passed off as a season's worth.
+**The range control governs it.** 8, 16 or 52 weeks, or All — the same buttons
+that bound the chart, so a tile is compared against exactly the completed days
+drawn underneath it. Below **three** qualifying days it reads *no prior window
+yet* instead: one or two readings are not an average, and a change off them is
+noise wearing a direction. The label always names the real day count, so a thin
+basis is visible as one rather than passed off as a season's worth — which
+matters most at the 8-week range.
 
 The tiles are ordered by the figure each one shows — the latest day, highest
 first — so the order you read is the order of the numbers in it. The first type
@@ -148,13 +182,21 @@ counted as zero, so a Sunday where two of three services had a counter running
 is the total of those two.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
-or 52 weeks, defaulting to 16, remembered per browser. The range is the chart's
-alone; it does not narrow what a tile's change is measured against. The **line**
-runs through the same daily figures, one node per recorded day, and every line is the same
+or 52 weeks, or **All**, defaulting to 16 and remembered per browser. The same
+control governs what a tile's change is measured against. At long ranges the axis
+steps in quarters and then half-years rather than crowding, and its labels carry
+the year once the span crosses one. The **line** runs through the same daily
+figures, one node per recorded day, and every line is the same
 weight: they are peers, not a measurement and its references. The tile's headline
 and the last node on its line are the same number. A recording with nothing under
 the current measure is not plotted at all, because a service nobody counted is
 not a service of nobody, and one with no meter running is not a silent one.
+
+The segment running into a day that has **not finished** is drawn dashed, with a
+hollow node on its end, and both move as the room fills. A solid line into a
+Sunday whose evening service is half over would read as a collapse rather than as
+a morning in progress. Under `prefers-reduced-motion` the node stops pulsing and
+the dash stays: the dash is the information.
 
 Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
 change figure, its line, its legend swatch and its milestones. The colour is
