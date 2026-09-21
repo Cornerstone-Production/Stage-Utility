@@ -1352,22 +1352,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
         </SectionCard>
-        <SectionCard id="history-sound" title="Sound">
-          {spl ? (
-            <SplDetail
-              // KEYED BY THE RECORD. The section fetches the raw series on
-              // mount; without a key React keeps the same component across a
-              // service switch and the previous service's line stays on screen
-              // until the new fetch lands.
-              key={spl.serviceKey}
-              detail={spl}
-              timeline={detail}
-              attendance={attendance}
-            />
-          ) : (
-            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
-          )}
-        </SectionCard>
+        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1411,22 +1396,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
         </SectionCard>
-        <SectionCard id="history-sound" title="Sound">
-          {spl ? (
-            <SplDetail
-              // KEYED BY THE RECORD. The section fetches the raw series on
-              // mount; without a key React keeps the same component across a
-              // service switch and the previous service's line stays on screen
-              // until the new fetch lands.
-              key={spl.serviceKey}
-              detail={spl}
-              timeline={detail}
-              attendance={attendance}
-            />
-          ) : (
-            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
-          )}
-        </SectionCard>
+        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1794,6 +1764,41 @@ function ExportPopover({
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+  );
+}
+
+/**
+ * The Sound card, identical in the full detail view and in the arrival-only
+ * view — the two callers passed the same three props to the same markup
+ * verbatim, which is how a fix to one of them (the KEYED BY THE RECORD note
+ * below explains a real bug) would land in one copy and not the other.
+ */
+function SoundSection({
+  spl,
+  timeline,
+  attendance,
+}: {
+  spl: ServiceSplHistory | null;
+  timeline: ServiceTimeline | null;
+  attendance: ServiceAttendance | null;
+}) {
+  return (
+    <SectionCard id="history-sound" title="Sound">
+      {spl ? (
+        <SplDetail
+          // KEYED BY THE RECORD. The section fetches the raw series on
+          // mount; without a key React keeps the same component across a
+          // service switch and the previous service's line stays on screen
+          // until the new fetch lands.
+          key={spl.serviceKey}
+          detail={spl}
+          timeline={timeline}
+          attendance={attendance}
+        />
+      ) : (
+        <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
+      )}
+    </SectionCard>
   );
 }
 
