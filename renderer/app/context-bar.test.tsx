@@ -81,7 +81,7 @@ const LIVE_GAME = {
 
 describe("context bar state", () => {
   test("reports not-live when there is no live payload at all", () => {
-    const s = contextBarState(null, Date.parse("2026-08-14T14:05:00.000Z"), 0);
+    const s = contextBarState(null, Date.parse("2026-08-14T14:05:00.000Z"));
     assert.equal(s.isLive, false);
     assert.equal(s.timerText, null);
   });
@@ -89,32 +89,23 @@ describe("context bar state", () => {
   test("reports not-live in mode none, even though a payload exists", () => {
     // A pco:live broadcast with mode "none" is the server saying the service
     // ENDED. Treating any payload as live leaves a Live pill lit all week.
-    const s = contextBarState({ ...LIVE_ITEM, mode: "none" }, Date.now(), 0);
+    const s = contextBarState({ ...LIVE_ITEM, mode: "none" }, Date.now());
     assert.equal(s.isLive, false);
     assert.equal(s.timerText, null);
   });
 
   test("reports live with the current item and a formatted timer", () => {
-    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:05:00.000Z"), 0);
+    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:05:00.000Z"));
     assert.equal(s.isLive, true);
     assert.equal(s.itemTitle, "Message");
     // 1200s planned, 300s elapsed -> 900s remaining, via fmtDuration.
     assert.equal(s.timerText, "15:00");
   });
 
-  test("applies clock skew, so a drifted browser matches the server", () => {
-    // The browser clock is 60s BEHIND the server. Without applying skew the
-    // timer reads a minute long for the whole service, disagreeing with the
-    // countdown on the wall.
-    const browserNow = Date.parse("2026-08-14T14:04:00.000Z");
-    const s = contextBarState(LIVE_ITEM, browserNow, 60_000);
-    assert.equal(s.timerText, "15:00");
-  });
-
   test("shows an overrun as negative rather than clamping it", () => {
     // PCO counts past zero when an item runs long, and so must this - an
     // operator needs to see HOW far over, not a frozen 0:00.
-    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:25:00.000Z"), 0);
+    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:25:00.000Z"));
     assert.equal(s.isLive, true);
     assert.equal(s.isOver, true);
     assert.ok(s.timerText?.startsWith("−"), `expected a negative timer, got ${s.timerText}`);
@@ -130,7 +121,7 @@ describe("context bar state", () => {
     }) as PcoLiveDTO;
 
   test("counts a pre-service countdown down to the service start", () => {
-    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:25:00.000Z"), 0);
+    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:25:00.000Z"));
     assert.equal(s.timerText, "5:00");
   });
 
@@ -139,14 +130,14 @@ describe("context bar state", () => {
     // any timer at all, so a service two days out — which produces a perfectly
     // good countdown — lit the green LIVE badge above every page. The bar said
     // "starts in 2d 0h" and "LIVE" at the same time.
-    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:25:00.000Z"), 0);
+    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:25:00.000Z"));
     assert.equal(s.isLive, false, "a countdown to a future service reported itself live");
   });
 
   test("still not live when the service is days away", () => {
     // The case actually reported. Five minutes out and two days out are the same
     // state, and neither is live.
-    const s = contextBarState(preservice("2026-08-16T14:30:00.000Z"), Date.parse("2026-08-14T14:30:00.000Z"), 0);
+    const s = contextBarState(preservice("2026-08-16T14:30:00.000Z"), Date.parse("2026-08-14T14:30:00.000Z"));
     assert.equal(s.isLive, false);
     assert.equal(s.timerText, "2d 0h");
   });
@@ -156,7 +147,7 @@ describe("context bar state", () => {
     // so the countdown goes negative while nothing is running — and "we are past
     // the start time" is the moment a false LIVE is most believable and most
     // wrong, because nobody has begun anything yet.
-    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:35:00.000Z"), 0);
+    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:35:00.000Z"));
     assert.equal(s.isLive, false, "an overdue start reported itself live");
     assert.equal(s.isOver, true);
   });
@@ -164,7 +155,7 @@ describe("context bar state", () => {
   test("a running ITEM is live", () => {
     // The other half: the badge has to still appear when it should, or this is
     // just a different bug.
-    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:05:00.000Z"), 0);
+    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:05:00.000Z"));
     assert.equal(s.isLive, true);
   });
 });
@@ -194,9 +185,8 @@ describe("nothing appears or disappears", () => {
   /** The deadest state the app has: no service, no recorder, no integrations. */
   const idle = {
     state: null,
-    bar: contextBarState(null, NOW, 0),
+    bar: contextBarState(null, NOW),
     now: NOW,
-    skewMs: 0,
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },
@@ -264,7 +254,7 @@ describe("nothing appears or disappears", () => {
 
   test("every item bound by the rule still renders mid-service", () => {
     // The other half. An item that only renders when idle is the same bug.
-    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW) };
     for (const id of MUST_RENDER) {
       assert.notEqual(renderBarItem(id, live), null, `${id} vanishes during a live service`);
     }
@@ -275,7 +265,7 @@ describe("nothing appears or disappears", () => {
     // branches an idle-only fixture never touches.
     const rolling = {
       ...idle,
-      bar: contextBarState(LIVE_ITEM, NOW, 0),
+      bar: contextBarState(LIVE_ITEM, NOW),
       obs: { connected: true, recording: false, recordPaused: false, recordAnchorMs: null, recordSampledAt: null },
       integrations: {
         states: [{ id: "obs", enabled: true, configured: true, connection: "disconnected" }],
@@ -289,7 +279,7 @@ describe("nothing appears or disappears", () => {
 
   const scoresCtx = (games: ScoreGameDTO[], over: Record<string, unknown> = {}) => ({
     ...idle,
-    bar: contextBarState(LIVE_ITEM, NOW, 0),
+    bar: contextBarState(LIVE_ITEM, NOW),
     scores: {
       connected: true,
       games,
@@ -405,9 +395,8 @@ describe("what a rung leaves behind", () => {
 
   const idle = {
     state: null,
-    bar: contextBarState(null, NOW, 0),
+    bar: contextBarState(null, NOW),
     now: NOW,
-    skewMs: 0,
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },
@@ -423,7 +412,7 @@ describe("what a rung leaves behind", () => {
   const loaded = {
     ...idle,
     state: { serviceTypeName: SERVICE_TYPE, planTitle: PLAN_TITLE } as unknown as StageState,
-    bar: contextBarState(LIVE_ITEM, NOW, 0),
+    bar: contextBarState(LIVE_ITEM, NOW),
   };
 
   /**
@@ -463,7 +452,7 @@ describe("what a rung leaves behind", () => {
   });
 
   test("and not mid-service either, where the readings are different", () => {
-    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW) };
     for (const id of MUST_RENDER) {
       for (let level = 0; level <= 3; level++) {
         assert.notEqual(
@@ -480,7 +469,7 @@ describe("what a rung leaves behind", () => {
     // qualifier or a decoration; it may never take a value. The clock's SECONDS
     // are the one deliberate exception — a reading at lower precision rather
     // than a value removed — so the clock is checked separately below.
-    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW) };
     const digits = (s: string) => (s.match(/\d/g) ?? []).join("");
     for (const id of MUST_RENDER) {
       if (id === "clock") continue;
@@ -579,9 +568,8 @@ describe("the bar and its probe are the same loop", () => {
 
   const ctx = {
     state: { serviceTypeName: SERVICE_TYPE, planTitle: PLAN_TITLE } as unknown as StageState,
-    bar: contextBarState(LIVE_ITEM, NOW, 0),
+    bar: contextBarState(LIVE_ITEM, NOW),
     now: NOW,
-    skewMs: 0,
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },

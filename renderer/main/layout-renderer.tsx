@@ -8,7 +8,7 @@ import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useServerSkew } from "@renderer/lib/use-server-skew";
+import { useServerClock } from "@renderer/lib/server-clock";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
@@ -21,7 +21,7 @@ import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
 import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
-import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
+import { usePvpState } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
 import { useScoresState } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
@@ -70,8 +70,6 @@ export interface LayoutRenderCtx {
   reaper: ReaperStatusDTO | null;
   /** Live ProVideoPlayer layer state — for the pvp-layers object. null until loaded. */
   pvp: PvpStatusDTO | null;
-  /** Clock offset measured from PVP's own frames, not from PCO's. */
-  pvpSkewMs: number;
   scores: ScoresStatusDTO | null;
   resi: StreamStatusDTO | null;
   youtube: YouTubeStatusDTO | null;
@@ -102,8 +100,11 @@ export interface LayoutRenderCtx {
   integrationLabels: Record<string, string>;
   /** Flat wireless channel list — for the wireless-summary object. */
   wireless: DeviceStatus[];
+  /** The SERVER's clock, ticking once a second. Every reading below it — the
+   *  clock face, the countdown, PVP's bar, the record timecode — is against an
+   *  instant the server stamped, so a wall Pi on a LAN with no NTP must never
+   *  answer from its own. See renderer/lib/server-clock.ts. */
   now: number;
-  skewMs: number;
   ndiSource: string | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
@@ -541,7 +542,7 @@ function Captioned({ caption, ts, children }: { caption?: string | null; ts: CSS
 
 /** Seconds until the next service, or null. Same source as the context bar. */
 function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
-  const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+  const t = computePcoTimer(ctx.pcoLive, ctx.now);
   return t && !t.over ? t.seconds : null;
 }
 
@@ -859,7 +860,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           state={ctx.state}
           pcoLive={ctx.pcoLive}
           now={ctx.now}
-          skewMs={ctx.skewMs}
           onlineOutputIds={ctx.onlineOutputIds}
           secondsToStart={homeSecondsToStart(ctx)}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
@@ -883,7 +883,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // changed a preference for the operator app.
       return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? displayHourCycle(), c.showMeridiem ?? true));
     case "countdown-timer": {
-      const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+      const t = computePcoTimer(ctx.pcoLive, ctx.now);
       if (!t) return (c.hideWhenIdle ?? false) ? null : readout("—");
       // Red once the timer goes negative (item or service ran over), like the
       // dashboard; amber once it drops to/below the configured warning; else keep
@@ -897,8 +897,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // right NOW. See servicePacing() in service-pacing.ts for the math (also
       // used by History) — negative = ahead (green), positive = behind (red).
       const tol = 3; // within ±3s of plan reads "0:00"
-      const serverNow = ctx.now + ctx.skewMs;
-      const { deltaSec } = servicePacing(ctx.serviceTimeline, serverNow);
+      const { deltaSec } = servicePacing(ctx.serviceTimeline, ctx.now);
       // Ahead/behind is derived from the drift where there IS one. In projected-
       // end mode the drift is optional — the timeline recorder may not be
       // running — so these stay false and the clock reads in the neutral colour.
@@ -916,7 +915,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         // while the drift cannot (nothing recording), and it can decline while
         // the drift can (plan lengths unset). Either way a null is a dash, never
         // a made-up time.
-        const endMs = projectedServiceEndMs(ctx.pcoLive, ctx.planItems, serverNow);
+        const endMs = projectedServiceEndMs(ctx.pcoLive, ctx.planItems, ctx.now);
         if (endMs == null) return nothingToSay();
         // The zone the app REASONS in when the operator has set one — a display
         // driven from a UTC box must read the venue's clock, not the box's. Unset
@@ -1255,7 +1254,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         activeText: c.recordingText ?? activeDefault,
         idleText: c.idleText ?? idleDefault,
         offlineText: c.offlineText ?? STATUS_TEXT.obs.offline,
-        sub: mode === "recording" && c.showTimecode ? obsRecordTimecode(obs, ctx.now, ctx.skewMs) : null,
+        sub: mode === "recording" && c.showTimecode ? obsRecordTimecode(obs, ctx.now) : null,
       });
     }
     case "stream-status":
@@ -1291,7 +1290,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "pvp-layers":
-      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.pvpSkewMs} H={ctx.H} />;
+      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} H={ctx.H} />;
 
     // `home-pvp-now` is NOT here: isHomeCard catches it above and draws it
     // through PvpNowCard, which renders this same component inside Home's card.
@@ -1304,7 +1303,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           config={c}
           status={ctx.pvp}
           now={ctx.now}
-          skewMs={ctx.pvpSkewMs}
           align={o.style?.textAlign}
           uniform={ctx.home}
         />
@@ -2957,10 +2955,6 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // on the channel whose demand sets the server's poll rate — the exact thing
   // the note above is about.
   const pvp = usePvpState(want(["pvp-layers", "pvp-now"]));
-  // PVP's own clock offset. The shared skewMs below is PCO-derived and is 0
-  // whenever PCO is off, which would leave every PVP bar comparing a server
-  // timestamp against the browser's clock.
-  const pvpSkewMs = usePvpSkewMs(pvp);
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
   const scores = useScoresState(want(["scores", "home-scores"]));
@@ -2994,14 +2988,11 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const serviceTimeline = useServiceTimeline();
   const integrationsSnap = useIntegrations();
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const skewMs = useServerSkew(pcoLive?.serverNow);
+  // One clock for the whole canvas, and it is the SERVER's — a wall Pi's own is
+  // as wrong as the last time anyone set it.
+  const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now };
 }
 
 /**
@@ -3035,7 +3026,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3108,7 +3099,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

@@ -1,60 +1,44 @@
-// The one clock a component is allowed to ask what time it is.
+// The clock for a component that holds no server-stamped timestamp of its own.
 //
-// This app has ONE clock: the server's, corrected against by every surface that
-// shows a time. A wall Pi is the reason — an isolated production LAN runs no NTP,
-// so a display that has been on the wall for a year can be minutes or hours out,
-// and a component reading `Date.now()` reports the drift as fact.
-//
-// The correction is the same one seven surfaces already make: `pco:live` carries
-// `serverNow`, and the difference between it and the browser's clock is the skew.
-// Those seven hold a `pcoLive` already — they take it from useDashboardState for
-// other reasons — and derive `now` and `skewMs` as two separate values because
-// their consumers (LayoutRenderCtx among them) hand the pair on. This hook is for
-// a component that has neither: it subscribes for itself and returns the one
+// Every surface that already has one — anything holding a `pcoLive`, a PVP
+// status — feeds renderer/lib/server-clock.ts from it and reads the corrected
+// instant back with `useServerClock`. This is for the rest: it subscribes to
+// `pco:live` for itself, feeds the same one clock, and returns the same one
 // number. `pco:live` is a hydrated channel, so a late subscriber is handed the
 // connect-time frame in a microtask rather than waiting for the next push.
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { onNotification } from "../lib/api";
+import { serverClock, useServerNow } from "../lib/server-clock";
 
 /**
- * The current instant, corrected against the server's clock.
+ * The current instant, on the server's clock.
  *
  * @param intervalMs how often the returned value advances. Pick the coarsest
  *   cadence the caller can live with: it is a re-render each time.
  * @param enabled false where the caller was handed a corrected clock already and
- *   only calls this because a hook cannot be conditional. Off, it neither ticks
- *   nor subscribes, so the surface that has its own clock pays nothing for a
- *   second one.
+ *   only calls this because a hook cannot be conditional, or where whatever it
+ *   counts is not running. Off, it neither ticks nor subscribes, so the surface
+ *   that has its own clock pays nothing for a second one.
  */
 export function useCorrectedNow(intervalMs: number, enabled = true): number {
-  const [skewMs, setSkewMs] = useState(0);
-  const [now, setNow] = useState(() => Date.now());
-
   useEffect(() => {
     if (!enabled) return;
-    return onNotification("pco:live", (payload: unknown) => {
+    return onNotification("pco:live", (payload: unknown, replayed: boolean) => {
+      // A replay is this client's own cache being handed to a late subscriber,
+      // so its `serverNow` says when the frame was FIRST seen and reading a
+      // clock offset from it would be reading an old one. The best-of window in
+      // ServerClock would reject it beside a fresher sample, but on a cold page
+      // it can be the only sample there is.
+      if (replayed) return;
       const serverNow = (payload as { serverNow?: string } | null)?.serverNow;
       if (!serverNow) return;
       const measured = Date.parse(serverNow);
       if (!Number.isFinite(measured)) return;
-      // Whole seconds only. `serverNow` moves on every push — as often as once a
-      // second while a service is live — and a skew stored to the millisecond
-      // would re-render the caller at that rate however coarse its own tick is.
-      // Returning the previous value is a React bail-out, so a settled clock
-      // costs nothing after the first frame, and a real correction still lands on
-      // the frame it arrives in rather than at the next tick.
-      const next = measured - Date.now();
-      setSkewMs((prev) => (Math.abs(next - prev) >= 1000 ? next : prev));
+      serverClock.observe(measured);
     });
   }, [enabled]);
 
-  useEffect(() => {
-    if (!enabled) return;
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs, enabled]);
-
-  return now + skewMs;
+  return useServerNow(intervalMs, enabled);
 }

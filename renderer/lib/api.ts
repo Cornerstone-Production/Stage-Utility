@@ -6,6 +6,7 @@
 // The renderer is always served from the same origin as the HTTP server
 // (port 8788), so all paths here are relative.
 
+import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 
 type Params = Record<string, unknown> | undefined;
@@ -983,10 +984,12 @@ const sseListeners: SseListener[] = [];
  * Ultritouch renders its Browser component in DashBoard's fallback browser
  * (its Chromium will not start on the panel's Linux), and that browser buffers
  * /api/events and releases the frames in batches up to a minute late — so the
- * panel showed a minute-old service and measured its clock skew a minute wrong.
+ * panel showed a minute-old service.
  *
  * Off by default and deliberately not sticky: a held stream is cheaper and
- * immediate, and this costs one request per client every two seconds.
+ * immediate, and this costs one request per client every two seconds. What it
+ * buys back is the only measurable round trip in the app: see the `now` handling
+ * in `pollOnce`, which is what keeps the clock on a panel right.
  */
 const POLL_TRANSPORT = (() => {
   try {
@@ -1460,6 +1463,9 @@ let pollFailures = 0;
 let pollInFlight = false;
 
 interface PollBody {
+  /** The server's clock as it assembled the answer. Absent from a server older
+   *  than the round-trip correction, which is why reading it is guarded. */
+  now?: number;
   seq: number;
   resync: boolean;
   frames: Array<{ channel: string; data: unknown }>;
@@ -1487,9 +1493,25 @@ async function pollOnce(): Promise<void> {
   pollInFlight = true;
   try {
     const since = pollSince === null ? "" : `&since=${pollSince}`;
+    const sentAt = monotonicNow();
     const res = await fetch(`/api/events/poll?cid=${encodeURIComponent(CLIENT_ID)}${since}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = (await res.json()) as PollBody;
+    // Read as text, stamp the arrival, THEN parse. `res.json()` reads the body
+    // and parses it in one call, so the parse lands inside both the measured
+    // round trip and the arrival instant — and the two do not cancel. With a
+    // parse of `p`, the offset comes out `p/2` SLOW, because the arrival moves
+    // by the whole `p` while the round trip contributes only half of it. On a
+    // resync that parse is the whole StageState, which is exactly when it is
+    // worst.
+    const text = await res.text();
+    const rttMs = monotonicNow() - sentAt;
+    const body = JSON.parse(text) as PollBody;
+    // THE round-trip correction. This transport is the reason the clock needed
+    // one: a frame can sit in the server's buffer for the whole interval before
+    // anyone collects it, so the timestamp inside a frame is not a reading of
+    // the server's clock at all — `now` is, stamped as the answer was built.
+    // See renderer/lib/server-clock.ts.
+    if (typeof body.now === "number") serverClock.observe(body.now, rttMs);
     if (pollFailures > 0) {
       console.log(`[api] poll transport recovered after ${pollFailures} failed attempt(s)`);
       pollFailures = 0;

@@ -40,11 +40,12 @@ import {
   readFingerprint,
   shortLocation,
 } from "@main/services/companion-fingerprint";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, DownloadIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
+import { serverClock } from "../../lib/server-clock";
 import {
   Button,
   Checkbox,
@@ -205,11 +206,24 @@ export function buttonStatusText(
  * this pill is the only warning there is.
  */
 export function CueButtonStatus({ params }: { params: Record<string, string | number> }) {
-  // A lazy state initializer, not a bare `Date.now()` in the body: reading the
-  // clock during render is impure and the lint rule refuses it. The wording is
-  // coarse enough ("3 hours ago") that a value fixed at mount is right for as
-  // long as the page is open.
-  const [nowMs] = useState(() => Date.now());
+  // A lazy state initializer, not a bare read in the body: reading the clock
+  // during render is impure and the lint rule refuses it. The wording is coarse
+  // enough ("3 hours ago") that a value fixed at mount is right for as long as
+  // the page is open — one per row, so a ticking hook here would re-render the
+  // whole list once a second for a reading that changes hourly.
+  //
+  // The SERVER's clock: `lastSeenAt` is stamped by companion-reconcile, so a
+  // console an hour out would say "4 hours ago" about something seen three hours
+  // ago.
+  //
+  // Read ONCE MORE when the clock is first set, which is the one moment reading
+  // it at mount cannot survive: on a cold page load the clock has not been set
+  // yet, `serverClock.now()` is the host's clock by design, and a value fixed
+  // there would keep the drift for the life of the page — the exact bug, on the
+  // exact path a settings page takes. `subscribe` fires on the first reading and
+  // on a step, and on nothing else, so a settled clock costs this row nothing.
+  const [nowMs, setNowMs] = useState(() => serverClock.now());
+  useEffect(() => serverClock.subscribe(() => setNowMs(serverClock.now())), []);
   const said = buttonStatusText(readFingerprint(params), nowMs);
   if (!said) return null;
   return (

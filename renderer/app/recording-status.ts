@@ -31,20 +31,19 @@ export interface Recorder {
  * THE place a new recording integration is added. One entry here and the Home
  * widget, the context bar and anything else asking the question all cover it.
  *
- * `now` and `skewMs` are passed in because OBS's record clock is INTERPOLATED
- * rather than pushed — the server sends an anchor twice a minute instead of a
- * formatted string every second, and this reads it forward. Same argument
- * `streamingStat` makes for taking `now`: a caller that ticks a clock already has
- * one, and a function that reads the clock itself cannot be tested.
+ * `serverNow` is passed in because OBS's record clock is INTERPOLATED rather than
+ * pushed — the server sends an anchor twice a minute instead of a formatted
+ * string every second, and this reads it forward. Same argument `streamingStat`
+ * makes for taking `now`: a caller that ticks a clock already has one, and a
+ * function that reads the clock itself cannot be tested.
  */
 export function recorders(
   obs: RecordAnchor & { connected: boolean } | null,
   reaper: { connected: boolean; recording: boolean; positionString?: string | null } | null,
-  now: number,
-  skewMs = 0,
+  serverNow: number,
 ): Recorder[] {
   return [
-    { name: "OBS", connected: !!obs?.connected, recording: !!obs?.recording, timecode: obsRecordTimecode(obs, now, skewMs) },
+    { name: "OBS", connected: !!obs?.connected, recording: !!obs?.recording, timecode: obsRecordTimecode(obs, serverNow) },
     // REAPER reports the transport position rather than a record timer, and while
     // it is rolling that IS how far into the take you are. Same source the REAPER
     // status object's `showPosition` uses, so the two cannot disagree.

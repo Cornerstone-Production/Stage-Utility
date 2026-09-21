@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
-import { useServerSkew } from "../lib/use-server-skew";
+import { useServerClockSample } from "../lib/server-clock";
 import { useStatusChannel } from "./use-status-channel";
 
 /**
@@ -18,27 +18,17 @@ import { useStatusChannel } from "./use-status-channel";
  */
 export function usePvpState(enabled = true): PvpStatusDTO | null {
   const read = useCallback(() => invoke<PvpStatusDTO>("pvp:getStatus"), []);
-  return useStatusChannel<PvpStatusDTO>(read, "pvp:status", enabled);
-}
-
-/**
- * How far this browser's clock is behind the server's, measured from PVP's OWN
- * frames.
- *
- * The shared `skewMs` threaded through the layout renderer is derived solely
- * from `pcoLive.serverNow`, so with Planning Center unconfigured or unreachable
- * it stays 0 — and PVP's progress bar then compares a SERVER-stamped `sampledAt`
- * against the browser's clock. On a wall Pi a minute fast that pins every bar at
- * 100% and every countdown at 0:00, and the clamp in computePvpProgress makes
- * the wrong answer look like a legitimate one. Nothing about ProVideoPlayer
- * should depend on whether Planning Center is up.
- *
- * `sampledAt` is stamped as the poll returns and arrives within a broadcast of
- * being taken, so the moment a frame lands is a fair reading of the offset. Only
- * moved when a NEW sample arrives — re-measuring on every render would chase the
- * render loop rather than the clock, and never on mount, where `sampledAt` can
- * be a replayed hello-burst snapshot minutes old. See use-server-skew.ts.
- */
-export function usePvpSkewMs(pvp: PvpStatusDTO | null): number {
-  return useServerSkew(pvp?.sampledAt);
+  const status = useStatusChannel<PvpStatusDTO>(read, "pvp:status", enabled);
+  // PVP's frames feed the page's clock like every other server-stamped
+  // timestamp. `sampledAt` is stamped as the poll returns, so a landing frame is
+  // a fair reading of the offset — and it means nothing about ProVideoPlayer
+  // depends on whether Planning Center is up. That was the whole argument for
+  // the second, PVP-only skew estimate this replaces: with PCO unconfigured the
+  // shared estimate stayed 0, and every PVP bar compared a SERVER-stamped
+  // `sampledAt` against the browser's clock. On a wall Pi a minute fast that
+  // pins every bar at 100% and every countdown at 0:00, and the clamp in
+  // computePvpProgress makes the wrong answer look legitimate. One clock fed by
+  // both sources answers it without a second copy of the arithmetic.
+  useServerClockSample(status?.sampledAt);
+  return status;
 }

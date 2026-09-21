@@ -24,6 +24,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { cn } from "../../../lib/cn";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { formatClock } from "../../../lib/clock-format";
+import { useServerNow } from "../../../lib/server-clock";
 import { fmtDur } from "../overview-data";
 import {
   areaPathD,
@@ -981,7 +982,7 @@ function numberOnly(seg: LaneSegment, width: number, measure: (t: string) => num
 }
 
 /**
- * The wall clock, while a record is open.
+ * The clock, while a record is open.
  *
  * A live chart's right edge is the CLOCK, not the newest sample: a counter that
  * has been quiet for two minutes should show two minutes of empty axis rather
@@ -990,24 +991,18 @@ function numberOnly(seg: LaneSegment, width: number, measure: (t: string) => num
  * is for — every 15s, which is half the attendance sampling interval and a
  * quarter of a pixel on an hour-wide plot.
  *
- * Starts at 0 rather than reading the clock during render (a render must be
- * pure, and the lint rule here enforces it). The consequence is one frame on
- * mount where a live chart's edge sits at its newest sample instead of at `now`
- * — which is where it sits for a finished record anyway.
+ * The SERVER's clock, because everything it is compared against is a
+ * server-recorded instant: a console an hour fast would otherwise draw an hour of
+ * empty axis on a chart whose counter is perfectly current. See
+ * renderer/lib/server-clock.ts.
+ *
+ * This READS that clock; it does not feed it. Inside the operator shell the
+ * context bar does. On `/history`, which is chromeless, nothing does, and this
+ * falls back to the host's clock — no worse than what it replaced, and not the
+ * correction the paragraph above would otherwise promise.
  */
 function useWallClock(enabled: boolean, override?: number): number {
-  const [now, setNow] = useState(0);
-  useEffect(() => {
-    if (override != null || !enabled) return;
-    // The first read is a task rather than a synchronous setState in the effect
-    // body: the latter is a cascading render, and the lint rule here says so.
-    const first = setTimeout(() => setNow(Date.now()), 0);
-    const id = setInterval(() => setNow(Date.now()), 15_000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(id);
-    };
-  }, [enabled, override]);
+  const now = useServerNow(15_000, enabled && override == null);
   return override ?? now;
 }
 

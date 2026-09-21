@@ -362,12 +362,4 @@ describe("obsRecordTimecode", () => {
   test("no snapshot at all is null, not a zeroed clock", () => {
     assert.equal(obsRecordTimecode(null, NOW), null);
   });
-
-  test("the skew is the SERVER's clock, so a display an hour out still reads right", () => {
-    // The anchor is stamped by the server. A kiosk on an isolated LAN with no NTP
-    // has been an hour out; without the correction it would draw an hour of
-    // recording that never happened.
-    const browserNow = NOW - 3_600_000;
-    assert.equal(obsRecordTimecode(rolling, browserNow, 3_600_000), "01:02:03");
-  });
 });

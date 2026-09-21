@@ -254,14 +254,12 @@ export function PvpNowObject({
   config,
   status,
   now,
-  skewMs,
   align,
   uniform = false,
 }: {
   config: PvpNowConfig;
   status: PvpStatusDTO | null;
   now: number;
-  skewMs: number;
   align?: LayoutHAlign | null;
   /** Size the value as though the composition had every line — for Home's grid
    *  of same-height tiles. */
@@ -282,13 +280,13 @@ export function PvpNowObject({
   // never asked to count a still down should not go looking for a hold at all.
   const stillHoldSec = config.countStills ? (config.stillHoldSec ?? status?.imageDurationSec ?? null) : null;
   const progress =
-    (layer ? computePvpProgress(layer, status?.sampledAt ?? null, now, skewMs) : null) ??
-    (layer ? computeStillProgress(layer, now, skewMs, stillHoldSec) : null);
+    (layer ? computePvpProgress(layer, status?.sampledAt ?? null, now) : null) ??
+    (layer ? computeStillProgress(layer, now, stillHoldSec) : null);
   // A still NOT opted into the countdown, but whose arrival PVP has told us —
   // the full mode's "on screen m:ss" line reads this. Never set at the same
   // time as `progress`: a still that IS counting down already has its value
   // slot, and a second clock beside it would answer the same question twice.
-  const onScreenSec = !progress && layer ? stillOnScreenSec(layer, now, skewMs) : null;
+  const onScreenSec = !progress && layer ? stillOnScreenSec(layer, now) : null;
   const badge = nowBadge(layer, found);
   const compact = config.compact ?? false;
   const label = config.nowLabel ?? DEFAULT_PVP_NOW_LABEL;

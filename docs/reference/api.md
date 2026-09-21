@@ -445,6 +445,7 @@ underneath it.
 
 ```json
 {
+  "now": 1789923805519,
   "seq": 148,
   "resync": false,
   "frames": [ { "channel": "pco:live", "data": { "mode": "item" } } ]
@@ -454,6 +455,12 @@ underneath it.
 `frames` are in the order they were broadcast, and `data` is the same payload the
 stream would have sent on that channel. `seq` is what to send as the next
 `since`.
+
+`now` is the server's clock in epoch milliseconds, stamped as the answer is sent.
+A client that measured its own round trip places the server's clock at `now +
+rtt/2`, which is the correction that keeps a polling display's countdowns on
+time: a frame can sit in the buffer for the whole interval, so a timestamp
+*inside* a frame says when it was broadcast, not when it was sent.
 
 With no `since`, the response is the connect-time snapshot — the same channels
 the stream hydrates, `server:hello` first — and `resync` is `false`, because

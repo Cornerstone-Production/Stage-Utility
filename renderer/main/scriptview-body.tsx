@@ -51,7 +51,6 @@ export function useScriptViewRender(
   roles: CategoryRole[],
   pcoLive: PcoLiveDTO | null,
   now: number,
-  skewMs: number,
 ) {
   const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
   const spec = useMemo(() => resolveScriptViewSpec(layout, roles, rundown?.noteCategories ?? []), [layout, roles, rundown?.noteCategories]);
@@ -75,7 +74,7 @@ export function useScriptViewRender(
   // only when the PCO controller is on a plan item (preservice countdown ≠ live).
   const isActivePlan = !!rundown?.isActivePlan;
   const liveNow = isActivePlan && pcoLive?.mode === "item";
-  const timer = isActivePlan ? computePcoTimer(pcoLive, now, skewMs) : null;
+  const timer = isActivePlan ? computePcoTimer(pcoLive, now) : null;
 
   return {
     items,

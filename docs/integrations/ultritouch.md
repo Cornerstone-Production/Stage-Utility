@@ -57,9 +57,7 @@ The Chromium browser could not be initialized
 and falls back to its own built-in browser. The page still renders — but that
 browser buffers a long-lived HTTP response and releases it in batches up to a
 minute later, which is exactly what the `/api/events` stream is. The panel then
-shows a minute-old service, and because it measures its clock offset from the
-timestamp on each frame as the frame arrives, every countdown on it is a minute
-out as well.
+shows a minute-old service.
 
 So a panel URL carries `?transport=poll`, which makes the page collect updates
 with a small request every two seconds instead. See
@@ -85,6 +83,16 @@ browser. The Chromium line appears there at every panel start.
   [The panel's browser](#the-panels-browser). The server's
   [`/log`](../ops/updates-and-logs.md) confirms it took:
   `[events] poll client <id> started`.
+- A clock or countdown reading wrong is not the panel's own clock showing
+  through: the page renders the server's time, not the panel's. The panel has no
+  NTP and its clock drifts freely, which is expected and does not reach the
+  screen. `/log` says so once per page load when the gap is more than a second —
+  `[clock] this browser's clock is 7h 2m fast — showing server time instead`.
+  A panel that shows its own time for a few seconds after a reload and then
+  corrects itself is one that is NOT on `?transport=poll`: the stream has no
+  round trip to measure, so the page waits for a second Planning Center frame
+  before it trusts one. Add the query string —
+  [The panel's browser](#the-panels-browser).
 - The URL needs its scheme: `http://`, not `http:`.
 - The screen must be in **panel** mode. A console on a display-mode screen is
   refused by the server, and a wall layout on a panel draws buttons that do

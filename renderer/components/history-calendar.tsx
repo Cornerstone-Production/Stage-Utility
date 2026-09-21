@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "./ui/tooltip";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { serverClock } from "../lib/server-clock";
 import { cn } from "../lib/cn";
 
 /** A month calendar for browsing recorded services: a day's cell is SHADED by how
@@ -85,8 +86,18 @@ export function HistoryCalendar({
    */
   onMonthChange?: (ym: string) => void;
 }) {
+  // The SERVER's clock, not `new Date()`. Every date this is compared against —
+  // the recorded service days it rings and shades, and the month it will not page
+  // past — was written by the server, so a console whose clock has drifted rings
+  // a day that is not today and refuses months that exist. Same reading as the
+  // PCO calendar's, which calendar-clock.test.tsx already guards; see
+  // renderer/lib/server-clock.ts.
+  //
+  // Fixed at mount, like the month it opens on: a calendar that repaints because
+  // midnight passed under a stationary cursor is not worth a tick, and the
+  // selected day is the operator's, not the clock's.
   const today = useMemo(() => {
-    const d = new Date();
+    const d = new Date(serverClock.now());
     return { y: d.getFullYear(), m: d.getMonth(), str: ymd(d.getFullYear(), d.getMonth(), d.getDate()) };
   }, []);
 

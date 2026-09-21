@@ -10,8 +10,9 @@
 // old password field reachable underneath, unchanged, for the OAuth Playground
 // path.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
+import { useServerNow } from "../lib/server-clock";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
@@ -56,7 +57,6 @@ export function YouTubeConnectRow({
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
 
   const { data } = useQuery({
     queryKey: QUERY_KEY,
@@ -69,12 +69,12 @@ export function YouTubeConnectRow({
   });
   const state: ConnectStatus = data ?? { status: "idle" };
 
-  // The countdown's own tick, independent of the status poll.
-  useEffect(() => {
-    if (state.status !== "pending") return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [state.status]);
+  // The countdown's own tick, independent of the status poll, and on the
+  // SERVER's clock — `expiresAt` is the server's deadline, so a console an hour
+  // out would count down to the wrong one. Reads the page's clock rather than
+  // subscribing for itself: this row only ever renders inside the operator
+  // shell, whose context bar feeds that clock on every page.
+  const now = useServerNow(1000, state.status === "pending");
 
   async function run(channel: string): Promise<void> {
     setBusy(true);

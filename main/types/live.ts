@@ -192,7 +192,8 @@ export interface ObsStatusDTO extends RevisionedStatus {
    */
   recordAnchorMs: number | null;
   /** ISO moment `recordAnchorMs` was read, stamped by this server — so a display
-   *  corrects it with the same clock skew it applies to the PCO countdown. */
+   *  reads it against the server's clock, the one every surface renders from
+   *  (renderer/lib/server-clock.ts), rather than against its own. */
   recordSampledAt: string | null;
 }
 

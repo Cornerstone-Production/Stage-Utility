@@ -62,7 +62,7 @@ function mount() {
       alignOn: false,
       locked: false,
       // Everything the objects read comes off the context, so a bare one renders.
-      ctx: { now: Date.now(), skewMs: 0, H: 0, interactive: false },
+      ctx: { now: Date.now(), H: 0, interactive: false },
       ndiSource: null,
       interactive: false,
       onSelect: () => {},
