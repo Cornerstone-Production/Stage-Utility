@@ -10,18 +10,30 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 266 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, idle, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const flashModule = await import("../app/flash.js");
 const { IntegrationsPanel, integrationFlashId } = await import("./integrations-panel.js");
 const { GettingStarted } = await import("../settings/getting-started.js");
 const { readinessChecks } = await import("../app/home/readiness.js");
+
+/** Like the shared settle(), but for a wait that needs a specific real-world
+ *  duration. */
+function settle(ms = 0): Promise<void> {
+  return act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+}
 
 let server = installFakeServer();
 
@@ -30,12 +42,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 /** Two animation frames before flashTarget's first look, then it clears. */
 const RESOLVE_MS = 120;
@@ -45,14 +57,21 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
+  // and sixteen cards' worth of Switch primitives settle their own state
+  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
+  // idle()'s condition reads react-query's cache, not anything React holds
+  // back.
+  await act(async () => {
+    await idle();
+  });
   return c;
 }
 
 describe("a reveal opens the named integration", () => {
   test("flashTarget on a configured integration opens its dialog", async () => {
     await panel();
-    flashModule.flashTarget(integrationFlashId("obs"));
+    act(() => flashModule.flashTarget(integrationFlashId("obs")));
     // Long enough for flashTarget's own retry loop to find the card and clear
     // its pending target. Left set, it seeds the NEXT panel this file mounts and
     // opens a dialog nobody asked for — which is the pending-seed path working
@@ -64,7 +83,7 @@ describe("a reveal opens the named integration", () => {
   test("the literal 'pco-credentials' opens Planning Center", async () => {
     // Three call sites hardcode this string rather than deriving it.
     await panel();
-    flashModule.flashTarget("pco-credentials");
+    act(() => flashModule.flashTarget("pco-credentials"));
     await settle(RESOLVE_MS);
     assert.match(dialog()?.textContent ?? "", /Planning Center/);
   });
@@ -78,14 +97,14 @@ describe("a reveal opens the named integration", () => {
     assert.ok(card, "the dormant card is not in the DOM before the reveal");
     assert.equal(card.getAttribute("data-flash-id"), integrationFlashId("reaper"));
 
-    flashModule.flashTarget(integrationFlashId("reaper"));
+    act(() => flashModule.flashTarget(integrationFlashId("reaper")));
     await settle(RESOLVE_MS);
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
 
   test("an unknown flash id opens nothing and does not throw", async () => {
     await panel();
-    flashModule.flashTarget("something-else-entirely");
+    act(() => flashModule.flashTarget("something-else-entirely"));
     await settle();
     assertAbsent(dialog(), "an unknown flash id opened a dialog");
     // flashTarget keeps looking for up to FIND_TIMEOUT_MS before giving up. Let
