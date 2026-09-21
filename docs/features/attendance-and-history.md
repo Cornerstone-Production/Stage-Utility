@@ -318,8 +318,10 @@ planned for. While the service is still recording it reads `LIVE` with the curre
 values, and a pointer anywhere on the chart wins over that — you asked about that
 instant.
 
-A chart with no at-rest figures carries no strip: the Trends chart hands its
-readout to the card's subtitle line instead, so nothing sits over the plot.
+A chart whose caller takes the readout itself carries no strip at all: the Trends
+chart hands its hover to the card's subtitle line, so nothing sits over the plot.
+The attendance and sound charts keep theirs, because they have figures to show at
+rest.
 
 **The plot** draws one line per series with no fill behind the plot area. The
 time axis is ticked every thirty minutes — every ten on a service under ninety —
