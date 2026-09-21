@@ -31,6 +31,7 @@ import {
   dateTicks,
   linePathD,
   nearestIndex,
+  nearestNodeT,
   niceAxis,
   splitRuns,
   tenMinuteDomainEnd,
@@ -323,9 +324,26 @@ export function HistoryChart({
   const hasPost = bandX1 != null && bandX1 < plotX1 - 1;
 
   // ── Hover ──
-  const hoverT = hoverX != null && Number.isFinite(domainStart)
+  const pointerT = hoverX != null && Number.isFinite(domainStart)
     ? domainStart + ((hoverX - plotX0) / (plotX1 - plotX0)) * span
     : null;
+  /**
+   * The instant the readout is ABOUT.
+   *
+   * On a DATE axis it is snapped to the nearest drawn node, because the label
+   * there is a calendar day and the pointer lands wherever it lands: hovering
+   * sixteen weeks of Sundays answered "Feb 3" — a Tuesday nothing was recorded
+   * on — beside Feb 1's figure. A date on screen must be a day something
+   * happened.
+   *
+   * Left alone on a CLOCK axis. One service's samples are thirty seconds apart,
+   * so the pointer is already on one, and snapping a crosshair that follows the
+   * cursor across an hour would make it stutter for no gain.
+   */
+  const hoverT = pointerT == null || xAxis !== "date" ? pointerT : nearestNodeT(shown, pointerT) ?? pointerT;
+  /** Where the crosshair stands. One expression with `hoverT`, so the line, the
+   *  date and the figures cannot come apart. */
+  const crosshairX = hoverT != null && Number.isFinite(hoverT) ? xOf(hoverT) : hoverX;
   const hoveredSegment: LaneSegment | null =
     hoverX != null && hoverRow && hoverRow !== "plot" ? segmentAt(segments, hoverX, hoverRow) : null;
   const hoverValues = hoverT == null
@@ -867,13 +885,17 @@ export function HistoryChart({
           );
         })}
 
-        {/* Crosshair. */}
-        {hoverX != null && (
+        {/* Crosshair, at the instant the READOUT is about — which on a date axis
+            is the nearest recorded day, not the raw pointer. A line standing
+            between two Sundays beside a figure from one of them is the same lie
+            the date used to tell. On a clock axis `xOf(hoverT)` inverts the map
+            the pointer came through, so it lands back where the cursor is. */}
+        {crosshairX != null && (
           <line
             data-crosshair=""
-            x1={hoverX}
+            x1={crosshairX}
             y1={plotY0}
-            x2={hoverX}
+            x2={crosshairX}
             y2={plotY1}
             stroke="var(--color-line-strong)"
             strokeWidth={1}

@@ -325,6 +325,33 @@ export function areaPathD(points: ChartPoint[], project: Project, baseY: number)
     + `L${last.x.toFixed(1)},${baseY.toFixed(1)}Z`;
 }
 
+/**
+ * The `t` of the nearest drawn node across every given series, or null when
+ * none of them has a point.
+ *
+ * For a chart whose x axis counts DAYS. The pointer lands between nodes, and a
+ * readout built off its raw position names a calendar day nothing was recorded
+ * on — "Feb 3" beside Feb 1's figure, on a Tuesday. Snapped, the crosshair, the
+ * date and the figures are one statement about one real day.
+ *
+ * Across every series rather than the first, so the day it lands on is the
+ * nearest RECORDED one whichever type recorded it.
+ */
+export function nearestNodeT(series: { points: ChartPoint[] }[], t: number): number | null {
+  let best: number | null = null;
+  let bestD = Infinity;
+  for (const s of series) {
+    const i = nearestIndex(s.points, t);
+    if (i < 0) continue;
+    const d = Math.abs(s.points[i].t - t);
+    if (d < bestD) {
+      bestD = d;
+      best = s.points[i].t;
+    }
+  }
+  return best;
+}
+
 /** Index of the point nearest `t`, or -1 for an empty series. */
 export function nearestIndex(points: ChartPoint[], t: number): number {
   let best = -1;

@@ -576,6 +576,38 @@ describe("the hover readout", () => {
     view.unmount();
   });
 
+  test("the date it names is a day something was RECORDED on", async () => {
+    // The pointer lands between nodes. Read off its raw position the readout
+    // answered "Feb 3" — a Tuesday, with Feb 1's figure beside it. A date on
+    // screen has to be a day something happened.
+    //
+    // The shape assertion above cannot catch this: `/^[A-Z][a-z]{2} \d+ /` is as
+    // happy with the wrong date as the right one.
+    const recs = twoTypes();
+    const recorded = new Set(
+      recs.map((r) =>
+        new Date(`${r.serviceDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      ),
+    );
+    const view = await renderCard(recs);
+    const readout = readoutIn(await hoverPlot(view));
+    const shown = (readout.textContent ?? "").replace(/\s+/g, " ").split(" \u00b7 ")[0].trim();
+    assert.ok(
+      recorded.has(shown),
+      `the readout is dated "${shown}", which nothing was recorded on: ${[...recorded].join(", ")}`,
+    );
+    // And the crosshair went with it. A line standing between two Sundays beside
+    // one Sunday's figure is the same lie the date used to tell.
+    const x = Number(view.container.querySelector("[data-crosshair]")?.getAttribute("x1"));
+    assert.ok(Number.isFinite(x), "there is no crosshair to check");
+    assert.notEqual(
+      Math.round(x),
+      Math.round(SVG_W / 2),
+      "the crosshair is still standing where the pointer is, so nothing snapped and this proves nothing",
+    );
+    view.unmount();
+  });
+
   test("a type switched off is not in it", async () => {
     // The readout reports what is DRAWN. A hidden type reporting a value is a
     // figure for a line that is not on the chart.

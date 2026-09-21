@@ -162,11 +162,13 @@ assigned per service type the first time it is seen and then persisted, so it
 does not follow the sort order — it does not change when you switch measure or
 range, when a quiet type has a loud week, or when a type misses a week.
 
-**Point at the chart** and the card's subtitle becomes the readout: the date the
-pointer is on, then each drawn service type's figure at its nearest recorded day,
-in that type's own colour. Moving off puts the sentence back. It replaces a line
-that is already there rather than being drawn over the plot, so nothing covers
-the lines and the card does not change height.
+**Point at the chart** and the card's subtitle becomes the readout: the nearest
+**recorded** day to the pointer, then each drawn service type's figure at its own
+nearest day, in that type's own colour. The crosshair snaps to the same day, so
+the line, the date and the figures are one statement — a date on screen is never
+one nothing was recorded on. Moving off puts the sentence back. It replaces a
+line that is already there rather than being drawn over the plot, so nothing
+covers the lines and the card does not change height.
 
 **Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
 tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
