@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "r
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
+import { useServerNow } from "../../lib/server-clock";
 import {
   FieldSet,
   FieldGroup,
@@ -948,11 +949,8 @@ function TimezoneField({
 
   const effective = timezone ?? hostTimezone;
   // A live clock in the chosen zone — the fastest way to confirm it is right.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
+  // On the SERVER's clock, because the setting it previews is the server's.
+  const now = useServerNow(1000);
   const reads = (() => {
     try {
       return new Intl.DateTimeFormat(undefined, {

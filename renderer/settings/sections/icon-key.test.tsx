@@ -20,10 +20,14 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import type { View } from "@main/types/views";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 1 update lands outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const view = (id: string, surface: "display" | "console") =>
   ({ id, name: id, kind: "custom", surface, ndiSource: null, createdAt: "" }) as unknown as View;
@@ -77,13 +81,7 @@ const { TooltipProvider } = await import("../../components/ui/tooltip-provider.j
 const { resolveIcon } = await import("../../components/icon-set.js");
 const { SlidersHorizontalIcon, MonitorIcon } = await import("lucide-react");
 
-const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-
-after(async () => {
-  cleanup();
-  await settle();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(async () => {
   cleanup();
   await settle();

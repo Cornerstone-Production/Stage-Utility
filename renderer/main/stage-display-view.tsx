@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { parseColor } from "../components/ui/color-math";
 import { QrHint } from "../components/qr-hint";
@@ -10,7 +9,7 @@ import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
-import { useServerSkew } from "@renderer/lib/use-server-skew";
+import { useServerClock } from "@renderer/lib/server-clock";
 
 interface StageDisplayViewProps {
   displayId: string;
@@ -83,13 +82,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const transcript = useTranscript();
   const spl = useSplState();
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const skewMs = useServerSkew(pcoLive?.serverNow);
+  const now = useServerClock(pcoLive?.serverNow);
 
   if (isLoading) {
     return (
@@ -118,7 +111,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const css = String(clock.getSeconds()).padStart(2, "0");
   const ampm = hh < 12 ? "AM" : "PM";
 
-  const timer = computePcoTimer(pcoLive, now, skewMs);
+  const timer = computePcoTimer(pcoLive, now);
   const over = !!timer?.over;
 
   const pro = propresenter;

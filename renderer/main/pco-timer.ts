@@ -16,13 +16,8 @@ export interface PcoTimer {
 }
 
 /** Compute the live countdown. Returns null when there's nothing to count down. */
-export function computePcoTimer(
-  pcoLive: PcoLiveDTO | null,
-  now: number,
-  skewMs: number,
-): PcoTimer | null {
+export function computePcoTimer(pcoLive: PcoLiveDTO | null, serverNow: number): PcoTimer | null {
   if (!pcoLive || pcoLive.mode === "none") return null;
-  const serverNow = now + skewMs;
 
   if (pcoLive.mode === "item") {
     if (!pcoLive.liveStartAt) return null;

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "./ui/tooltip";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { serverClock } from "../lib/server-clock";
+import { hostTimeZone, zonedDateKey, zonedParts, type TimeZone } from "@main/services/app-timezone";
 import { cn } from "../lib/cn";
 
 /** A month calendar for browsing recorded services: a day's cell is SHADED by how
@@ -71,6 +73,7 @@ export function HistoryCalendar({
   selected,
   onPick,
   onMonthChange,
+  zone,
 }: {
   counts: Map<string, number>;
   selected: string | null;
@@ -84,11 +87,37 @@ export function HistoryCalendar({
    * the selected day, else today — and the list cannot guess it.
    */
   onMonthChange?: (ym: string) => void;
+  /**
+   * The zone "today" is answered in — the operator's setting, read from the
+   * server, exactly as `appZoneOf` resolves it for Trends. A browser cannot
+   * ask for the app's zone, so the caller passes it; this browser's own zone
+   * is only the last resort, for the render before that state has arrived.
+   */
+  zone?: TimeZone;
 }) {
+  const tz = zone ?? hostTimeZone();
+  // The SERVER's clock, not `new Date()`, AND the app's zone, not this
+  // browser's: `getFullYear`/`getMonth`/`getDate` read the runtime's own zone,
+  // so a browser in a different zone from the server rang the wrong day with
+  // no clock skew involved at all — reproduced with a correct, synced server
+  // clock and only the browser's zone set to Pacific/Auckland against a
+  // server on America/Chicago. Every date this is compared against — the
+  // recorded service days it rings and shades, and the month it will not page
+  // past — was written by the server, so a console reading its own zone rings
+  // a day that is not today and refuses months that exist. Same reading as
+  // the PCO calendar's, which calendar-clock.test.tsx already guards; see
+  // renderer/lib/server-clock.ts and main/services/app-timezone.ts.
+  //
+  // Recomputed if `zone` changes — the one render before stage state has
+  // arrived falls back to this browser's own zone, and that correction must
+  // land — but not on every tick: a calendar that repaints because midnight
+  // passed under a stationary cursor is not worth a re-render, and the
+  // selected day is the operator's, not the clock's.
   const today = useMemo(() => {
-    const d = new Date();
-    return { y: d.getFullYear(), m: d.getMonth(), str: ymd(d.getFullYear(), d.getMonth(), d.getDate()) };
-  }, []);
+    const now = serverClock.now();
+    const p = zonedParts(now, tz);
+    return { y: p.year, m: p.month - 1, str: zonedDateKey(now, tz) };
+  }, [tz]);
 
   // Displayed month — follows the selected day; defaults to today.
   const [view, setView] = useState<{ y: number; m: number }>(() => {

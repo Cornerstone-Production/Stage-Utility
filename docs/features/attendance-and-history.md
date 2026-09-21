@@ -75,25 +75,113 @@ the day's services. Open a service for its own page, described after it.
 ### All services
 
 **Trends** leads the page. One tile per service type, showing a sparkline of the
-busiest service on each of the last eight **days** that type recorded, the
-average across them, and the change against the days before.
+last eight **days** that type recorded, the figure for the latest of those days,
+and how that figure compares against the days before it **within the selected
+range** — the same 8 / 16 / 52 weeks or All that bounds the chart below, named
+in the card's subtitle.
 
-The change is **absolute**, not a percentage — *+71 vs prior 8*, or *+1.2 dB vs
-prior 8* under the sound measure — because that is the number you can act on:
-seventy more people is a van, six percent is a conversation. It is green when it
-rises and red when it falls.
+The unit is a **day**, never a recording. A church running a 9, an 11 and a 6
+records three figures every Sunday and the tile shows one, captioned *latest day
+total* — or *latest day peak* under the sound measure — with the date of that day
+beside it, so a type that has not recorded for three weeks does not read as this
+week:
 
-It is the difference between the two figures it is derived from, both rounded to
-the precision the tile prints — whole people, tenths of a decibel — so it can
-never disagree with the number above it.
+| | |
+|---|---|
+| **Attendance** | the day's services **added up**. The question a trend asks is "how many came", and the three services are three congregations |
+| **Sound** | the day's **loudest single recording**. Decibels are logarithmic, so adding two services' peaks is not louder, it is meaningless |
 
-The comparison uses whatever prior days there are, up to eight, and says how
-many. Below **three** prior days it reads *no prior window yet* instead: one or
-two readings are not an average, and a change off them is noise wearing a
-direction. Because the count is always on the label, a thin comparison is
-visible as one rather than passed off as a full eight. The tiles sort busiest
-first, and the first type seen in that order takes the first colour in the
-palette.
+#### What the tile means across a Sunday
+
+The same tile means three different things through a morning, and the label
+beside the figure always says which.
+
+| | The figure | Compared against | Label reads |
+|---|---|---|---|
+| **More services still to come** | every service **started**, the finished ones plus the room right now | every prior day's **first N**, counting only days that ran N or more | *20 prior services* |
+| **The last service is running** | the same — every service started | prior completed days' **full totals** | *30 prior services* |
+| **The day is over** | the day's full total | prior completed days' **full totals** | *30 prior services* |
+
+**N is services started, not services finished.** A service on air counts from
+its first reading, wherever it sits in the day, so the figure climbs through the
+morning rather than holding flat and stepping each time a service ends. Nothing
+moves at the moment a service *ends*, either: the value simply stops changing.
+
+The first two rows read as a deficit that closes as the room fills — a "how are
+we tracking" number, and red for much of the hour on purpose. The last two share
+a basis, so **the number does not jump when the last service ends**; only the
+dashed line and its hollow node go away.
+
+The first row is first-N because a full-day basis there shows a gap that
+**cannot** close: the services that would close it have not run at all, so every
+Sunday would read as the church halving until the evening service ended.
+First-N closes honestly instead — today's part-filled service N climbs toward
+the average of prior days' *complete* first N and lands near it. A prior day
+only feeds that average if it ran at least N services: a Sunday that only ever
+held two has no third to offer, and averaging its two in would drag the figure
+down for a reason that is nothing to do with attendance.
+
+A finished day is compared **whole against whole**, whatever each day ran. A
+completed two-service summer Sunday is a two-service Sunday, not a partial three,
+and comparing first-twos would hide exactly the seasonal change you are looking
+for.
+
+A morning falls back to the last day that had a figure only when it has none of
+its own — a counter that has not reported yet, rather than a service that has
+not finished. The date beside the figure says which day is being shown.
+
+#### How a day is judged finished
+
+In this order:
+
+1. Something of that type is **still recording** — not finished.
+2. The date is **not today** in the app's time zone — finished. The setting
+   under Advanced, falling back to the **server's** clock when it is left on
+   "follow server clock" — never the zone of the browser you happen to be
+   looking from. Most Linux images run UTC, where the calendar date rolls at
+   7pm in Chicago, and a laptop in Chicago reading a UTC server would otherwise
+   end Sunday five hours before the server did.
+3. It is today, and **no service time Planning Center lists for today has yet to
+   start** — finished.
+
+Where Planning Center has nothing to say — the integration is off, or no plan is
+selected — the list is empty, so today is judged finished the moment its last
+recording ends, and a running service is treated as the day's last. With three
+services and no Planning Center that means the morning's first service is counted
+live against whole days, which reads as a deficit until the day catches up.
+
+Rehearsal times are not service times and never hold a day open.
+
+#### The change figure
+
+It is a **percentage** of the basis it is compared against — *+13% vs 12 prior
+services*. Signed, green when it rises, red when it falls. Whole points for
+attendance; tenths of a point for sound, where a real swing across a service is
+usually a few percent or less and a whole point would round it away.
+
+It is taken from the two figures the tile itself prints, both rounded to the
+precision they show — whole people, tenths of a decibel — before the percentage
+is taken, so it can never disagree with the numbers above it.
+
+**The basis is counted in services, not days.** A first-N comparison and a
+whole-day comparison can rest on the exact same prior days and still be worth a
+different number: ten prior days is 20 services under a first-two basis, and
+however many those ten days actually ran under a whole-day one. Counting
+services carries that distinction on its own, with no separate word for which
+basis produced it. The count is always the real one — taken only from services
+that fed the average, never the day count times N — so a prior day a first-N
+basis excludes for running too few services contributes nothing to it either.
+
+**The range control governs it.** 8, 16 or 52 weeks, or All — the same buttons
+that bound the chart, so a tile is compared against exactly the completed days
+drawn underneath it. Below **three** qualifying days it reads *no prior window
+yet* instead: one or two readings are not an average, and a change off them is
+noise wearing a direction.
+
+The tiles are ordered by the figure each one shows — the latest day, highest
+first — so the order you read is the order of the numbers in it. The first type
+seen in that order takes the first colour in the palette, once, and the
+assignment is then frozen.
 
 The switch at the top right chooses what is plotted:
 
@@ -102,26 +190,39 @@ The switch at the top right chooses what is plotted:
 | **Attendance** | peak people in the room, the default |
 | **Sound** | the loudest reading on your primary Smaart metric — the same metric a day-list row names, chosen the same way |
 
-Everything below follows the switch: the tiles average decibels, the axis
-becomes a dB band framed on the levels rather than anchored at 0, and the
-figures above the plot read *Loudest* instead of *Busiest*. A service type that
-recorded attendance and no sound keeps its tile and says *no sound recorded*
-rather than disappearing when you switch. The choice is remembered per browser.
+Everything below follows the switch: the tiles read decibels, the axis becomes a
+dB band framed on the levels rather than anchored at 0, and a day is the loudest
+recording on it rather than the sum. A service type that recorded attendance and
+no sound keeps its tile and says *no sound recorded* rather than disappearing
+when you switch. The choice is remembered per browser.
 
-Everything is counted **per day, at the day's highest reading** — the busiest
-service, or the loudest. A church running a 9, an 11 and a 6 records three
-figures every Sunday, and attendance is people in the room: summing them
-double-counts the family who came to one, and averaging them answers "how full
-was a service" when a trend asks "how many came". A peak level does not average
-either. The tile's average and a point on the line below it are the same kind of
-number for that reason.
+A recording with no figure under the current measure is skipped rather than
+counted as zero, so a Sunday where two of three services had a counter running
+is the total of those two.
 
 Under the tiles, one chart of every service type across the chosen range — 8, 16
-or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
-each day's highest reading, and every line is the same weight: they are peers,
-not a measurement and its references. A recording with nothing under the current
-measure is not plotted at all, because a service nobody counted is not a service
-of nobody, and one with no meter running is not a silent one.
+or 52 weeks, or **All**, defaulting to 16 and remembered per browser. The same
+control governs what a tile's change is measured against. At long ranges the axis
+steps in quarters and then half-years rather than crowding, and its labels carry
+the year once the span crosses one. The **line** runs through the same daily
+figures, one node per recorded day, and every line is the same
+weight: they are peers, not a measurement and its references. The tile's headline
+and the last node on its line are the same number. A recording with nothing under
+the current measure is not plotted at all, because a service nobody counted is
+not a service of nobody, and one with no meter running is not a silent one.
+
+The segment running into a day that has **not finished** is drawn dashed, with a
+hollow node on its end, and it **builds as the day does**. A solid line into a
+Sunday with one of three services done plunges from three thousand to one,
+drawing a collapse that the tile beside it spends its whole label denying;
+dashed, the same node reads "not done yet".
+
+Each reading **eases** into place over about half a second rather than jumping,
+and the dashed segment grows with the node instead of arriving ahead of it, so
+an hour of a service filling reads as a room filling rather than as a dozen
+twitches. Under `prefers-reduced-motion` the reading lands immediately, the node
+stops pulsing, and the dash stays: the dash is the information, the motion is
+decoration.
 
 Each service type keeps **one colour**, everywhere: its tile, its sparkline, its
 change figure, its line, its legend swatch and its milestones. The colour is
@@ -129,10 +230,18 @@ assigned per service type the first time it is seen and then persisted, so it
 does not follow the sort order — it does not change when you switch measure or
 range, when a quiet type has a loud week, or when a type misses a week.
 
+**Point at the chart** and the card's subtitle becomes the readout: the nearest
+**recorded** day to the pointer, then each drawn service type's figure at its own
+nearest day, in that type's own colour. The crosshair snaps to the same day, so
+the line, the date and the figures are one statement — a date on screen is never
+one nothing was recorded on. Moving off puts the sentence back. It replaces a
+line that is already there rather than being drawn over the plot, so nothing
+covers the lines and the card does not change height.
+
 **Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
 tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
-and the figures above the plot together; its legend entry stays, dimmed, and
-clicking it brings the type back. The choice is remembered per browser.
+and the readout together; its legend entry stays, dimmed, and clicking it brings
+the type back. The choice is remembered per browser.
 
 The sound measure reads each recording's peak from the **SPL summary**, which
 this page already loads — not from the per-item records. Recordings made before
@@ -200,11 +309,15 @@ to that day's group and rings it; it does not hide the rest of the month.
 A column header is drawn once, under the first day's label, then a row per
 service: the start time with the service type under it, the plan title with its
 series and item count under that, and four figures. Each figure's caption sits
-under its value.
+under its value. While a recording is still open the row says so twice: the same
+green **recording** pill the service's own page carries, after the plan title,
+and the pill's dot on its own beside the start time. The dot is the one that
+survives a narrow window — the Service column is the only one that can shrink,
+and the pill goes with the plan title when it does.
 
 | | |
 |---|---|
-| Peak | the most people in the room at once |
+| In room | the most people in the room at once, captioned *peak in room*. Named for the figure rather than for the reduction, because the app also tracks the cumulative door count and "peak" alone names either |
 | Ran | what the service ran; **Running**, counting up, while it is still recording |
 | vs plan | its difference against the planned total — a dash while recording, where most of a plan not yet run reads as a service running short |
 | Peak dB | the loudest reading on the primary Smaart metric, captioned with the metric it read |
@@ -267,7 +380,7 @@ bottom:
   | Planned | the counted items' planned total, and the time the service would end on it |
   | Actual | what it ran, its difference against the plan, and when it ended |
   | Avg overrun | the mean per-item difference, and how many items of how many ran over |
-  | Peak attendance | the most people in the room at once, and how many came in during the service — the same two figures the Attendance card calls Peak and Entries |
+  | Peak in room | the most people in the room at once, and how many came in during the service — the same two figures the Attendance card calls Peak and Entries, and the same words the All services row uses |
   | Peak *metric* | the loudest reading on the primary Smaart metric, named after the metric it read |
 
   Started, Planned and Actual count up live while a service is recording. A
@@ -295,6 +408,11 @@ item's block and it adds that item's number, title, what it ran and what it was
 planned for. While the service is still recording it reads `LIVE` with the current
 values, and a pointer anywhere on the chart wins over that — you asked about that
 instant.
+
+A chart whose caller takes the readout itself carries no strip at all: the Trends
+chart hands its hover to the card's subtitle line, so nothing sits over the plot.
+The attendance and sound charts keep theirs, because they have figures to show at
+rest.
 
 **The plot** draws one line per series with no fill behind the plot area. The
 time axis is ticked every thirty minutes — every ten on a service under ninety —

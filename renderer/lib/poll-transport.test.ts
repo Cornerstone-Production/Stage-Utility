@@ -86,18 +86,43 @@ let answer: () => Promise<unknown> = async () => ({ seq: 0, resync: false, frame
 /** Non-null when the next poll should be answered with a non-2xx rather than a body. */
 let refusal: number | null = null;
 
+// ── a driveable monotonic clock ─────────────────────────────────────────────
+// The client measures its round trip with `performance.now()` and hands half of
+// it to the page's clock, so a case that wants to assert on the correction has
+// to be able to spend time on each leg. Installed before api.ts is imported for
+// the same reason the timers are.
+let perfNow = 1000;
+(globalThis as { performance?: unknown }).performance = { now: () => perfNow };
+/** Milliseconds each leg of a poll costs. Zero unless a case sets it. */
+let legMs = 0;
+/** Milliseconds PARSING the body costs, charged only by `json()` — which is what
+ *  a real `Response.json()` does, and the reason the client does not use it. */
+let parseMs = 0;
+
 (globalThis as { fetch?: unknown }).fetch = async (url: unknown) => {
   const href = String(url);
   requests.push(href);
-  if (!href.startsWith("/api/events/poll")) return { ok: true, json: async () => ({ ok: true }) };
+  if (!href.startsWith("/api/events/poll")) return { ok: true, text: async () => "{}", json: async () => ({ ok: true }) };
   if (refusal !== null) {
     const status = refusal;
     refusal = null;
     // A real non-2xx: `ok` is false and the body is NOT a frame list. The client
     // must reject it on the status, not discover it by parsing.
-    return { ok: false, status, json: async () => ({ error: "unavailable" }) };
+    return { ok: false, status, text: async () => '{"error":"unavailable"}', json: async () => ({ error: "unavailable" }) };
   }
-  return { ok: true, json: await answer().then((b) => async () => b) };
+  perfNow += legMs; // the request leg
+  const body = await answer();
+  return {
+    ok: true,
+    text: async () => {
+      perfNow += legMs; // the response leg, and nothing else
+      return JSON.stringify(body);
+    },
+    json: async () => {
+      perfNow += legMs + parseMs; // the leg AND the parse, as a browser's does
+      return body;
+    },
+  };
 };
 
 function serves(body: unknown): void {
@@ -115,8 +140,14 @@ function refuses(status: number): void {
 /** Let every already-resolved promise settle. setImmediate is untouched. */
 const flush = () => new Promise((r) => setImmediate(r));
 
+/** An arbitrary epoch for "true server time", which the scripted server reports
+ *  as `EPOCH + perfNow` — server time and the monotonic counter advance together,
+ *  so the only thing that can put the client's clock wrong is the delivery delay. */
+const EPOCH = Date.UTC(2026, 8, 20, 15, 0, 0);
+
 // Imported AFTER the stubs: api.ts starts polling at module scope.
 const { onNotification } = await import("./api.js");
+const { serverClock } = await import("./server-clock.js");
 await flush();
 
 after(() => teardown());
@@ -329,5 +360,42 @@ describe("?transport=poll", () => {
     );
     off();
     fireReport();
+  });
+
+  test("subtracts half the round trip, so the panel's clock is not a delivery behind", async () => {
+    // THE bug this transport had. `pco:live` carries a `serverNow` stamped when
+    // the frame was BROADCAST, and on this transport a frame can sit in the
+    // server's buffer for the whole two-second interval before anyone collects
+    // it — so a client reading its offset off a frame ran that far behind, for
+    // ever. The Ultritouch panel measured exactly two seconds. `now` on the poll
+    // response is stamped as the answer is sent, and the client knows what the
+    // round trip cost because it issued the request.
+    serverClock.reset();
+    legMs = 400; // 800 ms round trip, split evenly
+    // And a slow parse, which is what a resync costs: the whole StageState. It is
+    // charged by `json()` only — the client reads the body as text and stamps the
+    // arrival before parsing, so this must not reach the measurement at all.
+    parseMs = 600;
+    answer = async () => ({ now: EPOCH + perfNow, seq: 400, resync: false, frames: [] });
+    firePoll();
+    await flush();
+
+    const offBy = serverClock.now() - (EPOCH + perfNow);
+    assert.ok(
+      serverClock.synced(),
+      "the poll answer carried a server timestamp and the client ignored it",
+    );
+    assert.ok(
+      Math.abs(offBy) <= 5,
+      `the clock is ${offBy}ms off the server. Without the round-trip correction it sits ${-legMs}ms behind; ` +
+        `with the body read by res.json() it sits ${-parseMs / 2}ms behind, because the parse lands in both the ` +
+        `measured round trip and the arrival instant and the two do not cancel`,
+    );
+
+    legMs = 0;
+    parseMs = 0;
+    serves({ seq: 401, resync: false, frames: [] });
+    firePoll();
+    await flush();
   });
 });

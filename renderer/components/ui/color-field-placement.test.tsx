@@ -19,9 +19,13 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 1 update lands outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 (globalThis as unknown as { fetch: unknown }).fetch = async () => ({
   ok: true,
@@ -45,8 +49,6 @@ const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ColorField } = await import("./color-field.js");
 const { PaletteIcon } = await import("lucide-react");
-
-const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
 /** A swatch near the foot of the window: nothing fits below it. */
 const SWATCH_TOP = 700;
@@ -88,10 +90,7 @@ before(() => {
   });
 });
 
-after(async () => {
-  await settle();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(async () => {
   cleanup();
   await settle();

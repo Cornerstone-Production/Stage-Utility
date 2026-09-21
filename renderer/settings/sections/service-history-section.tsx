@@ -5,10 +5,13 @@ import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { hostTimeZone } from "@main/services/app-timezone";
+import { useStageState } from "../../main/use-stage-state";
 import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
+import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
 import { confirm, EmptyState, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
@@ -17,10 +20,10 @@ import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
+import { RecordingDot, RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion } from "./history-chart";
 import { TrendsCard } from "./history-trends/trends-card";
-import type { TrendRecording } from "./history-trends/trends";
+import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
   summarize,
   fmtDur,
@@ -90,7 +93,14 @@ const ROW_COLUMNS: {
   color?: string;
   caption: (label?: string) => string;
 }[] = [
-  { key: "attendance", heading: "Peak", color: "var(--color-green-9)", caption: () => "peak" },
+  // IN ROOM, both times, because the app tracks two attendance numbers and
+  // "Peak / peak" named neither of them. The value is `peakOccupancy` — the most
+  // people in the room at once — and the other is `peakAttendance`, the
+  // cumulative door count, which double-counts anyone who steps out and back.
+  // The service page's header has had them the wrong way round once already and
+  // its `attendance` KPI carries the note about it; this is the same number that
+  // KPI shows, said in the words that tell it apart.
+  { key: "attendance", heading: "In room", color: "var(--color-green-9)", caption: () => "peak in room" },
   { key: "actual", heading: "Ran", caption: (label) => label ?? "ran" },
   { key: "vs-plan", heading: "vs plan", caption: () => "vs plan" },
   { key: "level", heading: "Peak dB", caption: (label) => label?.replace(/^Peak\s+/i, "") ?? "dB" },
@@ -130,10 +140,6 @@ function fmtMonth(ym: string | null): string {
 function dayGroupId(day: string): string {
   return `history-day-${day}`;
 }
-
-
-
-/** Tailwind text color for a trend tone (semantic status tokens). */
 
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
 function toTimeInput(iso: string | null): string {
@@ -199,11 +205,6 @@ export function editedTooltip(it: ServiceTimelineItem): string {
   return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
 }
 
-
-
-
-
-
 /** One record's share of a Rebuild from raw — mirrors RebuiltRecord in
  *  main/services/history-edit.ts. */
 interface RebuiltRecord {
@@ -241,7 +242,6 @@ export function describeRebuild(out: RebuildOutcome): string {
   return parts.join(" · ");
 }
 
-/** Baptism sessions that overlap a service's recorded window. */
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
 export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
@@ -555,6 +555,28 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    *  value. */
   const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
 
+  /**
+   * Planning Center's times for the ACTIVE plan, straight off the live channel.
+   *
+   * The Trends card needs them to answer one question: is another service still
+   * to come today? Without it a Sunday between the 11 o'clock and the 6 reads as
+   * a finished two-service day and is compared against whole three-service ones
+   * — the collapse the partial-day rule exists to prevent.
+   *
+   * `pco:live` carries `planTimes` in EVERY mode, and the SSE hello burst
+   * replays the current frame on subscribe, so this is populated without asking
+   * for anything: no extra request, no new route.
+   */
+  const [planTimes, setPlanTimes] = useState<{ timeType: string; startsAt: string }[]>([]);
+  useEffect(
+    () =>
+      onNotification("pco:live", (p) => {
+        const times = (p as { planTimes?: { timeType: string; startsAt: string }[] } | null)?.planTimes;
+        setPlanTimes(times ?? []);
+      }),
+    [],
+  );
+
   const trendRecordings = useMemo<TrendRecording[]>(
     () => {
       // Read so the subscription is not "unused". The VALUE is never wanted;
@@ -581,6 +603,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           seriesTitle: r.timeline?.seriesTitle ?? r.attendance?.seriesTitle ?? null,
           peakOccupancy: r.attendance && r.attendance.peakOccupancy > 0 ? r.attendance.peakOccupancy : null,
           peakDb: (metric && summary ? summary.metrics[metric]?.max : null) ?? null,
+          // HAS IT ENDED. The same test the row beside it calls `live`, off the
+          // same record: the timeline when there is one, otherwise the arrival
+          // ramp's own. A trend counts a running service either way — see
+          // `countedFor` in trends.ts — so this does not decide whether it is on
+          // the line. It decides which BASIS the day is compared against, which
+          // is `stateOf`'s question.
+          complete: r.timeline ? r.timeline.endedAt != null : r.attendance?.endedAt != null,
         };
       });
     },
@@ -602,12 +631,38 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // (an attendance-only selection never populates `detail` at all).
   const detailLive = detail != null ? detail.endedAt == null : attendance != null && attendance.endedAt == null;
   const listLive = rows.some((r) => (r.timeline ?? r.attendance)?.endedAt == null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    if (!detailLive && !listLive) return;
-    const t = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [detailLive, listLive]);
+  // The SERVER's clock: every figure this feeds is measured against a
+  // server-stamped `startedAt`, so a console whose clock has drifted would add
+  // the drift to the in-progress item's elapsed time.
+  //
+  // READS the page's clock, and something else has to have FED it. That holds on
+  // every page inside the operator shell, whose context bar feeds it from
+  // `pco:live`. It does NOT hold on `/history`, which is chromeless and carries
+  // no context bar: nothing in that subtree feeds the clock, so it falls back to
+  // the host's — the same answer this had before, and no worse, but not the
+  // correction this comment would otherwise promise. The fix is a server-stamped
+  // field on the hello frame, which is its own change.
+  const nowTick = useServerNow(1000, detailLive || listLive);
+
+  /**
+   * The zone every "what day is it" here is answered in — the operator's
+   * setting, from the server, NOT the browser's.
+   *
+   * A browser cannot ask for the app's zone, so `appTimeZone()` in here would
+   * answer the wrong question: a kiosk running UTC would decide Sunday ended at
+   * 7pm, which is the failure this repo has actually been bitten by. The server
+   * publishes both halves of its own answer on stage state — the setting and
+   * the host clock it falls back to — and `appZoneOf` reads them in that order.
+   * This browser's zone is the last resort, for the render before state lands.
+   */
+  const { state: stageState } = useStageState();
+  const zone = appZoneOf(stageState, hostTimeZone());
+  /** Rebuilt on every tick the page already takes, so "still to come" stops
+   *  being true the moment the day's last service time passes. */
+  const clock = useMemo<TrendClock>(
+    () => trendClock(nowTick, zone, planTimes),
+    [nowTick, zone, planTimes],
+  );
 
   // Synchronous, so the panel clears in the same render the selection does —
   // it never shows the previous service's numbers under an empty selection.
@@ -1297,22 +1352,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
         </SectionCard>
-        <SectionCard id="history-sound" title="Sound">
-          {spl ? (
-            <SplDetail
-              // KEYED BY THE RECORD. The section fetches the raw series on
-              // mount; without a key React keeps the same component across a
-              // service switch and the previous service's line stays on screen
-              // until the new fetch lands.
-              key={spl.serviceKey}
-              detail={spl}
-              timeline={detail}
-              attendance={attendance}
-            />
-          ) : (
-            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
-          )}
-        </SectionCard>
+        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1356,22 +1396,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
         </SectionCard>
-        <SectionCard id="history-sound" title="Sound">
-          {spl ? (
-            <SplDetail
-              // KEYED BY THE RECORD. The section fetches the raw series on
-              // mount; without a key React keeps the same component across a
-              // service switch and the previous service's line stays on screen
-              // until the new fetch lands.
-              key={spl.serviceKey}
-              detail={spl}
-              timeline={detail}
-              attendance={attendance}
-            />
-          ) : (
-            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
-          )}
-        </SectionCard>
+        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1388,7 +1413,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           length, overrun, peak, level — is on the service page's own KPI row
           against the service it belongs to, where it means something specific.
           Export moved into the Recorded services header; it is not removed. */}
-      <TrendsCard recordings={trendRecordings} soundUnavailable={loadFailed.has("spl")} />
+      <TrendsCard recordings={trendRecordings} clock={clock} soundUnavailable={loadFailed.has("spl")} />
 
       {/* Calendar (sticky) beside the month's services. The calendar decides
           which month both of them are about. There is no "Selected: …" summary
@@ -1402,6 +1427,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             selected={day}
             onPick={pickDay}
             onMonthChange={setViewMonth}
+            zone={zone}
           />
         </div>
 
@@ -1409,7 +1435,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             border, radius and padding. It was flat on the page, so the one
             column an operator reads down was the only thing on the tab that did
             not sit on a surface. */}
-        <section data-services-card className="su-card min-w-0 flex flex-col gap-2 px-4 py-3.5">
+        {/* `gap-3`, one card gap, between the header and the day groups and
+            between one day group and the next. It is the clearance the selected
+            day's ring stands in — see the ring's own note below — and 8px was
+            less than the ring's own 12px inset, so the ring had nowhere to be. */}
+        <section data-services-card className="su-card min-w-0 flex flex-col gap-3 px-4 py-3.5">
           {/* The card's own header: what the list is, what it is showing, and
               the Export control. Export used to be a full-width disclosure of
               its own above the calendar — a builder for a thing you do twice a
@@ -1444,7 +1474,20 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // read a month with the month right there beside it.
               className={cn(
                 "flex scroll-mt-4 flex-col gap-2 rounded-xl",
-                day === group.date && "bg-accent/6 ring-1 ring-accent/35 p-2 -m-2",
+                // 12px of air between the ring and what it rings; at 8px the day
+                // label and the rows touched the ring's edge.
+                //
+                // THE VERTICAL INSET IS REAL SPACE, NOT BORROWED. `-m-3` pulled
+                // all four edges back, so the ring drew 12px outside its own box
+                // into whatever sat next to it: the card's header and the Export
+                // button above, the next day group below, the card's own bottom
+                // padding at the end of a month. Every one of those gaps is
+                // smaller than 12px, so the ring touched all of them at once.
+                // Only the SIDES still borrow, from the card's 16px of padding,
+                // which leaves 4px and keeps every row aligned with the rows of
+                // the days above and below it — a selected group indented 12px
+                // from its neighbours is the other way this reads as broken.
+                day === group.date && "bg-accent/6 ring-1 ring-accent/35 -mx-3 px-3 py-3",
               )}
             >
               <span className="text-caption1 text-fg-muted">{fmtDay(group.date)}</span>
@@ -1505,7 +1548,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 )
                 : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
-            const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
+            // The item count whether or not it is recording. The subtitle used
+            // to read "recording\u2026" instead while a record was open, which is
+            // the one thing on the row the pill beside the title already says \u2014
+            // and it cost the reader the only place the row says how many items
+            // have run so far.
+            const under = [s.seriesTitle, itemCount].filter(Boolean).join(" \u00b7 ");
             // FIXED columns, so the header above the group lines up with every
             // row under it. The figures are picked by key rather than taken in
             // order: a live recording has no `vs plan`, and closing the gap
@@ -1526,18 +1574,45 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       it is not in the mockup, and it is one of the six KPIs on
                       the service page's own header, where it has the room to
                       say what it is measured against. */}
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
-                      {started.value}
+                  <span data-row-when className="flex min-w-0 flex-col">
+                    {/* The live DOT rides with the start time, and the pill in
+                        the SERVICE column says the word.
+                        Not redundant — belt and braces on purpose. SERVICE is
+                        the grid's only flexible track and it resolves to ZERO
+                        between 640 and about 1,150px wide, where the pill is
+                        clipped away with the plan title beside it. WHEN is a
+                        fixed 104px and is the leftmost column, so it is the one
+                        place a marker cannot be squeezed out of. Six pixels
+                        beside a 42px time, rather than the 84px pill that used
+                        to live here and truncated "Weekend" to "W…". */}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
+                        {started.value}
+                      </span>
+                      {live && <RecordingDot label="recording" />}
                     </span>
-                    <span className="flex min-w-0 items-baseline gap-1.5">
-                      <span className="truncate text-[11px] text-fg-subtle">{s.serviceTypeName ?? ""}</span>
+                    <span className="truncate text-[11px] text-fg-subtle">{s.serviceTypeName ?? ""}</span>
+                  </span>
+                  {/* SERVICE: the plan title — with the recording pill after it
+                      while the record is open — then its series and item count.
+                      The pill sat in the WHEN column beside the service type,
+                      where the two of them shared 104px: the pill does not
+                      shrink, so the type took what was left and "Weekend" read
+                      as "W…". It belongs here anyway. It says what is happening
+                      to this RECORDING, and it is where the service page and the
+                      arrival page both put it — after the title. */}
+                  <span data-row-service className="flex min-w-0 flex-col">
+                    {/* `overflow-hidden`, because the pill does not shrink. The
+                        SERVICE track is the only flexible one, and between 640
+                        and about 1,150px wide it resolves to ZERO — the plan
+                        title has been clipped to nothing there since the row
+                        grid was built. A fixed-width pill in a zero-width cell
+                        paints over the figure in the next column instead of
+                        being clipped with the title beside it. */}
+                    <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
+                      <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                       {live && <RecordingPill />}
                     </span>
-                  </span>
-                  {/* SERVICE: the plan title, then its series and item count. */}
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                     {under && <span className="truncate text-[11px] text-fg-subtle">{under}</span>}
                   </span>
                   {ROW_COLUMNS.map((col) => {
@@ -1690,6 +1765,41 @@ function ExportPopover({
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+  );
+}
+
+/**
+ * The Sound card, identical in the full detail view and in the arrival-only
+ * view — the two callers passed the same three props to the same markup
+ * verbatim, which is how a fix to one of them (the KEYED BY THE RECORD note
+ * below explains a real bug) would land in one copy and not the other.
+ */
+function SoundSection({
+  spl,
+  timeline,
+  attendance,
+}: {
+  spl: ServiceSplHistory | null;
+  timeline: ServiceTimeline | null;
+  attendance: ServiceAttendance | null;
+}) {
+  return (
+    <SectionCard id="history-sound" title="Sound">
+      {spl ? (
+        <SplDetail
+          // KEYED BY THE RECORD. The section fetches the raw series on
+          // mount; without a key React keeps the same component across a
+          // service switch and the previous service's line stays on screen
+          // until the new fetch lands.
+          key={spl.serviceKey}
+          detail={spl}
+          timeline={timeline}
+          attendance={attendance}
+        />
+      ) : (
+        <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
+      )}
+    </SectionCard>
   );
 }
 

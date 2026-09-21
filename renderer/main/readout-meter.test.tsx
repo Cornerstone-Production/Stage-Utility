@@ -244,7 +244,7 @@ describe("both ProVideoPlayer progress rules are the same rule", () => {
 
   test("the readout's rule interpolates", () => {
     const { container } = render(
-      <PvpNowObject config={{ showProgress: true }} status={status} now={AT} skewMs={0} />,
+      <PvpNowObject config={{ showProgress: true }} status={status} now={AT} />,
     );
     assert.equal(container.querySelectorAll(".su-meter-fill").length, 1);
     cleanup();
@@ -256,7 +256,6 @@ describe("both ProVideoPlayer progress rules are the same rule", () => {
         config={{ type: "pvp-layers", show: "all", showProgress: true, hideWhenEmpty: false }}
         status={status}
         now={AT}
-        skewMs={0}
         H={200}
       />,
     );

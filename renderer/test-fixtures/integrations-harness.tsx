@@ -224,6 +224,37 @@ export async function until(ok: () => boolean, say: () => string, capMs = 5000):
 }
 
 /**
+ * `until`, with each poll turn inside its own act() scope.
+ *
+ * Use this one whenever the condition reads something REACT owns — the DOM,
+ * focus, rendered text. In an act environment a plain `until()` polls with a
+ * bare setTimeout, so every state update React lands between polls escapes
+ * act and is reported as "not wrapped in act"; that is what this exists to
+ * stop.
+ *
+ * Do NOT reach for the obvious alternative of wrapping one `until()` call in
+ * one long act() scope. React holds its commits back until the scope closes,
+ * so a DOM-reading condition waits on exactly the paint act() is withholding
+ * and the poll spins to its cap every time. Each turn getting its OWN scope is
+ * what makes the condition observable between turns.
+ *
+ * Plain `until()` stays right for a condition about something outside React —
+ * the fake server's own state, a recorded list of writes. There is nothing for
+ * act to flush there, and the extra scopes only cost time.
+ */
+export async function actUntil(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    if (ok()) return;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    if (ok()) return;
+    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
+  }
+}
+
+/**
  * The integration card for `id`, once it is actually on the page.
  *
  * `idle()` below answers a question about REACT-QUERY, not about the DOM. It
@@ -315,6 +346,43 @@ export async function idle(capMs = 5000): Promise<void> {
     if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
   }
 }
+
+/**
+ * A wait of a REAL duration, with React's work drained inside it.
+ *
+ * The plain `settle(ms)` above is a bare setTimeout: any state update React
+ * lands during it escapes act and is reported as doing so. This is the same
+ * wait with the turn inside an act scope, for the places that genuinely need
+ * a wall-clock duration — a debounce, an animation — rather than just "let
+ * React finish", which is `settle()` in renderer/test-dom.ts.
+ *
+ * It was seven copies across the integration tests before it was one, under
+ * two different names, one of which shadowed the shared `settle`.
+ */
+export function settleFor(ms = 0): Promise<void> {
+  return act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+}
+
+/**
+ * `idle()`, with the whole wait inside one act() scope.
+ *
+ * Mounting the panel puts sixteen cards on the page, and their Switch
+ * primitives settle their own state while idle()'s plain setTimeout poll
+ * runs — outside any act scope, that is where the great majority of this
+ * file family's escaped updates came from.
+ *
+ * One continuous scope is safe here, unlike with a DOM-reading condition
+ * (see actUntil): idle() asks react-query's cache whether it has settled,
+ * and that is not something React holds back until the scope closes.
+ */
+export function actIdle(capMs = 5000): Promise<void> {
+  return act(async () => {
+    await idle(capMs);
+  });
+}
+
 
 /**
  * Assert a DOM node is not there.

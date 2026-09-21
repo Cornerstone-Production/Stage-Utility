@@ -16,10 +16,24 @@ import { installRenderDom } from "../../../test-dom.js";
 const teardown = installRenderDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, act } = await import("@testing-library/react");
+// jsdom's getBoundingClientRect is all zeros, and the chart REFUSES to map a
+// pointer against a zero-width box — it would map every x to NaN. Give every
+// element a box so a pointer move over the plot means an instant. The chart's
+// own WIDTH still comes from `clientWidth`, which jsdom leaves at 0, so it
+// draws at its 640px default: SVG_W matches that on purpose.
+const SVG_W = 640;
+Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+  configurable: true,
+  value() {
+    return { left: 0, top: 0, right: SVG_W, bottom: 217, width: SVG_W, height: 217, x: 0, y: 0, toJSON() {} };
+  },
+});
+
+const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
-const { TrendsCard, absChange } = await import("./trends-card.js");
+const { TrendsCard, pctChange, pctLabel, basisLabel } = await import("./trends-card.js");
+type TrendClock = import("./trends.js").TrendClock;
 const { TooltipProvider } = await import("../../../components/ui/index.js");
 type TrendRecording = import("./trends.js").TrendRecording;
 
@@ -68,54 +82,76 @@ describe("a sparkline that does not move", () => {
 });
 
 describe("how a change reads", () => {
-  test("it is an ABSOLUTE difference, and a zero carries no sign", () => {
-    // Absolute, not a percentage: "seventy more people" is a van, "+6%" is a
-    // conversation. A sign in front of zero claims a direction the number
-    // denies, and which of "+0" and "−0" you got depended on the sign of a
-    // difference too small to print.
+  test("it is a PERCENTAGE, and a zero carries no sign", () => {
+    // Percentage, not an absolute figure — this card printed an absolute
+    // change for a while; see pctChange's own comment for why it came back. A
+    // sign in front of zero claims a direction the number denies, and which
+    // of "+0%" and "−0%" you got depended on the sign of a difference too
+    // small to print.
     // One case per line, so two branches adding different ones merge cleanly.
     assert.deepEqual(
       [
-        [0, 0, ""],
-        [0.4, 0, ""],
-        [-0.4, 0, ""],
-        [71, 0, ""],
-        [-71, 0, ""],
-        [1234, 0, ""],
-        [1.24, 1, " dB"],
-        [-1.24, 1, " dB"],
-        [0.04, 1, " dB"],
-      ].map(([d, dp, unit]) => [d, absChange(d as number, dp as number, unit as string)]),
+        [0, 0],
+        [0.4, 0],
+        [-0.4, 0],
+        [8, 0],
+        [-8, 0],
+        [8.44, 1],
+        [-8.44, 1],
+        [0.04, 1],
+      ].map(([pct, dp]) => [pct, pctLabel(pct as number, dp as number)]),
       [
-        [0, "0"],
-        [0.4, "0"],
-        [-0.4, "0"],
-        [71, "+71"],
-        [-71, "−71"],
-        // Counts read with separators; a decibel does not.
-        [1234, "+1,234"],
-        [1.24, "+1.2 dB"],
-        [-1.24, "−1.2 dB"],
-        [0.04, "0.0 dB"],
+        [0, "0%"],
+        [0.4, "0%"],
+        [-0.4, "0%"],
+        [8, "+8%"],
+        [-8, "−8%"],
+        [8.44, "+8.4%"],
+        [-8.44, "−8.4%"],
+        [0.04, "0.0%"],
       ],
     );
   });
 
-  test("the change is the difference of the tile's own two numbers", async () => {
-    // Taken from the UNROUNDED means it prints a change beside two numbers that
-    // are equal on screen. The fixture is built so the two rules disagree: the
-    // prior window means 999.625 and the recent one 1000.375, so both round to
-    // 1,000 — a change of 0 — while the raw difference is 0.75, which rounds to
-    // "+1". The tile must read 0.
+  test("a basis of zero or less produces no percentage", () => {
+    // An absolute difference never had to guard this: 10 minus 0 is a fine
+    // number. Dividing by it is not — a NEW failure mode this figure
+    // introduces on top of it. Every basis that reaches here in production
+    // already cleared trends.ts's COMPARABLE_ABOVE, so this is a second,
+    // explicit floor rather than the only one.
+    assert.deepEqual(
+      [
+        pctChange(110, 100, 0),
+        pctChange(90, 0, 0),
+        pctChange(90, -10, 0),
+      ],
+      [10, null, null],
+    );
+  });
+
+  test("the percentage is taken from the tile's own two ROUNDED numbers", () => {
+    // Taken from the raw figures, a percentage prints a residual beside two
+    // numbers that read identically on screen. 99.6 and 100.4 both round to
+    // 100 at whole-point precision — the tile must read 0% — while the RAW
+    // ratio, (99.6 - 100.4) / 100.4, is a real −0.8% that would print "−1%"
+    // at the same precision: a visible, wrongly-signed change beside two
+    // numbers a reader cannot tell apart.
+    assert.equal(pctChange(99.6, 100.4, 0), 0, "two figures that round to 100 must compare at exactly 0%");
+  });
+
+  test("the change is a percentage of the tile's own two ROUNDED numbers", async () => {
+    // The rounding-order fix itself is proven at the unit level above. This is
+    // the end-to-end sanity check, through the real render: two figures that
+    // land on the SAME number print an unsigned 0%, not a signed residual.
     const view = await renderCard(straddlingRound());
     const tile = view.container.querySelector("[data-trend-tile]")!;
-    const avg = tile.querySelector("[data-trend-average]")!.textContent;
+    const headline = tile.querySelector("[data-trend-latest]")!.textContent;
     const change = tile.querySelector("[data-trend-change]")!.textContent ?? "";
     view.unmount();
-    assert.equal(avg, "1,000");
+    assert.equal(headline, "1,000");
     assert.ok(
-      change.startsWith("0 "),
-      `two windows that both round to 1,000 must read 0, not "${change}"`,
+      change.startsWith("0% "),
+      `two equal figures must read 0%, not "${change}"`,
     );
   });
 
@@ -143,6 +179,374 @@ describe("how a change reads", () => {
     assert.ok(downClass.includes("text-danger-11"), `a fall is not red: ${downClass}`);
   });
 });
+
+describe("a day with three services", () => {
+  /** The number of points a drawn line carries — one `M` or `L` each. */
+  function nodesOn(view: ReturnType<typeof render>, id: string): number {
+    const d = view.container.querySelector(`[data-series-line="${id}"]`)?.getAttribute("d") ?? "";
+    return [...d.matchAll(/[ML]/g)].length;
+  }
+
+  /** The chart's y-axis labels, as numbers. */
+  function axis(view: ReturnType<typeof render>): number[] {
+    return [...view.container.querySelectorAll("text")]
+      .map((n) => (n.textContent ?? "").replace(/,/g, ""))
+      .filter((t) => /^\d+$/.test(t))
+      .map(Number);
+  }
+
+  test("adds up into one point, on the tile AND on the line", async () => {
+    // A church running a 9, an 11 and a 6 at 1,400 / 700 / 1,100 had 3,200
+    // people that Sunday. The card used to print 1,400 — the busiest of the
+    // three — on the tile and plot the same, so a day's second and third
+    // services were nowhere on the page.
+    //
+    // WHAT THIS CANNOT SEE: the drawn pixels. jsdom loads no stylesheet, so the
+    // chart falls back to its 640px default and the plot's real shape is
+    // invisible. What it CAN read is what was handed to the SVG — how many
+    // points the path carries and how high the axis had to reach — and those
+    // are what a summed day changes. Driven in Chrome at 1440 as well.
+    const view = await renderCard(threeServicesADay());
+    const tile = view.container.querySelector('[data-trend-tile="weekend"]')!;
+    assert.equal(
+      tile.querySelector("[data-trend-latest]")?.textContent,
+      "3,200",
+      "the tile is still showing one service of the day",
+    );
+    assert.equal(nodesOn(view, "weekend"), 5, "the line drew a node per recording, not per day");
+    // The axis had to make room for a summed day. A plot of the busiest service
+    // alone tops out around 1,400 and could never reach here.
+    assert.ok(
+      Math.max(...axis(view)) >= 3200,
+      `the line is not plotting day totals — the axis only reaches ${Math.max(...axis(view))}`,
+    );
+    // AND IT SAYS WHICH DAY. "latest day" is relative: a type that has not
+    // recorded for three weeks shows a three-week-old figure, and without the
+    // date nothing on screen says so. The fixture's last Sunday is the fifth
+    // from 4 Jan 2026 — 1 Feb — and the tile must name it rather than any other
+    // day in the window.
+    const dated = tile.querySelector("[data-trend-latest-date]")?.textContent ?? "";
+    assert.ok(dated, `the tile does not say which day it is showing: ${tile.textContent}`);
+    assert.equal(
+      dated,
+      new Date("2026-02-01T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      "the tile is dated some other day than the one its figure came from",
+    );
+    view.unmount();
+  });
+
+  test("but its LEVEL is one recording's, on the tile and on the line", async () => {
+    // Decibels do not add. Three services at 96, 99 and 104 are a 104 dB day,
+    // and summing them would put 299 dB on the card and an axis to match.
+    const view = await renderCard(threeServicesADay());
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.equal(
+      view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent,
+      "104.0 dB",
+    );
+    assert.equal(nodesOn(view, "weekend"), 5, "the line drew a node per recording, not per day");
+    assert.deepEqual(
+      axis(view).filter((v) => v > 120),
+      [],
+      `the sound axis is framing summed levels: ${axis(view).join(", ")}`,
+    );
+    view.unmount();
+  });
+
+});
+
+describe("a Sunday morning on the card", () => {
+  const DAY = 24 * 60 * 60_000;
+  const FIRST = Date.parse("2026-01-04T15:00:00Z");
+  const GAP = 2 * 60 * 60_000;
+
+  /**
+   * Six finished Sundays of 1,000 + 500 + 800, then a seventh part way through:
+   * `done` of its three ended, and the next one on air if `running`. Anything
+   * after that has no record, because a service that has not started has not
+   * recorded anything.
+   *
+   * The slices differ deliberately — first-one 1,000, first-two 1,500, whole day
+   * 2,300 — so a comparison taken at the wrong one cannot come out right by
+   * accident.
+   */
+  function partSunday(done: number, running: boolean): TrendRecording[] {
+    const out: TrendRecording[] = [];
+    for (let w = 0; w < 7; w++) {
+      const day = FIRST + w * 7 * DAY;
+      const peaks = w === 6 ? [1100, 600, 900] : [1000, 500, 800];
+      const upTo = w < 6 ? 3 : Math.min(done + (running ? 1 : 0), 3);
+      peaks.slice(0, upTo).forEach((peak, i) => {
+        out.push({
+          serviceKey: `weekend:${w}:${i}`,
+          serviceTypeId: "weekend",
+          serviceTypeName: "Weekend",
+          serviceDate: new Date(day).toISOString().slice(0, 10),
+          t: day + i * GAP,
+          seriesTitle: null,
+          peakOccupancy: peak,
+          peakDb: null,
+          complete: w < 6 || i < done,
+        });
+      });
+    }
+    return out;
+  }
+
+  /** That seventh Sunday's clock: three services on the plan, `at` running. */
+  function clockAt(at: number): TrendClock {
+    const day = FIRST + 6 * 7 * DAY;
+    return {
+      now: day + at * GAP + 30 * 60_000,
+      today: new Date(day).toISOString().slice(0, 10),
+      serviceTimesToday: [0, 1, 2].map((i) => day + i * GAP),
+    };
+  }
+
+  const change = (view: ReturnType<typeof render>) =>
+    (view.container.querySelector('[data-trend-tile="weekend"] [data-trend-change]')?.textContent ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const figure = (view: ReturnType<typeof render>) =>
+    view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent;
+
+  test("service two of three running: it counts, against prior first TWOs", async () => {
+    // The defect this exists for: a Sunday morning reading against a basis of
+    // 2,300 — the whole church appearing to halve, every week, until the
+    // evening service ends. N is services STARTED, so the day climbs while the
+    // second fills rather than sitting flat on the first.
+    //
+    // The basis reads 12, not 6: the SAME six prior Sundays as the whole-day
+    // case below, but a first-two slice of them is 12 services, not 18 — a
+    // count of DAYS could not tell the two bases apart, and used to read 6
+    // for both.
+    const view = await renderCard(partSunday(1, true), { clock: clockAt(1) });
+    assert.equal(figure(view), "1,700", "1,100 finished plus the 600 in the room now");
+    assert.equal(change(view), "+13% vs 12 prior services", `the tile read "${change(view)}"`);
+    view.unmount();
+  });
+
+  test("the LAST service running: it counts live, against whole days", async () => {
+    // Same six prior Sundays as the case above; their WHOLE totals are 18
+    // services, not the 12 a first-two slice of them is worth.
+    const view = await renderCard(partSunday(2, true), { clock: clockAt(2) });
+    assert.equal(figure(view), "2,600", "the service on air is not in the figure");
+    assert.equal(change(view), "+13% vs 18 prior services", `the tile read "${change(view)}"`);
+    view.unmount();
+  });
+
+  test("and the tile does not move when that service ends", async () => {
+    // Deliberate continuity: only the dash and the provisional node go away.
+    const live = await renderCard(partSunday(2, true), { clock: clockAt(2) });
+    const before = [figure(live), change(live)];
+    live.unmount();
+    try { localStorage.clear(); } catch { /* jsdom always has one */ }
+    const done = await renderCard(partSunday(3, false), { clock: clockAt(3) });
+    assert.deepEqual([figure(done), change(done)], before, "the tile jumped when the last service ended");
+    done.unmount();
+  });
+
+  test("the label is one number, in services — singular only at exactly one", () => {
+    // basisLabel no longer takes a mode: counting the basis in services
+    // already carries the earlier-services/whole-day distinction (see the two
+    // tests above, 12 against 18 on the SAME six prior Sundays), so the
+    // sentence around the number is one shape for every state. One case per
+    // line, sorted, so two branches adding different ones merge cleanly.
+    assert.deepEqual(
+      [1, 2, 3, 12, 18, 22].map(basisLabel),
+      [
+        "1 prior service",
+        "2 prior services",
+        "3 prior services",
+        "12 prior services",
+        "18 prior services",
+        "22 prior services",
+      ],
+    );
+  });
+
+  test("the segment into the running day is DASHED, and every earlier one is not", async () => {
+    // A solid line into a Sunday whose evening service is half over says the
+    // church collapsed. Dashed, with a hollow node, it reads "not done yet".
+    //
+    // WHAT THIS CANNOT SEE: the dashes. jsdom paints nothing. What it CAN read
+    // is what was handed to the SVG — which path carries the dash array, which
+    // node is marked, and that the solid path stops one point short. Driven in
+    // Chrome at 1440.
+    const view = await renderCard(partSunday(2, true), { clock: clockAt(2) });
+    const solid = view.container.querySelector('[data-series-line="weekend"]');
+    const prov = view.container.querySelector('[data-series-provisional="weekend"]');
+    assert.ok(prov, "the day on air has no provisional segment");
+    assert.ok(prov.querySelector("[data-provisional-node]"), "the provisional node is missing");
+    assert.match(
+      prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "",
+      /\d/,
+      "the provisional segment is not dashed",
+    );
+    assert.equal(
+      solid?.getAttribute("stroke-dasharray"),
+      null,
+      "the whole line went dashed, not just the segment into the day on air",
+    );
+    // Seven days of data, six of them on the solid line: the newest comes off it
+    // and is drawn by the dashed segment instead.
+    assert.equal([...(solid?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 6);
+    view.unmount();
+  });
+
+  test("a day with EARLIER services still to run is dashed too", async () => {
+    // Driven in Chrome and it is why this exists: with one of three done the
+    // line plunged from ~3,500 to 1,252 in a SOLID stroke, drawing the collapse
+    // the tile beside it spends its whole label denying. Dashed, the same node
+    // reads "not done yet".
+    const view = await renderCard(partSunday(1, true), { clock: clockAt(1) });
+    const prov = view.container.querySelector('[data-series-provisional="weekend"]');
+    assert.ok(prov, "a part-finished day is drawn as if it were final");
+    assert.match(prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "", /\d/);
+    // And it counts the service on air, from the second position as from the last.
+    assert.equal(figure(view), "1,700");
+    view.unmount();
+  });
+
+  test("a finished day carries no provisional segment at all", async () => {
+    const view = await renderCard(partSunday(3, false), { clock: clockAt(3) });
+    assert.equal(
+      view.container.querySelectorAll("[data-series-provisional]").length,
+      0,
+      "a finished day is still drawn as if it were running",
+    );
+    assert.equal([...(view.container.querySelector('[data-series-line="weekend"]')?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 7);
+    view.unmount();
+  });
+
+  test("a live attendance update moves the node and the tile together", async () => {
+    // It updates through the morning off the page's own attendance channel; the
+    // card re-renders with a bigger figure on the service that is on air.
+    const at = (peak: number) =>
+      partSunday(2, true).map((r) =>
+        r.serviceKey === "weekend:6:2" ? { ...r, peakOccupancy: peak } : r,
+      );
+    // AGAINST THE PRIOR DAYS IN THE SAME RENDER, not against the other render's
+    // pixels: the y axis reframes as the figure grows, so two absolute `cy`
+    // values from two charts can land on the same number while the node has
+    // genuinely moved. A 2,000 day sits BELOW a 2,300 one and a 2,600 day sits
+    // above it, and that is true whatever the axis did.
+    const nodeVsPriorDay = (view: ReturnType<typeof render>) => {
+      const node = Number(view.container.querySelector("[data-provisional-node]")?.getAttribute("cy"));
+      const d = view.container.querySelector('[data-series-line="weekend"]')?.getAttribute("d") ?? "";
+      const ys = [...d.matchAll(/[ML][\d.]+,([\d.]+)/g)].map((m) => Number(m[1]));
+      return { node, priorDay: ys[ys.length - 1] };
+    };
+    const early = await renderCard(at(300), { clock: clockAt(2) });
+    assert.equal(figure(early), "2,000", "1,100 + 600 + 300 in the room so far");
+    const low = nodeVsPriorDay(early);
+    assert.ok(low.node > low.priorDay, `2,000 should sit below a 2,300 day: ${JSON.stringify(low)}`);
+    early.unmount();
+    try { localStorage.clear(); } catch { /* jsdom always has one */ }
+    const later = await renderCard(at(900), { clock: clockAt(2) });
+    assert.equal(figure(later), "2,600", "the figure did not climb with the room");
+    const high = nodeVsPriorDay(later);
+    assert.ok(high.node < high.priorDay, `2,600 should sit above a 2,300 day: ${JSON.stringify(high)}`);
+    later.unmount();
+  });
+});
+
+describe("the range control", () => {
+  test("offers All, and it draws every day", async () => {
+    const view = await renderCard(longRun("weekend", 1000));
+    const labels = [...view.container.querySelectorAll('[role="group"][aria-label="Trend range"] button')]
+      .map((b) => (b.textContent ?? "").trim());
+    // One entry per line, so two branches adding different ranges conflict.
+    assert.deepEqual(labels, ["8w", "16w", "52w", "All"]);
+    view.unmount();
+  });
+
+  test("the SUBTITLE names the range, and every choice reads differently", async () => {
+    // The card carried three numbers for one thing and no two agreed: the
+    // subtitle said "last 8 days" (the sparkline's window), the tile said
+    // "vs 11 full days", and the chart drew everything. Caught in Chrome with
+    // All selected; the subtitle is the one that was lying.
+    //
+    // EXACT, one line per choice, so a range added on one branch and a wording
+    // change on another cannot merge into a green suite that says nothing.
+    const view = await renderCard(longRun("weekend", 1000));
+    const read = async (label: string) => {
+      const b = [...view.container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Trend range"] button')]
+        .find((x) => (x.textContent ?? "").trim() === label);
+      assert.ok(b, `no ${label} button`);
+      await act(async () => {
+        b.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      return (view.container.querySelector("[data-trends-subtitle]")?.textContent ?? "")
+        .replace(/\s+/g, " ").trim();
+    };
+    assert.deepEqual(
+      [
+        await read("8w"),
+        await read("16w"),
+        await read("52w"),
+        await read("All"),
+      ],
+      [
+        "Attendance per service type, each day's services added up · last 8 weeks, drawn and compared · milestones from your list and series changes",
+        "Attendance per service type, each day's services added up · last 16 weeks, drawn and compared · milestones from your list and series changes",
+        "Attendance per service type, each day's services added up · last 52 weeks, drawn and compared · milestones from your list and series changes",
+        "Attendance per service type, each day's services added up · every recorded day, drawn and compared · milestones from your list and series changes",
+      ],
+    );
+    view.unmount();
+  });
+
+  test("changing it changes the basis AND the count the label reports", async () => {
+    // One control for the chart and the tile. `longRun` is sixteen weekly days,
+    // so an 8-week range reaches eight of the fifteen prior ones and All reaches
+    // all fifteen.
+    const view = await renderCard(longRun("weekend", 1000));
+    const pick = async (label: string) => {
+      const b = [...view.container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Trend range"] button')]
+        .find((x) => (x.textContent ?? "").trim() === label);
+      assert.ok(b, `no ${label} button`);
+      await act(async () => {
+        b.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      return (view.container.querySelector("[data-trend-change]")?.textContent ?? "").replace(/\s+/g, " ").trim();
+    };
+    const eight = await pick("8w");
+    const all = await pick("All");
+    // Absolute +4 against a basis of 1,011 and +8 against 1,007 — small
+    // percentages of a large basis, and one service a week so the basis in
+    // SERVICES is the same 8 and 15 the basis in days used to read.
+    assert.equal(eight, "0% vs 8 prior services", `8w read "${eight}"`);
+    assert.equal(all, "+1% vs 15 prior services", `All read "${all}"`);
+    view.unmount();
+  });
+
+  test("All is remembered across a remount", async () => {
+    const first = await renderCard(longRun("weekend", 1000));
+    const b = [...first.container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Trend range"] button')]
+      .find((x) => (x.textContent ?? "").trim() === "All")!;
+    await act(async () => {
+      b.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.equal(localStorage.getItem("history:trendRangeWeeks"), "all");
+    cleanup();
+    const second = await renderCard(longRun("weekend", 1000));
+    assert.equal(
+      [...second.container.querySelectorAll('[role="group"][aria-label="Trend range"] button')]
+        .find((x) => x.getAttribute("aria-pressed") === "true")?.textContent?.trim(),
+      "All",
+      "the card came back on 16w after the operator chose All",
+    );
+    second.unmount();
+  });
+});
+
 
 describe("a milestone's scope, from the store to the drawn mark", () => {
   test("the card hands the chart the service type the milestone was scoped to", () => {
@@ -209,13 +613,13 @@ describe("the measure switch", () => {
       view.container.querySelector('[data-trend-measure="attendance"]')?.getAttribute("aria-pressed"),
       "true",
     );
-    assert.equal(view.container.querySelector("[data-trend-average]")?.textContent, "1,000");
+    assert.equal(view.container.querySelector("[data-trend-latest]")?.textContent, "1,000");
   });
 
   test("switching to sound puts the tiles in decibels", async () => {
     const view = await renderCard(alternating());
     await click(view, "sound");
-    const avg = view.container.querySelector("[data-trend-average]")?.textContent ?? "";
+    const avg = view.container.querySelector("[data-trend-latest]")?.textContent ?? "";
     assert.match(avg, /^[\d.]+ dB$/, `the tile did not switch to decibels: "${avg}"`);
     assert.equal(
       view.container.querySelector('[data-trend-measure="sound"]')?.getAttribute("aria-pressed"),
@@ -234,7 +638,7 @@ describe("the measure switch", () => {
       "true",
       "the card came back on attendance after the operator chose sound",
     );
-    assert.match(second.container.querySelector("[data-trend-average]")?.textContent ?? "", /dB$/);
+    assert.match(second.container.querySelector("[data-trend-latest]")?.textContent ?? "", /dB$/);
   });
 
   test("the axis is a dB band, never anchored at zero", async () => {
@@ -264,7 +668,7 @@ describe("the measure switch", () => {
     await click(view, "sound");
     assert.deepEqual(names().sort(), ["evening", "weekend"], "a type went missing when the measure changed");
     const evening = view.container.querySelector('[data-trend-tile="evening"]')!;
-    assert.equal(evening.querySelector("[data-trend-average]")?.textContent, "—");
+    assert.equal(evening.querySelector("[data-trend-latest]")?.textContent, "—");
     assert.equal(evening.querySelector("[data-trend-change]")?.textContent, "no sound recorded");
   });
 });
@@ -282,47 +686,183 @@ function silentType(): TrendRecording[] {
     seriesTitle: null,
     peakOccupancy: 200 + i,
     peakDb: null,
+    complete: true,
   }));
 }
 
 
-describe("the strip above the trends plot", () => {
-  test("is OUT OF FLOW, so an empty one costs no space and a hover moves nothing", async () => {
-    // With no at-rest figures the strip is zero-high at rest. In flow that is
-    // either a void the height of a figure between the tiles and the plot — a
-    // reserved 44px, which is what shipped — or a chart that jumps down under
-    // the cursor the moment the pointer arrives.
+describe("the hover readout", () => {
+  /** The CHART's svg. `querySelector("svg")` finds the first tile's sparkline —
+   *  every tile has one, and they come first in the DOM. */
+  function plotOf(view: ReturnType<typeof render>): SVGSVGElement {
+    const svg = view.container.querySelector("[data-series-line]")?.closest("svg");
+    assert.ok(svg, "the chart drew no line, so there is nothing to hover");
+    return svg as SVGSVGElement;
+  }
+
+  /** The readout the subtitle row becomes under the pointer. Asserted rather
+   *  than dereferenced, so a card that reports nothing fails with a sentence
+   *  instead of a TypeError from the line after it. */
+  function readoutIn(row: HTMLElement): HTMLElement {
+    const readout = row.querySelector("[data-trends-readout]");
+    assert.ok(readout, `hovering the plot said nothing: "${row.textContent}"`);
+    return readout as HTMLElement;
+  }
+
+  /** Point at the middle of the plot, then hand back the card's subtitle row. */
+  async function hoverPlot(view: ReturnType<typeof render>): Promise<HTMLElement> {
+    const svg = plotOf(view);
+    await act(async () => {
+      fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 60 });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    return view.container.querySelector("[data-trends-subtitle]") as HTMLElement;
+  }
+
+  test("nothing is drawn over the plot at all — the chart has no strip", async () => {
+    // The readout was a box laid over the top-left of the plot. Narrowed to its
+    // text and made see-through it was still in FRONT of the line, and the
+    // top-left is where a rising line ends up — the part a pointer there is
+    // asking about.
     //
-    // WHAT THIS CANNOT SEE: the resulting 16px. jsdom loads no stylesheet and
-    // measures every box as 0, so a geometry assertion here would pass on any
-    // layout at all. The gap was measured in Chrome at 1440 — tiles bottom 202,
-    // chart top 218 — and what is asserted here is the structure that produces
-    // it: the strip is positioned, and its parent is the positioning context.
+    // WHAT THIS CANNOT SEE: what covers what. jsdom loads no stylesheet, paints
+    // nothing and measures every box as 0, so no assertion here can tell whether
+    // one element is on top of another. What it CAN do is deny the structure
+    // that made it possible: there is no strip, and nothing inside the card is
+    // taken out of flow to sit over the plot. Driven in Chrome at 1440.
     const view = await renderCard(twoTypes());
-    const strip = view.container.querySelector("[data-history-strip]") as HTMLElement;
-    assert.ok(strip, "no strip at all — hover has nowhere to report");
-    assert.ok(strip.className.includes("absolute"), `the strip is still in flow: ${strip.className}`);
-    assert.ok(strip.className.includes("pointer-events-none"), "an overlaid strip must not eat the pointer");
-    assert.ok(
-      strip.parentElement?.className.includes("relative"),
-      `the strip's parent is not the positioning context: ${strip.parentElement?.className}`,
+    // Counted, not compared. `assert.equal(<a DOM node>, null)` puts the node
+    // in the AssertionError, and serialising a jsdom element graph for the diff
+    // takes the whole heap: the run is SIGKILLed with no message at all, which
+    // is a guard that cannot report the bug it caught.
+    assert.equal(
+      view.container.querySelectorAll("[data-history-strip]").length,
+      0,
+      "the chart is still drawing a strip; the card is drawing the readout too",
+    );
+    // THE PLOT'S OWN WRAPPER, not the whole card. The overlay was positioned
+    // against the chart's flex column — the element that held both the strip and
+    // the svg — so that is the only subtree where "out of flow" can mean "over
+    // the line". Scanning the card caught it, but it would also have caught a
+    // popover or a tooltip somebody added to the tiles for a reason that has
+    // nothing to do with covering the plot.
+    const chart = plotOf(view).parentElement as HTMLElement;
+    assert.ok(chart, "the plot has no wrapper, so this asserts nothing");
+    const overlaid = [chart, ...chart.querySelectorAll("[class]")]
+      .map((el) => el.className)
+      .filter((c) => typeof c === "string" && /\babsolute\b/.test(c));
+    assert.deepEqual(overlaid, [], `something is still laid over the plot: ${overlaid.join(" | ")}`);
+    view.unmount();
+  });
+
+  test("hovering replaces the card's subtitle, and adds no row to do it", async () => {
+    const view = await renderCard(twoTypes());
+    const before = view.container.querySelector("[data-trends-subtitle]") as HTMLElement;
+    assert.match(before.textContent ?? "", /per service type/, "the subtitle is not the at-rest sentence");
+    assert.ok(!before.querySelector("[data-trends-readout]"), "a readout at rest");
+
+    const after = await hoverPlot(view);
+    // THE SAME ELEMENT. A second row appearing under the subtitle is a row of
+    // height added, which pushes the plot down under the cursor.
+    assert.ok(after === before, "the readout is a new element, not the subtitle's own row");
+    assert.equal(view.container.querySelectorAll("[data-trends-subtitle]").length, 1);
+    readoutIn(after);
+    assert.doesNotMatch(after.textContent ?? "", /per service type/, "the subtitle is still there beside the readout");
+    // One line in both states, so the row cannot grow when the readout is
+    // longer than the sentence it replaced.
+    assert.ok(/\btruncate\b/.test(after.className), `the readout row can wrap: ${after.className}`);
+    // And still ANNOUNCED. The strip this replaced was a polite live region;
+    // a row that changes under the pointer and never says so leaves a screen
+    // reader on the at-rest sentence forever.
+    assert.deepEqual(
+      [after.getAttribute("role"), after.getAttribute("aria-live")],
+      ["status", "polite"],
+      "the readout is not a live region any more",
     );
     view.unmount();
   });
 
-  test("carries no at-rest figures — the tiles are the summary", async () => {
-    // It read Services / Average peak / Busiest: a fourth summary of the same
-    // recordings the tiles already summarise, and a BLEND across service types,
-    // which is the statistic the per-type tiles exist to avoid.
+  test("it names the day and every VISIBLE type's value, each in its own colour", async () => {
     const view = await renderCard(twoTypes());
-    const strip = view.container.querySelector("[data-history-strip]") as HTMLElement;
-    assert.ok(strip, "the strip element is gone entirely — hover has nowhere to report");
-    assert.equal(strip.dataset.historyStrip, "rest");
+    const readout = readoutIn(await hoverPlot(view));
+    const text = (readout.textContent ?? "").replace(/\s+/g, " ");
+    // A date, not a time of day: the axis under the pointer is dates, and this
+    // answered "2:32 pm" on sixteen weeks of Sundays.
+    assert.match(text, /^[A-Z][a-z]{2} \d+ /, `the readout does not lead with the day: "${text}"`);
+    for (const id of ["weekend", "evening"]) {
+      assert.match(text, new RegExp(id), `${id} is not in the readout: "${text}"`);
+    }
+    // Each type's figure in the SAME colour as its line — which is what tells
+    // you which of several lines you are reading.
+    const colored = [...readout.querySelectorAll("[data-readout-series]")].map((el) => [
+      el.getAttribute("data-readout-series"),
+      (el as HTMLElement).style.color,
+    ]);
     assert.deepEqual(
-      [...strip.children].map((c) => (c.textContent ?? "").trim()).filter(Boolean),
-      [],
-      `the trends strip is still showing figures: ${strip.textContent}`,
+      colored.sort(),
+      [
+        ["evening", view.container.querySelector('[data-series-line="evening"]')!.getAttribute("stroke")],
+        ["weekend", view.container.querySelector('[data-series-line="weekend"]')!.getAttribute("stroke")],
+      ].sort(),
+      "a type's value is not in its line's colour",
     );
+    view.unmount();
+  });
+
+  test("the date it names is a day something was RECORDED on", async () => {
+    // The pointer lands between nodes. Read off its raw position the readout
+    // answered "Feb 3" — a Tuesday, with Feb 1's figure beside it. A date on
+    // screen has to be a day something happened.
+    //
+    // The shape assertion above cannot catch this: `/^[A-Z][a-z]{2} \d+ /` is as
+    // happy with the wrong date as the right one.
+    const recs = twoTypes();
+    const recorded = new Set(
+      recs.map((r) =>
+        new Date(`${r.serviceDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      ),
+    );
+    const view = await renderCard(recs);
+    const readout = readoutIn(await hoverPlot(view));
+    const shown = (readout.textContent ?? "").replace(/\s+/g, " ").split(" \u00b7 ")[0].trim();
+    assert.ok(
+      recorded.has(shown),
+      `the readout is dated "${shown}", which nothing was recorded on: ${[...recorded].join(", ")}`,
+    );
+    // And the crosshair went with it. A line standing between two Sundays beside
+    // one Sunday's figure is the same lie the date used to tell.
+    const x = Number(view.container.querySelector("[data-crosshair]")?.getAttribute("x1"));
+    assert.ok(Number.isFinite(x), "there is no crosshair to check");
+    assert.notEqual(
+      Math.round(x),
+      Math.round(SVG_W / 2),
+      "the crosshair is still standing where the pointer is, so nothing snapped and this proves nothing",
+    );
+    view.unmount();
+  });
+
+  test("a type switched off is not in it", async () => {
+    // The readout reports what is DRAWN. A hidden type reporting a value is a
+    // figure for a line that is not on the chart.
+    await withTwoTypes(async (view, toggle) => {
+      await toggle("evening");
+      const readout = readoutIn(await hoverPlot(view));
+      const text = (readout.textContent ?? "").replace(/\s+/g, " ");
+      assert.match(text, /weekend/, `the drawn type is missing: "${text}"`);
+      assert.doesNotMatch(text, /evening/, `a hidden type is still in the readout: "${text}"`);
+    });
+  });
+
+  test("moving off the plot puts the subtitle back", async () => {
+    const view = await renderCard(twoTypes());
+    const row = await hoverPlot(view);
+    readoutIn(row);
+    await act(async () => {
+      fireEvent.pointerLeave(plotOf(view));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.ok(!row.querySelector("[data-trends-readout]"), "the readout stayed after the pointer left");
+    assert.match(row.textContent ?? "", /per service type/, "the subtitle did not come back");
     view.unmount();
   });
 });
@@ -540,10 +1080,14 @@ function alternating(): TrendRecording[] {
     // A level on every recording but the last two, so the sound measure has
     // something to plot and one type-less gap to step over.
     peakDb: i < 14 ? 94 + (i % 4) : null,
+    complete: true,
   }));
 }
 
-async function renderCard(recordings: TrendRecording[], opts: { milestones?: "fail" } = {}) {
+async function renderCard(
+  recordings: TrendRecording[],
+  opts: { milestones?: "fail"; clock?: TrendClock } = {},
+) {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
     if (String(input) === "/api/history/milestones") {
       if (opts.milestones === "fail") throw new Error("nope");
@@ -554,7 +1098,7 @@ async function renderCard(recordings: TrendRecording[], opts: { milestones?: "fa
   let view!: ReturnType<typeof render>;
   await act(async () => {
     view = render(
-      React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings })),
+      React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings, clock: opts.clock ?? null })),
     );
     for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0));
   });
@@ -614,12 +1158,39 @@ function straddlingRound(): TrendRecording[] {
     seriesTitle: null,
     peakOccupancy: p,
     peakDb: null,
+    complete: true,
   }));
+}
+
+/** Five Sundays, each running a 9, an 11 and a 6 at 1,400 / 700 / 1,100 people
+ *  and 96 / 99 / 104 dB — the shape of a church the day figure has to get
+ *  right: 3,200 in the room across the day, and a 104 dB day. */
+function threeServicesADay(): TrendRecording[] {
+  const DAY = 24 * 60 * 60_000;
+  const start = Date.parse("2026-01-04T15:00:00Z");
+  const out: TrendRecording[] = [];
+  for (let w = 0; w < 5; w++) {
+    const day = start + w * 7 * DAY;
+    [[1400, 96], [700, 99], [1100, 104]].forEach(([people, db], i) => {
+      out.push({
+        serviceKey: `weekend:${w}:${i}`,
+        serviceTypeId: "weekend",
+        serviceTypeName: "Weekend",
+        serviceDate: new Date(day).toISOString().slice(0, 10),
+        t: day + i * 2 * 60 * 60_000,
+        seriesTitle: null,
+        peakOccupancy: people,
+        peakDb: db,
+        complete: true,
+      });
+    });
+  }
+  return out;
 }
 
 /** Sixteen days of one service type, so a tile has a prior window and prints a
  *  real change figure. `peak` drifts by a point a week so the two windows are
- *  not equal and the percentage is not "0%". */
+ *  not equal and the change is not "0". */
 function longRun(typeId: string, peak: number): TrendRecording[] {
   const DAY = 24 * 60 * 60_000;
   const start = Date.parse("2026-01-04T15:00:00Z");
@@ -632,6 +1203,7 @@ function longRun(typeId: string, peak: number): TrendRecording[] {
     seriesTitle: null,
     peakOccupancy: peak + i,
     peakDb: 90 + (i % 5),
+    complete: true,
   }));
 }
 
@@ -650,6 +1222,7 @@ function twoTypes(typeId?: string, peak?: number): TrendRecording[] {
       seriesTitle: null,
       peakOccupancy: p,
       peakDb: 95,
+      complete: true,
     }));
   if (typeId != null) return of(typeId, peak ?? 100);
   return [...of("weekend", 1000), ...of("evening", 200)];

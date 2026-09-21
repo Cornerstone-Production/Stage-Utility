@@ -60,13 +60,13 @@ export function formatRecordTimecode(ms: number): string {
 /**
  * The record timecode a display shows right now, or null when there is none.
  *
- * `skewMs` is the server's clock minus this browser's, the same correction the
- * PCO countdown and the PVP progress bar apply — `recordSampledAt` is stamped by
- * the server, so a kiosk whose clock is a minute out would otherwise draw a
- * minute of recording that never happened.
+ * `serverNow` is the SERVER's clock, which is what every caller of this holds —
+ * `recordSampledAt` is stamped by the server, so a kiosk reading its own clock
+ * would draw a minute of recording that never happened. See
+ * renderer/lib/server-clock.ts.
  */
-export function obsRecordTimecode(s: RecordAnchor | null, now: number, skewMs = 0): string | null {
+export function obsRecordTimecode(s: RecordAnchor | null, serverNow: number): string | null {
   if (!s) return null;
-  const ms = recordElapsedMs(s, now + skewMs);
+  const ms = recordElapsedMs(s, serverNow);
   return ms == null ? null : formatRecordTimecode(ms);
 }

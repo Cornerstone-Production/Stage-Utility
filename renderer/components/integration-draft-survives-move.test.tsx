@@ -16,12 +16,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 155 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent , integrationCard } = await import(
+const { installFakeServer, withQueryClient, assertAbsent, integrationCard, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -33,12 +37,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 /** Awaits the card. The synchronous read this replaced could run before React
  *  had committed it — see integrationCard. */
@@ -59,7 +63,7 @@ describe("a draft survives the card moving between groups", () => {
     // OBS starts dormant: the exact position the bug was reported from.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await idle();
+    await actIdle();
 
     fireEvent.click((await tile(c, "obs")));
     await settle();
@@ -96,7 +100,7 @@ describe("a draft survives the card moving between groups", () => {
     // whichever component rendered it — so this compares the node itself.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await idle();
+    await actIdle();
     fireEvent.click((await tile(c, "obs")));
     await settle();
 
@@ -120,7 +124,7 @@ describe("a draft survives the card moving between groups", () => {
     // the edit, and a value that reappeared later would be a surprise.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await idle();
+    await actIdle();
 
     fireEvent.click((await tile(c, "obs")));
     await settle();

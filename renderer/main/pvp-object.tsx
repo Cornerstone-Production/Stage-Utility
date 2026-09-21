@@ -109,11 +109,10 @@ function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowSh
   return clipped;
 }
 
-export function PvpObject({ config, status, now, skewMs, H }: {
+export function PvpObject({ config, status, now, H }: {
   config: Config;
   status: PvpStatusDTO | null;
   now: number;
-  skewMs: number;
   /** The canvas height in layout pixels, for the row gap. */
   H: number;
 }) {
@@ -155,7 +154,6 @@ export function PvpObject({ config, status, now, skewMs, H }: {
           layer={l}
           sampledAt={status?.sampledAt ?? null}
           now={now}
-          skewMs={skewMs}
           showProgress={showProgress}
         />
       ))}

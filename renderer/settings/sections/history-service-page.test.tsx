@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -137,12 +137,8 @@ const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
 
-after(() => {
-  cleanup();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 async function openTheService(Section: React.ComponentType) {
@@ -340,6 +336,9 @@ describe("the History service page", () => {
     // 1,196 in room" above a card saying "PEAK 1,196 / ENTRIES 2,061". Asserting
     // a literal on one side alone would not have caught it — the literal was
     // right for whichever side the author was looking at. This reads both.
+    //
+    // The header's label is "Peak in room" now, the All services row's own words
+    // for the same figure, so one number has one name wherever it appears.
     const figures = (root: Element) =>
       new Map(
         [...root.querySelectorAll("[data-history-strip] > div")].map((d) => [
@@ -357,9 +356,9 @@ describe("the History service page", () => {
     // that runs on past the end shows up here.
     assert.equal(card.get("entries"), "1,727", "the Attendance card's own entries (fixture check)");
     assert.equal(
-      header.get("peak attendance"),
+      header.get("peak in room"),
       card.get("peak"),
-      "the header's Peak attendance must be the same number the card calls Peak",
+      "the header's Peak in room must be the same number the card calls Peak",
     );
     const headerSub = new Map(
       [...view.container.querySelectorAll('[data-testid="service-kpis"] [data-history-strip] > div')].map((d) => [
@@ -368,7 +367,7 @@ describe("the History service page", () => {
       ]),
     );
     assert.equal(
-      headerSub.get("peak attendance"),
+      headerSub.get("peak in room"),
       `${card.get("entries")} entries`,
       `the header's entries line must be the card's Entries figure; header subs were ${JSON.stringify([...headerSub])}`,
     );

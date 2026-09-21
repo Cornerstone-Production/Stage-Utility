@@ -28,12 +28,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 1049 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, integrationCard, until } = await import(
+const { installFakeServer, withQueryClient, integrationCard, until, actUntil, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
@@ -47,12 +51,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 /** One number field, and what the form seeds it with on a fresh install. */
 interface Seeded {
@@ -267,9 +271,9 @@ function dialogNow(): HTMLElement {
 async function openCard(id: string, config: Record<string, unknown> = {}): Promise<void> {
   server = installFakeServer(Object.keys(config).length ? { [id]: { config } } : {});
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
-  await settle(60);
+  await settleFor(60);
   assert.ok(document.querySelector('[role="dialog"]'), `the ${id} dialog did not open`);
 }
 
@@ -315,7 +319,7 @@ async function save(id: string): Promise<Record<string, unknown>> {
   // edit the test made was then overwritten by handleSave's own re-seed landing
   // late. The label going back to "Save" says isSaving is false; `disabled`
   // saying so too says the form and the state the server answered with agree.
-  await until(
+  await actUntil(
     () => saveButton()?.disabled === true && saveButton()?.textContent?.trim() === "Save",
     () => `${id} never finished saving — Save reads "${saveButton()?.textContent?.trim()}"`,
   );
@@ -366,7 +370,7 @@ describe("an unset number field, opened and saved", () => {
       // so this is the operator reopening a field that now HAS a value and
       // emptying it — the path that used to be impossible, because the box
       // sprang back to a number on blur.
-      await until(() => box(key).value === "900", () => `${id}.${key} never showed the saved value`);
+      await actUntil(() => box(key).value === "900", () => `${id}.${key} never showed the saved value`);
       fireEvent.change(box(key), { target: { value: "" } });
       fireEvent.blur(box(key));
       const cleared = await save(id);

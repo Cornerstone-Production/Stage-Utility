@@ -1,7 +1,7 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
-import { useServerSkew } from "@renderer/lib/use-server-skew";
+import { useServerClock } from "@renderer/lib/server-clock";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
@@ -51,12 +51,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     return () => { cancelled = true; clearInterval(t); };
   }, [resolvedTypeId]);
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const skewMs = useServerSkew(pcoLive?.serverNow);
+  const now = useServerClock(pcoLive?.serverNow);
 
   const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.
@@ -74,7 +69,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
 
   // Every derived value comes from the shared hook, so this page and the layout
   // object cannot compute one of them differently — see scriptview-body.tsx.
-  const render = useScriptViewRender(rundown, layout, roles, pcoLive, now, skewMs);
+  const render = useScriptViewRender(rundown, layout, roles, pcoLive, now);
 
   return (
     // FULL BLEED, like a console. The shell's content column keeps its

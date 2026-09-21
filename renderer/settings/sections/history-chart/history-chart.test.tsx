@@ -127,10 +127,25 @@ function chart(props: Partial<React.ComponentProps<typeof HistoryChart>> = {}) {
   );
 }
 
+/**
+ * The strip, or a sentence saying it is not there.
+ *
+ * `document.querySelector(...) as HTMLElement` reads null as an element and the
+ * next line dies on `.dataset`, so a chart that stops drawing a strip at all
+ * failed ten tests with `Cannot read properties of null` and named nothing. It
+ * does go red; it just does not say what broke, which is the failure mode this
+ * module's own hover work complained about elsewhere.
+ */
+function stripEl(): HTMLElement {
+  const el = document.querySelector("[data-history-strip]");
+  assert.ok(el, "the chart drew no stat strip at all — nothing here can be read off it");
+  return el as HTMLElement;
+}
+
 describe("the stat strip", () => {
   test("at rest it shows the chosen figures, and only those", () => {
     render(chart());
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "rest");
     for (const f of FIGURES) assert.ok(strip.textContent?.includes(f.label), `${f.label} missing`);
     assert.ok(!strip.textContent?.includes("Live"));
@@ -138,7 +153,7 @@ describe("the stat strip", () => {
 
   test("a figure the operator unticked is not in the strip", () => {
     render(chart({ figures: FIGURES.filter((f) => f.key !== "samples") }));
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(!strip.textContent?.includes("Samples"));
     assert.ok(strip.textContent?.includes("Peak"));
   });
@@ -147,7 +162,7 @@ describe("the stat strip", () => {
     render(chart());
     const svg = document.querySelector("svg") as SVGSVGElement;
     fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 80 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "hover");
     assert.ok(strip.textContent?.includes("Time"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("Attendance"), strip.textContent ?? "");
@@ -160,7 +175,7 @@ describe("the stat strip", () => {
     const svg = document.querySelector("svg") as SVGSVGElement;
     fireEvent.pointerMove(svg, { clientX: SVG_W / 2, clientY: 80 });
     fireEvent.pointerLeave(svg);
-    assert.equal((document.querySelector("[data-history-strip]") as HTMLElement).dataset.historyStrip, "rest");
+    assert.equal(stripEl().dataset.historyStrip, "rest");
   });
 
   test("hovering a lane segment names the item, its number, and what it ran against plan", () => {
@@ -168,7 +183,7 @@ describe("the stat strip", () => {
     const svg = document.querySelector("svg") as SVGSVGElement;
     // Three quarters across = 20:45, inside Message; y in the lower lane row.
     fireEvent.pointerMove(svg, { clientX: 480, clientY: 205 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(strip.textContent?.includes("Item 3"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("Message"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("Planned"), strip.textContent ?? "");
@@ -177,7 +192,7 @@ describe("the stat strip", () => {
 
   test("while recording it reads LIVE with the current values", () => {
     render(chart({ live: true }));
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.equal(strip.dataset.historyStrip, "live");
     assert.ok(strip.textContent?.includes("Live"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("160"), strip.textContent ?? "");
@@ -186,7 +201,205 @@ describe("the stat strip", () => {
   test("a hover wins over LIVE — the operator asked about that instant", () => {
     render(chart({ live: true }));
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 200, clientY: 80 });
-    assert.equal((document.querySelector("[data-history-strip]") as HTMLElement).dataset.historyStrip, "hover");
+    assert.equal(stripEl().dataset.historyStrip, "hover");
+  });
+});
+
+describe("a day that has not finished", () => {
+  const provisional = () => chart({
+    series: [{ ...series(), provisional: true }],
+    xAxis: "date",
+  });
+
+  test("its last segment is dashed and its node marked; the rest of the line is not", () => {
+    // WHAT THIS CANNOT SEE: the dashes. jsdom paints nothing and loads no
+    // stylesheet. What it CAN read is what was handed to the SVG — which path
+    // carries the dash array, which node is marked, and that the solid path
+    // stops one point short. Driven in Chrome at 1440.
+    render(provisional());
+    const solid = document.querySelector("[data-series-line]");
+    const prov = document.querySelector("[data-series-provisional]");
+    assert.ok(prov, "no provisional segment at all");
+    assert.ok(prov.querySelector("[data-provisional-node]"), "the provisional node is missing");
+    assert.match(prov.querySelector("path")?.getAttribute("stroke-dasharray") ?? "", /\d/);
+    assert.equal(solid?.getAttribute("stroke-dasharray"), null, "the whole line went dashed");
+    // 61 points, 60 of them solid: the newest comes off the line and is drawn
+    // by the dashed segment instead.
+    assert.equal([...(solid?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 60);
+  });
+
+  // A DAY STILL FILLING, at two readings. The first point is pinned high so the
+  // y axis is framed by it and does not reframe between the two renders — two
+  // `cy` values off two different scales are not comparable, and a guard that
+  // compares them passes or fails on the axis rather than on the node.
+  const filling = (v: number) => chart({
+    xAxis: "date",
+    series: [{
+      ...series(),
+      provisional: true,
+      points: [
+        { t: T0, v: 5000 },
+        { t: T0 + 60 * MIN, v: 3000 },
+        { t: T0 + 120 * MIN, v },
+      ],
+    }],
+  });
+  const nodeY = () => Number(document.querySelector("[data-provisional-node]")?.getAttribute("cy"));
+  const tailEndY = () => {
+    const d = document.querySelector("[data-series-provisional] path")?.getAttribute("d") ?? "";
+    const ys = [...d.matchAll(/[ML][\d.-]+,([\d.-]+)/g)].map((m) => Number(m[1]));
+    return ys[ys.length - 1];
+  };
+
+  test("a broadcast EASES the node rather than stepping it", async () => {
+    // "Slowly building" is the requirement. A step is a twitch: the reading
+    // lands, the node teleports, and an hour of a service filling reads as a
+    // dozen jerks rather than as a room filling.
+    //
+    // WHAT THIS CANNOT SEE: the glide. jsdom paints nothing. What it CAN see is
+    // that the render in which a bigger reading ARRIVES still draws the node
+    // where it was — which is the whole difference between easing and stepping,
+    // and is false for any implementation that jumps. Driven in Chrome over a
+    // real broadcast sequence; the node was caught mid-climb between two
+    // readings of the same service.
+    // Where it ends up, off a fresh render at the new value, so nothing here
+    // depends on a tween having finished. Taken FIRST and unmounted: two charts
+    // in the document at once and `document.querySelector` reads the older one.
+    const probe = render(filling(2000));
+    const settled = nodeY();
+    probe.unmount();
+
+    const view = render(filling(1000));
+    const before = nodeY();
+    assert.notEqual(before, settled, "the fixture does not move the node at all");
+
+    view.rerender(filling(2000));
+    assert.equal(nodeY(), before, "the node jumped straight to the new reading");
+    // And it gets there.
+    await new Promise((r) => setTimeout(r, 900));
+    assert.equal(nodeY(), settled, "the node never arrived at the new reading");
+    view.unmount();
+  });
+
+  test("the dashed segment grows WITH the node, never ahead of it", async () => {
+    // The segment is drawn to the eased value too. Drawn to the target instead,
+    // the line would arrive first and the node would chase it up a dashed
+    // stretch that already exists — which reads as the node lagging, not as the
+    // day building.
+    // TO ONE DECIMAL, because `linePathD` writes coordinates with toFixed(1)
+    // and a circle's cy is the raw float. The question is whether they are the
+    // same value, not whether they are the same string.
+    const node1dp = () => Number(nodeY().toFixed(1));
+    const view = render(filling(1000));
+    view.rerender(filling(2000));
+    assert.equal(tailEndY(), node1dp(), "the segment ran ahead of its node on arrival");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(tailEndY(), node1dp(), "the segment and its node parted mid-ease");
+    // Dashed throughout, not only once it settles.
+    assert.match(
+      document.querySelector("[data-series-provisional] path")?.getAttribute("stroke-dasharray") ?? "",
+      /\d/,
+      "the segment lost its dash while easing",
+    );
+    view.unmount();
+  });
+
+  test("REDUCED MOTION lands the reading immediately", () => {
+    // No tween at all under reduced motion — `useEasedValue` holds no state when
+    // `ms` is 0, so there is nothing that can be left part-way.
+    const real = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (q: string) => ({ matches: q.includes("reduce"), media: q, addEventListener() {}, removeEventListener() {} }),
+    });
+    try {
+      const view = render(filling(1000));
+      const before = nodeY();
+      view.rerender(filling(2000));
+      assert.notEqual(nodeY(), before, "reduced motion left the node easing");
+      assert.equal(tailEndY(), Number(nodeY().toFixed(1)), "the segment did not land with its node");
+      view.unmount();
+    } finally {
+      Object.defineProperty(window, "matchMedia", { configurable: true, value: real });
+    }
+  });
+
+  test("a series that is NOT provisional carries neither", () => {
+    render(chart({ xAxis: "date" }));
+    assert.equal(document.querySelectorAll("[data-series-provisional]").length, 0);
+    assert.equal([...(document.querySelector("[data-series-line]")?.getAttribute("d") ?? "").matchAll(/[ML]/g)].length, 61);
+  });
+
+  test("REDUCED MOTION drops the pulse, and keeps the dash", () => {
+    // The dash is the information; the beat is decoration. Under
+    // prefers-reduced-motion the mark must still say "not done yet".
+    const real = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (q: string) => ({ matches: q.includes("reduce"), media: q, addEventListener() {}, removeEventListener() {} }),
+    });
+    try {
+      render(provisional());
+      const node = document.querySelector("[data-provisional-node]");
+      assert.ok(node, "no provisional node under reduced motion");
+      assert.equal(node.getAttribute("class"), null, "the pulse animation survived reduced motion");
+      assert.match(
+        document.querySelector("[data-series-provisional] path")?.getAttribute("stroke-dasharray") ?? "",
+        /\d/,
+        "reduced motion took the dash away with the animation",
+      );
+    } finally {
+      Object.defineProperty(window, "matchMedia", { configurable: true, value: real });
+    }
+  });
+
+  test("and the pulse is there when motion is allowed", () => {
+    // The other half: a guard that only ever sees "no class" would pass on a
+    // node that never pulsed at all.
+    render(provisional());
+    assert.match(
+      document.querySelector("[data-provisional-node]")?.getAttribute("class") ?? "",
+      /su-history-pulse/,
+      "the provisional node never pulses",
+    );
+  });
+});
+
+describe("handing the hover to the caller instead of drawing a strip", () => {
+  /** Every value the chart reported, in order. */
+  function reporter() {
+    const seen: ({ time: string } | null)[] = [];
+    return { seen, onHover: (h: { time: string } | null) => seen.push(h) };
+  }
+
+  test("a chart that goes away reports null, so nothing is left describing it", () => {
+    // The Trends card draws the readout on its own subtitle row. A chart that
+    // unmounts with a hover still set — the measure switched, the range emptied,
+    // the tab left — leaves that row holding a sentence about a plot that is no
+    // longer on the page.
+    const { seen, onHover } = reporter();
+    const view = render(chart({ onHover }));
+    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: SVG_W / 2, clientY: 80 });
+    assert.ok(seen.at(-1), `the chart never reported a hover, so unmounting proves nothing: ${JSON.stringify(seen)}`);
+    view.unmount();
+    assert.equal(
+      seen.at(-1),
+      null,
+      `unmounting left the last readout standing: ${JSON.stringify(seen.at(-1))}`,
+    );
+  });
+
+  test("and it stops drawing a strip, because the caller is drawing one", () => {
+    // The other half of the same contract: a chart cannot both hand the hover
+    // over and print it, or the Trends card gets two readouts and one of them
+    // is over the plot.
+    const { onHover } = reporter();
+    render(chart({ onHover }));
+    assert.equal(
+      document.querySelectorAll("[data-history-strip]").length,
+      0,
+      "the chart is drawing a strip as well as reporting the hover",
+    );
   });
 });
 
@@ -282,25 +495,27 @@ describe("the plot", () => {
 });
 
 describe("the live x domain", () => {
-  test("nine more minutes of samples do not move the right edge", () => {
+  // Shared by both tests below: a service growing one sample a minute, and the
+  // DRAWN DOMAIN at each point — not the axis labels and not the last tick.
+  //
+  // Both of those pass on the bug. A tick hard against an edge has its label
+  // dropped, so a label read returns "" on exactly the short domain this
+  // starts from; and the last TICK is the last half-hour INSIDE the domain,
+  // which does not move when the domain moves by a minute. Proved: with
+  // tenMinuteDomainEnd removed, the last-tick version of this test stayed
+  // green.
+  const points = (n: number) => Array.from({ length: n }, (_, i) => ({ t: T0 + i * MIN, v: 100 + i }));
+  const at = (n: number) => chart({
+    live: true,
+    nowMs: T0 + n * MIN,
+    series: [series({ points: points(n + 1) })],
+  });
+  const rightEdge = () => (document.querySelector("svg[role=img]") as SVGSVGElement).getAttribute("data-domain-end") ?? "";
+
+  test("nine more minutes of samples do not move the right edge", async () => {
     // The domain steps by TEN minutes while recording. Without that it tracks
     // the newest sample, so the whole curve slides leftward once every 30
     // seconds for an hour — the chart is never still while a service runs.
-    const points = (n: number) => Array.from({ length: n }, (_, i) => ({ t: T0 + i * MIN, v: 100 + i }));
-    const at = (n: number) => chart({
-      live: true,
-      nowMs: T0 + n * MIN,
-      series: [series({ points: points(n + 1) })],
-    });
-    // Read the DRAWN DOMAIN, not the axis labels and not the last tick.
-    //
-    // Both of those pass on the bug. A tick hard against an edge has its label
-    // dropped, so a label read returns "" on exactly the short domain this
-    // starts from; and the last TICK is the last half-hour INSIDE the domain,
-    // which does not move when the domain moves by a minute. Proved: with
-    // tenMinuteDomainEnd removed, the last-tick version of this test stayed
-    // green.
-    const rightEdge = () => (document.querySelector("svg[role=img]") as SVGSVGElement).getAttribute("data-domain-end") ?? "";
     const view = render(at(1));
     const before = rightEdge();
     assert.notEqual(before, "");
@@ -310,8 +525,31 @@ describe("the live x domain", () => {
     }
     // And it DOES move once the next ten-minute step is crossed, or the guard
     // would also pass on an axis that never moves at all.
+    //
+    // AFTER THE EASE, not on the render. `useEasedValue` seeds its tween at the
+    // old value in a layout effect, so the step is painted where it was and
+    // glides — asserting on the render itself would read the old edge and call
+    // a working ease a broken step.
     view.rerender(at(12));
+    await new Promise((r) => setTimeout(r, 900));
     assert.notEqual(rightEdge(), before, "the axis never stepped");
+  });
+
+  test("the step is painted where the domain WAS, not where it is going", () => {
+    // Guards the paint-order bug directly, where the sibling test above
+    // cannot: `useEasedValue` used to seed its starting value from a plain
+    // effect, which runs AFTER the browser paints. So the render carrying the
+    // new target painted AT the target, and only the first animation frame —
+    // a real timer here, not something a synchronous rerender() flushes —
+    // dropped it back to glide from. The sibling test waits 900ms before
+    // reading the domain, long enough for the ease to finish either way, so a
+    // reverted fix still leaves it green. This reads with NO wait, right on
+    // the render that crosses the ten-minute boundary, which is the one
+    // render the bug is in.
+    const view = render(at(1));
+    const before = rightEdge();
+    view.rerender(at(12));
+    assert.equal(rightEdge(), before, "the render after the step painted at the target instead of easing from where it was");
   });
 });
 
@@ -469,7 +707,7 @@ describe("the item lane", () => {
     // A tick on a block with the number nowhere is a mark nobody can read.
     render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("94 dB"), strip.textContent ?? "");
   });
@@ -477,7 +715,7 @@ describe("the item lane", () => {
   test("an item with no peak gets no empty Peaked column", () => {
     render(chart());
     fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
-    const strip = document.querySelector("[data-history-strip]") as HTMLElement;
+    const strip = stripEl();
     assert.ok(strip.textContent?.includes("Item 3"), "the lane hover did not register");
     assert.ok(!strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
   });

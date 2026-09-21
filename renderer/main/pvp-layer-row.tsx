@@ -32,7 +32,6 @@ export interface PvpLayerRowProps {
   /** From PvpStatusDTO. The anchor every progress reading is measured from. */
   sampledAt: string | null;
   now: number;
-  skewMs: number;
   /**
    * Draw the hairline progress rule under a rolling clip.
    *
@@ -80,15 +79,15 @@ export function rowQualifiers(layer: PvpLayerDTO, timed: boolean): string[] {
   return out;
 }
 
-export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress = false }: PvpLayerRowProps) {
+export function PvpLayerRow({ layer, sampledAt, now, showProgress = false }: PvpLayerRowProps) {
   const empty = !hasContent(layer);
   // Computed whatever showProgress says: it gates the BAR, not the number.
-  const progress = computePvpProgress(layer, sampledAt, now, skewMs);
+  const progress = computePvpProgress(layer, sampledAt, now);
   const quals = rowQualifiers(layer, progress != null);
   // "on screen m:ss" — counting UP, never down: the list has no per-layer hold
   // to count down against (that lives on `pvp-now`, which a widget opts into),
   // so this is only ever "how long has this been up".
-  const onScreenSec = stillOnScreenSec(layer, now, skewMs);
+  const onScreenSec = stillOnScreenSec(layer, now);
 
   return (
     <div className="min-w-0">

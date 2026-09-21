@@ -20,12 +20,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 100 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, until, idle , integrationCard } = await import(
+const { installFakeServer, withQueryClient, until, actUntil, integrationCard, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -37,12 +41,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 /** Where focus is, in a few words — never the node itself. See the note below. */
 const where = (el: Element | null): string => {
@@ -76,7 +80,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  await actIdle();
   return c;
 }
 
@@ -86,17 +90,17 @@ describe("focus returns to the card", () => {
     const before = (await card(c, "reaper"));
     before.focus();
     fireEvent.click(before);
-    await until(
+    await actUntil(
       () => dialog() !== null,
       () => "clicking the card opened no dialog",
     );
 
     fireEvent.keyDown(dialog()!, { key: "Escape" });
-    await until(
+    await actUntil(
       () => dialog() === null,
       () => "Escape did not close the dialog",
     );
-    await until(
+    await actUntil(
       () => document.activeElement === find(c, "reaper"),
       () => `focus did not come back to the card — it is on ${where(document.activeElement)}`,
     );
@@ -109,12 +113,14 @@ describe("focus returns to the card", () => {
     const before = (await card(c, "reaper"));
     before.focus();
     fireEvent.click(before);
-    await until(
+    await actUntil(
       () => dialog() !== null,
       () => "clicking the card opened no dialog",
     );
 
     fireEvent.click(dialog()!.querySelector<HTMLElement>('[aria-label="Enable REAPER"]')!);
+    // Plain until(), not actUntil(): this checks the fake SERVER's own state
+    // map, which updates independently of anything React holds back.
     await until(
       () => server.states.get("reaper")?.enabled === true,
       () => "enabling REAPER never reached the server",
@@ -131,7 +137,7 @@ describe("focus returns to the card", () => {
     // is a different sequence, not a faster version of this one — and one this
     // test has never covered. The old fixed 30ms here was waiting for the move
     // without saying so; this says so.
-    await until(
+    await actUntil(
       () => {
         const now = find(c, "reaper");
         return now !== null && now !== before;
@@ -140,11 +146,11 @@ describe("focus returns to the card", () => {
     );
 
     fireEvent.keyDown(dialog()!, { key: "Escape" });
-    await until(
+    await actUntil(
       () => dialog() === null,
       () => "Escape did not close the dialog",
     );
-    await until(
+    await actUntil(
       () => document.activeElement === find(c, "reaper"),
       () =>
         `the operator was left with no caret anywhere after the card moved groups — focus is on ${where(document.activeElement)}`,

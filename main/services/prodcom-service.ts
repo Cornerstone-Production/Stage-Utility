@@ -28,7 +28,7 @@ import { broadcast, channelInDemand } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { ConnectionLifecycle } from "./integration-base.js";
-import { OutageLog } from "./repeat-log.js";
+import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { createSseReader, keepSocketAlive, parseSseBlock, SSE_MAX_BUFFER, type SseEvent } from "./sse-reader.js";
 
 const RECONNECT_MS = 4000;
@@ -86,6 +86,21 @@ const WS_HEARTBEAT_TIMEOUT_MS = 90_000;
 const WS_RETRY_EVERY = 3;
 
 /**
+ * WS_RETRY_EVERY, once the box has been shown to accept a socket and carry
+ * nothing on it (see WS_SILENCE_CHECK_MS).
+ *
+ * A refused upgrade is free — the fallback never stops carrying captions. A
+ * socket that OPENS is not: `besideFallback`'s onopen destroys the SSE stream
+ * and adopts the socket, so every re-test of a silent box costs one check
+ * interval of captions. Three reconnects of a flapping fallback is seconds
+ * apart, which on such a box is a caption gap every few seconds. Twenty is far
+ * enough apart that the fallback is the transport in practice, while a ProdCom
+ * that has been fixed or restarted is still found without restarting this
+ * server.
+ */
+const WS_SILENT_RETRY_EVERY = 20;
+
+/**
  * While on the SSE fallback, also retry the WebSocket on this timer.
  *
  * WS_RETRY_EVERY alone is unreachable on a HEALTHY fallback: it only counts
@@ -102,6 +117,94 @@ const WS_RETRY_EVERY = 3;
  * five minutes against a box that genuinely has no WebSocket.
  */
 const WS_RETRY_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * WS_RETRY_INTERVAL_MS, once the box has been shown to accept a socket and carry
+ * nothing on it (see WS_SILENCE_CHECK_MS).
+ *
+ * Five minutes is right for a box that REFUSES the upgrade: the attempt is made
+ * beside the live fallback, fails, and costs nothing. It is wrong for a box that
+ * ACCEPTS one and says nothing on it, because opening it tears the fallback down
+ * (connectWebSocket's `besideFallback` onopen) and the socket is then given a
+ * check interval to prove itself — a caption gap every five minutes, for ever,
+ * which is worse than steadily staying on the fallback.
+ *
+ * Widened rather than removed. `useWebSocket` is only ever turned back on by
+ * these two retry rules, so dropping the timer would leave a ProdCom that has
+ * been fixed in place undiscovered until this server restarts — and the
+ * 18 Sep 2026 incident in WS_RETRY_INTERVAL_MS above is the case on record where
+ * the reconnect counter alone did not notice a box that had recovered. Half an
+ * hour cuts the worst case to one check interval of captions per thirty minutes,
+ * and even that costs nothing in a quiet room: the gap only loses captions while
+ * somebody is speaking, and somebody speaking is exactly what lets the re-test
+ * come good and keep the socket.
+ */
+const WS_SILENT_RETRY_INTERVAL_MS = 30 * 60_000;
+
+/**
+ * How long a WebSocket may be the live transport, having delivered NO transcript
+ * entry at all, before REST is asked whether anything was missed.
+ *
+ * ProdCom 2.3.2 accepts the upgrade, sends `{"type":"welcome"}` listing the
+ * transcript stream, answers every heartbeat, and — on prod, over seven
+ * connections across two days — delivered not one transcript entry. Every
+ * liveness check in this file was satisfied: armIdleWatchdog and
+ * noteWebSocketHealthy both treat ANY frame as proof of life, and the heartbeats
+ * kept arriving, so nothing ever dropped and the SSE fallback never engaged. The
+ * captions display was empty for two days while the integration card read
+ * connected.
+ *
+ * A heartbeat proves the PEER is alive. It does not prove the SUBSCRIPTION is
+ * delivering, and that is the gap this closes: one cheap REST question, asked
+ * only while the socket has delivered nothing, and never again once it has.
+ */
+const WS_SILENCE_CHECK_MS = 60_000;
+
+/**
+ * Page size for that question.
+ *
+ * It is not a count, it is a yes/no: did anybody speak since this socket opened?
+ * One page of twenty answers it for any real service. A page that is entirely
+ * `typed` or `automation` rows reads as "no" and the question is simply asked
+ * again — the wrong answer in that direction costs nothing, where the wrong
+ * answer in the other tears down a transport that is working.
+ */
+const WS_SILENCE_CHECK_PAGE_SIZE = 20;
+
+/**
+ * How far the question may page forward before giving up on it.
+ *
+ * Only reached while every row so far has been `typed` or `automation`, which on
+ * a box whose channels all transcribe their own audio is never — so the normal
+ * cost of the whole check stays one request. A hundred rows of nothing but typed
+ * comms traffic since the socket opened is where it stops, and that answers as
+ * "nobody spoke", which is the safe direction: the check simply asks again.
+ */
+const WS_SILENCE_CHECK_MAX_PAGES = 5;
+
+/** What the integration card says while captions are on the fallback because the
+ *  WebSocket carried nothing. `report()` dedupes on the message as well as the
+ *  state, so this is also what makes the card update at all — the socket had
+ *  already reported ("connected", "Streaming from host:port"). */
+const SILENT_SOCKET_CARD_MESSAGE = "Fallback stream — the websocket carried no transcript";
+
+/** What the card says for the minute a known-silent box's socket is being
+ *  re-tested. It is the live transport for that minute, so the row cannot stay
+ *  on the message above — but `Streaming from host:port` would be the same claim
+ *  of health the operator has already been told is false. */
+const RETESTING_CARD_MESSAGE = "Re-testing the websocket that carried no transcript";
+
+/** The outage KIND for noteWebSocketDown's dedupe. Constant per the rule there:
+ *  no counts, no timestamps, nothing that varies per attempt. */
+const SILENT_SOCKET_REASON = "opened but delivered no transcript";
+
+/** An interval as an operator would say it. Reads off the live value rather than
+ *  the constant so a log line stays true under the tests' overridden seams,
+ *  where "30 min" rounds to "0 min" and asserts something that will not happen. */
+function everyMs(ms: number): string {
+  if (ms >= 60_000) return `${Math.round(ms / 60_000)} min`;
+  return ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`;
+}
 
 /** Socket-inactivity timeout for the refused-upgrade probe. Same 4 s as every
  *  other one-shot read in this file (test(), getJson). NOT on its own enough —
@@ -233,6 +336,30 @@ const WS_ENTRY_CONTAINERS = ["data", "entry", "transcript", "payload"] as const;
 /** `source` on a TranscriptEntry: what produced the line. Only `audio` is
  *  somebody speaking; see shouldCaption(). */
 type EntrySource = "audio" | "typed" | "automation";
+
+/**
+ * The `source` of an entry that is NOT somebody speaking, or null when it is.
+ *
+ * The one place the rule lives. Two callers ask it for different reasons —
+ * shouldCaption() decides what reaches a wall, and the silence check asks REST
+ * whether anything was said while the socket was quiet — and a second copy of
+ * "`audio`, or no field at all" would be a rule to forget to change twice.
+ *
+ * An entry with no `source` is speech: the field is required by the current
+ * schema, but a build that predates it should not lose its captions, and must
+ * not read as "nobody spoke" either. Returning the source rather than a boolean
+ * is what lets shouldCaption name it in its log line without reading the field
+ * a second time, or asserting a narrowing the type system cannot see.
+ */
+function nonAudioSource(entry: Record<string, unknown>): EntrySource | null {
+  const source = str(entry, "source");
+  return source === null || source === "audio" ? null : (source as EntrySource);
+}
+
+/** Is this entry somebody speaking? The same rule, read the other way round. */
+function isSpokenAudio(entry: Record<string, unknown>): boolean {
+  return nonAudioSource(entry) === null;
+}
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -458,6 +585,76 @@ export class ProdComService extends ConnectionLifecycle {
   /** Armed while the SSE fallback is the live transport — see
    *  WS_RETRY_INTERVAL_MS. */
   private wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Armed while the WebSocket is the live transport and has delivered no
+   *  transcript entry yet — see WS_SILENCE_CHECK_MS. Disarmed for good the
+   *  moment one arrives. */
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * How many rows `GET /api/v1/transcript` held when the current socket opened.
+   *
+   * The silence check's baseline, and deliberately a COUNT rather than a time.
+   *
+   * A ProdCom is an appliance and its clock is its own — the Ultritouch panel on
+   * this network runs about seven hours fast, with no NTP. "Are there rows dated
+   * after <a time from OUR clock>" is therefore not a question about whether
+   * anybody spoke; it is a question about the difference between two clocks, and
+   * it fails in both directions. A box stamping fast answers yes for lines
+   * spoken before the socket ever opened, so a healthy socket is condemned,
+   * `wsSilentBox` latches, and `/log` accuses the vendor of a bug that is not
+   * there. A box stamping slow answers no for ever, so the bug this check exists
+   * for goes undetected with the suite green.
+   *
+   * The row count has no such failure: ProdCom's transcript is append-only and
+   * ascending from the oldest row, so "rows beyond the count we saw at open" is
+   * exactly "rows added since we opened", decided without reading a timestamp on
+   * either side. applyBackfillRows's four-hour horizon is the same hazard
+   * handled differently, and it works there only because four hours absorbs the
+   * skew; a sixty-second window absorbs none of it.
+   *
+   * Null when the WebSocket is not the transport, or when the count could not be
+   * read — and the check does nothing at all without it, because not knowing is
+   * not the same as knowing nothing was missed.
+   */
+  private wsBaselineRows: number | null = null;
+  /** Whether the current socket has ever delivered a transcript entry. Once
+   *  true the socket is proven and costs no further REST calls. */
+  private wsDelivered = false;
+
+  /**
+   * Whether `{"type":"subscribe","events":["transcript"]}` is suspected of being
+   * the thing that swallows the transcript, so it is no longer sent.
+   *
+   * Set when a socket that DID send it was shown to have missed spoken lines.
+   * ProdCom's own OpenAPI document specifies that frame for exactly this
+   * purpose, so it is sent first; if asking for the transcript stream yields
+   * nothing while the default (nothing sent) yields everything, the filter is
+   * broken and this is what carries that finding to the next connection.
+   *
+   * Survives a reconnect — a vendor bug does not fix itself between sockets —
+   * and is cleared only by configure(), so an operator pointing the integration
+   * at a different box, or at a build that has been upgraded, starts clean.
+   */
+  private wsSubscribeFilterSuspect = false;
+
+  /**
+   * Whether this box accepts a WebSocket and carries nothing on it, in EITHER
+   * subscription mode.
+   *
+   * Two things key off it, and both are about not thrashing: the socket stops
+   * being preferred (WS_SILENT_RETRY_EVERY, WS_SILENT_RETRY_INTERVAL_MS), and a
+   * socket opened to such a box is on probation — it gets one check interval to
+   * deliver something and is dropped otherwise, with no REST call, because the
+   * question has already been answered for this box.
+   *
+   * Cleared the moment any socket delivers a transcript entry, and by
+   * configure().
+   */
+  private wsSilentBox = false;
+
+  /** Whether the CURRENT spell on the fallback began because a socket opened and
+   *  carried nothing, as opposed to one that would not open at all. Only the
+   *  card reads it; wsSilentBox is what the retry rules read. */
+  private fellBackSilent = false;
 
   /** False once a WebSocket upgrade has failed, until WS_RETRY_EVERY reconnects
    *  later. Reset by configure(), so an operator who has just fixed the box gets
@@ -487,7 +684,7 @@ export class ProdComService extends ConnectionLifecycle {
    * SenSource's and OBS's — first failure, a reminder every 15 minutes carrying
    * the attempt count, and one line when it comes back.
    */
-  private readonly wsOutages = new OutageLog();
+  private readonly wsOutages = new OutageLog(this.wsOutageSettleMs);
 
   /** id → {name, colour} from GET /api/v1/channels. */
   private channels = new Map<string, ChannelMeta>();
@@ -571,6 +768,24 @@ export class ProdComService extends ConnectionLifecycle {
   protected get wsRetryIntervalMs(): number {
     return WS_RETRY_INTERVAL_MS;
   }
+  protected get wsSilentRetryIntervalMs(): number {
+    return WS_SILENT_RETRY_INTERVAL_MS;
+  }
+  protected get wsSilenceCheckMs(): number {
+    return WS_SILENCE_CHECK_MS;
+  }
+  /**
+   * How long after a failure a success still counts as a gap in the same outage
+   * rather than the end of it — OutageLog's settle window, with its own default.
+   *
+   * A seam because the thing it guards is slow by construction: a known-silent
+   * box's socket is re-tested half an hour after it was dropped, which is well
+   * past any settle window, so "did the re-test print a recovery line" cannot be
+   * observed at all while the window is longer than the whole test.
+   */
+  protected get wsOutageSettleMs(): number {
+    return DEFAULT_SETTLE_MS;
+  }
   protected get probeDeadlineMs(): number {
     return PROBE_DEADLINE_MS;
   }
@@ -578,6 +793,12 @@ export class ProdComService extends ConnectionLifecycle {
   /** Test seam: whether the fallback's WebSocket retry is currently armed. */
   protected get wsRetryArmed(): boolean {
     return this.wsRetryTimer !== null;
+  }
+
+  /** Test seam: whether this box has been shown to accept a socket and carry
+   *  nothing on it. */
+  protected get boxKnownSilent(): boolean {
+    return this.wsSilentBox;
   }
 
   /** Test seam: the REST prime (channels, then backfill) the current connection
@@ -600,8 +821,15 @@ export class ProdComService extends ConnectionLifecycle {
     this.sseReconnects = 0;
     // Nothing learned about the old box or the old key is true of the new one,
     // and carrying the run across would swallow the first line of the next
-    // outage.
+    // outage. The same applies to what was learned about its WebSocket: an
+    // operator who has just upgraded ProdCom, restarted it, or pointed this at a
+    // different box gets a clean first attempt WITH the documented subscribe
+    // frame and the narrow retry rules, rather than inheriting a verdict about
+    // gear that is no longer on the other end.
     this.wsOutages.forget();
+    this.wsSubscribeFilterSuspect = false;
+    this.wsSilentBox = false;
+    this.fellBackSilent = false;
     this.resetReport();
     this.restart();
   }
@@ -618,8 +846,7 @@ export class ProdComService extends ConnectionLifecycle {
     // stop(), restart() and configure() all land here — one clear covers all
     // three, the way the idle watchdog's does.
     this.clearWebSocketRetry();
-    this.req?.destroy();
-    this.req = null;
+    this.dropFallbackStream();
     // A probe outlives the connection that started it otherwise: its result is
     // already discarded by the epoch check, but the socket would go on reading.
     this.wsProbeRequest?.destroy();
@@ -628,6 +855,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.onWebSocket = false;
     this.wsEnvelopeLogged = false;
     this.wsUnknownFrameLogged = false;
+    // Per-CONNECTION, unlike wsSubscribeFilterSuspect and wsSilentBox above,
+    // which describe the BOX and are cleared by configure() alone.
+    this.wsBaselineRows = null;
+    this.wsDelivered = false;
     this.skippedSources.clear();
     // A new connection re-reads the keyword list and says so again. The list
     // itself is deliberately KEPT across the teardown: if the re-read fails,
@@ -647,6 +878,10 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   private closeSocket(): void {
+    // Before the early return: a check armed for a socket that has already gone
+    // (ws.onclose nulls `this.ws` itself) must not outlive it. Every other path
+    // that abandons a socket comes through here.
+    this.clearSilenceCheck();
     const ws = this.ws;
     if (!ws) return;
     this.ws = null;
@@ -679,12 +914,28 @@ export class ProdComService extends ConnectionLifecycle {
       } else {
         console.warn(`[prodcom] no transcript data for ${STREAM_IDLE_MS / 1000}s — treating the stream as dead`);
         this.report("error", "Transcript stream went silent — reconnecting");
-        this.req?.destroy();
-        this.req = null;
+        this.dropFallbackStream();
       }
       this.scheduleReconnect();
     }, ms);
     this.idleTimer.unref?.();
+  }
+
+  /**
+   * Let the SSE fallback's request go, deliberately.
+   *
+   * The field is nulled BEFORE the destroy, which is what makes the
+   * `if (this.req !== req) return;` guards in connectSse fire: destroying our own
+   * request reaches that request's own error handler, and without this it read as
+   * the stream DROPPING — countSseReconnect(), then scheduleReconnect(), then
+   * connect(), which assigned over a live `this.ws`. Exactly the rule
+   * closeSocket() has always followed for the WebSocket: drop the handlers first,
+   * then close.
+   */
+  private dropFallbackStream(): void {
+    const req = this.req;
+    this.req = null;
+    req?.destroy();
   }
 
   private clearIdleWatchdog(): void {
@@ -704,24 +955,339 @@ export class ProdComService extends ConnectionLifecycle {
    * and fed countSseReconnect and the reconnect back-off with a drop that never
    * happened.
    *
-   * Nothing is logged per retry: the outage is already reported once by
-   * noteWebSocketDown with a 15-minute reminder, and `websocket is back` is the
-   * signal that matters.
+   * Nothing is logged per retry against a box that REFUSES the upgrade: the
+   * outage is already reported once by noteWebSocketDown with a 15-minute
+   * reminder, and `websocket is back` is the signal that matters. A box that
+   * ACCEPTS the upgrade and carries nothing is different — the retry really does
+   * drop the fallback for a minute — so that one is logged every time, by
+   * runSilenceCheck.
    */
   private armWebSocketRetry(): void {
     this.clearWebSocketRetry();
     if (this.useWebSocket) return; // already on it, or already about to try
+    // A box that refuses the upgrade costs nothing to ask again; one that
+    // accepts it and says nothing costs a caption gap every time. See
+    // WS_SILENT_RETRY_INTERVAL_MS.
+    const interval = this.wsSilentBox ? this.wsSilentRetryIntervalMs : this.wsRetryIntervalMs;
     this.wsRetryTimer = setTimeout(() => {
       this.wsRetryTimer = null;
       if (!this.running || this.onWebSocket || this.ws || !this.host || !this.port) return;
       this.connectWebSocket(this.host, this.port, { besideFallback: true });
-    }, this.wsRetryIntervalMs);
+    }, interval);
     this.wsRetryTimer.unref?.();
   }
 
   private clearWebSocketRetry(): void {
     if (this.wsRetryTimer) clearTimeout(this.wsRetryTimer);
     this.wsRetryTimer = null;
+  }
+
+  // ── The socket that opens and says nothing ────────────────────────────────
+
+  /**
+   * Ask, once the socket has been up this long with nothing delivered, whether
+   * anything was missed.
+   *
+   * Armed on every open and re-armed after every inconclusive answer, and
+   * disarmed for good by closeSocket() or by the first transcript entry to
+   * arrive. A socket that is carrying the transcript never runs this and never
+   * costs a REST call.
+   */
+  private armSilenceCheck(): void {
+    this.clearSilenceCheck();
+    this.silenceTimer = setTimeout(() => {
+      this.silenceTimer = null;
+      void this.runSilenceCheck();
+    }, this.wsSilenceCheckMs);
+    this.silenceTimer.unref?.();
+  }
+
+  private clearSilenceCheck(): void {
+    if (this.silenceTimer) clearTimeout(this.silenceTimer);
+    this.silenceTimer = null;
+  }
+
+  /**
+   * Whether the check still has a question to ask ABOUT `ws`: the WebSocket is
+   * the live transport, `ws` is still the socket this service holds, and it has
+   * delivered nothing. Re-read after every await — a frame can land, or the
+   * socket can be replaced, while REST is out.
+   *
+   * Identity, not `this.ws !== null`, and the difference is the whole point.
+   * `connectionEpoch` is bumped only by teardown(), and an ordinary drop does
+   * not tear down — ws.onclose calls scheduleReconnect(), which opens the next
+   * socket without touching the epoch. So a REST answer about socket A, arriving
+   * after A dropped and B opened, passed a null check and a matching epoch and
+   * was applied to B seconds into its life: a verdict computed over a window
+   * that was not B's, condemning a box that may be working. In production the
+   * read has four seconds to run and the reconnect base is one, so it takes one
+   * slow transcript read coinciding with one drop.
+   */
+  private silenceCheckStillOpen(ws: WebSocket | null): boolean {
+    return this.running && this.onWebSocket && ws !== null && this.ws === ws && !this.wsDelivered;
+  }
+
+  /**
+   * One transcript entry has arrived over the socket. It is proven; stop asking.
+   *
+   * Also the only thing that clears wsSilentBox, which is the point: a box is
+   * "silent" until a socket delivers, not until a socket opens. noteWebSocketHealthy
+   * already fires on every frame INCLUDING the heartbeat, which is exactly why it
+   * could not be used for this.
+   */
+  private noteWebSocketDelivered(): void {
+    if (this.wsDelivered) return;
+    this.wsDelivered = true;
+    // Housekeeping, not the guard: `wsDelivered` in silenceCheckStillOpen is
+    // what stops the check acting, and has to be, because a frame can arrive
+    // while the REST request is already out. This just saves the wake-up.
+    this.clearSilenceCheck();
+    if (this.wsSilentBox) {
+      this.wsSilentBox = false;
+      console.log(
+        `[prodcom] the websocket is carrying the transcript again ` +
+          `(${this.wsSubscribeFilterSuspect ? "no subscribe frame sent" : "subscribed to the transcript stream"}) — ` +
+          `captions stay on it`,
+      );
+    } else if (this.wsSubscribeFilterSuspect) {
+      console.log(
+        `[prodcom] the websocket delivers the transcript with no subscribe frame sent — ` +
+          `ProdCom's subscribe filter is what was swallowing it`,
+      );
+    }
+  }
+
+  /**
+   * How many rows ProdCom's transcript holds in total, right now.
+   *
+   * Deliberately NO `?since=`. The number has to mean the same thing when it is
+   * compared against a later one, and any window pinned to this server's clock
+   * moves between the two reads while any window pinned to ProdCom's needs
+   * ProdCom's clock — which is exactly what wsBaselineRows exists to avoid
+   * reading. `limit=1` because only `meta.totalCount` is wanted; the row itself
+   * is discarded.
+   *
+   * Returns null rather than throwing: a baseline that could not be read is not
+   * a baseline of zero, and the caller must be able to tell those apart.
+   */
+  private async readTranscriptRowCount(host: string, port: number): Promise<number | null> {
+    let body: string;
+    try {
+      body = await this.getJson(host, port, "/api/v1/transcript?limit=1&offset=0");
+    } catch (e) {
+      console.warn(
+        `[prodcom] could not read the transcript row count (${scrub(errorMessage(e))}) — ` +
+          `this connection has no baseline, so a websocket that delivers nothing will not be noticed`,
+      );
+      return null;
+    }
+    const total = asRecord(asRecord(safeJson(body))?.["meta"])?.["totalCount"];
+    if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
+      console.warn(
+        `[prodcom] the transcript row count was missing from ProdCom's response — ` +
+          `this connection has no baseline, so a websocket that delivers nothing will not be noticed`,
+      );
+      return null;
+    }
+    return Math.floor(total);
+  }
+
+  /**
+   * Has anything been SAID that this socket never delivered?
+   *
+   * Asked as "are there spoken rows beyond the row count we saw when the socket
+   * opened", which is a question about ProdCom's own append-only ordering and
+   * reads no timestamp on either side. See wsBaselineRows for why a timestamp
+   * cannot answer it: the two clocks are independent, and the error in either
+   * direction is worse than the bug being looked for.
+   *
+   * Pages forward only while the answer is still "no", which on any real box is
+   * one request: the first page beyond the baseline either holds speech or holds
+   * fewer than a full page. It has to page at all because the endpoint is
+   * ascending from the OLDEST row, so that page is the FIRST twenty rows added
+   * since the socket opened, not the most recent — and a run of `typed` or
+   * `automation` rows longer than a page would otherwise read as "nobody spoke"
+   * on every check for the life of the connection, the baseline being fixed.
+   *
+   * Returns the failure rather than logging it, because the two answers this can
+   * give — "nothing was missed" and "I could not ask" — must not be confused,
+   * and only the caller knows that acting on the second is what breaks a working
+   * transport.
+   */
+  private async spokenLinesBeyond(
+    host: string,
+    port: number,
+    baselineRows: number,
+  ): Promise<{ ok: true; spoken: number } | { ok: false; error: string }> {
+    let spoken = 0;
+    for (let page = 0; page < WS_SILENCE_CHECK_MAX_PAGES; page++) {
+      const offset = baselineRows + page * WS_SILENCE_CHECK_PAGE_SIZE;
+      const path = `/api/v1/transcript?limit=${WS_SILENCE_CHECK_PAGE_SIZE}&offset=${offset}`;
+      let body: string;
+      try {
+        body = await this.getJson(host, port, path);
+      } catch (e) {
+        // Returned, not logged: the caller is the only place that knows "could
+        // not ask" must not be acted on like "nothing was said".
+        return { ok: false, error: errorMessage(e) };
+      }
+      const parsed = asRecord(safeJson(body));
+      const data = parsed?.["data"];
+      if (!Array.isArray(data)) return { ok: false, error: "response had no data array" };
+      for (const row of data) {
+        const entry = asRecord(row);
+        if (entry && isSpokenAudio(entry)) spoken++;
+      }
+      if (spoken > 0 || data.length === 0) break;
+      if (asRecord(parsed?.["meta"])?.["hasMore"] !== true) break;
+    }
+    return { ok: true, spoken };
+  }
+
+  /**
+   * The check itself. Three outcomes, and the two that do nothing matter most.
+   *
+   * Every log line here is one an operator reads at 9am on a Sunday to answer
+   * "why is the captions strip empty": whether the socket was silent, how many
+   * lines it had missed, which retry was tried, and which transport is carrying
+   * captions now.
+   */
+  private async runSilenceCheck(): Promise<void> {
+    const host = this.host;
+    const port = this.port;
+    // The socket this verdict will be about, captured before any await so the
+    // re-checks below can tell it apart from whatever replaced it.
+    const ws = this.ws;
+    if (!this.silenceCheckStillOpen(ws) || !host || !port) return;
+    // everyMs, not Math.round(ms / 1000): the seam these tests override is
+    // milliseconds, and raw rounding prints "in 0s" for it. The helper exists
+    // for exactly that.
+    const quiet = everyMs(this.wsSilenceCheckMs);
+
+    // Probation. This box has already been shown to accept a socket and carry
+    // nothing on it, with AND without the subscribe frame, so the burden of
+    // proof is on the socket rather than on REST: deliver something inside one
+    // check interval or go back to the transport that works. No REST call —
+    // the question was answered the first time.
+    if (this.wsSilentBox) {
+      console.warn(
+        `[prodcom] the websocket has carried no transcript in ${quiet} and this box has failed ` +
+          `that test before — captions go back to the SSE fallback, and the next re-test will connect ` +
+          `${this.alternateSubscribeMode()}`,
+      );
+      this.fallBackToSse(host, port, SILENT_SOCKET_REASON);
+      return;
+    }
+
+    // Without a baseline there is no question to ask. readTranscriptRowCount has
+    // already said so once, at connect, on the line that explains the
+    // consequence; repeating it every minute for the life of the connection
+    // would bury the rest of the log.
+    const baseline = this.wsBaselineRows;
+    if (baseline === null) {
+      console.debug(`[prodcom] websocket quiet for ${quiet}, but this connection has no transcript baseline`);
+      this.armSilenceCheck();
+      return;
+    }
+
+    // Captured before the await, the same way probeThenFallBack does: a stop()
+    // or a configure() landing while REST is out means this answer is about a
+    // box this service has already let go.
+    const epoch = this.connectionEpoch;
+    const answer = await this.spokenLinesBeyond(host, port, baseline);
+    if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
+
+    if (!answer.ok) {
+      // "No lines" and "could not ask" are indistinguishable from here, and
+      // acting on the second is how a transport that is working gets torn down.
+      //
+      // Through OutageLog, like every other repeated failure in this file: the
+      // check re-arms every interval, so an unreachable REST endpoint under a
+      // socket that is up wrote this line 1440 times a day into a 10,000-line
+      // ring. First failure, a reminder every fifteen minutes carrying the
+      // count, and one line when it comes back.
+      const out = this.wsOutages.fail("silence-check", answer.error, this.now());
+      if (out.log) {
+        console.warn(
+          `[prodcom] could not check whether the websocket is missing transcript lines ` +
+            `(${scrub(answer.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+        );
+      }
+      this.armSilenceCheck();
+      return;
+    }
+    const askable = this.wsOutages.ok("silence-check", this.now());
+    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
+    if (answer.spoken === 0) {
+      // Nothing was said, so nothing was missed. debug, not log: a quiet room is
+      // not an event, and this repeats for as long as the room stays quiet.
+      console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
+      this.armSilenceCheck();
+      return;
+    }
+
+    if (!this.wsSubscribeFilterSuspect) {
+      // The strong hypothesis: ProdCom's `subscribe` frame acts as a filter and
+      // the filter is broken, so asking for ["transcript"] yields nothing where
+      // the default yields everything. One reconnect to find out, and if it is
+      // right the socket keeps working for every site running this build.
+      this.wsSubscribeFilterSuspect = true;
+      console.warn(
+        `[prodcom] websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
+          `${answer.spoken} spoken line(s) since it opened — reopening it without the subscribe frame`,
+      );
+      this.reopenWebSocketUnsubscribed(host, port);
+      return;
+    }
+
+    this.wsSilentBox = true;
+    console.warn(
+      `[prodcom] websocket delivered no transcript with or without the subscribe frame, while ProdCom has ` +
+        `at least ${answer.spoken} spoken line(s) since it opened — captions move to the SSE fallback, ` +
+        `the websocket is re-tested every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
+        `${everyMs(this.wsRetryIntervalMs)}, and every ${WS_SILENT_RETRY_EVERY} reconnect(s) ` +
+        `instead of every ${WS_RETRY_EVERY}, starting ${this.alternateSubscribeMode()}`,
+    );
+    this.fallBackToSse(host, port, SILENT_SOCKET_REASON);
+  }
+
+  /**
+   * Swap the subscription the NEXT socket to this box will use, and name it.
+   *
+   * wsSubscribeFilterSuspect used to be a one-way latch, cleared only by
+   * configure(). Once set, every re-test for the life of the process connected
+   * WITHOUT the subscribe frame — so if ProdCom ships a build that fixes the
+   * subscription and makes the frame mandatory, which is what its own OpenAPI
+   * document implies is the intent, every half-hourly re-test would open
+   * unsubscribed, receive nothing, be dropped by probation a minute later, and
+   * repeat: a caption gap every thirty minutes on a box that has been FIXED.
+   * That is precisely what widening the interval instead of removing it was
+   * meant to avoid.
+   *
+   * Alternating costs nothing — consecutive re-tests were going to happen anyway
+   * — and means the client cannot be permanently wrong about which of the two
+   * shapes this box wants. Called from both fallback paths, so the flip happens
+   * exactly once per re-test whichever one took it.
+   */
+  private alternateSubscribeMode(): string {
+    this.wsSubscribeFilterSuspect = !this.wsSubscribeFilterSuspect;
+    return this.wsSubscribeFilterSuspect ? "without the subscribe frame" : "with the subscribe frame";
+  }
+
+  /**
+   * Reconnect immediately, sending no `subscribe` frame.
+   *
+   * Not a teardown: the epoch is deliberately NOT bumped, because nothing this
+   * connection started is being abandoned — the priming reads are already done
+   * and the buffer is kept, exactly as it is across any other reconnect.
+   */
+  private reopenWebSocketUnsubscribed(host: string, port: number): void {
+    this.clearIdleWatchdog();
+    this.closeSocket();
+    this.onWebSocket = false;
+    this.wsEnvelopeLogged = false;
+    this.wsUnknownFrameLogged = false;
+    this.connectWebSocket(host, port);
   }
 
   /** Drop partials nothing has updated for PARTIAL_TTL_MS. Returns whether any went. */
@@ -1033,6 +1599,17 @@ export class ProdComService extends ConnectionLifecycle {
    */
   private connectWebSocket(host: string, port: number, opts: { besideFallback?: boolean } = {}): void {
     const beside = opts.besideFallback === true;
+    // Never assign over a live socket: that puts it beyond closeSocket()'s reach
+    // for the life of the process.
+    //
+    // Belt-and-braces, and deliberately kept as such. With the `this.req !== req`
+    // guards in connectSse there is no longer a reachable path that arrives here
+    // holding a live socket, so this line cannot be made to fail a test and no
+    // guard claims it does. It is one line standing between an assignment and a
+    // leaked connection that already got through one review, and the rule it
+    // states — close before you replace — is the same one closeSocket() itself
+    // follows.
+    this.closeSocket();
     const url = `ws://${host}:${port}/api/v1/ws`;
     let ws: WebSocket;
     try {
@@ -1056,24 +1633,37 @@ export class ProdComService extends ConnectionLifecycle {
         // The retry's socket is up: drop the fallback before adopting it, so the
         // two never feed the same buffer.
         this.clearIdleWatchdog();
-        this.req?.destroy();
-        this.req = null;
+        this.dropFallbackStream();
         this.useWebSocket = true;
       }
       this.onWebSocket = true;
       this.sseReconnects = 0;
+      // Null until primeFromRest reads it below, so a baseline belonging to the
+      // socket this one replaced can never be used to judge this one.
+      this.wsBaselineRows = null;
+      this.wsDelivered = false;
       // No clearWebSocketRetry() here on purpose: the timer is a one-shot that
       // nulls itself when it fires, is armed ONLY from the fallback's connected
       // handler, and connect() clears it at the head of every attempt — so by
       // the time a socket opens there is nothing left to clear. A line here
       // could not be made to fail on any reachable state.
       this.noteWebSocketHealthy();
-      this.report("connected", `Streaming from ${host}:${port}`);
+      this.report("connected", this.wsSilentBox ? RETESTING_CARD_MESSAGE : `Streaming from ${host}:${port}`);
       // Only the transcript stream is consumed here. The live box offers
       // transcript / status / automation / activity (the spec's list says
       // "channel" instead of "activity" and is wrong about that).
-      ws.send(JSON.stringify({ type: "subscribe", events: ["transcript"] }));
+      //
+      // Unless this build of ProdCom has already been shown to deliver nothing
+      // when asked (wsSubscribeFilterSuspect), in which case the frame is
+      // omitted and whatever the box sends by default is taken instead. Frames
+      // that are not transcript entries are already ignored, and logged once.
+      if (!this.wsSubscribeFilterSuspect) {
+        ws.send(JSON.stringify({ type: "subscribe", events: ["transcript"] }));
+      }
       this.armIdleWatchdog();
+      // A heartbeat proves the peer; only a transcript entry proves the
+      // subscription. Until one arrives, this is what notices.
+      this.armSilenceCheck();
       this.priming = this.primeFromRest(host, port);
     };
 
@@ -1097,6 +1687,9 @@ export class ProdComService extends ConnectionLifecycle {
       if (this.ws !== ws) return;
       this.ws = null;
       this.clearIdleWatchdog();
+      // The socket nulled itself, so closeSocket() — which is where every other
+      // path clears this — is not on this one.
+      this.clearSilenceCheck();
       if (this.onWebSocket) {
         // It was up and went away: a normal drop, retry the same transport.
         this.onWebSocket = false;
@@ -1269,9 +1862,25 @@ export class ProdComService extends ConnectionLifecycle {
     });
   }
 
-  /** Give up on the WebSocket for now and open the SSE stream instead. */
+  /**
+   * Give up on the WebSocket for now and open the SSE stream instead.
+   *
+   * closeSocket(), not `this.ws = null`. Two of the three callers reach here
+   * from a socket that never opened, where the two are the same thing; the
+   * silence check reaches here from one that is OPEN and must actually be shut,
+   * or it goes on feeding the same buffer as the fallback that replaces it. It
+   * also drops the handlers first, so the close cannot schedule a reconnect over
+   * the top of the stream being opened below.
+   */
   private fallBackToSse(host: string, port: number, reason: string, detail: string | null = null): void {
-    this.ws = null;
+    // What the card will say, decided by why we are falling back rather than by
+    // what is known about the box. Keyed on wsSilentBox alone, a known-silent
+    // box whose re-test was REFUSED — which arrives here through
+    // probeThenFallBack — put "the websocket carried no transcript" on the row
+    // about a socket that never opened.
+    this.fellBackSilent = reason === SILENT_SOCKET_REASON;
+    this.clearIdleWatchdog();
+    this.closeSocket();
     this.onWebSocket = false;
     this.useWebSocket = false;
     this.noteWebSocketDown(reason, detail);
@@ -1307,6 +1916,13 @@ export class ProdComService extends ConnectionLifecycle {
    */
   protected noteWebSocketHealthy(): void {
     this.resetBackoff();
+    // On a box already known to open a socket and carry nothing on it, opening
+    // one again is not recovery — noteWebSocketDelivered decides that, and until
+    // it does this socket is a minute from being dropped. The settle window
+    // cannot catch this on its own: the re-tests are half an hour apart, so each
+    // one looks like a fresh success and would print "websocket is back"
+    // followed by a fallback line, every thirty minutes, indefinitely.
+    if (this.wsSilentBox) return;
     const back = this.wsOutages.ok("websocket", this.now());
     if (back.log) console.log(`[prodcom] websocket is back${back.note}`);
   }
@@ -1364,6 +1980,12 @@ export class ProdComService extends ConnectionLifecycle {
           `${type ? ` (type=${type})` : ""}`,
       );
     }
+    // Here rather than in acceptEntry(): what is being proven is that the SOCKET
+    // delivers transcript entries, not that this particular one becomes a
+    // caption. A `typed` entry is dropped by shouldCaption() and is still proof
+    // the subscription works. acceptEntry is also the SSE fallback's path, where
+    // there is no socket to prove.
+    this.noteWebSocketDelivered();
     this.acceptEntry(found.entry);
   }
 
@@ -1387,6 +2009,7 @@ export class ProdComService extends ConnectionLifecycle {
         headers: { ...this.authHeaders(this.apiKey), Accept: "text/event-stream" },
       },
       (res) => {
+        if (this.req !== req) return;
         const code = res.statusCode ?? 0;
         if (code < 200 || code >= 300) {
           res.destroy();
@@ -1399,7 +2022,17 @@ export class ProdComService extends ConnectionLifecycle {
         // job, so the next drop retries in 4s rather than wherever the back-off
         // had climbed to.
         this.resetBackoff();
-        this.report("connected", `Streaming from ${host}:${port}`);
+        // A fallback that is here because the WebSocket carried nothing says so
+        // on the card. Reporting `Streaming from host:port` — the same string
+        // the socket reported — would leave the row asserting a healthy
+        // connection over a transport that was delivering no captions at all,
+        // which is the failure this whole path exists to end. It is still
+        // "connected", because captions ARE flowing: what is degraded is which
+        // transport, and that is what the message names.
+        this.report(
+          "connected",
+          this.fellBackSilent ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${host}:${port}`,
+        );
         this.priming = this.primeFromRest(host, port);
         res.setEncoding("utf8");
         this.armIdleWatchdog();
@@ -1417,16 +2050,19 @@ export class ProdComService extends ConnectionLifecycle {
             console.warn(`[prodcom] transcript buffer exceeded ${SSE_MAX_BUFFER} bytes — resyncing`),
         });
         res.on("data", (chunk: string) => {
+          if (this.req !== req) return;
           this.armIdleWatchdog();
           for (const event of reader.push(chunk)) this.handleSseEvent(event);
         });
         res.on("end", () => {
+          if (this.req !== req) return;
           this.clearIdleWatchdog();
           this.report("disconnected", null);
           this.countSseReconnect();
           this.scheduleReconnect();
         });
         res.on("error", () => {
+          if (this.req !== req) return;
           this.clearIdleWatchdog();
           this.countSseReconnect();
           this.scheduleReconnect();
@@ -1437,6 +2073,7 @@ export class ProdComService extends ConnectionLifecycle {
     // The real liveness check on this path — see SOCKET_KEEPALIVE_MS.
     keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
     req.on("error", (e) => {
+      if (this.req !== req) return;
       // A watchdog armed by the dying stream must not outlive it, or it can
       // destroy the NEXT request while it is still connecting.
       this.clearIdleWatchdog();
@@ -1448,10 +2085,13 @@ export class ProdComService extends ConnectionLifecycle {
 
   /** Come back to the WebSocket periodically while stuck on the fallback — a box
    *  that was mid-restart, or had its API toggled, should not be on SSE until the
-   *  next server restart. */
+   *  next server restart. Both this and armWebSocketRetry() widen on a box whose
+   *  socket opens and carries nothing; widening one and not the other would leave
+   *  a flapping fallback re-testing a known-silent socket every few seconds. */
   private countSseReconnect(): void {
     this.sseReconnects++;
-    if (this.sseReconnects % WS_RETRY_EVERY === 0) {
+    const every = this.wsSilentBox ? WS_SILENT_RETRY_EVERY : WS_RETRY_EVERY;
+    if (this.sseReconnects % every === 0) {
       // debug, not log: console.debug is the one level log-buffer does not
       // capture, so this stays out of /log. It is a routine step inside an
       // outage that is already reported once by noteWebSocketDown, with the
@@ -1506,8 +2146,8 @@ export class ProdComService extends ConnectionLifecycle {
    * build that predates the field should not lose its captions.
    */
   private shouldCaption(entry: Record<string, unknown>): boolean {
-    const source = str(entry, "source") as EntrySource | null;
-    if (source === null || source === "audio") return true;
+    const source = nonAudioSource(entry);
+    if (source === null) return true;
     const seen = (this.skippedSources.get(source) ?? 0) + 1;
     this.skippedSources.set(source, seen);
     if (seen === 1) {
@@ -1637,6 +2277,12 @@ export class ProdComService extends ConnectionLifecycle {
    */
   private async primeFromRest(host: string, port: number): Promise<void> {
     await this.refreshChannelMetadata(host, port);
+    // Only the WebSocket path has a silence check to feed, and this is the one
+    // request it costs. Reading it before backfill keeps the baseline as close
+    // to the socket opening as the priming order allows; anything spoken in the
+    // gap lands inside the baseline and so reads as "not missed", which is the
+    // safe direction for a question whose wrong answer tears down a transport.
+    if (this.onWebSocket) this.wsBaselineRows = await this.readTranscriptRowCount(host, port);
     const result = await this.backfill(host, port);
     if (result.error) {
       console.warn(

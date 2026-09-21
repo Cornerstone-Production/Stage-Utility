@@ -46,12 +46,16 @@ import * as path from "node:path";
 import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STYLES = path.join(HERE, "..", "styles.css");
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 15 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Home's cards read live state through the app's SSE hooks, which open an
 // EventSource on mount. jsdom has none, and what this measures is the colour
@@ -82,7 +86,7 @@ const styleEl = document.createElement("style");
 styleEl.textContent = readFileSync(STYLES, "utf8").replace(/@theme\s*\{/, ":root {");
 document.head.appendChild(styleEl);
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { EditorCanvas } = await import("./layout-editor.js");
 const { LAYOUT_OBJECTS } = await import("../main/layout-objects.js");
@@ -106,13 +110,14 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
   });
 }) as typeof fetch;
 
-after(() => {
-  cleanup();
-  styleEl.remove();
-  globalThis.fetch = realFetch;
-  Element.prototype.getBoundingClientRect = realRect;
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    styleEl.remove();
+    globalThis.fetch = realFetch;
+    Element.prototype.getBoundingClientRect = realRect;
+    teardown();
+  }),
+);
 
 /** Every object an operator can put on a canvas — the palette, in full. */
 const TYPES = Object.keys(LAYOUT_OBJECTS).sort();
@@ -281,7 +286,12 @@ const outsideFg = (() => {
 // hydrate, and the canvas's own re-measure (a rAF and an 80ms settle). Left to
 // land after teardown they throw "window is not defined" from an update with
 // nowhere to go, and the run fails with five green assertions above it.
-await new Promise((r) => setTimeout(r, 250));
+// act()-wrapped so React queues that work on its own queue instead of the
+// scheduler — the same race, just as reachable from a module-level await as
+// from inside a test.
+await act(async () => {
+  await new Promise((r) => setTimeout(r, 250));
+});
 
 describe("every widget on the editor canvas inherits the kiosk foregrounds", () => {
   test("the canvas is the kiosk ground", () => {

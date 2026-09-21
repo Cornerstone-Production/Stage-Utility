@@ -147,8 +147,8 @@ export function EmbeddedView({
       // in any tile — which is the point: a producer multiview should be able to
       // carry the month beside everything else.
       //
-      // now + skewMs, not Date.now(): this app has one clock, corrected against
-      // the server, and "which square is today" must be asked on that one. The
+      // ctx.now, not Date.now(): this app has one clock, corrected against the
+      // server, and "which square is today" must be asked on that one. The
       // component's own minute tick is skipped while a value is supplied, since
       // ctx.now already ticks.
       //
@@ -163,7 +163,7 @@ export function EmbeddedView({
           viewId={view.id}
           pcoConfigured={ctx.state.pcoConfigured ?? false}
           interactive={ctx.interactive}
-          nowMs={ctx.now + ctx.skewMs}
+          nowMs={ctx.now}
         />
       );
 

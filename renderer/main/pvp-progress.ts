@@ -33,8 +33,7 @@ export interface PvpProgress {
 export function computePvpProgress(
   layer: PvpLayerDTO,
   sampledAt: string | null,
-  now: number,
-  skewMs: number,
+  serverNow: number,
 ): PvpProgress | null {
   const duration = layer.durationSec;
   if (duration == null || duration <= 0) return null;
@@ -43,9 +42,9 @@ export function computePvpProgress(
   const anchorMs = Date.parse(sampledAt ?? "");
   if (!Number.isFinite(anchorMs)) return null;
 
-  // The server's clock, not this browser's. A kiosk whose clock is a minute out
-  // would otherwise draw a minute of phantom progress on every frame.
-  const serverNow = now + skewMs;
+  // The server's clock, not this browser's — see renderer/lib/server-clock.ts. A
+  // kiosk whose clock is a minute out would otherwise draw a minute of phantom
+  // progress on every frame.
   const sinceAnchorSec = (serverNow - anchorMs) / 1000;
 
   // playbackRate is the multiplier PVP is actually running at, so a paused clip
@@ -76,11 +75,11 @@ export function computePvpProgress(
  * set the moment the still was first seen), and there is no "duration" to run
  * past — a still stays on screen for as long as it does.
  */
-export function stillOnScreenSec(layer: PvpLayerDTO, now: number, skewMs: number): number | null {
+export function stillOnScreenSec(layer: PvpLayerDTO, serverNow: number): number | null {
   if (layer.state !== "still" || layer.mediaSinceAt == null) return null;
   const sinceMs = Date.parse(layer.mediaSinceAt);
   if (!Number.isFinite(sinceMs)) return null;
-  return Math.max(0, (now + skewMs - sinceMs) / 1000);
+  return Math.max(0, (serverNow - sinceMs) / 1000);
 }
 
 /**
@@ -104,12 +103,11 @@ export function stillOnScreenSec(layer: PvpLayerDTO, now: number, skewMs: number
  */
 export function computeStillProgress(
   layer: PvpLayerDTO,
-  now: number,
-  skewMs: number,
+  serverNow: number,
   holdSec: number | null,
 ): PvpProgress | null {
   if (holdSec == null || !(holdSec > 0)) return null;
-  const elapsedSec = stillOnScreenSec(layer, now, skewMs);
+  const elapsedSec = stillOnScreenSec(layer, serverNow);
   if (elapsedSec == null) return null;
   const clamped = Math.min(holdSec, elapsedSec);
   return {

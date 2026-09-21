@@ -18,11 +18,15 @@ import { after, beforeEach, describe, mock, test } from "node:test";
 // exist before the component module is evaluated: a hook runs after the module
 // body, so a top-level `await import` of the component would happen first and
 // render into nothing.
-import { installDom } from "../../test-dom.js";
+import { installDom, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 14 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { fireEvent, render, screen, cleanup } = await import("@testing-library/react");
+const { fireEvent, render, screen, cleanup, act } = await import("@testing-library/react");
 // Only for the one controlled test below. Dynamic like the rest of this file's
 // imports so nothing is evaluated before installDom() has run.
 const { useState } = await import("react");
@@ -37,10 +41,7 @@ beforeEach(() => {
   cleanup();
 });
 
-after(() => {
-  cleanup();
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
 /** A press-and-release, short of the repeat delay — the one-step case every
  *  stepper click used to be a plain `fireEvent.click` for, before a hold
@@ -79,7 +80,7 @@ async function flushReact(): Promise<void> {
  */
 function tickInSteps(totalMs: number, stepMs = 10) {
   for (let elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
-    mock.timers.tick(Math.min(stepMs, totalMs - elapsed));
+    act(() => mock.timers.tick(Math.min(stepMs, totalMs - elapsed)));
   }
 }
 
@@ -257,11 +258,11 @@ describe("NumberInput", () => {
     mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
     try {
       fireEvent.pointerDown(plus, { pointerId: 1, isPrimary: true });
-      mock.timers.tick(STEPPER_REPEAT_DELAY_MS - 50);
+      act(() => mock.timers.tick(STEPPER_REPEAT_DELAY_MS - 50));
       fireEvent.pointerUp(plus, { pointerId: 1 });
       // Run out whatever time remains — a lingering timer must have been
       // cancelled by the release, not merely delayed.
-      mock.timers.tick(STEPPER_REPEAT_DELAY_MS * 4);
+      act(() => mock.timers.tick(STEPPER_REPEAT_DELAY_MS * 4));
       assert.equal(commits.length, 1, "releasing before the delay must not start repeating");
     } finally {
       mock.timers.reset();

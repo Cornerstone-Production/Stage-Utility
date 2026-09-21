@@ -13,6 +13,7 @@ import { inTrendScope, inAverageScope } from "./overview-scope";
 import type { SplServiceSummary } from "@main/types/stage";
 import { combineLeq, leqOf } from "@main/services/spl-leq";
 import { formatClock } from "../../lib/clock-format";
+import { serverClock } from "../../lib/server-clock";
 
 export function fmtTime(iso: string | null): string {
   return formatClock(iso);
@@ -171,7 +172,7 @@ export function isCountedItem(it: ServiceTimelineItem, rec: ServiceTimeline): bo
 }
 
 /** Derived service-level timing from a record. */
-export function summarize(rec: ServiceTimeline, now = Date.now()) {
+export function summarize(rec: ServiceTimeline, now = serverClock.now()) {
   const counted = rec.items.filter((it) => isCountedItem(it, rec));
   // "Started" = when the service proper began (first counted item), not doors.
   const firstStart = counted[0]?.startedAt ?? rec.items[0]?.startedAt ?? rec.startedAt;
@@ -294,13 +295,13 @@ export function computeOverview(
    * The optional extras, as a bag rather than three more positional arguments.
    *
    * `now` sat sixth, so reaching the SPL parameters meant passing it — and the
-   * only honest value at a call site is `Date.now()`, which inside a useMemo is
-   * an impure call the lint rule rejects. Named, a caller passes what it has and
+   * only honest value at a call site is the clock, which inside a useMemo is an
+   * impure call the lint rule rejects. Named, a caller passes what it has and
    * the clock keeps defaulting itself inside.
    */
   opts: { now?: number; splList?: readonly SplServiceSummary[]; splMetric?: string | null } = {},
 ): OverviewData {
-  const now = opts.now ?? Date.now();
+  const now = opts.now ?? serverClock.now();
   const splList = opts.splList ?? [];
   const splMetric = opts.splMetric ?? null;
   const asOf = day;
@@ -386,6 +387,12 @@ export function computeOverview(
   // One point per WEEKEND (service date): value = TOTAL attendance across that
   // day's services (the headline weekend number), with a per-service breakdown
   // for the tooltip. So 3 weekends of 2 services each read as 3 dots, not 6.
+  //
+  // THE SAME RULE THE TRENDS CARD APPLIES — see DAY_FIGURE in
+  // history-trends/trends.ts. It cannot call `dailyValues` because this point
+  // carries a per-service breakdown, a live flag and an SPL reading that a trend
+  // day does not, so the sum lives in two places and they have to move together:
+  // change what a day is worth here and the History tab keeps the old answer.
   const byDate = new Map<string, ServiceAttendance[]>();
   for (const a of [...occ].sort((x, y) => Date.parse(x.startedAt) - Date.parse(y.startedAt))) {
     const arr = byDate.get(a.serviceDate);

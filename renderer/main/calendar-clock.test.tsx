@@ -65,6 +65,7 @@ const sseHandlers = new Map<string, Set<(e: { data: string }) => void>>();
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { CalendarView } = await import("./calendar-view.js");
+const { SERVER_CLOCK_MIN_SPREAD_MS, serverClock } = await import("../lib/server-clock.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const realNow = Date.now;
@@ -73,6 +74,7 @@ beforeEach(() => {
   cleanup();
   // The drifted wall Pi. Restored in afterEach — a leaked clock would make every
   // file that runs after this one behave differently depending on the order.
+  serverClock.reset();
   Date.now = () => DRIFTED;
 });
 afterEach(async () => {
@@ -125,6 +127,16 @@ describe("the calendar on a display asks the server what day it is", () => {
     await act(async () => {
       push("calendar:grid", { viewId: "view-cal", grid: grid() });
       push("pco:live", { serverNow: SERVER_NOW });
+      await settle();
+    });
+    // TWO frames, a second apart, because one is not a reading. The first frame
+    // a page ever sees is the SSE hello burst, which carries whatever `pco:live`
+    // was last broadcast with and can be minutes old — see
+    // SERVER_CLOCK_MIN_SPREAD_MS. The keepalive that follows it is what sets the
+    // clock, and on a real display that is at most one LIVE_KEEPALIVE_MS away.
+    await new Promise((r) => setTimeout(r, SERVER_CLOCK_MIN_SPREAD_MS + 80));
+    await act(async () => {
+      push("pco:live", { serverNow: new Date(Date.parse(SERVER_NOW) + SERVER_CLOCK_MIN_SPREAD_MS).toISOString() });
       await settle();
     });
 

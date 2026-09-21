@@ -3,9 +3,10 @@
 // Some embedded browsers cannot hold a server-sent event stream. The Ross
 // Ultritouch's DashBoard fallback browser buffers `GET /api/events` and releases
 // its frames in batches up to a minute late, so a panel on it renders a
-// minute-old service and mis-measures its clock skew by the same minute. Such a
-// client opts into `?transport=poll` instead and asks
-// `GET /api/events/poll?cid=…&since=…` every couple of seconds.
+// minute-old service. Such a client opts into `?transport=poll` instead and asks
+// `GET /api/events/poll?cid=…&since=…` every couple of seconds — which, unlike a
+// pushed frame, is a request/response pair the client can time, so `nowMs` below
+// lets it place the server's clock exactly.
 //
 // Here: the recent-broadcast ring buffer those polls read from, and the registry
 // of which poll clients are currently alive (so subscriber-gated producers count
@@ -28,6 +29,18 @@ interface BufferedFrame extends PollFrame {
 }
 
 export interface PollResponse {
+  /**
+   * The server's clock as this answer was assembled, in epoch milliseconds.
+   *
+   * The client subtracts half its measured round trip from the gap between this
+   * and its own clock, which is the only way a polling client can correct for
+   * delivery delay: a frame can sit in the buffer below for the whole poll
+   * interval before anyone collects it, so the timestamp INSIDE a frame says
+   * when it was broadcast, not when it was sent. A panel reading the offset off
+   * a frame ran two seconds behind for exactly that reason. Stamped last, after
+   * the snapshot is built, because building one is the slowest thing here.
+   */
+  nowMs: number;
   /** The newest sequence number the client has now seen. It sends this back as
    *  `since` on its next poll. */
   seq: number;
@@ -35,6 +48,26 @@ export interface PollResponse {
    *  what it is being handed is a fresh snapshot rather than a continuation. */
   resync: boolean;
   frames: PollFrame[];
+}
+
+/**
+ * The poll response, as the wire carries it.
+ *
+ * Assembled by string concatenation rather than `JSON.stringify`: every frame is
+ * ALREADY a JSON string, and stringifying the response object would parse and
+ * reserialize the lot — including the whole StageState with its base64 branding.
+ *
+ * It lives HERE, beside the shape it serializes, because the seam between
+ * `nowMs` on this side and `"now"` on the client's had nothing holding it
+ * together. Renaming either left the other compiling and every test green, and
+ * every polling panel would have dropped silently back to its own host clock —
+ * the one failure this field exists to prevent, arriving with no symptom a test
+ * could see.
+ *
+ * @param frames each already a `{"channel":…,"data":…}` JSON string.
+ */
+export function serializePollResponse(r: PollResponse, frames: readonly string[]): string {
+  return `{"now":${r.nowMs},"seq":${r.seq},"resync":${r.resync},"frames":[${frames.join(",")}]}`;
 }
 
 /** Most recent broadcasts kept for replay. Bounds memory when a client stops
@@ -148,9 +181,20 @@ export class EventPollHub {
     // channels had nothing cached for the other twenty-one and any later mount
     // sat blank until that channel happened to change. Frames after `since`
     // stay filtered; that is the per-broadcast firehose the filter exists for.
+
+    // One stamped exit, so the timestamp is always taken AFTER the work — a
+    // snapshot serializes the whole StageState, and stamping before it would
+    // hand the client a send time that is already milliseconds old.
+    const answer = (resync: boolean, frames: PollFrame[]): PollResponse => ({
+      nowMs: this.now(),
+      seq: this.lastSeq,
+      resync,
+      frames,
+    });
+
     const oldest = this.buffer.length > 0 ? this.buffer[0].seq : this.lastSeq + 1;
     if (since == null) {
-      return { seq: this.lastSeq, resync: false, frames: snapshot() };
+      return answer(false, snapshot());
     }
     // `returning` is the case the sequence numbers cannot see. record() is a
     // no-op with no clients attached, so while this cid was expired the counter
@@ -159,13 +203,13 @@ export class EventPollHub {
     // forever while the service ran on without it. The registry is the only
     // thing that knows a gap happened.
     if (returning || since + 1 < oldest || since > this.lastSeq) {
-      return { seq: this.lastSeq, resync: true, frames: snapshot() };
+      return answer(true, snapshot());
     }
     const frames: PollFrame[] = [];
     for (const f of this.buffer) {
       if (f.seq > since && wants(f.channel)) frames.push({ channel: f.channel, serialized: f.serialized });
     }
-    return { seq: this.lastSeq, resync: false, frames };
+    return answer(false, frames);
   }
 
   // ── client registry ────────────────────────────────────────────────────

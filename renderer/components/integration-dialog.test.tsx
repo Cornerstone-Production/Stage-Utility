@@ -9,12 +9,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 2097 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent, integrationCard } = await import(
+const { installFakeServer, withQueryClient, assertAbsent, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -30,21 +34,21 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]');
 
 async function open(id: string) {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
-  await settle(60);
+  await settleFor(60);
   const d = dialog();
   assert.ok(d, `the ${id} dialog did not open`);
   return d;
@@ -165,7 +169,7 @@ describe("the dialog footer", () => {
     fireEvent.change(content.querySelector<HTMLInputElement>('[data-config-field="host"] input')!, {
       target: { value: "192.0.2.31" },
     });
-    await settle();
+    await settleFor();
     assert.equal(save.disabled, false);
     assert.equal(discard.disabled, false);
   });

@@ -17,12 +17,12 @@
 // every display with its URL, which is the same job done in the place you go to
 // think about screens.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useServerSkew } from "@renderer/lib/use-server-skew";
+import { useServerClock } from "@renderer/lib/server-clock";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
 import { GettingStarted } from "../../settings/getting-started";
@@ -175,17 +175,10 @@ export function HomeRoute() {
    *  `save` only — never during a render. */
   const editRef = useRef<LayoutObject[] | null>(null);
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    // Cleanup is load-bearing: the shell is persistent, so an interval that
-    // outlives this route runs for the whole service.
-    return () => clearInterval(id);
-  }, []);
-
-  // Skew between this client and the server, recomputed whenever a pco:live
-  // arrives. Same pattern as dashboard-view.tsx and the context bar.
-  const skewMs = useServerSkew(pcoLive?.serverNow);
+  // The SERVER's clock, ticking once a second — see renderer/lib/server-clock.ts.
+  // Every card below reads against a server-stamped instant, so a console whose
+  // own clock has drifted must not report the drift as the time.
+  const now = useServerClock(pcoLive?.serverNow);
 
   // The server has caught up — stop preferring the optimistic copy, so an edit
   // made anywhere else (a restored snapshot, a second tab) is not masked forever.
@@ -312,9 +305,9 @@ export function HomeRoute() {
 
   const state = s.stageState;
   // Seconds to the service start, for the pre-service window. computePcoTimer
-  // already does the skew-corrected maths for both modes, so this reads the
-  // countdown it produces rather than parsing targetAt again.
-  const timer = computePcoTimer(pcoLive, now, skewMs);
+  // already does the maths for both modes against the server's clock, so this
+  // reads the countdown it produces rather than parsing targetAt again.
+  const timer = computePcoTimer(pcoLive, now);
   const secondsToStart = timer?.mode === "preservice" ? timer.seconds : null;
   const mode = homeMode(pcoLiveKnown, pcoLive, secondsToStart);
 

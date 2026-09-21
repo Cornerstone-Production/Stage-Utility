@@ -10,12 +10,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 88 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, blankState, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, blankState, assertAbsent, settleFor } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -35,12 +39,12 @@ beforeEach(() => {
   server = installFakeServer();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 interface Opened {
   closes: number;
@@ -170,7 +174,7 @@ describe("dismissing a dialog with unsaved changes", () => {
     await settle();
 
     fireEvent.click(button(confirmDialog()!, "Save & close"));
-    await settle(60);
+    await settleFor(60);
 
     const saves = server.posts.filter((p) => p.path === "/api/integrations/obs/config");
     assert.equal(saves.length, 1, "Save & close did not save");
@@ -220,7 +224,7 @@ describe("dismissing a dialog with unsaved changes", () => {
     assert.deepEqual(server.posts.filter((p) => p.path.endsWith("/config")), []);
 
     fireEvent.click(button(settings(), "Save"));
-    await settle(60);
+    await settleFor(60);
     assert.equal(server.posts.filter((p) => p.path === "/api/integrations/obs/config").length, 1);
     assert.equal(o.closes, 0, "a footer Save closed the dialog — a refusal would have gone with it");
   });
@@ -382,7 +386,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     await settle();
     assert.ok(confirmDialog(), "Escape threw the unsaved instance away with no question asked");
     fireEvent.click(button(confirmDialog()!, "Save & close"));
-    await settle(60);
+    await settleFor(60);
 
     const rows = instancesSaved();
     assert.equal(rows.length, 1, "Save & close did not write the instance");
@@ -410,7 +414,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
       fireEvent.keyDown(propSettings(), { key: "Escape" });
       await settle();
       fireEvent.click(button(confirmDialog()!, "Save & close"));
-      await settle(20);
+      await settleFor(20);
 
       // The three choices, not Radix's own X in the corner.
       const busy = [...confirmDialog()!.querySelectorAll("button")].filter((b) =>
@@ -423,7 +427,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
         "the confirm's choices stayed live while the panel was still saving",
       );
 
-      await settle(160);
+      await settleFor(160);
       assert.equal(
         configPosts().length,
         1,
@@ -443,7 +447,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     await settle();
     assert.ok(confirmDialog(), "Escape threw the unsaved instance away with no question asked");
     fireEvent.click(button(confirmDialog()!, "Discard"));
-    await settle(60);
+    await settleFor(60);
 
     assert.equal(o.closes, 1, "Discard did not close the dialog");
     assert.deepEqual(

@@ -21,7 +21,7 @@ import {
   setSubscriberCount,
   subscriptionsChanged,
 } from "./broadcaster.js";
-import { EventPollHub, type PollFrame } from "./event-poll.js";
+import { EventPollHub, serializePollResponse, type PollFrame } from "./event-poll.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
@@ -992,11 +992,10 @@ export class RemoteServer {
       const since = sinceNum !== null && Number.isFinite(sinceNum) ? sinceNum : null;
       const chans = clientChannels.get(cid);
       const result = eventPoll.buildPollResponse(cid, since, (c) => !chans || chans.has(c), helloSnapshot);
-      // Assembled by string concatenation: every frame is ALREADY a JSON string,
-      // and JSON.stringify over the response object would parse-and-reserialize
-      // the lot — including the full StageState with its base64 branding.
       const frames = result.frames.map((f) => `{"channel":${JSON.stringify(f.channel)},"data":${f.serialized}}`);
-      const body = `{"seq":${result.seq},"resync":${result.resync},"frames":[${frames.join(",")}]}`;
+      // Serialized by event-poll.ts, beside the shape it serializes — see
+      // serializePollResponse for why the wire keys are not written out here.
+      const body = serializePollResponse(result, frames);
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(body);
       return;

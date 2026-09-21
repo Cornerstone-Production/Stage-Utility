@@ -178,7 +178,6 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     obs: d.obs,
     reaper: d.reaper,
     pvp: d.pvp,
-    pvpSkewMs: d.pvpSkewMs,
     scores: d.scores,
     resi: d.resi,
     youtube: d.youtube,
@@ -198,7 +197,6 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     // list are two of the three things in the app that draw it.
     onlineOutputIds: d.onlineOutputIds,
     now: d.now,
-    skewMs: d.skewMs,
     ndiSource: null,
     H: NOMINAL_H,
     // Home is the operator's own screen: controls fire and drill-downs work.

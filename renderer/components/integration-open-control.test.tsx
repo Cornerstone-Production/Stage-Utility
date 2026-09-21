@@ -15,16 +15,23 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 402 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const React = await import("react");
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent , integrationCard } = await import(
+const { installFakeServer, withQueryClient, assertAbsent, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel, integrationFlashId } = await import("./integrations-panel.js");
+
+/** Like the shared settle(), but for a wait that needs a specific real-world
+ *  duration. */
 
 let server = installFakeServer();
 
@@ -33,12 +40,12 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]');
 
@@ -65,7 +72,7 @@ async function controlled(initial: string | null) {
   // change, so clearing it there wiped the very call under test.
   seen.length = 0;
   const c = render(withQueryClient(<Controlled initial={initial} />));
-  await settle(60);
+  await settleFor(60);
   return c;
 }
 
@@ -95,7 +102,7 @@ describe("the panel opens whatever it is told to", () => {
   test("clicking a card reports the id up rather than opening on its own", async () => {
     const c = await controlled(null);
     fireEvent.click(await integrationCard(c.container, "reaper"));
-    await settle(60);
+    await settleFor(60);
     assert.deepEqual(seen, ["reaper"], "the panel did not tell its parent which card was clicked");
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
@@ -103,7 +110,7 @@ describe("the panel opens whatever it is told to", () => {
   test("closing reports null up", async () => {
     await controlled("reaper");
     fireEvent.keyDown(dialog()!, { key: "Escape" });
-    await settle(60);
+    await settleFor(60);
     assert.deepEqual(seen, [null]);
     assertAbsent(dialog(), "the dialog stayed open after the parent was told to close it");
   });
@@ -111,9 +118,9 @@ describe("the panel opens whatever it is told to", () => {
   test("uncontrolled still works, and is what every other caller gets", async () => {
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await idle();
+    await actIdle();
     fireEvent.click(await integrationCard(c.container, "reaper"));
-    await settle(60);
+    await settleFor(60);
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
 });
