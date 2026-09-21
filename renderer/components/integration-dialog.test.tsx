@@ -9,12 +9,16 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
+// React only act-wraps a render, and only warns when an update escapes one,
+// once it is told it is in a test environment. Without this the file reads
+// as clean while 2097 updates land outside act.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent, integrationCard } = await import(
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, idle, assertAbsent, integrationCard } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -23,6 +27,13 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
 const { WIDE_DIALOG_IDS, WIDE_PANEL_ATTR } = await import("./integration-dialog-size.js");
 const { IntegrationsPanel } = await import("./integrations-panel.js");
 
+/** Like settle(), but for a wait that needs a specific real-world duration. */
+function settle(ms = 0): Promise<void> {
+  return act(async () => {
+    await new Promise((r) => setTimeout(r, ms));
+  });
+}
+
 let server = installFakeServer();
 
 beforeEach(() => {
@@ -30,19 +41,26 @@ beforeEach(() => {
   server.restore();
 });
 
-after(async () => {
-  cleanup();
-  await settle();
-  server.restore();
-  teardown();
-});
+after(() =>
+  unmountAndTeardown(cleanup, () => {
+    server.restore();
+    teardown();
+  }),
+);
 
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]');
 
 async function open(id: string) {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await idle();
+  // act()-wrapped: idle() polls the query cache with a plain setTimeout loop,
+  // and sixteen cards' worth of Switch primitives settle their own state
+  // while that loop runs, outside any wrapper otherwise. No deadlock risk —
+  // idle()'s condition reads react-query's cache, not anything React holds
+  // back.
+  await act(async () => {
+    await idle();
+  });
   fireEvent.click(await integrationCard(c.container, id));
   await settle(60);
   const d = dialog();
