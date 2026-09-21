@@ -169,7 +169,7 @@ describe("History service header", () => {
     const kpis = serviceKpis(timeline(), attendance(), spl());
     assert.deepEqual(
       kpis.map((k) => k.label),
-      ["Started", "Planned", "Actual", "Avg overrun", "Peak attendance", "Peak SPL LAeq"],
+      ["Started", "Planned", "Actual", "Avg overrun", "Peak in room", "Peak SPL LAeq"],
       "the header's six figures, in order",
     );
     const by = (key: string) => kpis.find((k) => k.key === key)!;
@@ -278,7 +278,7 @@ describe("History service header", () => {
     const label = () =>
       [...view.container.querySelectorAll('[data-testid="service-kpis"] [data-history-strip] > div')]
         .map((d) => (d.children[0]?.textContent ?? "").trim())
-        .find((l) => l.startsWith("Peak ") && l !== "Peak attendance");
+        .find((l) => l.startsWith("Peak ") && l !== "Peak in room");
     assert.equal(label(), "Peak SPL LAeq");
 
     // Two acts, not two calls in one: `toggle` closes over the key list from
@@ -331,7 +331,7 @@ describe("History service header", () => {
     );
     assert.equal(subs.get("Started"), "+2:14 late");
     assert.equal(subs.get("Avg overrun"), "2 of 3 over");
-    assert.equal(subs.get("Peak attendance"), "1,727 entries");
+    assert.equal(subs.get("Peak in room"), "1,727 entries");
   });
 
   test("the header publishes its height while mounted, and takes it back", () => {

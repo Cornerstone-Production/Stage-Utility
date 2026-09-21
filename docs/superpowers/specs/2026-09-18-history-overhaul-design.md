@@ -107,11 +107,18 @@ SPL "Show metrics" chip row goes. Each becomes a Customize group.
 
 ## PR 2: the service page
 
+> **Superseded on one label.** The mockup and the wording above say "peak
+> attendance" for the in-room figure, on the service page header and on a list
+> row. Both say **peak in room** now: the app tracks two attendance numbers —
+> people in the room, and the cumulative door count — and "peak attendance"
+> named neither, on the surfaces where the two sit side by side. The figure is
+> unchanged; so is the entries figure beside it. The rest of the mockup stands.
+
 **Sticky header.** Crumb back to All services; the plan title; series, service
 type, date and time on one muted line with a green `recording` pill while
 live; the action group (Edit times, Copy report, Merge, Rebuild from raw,
 Delete); six KPIs in one row (started with early/late, planned, actual with
-delta, average overrun with the over count, peak attendance, peak LAeq); a
+delta, average overrun with the over count, peak in room, peak LAeq); a
 section nav (Rundown, Attendance, Sound) that highlights as you scroll.
 
 **Rundown.** The table on the app's scale: 10px uppercase headers, 13px rows,
@@ -167,7 +174,7 @@ in the accent; the selected day carries the accent ring. One sentence under the
 grid says what the shade is, in place of the row of tinted swatches.
 
 **List.** Grouped by day. Each row: time and service type, plan title and
-series with item count, then peak attendance, ran, versus plan, and the peak on
+series with item count, then peak in room, ran, versus plan, and the peak on
 the operator's PRIMARY Smaart metric — not LAeq, which this said. The service
 page's own header has named the metric it actually read since PR 2, because a
 church metering LCeq is not told it peaked at an LAeq it never recorded. The row

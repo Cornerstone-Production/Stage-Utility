@@ -37,11 +37,25 @@ export interface StripItem {
   peak?: string | null;
 }
 
+/**
+ * The chart's answer to "what is under the pointer": where on the x axis, in the
+ * words that axis is labelled in, and what every drawn series reads there.
+ *
+ * Named and exported because it is not only the strip's input any more — a chart
+ * can hand it to its caller instead of printing it, which is what the Trends
+ * card does with its own subtitle line. See HistoryChartProps.onHover.
+ */
+export interface StripHover {
+  time: string;
+  values: StripValue[];
+  item: StripItem | null;
+}
+
 export interface StatStripProps {
   /** At rest: the figures the operator chose in Customize. */
   figures: StatFigure[];
   /** Non-null while the pointer is over the plot or the lane. Wins over `live`. */
-  hover: { time: string; values: StripValue[]; item: StripItem | null } | null;
+  hover: StripHover | null;
   /** Non-null while the record is still open. */
   live: { time: string; values: StripValue[] } | null;
   /** The Customize trigger, pinned to the right end. */
@@ -54,14 +68,6 @@ export interface StatStripProps {
    * on every tick.
    */
   announce?: boolean;
-  /**
-   * Draw out of flow, over the top of the plot.
-   *
-   * For a chart with NO at-rest figures, where the strip is empty until the
-   * pointer arrives: in flow it is either a void the height of a figure or a
-   * chart that jumps down under the cursor. Only the Trends card passes it.
-   */
-  overlay?: boolean;
 }
 
 /** 20px mono value over an 11px uppercase label, with a hairline before every
@@ -93,7 +99,7 @@ function Figure({ label, value, color, sub, first }: { label: string; value: str
   );
 }
 
-export function StatStrip({ figures, hover, live, right, announce = true, overlay = false }: StatStripProps) {
+export function StatStrip({ figures, hover, live, right, announce = true }: StatStripProps) {
   // Hover wins over live: the operator moved the pointer there to ask about that
   // instant, and a strip that kept answering "now" while the cursor sat on 9:42
   // answered a question nobody asked.
@@ -127,21 +133,14 @@ export function StatStrip({ figures, hover, live, right, announce = true, overla
       // shape so it made no difference there, but the service header's KPIs
       // carry a second line on some figures and not others, and bottom-aligning
       // dropped "Peak SPL A Fast" a whole line below the five beside it.
-      className={cn(
-        "flex items-start gap-0 overflow-x-auto",
-        // OVERLAID, not in flow. A strip with no at-rest figures — the Trends
-        // card, which shows none — is zero-high at rest, so reserving its
-        // height left a 44px void between the tiles and the plot, and NOT
-        // reserving it pushed the chart down by a figure's height the moment
-        // the pointer entered. Out of flow it costs nothing at rest and moves
-        // nothing on hover. `pointer-events-none` so it cannot eat the pointer
-        // it exists to report on.
-        // Sized to its text, not the plot's width, and see-through: a full-width
-        // opaque bar laid over the top of the plot hid the line exactly where a
-        // line is highest, which is the part a pointer there is asking about.
-        // Padding so the figures do not touch the box's edge.
-        overlay && "pointer-events-none absolute left-0 top-0 z-10 w-fit max-w-full rounded-md bg-bg/60 px-3 py-1.5 backdrop-blur-sm",
-      )}
+      // IN FLOW, always. There was an overlay mode for a chart with no at-rest
+      // figures — the Trends card — because an empty strip in flow is a void the
+      // height of a figure. Out of flow it was a box over the top of the plot
+      // instead, and narrowing it to its text and making it see-through still
+      // left it in front of the line exactly where the line is highest. A chart
+      // with nothing to say at rest now hands its hover to its caller and draws
+      // no strip at all; see HistoryChartProps.onHover.
+      className="flex items-start gap-0 overflow-x-auto"
       data-history-strip={mode}
       // The strip is the section's live summary: a pointer move must be
       // announced, or a screen reader hears only the at-rest figures forever.

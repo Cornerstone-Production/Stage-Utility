@@ -179,9 +179,86 @@ async function renderList(readOnly = false) {
   return view;
 }
 
+type Edge = "top" | "bottom" | "left" | "right";
+const EDGES: Edge[] = ["top", "bottom", "left", "right"];
+/** Which edges a Tailwind axis suffix touches: `p-3` all four, `py-3` two. */
+const AXIS: Record<string, Edge[]> = {
+  "": EDGES,
+  x: ["left", "right"],
+  y: ["top", "bottom"],
+  t: ["top"],
+  b: ["bottom"],
+  l: ["left"],
+  r: ["right"],
+};
+
 /**
- * `{ attendance: { value: "1,196", caption: "peak" }, … }` for one row, keyed
- * by COLUMN.
+ * The padding a rendered class list ADDS and the margin it PULLS BACK, per
+ * edge, in px.
+ *
+ * Tailwind's spacing scale is 0.25rem a step, so `p-3` is 12px and `py-3.5` is
+ * 14px. Read off the element's own `class` attribute rather than off this
+ * repository's source, so a class that arrives through a helper, a variant or a
+ * `cn()` branch still counts — and the LAST token for an edge wins, which is
+ * what `cn`'s tailwind-merge leaves behind.
+ *
+ * A negative margin is the interesting half: it is how a ring comes to be drawn
+ * outside the box the layout gave it, in space that belongs to its neighbour.
+ */
+function spacingOf(className: string): { pad: Record<Edge, number>; pull: Record<Edge, number> } {
+  const pad: Record<Edge, number> = { top: 0, bottom: 0, left: 0, right: 0 };
+  const pull: Record<Edge, number> = { top: 0, bottom: 0, left: 0, right: 0 };
+  for (const token of className.split(/\s+/)) {
+    const m = /^(-?)([pm])([xytrbl]?)-([\d.]+)$/.exec(token);
+    if (!m) continue;
+    const [, sign, kind, axis, size] = m;
+    const px = Number(size) * 4;
+    for (const edge of AXIS[axis]) {
+      if (kind === "p") pad[edge] = px;
+      else pull[edge] = sign === "-" ? px : -px;
+    }
+  }
+  return { pad, pull };
+}
+
+/** The `gap-N` a flex column puts between its children, in px. */
+function gapOf(className: string): number {
+  const m = /(?:^|\s)gap-([\d.]+)(?:\s|$)/.exec(className);
+  return m ? Number(m[1]) * 4 : 0;
+}
+
+/**
+ * How far a `ring-N` is PAINTED outside the padding box, in px.
+ *
+ * Tailwind's ring is a box-shadow, not a border: it adds nothing to the layout
+ * and draws entirely outside the box `spacingOf` measures. A clearance taken
+ * from the box alone is that much too generous — the arithmetic said 12px and 4px
+ * where the painted edge really stands at 11px and 3px. Read off the class so it
+ * stays exact if the ring ever gets thicker; `ring` with no number is 3px, which
+ * is Tailwind's own default.
+ */
+function ringWidthOf(className: string): number {
+  const m = /(?:^|\s)ring(?:-(\d+))?(?:\s|$)/.exec(className);
+  if (!m) return 0;
+  return m[1] == null ? 3 : Number(m[1]);
+}
+
+/**
+ * Any spacing or gap token behind a VARIANT — `sm:p-4`, `hover:gap-2`.
+ *
+ * `spacingOf` and `gapOf` read the unconditional ones only: a variant's value
+ * depends on a media query or a state jsdom does not have, and silently reading
+ * the base value instead would make the clearance arithmetic below quietly wrong
+ * at exactly the width somebody added the variant for. Asserted as empty rather
+ * than handled, so the next person to add one is told the helper cannot see it.
+ */
+function variantSpacing(className: string): string[] {
+  return className.split(/\s+/).filter((t) => /:-?(?:[pm][xytrbl]?|gap)-[\d.]+$/.test(t));
+}
+
+/**
+ * `{ attendance: { value: "1,196", caption: "peak in room" }, … }` for one row,
+ * keyed by COLUMN.
  *
  * Keyed by the column rather than by the caption, because the caption is no
  * longer the column's name: the value leads and the caption under it says what
@@ -537,10 +614,60 @@ describe("what the All services page is made of", () => {
       .filter((g) => g.className.includes("ring-accent"))
       .map((g) => g.getAttribute("data-day-group"));
     assert.deepEqual(ringed, ["2026-09-06"], "the picked day's group is not marked");
-    // The ring stands off what it rings. At `p-2 -m-2` the day label and the
-    // rows touched the ring's edge; 12px is the inset that reads as a frame.
+
+    // ── The ring stands clear of everything around it ──
+    //
+    // WHAT THIS CANNOT SEE: the pixels. jsdom loads no stylesheet and reports
+    // every box as 0, so a geometry assertion would pass on any layout at all.
+    // What it CAN do is the arithmetic those pixels come out of, off the class
+    // attribute the element actually rendered: Tailwind's spacing scale is
+    // 0.25rem a step, so the padding a group adds and the margin it pulls back
+    // are both readable numbers, and the clearance is their difference against
+    // the gap and padding of the card the group sits in. Measured in Chrome at
+    // 1440 as well — the ring's top edge sits 12px under the Export button.
+    //
+    // The defect: at `p-3 -m-3` the ring drew 12px OUTSIDE its own box on all
+    // four edges, into gaps of 8px (the card's `gap-2`) and padding of 14px. It
+    // touched the Recorded services header, the next day group and the bottom
+    // of the card at once.
     const ringedEl = view.container.querySelector('[data-day-group="2026-09-06"]') as HTMLElement;
-    assert.ok(/\bp-3\b/.test(ringedEl.className) && /-m-3\b/.test(ringedEl.className), `the ring has no inset from its content: ${ringedEl.className}`);
+    const card = view.container.querySelector("[data-services-card]") as HTMLElement;
+    assert.deepEqual(
+      [...variantSpacing(ringedEl.className), ...variantSpacing(card.className)].sort(),
+      [],
+      "the arithmetic below cannot read a spacing token behind a variant",
+    );
+    const ring = spacingOf(ringedEl.className);
+    const cardPad = spacingOf(card.className).pad;
+    const gap = gapOf(card.className);
+    assert.ok(
+      ring.pad.top >= 12 && ring.pad.left >= 12,
+      `the ring has no inset from its own content: ${ringedEl.className}`,
+    );
+    // THE PAINTED EDGE, not the box. A Tailwind ring is a box-shadow drawn
+    // outside the padding box, so every clearance is one ring-width shorter than
+    // the boxes suggest: the real figures at 1440 are 11px and 3px, not 12 and 4.
+    const paint = ringWidthOf(ringedEl.className);
+    // One clearance per EDGE per line, sorted by what the ring is standing off,
+    // so two branches adding different edges conflict instead of merging
+    // silently — and so a branch changing `-mx-3` to `-mr-4` cannot pass on the
+    // strength of the left side alone.
+    const clearances: [what: string, clear: number, floor: number][] = [
+      ["the card's bottom padding, under the last day of a month", cardPad.bottom - ring.pull.bottom - paint, 11],
+      ["the card's left padding", cardPad.left - ring.pull.left - paint, 3],
+      ["the card's right padding", cardPad.right - ring.pull.right - paint, 3],
+      ["the day group above it, or the Recorded services header", gap - ring.pull.top - paint, 11],
+      ["the day group below it", gap - ring.pull.bottom - paint, 11],
+    ];
+    // Every failing edge at once, not the first: the bug put the ring hard
+    // against four different things, and a one-at-a-time assertion would have
+    // been four runs to find that out.
+    assert.deepEqual(
+      clearances
+        .filter(([, clear, floor]) => clear < floor)
+        .map(([what, clear, floor]) => `the ring is ${clear}px from ${what}; it needs ${floor}px`),
+      [],
+    );
   });
 });
 
@@ -571,6 +698,91 @@ describe("a row's columns", () => {
     assert.equal(drawn.level.caption, "no sound recorded", `Peak dB landed in the wrong column: ${JSON.stringify(drawn)}`);
   });
 
+  test("a LIVE row's recording pill sits after the plan title, not in the WHEN column", async () => {
+    // The pill does not shrink — it is a fixed badge — and in the WHEN column it
+    // shared 104px with the service type. The type took whatever was left and
+    // "Weekend" read as "W…", on the one row an operator is most likely to be
+    // looking at.
+    //
+    // WHAT THIS CANNOT SEE: the ellipsis. `truncate` is a stylesheet rule and
+    // jsdom loads none, so the type's text content is "Weekend" whether it is
+    // squeezed to nothing or not. What it CAN see is the structure that did the
+    // squeezing: which column the pill is in, and whether anything shares the
+    // type's line. Driven in Chrome at 1440 and 900 as well.
+    const LIVE = {
+      ...timeline("weekend:plan-1:1300", "Sunday 1:00", "13:00:00", "14:00:00"),
+      endedAt: null,
+    } as unknown as ServiceTimeline;
+    installFetch({ extra: [LIVE] });
+    const view = await renderList();
+    const live = view.container.querySelector(`[data-history-row="${LIVE.serviceKey}"]`) as HTMLElement;
+    assert.ok(live, "the live recording did not render");
+
+    const when = live.querySelector("[data-row-when]") as HTMLElement;
+    const service = live.querySelector("[data-row-service]") as HTMLElement;
+    assert.equal(
+      when.querySelectorAll('[data-testid="recording-pill"]').length,
+      0,
+      `the pill is still in the WHEN column, squeezing the service type: ${when.textContent}`,
+    );
+    const pill = service.querySelector('[data-testid="recording-pill"]');
+    assert.ok(pill, `the live row lost its recording pill altogether: ${service.textContent}`);
+    // Beside the TITLE, on the first line — not stranded on the series line
+    // under it, which is where "recording…" used to be.
+    assert.equal(
+      pill.parentElement?.firstElementChild?.textContent,
+      "Sunday 1:00",
+      "the pill is not the plan title's own neighbour",
+    );
+    // And CLIPPED with the title. SERVICE is the row's only flexible track, and
+    // between 640 and about 1,150px wide it resolves to ZERO — measured in
+    // Chrome: 238px at 1440, 78px at 1280, 0 from 1152 down. A pill does not
+    // shrink, so in a zero-width cell it paints over the figure in the next
+    // column instead of disappearing with the title beside it. jsdom lays out
+    // nothing, so what is asserted is the rule that clips it.
+    assert.ok(
+      /\boverflow-hidden\b/.test(pill.parentElement?.className ?? ""),
+      `the pill can paint outside the SERVICE column: ${pill.parentElement?.className}`,
+    );
+    // WHICH MEANS THE PILL IS NOT ENOUGH ON ITS OWN. Clipped away, the row has
+    // nothing left saying it is live except a RAN caption that is itself near
+    // the clipping edge. The dot rides with the start time instead, in WHEN —
+    // a fixed 104px track, and the leftmost, so it is the one cell that cannot
+    // be squeezed out. Six pixels beside a 42px time, not the 84px pill that
+    // used to live there.
+    const dot = when.querySelector('[data-testid="recording-dot"]');
+    assert.ok(dot, `no live marker survives a zero-width SERVICE column: ${when.textContent}`);
+    assert.equal(
+      dot.previousElementSibling?.textContent,
+      when.firstElementChild?.firstElementChild?.textContent,
+      "the live dot is not beside the start time",
+    );
+    // Named, not just coloured: six green pixels are not a fact a screen reader
+    // or a colour-blind operator can read.
+    assert.equal(dot.getAttribute("aria-label"), "recording", "the live dot has no accessible name");
+    // And GONE on a finished row, or it says every row is recording.
+    const done = view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`) as HTMLElement;
+    assert.equal(
+      done.querySelectorAll('[data-testid="recording-dot"]').length,
+      0,
+      "a finished recording is wearing the live dot",
+    );
+    // The type has its line to itself and reads in full.
+    assert.equal(
+      (when.lastElementChild?.textContent ?? "").trim(),
+      "Weekend",
+      `something is sharing the service type's line: ${when.lastElementChild?.textContent}`,
+    );
+    // And the subtitle is back to what it says on a finished row: the pill
+    // already says it is recording, and "recording…" cost the reader the only
+    // place the row counts the items that have run.
+    assert.equal(
+      (service.lastElementChild?.textContent ?? "").trim(),
+      "Rooted · 2 items",
+      "a live row's subtitle must count its items, not repeat the pill",
+    );
+  });
+
   test("the header names the same columns, in the same order, as the rows carry", async () => {
     // A heading one column left of its figures is the failure. Asserted as the
     // two lists rather than as a screenshot, because jsdom lays out nothing.
@@ -578,10 +790,57 @@ describe("a row's columns", () => {
     const view = await renderList();
     const headings = [...(view.container.querySelector("[data-row-header]")?.children ?? [])]
       .map((c) => (c.textContent ?? "").trim());
-    assert.deepEqual(headings, ["When", "Service", "Peak", "Ran", "vs plan", "Peak dB", ""]);
+    assert.deepEqual(headings, ["When", "Service", "In room", "Ran", "vs plan", "Peak dB", ""]);
     const row = view.container.querySelector("[data-history-row]")!;
     // Two leading cells (When, Service), four figures, then the chevron — the
     // same seven tracks the heading spans.
     assert.equal(row.children.length, headings.length);
+  });
+
+  test("the in-room column says WHICH attendance figure it is, in both its labels", async () => {
+    // The app tracks two attendance numbers for one service: `peakOccupancy`,
+    // the most people in the room at once, and `peakAttendance`, the cumulative
+    // door count, which double-counts anyone who steps out and back. The column
+    // was headed "Peak" and captioned "peak", which names either of them — and
+    // the service page's header has had the two the wrong way round once
+    // already, printing 2,061 where it meant 1,196.
+    //
+    // WHAT THIS CANNOT SEE: whether the heading row wraps at the narrow end.
+    // jsdom loads no stylesheet and reports every box as 0. Driven in Chrome at
+    // 1440 and 900, where "IN ROOM" sits on one line in its 84px column.
+    installFetch();
+    const view = await renderList();
+    const headings = [...(view.container.querySelector("[data-row-header]")?.children ?? [])]
+      .map((c) => (c.textContent ?? "").trim());
+    const drawn = figuresOf(view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!);
+    // One label per line, so two branches renaming different ones conflict
+    // instead of merging silently.
+    const labels: [what: string, text: string][] = [
+      ["the caption under the value", drawn.attendance.caption],
+      ["the column heading", headings[2]],
+    ];
+    assert.deepEqual(
+      labels
+        .filter(([, text]) => !/in.room/i.test(text))
+        .map(([what, text]) => `${what} reads "${text}", which names either attendance figure`),
+      [],
+    );
+    // And the number under those labels is the in-room one — the same figure
+    // the service page's header quotes, not the door count beside it.
+    const att = ATT.find((a) => a.serviceKey === NINE.serviceKey)!;
+    const kpis = new Map(serviceKpis(NINE, att, null).map((k) => [k.key, k]));
+    assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "the row and the page quote different numbers");
+    // AND CALL IT THE SAME THING. One number with two names across two pages is
+    // the confusion this column was relabelled to end; the service page said
+    // "Peak attendance" while the row said "In room". Asserted as a shared word
+    // rather than a shared string, because the row has the room for a heading
+    // and a caption and the header has one label.
+    assert.match(
+      kpis.get("attendance")!.label,
+      /in.room/i,
+      `the service page calls it "${kpis.get("attendance")!.label}" while the row says "${headings[2]} / ${drawn.attendance.caption}"`,
+    );
+    assert.equal(drawn.attendance.value, att.peakOccupancy.toLocaleString());
+    assert.notEqual(drawn.attendance.value, att.peakAttendance.toLocaleString(), "the row is showing the door count");
   });
 });

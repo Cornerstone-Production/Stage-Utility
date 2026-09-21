@@ -387,6 +387,12 @@ export function computeOverview(
   // One point per WEEKEND (service date): value = TOTAL attendance across that
   // day's services (the headline weekend number), with a per-service breakdown
   // for the tooltip. So 3 weekends of 2 services each read as 3 dots, not 6.
+  //
+  // THE SAME RULE THE TRENDS CARD APPLIES — see DAY_FIGURE in
+  // history-trends/trends.ts. It cannot call `dailyValues` because this point
+  // carries a per-service breakdown, a live flag and an SPL reading that a trend
+  // day does not, so the sum lives in two places and they have to move together:
+  // change what a day is worth here and the History tab keeps the old answer.
   const byDate = new Map<string, ServiceAttendance[]>();
   for (const a of [...occ].sort((x, y) => Date.parse(x.startedAt) - Date.parse(y.startedAt))) {
     const arr = byDate.get(a.serviceDate);

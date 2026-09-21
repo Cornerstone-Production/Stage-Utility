@@ -66,18 +66,40 @@ export const SERVICE_SECTIONS = [
  * one-frame flash of it.
  */
 export function RecordingPill() {
-  const reduced = prefersReducedMotion();
   return (
     <span
       data-testid="recording-pill"
       className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-live-9/45 bg-live-9/12 px-2 py-0.5 text-[10px] font-semibold text-live-11"
     >
-      <span
-        aria-hidden="true"
-        className={cn("inline-block size-1.5 rounded-full bg-live-9", !reduced && "su-history-pulse-dot")}
-      />
+      <RecordingDot />
       recording
     </span>
+  );
+}
+
+/**
+ * The pill's dot, on its own — six pixels that say a record is still open where
+ * there is no room for the word.
+ *
+ * ONE definition, so the dot beside a list row's start time and the dot inside
+ * the pill are the same colour and the same beat. Two of them drifting apart is
+ * how one surface ends up pulsing and another not.
+ *
+ * `label` gives it an accessible name where it stands alone; inside the pill the
+ * word is already there, so the dot is hidden from a screen reader instead of
+ * read twice.
+ */
+export function RecordingDot({ label }: { label?: string } = {}) {
+  const reduced = prefersReducedMotion();
+  return (
+    <span
+      data-testid={label ? "recording-dot" : undefined}
+      aria-hidden={label ? undefined : "true"}
+      role={label ? "img" : undefined}
+      aria-label={label}
+      title={label}
+      className={cn("inline-block size-1.5 shrink-0 rounded-full bg-live-9", !reduced && "su-history-pulse-dot")}
+    />
   );
 }
 
@@ -203,8 +225,14 @@ function serviceKpisFrom(
        * Both figures are the recorder's own stored fields, which is also what
        * the dashboard's people widgets read — so the header, the Attendance
        * card, the pasted report and every layout now quote one number each.
+       *
+       * "PEAK IN ROOM", the All services row's own words for this same figure,
+       * so one number has one name on both pages. "Peak attendance" was true and
+       * did not distinguish itself from the door count beside it, which is the
+       * pair this comment exists about. The mockup says "peak attendance"; it is
+       * superseded on this point, and the spec says so.
        */
-      label: "Peak attendance",
+      label: "Peak in room",
       value: attendance && attendance.peakOccupancy > 0 ? attendance.peakOccupancy.toLocaleString() : "—",
       sub: attendance ? `${attendance.peakAttendance.toLocaleString()} entries` : undefined,
     },

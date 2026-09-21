@@ -31,6 +31,7 @@ import {
   dateTicks,
   linePathD,
   nearestIndex,
+  nearestNodeT,
   niceAxis,
   splitRuns,
   tenMinuteDomainEnd,
@@ -41,7 +42,7 @@ import {
 } from "./geometry";
 import { laneLabel, laneSegments, segmentAt, type LaneItem, type LaneSegment } from "./lane";
 import { makeTextMeasurer } from "./measure-text";
-import { StatStrip, type StatFigure } from "./stat-strip";
+import { StatStrip, type StatFigure, type StripHover } from "./stat-strip";
 
 /** Sampling gap past which the line breaks rather than spanning the silence. */
 const GAP_MS = 3 * 60_000;
@@ -137,14 +138,20 @@ export interface HistoryChartProps {
    */
   peakMarks?: boolean;
   /**
-   * Draw the stat strip OVER the plot instead of above it.
+   * Take the hovered instant and draw it YOURSELF, instead of the chart drawing
+   * a stat strip at all.
    *
-   * For a chart with no at-rest figures: in flow an empty strip is either a
-   * void the height of a figure between whatever is above the chart and the
-   * plot, or a chart that jumps down under the cursor the moment the pointer
-   * arrives. See StatStrip.overlay. Only the Trends card passes it.
+   * For a chart with no at-rest figures, where a strip is empty until the
+   * pointer arrives: in flow that is a void the height of a figure, and out of
+   * flow it is a box laid over the top of the plot — which is in front of the
+   * line exactly where the line is highest. A caller that already has a line of
+   * its own to lend takes the readout instead. Called with null when the
+   * pointer leaves, and again when the chart unmounts.
+   *
+   * Only the Trends card passes it, and passing it is what removes the strip:
+   * a chart cannot both hand the hover over and print it.
    */
-  stripOverlay?: boolean;
+  onHover?: (hover: StripHover | null) => void;
 }
 
 const PAD_L = 44;
@@ -173,7 +180,7 @@ export function HistoryChart({
   milestones,
   peakMarks = true,
   onSeriesContextMenu,
-  stripOverlay = false,
+  onHover,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -233,7 +240,7 @@ export function HistoryChart({
   // empty axis, not stop time.
   const rightT = live ? Math.max(lastT, now) : lastT;
   const targetEnd = Number.isFinite(firstT) ? (live ? tenMinuteDomainEnd(firstT, rightT) : rightT) : NaN;
-  const domainEnd = useEasedValue(targetEnd, live && !reduced ? 600 : 0);
+  const domainEnd = useEasedValue(targetEnd, live && !reduced ? EASE_MS : 0);
   const domainStart = firstT;
   const span = domainEnd - domainStart || 1;
 
@@ -263,9 +270,21 @@ export function HistoryChart({
     () => (xAxis === "date" ? dateTicks(domainStart, domainEnd) : timeTicks(domainStart, domainEnd)),
     [domainStart, domainEnd, xAxis],
   );
+  /**
+   * A tick's words. Dates on a trend, times of day on a service.
+   *
+   * THE YEAR APPEARS once the domain crosses one, which the All range routinely
+   * does: "Sep 20" beside "Sep 20" a year apart is two identical labels on one
+   * axis, and a reader has nothing to tell them apart with.
+   */
+  const spansYears = Number.isFinite(domainStart) && Number.isFinite(domainEnd)
+    && new Date(domainStart).getFullYear() !== new Date(domainEnd).getFullYear();
   const axisText = (t: number) =>
     xAxis === "date"
-      ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      ? new Date(t).toLocaleDateString(
+        undefined,
+        spansYears ? { month: "short", year: "numeric" } : { month: "short", day: "numeric" },
+      )
       : formatClock(new Date(t).toISOString());
 
   const labelledTicks = useMemo(
@@ -317,9 +336,26 @@ export function HistoryChart({
   const hasPost = bandX1 != null && bandX1 < plotX1 - 1;
 
   // ── Hover ──
-  const hoverT = hoverX != null && Number.isFinite(domainStart)
+  const pointerT = hoverX != null && Number.isFinite(domainStart)
     ? domainStart + ((hoverX - plotX0) / (plotX1 - plotX0)) * span
     : null;
+  /**
+   * The instant the readout is ABOUT.
+   *
+   * On a DATE axis it is snapped to the nearest drawn node, because the label
+   * there is a calendar day and the pointer lands wherever it lands: hovering
+   * sixteen weeks of Sundays answered "Feb 3" — a Tuesday nothing was recorded
+   * on — beside Feb 1's figure. A date on screen must be a day something
+   * happened.
+   *
+   * Left alone on a CLOCK axis. One service's samples are thirty seconds apart,
+   * so the pointer is already on one, and snapping a crosshair that follows the
+   * cursor across an hour would make it stutter for no gain.
+   */
+  const hoverT = pointerT == null || xAxis !== "date" ? pointerT : nearestNodeT(shown, pointerT) ?? pointerT;
+  /** Where the crosshair stands. One expression with `hoverT`, so the line, the
+   *  date and the figures cannot come apart. */
+  const crosshairX = hoverT != null && Number.isFinite(hoverT) ? xOf(hoverT) : hoverX;
   const hoveredSegment: LaneSegment | null =
     hoverX != null && hoverRow && hoverRow !== "plot" ? segmentAt(segments, hoverX, hoverRow) : null;
   const hoverValues = hoverT == null
@@ -329,10 +365,14 @@ export function HistoryChart({
       if (i < 0) return [];
       return [{ label: s.label, value: fmt(s, s.points[i].v), color: s.color }];
     });
-  const hoverStrip = hoverT == null
+  const hoverStrip: StripHover | null = hoverT == null
     ? null
     : {
-      time: formatClock(new Date(hoverT).toISOString()),
+      // `axisText`, which is what the AXIS under the pointer is labelled in —
+      // a time of day on a service's chart, a date on a trend's. It was
+      // `formatClock` whatever the axis, so hovering sixteen weeks of Sundays
+      // answered "2:32 pm", a reading of a scale this chart does not have.
+      time: axisText(hoverT),
       values: hoverValues,
       item: hoveredSegment
         ? {
@@ -346,13 +386,46 @@ export function HistoryChart({
     };
   const liveStrip = live && all.length
     ? {
-      time: formatClock(new Date(lastT).toISOString()),
+      time: axisText(lastT),
       values: shown.flatMap((s) => {
         const last = s.points[s.points.length - 1];
         return last ? [{ label: s.label, value: fmt(s, last.v), color: s.color }] : [];
       }),
     }
     : null;
+
+  /**
+   * Hand the hovered instant to a caller that draws it ITSELF, instead of
+   * drawing a strip.
+   *
+   * The Trends card puts it on its own subtitle line, where it replaces a
+   * sentence rather than covering the plot: a readout laid over the top of the
+   * chart hid the line exactly where a line is highest, which is the part a
+   * pointer there is asking about, and no amount of narrowing or transparency
+   * stopped it being in front of the data.
+   *
+   * From an EFFECT, keyed on the readout's CONTENT: calling a parent's setState
+   * during this component's render is a React warning, and `hoverStrip` is a
+   * fresh object every render, so depending on it directly would fire on every
+   * one of them.
+   */
+  // Nothing to report when nobody asked, so the two service-page charts — which
+  // draw a strip and pass no `onHover` — never pay for the serialisation below.
+  const reportedHover = onHover && all.length ? hoverStrip : null;
+  const hoverKey = reportedHover ? JSON.stringify(reportedHover) : "";
+  const onHoverRef = useRef(onHover);
+  useEffect(() => {
+    onHoverRef.current = onHover;
+  }, [onHover]);
+  useEffect(() => {
+    onHoverRef.current?.(reportedHover);
+    // `reportedHover` is rebuilt every render; `hoverKey` is what is IN it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverKey]);
+  // A chart that goes away leaves no readout behind it. Without this the card
+  // keeps whatever was last under the pointer, as a sentence that has lost the
+  // thing it was describing.
+  useEffect(() => () => onHoverRef.current?.(null), []);
 
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     const svg = svgRef.current;
@@ -467,7 +540,7 @@ export function HistoryChart({
       // chart stayed at its 640px default: a half-width plot letterboxed in the
       // middle of a 1,256px card, for the rest of the page's life.
       <div className="flex flex-col gap-3" ref={hostRef}>
-        <StatStrip figures={figures} hover={null} live={null} right={customize} />
+        {!onHover && <StatStrip figures={figures} hover={null} live={null} right={customize} />}
         <div
           className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted"
           onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
@@ -480,8 +553,10 @@ export function HistoryChart({
   }
 
   return (
-    <div className={cn("flex flex-col gap-3", stripOverlay && "relative")} ref={hostRef}>
-      <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} overlay={stripOverlay} />
+    <div className="flex flex-col gap-3" ref={hostRef}>
+      {/* No strip at all when the caller is drawing the readout itself — see
+          `onHover`. An empty one in flow is a void the height of a figure. */}
+      {!onHover && <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} />}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -569,7 +644,12 @@ export function HistoryChart({
             sample count, so appending a sample updates `d` on the element that is
             already there instead of replacing it — see history-chart-live.test.tsx. */}
         {shown.map((s) => {
-          const runs = s.runs ?? splitRuns(s.points, s.gapMs ?? GAP_MS);
+          // A PROVISIONAL last point comes off the solid line and is drawn as
+          // its own dashed segment below, so every earlier stretch stays solid.
+          // `s.points` is left whole: hover still reads the nearest sample from
+          // it, and the readout must be able to answer about the day in progress.
+          const drawn = s.provisional && s.points.length > 1 ? s.points.slice(0, -1) : s.points;
+          const runs = s.runs ?? splitRuns(drawn, s.gapMs ?? GAP_MS);
           return (
             <g key={s.id} data-series={s.id}>
               {s.fill
@@ -598,6 +678,15 @@ export function HistoryChart({
             </g>
           );
         })}
+
+        {/* The segment into a day that has not finished, and its node.
+            One CHILD COMPONENT per series because it holds a hook — the value
+            eases toward each new reading instead of stepping to it. */}
+        {shown.map((s) =>
+          s.provisional && s.points.length >= 2
+            ? <ProvisionalTail key={`${s.id}-prov`} series={s} xOf={xOf} yOf={yOf} reduced={reduced} />
+            : null,
+        )}
 
         {/* The stretch that just arrived, drawn in over 200ms on top of the line
             it is already part of.
@@ -822,13 +911,17 @@ export function HistoryChart({
           );
         })}
 
-        {/* Crosshair. */}
-        {hoverX != null && (
+        {/* Crosshair, at the instant the READOUT is about — which on a date axis
+            is the nearest recorded day, not the raw pointer. A line standing
+            between two Sundays beside a figure from one of them is the same lie
+            the date used to tell. On a clock axis `xOf(hoverT)` inverts the map
+            the pointer came through, so it lands back where the cursor is. */}
+        {crosshairX != null && (
           <line
             data-crosshair=""
-            x1={hoverX}
+            x1={crosshairX}
             y1={plotY0}
-            x2={hoverX}
+            x2={crosshairX}
             y2={plotY1}
             stroke="var(--color-line-strong)"
             strokeWidth={1}
@@ -1005,6 +1098,71 @@ function useWallClock(enabled: boolean, override?: number): number {
   const now = useServerNow(15_000, enabled && override == null);
   return override ?? now;
 }
+
+/**
+ * The dashed tail into a day that is still filling, and its node.
+ *
+ * ITS OWN COMPONENT so it can hold a hook. The node EASES to each new reading
+ * rather than snapping to it: a broadcast lands every few seconds and a service
+ * fills over an hour, so stepping reads as a twitch where the requirement is a
+ * day slowly building. The dashed segment is drawn to the eased value too, so
+ * the line grows with the node instead of arriving ahead of it.
+ *
+ * SAME MACHINERY as the x domain — `useEasedValue`, one easeOutCubic, one
+ * `EASE_MS` — rather than a second animator. Under `prefers-reduced-motion`
+ * `ms` is 0, which in that hook means no state at all: the value lands on the
+ * render it arrives in.
+ *
+ * DASHED and MARKED regardless. The beat is the same `su-history-pulse` the
+ * live edge uses and the same `reduced` gate; the dash is the information and
+ * survives reduced motion, the beat is decoration and does not.
+ *
+ * ONE FRAME of the target before the ease begins, because `useEasedValue` sets
+ * its tween from an effect and an effect runs after paint. At a reading's worth
+ * of movement that is a pixel or two for 16ms, and fixing it would mean a
+ * layout effect in machinery the service chart shares.
+ */
+function ProvisionalTail({ series, xOf, yOf, reduced }: {
+  series: ChartSeries;
+  xOf: (t: number) => number;
+  yOf: (v: number) => number;
+  reduced: boolean;
+}): React.ReactElement {
+  const tail = series.points.slice(-2);
+  const v = useEasedValue(tail[1].v, reduced ? 0 : EASE_MS);
+  const width = series.width ?? (series.role === "primary" ? 1.8 : 1.2);
+  const project = (p: ChartPoint) => ({ x: xOf(p.t), y: yOf(p.v) });
+  return (
+    <g data-series-provisional={series.id}>
+      <path
+        d={linePathD([tail[0], { t: tail[1].t, v }], project)}
+        fill="none"
+        stroke={series.color}
+        strokeWidth={width}
+        strokeDasharray="5 4"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* Hollow, so it reads as a reading not yet taken rather than as one more
+          node on the line. */}
+      <circle
+        data-provisional-node={series.id}
+        cx={xOf(tail[1].t)}
+        cy={yOf(v)}
+        r={3.5}
+        fill="var(--color-bg)"
+        stroke={series.color}
+        strokeWidth={width}
+        vectorEffect="non-scaling-stroke"
+        className={reduced ? undefined : "su-history-pulse"}
+      />
+    </g>
+  );
+}
+
+/** How long an eased value takes to arrive. One constant for the x domain and
+ *  for a day still filling, so the module moves at one speed. */
+const EASE_MS = 600;
 
 /**
  * Ease toward `target` over `ms`; `ms <= 0` means no motion at all.
