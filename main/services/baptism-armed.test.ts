@@ -191,12 +191,15 @@ describe("armed is contained — it cannot survive the action that ends it", () 
 describe("I-B: resume() must count on from what pause() banked", () => {
   it("does not default the banked accumulator to zero", async () => {
     // Before startSegment() existed, resume() wrote `segmentAccumMs: 0` only if
-    // someone typed it — nothing to accidentally omit. After the refactor,
-    // startSegment(accumMs = 0) makes zero the DEFAULT, so dropping resume()'s
-    // one argument (`this.state.segmentAccumMs ?? 0`) silently discards the
-    // banked time instead of failing loudly. This is the exact defect the
-    // comment above resume() already names: a testimony paused through the
-    // prayer came back reading the length of the prayer.
+    // someone typed it — nothing to accidentally omit. The refactor briefly
+    // made zero the DEFAULT (`accumMs = 0`), so dropping resume()'s one
+    // argument (`this.state.segmentAccumMs ?? 0`) silently discarded the banked
+    // time instead of failing loudly. `accumMs` is now required, so that exact
+    // omission is a type error — this test still guards the behaviour the type
+    // checker cannot state: that the value passed is the BANKED one rather than
+    // a hard-coded 0. The defect it names is the one the comment above resume()
+    // describes: a testimony paused through the prayer came back reading the
+    // length of the prayer.
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
     baptismTimerService.start();

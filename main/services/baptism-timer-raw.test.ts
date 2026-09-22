@@ -436,7 +436,12 @@ describe("undoing and redoing a baptism writes a second person-complete row, and
     await sleep(5);
     baptismTimerService.next(); // person 1 (index 0) baptized — a mis-tap, too early
     baptismTimerService.undo(); // back to index 0, clock restarted
-    await sleep(9); // the REAL baptism runs longer
+    // 40ms, not 9: the assertion below requires the two attempts to have
+    // genuinely different durations, and measured runs under load closed a 5ms
+    // vs 9ms gap to 1ms twice. It fails red rather than passing wrongly, so
+    // this is a flake risk and not a vacuous guard — but it is nearly free to
+    // remove.
+    await sleep(40); // the REAL baptism runs longer
     baptismTimerService.next(); // person 1 (index 0) baptized again — the real one
     await sleep(5);
     const finished = baptismTimerService.next(); // person 2 (index 1) baptized — auto-finishes
@@ -629,5 +634,140 @@ describe("the no-service warning logs once per session, not once per press", () 
     } finally {
       console.warn = original;
     }
+  });
+});
+
+// F1: undo() pops a person off `people` in two grouped branches, and BOTH
+// restarted the resumed segment at zero — discarding the time banked in the
+// entry they had just popped. The real shape: a three-minute testimony, armed
+// on the wrong song (or ended a beat early by a mis-tap), undone, resumed when
+// the right song goes live fifty seconds later — the session recorded fifty
+// seconds and threw away three minutes.
+//
+// Both tests read the FINISHED session's own testimonyMs, so they fail on the
+// real defect rather than on a synthetic mutation: change either
+// `startSegment(<banked>)` back to `startSegment(0)` and the matching test
+// reports the short time. The sleeps are deliberately far apart (150ms before
+// the undo, 40ms after) so a loaded machine cannot close the gap — with the
+// bug the value is bounded ABOVE by roughly the second sleep, and the
+// assertion's floor is the first.
+describe("undo() resumes a popped person's testimony from its banked time, not from zero", () => {
+  it("grouped/armed: armed on the wrong song, undone, re-armed — the whole testimony survives", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start(); // the only person, testimony running
+    await sleep(150); // the testimony itself
+    baptismTimerService.startBaptisms(); // armed on the WRONG song — folds the person
+    baptismTimerService.undo(); // back to the testimony section
+    await sleep(40); // the gap before the right song goes live
+    baptismTimerService.startBaptisms(); // right song — arm again
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 1, "sanity: still one person (fix round 3's guard)");
+    assert.ok(
+      finished.people[0]!.testimonyMs >= 150,
+      `the whole testimony survives the undo — got ${finished.people[0]!.testimonyMs}ms, ` +
+        "which means the resumed segment restarted at zero and kept only the gap after the undo",
+    );
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "baptisms-armed", "undo", "baptisms-armed", "finish"]);
+    const armedRows = c.filter("baptisms-armed");
+    assert.equal(
+      Number(armedRows[1]![c.idx("segmentMs")]),
+      Math.round(finished.people[0]!.testimonyMs),
+      "the second arming row carries the full testimony, the same value the session kept",
+    );
+    assert.ok(
+      Number(armedRows[1]![c.idx("segmentMs")]) > Number(armedRows[0]![c.idx("segmentMs")]),
+      "the re-arm banks MORE than the first arm did — it resumed, it did not restart",
+    );
+  });
+
+  it("grouped/testimony: next() pressed a beat early, undone — the testimony resumes where it was", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start(); // person 1's testimony
+    await sleep(150);
+    baptismTimerService.next(); // mis-tap: person 1 banked, person 2's testimony starts
+    await sleep(20);
+    const undone = baptismTimerService.undo(); // back to person 1, still speaking
+    assert.equal(undone.people.length, 0, "person 1 is popped back into the in-progress testimony");
+    assert.equal(undone.personNumber, 1);
+
+    await sleep(40); // person 1 finishes what they were saying
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 1);
+    assert.ok(
+      finished.people[0]!.testimonyMs >= 150,
+      `person 1's testimony resumed from what it had banked — got ${finished.people[0]!.testimonyMs}ms, ` +
+        "which means the undo restarted their clock at zero",
+    );
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "testimony-end", "undo", "testimony-end", "finish"]);
+    const testimonyEndRows = c.filter("testimony-end");
+    assert.equal(
+      Number(testimonyEndRows[1]![c.idx("segmentMs")]),
+      Math.round(finished.people[0]!.testimonyMs),
+      "the row written after the undo carries the resumed total, not just the tail",
+    );
+    assert.ok(
+      Number(testimonyEndRows[1]![c.idx("segmentMs")]) > Number(testimonyEndRows[0]![c.idx("segmentMs")]),
+      "the resumed testimony is LONGER than the one the mis-tap cut short",
+    );
+  });
+});
+
+// F2: pause() and resume() were the only two of the sixteen emitRaw call sites
+// that could be deleted with the whole suite green. Nothing drove a pause with
+// a service OPEN — the one existing test that pauses runs with no service at
+// all (it is measuring the "no service open" warning), so its rows never reach
+// an archive anyone reads. That is the vacuous-guard shape this repo has
+// shipped thirteen times, applied to the commit message's own claim that
+// "every baptism timer action lands in the raw layer".
+describe("pausing and resuming land in the raw layer", () => {
+  it("writes a pause row carrying the banked accumulator, then a resume row", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start(); // person 1's testimony
+    await sleep(30);
+    const paused = baptismTimerService.pause();
+    const banked = paused.segmentAccumMs ?? 0;
+    assert.ok(banked > 0, "sanity: pause() banked some real elapsed time");
+    assert.equal(paused.segmentStartedAt, null, "sanity: the clock is genuinely stopped");
+
+    await sleep(20); // wall time that must NOT be banked
+    const resumed = baptismTimerService.resume();
+    assert.equal(resumed.segmentAccumMs, banked, "sanity: resume() counts on from what pause() banked");
+
+    await sleep(20);
+    baptismTimerService.finish();
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "pause", "resume", "testimony-end", "finish"]);
+    assert.equal(
+      Number(c.filter("pause")[0]![c.idx("segmentMs")]),
+      Math.round(banked),
+      "the pause row carries what the pause actually banked, not 0",
+    );
+    assert.equal(
+      Number(c.filter("resume")[0]![c.idx("segmentMs")]),
+      Math.round(banked),
+      "the resume row carries the same banked total it resumed from",
+    );
   });
 });

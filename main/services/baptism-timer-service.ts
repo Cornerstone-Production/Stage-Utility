@@ -99,11 +99,16 @@ class BaptismTimerService {
    * each leave `armed: true` sitting on top of a running clock, or on a
    * session that had already finished.
    *
-   * `accumMs` defaults to 0 — a genuinely new segment. resume() is the one
-   * caller that passes the banked amount instead, since resuming counts ON
-   * from what was banked rather than restarting at zero.
+   * `accumMs` is REQUIRED, deliberately — it used to default to 0, and that
+   * default has been the defect three separate times: resume() dropping its
+   * one argument came back reading the length of the prayer it was paused
+   * through, and both undo() branches that pop a person off `people` restarted
+   * their resumed testimony at zero, discarding the minutes already banked in
+   * the popped entry. A caller starting a genuinely new segment says so with
+   * `startSegment(0)`; a caller resuming one passes what was banked. Omitting
+   * it is now a type error rather than a silent zero.
    */
-  private startSegment(accumMs = 0): Pick<BaptismState, "armed" | "segmentStartedAt" | "segmentAccumMs"> {
+  private startSegment(accumMs: number): Pick<BaptismState, "armed" | "segmentStartedAt" | "segmentAccumMs"> {
     return { armed: false, segmentStartedAt: new Date().toISOString(), segmentAccumMs: accumMs };
   }
 
@@ -280,7 +285,7 @@ class BaptismTimerService {
       ...idleState(this.state.mode),
       phase: "testimony",
       personNumber: 1,
-      ...this.startSegment(),
+      ...this.startSegment(0),
       sessionStartedAt: now,
       serviceTitle: st.planTitle ?? null,
       serviceTypeId: st.serviceTypeId ?? null,
@@ -306,7 +311,7 @@ class BaptismTimerService {
   /** PER-PERSON: testimony → baptism for the current person. */
   baptized(): BaptismState {
     if (this.state.mode !== "per-person" || this.state.phase !== "testimony") return this.state;
-    this.state = { ...this.state, phase: "baptism", pendingTestimonyMs: this.elapsedMs(), ...this.startSegment() };
+    this.state = { ...this.state, phase: "baptism", pendingTestimonyMs: this.elapsedMs(), ...this.startSegment(0) };
     this.emitRaw("testimony-end", this.state.pendingTestimonyMs ?? 0);
     return this.commit();
   }
@@ -343,7 +348,7 @@ class BaptismTimerService {
     if (this.state.phase === "idle") return this.start();
     if (this.state.armed) {
       // "First person in": begin person 1 without banking the armed stretch.
-      this.state = { ...this.state, ...this.startSegment() };
+      this.state = { ...this.state, ...this.startSegment(0) };
       this.emitRaw("baptisms-start", 0);
       return this.commit();
     }
@@ -367,7 +372,7 @@ class BaptismTimerService {
       // Emitted BEFORE personNumber advances, so the row names the person who was
       // just baptized rather than the one about to start their testimony.
       this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
-      this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, ...this.startSegment() };
+      this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, ...this.startSegment(0) };
       return this.commit();
     }
     // grouped
@@ -376,7 +381,7 @@ class BaptismTimerService {
       // Same reasoning as above: emit against the person whose testimony just
       // ended, before personNumber moves on to the next one.
       this.emitRaw("testimony-end", person.testimonyMs);
-      this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment() };
+      this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment(0) };
       return this.commit();
     }
     if (this.state.phase === "baptism") {
@@ -415,7 +420,7 @@ class BaptismTimerService {
         );
       }
       if (this.state.baptismIndex + 1 < people.length) {
-        this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment() };
+        this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment(0) };
         return this.commit();
       }
       // last person baptized → close the session.
@@ -500,38 +505,48 @@ class BaptismTimerService {
     const s = this.state;
     if (s.mode === "per-person") {
       if (s.phase === "baptism") {
-        this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment() };
+        this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment(0) };
       } else if (s.phase === "testimony" && s.people.length > 0) {
         const people = [...s.people];
         const last = people.pop()!;
-        this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, ...this.startSegment() };
+        this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0) };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const people = [...s.people];
         const last = people.pop()!;
-        this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(), finishedAt: null };
+        this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0), finishedAt: null };
       } else return s;
     } else {
       // grouped
       if (s.phase === "testimony" && s.people.length > 0) {
+        // Resume the popped person's testimony from the time it had already
+        // banked, NOT from zero: next() was pressed a beat early, and the
+        // minutes they had already spoken live nowhere but this entry. Same
+        // shape as the baptismIndex === 0 branch below.
         const people = [...s.people];
-        people.pop();
-        this.state = { ...s, people, personNumber: Math.max(1, s.personNumber - 1), ...this.startSegment() };
+        const last = people.pop()!;
+        this.state = { ...s, people, personNumber: Math.max(1, s.personNumber - 1), ...this.startSegment(last.testimonyMs) };
       } else if (s.phase === "baptism" && s.baptismIndex > 0) {
         const idx = s.baptismIndex - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, people, baptismIndex: idx, ...this.startSegment() };
+        this.state = { ...s, people, baptismIndex: idx, ...this.startSegment(0) };
       } else if (s.phase === "baptism" && s.baptismIndex === 0) {
         // Back to the testimony section — pop the person startBaptisms()
         // folded in when it armed, resuming them as the in-progress testimony.
         // Left unpopped, a later re-arm folds them AGAIN beside the leftover
         // completed entry: a one-person service finishes as two, silently.
+        //
+        // Resumed from the folded entry's OWN banked testimonyMs, not zero —
+        // arming on the wrong song, undoing, and re-arming when the right song
+        // goes live is an ordinary Sunday sequence, and restarting at zero
+        // records only the seconds between the two arms while discarding the
+        // whole testimony that ran before the first one.
         const people = [...s.people];
-        people.pop();
-        this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment() };
+        const folded = people.pop()!;
+        this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(folded.testimonyMs) };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const idx = s.people.length - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(), finishedAt: null };
+        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(0), finishedAt: null };
       } else return s;
     }
     this.emitRaw("undo", 0, `from ${s.phase}`);
