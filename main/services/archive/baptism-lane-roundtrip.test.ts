@@ -18,12 +18,24 @@
 // fails here. That is what ties the lane to the data.
 //
 // THE TOLERANCE. Spans are drawn from each row's `at`, which recordBaptism stamps
-// a moment after the timer read its own clock for the same press — see the
-// header of rebuild-baptism.ts, which measured it at 0–1ms. So each span can be
-// off by about a millisecond at each end, and a person's sum by that much per
-// piece. TOLERANCE_MS allows 4ms per piece; every stretch these scenarios need
-// to tell apart runs 25ms or more, so a missing or extra piece cannot hide inside
-// it.
+// a moment after the timer read its own clock for the same press. Normally that
+// moment is 0–1ms (see the header of rebuild-baptism.ts), but anything that stalls
+// the process between the two reads — a GC pause on a loaded machine — moves a
+// boundary by the length of the stall. A flat 4ms failed 1 run in 48 under heavy
+// load for exactly that reason.
+//
+// So the allowance is proportional: a fifth of the time being compared, never
+// under 4ms a piece (toleranceMs below). What the invariant exists to catch is a
+// lane that drops or duplicates a whole stretch, not a boundary a few
+// milliseconds late. Every stretch these scenarios need to tell apart runs
+// STRETCH_MS or LONG_MS, and no person has more than two pieces of one kind, so a
+// dropped or extra stretch is at least twice the allowance of any total it could
+// hide in.
+//
+// PR 3's Task 16 threads the timer's own stamp through emitRaw, so a row will
+// carry exactly the instant the timer used. Tighten this back to a flat
+// millisecond or two then; the proportional allowance is standing in for that
+// fix, not replacing it.
 //
 // Shares its harness with rebuild-baptism-roundtrip.test.ts
 // (baptism-roundtrip-harness.ts): a fresh serviceKey per test, because the
@@ -51,7 +63,17 @@ const { freshCtx, openService, sleep, storedSessions } = await import("./baptism
 
 type Ctx = { serviceKey: string; serviceDate: string };
 
-const TOLERANCE_MS = 4;
+/** One counted stretch: a testimony, a baptism, or a piece of either. */
+const STRETCH_MS = 60;
+/** A stretch that has to read as longer than STRETCH_MS — the attempt an undo
+ *  re-times, against the one it threw away. */
+const LONG_MS = 100;
+
+/** How far a sum of `pieces` spans may drift from `comparedMs` before it counts as
+ *  a different amount of time. See the header. */
+function toleranceMs(comparedMs: number, pieces = 1): number {
+  return Math.max(4 * pieces, 0.2 * comparedMs);
+}
 
 const ms = (s: BaptismSpan) => Date.parse(s.endedAt ?? "") - Date.parse(s.startedAt);
 
@@ -104,7 +126,7 @@ function assertSpansArePeople(spans: BaptismSpan[], people: BaptismPerson[], why
       }
       const sum = pieces.reduce((t, s) => t + ms(s), 0);
       assert.ok(
-        pieces.length > 0 && Math.abs(sum - recorded) <= TOLERANCE_MS * pieces.length,
+        pieces.length > 0 && Math.abs(sum - recorded) <= toleranceMs(recorded, pieces.length),
         `${why}: person ${person}'s ${kind} spans sum to ${sum}ms over ${pieces.length} piece(s); the store recorded ${recorded}ms`,
       );
     }
@@ -146,38 +168,38 @@ describe("a real grouped session's lane is the time the store recorded", () => {
   it("run to its natural end, the last person auto-finishing", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // person 1's testimony ends, person 2's begins
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms(); // person 2 folds in, the section arms
-    await sleep(25); // the band's intro: nobody's clock
+    await sleep(STRETCH_MS); // the band's intro: nobody's clock
     timer.advance(); // first person in
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // person 1 out, person 2 in
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // person 2 out — auto-finishes
 
     const spans = await assertLaneMatchesStore(ctx, "grouped, natural end");
     assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
     const intro = Date.parse(spans[2]!.startedAt) - Date.parse(spans[1]!.endedAt!);
-    assert.ok(intro >= 20, `the armed stretch is a gap, not anybody's (got ${intro}ms)`);
+    assert.ok(intro >= STRETCH_MS / 2, `the armed stretch is a gap, not anybody's (got ${intro}ms)`);
   });
 
   it("with a pause mid-testimony, closed by Last person out", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.pause();
-    await sleep(30); // a prayer: not person 1's testimony
+    await sleep(STRETCH_MS); // a prayer: not person 1's testimony
     timer.resume();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish(); // the panel's "Last person out" is finish(), not next()
 
     const spans = await assertLaneMatchesStore(ctx, "grouped, pause mid-testimony");
@@ -187,12 +209,12 @@ describe("a real grouped session's lane is the time the store recorded", () => {
   it("finished mid-baptism, the second person never baptized", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "grouped, finished mid-baptism");
   });
@@ -200,9 +222,9 @@ describe("a real grouped session's lane is the time the store recorded", () => {
   it("finished during the testimonies", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "grouped, finished in the testimonies");
   });
@@ -210,11 +232,11 @@ describe("a real grouped session's lane is the time the store recorded", () => {
   it("finished while armed, before anyone stepped in", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "grouped, finished while armed");
     assert.deepEqual(shape(spans), ["testimony 1", "testimony 2"]);
@@ -223,16 +245,16 @@ describe("a real grouped session's lane is the time the store recorded", () => {
   it("paused during a baptism, and a Pause pressed while armed does nothing", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.pause(); // armed: nothing to bank, no row
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.pause();
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.resume();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "grouped, paused baptism");
     assert.deepEqual(shape(spans), ["testimony 1", "baptism 1", "baptism 1"]);
@@ -243,13 +265,13 @@ describe("a real per-person session's lane is the time the store recorded", () =
   it("two people, closed by finish(), its only terminator", async () => {
     const ctx = begin("per-person");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // person 1 done, person 2's testimony begins
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "per-person, two people");
     assert.deepEqual(shape(spans), ["testimony 1", "baptism 1", "testimony 2", "baptism 2"]);
@@ -258,17 +280,17 @@ describe("a real per-person session's lane is the time the store recorded", () =
   it("paused in a testimony and again in a baptism", async () => {
     const ctx = begin("per-person");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.pause();
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.resume();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.pause();
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.resume();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "per-person, two pauses");
   });
@@ -276,7 +298,7 @@ describe("a real per-person session's lane is the time the store recorded", () =
   it("finished in the testimony, before any baptism", async () => {
     const ctx = begin("per-person");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "per-person, finished in the testimony");
     assert.deepEqual(shape(spans), ["testimony 1"]);
@@ -287,38 +309,44 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("an undo that re-baptizes the same person keeps only the second attempt", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // person 1 out — a beat early
-    await sleep(25); // person 2's clock runs, and is thrown away
+    await sleep(STRETCH_MS); // person 2's clock runs, and is thrown away
+    const undoneAt = Date.now();
     timer.undo(); // back to person 1, timed afresh
-    await sleep(40);
+    await sleep(LONG_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // auto-finishes
 
     const spans = await assertLaneMatchesStore(ctx, "grouped, undo and re-baptize");
     const first = spans.filter((s) => s.kind === "baptism" && s.person === 1);
     assert.equal(first.length, 1, "the undone attempt is a gap, not a second piece of person 1's baptism");
-    assert.ok(ms(first[0]!) >= 40, `person 1's baptism is the second attempt (got ${ms(first[0]!)}ms)`);
+    // Placed, not measured: a stretch's length moves with timer overshoot under
+    // load, where it starts does not. The undo row is stamped after undoneAt.
+    assert.ok(
+      Date.parse(first[0]!.startedAt) >= undoneAt,
+      `person 1's baptism is the attempt timed from the undo, not the one before it (started ${first[0]!.startedAt})`,
+    );
   });
 
   it("arm, undo, re-arm: one person, the armed stretch a gap", async () => {
     const ctx = begin("grouped");
     timer.start(); // the only person
-    await sleep(40);
+    await sleep(STRETCH_MS);
     timer.startBaptisms(); // wrong song
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.undo(); // back into the testimony, resumed from what it banked
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms(); // right song
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
 
     const spans = await assertLaneMatchesStore(ctx, "grouped, arm/undo/re-arm");
@@ -328,16 +356,16 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("a testimony next() closed a beat early, taken back", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // early
-    await sleep(25); // person 2's testimony, thrown away
+    await sleep(STRETCH_MS); // person 2's testimony, thrown away
     timer.undo();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "grouped, testimony undo");
   });
@@ -345,22 +373,22 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("correcting the second of three people leaves the first one's baptism alone", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // index 0 baptized
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // index 1 baptized — early
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.undo(); // back to index 1, NOT index 0
-    await sleep(40);
+    await sleep(LONG_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // index 2, auto-finishes
     await assertLaneMatchesStore(ctx, "grouped, undo at index 1 of three");
   });
@@ -368,19 +396,19 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("the arming undone after the first person had stepped in", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25); // person 1's baptism, thrown away with the arming
+    await sleep(STRETCH_MS); // person 1's baptism, thrown away with the arming
     timer.undo(); // person 2's testimony resumes
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "grouped, arming undone mid-baptism");
   });
@@ -388,13 +416,13 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("grouped finish, undo, finish again: the last baptism re-timed", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     timer.undo(); // un-finish
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "grouped, finish/undo/finish");
   });
@@ -402,13 +430,13 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("per-person Baptized pressed early, undone, then pressed again", async () => {
     const ctx = begin("per-person");
     timer.start();
-    await sleep(40);
+    await sleep(STRETCH_MS);
     timer.baptized(); // early
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.undo(); // the testimony resumes
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "per-person, Baptized undone");
     assert.deepEqual(shape(spans), ["testimony 1", "testimony 1", "baptism 1"]);
@@ -417,17 +445,17 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("per-person Next pressed early, undone back into the baptism", async () => {
     const ctx = begin("per-person");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // early
-    await sleep(25); // person 2's testimony, thrown away
+    await sleep(STRETCH_MS); // person 2's testimony, thrown away
     timer.undo(); // person 1's baptism, timed afresh
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "per-person, Next undone");
   });
@@ -435,12 +463,12 @@ describe("a real session containing an undo: the lane is still the time the stor
   it("per-person finish, undo, finish again", async () => {
     const ctx = begin("per-person");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     timer.undo();
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "per-person, finish/undo/finish");
   });
@@ -450,15 +478,15 @@ describe("session boundaries on a real lane", () => {
   it("a session reset part-way leaves nothing; the session after it is drawn", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.reset(); // nothing logged: that time is in no session
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "reset, then a second session");
   });
@@ -466,16 +494,16 @@ describe("session boundaries on a real lane", () => {
   it("two sessions in one service each match their own stored session", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.setMode("per-person");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.baptized();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "two sessions", 2);
   });
@@ -485,13 +513,13 @@ describe("the clock a direct next() starts while armed, with no row of its own",
   it("is placed from the person-complete that ends it", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next(); // POST /api/baptism/next while armed: person 1 skipped, person 2's clock starts, no row
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "direct next() while armed");
     assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 2"]);
@@ -500,16 +528,16 @@ describe("the clock a direct next() starts while armed, with no row of its own",
   it("is placed from the pause that banks it", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.next(); // silent
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.pause();
-    await sleep(30);
+    await sleep(STRETCH_MS);
     timer.resume();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "direct next() while armed, then a pause");
   });
@@ -519,28 +547,28 @@ describe("a real session still running", () => {
   it("ends with the running clock as the last span, open, starting where the timer's segment does", async () => {
     const ctx = begin("grouped");
     timer.start();
-    await sleep(25);
+    await sleep(STRETCH_MS);
     timer.next();
-    await sleep(25);
+    await sleep(STRETCH_MS);
 
     const running = await laneOf(ctx);
     const state = timer.getState();
     assertOneClockAtATime(running, "running");
     assert.deepEqual(shape(running), ["testimony 1", "testimony 2"]);
     assert.equal(running[1]!.endedAt, null, "person 2's testimony is still running");
+    // A boundary, not a length: held to the allowance of the stretch a client
+    // grows from it.
     assert.ok(
-      Math.abs(Date.parse(running[1]!.startedAt) - Date.parse(state.segmentStartedAt!)) <= TOLERANCE_MS,
+      Math.abs(Date.parse(running[1]!.startedAt) - Date.parse(state.segmentStartedAt!)) <= toleranceMs(STRETCH_MS),
       "the open span starts where the timer's running segment does, so a client can grow it from segmentStartedAt",
     );
     assertSpansArePeople(running.slice(0, 1), state.people, "running");
 
     timer.pause();
     const paused = await laneOf(ctx);
+    const banked = timer.getState().segmentAccumMs ?? 0;
     assert.ok(paused.every((s) => s.endedAt !== null), "paused, nothing runs");
-    assert.ok(
-      Math.abs(ms(paused[1]!) - (timer.getState().segmentAccumMs ?? 0)) <= TOLERANCE_MS,
-      "the paused span is what the timer banked",
-    );
+    assert.ok(Math.abs(ms(paused[1]!) - banked) <= toleranceMs(banked), "the paused span is what the timer banked");
     timer.reset();
   });
 });
