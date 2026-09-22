@@ -4,7 +4,7 @@ import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon, PauseIcon, PlayIcon } from "lucide-react";
 
-import { invoke } from "../lib/api";
+import { invoke, type IpcChannel } from "../lib/api";
 import { Button, confirm, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
@@ -52,7 +52,7 @@ export function BaptismOperator() {
   // and the same segment reads differently here and on the display object.
   const now = useServerNow(250, !!segStart);
 
-  async function act(channel: string, after?: () => void, payload?: Record<string, unknown>) {
+  async function act(channel: IpcChannel, after?: () => void, payload?: Record<string, unknown>) {
     setBusy(true);
     try {
       await invoke(channel, payload);
@@ -82,7 +82,11 @@ export function BaptismOperator() {
 
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
-  let primaryChannel: string;
+  // Typed against the full IpcChannel union, not `string` — an unwired or
+  // misspelled channel assigned below fails `tsc`, rather than depending on
+  // the text scans in api-channels.test.ts (which cannot see a channel behind
+  // a variable at all; see IpcChannel's own doc comment).
+  let primaryChannel: IpcChannel;
   if (state.armed) {
     // Grouped only: the song is live but nobody's clock has started. This press is
     // exactly what advance() exists for — starting person 1 without banking the
