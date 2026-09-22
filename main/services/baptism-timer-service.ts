@@ -292,7 +292,14 @@ class BaptismTimerService {
       // overrunning service rolls PCO's current service time forward.
       serviceKey: currentServiceKey(),
     };
-    this.emitRaw("start", 0, this.state.autoStartedFrom ? `auto: ${this.state.autoStartedFrom}` : "manual");
+    // No manual/auto provenance here: at this point in start(), this.state.
+    // autoStartedFrom is always whatever idleState() left it as (unset) —
+    // onLiveTick sets it in a SEPARATE assignment + commit() only after start()
+    // has already returned, so reading it here would read "manual" for both a
+    // button press and a PCO auto-start, every time. That is worse than no
+    // value: the whole point of this row is to report only what happened. The
+    // `[baptism] auto-start:` log line already records which one it was.
+    this.emitRaw("start", 0, "");
     return this.commit();
   }
 
@@ -319,7 +326,11 @@ class BaptismTimerService {
       segmentStartedAt: null,
       segmentAccumMs: 0,
     };
-    this.emitRaw("baptisms-armed", 0);
+    // The last person's testimony is folded into `people` here rather than
+    // getting its own `next()` press — carry its testimonyMs as this row's
+    // segmentMs, or it survives nowhere but the free-text detail of whatever
+    // row eventually baptizes them (and nowhere at all if they never are).
+    this.emitRaw("baptisms-armed", people[people.length - 1]!.testimonyMs);
     return this.commit();
   }
 
@@ -374,13 +385,17 @@ class BaptismTimerService {
       // startSegment() clearing it is load-bearing, not just tidy.
       const people = this.state.people.map((p, i) => (i === this.state.baptismIndex ? { ...p, baptizeMs: this.elapsedMs() } : p));
       const justBaptized = people[this.state.baptismIndex]!;
-      // Emitted against THIS state — mode/phase/personNumber/baptismIndex all
-      // still name the person just baptized. Emitting after baptismIndex
-      // advances (or after finalize() resets the whole session to idle, for the
-      // last person) would point the row at the wrong person, or at nobody: the
-      // final person in a grouped session auto-finishes straight into
-      // finalize() rather than reaching a `return this.commit()` of its own, so
-      // this call is the only chance to record their completion at all.
+      // Emitted against THIS state — mode/phase/baptismIndex still name the
+      // person just baptized (personNumber does NOT: in grouped mode it is the
+      // testimony counter, frozen at the section total once armed, so a
+      // 2-person grouped session stamps BOTH person-complete rows with
+      // personNumber=2 — a replay must key grouped rows on baptismIndex, never
+      // personNumber). Emitting after baptismIndex advances (or after
+      // finalize() resets the whole session to idle, for the last person)
+      // would point the row at the wrong person, or at nobody: the final
+      // person in a grouped session auto-finishes straight into finalize()
+      // rather than reaching a `return this.commit()` of its own, so this call
+      // is the only chance to record their completion at all.
       this.emitRaw(
         "person-complete",
         justBaptized.baptizeMs,
@@ -396,17 +411,39 @@ class BaptismTimerService {
     return this.state;
   }
 
-  /** Close the in-progress person/segment, freeze the session, and log it. */
+  /** Close the in-progress person/segment, freeze the session, and log it.
+   *  This is a SECOND delegation to finalize() beside next()'s grouped-baptism
+   *  auto-finish, and the one that terminates every per-person session — next()
+   *  in per-person mode never auto-finishes, it always starts another testimony
+   *  — so a Finish press is the ONLY way a per-person session ends. Each branch
+   *  below emits against the person/segment it just closed, using the same
+   *  "capture locally, emit before finalize() resets anything" shape next()
+   *  uses, before delegating. */
   finish(): BaptismState {
     if (this.state.phase === "idle") return this.state;
     let people = [...this.state.people];
     if (this.state.mode === "per-person") {
-      if (this.state.phase === "baptism") people.push({ testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() });
-      else if (this.state.phase === "testimony") people.push({ testimonyMs: this.elapsedMs(), baptizeMs: 0 });
+      if (this.state.phase === "baptism") {
+        const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
+        people.push(person);
+        this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
+      } else if (this.state.phase === "testimony") {
+        const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
+        people.push(person);
+        this.emitRaw("testimony-end", person.testimonyMs);
+      }
     } else if (this.state.phase === "testimony") {
-      people.push({ testimonyMs: this.elapsedMs(), baptizeMs: 0 });
+      const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
+      people.push(person);
+      this.emitRaw("testimony-end", person.testimonyMs);
     } else if (this.state.phase === "baptism") {
-      people = people.map((p, i) => (i === this.state.baptismIndex ? { ...p, baptizeMs: this.elapsedMs() } : p));
+      const justBaptized: BaptismPerson = { ...people[this.state.baptismIndex]!, baptizeMs: this.elapsedMs() };
+      people = people.map((p, i) => (i === this.state.baptismIndex ? justBaptized : p));
+      this.emitRaw(
+        "person-complete",
+        justBaptized.baptizeMs,
+        `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
+      );
     }
     return this.finalize(people);
   }
