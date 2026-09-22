@@ -131,7 +131,7 @@ than centring a fixed column:
 
 # Baptisms
 
-An operator page at `/baptism`, also available as a Settings tab. It opens in
+An operator page at `/baptism`. It opens in
 **grouped** mode — every testimony first, then everyone baptized in turn across
 the songs that follow — because that is how a baptism service runs here: the
 testimonies happen inside one plan item (typically "Baptism Stories"), then
