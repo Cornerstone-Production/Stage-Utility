@@ -11,7 +11,7 @@
 // resumes the running clock — segmentStartedAt is an absolute timestamp). Finished
 // sessions are logged for review. Running elapsed is derived client-side.
 
-import type { BaptismMode, BaptismPerson, BaptismSession, BaptismState } from "../types/stage.js";
+import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSession, BaptismState } from "../types/stage.js";
 import { settingsStore } from "./settings-store.js";
 import { baptismTriggersStore } from "./baptism-triggers-store.js";
 import { autoStartAction } from "./baptism-autostart.js";
@@ -20,6 +20,8 @@ import { currentServiceKey } from "./service-key.js";
 import { broadcast } from "./broadcaster.js";
 import { baptismStore } from "./baptism-store.js";
 import { stageController } from "./stage-controller.js";
+import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+import { sampleArchive } from "./archive/sample-archive.js";
 
 function idleState(mode: BaptismMode): BaptismState {
   return {
@@ -73,6 +75,16 @@ class BaptismTimerService {
    *  per item rather than once per ~1.5s poll for as long as PCO sits on it. */
   private lastWarnedItemId: string | null = null;
 
+  /** The plan item live right now, held from the last onLiveTick so a button
+   *  press — which arrives nowhere near a live tick — can still say which song
+   *  the room was on when the raw layer records the action. */
+  private liveItem: { id: string; title: string } | null = null;
+
+  /** Whether "no service open" has already been logged for the session in
+   *  progress, so a producer running the whole rehearsal off-Sunday sees the
+   *  line once rather than once per press. Reset in start(). */
+  private warnedNoService = false;
+
   private elapsedMs(): number {
     return segmentElapsedMs(this.state);
   }
@@ -105,6 +117,8 @@ class BaptismTimerService {
    * not start itself out of nowhere and can reset if it was wrong.
    */
   async onLiveTick(live: PcoLiveDTO): Promise<void> {
+    this.liveItem =
+      live.mode === "item" && live.currentItemId ? { id: live.currentItemId, title: live.label ?? "" } : null;
     if (live.mode !== "item" || !live.currentItemId) return;
     if (live.currentItemId === this.lastAutoItemId) return; // only on a change
 
@@ -169,6 +183,7 @@ class BaptismTimerService {
     if (this.state.phase === "idle" || !this.state.segmentStartedAt) return this.state;
     if (this.state.armed) return this.state; // nothing is running to bank
     this.state = { ...this.state, segmentAccumMs: this.elapsedMs(), segmentStartedAt: null };
+    this.emitRaw("pause", this.state.segmentAccumMs ?? 0);
     return this.commit();
   }
 
@@ -184,6 +199,7 @@ class BaptismTimerService {
     // here silently discarded everything before the pause, so a testimony paused
     // through the prayer came back reading the length of the prayer.
     this.state = { ...this.state, ...this.startSegment(this.state.segmentAccumMs ?? 0) };
+    this.emitRaw("resume", this.state.segmentAccumMs ?? 0);
     return this.commit();
   }
 
@@ -200,6 +216,51 @@ class BaptismTimerService {
     return this.state;
   }
 
+  /**
+   * Append this action to the raw layer. Gated on an open service, like every
+   * other raw source — no key means no row, which is what keeps a Tuesday
+   * afternoon out of the archive.
+   *
+   * `serviceKey` and `serviceDate` are read off the SAME record
+   * (serviceTimelineRecorder.getCurrent()), never split out of a key string —
+   * one read of one record cannot have its key and date disagree. "Open" mirrors
+   * currentServiceKey()'s own meaning: a record exists AND `endedAt == null`.
+   *
+   * Never throws and never blocks: this runs from the live tick and from
+   * operator presses during a service, and taking the service down to record a
+   * row is worse than losing one. This is a deliberate exception to this repo's
+   * catch-rethrows-or-returns rule, matching the convention sampleArchive's own
+   * record methods already document (see recordBaptism).
+   */
+  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = ""): void {
+    try {
+      const record = serviceTimelineRecorder.getCurrent();
+      if (!record || record.endedAt != null) {
+        if (!this.warnedNoService) {
+          this.warnedNoService = true;
+          console.warn("[baptism] raw: no service open, session not archived");
+        }
+        return;
+      }
+      sampleArchive.recordBaptism(
+        { serviceKey: record.serviceKey, serviceDate: record.serviceDate },
+        {
+          event,
+          mode: this.state.mode,
+          phase: this.state.phase,
+          personNumber: this.state.personNumber,
+          baptismIndex: this.state.baptismIndex,
+          segmentMs,
+          itemId: this.liveItem?.id ?? null,
+          item: this.liveItem?.title ?? null,
+          detail,
+        },
+      );
+    } catch (err) {
+      console.error("[baptism] raw: emit failed:", event, err);
+    }
+  }
+
   /** Switch workflow — only allowed while idle (preserves nothing else). */
   setMode(mode: BaptismMode): BaptismState {
     if (mode !== "per-person" && mode !== "grouped") return this.state;
@@ -212,6 +273,7 @@ class BaptismTimerService {
    *  service/plan so the session can be named + cross-linked to Service History. */
   start(): BaptismState {
     if (this.state.phase !== "idle") return this.state;
+    this.warnedNoService = false; // a new session gets its own one-time "no service" warning
     const now = new Date().toISOString();
     const st = stageController.getState();
     this.state = {
@@ -230,6 +292,7 @@ class BaptismTimerService {
       // overrunning service rolls PCO's current service time forward.
       serviceKey: currentServiceKey(),
     };
+    this.emitRaw("start", 0, this.state.autoStartedFrom ? `auto: ${this.state.autoStartedFrom}` : "manual");
     return this.commit();
   }
 
@@ -237,6 +300,7 @@ class BaptismTimerService {
   baptized(): BaptismState {
     if (this.state.mode !== "per-person" || this.state.phase !== "testimony") return this.state;
     this.state = { ...this.state, phase: "baptism", pendingTestimonyMs: this.elapsedMs(), ...this.startSegment() };
+    this.emitRaw("testimony-end", this.state.pendingTestimonyMs ?? 0);
     return this.commit();
   }
 
@@ -255,6 +319,7 @@ class BaptismTimerService {
       segmentStartedAt: null,
       segmentAccumMs: 0,
     };
+    this.emitRaw("baptisms-armed", 0);
     return this.commit();
   }
 
@@ -268,6 +333,7 @@ class BaptismTimerService {
     if (this.state.armed) {
       // "First person in": begin person 1 without banking the armed stretch.
       this.state = { ...this.state, ...this.startSegment() };
+      this.emitRaw("baptisms-start", 0);
       return this.commit();
     }
     if (this.state.phase === "testimony") {
@@ -287,12 +353,18 @@ class BaptismTimerService {
     if (this.state.mode === "per-person") {
       if (this.state.phase !== "baptism") return this.state;
       const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
+      // Emitted BEFORE personNumber advances, so the row names the person who was
+      // just baptized rather than the one about to start their testimony.
+      this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
       this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, ...this.startSegment() };
       return this.commit();
     }
     // grouped
     if (this.state.phase === "testimony") {
       const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
+      // Same reasoning as above: emit against the person whose testimony just
+      // ended, before personNumber moves on to the next one.
+      this.emitRaw("testimony-end", person.testimonyMs);
       this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment() };
       return this.commit();
     }
@@ -301,6 +373,19 @@ class BaptismTimerService {
       // reachable directly (bypassing advance()) while the phase is armed — so
       // startSegment() clearing it is load-bearing, not just tidy.
       const people = this.state.people.map((p, i) => (i === this.state.baptismIndex ? { ...p, baptizeMs: this.elapsedMs() } : p));
+      const justBaptized = people[this.state.baptismIndex]!;
+      // Emitted against THIS state — mode/phase/personNumber/baptismIndex all
+      // still name the person just baptized. Emitting after baptismIndex
+      // advances (or after finalize() resets the whole session to idle, for the
+      // last person) would point the row at the wrong person, or at nobody: the
+      // final person in a grouped session auto-finishes straight into
+      // finalize() rather than reaching a `return this.commit()` of its own, so
+      // this call is the only chance to record their completion at all.
+      this.emitRaw(
+        "person-complete",
+        justBaptized.baptizeMs,
+        `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
+      );
       if (this.state.baptismIndex + 1 < people.length) {
         this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment() };
         return this.commit();
@@ -333,6 +418,7 @@ class BaptismTimerService {
     // to disk, and init() restored it — the panel checks `armed` before
     // `phase === "idle"`, so a finished session read as "Baptize person 1."
     this.state = { ...this.state, phase: "idle", armed: false, segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
+    this.emitRaw("finish", 0, `people=${people.length}`);
     if (people.length > 0 && this.state.sessionStartedAt) {
       void baptismStore.addSession({
         id: `bap-${Date.parse(this.state.sessionStartedAt)}`,
@@ -385,12 +471,14 @@ class BaptismTimerService {
         this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(), finishedAt: null };
       } else return s;
     }
+    this.emitRaw("undo", 0, `from ${s.phase}`);
     return this.commit();
   }
 
   /** Clear everything back to idle (keeps the chosen mode). */
   reset(): BaptismState {
     this.state = idleState(this.state.mode);
+    this.emitRaw("reset", 0);
     return this.commit();
   }
 }

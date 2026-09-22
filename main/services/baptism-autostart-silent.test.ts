@@ -68,10 +68,15 @@ describe("auto-start in per-person mode", () => {
     await baptismTriggersStore.set(PLAN_ID, { testimonyItemId: null, baptismItemId: "song-2" });
     baptismTimerService.start(); // phase: testimony, per-person
 
+    // Filtered to the auto-start "ignored" warning specifically: the raw
+    // archive's own "[baptism] raw: no service open" warning also goes through
+    // console.warn (no PCO service is stubbed open in this test), and the
+    // reset()+start() retry below legitimately re-fires that one — it is not
+    // what this test is about.
     const warnings: unknown[][] = [];
     const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => {
-      warnings.push(args);
+      if (typeof args[0] === "string" && args[0].startsWith("[baptism] auto-start:")) warnings.push(args);
     };
     try {
       const tick = () =>
