@@ -254,6 +254,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET \| POST | `/api/scores/favourites` | Read / replace the followed teams |
 | GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
+| GET | `/api/baptism/lane?serviceKey=<key>` | One service's session lane: each testimony and baptism in real time, from its raw rows |
 
 **The SPL series**
 
@@ -356,6 +357,16 @@ callers (automations, Companion) that should not have to know the current phase
 to drive the timer forward. `GET` and `POST /api/baptism/triggers` read
 and set which plan items start each phase, and
 `DELETE /api/baptism/sessions/:id` removes one saved session.
+
+`GET /api/baptism/lane?serviceKey=<key>` answers `{ spans }`, each
+`{ kind: "testimony"|"baptism", person, startedAt, endedAt }`, oldest first,
+derived from the service's `baptism.csv`. A span is one run of one clock: a pause
+splits a testimony in two, and the stretches between spans — the armed wait, a
+pause, a press that was undone — are time nobody was timed for. The last span's
+`endedAt` is `null` while its clock is still running. A session reset before it
+finished is not in the lane, because it was never recorded. `{ spans: [] }` for a
+service with no baptism archive; a `500` when the archive exists and cannot be
+read.
 
 **Updates, backup and the archive** — see
 [Updates and logs](../ops/updates-and-logs.md) and

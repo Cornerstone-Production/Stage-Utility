@@ -1222,10 +1222,16 @@ describe("baptismLaneSpans", () => {
   implementation (say, `resume` opening a span) and watch the invariant fail on the pause
   scenario. Restore.
 - [ ] **Step 5: The route.** `GET /api/baptism/lane?serviceKey=` resolves the service's
-  `serviceDate` from the timeline store (not by parsing the key — Ruling 1), calls
+  `serviceDate` from its timeline record (not by parsing the key — Ruling 1): the recorder's
+  live record first, because the recorder persists on a 4s debounce and a service opened
+  seconds ago is not in the store yet, then the timeline store. It calls
   `await sampleArchive.flush()` BEFORE reading so a push-triggered fetch cannot beat the row
-  to disk, then returns `{ spans }`. Add `baptism:lane` to `renderer/lib/api.ts` in the form of
-  its neighbours; the `IpcChannel` union derives from the switch, so `tsc` enforces it.
+  to disk — measured without it, every read made on the push came back a row short — then
+  returns `{ spans }`, or a 500 when an archive exists and cannot be read (readArchiveRows
+  answers null for that and for no file alike). Add `baptism:lane` to `renderer/lib/api.ts`
+  in the form of its neighbours, in BOTH places: the `IpcChannel` union is a hand-written
+  sorted list tied to the switch by the exhaustiveness check at `default:`, not derived from
+  it, so a case without a union entry fails `tsc` and the entry has to be added by hand.
 - [ ] **Step 6: Commit** — `feat: the baptism session lane derives from the raw rows`
 
 ## Task 10: History opens a named service from its URL

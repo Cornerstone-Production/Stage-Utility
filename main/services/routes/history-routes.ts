@@ -28,6 +28,11 @@ import {
 } from "../history-edit.js";
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 import { historyMilestonesStore } from "../history-milestones-store.js";
+import { sampleArchive } from "../archive/sample-archive.js";
+import { readBaptismRows } from "../archive/rebuild-baptism.js";
+import { baptismLaneSpans, type BaptismSpan } from "../archive/baptism-lane.js";
+import { rolledFiles } from "../archive/archive-rows.js";
+import { serviceDirPath } from "../archive/archive-paths.js";
 
 /**
  * Every service type id that has a SERVICE the Trends chart draws, for
@@ -54,6 +59,41 @@ async function recordedServiceTypeIds(): Promise<string[]> {
     if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
   }
   return [...ids];
+}
+
+/**
+ * One service's baptism lane, derived from its own `baptism.csv`.
+ *
+ * Flushed FIRST. emitRaw queues its append without awaiting it, and commit()
+ * broadcasts `baptism:state` in the same call — so the Baptisms tab, which
+ * refetches this on that push, would otherwise read the file a row short and
+ * draw the press it is reacting to as not having happened.
+ *
+ * The directory is named by key AND date, and the date is read off the
+ * service's timeline record, never parsed from the key: a key ends in a date
+ * only when Planning Center had no service-time id for the occurrence, and in
+ * that id otherwise. The record is what emitRaw took the date from when it
+ * wrote the rows. The live one first, because the recorder persists on a
+ * debounce and a service opened seconds ago is not in the store yet.
+ *
+ * `[]` when the service has no baptism archive. An archive that exists and
+ * cannot be read is a failure, not an empty lane — readArchiveRows answers null
+ * for both, so the files are looked for before believing it.
+ */
+async function baptismLaneFor(serviceKey: string): Promise<BaptismSpan[]> {
+  await sampleArchive.flush();
+  const live = serviceTimelineRecorder.getCurrent();
+  const record = live?.serviceKey === serviceKey ? live : await serviceTimelineStore.get(serviceKey);
+  if (!record) return [];
+  const rows = await readBaptismRows(serviceKey, record.serviceDate);
+  if (rows === null) {
+    const present = await rolledFiles(serviceDirPath(serviceKey, record.serviceDate), "baptism");
+    if (present.length > 0) {
+      throw new Error(`${present.length} baptism archive file(s) present for this service, and none could be read`);
+    }
+    return [];
+  }
+  return baptismLaneSpans(rows, serviceKey);
 }
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
@@ -279,6 +319,17 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     }
     if (method === "GET" && pathname === "/api/baptism/sessions") {
       json(res, await baptismTimerService.listSessions());
+      return;
+    }
+    // A service's session lane: each testimony and baptism as a span in real
+    // time, the gaps between them uncounted. See baptismLaneFor above.
+    if (method === "GET" && pathname === "/api/baptism/lane") {
+      const serviceKey = c.url.searchParams.get("serviceKey");
+      if (!serviceKey) {
+        error(res, "serviceKey query parameter required");
+        return;
+      }
+      json(res, { spans: await baptismLaneFor(serviceKey) });
       return;
     }
     // Which plan items start each phase, for one plan. Kept per plan because the

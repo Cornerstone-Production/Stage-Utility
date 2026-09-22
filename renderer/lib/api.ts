@@ -130,6 +130,7 @@ export type IpcChannel =
   | "baptism:finish"
   | "baptism:get"
   | "baptism:getTriggers"
+  | "baptism:lane"
   | "baptism:next"
   | "baptism:pause"
   | "baptism:reset"
@@ -583,6 +584,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":
       return apiFetch<T>("/api/baptism/sessions");
+    case "baptism:lane":
+      return apiFetch<T>(`/api/baptism/lane?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
     case "baptism:start":
       return post<T>("/api/baptism/start");
     case "baptism:baptized":

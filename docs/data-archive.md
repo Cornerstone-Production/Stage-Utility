@@ -34,6 +34,10 @@ and sound levels, there is no operator action wired up to do it yet; see
 row rather than the row it cancels being removed — the file is append-only, so
 what was undone is still in it and only that marker says so. An operator pressing
 Undo does not lose a service; a file that lost the marker would count the mis-tap.
+Because every row carries its `at`, the rows also place each testimony and baptism
+in real time, which the durations in `baptism.json` cannot: a service's session
+lane is derived from them (`GET /api/baptism/lane`, see
+[API](reference/api.md)).
 
 Nothing is written outside a service.
 
