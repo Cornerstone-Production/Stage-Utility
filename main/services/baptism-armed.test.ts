@@ -35,5 +35,6 @@ describe("default workflow", () => {
     await baptismStore.saveCurrent(resumedSession);
     await baptismTimerService.init();
     assert.equal(baptismTimerService.getState().mode, "per-person");
+    await baptismStore.saveCurrent(null);
   });
 });
