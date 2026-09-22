@@ -1,36 +1,34 @@
 import { useEffect, useState } from "react";
-import { BaptismTriggersPanel } from "./baptism-triggers-panel";
-import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
-import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon, PauseIcon, PlayIcon } from "lucide-react";
+import { Trash2Icon, ChevronRightIcon } from "lucide-react";
 
-import { invoke, type IpcChannel } from "../lib/api";
-import { Button, confirm, toast } from "../components/ui";
+import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
-import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
-import { formatClock } from "../lib/clock-format";
-import { useServerNow } from "../lib/server-clock";
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + " · " + formatClock(d);
-}
+import { useBaptismState, fmtClock, fmtDate } from "./use-baptism-state";
+import { BaptismHeader } from "../settings/sections/baptisms/header";
+import { TimerCard } from "../settings/sections/baptisms/timer-card";
 
 /**
  * Baptisms — an operator stopwatch for baptism services. Each person has a
  * testimony then a baptism; the panel times the current segment, logs each
  * person's splits, and shows running totals + averages. Drives the shared
- * baptism-timer service, so every surface that renders this (the Settings
- * "Baptisms" tab AND the standalone /baptism kiosk page) controls the SAME live
- * session — they stay in sync via the "baptism:state" SSE channel. Also surfaced
- * read-only on a display via the "Baptism timer" layout object.
+ * baptism-timer service, so every surface that renders this controls the SAME
+ * live session — they stay in sync via the "baptism:state" SSE channel. Also
+ * surfaced read-only on a display via the "Baptism timer" layout object.
+ *
+ * The page shell (BaptismHeader: title, recording pill, service sub-line,
+ * actions, stat strip, section nav) and the Timer card live in
+ * ../settings/sections/baptisms/ — reusing the History module's StatStrip,
+ * RecordingPill and section-nav pattern rather than a bespoke header for one
+ * more page. This component composes them and keeps two sections that predate
+ * that shell: the per-person log and the past-sessions list. Both are
+ * SUPERSEDED by later tasks in this same PR (People and Past sessions cards) —
+ * they stay here, working exactly as before, until those land.
  */
 export function BaptismOperator() {
   const state = useBaptismState();
   const [sessions, setSessions] = useState<BaptismSession[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   function reloadSessions() {
     invoke<BaptismSession[]>("baptism:sessions").then(setSessions).catch(() => setSessions([]));
@@ -39,97 +37,6 @@ export function BaptismOperator() {
     reloadSessions();
   }, []);
 
-  // Tick the live segment clock while a segment is running.
-  const segStart = state?.segmentStartedAt ?? null;
-  // Paused = a phase is running but its clock is not, AND there is banked time to
-  // resume from. Armed (grouped baptisms, before the first press) looks the same —
-  // no clock, nothing banked — but is not paused: there is nothing to resume, so it
-  // must not offer a "Resume" button. The readout keeps showing what was banked, so
-  // a paused timer looks stopped rather than looking broken.
-  const paused = !!state && state.phase !== "idle" && !state.armed && !state.segmentStartedAt;
-  // The SERVER's clock. `segmentStartedAt` is stamped by the server, so a
-  // console whose own clock has drifted would report the drift as elapsed time —
-  // and the same segment reads differently here and on the display object.
-  const now = useServerNow(250, !!segStart);
-
-  async function act(channel: IpcChannel, after?: () => void, payload?: Record<string, unknown>) {
-    setBusy(true);
-    try {
-      await invoke(channel, payload);
-      after?.();
-    } catch (err) {
-      toast.error(`Action failed: ${String(err)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!state) {
-    return <p className="text-caption1 text-gray-9 py-6">Loading…</p>;
-  }
-
-  const phase = state.phase;
-  // Includes what the segment banked before a pause, or a paused clock reads 0:00
-  // and looks broken. `now` is only ticking while it runs, which is why the paused
-  // value holds steady.
-  const liveMs = segmentElapsedMs(state, now);
-  const sum = summarizeBaptism(state);
-  const justFinished = phase === "idle" && state.finishedAt != null && state.people.length > 0;
-
-  const grouped = state.mode === "grouped";
-  const lastBaptism = grouped && phase === "baptism" && state.baptismIndex >= state.people.length - 1;
-  // Armed gets its own quiet, muted treatment — not the active green baptism
-  // color (nothing is running yet) and deliberately not any color a paused
-  // clock would use either: armed has nothing banked to resume, so it must
-  // not read as "stopped mid-segment."
-  const phaseColor = state.armed ? "text-gray-9" : phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
-
-  // Phase-aware primary action (label + channel), per workflow.
-  let primaryLabel: string;
-  // Typed against the full IpcChannel union, not `string` — an unwired or
-  // misspelled channel assigned below fails `tsc`, rather than depending on
-  // the text scans in api-channels.test.ts (which cannot see a channel behind
-  // a variable at all; see IpcChannel's own doc comment).
-  let primaryChannel: IpcChannel;
-  if (state.armed) {
-    // Grouped only: the song is live but nobody's clock has started. This press is
-    // exactly what advance() exists for — starting person 1 without banking the
-    // stretch the band's intro took. See BaptismState.armed.
-    primaryLabel = "First person in";
-    primaryChannel = "baptism:advance";
-  } else if (phase === "idle") {
-    primaryLabel = grouped ? "Start testimonies" : "Start";
-    primaryChannel = "baptism:start";
-  } else if (phase === "testimony") {
-    primaryLabel = grouped ? "Next testimony" : "Mark baptized";
-    primaryChannel = grouped ? "baptism:next" : "baptism:baptized";
-  } else {
-    // baptism
-    if (grouped) {
-      // Each press marks a boundary, not a "baptize" command — "Next person in"
-      // ends the current person's segment and starts the next; "Last person
-      // out" ends the final one and is the one that also finishes the session.
-      primaryLabel = lastBaptism ? "Last person out" : "Next person in";
-      primaryChannel = lastBaptism ? "baptism:finish" : "baptism:next";
-    } else {
-      primaryLabel = "Next person";
-      primaryChannel = "baptism:next";
-    }
-  }
-
-  // Readout heading. Armed overrides every other label — the one thing the
-  // operator must not mistake it for is a baptism already under way.
-  let readoutLabel: string;
-  if (state.armed) readoutLabel = "Baptisms · armed";
-  else if (phase === "idle") readoutLabel = justFinished ? "Finished" : "Ready";
-  else if (grouped && phase === "testimony") readoutLabel = `Testimony · Person ${state.personNumber}`;
-  else if (grouped && phase === "baptism") readoutLabel = `Baptism · Person ${state.baptismIndex + 1} of ${state.people.length}`;
-  else readoutLabel = `Person ${state.personNumber} · ${phase === "testimony" ? "Testimony" : "Baptism"}`;
-
-  async function resetAll() {
-    if (!(await confirm({ title: "Reset baptism timer?", message: "Clear the current session and all splits. This can't be undone.", confirmLabel: "Reset", destructive: true }))) return;
-    void act("baptism:reset");
-  }
   async function deleteSession(id: string) {
     setSessions((prev) => prev.filter((s) => s.id !== id));
     try {
@@ -139,118 +46,16 @@ export function BaptismOperator() {
     }
   }
 
+  if (!state) {
+    return <p className="text-caption1 text-gray-9 py-6">Loading…</p>;
+  }
+
   return (
-    // CENTRED, not pinned to the left edge of a monitor-wide page: this is a
-    // column of controls about one thing, and left-aligned it read as having
-    // come loose in the corner with the rest of the screen empty beside it.
-    //
-    // And NO heading of its own. It had one — "Baptism timer", with a paragraph
-    // under it — from when this was a tab inside Settings and nothing above it
-    // said what it was. In the shell the page header says that already, so the
-    // page opened with two titles, one under the other, saying the same thing.
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-1">
+    <div className="flex flex-col gap-4">
+      <BaptismHeader state={state} />
+      <TimerCard state={state} onFinished={reloadSessions} />
 
-      {/* Workflow mode */}
-      <div className="flex items-center gap-2">
-        <span className="text-caption1 text-gray-9">Workflow</span>
-        <div className="inline-flex rounded-md border border-gray-5 overflow-hidden">
-          {([["per-person", "Per person"], ["grouped", "Grouped"]] as const).map(([m, label]) => (
-            <button
-              key={m}
-              disabled={busy || phase !== "idle"}
-              onClick={() => void act("baptism:setMode", undefined, { mode: m })}
-              className={cn("px-2.5 py-1 text-caption1 transition-colors", state.mode === m ? "bg-accent text-white" : "text-gray-11 enabled:hover:bg-gray-3", "disabled:opacity-50")}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span className="text-caption2 text-gray-8">
-          {grouped ? "all testimonies, then all baptisms" : "each person: testimony then baptism"}
-          {phase !== "idle" && " · finish or reset to switch"}
-        </span>
-      </div>
-
-      <BaptismTriggersPanel />
-
-      {/* Live readout */}
-      <div className="flex flex-col items-center gap-1 rounded-xl border border-gray-5 bg-gray-2 py-6">
-        <span className={`text-caption1 font-medium uppercase tracking-wide ${phaseColor}`}>
-          {readoutLabel}
-        </span>
-        <span className="text-[3.5rem] leading-none font-bold tabular-nums text-gray-12">
-          {phase === "idle" ? (justFinished ? fmtClock(sum.totalMs) : "0:00") : fmtClock(liveMs)}
-        </span>
-        <span className="text-caption2 text-gray-9">
-          {state.armed
-            ? "waiting for the first person to step in"
-            : phase === "baptism" && state.pendingTestimonyMs != null
-              ? `testimony ${fmtClock(state.pendingTestimonyMs)}`
-              : justFinished
-                ? `${sum.count} baptized · total time`
-                : " "}
-        </span>
-      </div>
-
-      {state?.autoStartedFrom && phase !== "idle" && (
-        <span className="text-caption2 text-gray-9">
-          Started automatically from &ldquo;{state.autoStartedFrom}&rdquo; — reset if that was wrong.
-        </span>
-      )}
-
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel, primaryChannel === "baptism:finish" ? reloadSessions : undefined)} className="px-6 py-2 text-body">
-          {primaryLabel}
-        </Button>
-        {phase !== "idle" && !state.armed && (
-          <Button
-            variant="filled"
-            disabled={busy}
-            onClick={() => void act(paused ? "baptism:resume" : "baptism:pause")}
-            tooltip={
-              paused
-                ? "Start the clock again from where it stopped"
-                : "Stop the clock — vows, prayer and talking between people should not land on someone's time"
-            }
-          >
-            {paused ? <PlayIcon className="size-4 text-gray-9" /> : <PauseIcon className="size-4 text-gray-9" />}
-            {paused ? "Resume" : "Pause"}
-          </Button>
-        )}
-        {grouped && phase === "testimony" && (
-          <Button variant="filled" disabled={busy} onClick={() => void act("baptism:startBaptisms")} tooltip="Done with testimonies — start timing baptisms">
-            Start baptisms →
-          </Button>
-        )}
-        {phase !== "idle" && primaryChannel !== "baptism:finish" && (
-          <Button variant="filled" disabled={busy} onClick={() => void act("baptism:finish", reloadSessions)} tooltip="End the session and log it">
-            <FlagIcon className="size-4 text-gray-9" /> Finish
-          </Button>
-        )}
-        {(phase !== "idle" || justFinished) && (
-          <Button variant="transparent" disabled={busy} onClick={() => void act("baptism:undo")} tooltip="Undo the last step">
-            <Undo2Icon className="size-4 text-gray-9" /> Undo
-          </Button>
-        )}
-        {(state.people.length > 0 || phase !== "idle") && (
-          <Button variant="transparent" disabled={busy} onClick={resetAll} tooltip="Clear the session">
-            <RotateCcwIcon className="size-4 text-gray-9" /> Reset
-          </Button>
-        )}
-      </div>
-
-      {/* Totals */}
-      {sum.count > 0 && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="Baptized" value={String(sum.count)} />
-          <Stat label="Total time" value={fmtClock(sum.totalMs)} />
-          <Stat label="Avg testimony" value={fmtClock(sum.avgTestimonyMs)} accent="text-accent" />
-          <Stat label="Avg baptism" value={fmtClock(sum.avgBaptizeMs)} accent="text-green-11" />
-        </div>
-      )}
-
-      {/* Per-person log */}
+      {/* Per-person log — superseded by the People card, Task 13. */}
       {state.people.length > 0 && (
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
           <div className="grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
@@ -268,7 +73,8 @@ export function BaptismOperator() {
         </div>
       )}
 
-      {/* Past sessions — click a row to see its per-person splits + averages. */}
+      {/* Past sessions — superseded by the Past sessions card, Task 13. Click a
+          row to see its per-person splits + averages. */}
       {sessions.length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-caption1 font-medium text-gray-11">Past sessions</span>
@@ -283,8 +89,6 @@ export function BaptismOperator() {
           ))}
         </div>
       )}
-
-      <span className="inline-flex items-center gap-1.5 text-caption2 text-gray-8"><DropletIcon className="size-3.5" /> Tip: leave this open during baptisms; the timer keeps running even if you navigate away.</span>
     </div>
   );
 }
@@ -333,15 +137,6 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, accent = "text-gray-12" }: { label: string; value: string; accent?: string }) {
-  return (
-    <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
-      <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
     </div>
   );
 }

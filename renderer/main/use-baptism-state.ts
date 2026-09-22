@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
+import { formatClock } from "../lib/clock-format";
 import { useStatusChannel } from "./use-status-channel";
 
 /**
@@ -55,4 +56,19 @@ export function fmtClock(ms: number): string {
   const r = s % 60;
   if (m >= 60) return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/**
+ * "Sun, Sep 27 · 11:34 AM" — when a session (or a past one) started.
+ *
+ * Shared by the operator page and its header, rather than a private copy in
+ * each: both name the same session, off the same field, and a second copy is
+ * how the two would drift. `service-history-section.tsx` has its own
+ * differently-shaped `fmtDate` (a bare calendar day, no time, for grouping past
+ * services) — a different job, not a third copy of this one.
+ */
+export function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + " · " + formatClock(d);
 }
