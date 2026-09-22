@@ -175,7 +175,20 @@ describe("invoke('baptism:lane') reaches this route", () => {
     // route-coverage.test.ts accepts any path under /api/baptism, so a client
     // asking for /api/baptism/lanes would pass it. This runs the renderer's own
     // invoke() against the real route instead of a stubbed answer.
-    const key = "st1:plan1:2251"; // recorded by the first test in this file
+    //
+    // It records its own session rather than reading another test's, so it
+    // passes run alone (--test-name-pattern) as well as with the file.
+    const key = "st1:plan1:2256";
+    await serviceTimelineStore.upsert(timeline(key) as never);
+    idleTimer();
+    recorder.current = { serviceKey: key, serviceDate: DATE, endedAt: null };
+    timer.start();
+    await sleep(20);
+    timer.next();
+    await sleep(20);
+    timer.finish();
+    recorder.current = null;
+
     const { invoke } = await import("../../../renderer/lib/api.js");
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request) => {
