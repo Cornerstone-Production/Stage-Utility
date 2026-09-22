@@ -79,7 +79,15 @@ function invokedChannels(): Map<string, string[]> {
     // "invoked with no case", just invisible to this function, so the
     // missing-case check below never had a reason to complain. `[^()]*?` allows
     // the ternary's own condition to contain quotes (`dir === "next"`) as long as
-    // it contains no parens, which is true of every condition in this codebase.
+    // it contains no parens — true of every condition this closes today, but not
+    // a property of ternaries in general. This scan is still blind to: a
+    // three-way ternary (only the first `?`/`:` pair resolves); a parenthesised
+    // condition (`(a || b) ? "x:y" : "x:z"` — the paren exclusion in `[^()]*?`
+    // stops at it); a channel assembled in a variable before the call, however
+    // it got its value (see IpcChannel in api.ts for the typed answer to that
+    // one); and a channel built from a template literal. Widen it again, or
+    // reach for typing, when one of those actually ships unwired — do not
+    // assume this list is exhaustive of what a future call site can do.
     const re = new RegExp(
       `\\b(?:${callee})\\s*(?:<[^>()]*>)?\\s*\\(\\s*(?:[^()]*?\\?\\s*)?"([\\w-]+:[\\w-]+)"(?:\\s*:\\s*"([\\w-]+:[\\w-]+)")?`,
       "g",

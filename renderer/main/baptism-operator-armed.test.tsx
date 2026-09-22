@@ -1,8 +1,12 @@
 // The armed half of the panel is what the operator actually touches — and it
-// was untested. Reverting either of the two `!state.armed` terms this feature
-// added (the `paused` computation and the Pause/Resume button's render gate)
-// left the whole suite green: nothing rendered would have told a reviewer the
-// panel regressed to offering "Resume" on a segment that never started.
+// was untested. Reverting the `!state.armed` term on the Pause/Resume button's
+// render gate left the whole suite green: nothing rendered would have told a
+// reviewer the panel regressed to offering "Resume" on a segment that never
+// started. (The OTHER `!state.armed` term, on the `paused` computation itself,
+// is unreachable while armed — the gate hides the whole block that reads
+// `paused` — so reverting it alone changes nothing this test or anything else
+// can observe. Both terms stay, for the invariant they each document, but only
+// the gate is what this test actually proves.)
 //
 // Driven through the real component with a stubbed fetch answering
 // `GET /api/baptism` with an armed session — not a unit test of the boolean
