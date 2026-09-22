@@ -13,6 +13,11 @@ import type { BaptismState } from "../types/stage.js";
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
 const { segmentElapsedMs } = await import("./baptism-elapsed.js");
+const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
+const { sampleArchive } = await import("./archive/sample-archive.js");
+
+type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
+const rec = () => serviceTimelineRecorder as unknown as Held;
 
 describe("default workflow", () => {
   it("starts grouped, because that is how a baptism is run here", async () => {
@@ -271,6 +276,104 @@ describe("undo() survives a restored record that has no people to step back into
     const after = baptismTimerService.undo();
     assert.equal(after.phase, "baptism", "with nobody to step back to, undo() is a no-op, not a crash");
     assert.equal(after.people.length, 0);
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+});
+
+describe("next(), advance() and finish() survive the same restored record undo() had to survive", () => {
+  // Same restored shape as the block above — a pre-mode record saved mid-baptism
+  // restores (init()'s grouped fallback) as grouped/baptism/baptismIndex 0 with
+  // an empty people list. undo()'s baptismIndex===0 branch was fixed for this
+  // shape already; next() and finish() dereferenced `people[this.state.
+  // baptismIndex]` the same way and were not. advance() is the panel's primary
+  // button and the single entry point Companion keys and custom-layout buttons
+  // route through, and it dispatches straight into next() here (armed is
+  // false, phase is not idle/testimony), so both /api/baptism/next and
+  // /api/baptism/advance 500'd on this exact restore.
+  const legacy = {
+    phase: "baptism",
+    personNumber: 1,
+    segmentStartedAt: new Date().toISOString(),
+    sessionStartedAt: new Date().toISOString(),
+    finishedAt: null,
+    people: [],
+    pendingTestimonyMs: 12345,
+    serviceTitle: null,
+    serviceTypeId: null,
+    planId: null,
+  } as unknown as BaptismState;
+
+  /** Drains the previous test's 800ms persist debounce before this test's own
+   *  saveCurrent() runs, so a pending write from the test before cannot land on
+   *  top of the record this test saves before init() reads it back — same
+   *  reasoning as the sibling undo() guard above. */
+  async function restoreLegacy(): Promise<void> {
+    await new Promise((r) => setTimeout(r, 900));
+    await baptismStore.saveCurrent(legacy);
+    await baptismTimerService.init();
+  }
+
+  it("next() does not throw and leaves the session untouched with nobody at this index", async () => {
+    await restoreLegacy();
+    const restored = baptismTimerService.getState();
+    assert.equal(restored.phase, "baptism");
+    assert.equal(restored.baptismIndex, 0);
+    assert.equal(restored.people.length, 0, "sanity: the branch's own precondition — nobody to baptize");
+
+    const after = baptismTimerService.next();
+    assert.equal(after.phase, "baptism", "with nobody at this index, next() is a no-op, not a crash");
+    assert.equal(after.people.length, 0);
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("advance() does not throw for the same restored record — it is the panel's primary button", async () => {
+    await restoreLegacy();
+    const restored = baptismTimerService.getState();
+    assert.equal(restored.armed ?? false, false, "sanity: advance() dispatches straight into next() from here");
+
+    const after = baptismTimerService.advance();
+    assert.equal(after.phase, "baptism", "with nobody at this index, advance() is a no-op, not a crash");
+    assert.equal(after.people.length, 0);
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("finish() does not archive a person-complete row carrying a literal 't=undefined' detail", async () => {
+    await restoreLegacy();
+    rec().current = { serviceKey: "st1:plan1:finish-guard", serviceDate: "2026-09-20", endedAt: null };
+
+    const recorded: { event: string; detail: string }[] = [];
+    const original = sampleArchive.recordBaptism;
+    (sampleArchive as unknown as { recordBaptism: (...args: unknown[]) => void }).recordBaptism = (
+      ...args: unknown[]
+    ) => {
+      const fields = args[1] as { event: string; detail: string };
+      recorded.push({ event: fields.event, detail: fields.detail });
+    };
+
+    try {
+      const after = baptismTimerService.finish();
+      assert.equal(after.phase, "idle", "finish() must still close the session with nobody at this index");
+
+      const personComplete = recorded.filter((r) => r.event === "person-complete");
+      assert.equal(
+        personComplete.length,
+        0,
+        "nobody was actually baptized here, so a person-complete row would be dishonest",
+      );
+      assert.ok(
+        !recorded.some((r) => r.detail.includes("undefined")),
+        `no archived row may carry the literal string "undefined" in its detail: ${JSON.stringify(recorded)}`,
+      );
+    } finally {
+      (sampleArchive as unknown as { recordBaptism: typeof sampleArchive.recordBaptism }).recordBaptism = original;
+      rec().current = null;
+    }
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);

@@ -384,7 +384,17 @@ class BaptismTimerService {
       this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment(0) };
       return this.commit();
     }
-    if (this.state.phase === "baptism") {
+    if (this.state.phase === "baptism" && this.state.people.length > 0) {
+      // `people.length > 0` guards the same restored-record shape undo()'s
+      // baptismIndex===0 branch guards against: a pre-mode record restores as
+      // grouped/baptism/baptismIndex 0 with an empty people list (see
+      // baptism-armed.test.ts), and this branch used to index into that empty
+      // array unconditionally — a TypeError out of next(), a 500 from
+      // POST /api/baptism/next AND /api/baptism/advance (advance() is the
+      // panel's primary button and dispatches straight into this branch once
+      // armed is cleared). With nobody at this index there is nothing to step
+      // forward from, so this is a no-op rather than inventing a person.
+      //
       // `armed` may still be true here — /api/baptism/next is a documented route,
       // reachable directly (bypassing advance()) while the phase is armed — so
       // startSegment() clearing it is load-bearing, not just tidy.
@@ -454,7 +464,14 @@ class BaptismTimerService {
       const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
       people.push(person);
       this.emitRaw("testimony-end", person.testimonyMs);
-    } else if (this.state.phase === "baptism") {
+    } else if (this.state.phase === "baptism" && people.length > 0) {
+      // Same restored-record shape as next()'s guard above: with an empty
+      // people list, `people[this.state.baptismIndex]` is undefined, and
+      // spreading it into `justBaptized` produced `{ baptizeMs: ... }` with no
+      // testimonyMs — not a throw, but a person-complete row whose detail read
+      // the literal string "t=undefined", a row the replay would have to
+      // defend against. Skipping the whole branch leaves `people` (and thus
+      // the finalized session) unchanged, which matches next()'s no-op.
       const justBaptized: BaptismPerson = { ...people[this.state.baptismIndex]!, baptizeMs: this.elapsedMs() };
       people = people.map((p, i) => (i === this.state.baptismIndex ? justBaptized : p));
       // Guarded on `!armed` for the same reason as next()'s grouped-baptism
