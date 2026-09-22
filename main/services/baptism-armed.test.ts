@@ -8,6 +8,8 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-armed-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
+import type { BaptismState } from "../types/stage.js";
+
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
 const { segmentElapsedMs } = await import("./baptism-elapsed.js");
@@ -220,6 +222,55 @@ describe("I-B: resume() must count on from what pause() banked", () => {
       elapsedRightAfter >= banked,
       `expected elapsed (${elapsedRightAfter}ms) to count on from banked (${banked}ms), not restart from zero`,
     );
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+});
+
+describe("undo() survives a restored record that has no people to step back into", () => {
+  it("does not throw when a pre-mode record restores as grouped/baptism with an empty people list", async () => {
+    // Drives the real store and the real init(), not a hand-built state object:
+    // the only way to reach this branch is a PERSISTED record, and constructing
+    // the state by hand would prove nothing about whether init() can produce it.
+    //
+    // The record below is what a session saved before `mode` existed looks like
+    // — per-person, person 1 mid-baptism, so `people` is still empty and their
+    // testimony lives in pendingTestimonyMs. init() spreads it over
+    // idleState(fallback), and the fallback is "grouped" (the default), so it
+    // comes back as grouped/baptism/baptismIndex 0 with people: []. undo()'s
+    // `baptismIndex === 0` branch popped that empty array and read
+    // `.testimonyMs` off undefined — a TypeError out of undo(), a 500 from
+    // POST /api/baptism/undo, and no Undo for the rest of the service.
+    //
+    // The 900ms wait drains commit()'s 800ms persist debounce from the tests
+    // above, so their pending write cannot land on top of the record this test
+    // saves before init() reads it.
+    await new Promise((r) => setTimeout(r, 900));
+    const legacy = {
+      phase: "baptism",
+      personNumber: 1,
+      segmentStartedAt: new Date().toISOString(),
+      sessionStartedAt: new Date().toISOString(),
+      finishedAt: null,
+      people: [],
+      pendingTestimonyMs: 12345,
+      serviceTitle: null,
+      serviceTypeId: null,
+      planId: null,
+    } as unknown as BaptismState;
+    await baptismStore.saveCurrent(legacy);
+    await baptismTimerService.init();
+
+    const restored = baptismTimerService.getState();
+    assert.equal(restored.mode, "grouped", "sanity: a record with no mode restores on the grouped default");
+    assert.equal(restored.phase, "baptism");
+    assert.equal(restored.baptismIndex, 0, "sanity: a record with no baptismIndex restores at 0");
+    assert.equal(restored.people.length, 0, "sanity: the branch's own precondition — nothing to pop");
+
+    const after = baptismTimerService.undo();
+    assert.equal(after.phase, "baptism", "with nobody to step back to, undo() is a no-op, not a crash");
+    assert.equal(after.people.length, 0);
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);

@@ -505,7 +505,13 @@ class BaptismTimerService {
     const s = this.state;
     if (s.mode === "per-person") {
       if (s.phase === "baptism") {
-        this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment(0) };
+        // Back into the testimony we just closed. `pendingTestimonyMs` is where
+        // baptized() parked it, and it does not apply in the testimony phase —
+        // but clearing it without resuming FROM it throws the whole testimony
+        // away. Baptized pressed a beat early on a three-minute testimony,
+        // undone, then finished fifty seconds later, recorded as fifty seconds.
+        // Third site of this shape; see the two grouped branches below.
+        this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment(s.pendingTestimonyMs ?? 0) };
       } else if (s.phase === "testimony" && s.people.length > 0) {
         const people = [...s.people];
         const last = people.pop()!;
@@ -529,7 +535,15 @@ class BaptismTimerService {
         const idx = s.baptismIndex - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
         this.state = { ...s, people, baptismIndex: idx, ...this.startSegment(0) };
-      } else if (s.phase === "baptism" && s.baptismIndex === 0) {
+      } else if (s.phase === "baptism" && s.baptismIndex === 0 && s.people.length > 0) {
+        // `people.length > 0` is load-bearing, matching the sibling branches
+        // that pop: init() restores a record saved before `mode` existed onto
+        // the grouped default, and a per-person session saved mid-baptism has
+        // an EMPTY people list (person 1's testimony lives in
+        // pendingTestimonyMs, not in people). Unguarded, the pop below read
+        // .testimonyMs off undefined — a TypeError out of undo(), a 500 from
+        // POST /api/baptism/undo, and no Undo left for the rest of the service.
+        //
         // Back to the testimony section — pop the person startBaptisms()
         // folded in when it armed, resuming them as the in-progress testimony.
         // Left unpopped, a later re-arm folds them AGAIN beside the leftover

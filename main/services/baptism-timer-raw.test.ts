@@ -688,6 +688,45 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
     );
   });
 
+  it("per-person: Baptized pressed a beat early, undone — the testimony resumes where it was", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+
+    baptismTimerService.start(); // person 1's testimony
+    await sleep(150);
+    baptismTimerService.baptized(); // mis-tap: the testimony is banked in pendingTestimonyMs
+    const undone = baptismTimerService.undo(); // back to person 1, still speaking
+    assert.equal(undone.phase, "testimony", "sanity: the undo returned us INTO the testimony");
+    assert.equal(undone.pendingTestimonyMs, null, "sanity: the pending value no longer applies in this phase");
+
+    await sleep(40); // person 1 finishes what they were saying
+    baptismTimerService.baptized();
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 1);
+    assert.ok(
+      finished.people[0]!.testimonyMs >= 150,
+      `person 1's testimony resumed from what pendingTestimonyMs held — got ${finished.people[0]!.testimonyMs}ms, ` +
+        "which means the undo dropped the banked testimony and restarted their clock at zero",
+    );
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "testimony-end", "undo", "testimony-end", "person-complete", "finish"]);
+    const testimonyEndRows = c.filter("testimony-end");
+    assert.equal(
+      Number(testimonyEndRows[1]![c.idx("segmentMs")]),
+      Math.round(finished.people[0]!.testimonyMs),
+      "the row written after the undo carries the resumed total, not just the tail",
+    );
+    assert.ok(
+      Number(testimonyEndRows[1]![c.idx("segmentMs")]) > Number(testimonyEndRows[0]![c.idx("segmentMs")]),
+      "the resumed testimony is LONGER than the one the mis-tap cut short",
+    );
+  });
+
   it("grouped/testimony: next() pressed a beat early, undone — the testimony resumes where it was", async () => {
     const ctx = freshCtx();
     openService(ctx);
