@@ -61,7 +61,11 @@ export interface BaptismState {
   sessionStartedAt: string | null;
   /** ISO when the session was finished (totals frozen); null while active. */
   finishedAt: string | null;
-  /** Completed people (testimony + baptize splits). */
+  /** People whose testimony has closed. In grouped mode this fills during the
+   *  testimony pass, before anyone is baptized — `baptizeMs` sits at 0 until a
+   *  baptism actually closes that entry. A person is "baptized" (see
+   *  summarizeBaptism) only once `baptizeMs > 0`, not merely by being in this
+   *  array. */
   people: BaptismPerson[];
   /** Testimony split captured for the in-progress person (set while in "baptism"). */
   pendingTestimonyMs: number | null;

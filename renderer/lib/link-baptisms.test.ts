@@ -102,4 +102,17 @@ describe("baptismStats", () => {
     assert.equal(out.people, 4);
     assert.ok(out.avgTestimonySec > 120, `got ${out.avgTestimonySec}`);
   });
+
+  test("a session finished mid-testimony leaves a testified-but-not-baptized entry, uncounted", () => {
+    // THE guard. A grouped session's `people` array fills during the testimony
+    // pass before anyone is baptized, and finishing early (or a per-person
+    // session ended mid-testimony) leaves a `baptizeMs: 0` entry behind
+    // permanently. Both callers label `people` "Baptized" — three testimonies
+    // and one actual baptism must not read as three baptized.
+    const out = baptismStats([people([90, 30], [60, 0], [45, 0])]);
+    assert.equal(out.people, 1, "only the one entry with a real baptizeMs counts");
+    assert.equal(out.testimonySec, 195, "testimony time is still counted for everyone who testified");
+    assert.equal(out.avgTestimonySec, 65, "testimony average divides by everyone who testified");
+    assert.equal(out.avgBaptismSec, 30, "baptism average divides by who was actually baptized, not by 3");
+  });
 });
