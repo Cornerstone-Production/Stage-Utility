@@ -78,7 +78,11 @@ export function BaptismOperator() {
 
   const grouped = state.mode === "grouped";
   const lastBaptism = grouped && phase === "baptism" && state.baptismIndex >= state.people.length - 1;
-  const phaseColor = phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
+  // Armed gets its own quiet, muted treatment — not the active green baptism
+  // color (nothing is running yet) and deliberately not any color a paused
+  // clock would use either: armed has nothing banked to resume, so it must
+  // not read as "stopped mid-segment."
+  const phaseColor = state.armed ? "text-gray-9" : phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
 
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
@@ -91,7 +95,7 @@ export function BaptismOperator() {
     // Grouped only: the song is live but nobody's clock has started. This press is
     // exactly what advance() exists for — starting person 1 without banking the
     // stretch the band's intro took. See BaptismState.armed.
-    primaryLabel = "Baptize person 1";
+    primaryLabel = "First person in";
     primaryChannel = "baptism:advance";
   } else if (phase === "idle") {
     primaryLabel = grouped ? "Start testimonies" : "Start";
@@ -102,7 +106,10 @@ export function BaptismOperator() {
   } else {
     // baptism
     if (grouped) {
-      primaryLabel = lastBaptism ? "Finish baptisms" : "Next baptism";
+      // Each press marks a boundary, not a "baptize" command — "Next person in"
+      // ends the current person's segment and starts the next; "Last person
+      // out" ends the final one and is the one that also finishes the session.
+      primaryLabel = lastBaptism ? "Last person out" : "Next person in";
       primaryChannel = lastBaptism ? "baptism:finish" : "baptism:next";
     } else {
       primaryLabel = "Next person";
@@ -110,9 +117,11 @@ export function BaptismOperator() {
     }
   }
 
-  // Readout heading.
+  // Readout heading. Armed overrides every other label — the one thing the
+  // operator must not mistake it for is a baptism already under way.
   let readoutLabel: string;
-  if (phase === "idle") readoutLabel = justFinished ? "Finished" : "Ready";
+  if (state.armed) readoutLabel = "Baptisms · armed";
+  else if (phase === "idle") readoutLabel = justFinished ? "Finished" : "Ready";
   else if (grouped && phase === "testimony") readoutLabel = `Testimony · Person ${state.personNumber}`;
   else if (grouped && phase === "baptism") readoutLabel = `Baptism · Person ${state.baptismIndex + 1} of ${state.people.length}`;
   else readoutLabel = `Person ${state.personNumber} · ${phase === "testimony" ? "Testimony" : "Baptism"}`;
@@ -173,7 +182,13 @@ export function BaptismOperator() {
           {phase === "idle" ? (justFinished ? fmtClock(sum.totalMs) : "0:00") : fmtClock(liveMs)}
         </span>
         <span className="text-caption2 text-gray-9">
-          {phase === "baptism" && state.pendingTestimonyMs != null ? `testimony ${fmtClock(state.pendingTestimonyMs)}` : justFinished ? `${sum.count} baptized · total time` : " "}
+          {state.armed
+            ? "waiting for the first person to step in"
+            : phase === "baptism" && state.pendingTestimonyMs != null
+              ? `testimony ${fmtClock(state.pendingTestimonyMs)}`
+              : justFinished
+                ? `${sum.count} baptized · total time`
+                : " "}
         </span>
       </div>
 

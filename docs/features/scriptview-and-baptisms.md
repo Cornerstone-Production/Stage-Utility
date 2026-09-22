@@ -186,11 +186,14 @@ Grouped only. The baptism phase begins either by pressing **Start baptisms**,
 once every testimony is in, or by the bound song going live — and neither one
 starts a clock: the phase becomes `baptism`, but nobody's time is counting yet.
 The band's intro before the first person steps up would otherwise land on
-person 1 alone, every week.
+person 1 alone, every week. While armed, the readout says so directly — the
+heading reads **Baptisms · armed**, the clock holds at `0:00`, and the line
+under it reads "waiting for the first person to step in" — so a frozen clock
+does not read as broken.
 
-The operator's own press ("Baptize person 1") starts person 1 without banking
+The operator's own press ("First person in") starts person 1 without banking
 whatever the intro ran. Every person after that runs the same way, from their
-own press ("Next baptism", then "Finish baptisms" for the last one) to the
+own press ("Next person in", then "Last person out" for the last one) to the
 next — the walk-up, the words spoken over them, the dunk, and getting out, never
 the moment of submersion by itself. There is nothing to pause while armed, so
 that button is hidden until the first press.

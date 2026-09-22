@@ -81,7 +81,7 @@ test("armed offers the arming press, not Resume", async () => {
 
   // The primary button is the arming press, not one of the ordinary phase
   // actions a running or paused segment would offer.
-  assert.equal(!!screen.queryByText("Baptize person 1"), true, "expected the arming press as the primary action");
+  assert.equal(!!screen.queryByText("First person in"), true, "expected the arming press as the primary action");
 
   // Nothing here may read as a paused clock. There is nothing banked to resume —
   // offering "Resume" is the regression this test exists to catch.
@@ -96,6 +96,68 @@ test("once the first press starts a real clock, Pause is offered again", async (
     segmentStartedAt: "2026-09-20T15:10:00.000Z",
   });
 
-  assert.equal(!!screen.queryByText("Baptize person 1"), false, "the arming press must not linger once armed clears");
+  assert.equal(!!screen.queryByText("First person in"), false, "the arming press must not linger once armed clears");
   assert.equal(!!screen.queryByText("Pause"), true, "a running clock must offer Pause");
+});
+
+// The BEHAVIOR (frozen clock, no Pause) was already right — this is the panel
+// finally SAYING it is armed, which is the whole point: without it, an armed
+// baptism (clock at 0:00, "First person in") is indistinguishable from a
+// baptism that just started and hasn't ticked yet.
+test("armed readout says armed and tells the operator what it's waiting for", async () => {
+  await mount();
+
+  assert.equal(!!screen.queryByText(/armed/i), true, "expected the readout heading to say the phase is armed");
+  assert.equal(
+    !!screen.queryByText("waiting for the first person to step in"),
+    true,
+    "expected the sub-line to say what the frozen clock is waiting for",
+  );
+});
+
+test("a non-armed baptism phase shows neither the armed readout nor its sub-line", async () => {
+  await mount({
+    ...ARMED_STATE,
+    armed: false,
+    segmentStartedAt: "2026-09-20T15:10:00.000Z",
+  });
+
+  assert.equal(!!screen.queryByText(/armed/i), false, "a running baptism must not say armed");
+  assert.equal(
+    !!screen.queryByText("waiting for the first person to step in"),
+    false,
+    "a running baptism has nothing to wait for",
+  );
+});
+
+test("grouped baptism phase, once armed clears, reads Next person in / Last person out", async () => {
+  // Second (last) of two people, not armed, clock running: the press that
+  // ends this segment also finishes the session.
+  await mount({
+    ...ARMED_STATE,
+    armed: false,
+    baptismIndex: 1,
+    segmentStartedAt: "2026-09-20T15:10:00.000Z",
+  });
+
+  assert.equal(!!screen.queryByText("Last person out"), true, "expected the final person's press to read Last person out");
+  assert.equal(!!screen.queryByText("Next person in"), false, "must not also show the non-final label");
+});
+
+test("grouped baptism phase, mid-list, reads Next person in — not the old 'Next baptism'/'Baptize' wording", async () => {
+  await mount({
+    ...ARMED_STATE,
+    armed: false,
+    baptismIndex: 0,
+    people: [
+      { testimonyMs: 45_000, baptizeMs: 0 },
+      { testimonyMs: 38_000, baptizeMs: 0 },
+      { testimonyMs: 20_000, baptizeMs: 0 },
+    ],
+    segmentStartedAt: "2026-09-20T15:10:00.000Z",
+  });
+
+  assert.equal(!!screen.queryByText("Next person in"), true, "expected the boundary-press wording for a non-final person");
+  assert.equal(!!screen.queryByText("Next baptism"), false, "old wording must not linger");
+  assert.equal(!!screen.queryByText("Last person out"), false, "must not show the final-person label mid-list");
 });
