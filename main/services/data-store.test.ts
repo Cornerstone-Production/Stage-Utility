@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { test, describe, after } from "node:test";
 import * as fs from "node:fs/promises";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -182,6 +183,166 @@ describe("DataStore", () => {
     // test, so the stores above only worked because the store mkdir -p's it.
     const st = await fs.stat(DATA_DIR);
     assert.ok(st.isDirectory(), "the store must create its data dir recursively");
+  });
+});
+
+// A save racing the store's first read, on each path load() can take. The test
+// above lets the race happen naturally, which reaches only the parse path; these
+// hold one of the store's own fs calls open at the moment that matters, so each
+// window is hit every run rather than by luck.
+//
+// data-store.ts imports `node:fs/promises` as an ES namespace, which Node re-reads
+// from the builtin's CommonJS object only on syncBuiltinESMExports(). Replacing a
+// method on that object and syncing is how a test reaches inside the store.
+describe("a save racing the store's first read, on every path load() takes", () => {
+  const fsp = createRequire(import.meta.url)("node:fs/promises") as Record<string, (...args: unknown[]) => Promise<unknown>>;
+
+  function opened() {
+    let open!: () => void;
+    const promise = new Promise<void>((resolve) => (open = resolve));
+    return { promise, open };
+  }
+
+  /**
+   * Hold the first fs[method] call that `matches`. `after: true` holds it once
+   * the real call has finished, so the store is parked between its disk access
+   * and the code after it; `after: false` holds it before the call runs.
+   * `reached` resolves when the call is being held.
+   */
+  function hold(method: "readFile" | "rename", matches: (args: unknown[]) => boolean, opts: { after: boolean }) {
+    const real = fsp[method]!;
+    const reached = opened();
+    const gate = opened();
+    let taken = false;
+    fsp[method] = async (...args: unknown[]) => {
+      if (taken || !matches(args)) return real(...args);
+      taken = true;
+      if (!opts.after) {
+        reached.open();
+        await gate.promise;
+        return real(...args);
+      }
+      let result: unknown;
+      let failure: unknown = null;
+      try {
+        result = await real(...args);
+      } catch (err) {
+        failure = err;
+      }
+      reached.open();
+      await gate.promise;
+      if (failure) throw failure;
+      return result;
+    };
+    syncBuiltinESMExports();
+    return {
+      reached: reached.promise,
+      release: () => gate.open(),
+      restore: () => {
+        fsp[method] = real;
+        syncBuiltinESMExports();
+      },
+    };
+  }
+
+  const SAVED: Doc = { count: 2, items: ["saved"] };
+
+  /** After the race: the store serves the save, and the next save builds on it. */
+  async function assertSaveSurvives(store: InstanceType<typeof DataStore<Doc>>, file: string) {
+    assert.deepEqual(await store.load(), SAVED, "the store serves the save, not what its first read found");
+    await store.update((c) => ({ ...c, count: c.count + 1 }));
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(file, "utf8")),
+      { count: 3, items: ["saved"] },
+      "the next save builds on the first, rather than erasing it from disk",
+    );
+  }
+
+  test("no file yet: the first read's ENOENT does not install defaults over the save", async () => {
+    const { store, file } = freshStore();
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const read = hold("readFile", (a) => a[0] === file, { after: true });
+    try {
+      const first = store.load();
+      await read.reached; // the read has failed ENOENT and is parked there
+      await store.save(SAVED);
+      read.release();
+      await first;
+    } finally {
+      read.restore();
+    }
+    await assertSaveSurvives(store, file);
+  });
+
+  test("a corrupt file: a save that replaced it during the read is not quarantined as corrupt", async () => {
+    // Main quarantined the SAVE here: the read found the corrupt bytes, the save
+    // renamed a good file over them, and the parse failure then moved that good
+    // file aside and served defaults.
+    const { store, file } = freshStore();
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(file, '{"count": 42, "items": ["prec', "utf8");
+    const read = hold("readFile", (a) => a[0] === file, { after: true });
+    try {
+      const first = store.load();
+      await read.reached; // the corrupt bytes are read, and the read is parked
+      await store.save(SAVED);
+      read.release();
+      await first;
+    } finally {
+      read.restore();
+    }
+    // Read tolerantly: a file renamed aside is the defect, and should fail as this
+    // assertion rather than as an ENOENT thrown before it.
+    const onDisk = await fs.readFile(file, "utf8").catch(() => null);
+    assert.deepEqual(
+      onDisk === null ? null : JSON.parse(onDisk),
+      SAVED,
+      "the save's file is still in place — not renamed aside as corrupt",
+    );
+    await assertSaveSurvives(store, file);
+  });
+
+  test("a corrupt file: a save landing during the quarantine rename is not overwritten by defaults", async () => {
+    const { store, file } = freshStore();
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(file, '{"count": 42, "items": ["prec', "utf8");
+    const quarantine = hold("rename", (a) => String(a[1]).includes(".corrupt-"), { after: false });
+    try {
+      const first = store.load();
+      await quarantine.reached; // the parse failed; the rename aside is held
+      await store.save(SAVED);
+      quarantine.release();
+      await first;
+    } finally {
+      quarantine.restore();
+    }
+    await assertSaveSurvives(store, file);
+  });
+
+  test("reload() during the quarantine rename does not make the first load resolve null", async () => {
+    // reload() empties the cache while the first load waits on its rename; that
+    // load then finished by returning the emptied cache — null, from a method
+    // typed never to return it.
+    const { store, file } = freshStore();
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(file, '{"count": 42, "items": ["prec', "utf8");
+    const quarantine = hold("rename", (a) => String(a[1]).includes(".corrupt-"), { after: false });
+    let reread: ReturnType<typeof hold> | null = null;
+    try {
+      const first = store.load();
+      await quarantine.reached;
+      reread = hold("readFile", (a) => a[0] === file, { after: true });
+      const reloading = store.reload();
+      await reread.reached; // reload() has emptied the cache and is mid-read
+      quarantine.release();
+      const resolved = await first;
+      reread.release();
+      await reloading;
+      assert.deepEqual(resolved, DEFAULTS, "a corrupt file's first load resolves to the defaults, never null");
+    } finally {
+      quarantine.restore();
+      reread?.restore();
+    }
   });
 });
 

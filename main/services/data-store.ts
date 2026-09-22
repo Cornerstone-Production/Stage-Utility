@@ -116,7 +116,9 @@ export class DataStore<T> {
         `[data-store] ${this.filename} could not be parsed (corrupt). Backed up to ${this.filename}.corrupt-* and starting fresh — recover history from that copy.`,
         err,
       );
-      return this.cache;
+      // reload() empties the cache, and can do it while this waited on the
+      // rename. What this load found is still the defaults, not nothing.
+      return this.cache ?? this.defaultValue;
     }
   }
 
