@@ -24,7 +24,8 @@ before those columns shipped keep their narrower file and still read back — th
 rebuild matches them to the stored record by title instead.
 
 A baptism row is one press, never a total: Start, each testimony ending, the
-baptisms arming, each person baptized, pause, resume, Undo, Finish and Reset. The
+baptisms arming, the first person stepping up, each person baptized, pause,
+resume, Undo, Finish and Reset. The
 finished session in `baptism.json` is derived from them, so a session lost to a
 corrupt file, or to a crash between the debounced save and the next write, can be
 re-derived from the presses instead of being gone. `undo` is recorded as its own

@@ -290,6 +290,50 @@ describe("a real session containing an undo replays back into the session the st
     );
   });
 
+  it("correcting the SECOND of three people leaves the first one's baptism alone", async () => {
+    // Every other undo in this file steps back at baptismIndex 0, where the
+    // row's index and a hardcoded 0 are the same number. Replacing the replay's
+    // `num(r.baptismIndex)` with `0` left the committed suite green while
+    // zeroing person 0's baptism on any service where the operator corrected
+    // somebody further down the line — which is the ordinary case, not the edge
+    // one.
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(12);
+    baptismTimerService.next(); // person 1's testimony ends
+    await sleep(12);
+    baptismTimerService.next(); // person 2's testimony ends
+    await sleep(11);
+    baptismTimerService.startBaptisms(); // person 3 folds in, section arms
+    baptismTimerService.advance();
+    await sleep(12);
+    baptismTimerService.next(); // index 0 baptized
+    await sleep(12);
+    baptismTimerService.next(); // index 1 baptized — a beat early
+    baptismTimerService.undo(); // back to index 1, NOT index 0
+    await sleep(42); // the real baptism, measurably longer
+    baptismTimerService.next(); // index 1 baptized for real
+    await sleep(11);
+    const finished = baptismTimerService.next(); // index 2 (last) — auto-finishes
+
+    assert.equal(finished.people.length, 3);
+    assert.ok(finished.people[0]!.baptizeMs > 0, "sanity: person 0 was baptized and kept their time");
+
+    const [replayed] = await assertRoundTrip(ctx, "grouped, undo at index 1 of three");
+    assert.ok(
+      replayed!.people[0]!.baptizeMs > 0,
+      `person 0's baptism must survive an undo aimed at person 1 (got ${replayed!.people[0]!.baptizeMs}ms)`,
+    );
+    assert.ok(
+      replayed!.people[1]!.baptizeMs >= 42,
+      "person 1 carries the corrected attempt, not the one that was undone",
+    );
+  });
+
   it("armed on the wrong song, undone, re-armed — still one person", async () => {
     const ctx = freshCtx();
     openService(ctx);

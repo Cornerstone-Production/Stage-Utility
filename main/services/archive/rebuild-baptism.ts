@@ -122,6 +122,25 @@ interface Skips {
  *
  * Rows before the first `start`, or after a `reset`, belong to no session and
  * are ignored: the timer had no session to record them against either.
+ *
+ * THE IDS THIS PRODUCES ARE NOT COMPARABLE TO THE STORE'S. `start()` stamps
+ * `sessionStartedAt` from its own clock and then calls `emitRaw`, and
+ * `recordBaptism` stamps the row from ITS clock — microseconds later, but often
+ * enough across a millisecond boundary that roughly one session in twenty comes
+ * back with `bap-<ms>` one higher than the one `finalize()` wrote. Measured over
+ * 50 driven sessions: never more than 1ms of skew, ~4% of ids different, and
+ * unmoved by CPU load.
+ *
+ * So a caller must NOT merge a rebuild through `baptismStore.addSessions`,
+ * which de-duplicates on id: a rebuilt copy of a session that survived would
+ * land beside it rather than being recognised as the same one. Replace by
+ * service, or match on `startedAt` within a tolerance.
+ *
+ * The fix, for whoever wires this up: thread an optional trailing `at` through
+ * `emitRaw` and `recordBaptism`, with `start()` passing its own `now` and
+ * `finalize()` its `finishedAt`, so the row carries the timer's stamp rather
+ * than the archive's. Deliberately not done here — the emitter is live-service
+ * code and this was built days before a baptism service.
  */
 export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIdentity): BaptismSession[] {
   const out: BaptismSession[] = [];
@@ -180,6 +199,11 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
       case "person-complete":
         if (open.mode === "per-person") {
           open.people.push({ testimonyMs: open.pendingTestimonyMs ?? 0, baptizeMs: num(r.segmentMs) });
+          // Belt and braces, mirroring next()'s own `pendingTestimonyMs: null`.
+          // Nothing reads it before the next testimony-end overwrites it, so
+          // removing this line changes no result today — it is here so the
+          // replay's state transitions match the emitter's one for one, not
+          // because a rule depends on it.
           open.pendingTestimonyMs = null;
         } else {
           // ASSIGN, never append: a re-baptised index has two rows and the last
@@ -197,6 +221,8 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
           if (r.phase === "testimony") {
             // Un-baptized: the banked testimony went back into the running
             // clock and a later testimony-end re-banks the corrected total.
+            // Belt and braces like the clear in person-complete above — the
+            // corrected total always overwrites this before anything reads it.
             open.pendingTestimonyMs = null;
           } else {
             // Stepped back into the person just completed (from the next
@@ -270,8 +296,15 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
   return out;
 }
 
-/** The rows for one service, or null when it has no baptism archive — the same
- *  "nothing to rebuild from" contract rebuildSplItems has. */
+/**
+ * The rows for one service, or null when it has no baptism archive.
+ *
+ * `readArchiveRows`'s contract, passed straight through: null means no file,
+ * and `[]` means a file that recorded a header and no rows. `rebuildSplItems`
+ * collapses those two into one null; this does not, so a caller can tell "never
+ * recorded" from "recorded nothing" and leave a stored record alone in the
+ * first case without claiming the second is damage.
+ */
 export async function readBaptismRows(serviceKey: string, serviceDate: string): Promise<BaptismRow[] | null> {
   return readArchiveRows(serviceDirPath(serviceKey, serviceDate), "baptism");
 }

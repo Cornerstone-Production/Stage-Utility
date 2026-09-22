@@ -181,6 +181,39 @@ describe("rebuildBaptismSessions: undo", () => {
     assert.equal(session!.people[0]!.testimonyMs, 8000, "the re-arm's resumed total, not the first arm's");
   });
 
+  it("un-baptizes the person the undo row NAMES, not whoever is at index 0", () => {
+    // Every other undo in this suite steps back at baptismIndex 0, where the
+    // row's index and a hardcoded 0 are the same number — so replacing
+    // `num(r.baptismIndex)` with `0` left the whole suite green while silently
+    // zeroing person 0's baptism on any service where the operator corrected
+    // somebody later in the line. Three people, undone at index 1.
+    const rows: BaptismRow[] = [
+      row(0, { event: "start", phase: "testimony", personNumber: "1" }),
+      row(12, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "12000" }),
+      row(24, { event: "testimony-end", phase: "testimony", personNumber: "2", segmentMs: "12000" }),
+      row(35, { event: "baptisms-armed", phase: "baptism", personNumber: "3", segmentMs: "11000" }),
+      row(36, { event: "baptisms-start", phase: "baptism", personNumber: "3" }),
+      row(48, { event: "person-complete", phase: "baptism", personNumber: "3", baptismIndex: "0", segmentMs: "12000" }),
+      row(60, { event: "person-complete", phase: "baptism", personNumber: "3", baptismIndex: "1", segmentMs: "12000" }),
+      // The correction: back to person 1 (index 1), whose clock is zeroed.
+      row(61, { event: "undo", phase: "baptism", personNumber: "3", baptismIndex: "1", detail: "from baptism" }),
+      row(103, { event: "person-complete", phase: "baptism", personNumber: "3", baptismIndex: "1", segmentMs: "42000" }),
+      row(114, { event: "person-complete", phase: "baptism", personNumber: "3", baptismIndex: "2", segmentMs: "11000" }),
+      row(114, { event: "finish", phase: "idle", detail: "people=3" }),
+    ];
+
+    const [session] = rebuildBaptismSessions(rows, ID);
+    assert.deepEqual(
+      session!.people,
+      [
+        { testimonyMs: 12000, baptizeMs: 12000 },
+        { testimonyMs: 12000, baptizeMs: 42000 },
+        { testimonyMs: 11000, baptizeMs: 11000 },
+      ],
+      "person 0's baptism must survive an undo aimed at person 1",
+    );
+  });
+
   it("pops a completed grouped testimony that next() closed a beat early", () => {
     const rows: BaptismRow[] = [
       row(0, { event: "start", phase: "testimony", personNumber: "1" }),
@@ -350,10 +383,37 @@ describe("rebuildBaptismSessions: session boundaries", () => {
       row(40, { event: "start", phase: "testimony", personNumber: "1" }),
       row(60, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "20000" }),
       row(70, { event: "reset", phase: "idle" }),
+      // Orphans AFTER the last reset. Without them this test could not fail on
+      // a reset that closed nothing: the `start` above re-opens the session
+      // anyway, and a session with no `finish` is unlogged either way. These
+      // are the rows that make the reset load-bearing — replayed into the
+      // session the reset should have closed, they invent a second one.
+      row(80, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "10000" }),
+      row(81, { event: "finish", phase: "idle", detail: "people=2" }),
     ];
-    const sessions = rebuildBaptismSessions(rows, ID);
-    assert.equal(sessions.length, 1, "only the session that finished is logged");
+    const { value: sessions, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    assert.equal(sessions.length, 1, "only the session that finished before the reset is logged");
     assert.equal(sessions[0]!.id, startedAtId(0));
+    assert.deepEqual(sessions[0]!.people, [{ testimonyMs: 20000, baptizeMs: 5000 }]);
+    assert.match(warnings[0]!, /2 row\(s\) belonging to no started session/);
+  });
+
+  it("a reset closes the session outright, so later rows cannot rejoin it", () => {
+    // The smallest shape that separates a working reset from a no-op one. It
+    // comes off a damaged or merged file, which is the case this whole module
+    // exists for: with the reset honoured the orphans are reported and dropped,
+    // without it they graft a two-person session onto a session the operator
+    // threw away.
+    const rows: BaptismRow[] = [
+      row(0, { event: "start", phase: "testimony", personNumber: "1" }),
+      row(12, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "12000" }),
+      row(13, { event: "reset", phase: "idle" }),
+      row(30, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "17000" }),
+      row(31, { event: "finish", phase: "idle", detail: "people=2" }),
+    ];
+    const { value: sessions, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    assert.deepEqual(sessions, [], "the reset threw the session away; nothing after it rebuilds one");
+    assert.match(warnings[0]!, /2 row\(s\) belonging to no started session/);
   });
 
   it("starts a second session fresh rather than carrying the first one's people", () => {
