@@ -436,6 +436,16 @@ class BaptismTimerService {
       // last person baptized → close the session.
       return this.finalize(people);
     }
+    // Scoped to the exact shape the guard above exists for — grouped/baptism
+    // with nobody at this index — not the (also silent, pre-existing, and out
+    // of scope here) grouped/idle fallthrough. Without this, an operator
+    // pressing the panel's primary button on a corrupted restored session got
+    // nothing: no commit(), no broadcast, no archive row, not even a state
+    // push — the press looked like it did nothing because it did nothing, and
+    // said so nowhere.
+    if (this.state.phase === "baptism") {
+      console.log(`[baptism] next: ignored, the restored session has nobody at baptismIndex ${this.state.baptismIndex}`);
+    }
     return this.state;
   }
 
@@ -487,6 +497,15 @@ class BaptismTimerService {
           `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
         );
       }
+    } else if (this.state.phase === "baptism") {
+      // finalize() below runs unconditionally and archives a "finish" row
+      // carrying `people=${people.length}`, so this path is not silent the
+      // way next()'s equivalent no-op is — the session does visibly close.
+      // But that row reads identically whether this was a genuine service
+      // with nobody baptized, or a Finish pressed on a corrupted restored
+      // session with a phantom baptism in progress; only this line names the
+      // second case.
+      console.log(`[baptism] finish: closing with nobody at baptismIndex ${this.state.baptismIndex} — no person-complete row recorded`);
     }
     return this.finalize(people);
   }
@@ -578,6 +597,15 @@ class BaptismTimerService {
         const idx = s.people.length - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
         this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(0), finishedAt: null };
+      } else if (s.phase === "baptism" && s.baptismIndex === 0) {
+        // The complement of the guarded branch above: baptismIndex === 0 with
+        // an EMPTY people list — the same restored-record shape, caught here
+        // rather than there. Named separately from the generic `else return s`
+        // below (which also covers ordinary "nothing to undo yet" presses)
+        // because this one specifically means the session came back corrupted,
+        // not that the operator is just at the start of it.
+        console.log("[baptism] undo: ignored, the restored session has nobody at baptismIndex 0");
+        return s;
       } else return s;
     }
     this.emitRaw("undo", 0, `from ${s.phase}`);
