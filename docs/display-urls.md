@@ -93,6 +93,11 @@ the link shows nothing else of the app. The operator's own history — edit
 recorded times, merge a split service, delete one — is `/history/manage`, in the
 sidebar under Services, with the app's usual chrome.
 
+Either one opens a single service directly at `?service=<serviceKey>` — a link
+into a specific recording, rather than the day list. A reload or a copied link
+lands on that same service, and an unknown or missing key falls back to the
+list instead of an empty page.
+
 `/scriptview` works the same way: the rundown launcher with its own "ScriptView"
 heading and no sidebar or header, for a stage tablet or a producer's second
 screen, and each rundown under it, `/scriptview/<service type>/<layout>`, is the
