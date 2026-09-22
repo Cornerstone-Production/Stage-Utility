@@ -93,15 +93,28 @@ class BaptismTimerService {
       triggers,
       auto: settings.baptismAutoStart ?? null,
     });
-    if (action === "start-testimonies") {
-      this.start();
-      this.state = { ...this.state, autoStartedFrom: live.label ?? null };
-      this.commit();
-    } else if (action === "start-baptisms") {
-      this.startBaptisms();
-      this.state = { ...this.state, autoStartedFrom: live.label ?? null };
-      this.commit();
+    if (action === null) return;
+
+    // Compare the phase the action was supposed to produce against the phase we
+    // actually got. startBaptisms() returns early unless the mode is grouped,
+    // and the old code set autoStartedFrom regardless -- so the panel reported a
+    // transition that never happened and the operator had no reason to look.
+    const before = this.state.phase;
+    if (action === "start-testimonies") this.start();
+    else this.startBaptisms();
+
+    if (this.state.phase === before) {
+      console.warn(
+        `[baptism] auto-start: "${live.label ?? live.currentItemId}" is bound to the ` +
+          `${action === "start-baptisms" ? "baptisms" : "testimonies"} but the timer is in ` +
+          `${this.state.mode} mode and stayed in "${before}" — ignored`,
+      );
+      return;
     }
+
+    console.info(`[baptism] auto-start: started ${this.state.phase} from "${live.label ?? ""}"`);
+    this.state = { ...this.state, autoStartedFrom: live.label ?? null };
+    this.commit();
   }
 
   /** Stop the clock, banking what it has run. Idempotent — pausing a paused timer
