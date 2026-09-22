@@ -2018,6 +2018,11 @@ function BaptismTimer({
       // the held value rather than freezing at whatever it last happened to render.
       value = fmtClock(segmentElapsedMs(state, now));
       if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
+      // Armed reads identically to a just-started baptism otherwise — 0:00 over
+      // "Baptism 1" — which is exactly the ambiguity the operator panel's own
+      // "armed" readout exists to rule out. Same word, kept short for a wall
+      // rather than the panel's full sentence.
+      else if (state.armed) fallback = "armed";
       else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
     } else {
       value = "0:00";
