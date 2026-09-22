@@ -10,6 +10,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
+const { segmentElapsedMs } = await import("./baptism-elapsed.js");
 
 describe("default workflow", () => {
   it("starts grouped, because that is how a baptism is run here", async () => {
@@ -181,6 +182,41 @@ describe("armed is contained — it cannot survive the action that ends it", () 
     assert.equal(restored.finishedAt, null);
     assert.equal(restored.armed ?? false, false, "restoring into a redo must not read as armed");
     assertNotArmedAndRunning(restored, "after undo() out of a finished session");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+});
+
+describe("I-B: resume() must count on from what pause() banked", () => {
+  it("does not default the banked accumulator to zero", async () => {
+    // Before startSegment() existed, resume() wrote `segmentAccumMs: 0` only if
+    // someone typed it — nothing to accidentally omit. After the refactor,
+    // startSegment(accumMs = 0) makes zero the DEFAULT, so dropping resume()'s
+    // one argument (`this.state.segmentAccumMs ?? 0`) silently discards the
+    // banked time instead of failing loudly. This is the exact defect the
+    // comment above resume() already names: a testimony paused through the
+    // prayer came back reading the length of the prayer.
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    await new Promise((r) => setTimeout(r, 20)); // let some real time bank
+
+    const paused = baptismTimerService.pause();
+    const banked = paused.segmentAccumMs ?? 0;
+    assert.ok(banked > 0, "expected pause() to have banked some elapsed time");
+
+    const resumed = baptismTimerService.resume();
+    assert.equal(resumed.segmentAccumMs, banked, "resume() must keep what pause() banked, not reset it to zero");
+    assert.notEqual(resumed.segmentStartedAt, null, "resume() must start a clock");
+
+    // Read right after resuming: if the accumulator had been zeroed, this would
+    // read close to 0ms instead of at least the banked amount.
+    const elapsedRightAfter = segmentElapsedMs(resumed);
+    assert.ok(
+      elapsedRightAfter >= banked,
+      `expected elapsed (${elapsedRightAfter}ms) to count on from banked (${banked}ms), not restart from zero`,
+    );
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);
