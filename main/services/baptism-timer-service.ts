@@ -521,8 +521,13 @@ class BaptismTimerService {
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
         this.state = { ...s, people, baptismIndex: idx, ...this.startSegment() };
       } else if (s.phase === "baptism" && s.baptismIndex === 0) {
-        // Back to the testimony section.
-        this.state = { ...s, phase: "testimony", personNumber: s.people.length + 1, ...this.startSegment() };
+        // Back to the testimony section — pop the person startBaptisms()
+        // folded in when it armed, resuming them as the in-progress testimony.
+        // Left unpopped, a later re-arm folds them AGAIN beside the leftover
+        // completed entry: a one-person service finishes as two, silently.
+        const people = [...s.people];
+        people.pop();
+        this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment() };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const idx = s.people.length - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));

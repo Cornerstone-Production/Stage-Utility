@@ -84,7 +84,6 @@ function cols(rows: string[][]) {
   const at = (name: string) => header.indexOf(name);
   return {
     events: () => body.map((r) => r[at("event")]),
-    col: (name: string) => body.map((r) => r[at(name)]),
     filter: (event: string) => body.filter((r) => r[at("event")] === event),
     idx: at,
   };
@@ -308,6 +307,38 @@ describe("finish() mid-baptism in grouped mode also records the closing person",
     assert.equal(personCompleteRows[0]![c.idx("baptismIndex")], "0", "only person 0 was ever baptized");
     assert.equal(Number(personCompleteRows[0]![c.idx("segmentMs")]), Math.round(finished.people[0]!.baptizeMs));
   });
+
+  // A1: no test anywhere in the repo drove this path before. finish()'s
+  // per-person testimony branch is covered (line ~446); its grouped sibling
+  // (line ~451) is not — an ordinary Sunday sequence (Start Baptisms never
+  // pressed; the operator hits Finish instead, baptisms cancelled) closes the
+  // person currently mid-testimony with no row anywhere but `finish`'s own
+  // `people=N` detail, which carries no per-person time at all.
+  it("records the in-progress testimony when Finish cancels the baptisms in grouped mode", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start(); // person 1 testimony
+    await sleep(5);
+    baptismTimerService.next(); // person 1 testimony done, person 2 testimony starts
+    await sleep(5);
+    const finished = baptismTimerService.finish(); // Finish instead of Start Baptisms — cancels the baptism section
+
+    assert.equal(finished.people.length, 2);
+    assert.ok(finished.people[1]!.testimonyMs > 0, "person 2's testimony actually ran a clock");
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "testimony-end", "testimony-end", "finish"]);
+    const testimonyEndRows = c.filter("testimony-end");
+    assert.equal(
+      Number(testimonyEndRows[1]![c.idx("segmentMs")]),
+      Math.round(finished.people[1]!.testimonyMs),
+      "person 2's testimony time reaches a structured column, not just finish's people=N detail",
+    );
+  });
 });
 
 // N3: neither next() nor finish() may write a person-complete row for a
@@ -344,7 +375,6 @@ describe("closing a person while still armed writes no person-complete row for t
       ["reset", "start", "testimony-end", "baptisms-armed", "finish"],
       "no person-complete row for either person — neither was ever baptized",
     );
-    assert.equal(c.filter("person-complete").length, 0);
   });
 
   it("next() while armed (bypassing advance(), a documented route) writes no person-complete for the skipped person", async () => {
@@ -381,6 +411,110 @@ describe("closing a person while still armed writes no person-complete row for t
       "the row names index 1 (the real baptism), never index 0 (the skipped one)",
     );
     assert.equal(Number(personCompleteRows[0]![c.idx("segmentMs")]), Math.round(finished.people[1]!.baptizeMs));
+  });
+});
+
+// A2: the `undo` emit had no test at all, and it is the ONLY thing that tells
+// a replay `person-complete` is not a unique-per-person event — undoing a
+// baptism and redoing it writes a SECOND person-complete row for the same
+// baptismIndex, and the correct value is the LAST one, not the first. Without
+// a marker between them, a replay counting person-complete rows reports three
+// baptisms for two people with no way to notice.
+describe("undoing and redoing a baptism writes a second person-complete row, and the last one wins", () => {
+  it("the LAST person-complete row for a re-baptized index carries the real baptizeMs", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.next(); // person 1 testimony done, person 2 testimony starts
+    await sleep(2);
+    baptismTimerService.startBaptisms();
+    baptismTimerService.advance(); // person 1's baptism clock starts
+    await sleep(5);
+    baptismTimerService.next(); // person 1 (index 0) baptized — a mis-tap, too early
+    baptismTimerService.undo(); // back to index 0, clock restarted
+    await sleep(9); // the REAL baptism runs longer
+    baptismTimerService.next(); // person 1 (index 0) baptized again — the real one
+    await sleep(5);
+    const finished = baptismTimerService.next(); // person 2 (index 1) baptized — auto-finishes
+
+    assert.equal(finished.people.length, 2);
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), [
+      "reset",
+      "start",
+      "testimony-end",
+      "baptisms-armed",
+      "baptisms-start",
+      "person-complete",
+      "undo",
+      "person-complete",
+      "person-complete",
+      "finish",
+    ]);
+    const personCompleteRows = c.filter("person-complete");
+    assert.deepEqual(
+      personCompleteRows.map((r) => r[c.idx("baptismIndex")]),
+      ["0", "0", "1"],
+      "index 0 appears twice (the undone attempt, then the real one), then index 1 once",
+    );
+    assert.equal(
+      Number(personCompleteRows[1]![c.idx("segmentMs")]),
+      Math.round(finished.people[0]!.baptizeMs),
+      "the LAST index-0 row is the authoritative one, not the first (too-early) attempt",
+    );
+    assert.notEqual(
+      personCompleteRows[0]![c.idx("segmentMs")],
+      personCompleteRows[1]![c.idx("segmentMs")],
+      "the two attempts must have genuinely different durations, or last-wins is unproven",
+    );
+  });
+});
+
+// A3: undo() out of an armed grouped baptism section must pop the person
+// startBaptisms() folded in when it armed, or a later re-arm appends a SECOND
+// entry for the same person. A one-person service then finishes as two — the
+// headline number of this whole feature — and arming on the wrong song,
+// undoing, then re-arming when the right song goes live is an ordinary
+// Sunday sequence, not an edge case.
+describe("undoing out of an armed baptism section does not duplicate the folded person", () => {
+  it("arm, undo, re-arm leaves exactly one person, not two", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start(); // the only person, testimony
+    await sleep(3);
+    const armed = baptismTimerService.startBaptisms(); // folds the only person, arms — wrong song
+    assert.equal(armed.people.length, 1, "sanity: exactly one person after the first arm");
+
+    const undone = baptismTimerService.undo(); // back to testimony — must pop the fold, not leave it
+    assert.equal(undone.phase, "testimony");
+    assert.equal(
+      undone.people.length,
+      0,
+      "the folded person is popped back into the in-progress testimony, not left as a completed entry",
+    );
+
+    await sleep(4); // testimony continues running
+    const rearmed = baptismTimerService.startBaptisms(); // right song — arm again
+    assert.equal(
+      rearmed.people.length,
+      1,
+      "re-arming must fold the SAME person once, not add a second entry beside the one undo left behind",
+    );
+
+    const finished = baptismTimerService.finish();
+    assert.equal(finished.people.length, 1, "a one-person service must finish as one person, not two");
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "baptisms-armed", "undo", "baptisms-armed", "finish"]);
   });
 });
 
