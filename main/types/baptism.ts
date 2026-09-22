@@ -106,6 +106,35 @@ export interface BaptismSession {
   serviceKey?: string | null;
 }
 
+/** One operator action, as the raw layer records it. Never a derived total:
+ *  the file is what happened, and the totals are replayed from it. */
+export type BaptismRawEvent =
+  | "start"
+  | "testimony-end"
+  | "baptisms-armed"
+  | "baptisms-start"
+  | "person-complete"
+  | "pause"
+  | "resume"
+  | "undo"
+  | "finish"
+  | "reset";
+
+/** One `baptism.csv` row. The column set is FIXED — see recordBaptism. */
+export interface BaptismRawFields {
+  event: BaptismRawEvent;
+  mode: BaptismMode;
+  phase: BaptismPhase;
+  personNumber: number;
+  baptismIndex: number;
+  /** The segment's elapsed ms at this moment, or 0 where it means nothing. */
+  segmentMs: number;
+  /** The plan item live when this happened. Null when nothing is live. */
+  itemId: string | null;
+  item: string | null;
+  detail: string;
+}
+
 /** One of PCO's item row colors, from ServiceType.standard_item_types /
  *  custom_item_types. Standard entries match an item's `itemType`; custom entries
  *  match text CONTAINED in the title ("Items that include this text in the title
