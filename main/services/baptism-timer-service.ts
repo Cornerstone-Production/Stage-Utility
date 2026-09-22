@@ -45,8 +45,9 @@ class BaptismTimerService {
   /** Resume a persisted in-progress session on startup (tolerating older records
    *  that predate mode/baptismIndex). */
   async init(): Promise<void> {
-    const saved = await baptismStore.loadCurrent();
-    if (saved) this.state = { ...idleState("per-person"), ...saved };
+    const [saved, settings] = await Promise.all([baptismStore.loadCurrent(), settingsStore.get()]);
+    const fallback = settings.baptismDefaultMode === "per-person" ? "per-person" : "grouped";
+    this.state = saved ? { ...idleState(fallback), ...saved } : idleState(fallback);
   }
 
   getState(): BaptismState {
