@@ -27,6 +27,7 @@ function idleState(mode: BaptismMode): BaptismState {
     phase: "idle",
     personNumber: 0,
     baptismIndex: 0,
+    armed: false,
     segmentStartedAt: null,
     sessionStartedAt: null,
     finishedAt: null,
@@ -140,6 +141,7 @@ class BaptismTimerService {
    *  must not bank the same stretch twice. */
   pause(): BaptismState {
     if (this.state.phase === "idle" || !this.state.segmentStartedAt) return this.state;
+    if (this.state.armed) return this.state; // nothing is running to bank
     this.state = { ...this.state, segmentAccumMs: this.elapsedMs(), segmentStartedAt: null };
     return this.commit();
   }
@@ -207,20 +209,49 @@ class BaptismTimerService {
     return this.commit();
   }
 
-  /** GROUPED: end the testimony section and begin baptisms with person 1. The
-   *  currently-timing testimony is finalized as the last person. */
+  /** GROUPED: end the testimony section and ARM the baptisms. The currently-timing
+   *  testimony is finalized as the last person; no baptism clock starts until the
+   *  first press. See BaptismState.armed. */
   startBaptisms(): BaptismState {
     if (this.state.mode !== "grouped" || this.state.phase !== "testimony") return this.state;
     const people = [...this.state.people, { testimonyMs: this.elapsedMs(), baptizeMs: 0 }];
-    this.state = { ...this.state, phase: "baptism", people, baptismIndex: 0, segmentStartedAt: new Date().toISOString(), segmentAccumMs: 0 };
+    this.state = {
+      ...this.state,
+      phase: "baptism",
+      people,
+      baptismIndex: 0,
+      armed: true,
+      segmentStartedAt: null,
+      segmentAccumMs: 0,
+    };
     return this.commit();
   }
 
-  /** Advance — meaning depends on mode + phase:
+  /**
+   * The phase-aware primary press — whatever the operator panel's main button
+   * does right now. ONE entry point, so a Companion key, a layout button and the
+   * panel cannot disagree about which action is legal in which phase.
+   */
+  advance(): BaptismState {
+    if (this.state.phase === "idle") return this.start();
+    if (this.state.armed) {
+      // "First person in": begin person 1 without banking the armed stretch.
+      this.state = { ...this.state, armed: false, segmentStartedAt: new Date().toISOString(), segmentAccumMs: 0 };
+      return this.commit();
+    }
+    if (this.state.phase === "testimony") {
+      return this.state.mode === "grouped" ? this.next() : this.baptized();
+    }
+    return this.next();
+  }
+
+  /** Step forward one action — meaning depends on mode + phase:
    *   per-person/baptism  → finish this person, start the next testimony
    *   grouped/testimony   → finish this testimony, start the next testimony
    *   grouped/baptism     → finish this baptism, baptize the next person (auto-
-   *                         finishes the session after the last person). */
+   *                         finishes the session after the last person).
+   *  Not the phase-aware entry point itself — see advance(), which calls this
+   *  once the idle/armed/per-person-testimony special cases are handled. */
   next(): BaptismState {
     const now = new Date().toISOString();
     if (this.state.mode === "per-person") {
@@ -305,14 +336,17 @@ class BaptismTimerService {
       } else if (s.phase === "baptism" && s.baptismIndex > 0) {
         const idx = s.baptismIndex - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, people, baptismIndex: idx, segmentStartedAt: now, segmentAccumMs: 0 };
+        // A clock is running again (segmentStartedAt below), so this can no longer be
+        // the armed, nobody-has-pressed-yet state — clear a stale flag rather than
+        // let the panel's primary button read "Baptize person 1" mid-session.
+        this.state = { ...s, people, baptismIndex: idx, armed: false, segmentStartedAt: now, segmentAccumMs: 0 };
       } else if (s.phase === "baptism" && s.baptismIndex === 0) {
         // Back to the testimony section.
-        this.state = { ...s, phase: "testimony", personNumber: s.people.length + 1, segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...s, phase: "testimony", personNumber: s.people.length + 1, armed: false, segmentStartedAt: now, segmentAccumMs: 0 };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const idx = s.people.length - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, segmentStartedAt: now, segmentAccumMs: 0, finishedAt: null };
+        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, armed: false, segmentStartedAt: now, segmentAccumMs: 0, finishedAt: null };
       } else return s;
     }
     return this.commit();

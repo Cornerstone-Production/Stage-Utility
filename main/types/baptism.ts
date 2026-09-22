@@ -41,6 +41,19 @@ export interface BaptismState {
    *  the time since `segmentStartedAt`; a null start with a non-zero accumulator is
    *  a paused clock. Absent on records made before pausing existed. */
   segmentAccumMs?: number;
+  /**
+   * Grouped only: the baptism phase has begun but nobody's clock runs yet.
+   *
+   * The baptisms happen across the song set, and the phase starts when the first
+   * song goes live -- which is not when the first person steps up. Without this,
+   * person 1 absorbs however much intro the band plays, every week. Armed, every
+   * person's span runs from their own press to the next person's, so they all
+   * carry the same kind of boundary.
+   *
+   * Distinct from paused: a paused segment has banked time to resume from, an
+   * armed one has not started.
+   */
+  armed?: boolean;
   /** The plan item that started this session automatically, if one did — shown so
    *  the operator can see the timer did not start itself out of nowhere. */
   autoStartedFrom?: string | null;

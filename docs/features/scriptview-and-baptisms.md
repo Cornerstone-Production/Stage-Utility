@@ -164,6 +164,17 @@ Keep the keyword specific — plain "baptism" would catch a "Baptism class signu
 announcement where "baptism stories" would not. The Baptisms tab states, for the
 plan currently loaded, which item will start each phase or that nothing will.
 
+## Armed, then running
+
+The bound song going live does not start a clock. It **arms** the baptism phase:
+the timer shows the baptism section is underway, but nobody's time is counting.
+The band's intro before the first person steps up would otherwise land on person
+1 alone, every week. Instead the operator's own press starts person 1, and every
+person's time then runs from their own press to the next person's — a person's
+walk-up, what is said over them, and getting turned back around, all counted the
+same way for everyone. There is nothing to pause while armed, so that button is
+hidden until the first press.
+
 ## Pause
 
 The clock can stop for the talking between people without that time landing on

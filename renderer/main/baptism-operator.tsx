@@ -41,9 +41,12 @@ export function BaptismOperator() {
 
   // Tick the live segment clock while a segment is running.
   const segStart = state?.segmentStartedAt ?? null;
-  // Paused = a phase is running but its clock is not. The readout keeps showing what
-  // was banked, so a paused timer looks stopped rather than looking broken.
-  const paused = !!state && state.phase !== "idle" && !state.segmentStartedAt;
+  // Paused = a phase is running but its clock is not, AND there is banked time to
+  // resume from. Armed (grouped baptisms, before the first press) looks the same —
+  // no clock, nothing banked — but is not paused: there is nothing to resume, so it
+  // must not offer a "Resume" button. The readout keeps showing what was banked, so
+  // a paused timer looks stopped rather than looking broken.
+  const paused = !!state && state.phase !== "idle" && !state.armed && !state.segmentStartedAt;
   // The SERVER's clock. `segmentStartedAt` is stamped by the server, so a
   // console whose own clock has drifted would report the drift as elapsed time —
   // and the same segment reads differently here and on the display object.
@@ -80,7 +83,13 @@ export function BaptismOperator() {
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
   let primaryChannel: string;
-  if (phase === "idle") {
+  if (state.armed) {
+    // Grouped only: the song is live but nobody's clock has started. This press is
+    // exactly what advance() exists for — starting person 1 without banking the
+    // stretch the band's intro took. See BaptismState.armed.
+    primaryLabel = "Baptize person 1";
+    primaryChannel = "baptism:advance";
+  } else if (phase === "idle") {
     primaryLabel = grouped ? "Start testimonies" : "Start";
     primaryChannel = "baptism:start";
   } else if (phase === "testimony") {
@@ -175,7 +184,7 @@ export function BaptismOperator() {
         <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel, primaryChannel === "baptism:finish" ? reloadSessions : undefined)} className="px-6 py-2 text-body">
           {primaryLabel}
         </Button>
-        {phase !== "idle" && (
+        {phase !== "idle" && !state.armed && (
           <Button
             variant="filled"
             disabled={busy}
