@@ -210,11 +210,12 @@ shows the same everywhere.
 Every press on the timer appends a row to `baptism.csv`, the same append-only
 file the rest of the archive uses. A session that `baptism.json` loses — a
 corrupt file, or a crash between the debounced save and the next write — is not
-gone: it can be replayed from those rows, the same way an item's recorded
-timing is. The derived record is a cache of what the presses already said, not
-the only copy of it. See [Data archive](../data-archive.md) for the column list,
-which presses are recorded, and what the append-only rule buys the rest of the
-archive.
+gone: it can be replayed from those rows. The derived record is a cache of what
+the presses already said, not the only copy of it — but unlike an item's
+recorded timing, there is no **Rebuild from raw** entry for it yet, so that
+replay is not something an operator can trigger from the app. See
+[Data archive](../data-archive.md) for the column list, which presses are
+recorded, and what the append-only rule buys the rest of the archive.
 
 ## Logging
 
