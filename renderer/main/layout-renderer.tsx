@@ -2038,7 +2038,13 @@ function BaptismTimer({
     value = sum.count ? fmtClock(sum.avgPersonMs) : "—";
     fallback = "avg per person";
   } else if (field === "last") {
-    const last = state?.people[state.people.length - 1];
+    // NOT the last entry in `people` — in grouped mode every testimony is
+    // pushed up front with `baptizeMs: 0`, so the last entry is the last person
+    // who TESTIFIED, not the last one baptized (they agree only on the final
+    // baptism of the session). "Last person" on a stage display has to mean
+    // the last one actually baptized, same rule as `count`'s source.
+    const baptized = state?.people.filter((p) => p.baptizeMs > 0) ?? [];
+    const last = baptized[baptized.length - 1];
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
   }

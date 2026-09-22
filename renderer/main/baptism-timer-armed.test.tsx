@@ -61,21 +61,23 @@ const BASE_STATE: BaptismState = {
   planId: null,
 };
 
-/** Render the baptism-timer object's "live" field over a given state and
+/** Render one of the baptism-timer object's fields over a given state and
  *  return the text it drew. No `label` override — the object falls back to
- *  its own phase wording, the branch this bug lives in. */
-function textFor(state: BaptismState): string {
+ *  its own wording, the branch these bugs live in. */
+function textForField(state: BaptismState, field: "live" | "count" | "total" | "average" | "last" = "live"): string {
   cleanup();
   const ctx = makeRenderCtx({ baptism: state });
   const obj = {
     id: "o1",
     x: 0, y: 0, w: 0.3, h: 0.2, z: 1,
-    config: { type: "baptism-timer", field: "live", showLabel: true },
+    config: { type: "baptism-timer", field, showLabel: true },
     style: {},
   } as never;
   const { container } = render(React.createElement(ObjectContent as never, { o: obj, ctx }));
   return container.textContent ?? "";
 }
+
+const textFor = (state: BaptismState) => textForField(state, "live");
 
 describe("the baptism-timer object while armed", () => {
   test("says armed, not a person/baptism number", () => {
@@ -99,5 +101,39 @@ describe("the baptism-timer object while armed", () => {
     const text = textFor({ ...BASE_STATE, armed: false, segmentStartedAt: "2026-09-20T12:05:00.000Z" });
     assert.ok(text.includes("Baptism 1"), `Saw: ${JSON.stringify(text)}`);
     assert.ok(!text.includes("armed"), `Saw: ${JSON.stringify(text)}`);
+  });
+});
+
+describe("the baptism-timer object's \"last\" field", () => {
+  // In grouped mode every testimony is pushed into `people` up front with
+  // `baptizeMs: 0`, then mutated in place as each baptism happens — so the
+  // LAST entry in `people` is the last person who testified, not the last one
+  // baptized. They only agree on the final baptism of the session.
+
+  test("mid-testimony, nobody baptized yet, shows the dash — not a testimony time", () => {
+    // BASE_STATE: three testimonies done, phase "baptism" not yet reached in
+    // spirit (baptismIndex 0, every baptizeMs still 0). people[length-1]'s own
+    // testimonyMs (30_000 -> "0:30") is exactly what the bug rendered here.
+    const text = textForField(BASE_STATE, "last");
+    assert.ok(text.includes("—"), `Saw: ${JSON.stringify(text)}`);
+    assert.ok(!text.includes("0:30"), `named a testimony instead of nobody. Saw: ${JSON.stringify(text)}`);
+  });
+
+  test("partway through the baptisms, names the person actually just baptized", () => {
+    // Person 0 baptized (25s), person 1 and 2 still only testified. The last
+    // entry in `people` is person 2 (testimony 30s, baptizeMs 0) — the bug
+    // would report 0:30 (testimony-only) instead of person 0's 1:25 total.
+    const state: BaptismState = {
+      ...BASE_STATE,
+      baptismIndex: 1,
+      people: [
+        { testimonyMs: 60_000, baptizeMs: 25_000 },
+        { testimonyMs: 45_000, baptizeMs: 0 },
+        { testimonyMs: 30_000, baptizeMs: 0 },
+      ],
+    };
+    const text = textForField(state, "last");
+    assert.ok(text.includes("1:25"), `did not name the person actually baptized. Saw: ${JSON.stringify(text)}`);
+    assert.ok(!text.includes("0:30"), `named the last TESTIFIED person instead. Saw: ${JSON.stringify(text)}`);
   });
 });
