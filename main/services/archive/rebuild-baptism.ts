@@ -86,7 +86,10 @@ export interface BaptismIdentity {
   planId: string | null;
 }
 
-function num(v: string | undefined): number {
+/** A numeric cell of a baptism row: 0 when blank or unreadable. Exported so the
+ *  lane (baptism-lane.ts) reads every row exactly as this replay does — two
+ *  parses of one column are two answers about which person a row names. */
+export function cellNumber(v: string | undefined): number {
   const n = Number(v ?? "");
   return Number.isFinite(n) ? n : 0;
 }
@@ -181,24 +184,24 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
           // baptized(): the state has already moved into the baptism phase, so
           // this only banks the testimony. The person is completed later, by
           // next() or by finish().
-          open.pendingTestimonyMs = num(r.segmentMs);
+          open.pendingTestimonyMs = cellNumber(r.segmentMs);
         } else {
           // Grouped next()/finish(), and per-person finish() closing a testimony
           // that never reached a baptism — all three had already pushed a person
           // when they emitted, with baptizeMs still 0.
-          open.people.push({ testimonyMs: num(r.segmentMs), baptizeMs: 0 });
+          open.people.push({ testimonyMs: cellNumber(r.segmentMs), baptizeMs: 0 });
         }
         break;
 
       case "baptisms-armed":
         // startBaptisms() folds the running testimony into `people` and carries
         // its duration here. Nowhere else holds it.
-        open.people.push({ testimonyMs: num(r.segmentMs), baptizeMs: 0 });
+        open.people.push({ testimonyMs: cellNumber(r.segmentMs), baptizeMs: 0 });
         break;
 
       case "person-complete":
         if (open.mode === "per-person") {
-          open.people.push({ testimonyMs: open.pendingTestimonyMs ?? 0, baptizeMs: num(r.segmentMs) });
+          open.people.push({ testimonyMs: open.pendingTestimonyMs ?? 0, baptizeMs: cellNumber(r.segmentMs) });
           // Belt and braces, mirroring next()'s own `pendingTestimonyMs: null`.
           // Nothing reads it before the next testimony-end overwrites it, so
           // removing this line changes no result today — it is here so the
@@ -208,8 +211,8 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         } else {
           // ASSIGN, never append: a re-baptised index has two rows and the last
           // one wins.
-          const person = open.people[num(r.baptismIndex)];
-          if (person) person.baptizeMs = num(r.segmentMs);
+          const person = open.people[cellNumber(r.baptismIndex)];
+          if (person) person.baptizeMs = cellNumber(r.segmentMs);
           else skips.missingIndex += 1;
         }
         break;
@@ -239,7 +242,7 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         } else {
           // Still in the baptism section (or reopening a finished one): the
           // person at the row's index is un-baptized, not removed.
-          const person = open.people[num(r.baptismIndex)];
+          const person = open.people[cellNumber(r.baptismIndex)];
           if (person) person.baptizeMs = 0;
           else skips.missingIndex += 1;
         }

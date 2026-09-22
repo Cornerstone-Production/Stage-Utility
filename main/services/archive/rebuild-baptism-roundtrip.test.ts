@@ -38,37 +38,12 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { baptismTimerService } = await import("../baptism-timer-service.js");
-const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { stageController } = await import("../stage-controller.js");
 const { sampleArchive } = await import("./sample-archive.js");
 const { rebuildBaptismSessions, readBaptismRows } = await import("./rebuild-baptism.js");
-
-type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
-const rec = () => serviceTimelineRecorder as unknown as Held;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-let ctxCounter = 0;
-function freshCtx() {
-  ctxCounter += 1;
-  return { serviceKey: `st1:plan1:replay${ctxCounter}`, serviceDate: "2026-09-20" };
-}
-
-function openService(ctx: { serviceKey: string; serviceDate: string }): void {
-  rec().current = { ...ctx, endedAt: null };
-}
-
-/** The session the store holds for this service, once the fire-and-forget save
- *  behind finalize() has settled. Polled rather than slept on: the save is a
- *  queued read-modify-write, not a fixed delay. */
-async function storedSession(ctx: { serviceKey: string }) {
-  for (let i = 0; i < 200; i++) {
-    const found = (await baptismTimerService.listSessions()).filter((s) => s.serviceKey === ctx.serviceKey);
-    if (found.length > 0) return found;
-    await sleep(5);
-  }
-  throw new Error(`no stored session for ${ctx.serviceKey} after 1s`);
-}
+// Opening a service, a fresh key per test, and waiting on the store: shared with
+// baptism-lane-roundtrip.test.ts, so the two guards cannot drift apart.
+const { freshCtx, openService, sleep, storedSessions } = await import("./baptism-roundtrip-harness.js");
 
 /**
  * Replay this service's real archived rows and assert they reproduce the
@@ -78,7 +53,7 @@ async function storedSession(ctx: { serviceKey: string }) {
  */
 async function assertRoundTrip(ctx: { serviceKey: string; serviceDate: string }, why: string) {
   await sampleArchive.flush();
-  const stored = await storedSession(ctx);
+  const stored = await storedSessions(ctx);
 
   const rows = await readBaptismRows(ctx.serviceKey, ctx.serviceDate);
   assert.ok(rows, `${why}: readBaptismRows found an archive for this service`);
@@ -126,7 +101,7 @@ async function assertRoundTrip(ctx: { serviceKey: string; serviceDate: string },
 
 describe("a real grouped session replays back into the session the store recorded", () => {
   it("run to its natural end, where the last person auto-finishes", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -151,7 +126,7 @@ describe("a real grouped session replays back into the session the store recorde
   });
 
   it("finished mid-baptism, with the second person never baptized", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -174,7 +149,7 @@ describe("a real grouped session replays back into the session the store recorde
   });
 
   it("finished during the testimony section, the baptisms cancelled", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -193,7 +168,7 @@ describe("a real grouped session replays back into the session the store recorde
   });
 
   it("finished while still armed, before anyone stepped up", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -215,7 +190,7 @@ describe("a real grouped session replays back into the session the store recorde
 
 describe("a real per-person session replays back into the session the store recorded", () => {
   it("two people, closed by the Finish press that is its only terminator", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("per-person");
@@ -238,7 +213,7 @@ describe("a real per-person session replays back into the session the store reco
   });
 
   it("one person whose testimony Finish closed before any baptism", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("per-person");
@@ -256,7 +231,7 @@ describe("a real per-person session replays back into the session the store reco
 
 describe("a real session containing an undo replays back into the session the store recorded", () => {
   it("re-baptizing the same person keeps the second attempt, not the first", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -300,7 +275,7 @@ describe("a real session containing an undo replays back into the session the st
     // zeroing person 0's baptism on any service where the operator corrected
     // somebody further down the line — which is the ordinary case, not the edge
     // one.
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -342,7 +317,7 @@ describe("a real session containing an undo replays back into the session the st
   });
 
   it("armed on the wrong song, undone, re-armed — still one person", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -375,7 +350,7 @@ describe("a real session containing an undo replays back into the session the st
     // baptismIndex 0, which the replay reads as un-baptizing index 0 — and
     // person 1 has no completion row yet, so there is nothing to zero. The
     // replay has no rule of its own for this press; this proves it needs none.
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -427,7 +402,7 @@ describe("a real session containing an undo replays back into the session the st
   });
 
   it("per-person Baptized pressed early, undone, then pressed again", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("per-person");

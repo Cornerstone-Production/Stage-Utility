@@ -1099,18 +1099,36 @@ gaps in the original plan, each confirmed against source:
     service has no `baptism.csv`.
   - `invoke("baptism:lane", { serviceKey })`.
 
-**Rules the derivation must implement**, each from a real emitter behaviour:
+**Rules the derivation must implement**, each from a real emitter behaviour. Corrected against
+driven sessions when Task 9 was built; the three corrections are marked.
 
 - A span opens on `start` (testimony, person 1), on `testimony-end` in grouped mode (the next
-  testimony), on `testimony-end` in per-person mode (that person's baptism), on
+  testimony), on per-person `testimony-end` at `phase=baptism` (that person's baptism —
+  `baptized()` writes it; at `phase=testimony` it is `finish()` and opens nothing), on
   `baptisms-start` (the first baptism, grouped), on `person-complete` (the next person), and
-  on `resume`.
+  on `resume`. Grouped `person-complete` opens the next baptism only while someone is left to
+  baptize (Ruling 1's count).
+- **Corrected — the press that ends a session opens nothing.** `finish()` writes its closing
+  boundary (`testimony-end` or `person-complete`) and then `finish`, in one synchronous call,
+  as does `next()`'s grouped auto-finish. A boundary immediately followed by `finish` opens
+  nothing. Ruling 1's count alone misses this: a grouped session finished mid-baptism still
+  has a next person, never baptized, and per-person `finish()` writes a `person-complete` that
+  "always opens the next testimony" would turn into a person the session never had.
 - A span closes on the next boundary, on `pause`, on `finish`, and on `reset`.
+- **Corrected — a reset session draws nothing.** `reset()` logs no session, so the spans of a
+  session reset before it finished are time no recorded session holds. A session's spans are
+  what its last `finish` logged — the replay's rule.
 - `baptisms-armed` closes the last testimony and opens NOTHING. The stretch until
   `baptisms-start` is a gap, drawn as not counted.
 - A grouped baptism span's `person` is `baptismIndex + 1`, never `personNumber`.
-- An `undo` takes back the most recent boundary and reopens the span it closed. The stretch
-  the undone span covered is a gap. Handle all four shapes above.
+- An `undo` takes back the most recent boundary. The span that press opened becomes a gap; the
+  span it closed runs again from the undo row — resumed where the emitter resumes from banked
+  time (a testimony), re-timed where it restarts at zero (a baptism), so a re-timed baptism's
+  earlier pieces are dropped too. Handle all four shapes above.
+- **Corrected — one transition writes no row.** `POST /api/baptism/next` while armed starts
+  the next person's baptism clock without a row. The first row after it (`pause` or
+  `person-complete`) carries that clock's whole run in `segmentMs`, so the span is placed at
+  that row's time minus it. The emitter should write `baptisms-start` there (Task 14 or later).
 - A still-running session ends with one span whose `endedAt` is null.
 
 **The guard that matters — a round-trip invariant.** Drive real sessions through the real
@@ -1119,10 +1137,14 @@ rows, read them back with `readBaptismRows`, derive spans, and assert that **for
 the sum of their testimony spans equals their recorded `testimonyMs` and the sum of their
 baptism spans equals their `baptizeMs`**, within a few milliseconds of rounding. This ties the
 lane to the data: a lane that shows time the session did not record, or drops time it did, fails.
+The sum alone passes a zero-length span for a person who is not there, so the guard also holds
+that a person with no recorded time of a kind has no span of it, that every span names a person
+the session has and lies inside a stored session, and that only one clock runs at a time.
 
-Reuse the harness in `main/services/archive/rebuild-baptism-roundtrip.test.ts`. Scenarios, at
-minimum: grouped run to its natural end; grouped with a pause mid-testimony; per-person
-finished with `finish()`; an undo that re-baptizes the same person; arm, undo, re-arm.
+Reuse the harness in `main/services/archive/rebuild-baptism-roundtrip.test.ts` (lifted into
+`baptism-roundtrip-harness.ts`, shared by both round trips). Scenarios, at minimum: grouped run
+to its natural end; grouped with a pause mid-testimony; per-person finished with `finish()`; an
+undo that re-baptizes the same person; arm, undo, re-arm.
 
 - [ ] **Step 1: Write the failing fixture tests**
 
