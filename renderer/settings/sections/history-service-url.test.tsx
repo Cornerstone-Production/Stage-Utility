@@ -25,8 +25,17 @@
 // history change it did not itself initiate — Back, Forward, another tab.
 // `router.navigate()` still updates `router.state.location` synchronously
 // without it (proved below), but `router.history.back()` alone does not, so
-// "Back returns to the list" is NOT asserted here — it was driven in a real
-// browser instead (see the task report).
+// "Back returns to the list" is NOT asserted here, and — say this plainly —
+// it was NOT driven in a real browser either: this environment has no
+// browser-automation tool (no Playwright/Puppeteer, and neither is a project
+// dependency). What stands in its place: `setSelectedKey` sets local state
+// directly on selection (see its doc comment in service-history-section.tsx),
+// so opening a service does not depend on `<Transitioner>` at all; only the
+// reverse direction does, and it is exactly the push/replace navigation
+// `?integration=` already uses in shipped code on
+// integrations-section.tsx, which could not work in production if this
+// mechanism were broken. That is corroboration, not proof — the gap is real
+// and is named in the task report.
 //
 // NOT asserted here: jsdom loads no stylesheet, so this does not touch layout.
 // See history-service-page.test.tsx's own header for that split.
