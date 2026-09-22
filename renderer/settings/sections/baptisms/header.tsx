@@ -78,7 +78,7 @@ export function baptismSubline(state: BaptismState): string {
  * session this page is timing right now, straight off the figures already on
  * screen, so the pasted text can never disagree with the strip beside it.
  */
-export function baptismReportText(state: BaptismState, figures: readonly (StatFigure & { sub?: string })[]): string {
+export function baptismReportText(state: BaptismState, figures: readonly StatFigure[]): string {
   const lines: string[] = [state.serviceTitle ?? "Baptisms"];
   if (state.sessionStartedAt) lines.push(fmtDate(state.sessionStartedAt));
   lines.push("", ...figures.map((f) => `${f.label}: ${f.value}`));

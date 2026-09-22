@@ -1,10 +1,10 @@
 import { BaptismOperator } from "../../main/baptism-operator";
 
 /**
- * Settings "Baptisms" tab. This and the standalone /baptism page render the SAME
- * <BaptismOperator/> against the same live session, so an operator can run it
- * from a tablet while this tab mirrors it. The link to that page is the standard
- * header action, as on every other tab with a standalone page.
+ * A wrapper around <BaptismOperator/>, unrouted — /baptism renders that
+ * component directly, and nothing links to this file. Kept rather than
+ * deleted; see the NOT_ROUTED entry for "BaptismsSection" in
+ * renderer/app/reachable.test.ts for why removing it is a separate decision.
  */
 export function BaptismsSection() {
   return (

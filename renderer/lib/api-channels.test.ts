@@ -47,6 +47,15 @@ function handledChannels(): Set<string> {
  * Resolved per file rather than by matching any callee: `onNotification` takes a
  * channel-shaped string too, but those are SSE event names with no case in
  * api.ts and never should have one.
+ *
+ * KNOWN BLIND SPOT: this walks text forward to the first `}`, not a parser. A
+ * dispatcher declared NESTED inside another function is attributed to that
+ * enclosing function instead of itself, whenever nothing between the two
+ * closes a brace first — so the nested one is never added to this list, and a
+ * channel it dispatches with no case in api.ts passes this file silently. The
+ * only real protection for a wrapper shaped like that is typing its channel
+ * parameter as `IpcChannel` rather than `string`, so `tsc` catches an unwired
+ * channel this scan cannot see.
  */
 function dispatcherNames(src: string): string[] {
   const names = new Set(["invoke"]);

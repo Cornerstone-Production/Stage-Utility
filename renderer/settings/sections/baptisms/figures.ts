@@ -56,7 +56,7 @@ export const DEFAULT_BAPTISM_FIGURES: string[] = [...BAPTISM_FIGURE_KEYS];
  * A person's own time is press to press, never claims to be time submerged —
  * this is that same idea, over the whole session.
  */
-export function baptismFigures(state: BaptismState, now: number): (StatFigure & { sub?: string })[] {
+export function baptismFigures(state: BaptismState, now: number): StatFigure[] {
   const sum = summarizeBaptism(state);
   const live = state.phase !== "idle";
   const liveMs = live ? segmentElapsedMs(state, now) : 0;
