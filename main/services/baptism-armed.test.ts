@@ -96,3 +96,93 @@ describe("grouped baptisms begin armed", () => {
     await baptismStore.saveCurrent(null);
   });
 });
+
+/** armed === true implies segmentStartedAt === null, always. An armed segment
+ *  has no clock running by definition — see BaptismState.armed — so the two
+ *  can never legitimately coexist. */
+function assertNotArmedAndRunning(state: { armed?: boolean; segmentStartedAt: string | null }, where: string): void {
+  if (state.armed) {
+    assert.equal(state.segmentStartedAt, null, `${where}: armed is true but a clock is running`);
+  }
+}
+
+describe("armed is contained — it cannot survive the action that ends it", () => {
+  it("C1: resume() must not stamp a start time while armed", async () => {
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    baptismTimerService.next();
+    const armedAt = baptismTimerService.startBaptisms();
+    assert.equal(armedAt.armed, true);
+
+    // The documented route an operator's panel would call if a paused testimony
+    // auto-armed on the song while the already-rendered button still said
+    // "Resume" — the exact race the reviewer named.
+    const after = baptismTimerService.resume();
+    assert.equal(after.armed, true, "resume() must leave armed alone, not silently clear it");
+    assertNotArmedAndRunning(after, "after resume() while armed");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("C2: finish() must not persist armed on a finished session", async () => {
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    baptismTimerService.next();
+    baptismTimerService.startBaptisms();
+
+    const finished = baptismTimerService.finish();
+    assert.equal(finished.phase, "idle");
+    assert.equal(
+      finished.armed ?? false,
+      false,
+      "a finished session must not read armed — the panel checks armed before phase === \"idle\"",
+    );
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("I3: next() called directly while armed must not leave armed stuck under a running clock", async () => {
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    baptismTimerService.next(); // bank person 1's testimony, person 2's begins
+    const armedAt = baptismTimerService.startBaptisms(); // finalizes person 2 — arms over 2 people
+    assert.equal(armedAt.armed, true);
+    assert.equal(armedAt.people.length, 2);
+
+    // /api/baptism/next is a documented, reachable route — this is not a
+    // hypothetical misuse.
+    const after = baptismTimerService.next();
+    assert.equal(after.baptismIndex, 1, "moved to the next person");
+    assert.notEqual(after.segmentStartedAt, null, "a clock is now running");
+    assert.equal(after.armed ?? false, false, "armed must not survive next() while it was true");
+    assertNotArmedAndRunning(after, "after next() while armed");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("M8: undo() restores into the baptism phase from a finished grouped session", async () => {
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    baptismTimerService.startBaptisms();
+    baptismTimerService.advance(); // first press — starts person 1's clock
+    const finished = baptismTimerService.finish();
+    assert.equal(finished.phase, "idle");
+    assert.ok(finished.finishedAt);
+
+    const restored = baptismTimerService.undo();
+    assert.equal(restored.phase, "baptism");
+    assert.equal(restored.finishedAt, null);
+    assert.equal(restored.armed ?? false, false, "restoring into a redo must not read as armed");
+    assertNotArmedAndRunning(restored, "after undo() out of a finished session");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+});

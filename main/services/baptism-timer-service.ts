@@ -78,6 +78,24 @@ class BaptismTimerService {
   }
 
   /**
+   * Start (or restart) the current segment's clock: never armed, never paused,
+   * timing from this instant. Compose this into every state update that begins
+   * timing something, rather than writing the shape by hand — eleven call
+   * sites wrote `segmentStartedAt: <now>, segmentAccumMs: 0` themselves, and
+   * only three of them also remembered to clear `armed`. That is exactly how
+   * armed leaked past its own state: resume(), finalize() and next() could
+   * each leave `armed: true` sitting on top of a running clock, or on a
+   * session that had already finished.
+   *
+   * `accumMs` defaults to 0 — a genuinely new segment. resume() is the one
+   * caller that passes the banked amount instead, since resuming counts ON
+   * from what was banked rather than restarting at zero.
+   */
+  private startSegment(accumMs = 0): Pick<BaptismState, "armed" | "segmentStartedAt" | "segmentAccumMs"> {
+    return { armed: false, segmentStartedAt: new Date().toISOString(), segmentAccumMs: accumMs };
+  }
+
+  /**
    * Drive the timer from the running plan, so a producer advancing PCO is not also
    * clicking start here at the same moment.
    *
@@ -132,7 +150,15 @@ class BaptismTimerService {
     }
 
     this.lastAutoItemId = live.currentItemId;
-    console.log(`[baptism] auto-start: started ${this.state.phase} from "${live.label ?? ""}"`);
+    // startBaptisms() ARMS rather than starting a clock (see BaptismState.armed) —
+    // saying "started baptism" here would tell a Sunday-morning operator a clock
+    // is running when nobody's is, which is the one thing this whole feature
+    // exists to stop happening.
+    console.log(
+      action === "start-testimonies"
+        ? `[baptism] auto-start: started testimonies from "${live.label ?? ""}"`
+        : `[baptism] auto-start: armed baptisms from "${live.label ?? ""}" — no clock runs until the first press`,
+    );
     this.state = { ...this.state, autoStartedFrom: live.label ?? null };
     this.commit();
   }
@@ -149,10 +175,15 @@ class BaptismTimerService {
   /** Start it again from what was banked, not from zero. */
   resume(): BaptismState {
     if (this.state.phase === "idle" || this.state.segmentStartedAt) return this.state;
+    // Nothing banked to resume FROM — advance() is how armed ends, not this. Without
+    // this check, POST /api/baptism/resume while armed stamped a start time and left
+    // `armed: true`, so person 1's clock silently counted the band's intro: the exact
+    // outcome this whole feature exists to prevent.
+    if (this.state.armed) return this.state;
     // Keeps segmentAccumMs — resuming counts ON from what was banked. Clearing it
     // here silently discarded everything before the pause, so a testimony paused
     // through the prayer came back reading the length of the prayer.
-    this.state = { ...this.state, segmentStartedAt: new Date().toISOString() };
+    this.state = { ...this.state, ...this.startSegment(this.state.segmentAccumMs ?? 0) };
     return this.commit();
   }
 
@@ -187,7 +218,7 @@ class BaptismTimerService {
       ...idleState(this.state.mode),
       phase: "testimony",
       personNumber: 1,
-      segmentStartedAt: now, segmentAccumMs: 0,
+      ...this.startSegment(),
       sessionStartedAt: now,
       serviceTitle: st.planTitle ?? null,
       serviceTypeId: st.serviceTypeId ?? null,
@@ -205,7 +236,7 @@ class BaptismTimerService {
   /** PER-PERSON: testimony → baptism for the current person. */
   baptized(): BaptismState {
     if (this.state.mode !== "per-person" || this.state.phase !== "testimony") return this.state;
-    this.state = { ...this.state, phase: "baptism", pendingTestimonyMs: this.elapsedMs(), segmentStartedAt: new Date().toISOString(), segmentAccumMs: 0 };
+    this.state = { ...this.state, phase: "baptism", pendingTestimonyMs: this.elapsedMs(), ...this.startSegment() };
     return this.commit();
   }
 
@@ -236,7 +267,7 @@ class BaptismTimerService {
     if (this.state.phase === "idle") return this.start();
     if (this.state.armed) {
       // "First person in": begin person 1 without banking the armed stretch.
-      this.state = { ...this.state, armed: false, segmentStartedAt: new Date().toISOString(), segmentAccumMs: 0 };
+      this.state = { ...this.state, ...this.startSegment() };
       return this.commit();
     }
     if (this.state.phase === "testimony") {
@@ -253,23 +284,25 @@ class BaptismTimerService {
    *  Not the phase-aware entry point itself — see advance(), which calls this
    *  once the idle/armed/per-person-testimony special cases are handled. */
   next(): BaptismState {
-    const now = new Date().toISOString();
     if (this.state.mode === "per-person") {
       if (this.state.phase !== "baptism") return this.state;
       const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
-      this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, segmentStartedAt: now, segmentAccumMs: 0 };
+      this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, ...this.startSegment() };
       return this.commit();
     }
     // grouped
     if (this.state.phase === "testimony") {
       const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
-      this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, segmentStartedAt: now, segmentAccumMs: 0 };
+      this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment() };
       return this.commit();
     }
     if (this.state.phase === "baptism") {
+      // `armed` may still be true here — /api/baptism/next is a documented route,
+      // reachable directly (bypassing advance()) while the phase is armed — so
+      // startSegment() clearing it is load-bearing, not just tidy.
       const people = this.state.people.map((p, i) => (i === this.state.baptismIndex ? { ...p, baptizeMs: this.elapsedMs() } : p));
       if (this.state.baptismIndex + 1 < people.length) {
-        this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment() };
         return this.commit();
       }
       // last person baptized → close the session.
@@ -295,7 +328,11 @@ class BaptismTimerService {
 
   private finalize(people: BaptismPerson[]): BaptismState {
     const finishedAt = new Date().toISOString();
-    this.state = { ...this.state, phase: "idle", segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
+    // `armed: false` is load-bearing, not tidy: finishing (or auto-finishing after
+    // the last person) while armed used to persist `{ phase: "idle", armed: true }`
+    // to disk, and init() restored it — the panel checks `armed` before
+    // `phase === "idle"`, so a finished session read as "Baptize person 1."
+    this.state = { ...this.state, phase: "idle", armed: false, segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
     if (people.length > 0 && this.state.sessionStartedAt) {
       void baptismStore.addSession({
         id: `bap-${Date.parse(this.state.sessionStartedAt)}`,
@@ -311,42 +348,41 @@ class BaptismTimerService {
     return this.commit();
   }
 
-  /** Step back one action — fixes a mis-tap without losing the session. */
+  /** Step back one action — fixes a mis-tap without losing the session. Every
+   *  branch resumes a real clock (startSegment()), so none of them can restore
+   *  into the armed state — armed means nobody has pressed yet, and undo only
+   *  runs after some press already happened. */
   undo(): BaptismState {
-    const now = new Date().toISOString();
     const s = this.state;
     if (s.mode === "per-person") {
       if (s.phase === "baptism") {
-        this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment() };
       } else if (s.phase === "testimony" && s.people.length > 0) {
         const people = [...s.people];
         const last = people.pop()!;
-        this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, ...this.startSegment() };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const people = [...s.people];
         const last = people.pop()!;
-        this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, segmentStartedAt: now, segmentAccumMs: 0, finishedAt: null };
+        this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(), finishedAt: null };
       } else return s;
     } else {
       // grouped
       if (s.phase === "testimony" && s.people.length > 0) {
         const people = [...s.people];
         people.pop();
-        this.state = { ...s, people, personNumber: Math.max(1, s.personNumber - 1), segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...s, people, personNumber: Math.max(1, s.personNumber - 1), ...this.startSegment() };
       } else if (s.phase === "baptism" && s.baptismIndex > 0) {
         const idx = s.baptismIndex - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        // A clock is running again (segmentStartedAt below), so this can no longer be
-        // the armed, nobody-has-pressed-yet state — clear a stale flag rather than
-        // let the panel's primary button read "Baptize person 1" mid-session.
-        this.state = { ...s, people, baptismIndex: idx, armed: false, segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...s, people, baptismIndex: idx, ...this.startSegment() };
       } else if (s.phase === "baptism" && s.baptismIndex === 0) {
         // Back to the testimony section.
-        this.state = { ...s, phase: "testimony", personNumber: s.people.length + 1, armed: false, segmentStartedAt: now, segmentAccumMs: 0 };
+        this.state = { ...s, phase: "testimony", personNumber: s.people.length + 1, ...this.startSegment() };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const idx = s.people.length - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, armed: false, segmentStartedAt: now, segmentAccumMs: 0, finishedAt: null };
+        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(), finishedAt: null };
       } else return s;
     }
     return this.commit();
