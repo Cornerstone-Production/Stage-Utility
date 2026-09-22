@@ -1042,208 +1042,477 @@ Base `beta`. Body answers both standing questions explicitly: which docs changed
 
 # PR 2 — The tab
 
-Branch: `feat/baptisms-tab`. Depends on PR 1's `armed` field.
+Branch: `feat/baptisms-tab`, stacked on `fix/baptism-session-integrity` (#581). Opened with
+`--base fix/baptism-session-integrity`; never by merging the unmerged sibling in.
 
-## Task 9: split the operator panel and add the header
+**The mockup is the spec.** `.superpowers/sdd/2026-09-21-baptisms-overhaul/mockup-v3.html`
+(published at https://claude.ai/artifact/CKsh8UMt2uASE2xxxE7Gc8, v3). Every UI task builds
+what it shows, in the app's real tokens, and reads the mockup BEFORE this prose.
+
+**Refreshed after PR 1.** This section was rewritten against the code as PR 1 left it. Three
+gaps in the original plan, each confirmed against source:
+
+1. **The session lane cannot be drawn from `BaptismState`.** `people` holds durations
+   (`testimonyMs`, `baptizeMs`), not timestamps, and durations cannot show a gap — which is
+   the lane's whole purpose (the armed stretch, the transition, a pause). The raw rows PR 1
+   built carry an `at` on every press. The lane is derived from them (Task 9).
+2. **History has no URL for a single service.** Its selection is `useState` at
+   `service-history-section.tsx:335`. Every "open in History" link needs somewhere to go.
+   Task 10 adds it; PR 3 reuses it.
+3. **"Rebuild from raw" moves to PR 3.** The mockup's header shows it, but the replay has no
+   production caller until PR 3 fixes the session-id skew (Ruling 31). A button that does
+   nothing is the failure CLAUDE.md names. PR 2's header ships Copy report and Export CSV.
+
+**Handoffs from PR 1 that bind this PR:**
+
+- `summarizeBaptism().count` now counts people with a baptism time, not everyone who
+  testified. Use it; do not re-derive.
+- In grouped mode, `personNumber` is the TESTIMONY counter and freezes when the section
+  arms. A baptism span's person is `baptismIndex + 1`. Keying on `personNumber` mis-attributes
+  every grouped baptism.
+- `person-complete` is NOT unique per person — an undo can re-baptize. Last wins.
+- There are four `undo` row shapes: `(testimony, from testimony)` pops a completed testimony;
+  `(testimony, from baptism)` pops the person `baptisms-armed` folded in; `(baptism, from
+  baptism)` does not pop and re-times the baptism at the new index; `(baptism, from idle)`
+  un-finishes. The `detail` text collides between modes — key on `mode` and `phase`.
+- `emitRaw` queues the append and does NOT await it, and `commit()` broadcasts `baptism:state`
+  synchronously. A reader that fetches rows on the push can beat the row to disk.
+- Everything PR 1 hardened in `main/services/baptism-timer-service.ts` stays hardened. Task 14
+  is the only task in this PR that edits it.
+
+## Task 9: derive the session lane from the raw rows
 
 **Files:**
-- Create: `renderer/settings/sections/baptisms/figures.ts`, `header.tsx`
-- Modify: `renderer/main/baptism-operator.tsx` (extract the timer block, keep the panel)
+- Create: `main/services/archive/baptism-lane.ts`, `main/services/archive/baptism-lane.test.ts`,
+  `main/services/archive/baptism-lane-roundtrip.test.ts`
+- Modify: `main/services/routes/history-routes.ts` (a GET route), `renderer/lib/api.ts`
+  (a `baptism:lane` case)
 
 **Interfaces:**
-- Produces: `baptismFigures(state: BaptismState | null, sessions: BaptismSession[], now: number): StatFigure[]`; `<BaptismsHeader state figures onCopy onExport onRebuild />`.
+- Consumes: `readBaptismRows(serviceKey, serviceDate)`, `type BaptismRow` from
+  `./rebuild-baptism.js`; `rowsByTime` from wherever PR 1's refactor put it
+  (`c204eb94` extracted one shared helper — find it, do not write a second).
+- Produces:
+  - `interface BaptismSpan { kind: "testimony" | "baptism"; person: number; startedAt: string; endedAt: string | null }`
+  - `baptismLaneSpans(rows: BaptismRow[]): BaptismSpan[]` — PURE, like `rebuildBaptismSessions`.
+  - `GET /api/baptism/lane?serviceKey=<key>` → `{ spans: BaptismSpan[] }`, empty when the
+    service has no `baptism.csv`.
+  - `invoke("baptism:lane", { serviceKey })`.
 
-- [ ] **Step 1: Write the failing test** — `renderer/settings/sections/baptisms/figures.test.ts`:
+**Rules the derivation must implement**, each from a real emitter behaviour:
+
+- A span opens on `start` (testimony, person 1), on `testimony-end` in grouped mode (the next
+  testimony), on `testimony-end` in per-person mode (that person's baptism), on
+  `baptisms-start` (the first baptism, grouped), on `person-complete` (the next person), and
+  on `resume`.
+- A span closes on the next boundary, on `pause`, on `finish`, and on `reset`.
+- `baptisms-armed` closes the last testimony and opens NOTHING. The stretch until
+  `baptisms-start` is a gap, drawn as not counted.
+- A grouped baptism span's `person` is `baptismIndex + 1`, never `personNumber`.
+- An `undo` takes back the most recent boundary and reopens the span it closed. The stretch
+  the undone span covered is a gap. Handle all four shapes above.
+- A still-running session ends with one span whose `endedAt` is null.
+
+**The guard that matters — a round-trip invariant.** Drive real sessions through the real
+`baptismTimerService` against a temp data dir, let the real `sampleArchive` write the real
+rows, read them back with `readBaptismRows`, derive spans, and assert that **for every person,
+the sum of their testimony spans equals their recorded `testimonyMs` and the sum of their
+baptism spans equals their `baptizeMs`**, within a few milliseconds of rounding. This ties the
+lane to the data: a lane that shows time the session did not record, or drops time it did, fails.
+
+Reuse the harness in `main/services/archive/rebuild-baptism-roundtrip.test.ts`. Scenarios, at
+minimum: grouped run to its natural end; grouped with a pause mid-testimony; per-person
+finished with `finish()`; an undo that re-baptizes the same person; arm, undo, re-arm.
+
+- [ ] **Step 1: Write the failing fixture tests**
+
+```ts
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { baptismLaneSpans, type BaptismSpan } from "./baptism-lane.js";
+import type { BaptismRow } from "./rebuild-baptism.js";
+
+/** t is seconds after 11:00:00Z. */
+const row = (t: number, over: Partial<BaptismRow>): BaptismRow => ({
+  at: new Date(Date.UTC(2026, 8, 27, 11, 0, t)).toISOString(),
+  event: "", mode: "grouped", phase: "", personNumber: "0", baptismIndex: "0",
+  segmentMs: "0", itemId: "", item: "", detail: "",
+  ...over,
+});
+const sec = (s: BaptismSpan) =>
+  s.endedAt === null ? null : (Date.parse(s.endedAt) - Date.parse(s.startedAt)) / 1000;
+
+describe("baptismLaneSpans", () => {
+  it("leaves the armed stretch as a gap, owned by nobody", () => {
+    const spans = baptismLaneSpans([
+      row(0,   { event: "start", phase: "testimony", personNumber: "1" }),
+      row(100, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "100000" }),
+      row(160, { event: "baptisms-start", phase: "baptism" }),
+      row(200, { event: "person-complete", phase: "baptism", baptismIndex: "0", segmentMs: "40000" }),
+      row(201, { event: "finish", phase: "idle" }),
+    ]);
+    assert.deepEqual(spans.map((s) => [s.kind, s.person, sec(s)]), [
+      ["testimony", 1, 100],
+      ["baptism", 1, 40],
+    ]);
+    // 100s..160s belongs to no span: the band's intro.
+    assert.equal(Date.parse(spans[1].startedAt) - Date.parse(spans[0].endedAt as string), 60_000);
+  });
+
+  it("names a grouped baptism by baptismIndex, not the frozen personNumber", () => {
+    const spans = baptismLaneSpans([
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(10, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "10000" }),
+      row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "10000" }),
+      row(25, { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(30, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "0", segmentMs: "5000" }),
+      row(40, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "10000" }),
+      row(41, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1" }),
+    ]);
+    assert.deepEqual(spans.filter((s) => s.kind === "baptism").map((s) => s.person), [1, 2]);
+  });
+
+  it("splits a span at a pause and resumes it as the same person", () => {
+    const spans = baptismLaneSpans([
+      row(0,  { event: "start", mode: "per-person", phase: "testimony", personNumber: "1" }),
+      row(30, { event: "pause", mode: "per-person", phase: "testimony", personNumber: "1", segmentMs: "30000" }),
+      row(90, { event: "resume", mode: "per-person", phase: "testimony", personNumber: "1", segmentMs: "30000" }),
+      row(110,{ event: "finish", mode: "per-person", phase: "idle", personNumber: "1" }),
+    ]);
+    assert.deepEqual(spans.map((s) => [s.kind, s.person, sec(s)]), [
+      ["testimony", 1, 30],
+      ["testimony", 1, 20],
+    ]);
+  });
+
+  it("leaves the last span open while the session runs", () => {
+    const spans = baptismLaneSpans([row(0, { event: "start", phase: "testimony", personNumber: "1" })]);
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].endedAt, null);
+  });
+});
+```
+
+- [ ] **Step 2: Run them and watch them fail** —
+  `node --import tsx --test main/services/archive/baptism-lane.test.ts` → module not found.
+- [ ] **Step 3: Implement** `baptism-lane.ts` to the rules above. PURE: no disk, no store.
+- [ ] **Step 4: Write the round-trip guard, prove it red.** Delete one boundary rule from your
+  implementation (say, `resume` opening a span) and watch the invariant fail on the pause
+  scenario. Restore.
+- [ ] **Step 5: The route.** `GET /api/baptism/lane?serviceKey=` resolves the service's
+  `serviceDate` from the timeline store (not by parsing the key — Ruling 1), calls
+  `await sampleArchive.flush()` BEFORE reading so a push-triggered fetch cannot beat the row
+  to disk, then returns `{ spans }`. Add `baptism:lane` to `renderer/lib/api.ts` in the form of
+  its neighbours; the `IpcChannel` union derives from the switch, so `tsc` enforces it.
+- [ ] **Step 6: Commit** — `feat: the baptism session lane derives from the raw rows`
+
+## Task 10: History opens a named service from its URL
+
+**Files:** `renderer/settings/sections/service-history-section.tsx`, the router/destination
+definitions (`renderer/app/destinations.tsx` and whatever it composes), and a test beside
+`renderer/settings/sections/history-service-page.test.tsx`.
+
+**Interfaces:**
+- Produces: `historyServiceHref(serviceKey: string): string` — one exported helper, so no
+  caller builds the URL by hand.
+
+Read how this app routes before choosing a mechanism: it uses TanStack Router, and
+`destinations.tsx` defines the pages. Prefer a validated search param (for example
+`?service=<key>`) over a path segment, because a service key contains colons. On load, a
+present and known key selects that service exactly as clicking its row does. An unknown key
+falls back to the list rather than an empty page, and says nothing alarming.
+
+Selecting a service in the page should also write the param back, so a reload or a copied
+URL lands on the same service and Back returns to the list. If the router makes that
+invasive, reading on load is the floor; say which you delivered.
+
+- [ ] **Step 1: Failing test** — rendering History with the param for a seeded service opens
+  that service's page; an unknown key renders the list.
+- [ ] **Step 2: Watch it fail.**
+- [ ] **Step 3: Implement**, and export `historyServiceHref`.
+- [ ] **Step 4: Watch it pass.**
+- [ ] **Step 5: Commit** — `feat: History opens the service named in its URL`
+
+## Task 11: the page shell — header, figures, section nav, timer card
+
+**Files:**
+- Create: `renderer/settings/sections/baptisms/figures.ts`, `figures.test.ts`,
+  `renderer/settings/sections/baptisms/header.tsx`, `renderer/settings/sections/baptisms/timer-card.tsx`
+- Modify: `renderer/main/baptism-operator.tsx` becomes the page composing the pieces. Both
+  mounts — `renderer/settings/sections/baptisms-section.tsx` and the `/baptism` destination in
+  `renderer/app/destinations.tsx` — keep rendering `<BaptismOperator/>`, so they stay one live
+  session viewed twice.
+
+**Build what the mockup shows**, from top to bottom: the title, the `recording` pill while a
+session runs (reuse `RecordingPill` from `history-service-header.tsx`), the service sub-line,
+the action group, the stat strip (reuse `StatStrip` from `../history-chart`), and the section
+nav (Timer, Session, People, Past sessions, Trends) highlighting on scroll the way
+`history-service-header.tsx` does. Then the Timer card.
+
+**Figures** — keys and labels exactly as the mockup: `count` "Baptized"; `timed` "Timed"
+(sub "testimony + baptism"); `wall` "Wall clock" (sub "start to finish"); `gap` "Not counted"
+(sub "gap between phases"); `avgTestimony` "Avg testimony" in `--color-accent`; `avgBaptism`
+"Avg baptism" in `--color-live-11`. Derive from `summarizeBaptism` — `count` there already
+counts actual baptisms. Customize picks which show, through the existing `prefs` store.
+
+**Actions** — Copy report (a plain-text summary via `copyText` from `renderer/lib/clipboard.ts`)
+and Export CSV (the existing `GET /api/history/export` with the `baptisms` sheet). NOT
+Rebuild from raw — see the section header.
+
+**The Timer card keeps every PR 1 behaviour.** It moves, it does not change: the armed readout
+(`Baptisms · armed` / `waiting for the first person to step in`), the button labels (`First
+person in` → `Next person in` → `Last person out`), Pause hidden while armed, the typed
+`primaryChannel`, the workflow toggle, and `BaptismTriggersPanel`. The readout stays large and
+thumb-sized — it is what the operator touches during a service. PR 1's panel guards in
+`renderer/main/baptism-operator-armed.test.tsx` must still pass unchanged; if one needs editing,
+that is a sign behaviour moved.
+
+- [ ] **Step 1: Failing tests** for the figures:
 
 ```ts
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { baptismFigures } from "./figures.js";
 
+const started = Date.UTC(2026, 8, 27, 11, 0, 0);
+const base = {
+  mode: "grouped", phase: "idle", armed: false,
+  sessionStartedAt: new Date(started).toISOString(),
+  finishedAt: new Date(started + 29 * 60_000).toISOString(),
+  personNumber: 1, baptismIndex: 0, segmentStartedAt: null, segmentAccumMs: 0,
+  pendingTestimonyMs: null, serviceTitle: null, serviceTypeId: null, planId: null,
+};
+const by = (f: { key: string; value: string }[], k: string) => f.find((x) => x.key === k)?.value;
+
 describe("baptismFigures", () => {
-  it("keeps wall clock and timed apart", () => {
-    // Grouped here means a long uncounted transition between the testimonies and
-    // the songs. Folding the two into one "total" would be a number that means
-    // neither thing.
-    const started = Date.UTC(2026, 8, 27, 11, 0, 0);
-    const state = {
-      mode: "grouped", phase: "idle", armed: false,
-      sessionStartedAt: new Date(started).toISOString(),
-      finishedAt: new Date(started + 29 * 60_000).toISOString(),
-      people: [{ testimonyMs: 108_000, baptizeMs: 42_000 }],
-      personNumber: 1, baptismIndex: 0, segmentStartedAt: null,
-      pendingTestimonyMs: null, serviceTitle: null, serviceTypeId: null, planId: null,
-    } as never;
+  it("keeps wall clock and timed apart, and names the difference", () => {
+    const f = baptismFigures(
+      { ...base, people: [{ testimonyMs: 108_000, baptizeMs: 42_000 }] } as never,
+      started + 29 * 60_000,
+    );
+    assert.equal(by(f, "timed"), "2:30");
+    assert.equal(by(f, "wall"), "29:00");
+    assert.equal(by(f, "gap"), "26:30");
+  });
 
-    const f = baptismFigures(state, [], started + 29 * 60_000);
-    const by = (k: string) => f.find((x) => x.key === k)?.value;
-
-    assert.equal(by("timed"), "2:30", "the sum of banked segments");
-    assert.equal(by("wall"), "29:00", "start to finish");
-    assert.equal(by("gap"), "26:30", "the difference, named as not counted");
+  it("counts people baptized, not people who testified", () => {
+    // Grouped: three testimonies banked, nobody in the water yet.
+    const f = baptismFigures(
+      { ...base, phase: "testimony", finishedAt: null,
+        people: [{ testimonyMs: 60_000, baptizeMs: 0 }, { testimonyMs: 70_000, baptizeMs: 0 },
+                 { testimonyMs: 80_000, baptizeMs: 0 }] } as never,
+      started + 5 * 60_000,
+    );
+    assert.equal(by(f, "count"), "0");
   });
 });
 ```
 
-- [ ] **Step 2: Run it, watch it fail** (module not found).
-- [ ] **Step 3: Implement** `figures.ts` returning `StatFigure[]` with keys `count`, `timed`, `wall`, `gap`, `avgTestimony`, `avgBaptism`, using `fmtClock` from `use-baptism-state` and `segmentElapsedMs` from `@main/services/baptism-elapsed`. Then `header.tsx` composing `StatStrip` from `../history-chart`, the `RecordingPill` from `../history-service-header`, the action group, and the section nav.
-- [ ] **Step 4: Run it, watch it pass.**
-- [ ] **Step 5: Commit** — `feat: the Baptisms tab gets the History header and stat strip`
+- [ ] **Step 2: Watch them fail.**
+- [ ] **Step 3: Implement** `figures.ts`, then `header.tsx` and `timer-card.tsx`, and recompose
+  `baptism-operator.tsx`.
+- [ ] **Step 4: Watch them pass**, and confirm every PR 1 panel guard still passes unedited.
+- [ ] **Step 5: Commit** — `feat: the Baptisms tab gets the History header, stat strip and section nav`
 
-## Task 10: the two-lane session chart
+## Task 12: the two-lane session chart
 
-**Files:**
-- Create: `renderer/settings/sections/baptisms/session-lane.ts`, `session-chart.tsx`, `session-lane.test.ts`
+**Files:** `renderer/settings/sections/baptisms/session-chart.tsx`,
+`renderer/settings/sections/baptisms/session-lane.ts`, `session-lane.test.ts`
 
 **Interfaces:**
-- Consumes: `laneSegments`, `laneLabel`, `segmentAt`, `type LaneItem` from `../history-chart`.
-- Produces: `baptismLaneSegments(state, sessions, window): LaneSegment[]`; `gapSegments(segs: LaneSegment[]): LaneSegment[]`.
+- Consumes: `invoke("baptism:lane", { serviceKey })` (Task 9); `laneSegments`, `laneLabel`,
+  `segmentAt`, `type LaneItem`, `type LaneSegment`, `dateTicks` and the text measurer from
+  `../history-chart`; the service timeline via `invoke("serviceTimeline:get", …)` or
+  `serviceTimeline:getCurrent` for the live session.
+- Produces: `gapSpans(spans: BaptismSpan[], windowEndIso: string): { startedAt: string; endedAt: string }[]`.
 
-- [ ] **Step 1: Write the failing test** — the spec's guard: *the lane's gap segments cover exactly the stretches no person was timed for*.
+**Build what the mockup's Session card shows.** Two lanes on one x axis: *timer* on top, *plan*
+beneath. Timer spans in `--color-accent` (testimony) and `--color-live-9` (baptism), labelled
+with the person number when the segment fits, by the existing `laneLabel` rule. Gaps between
+spans hatched in `--color-line` and reading "not counted" when wide enough. Plan items outlined,
+labelled with the item title when it fits. The legend beneath. Hover a segment and the strip
+shows the person, the phase, the duration and its boundary times, the way the attendance and
+sound charts do.
 
-```ts
-describe("gapSegments", () => {
-  it("covers exactly the stretches nobody was timed for", () => {
-    const segs = [
-      { from: 0,     to: 108_000, kind: "testimony", person: 1 },
-      { from: 420_000, to: 462_000, kind: "baptism",  person: 1 },
-    ] as never[];
-    const gaps = gapSegments(segs);
-    assert.equal(gaps.length, 1);
-    assert.equal(gaps[0].from, 108_000);
-    assert.equal(gaps[0].to, 420_000);
-  });
+**Do not use `HistoryChart`.** It requires a `series[]` and a `yScale`; this chart has no y axis.
+Reuse the lane GEOMETRY — map each `BaptismSpan` onto a `LaneItem` and let `laneSegments`
+position it — and render your own SVG. That keeps overlap stacking, clipping and the live edge
+identical to History's.
 
-  it("finds no gap in a continuous run", () => {
-    const segs = [
-      { from: 0, to: 100, kind: "testimony", person: 1 },
-      { from: 100, to: 200, kind: "baptism", person: 1 },
-    ] as never[];
-    assert.deepEqual(gapSegments(segs), []);
-  });
-});
-```
+**Live, change-driven, never polled.** Refetch `baptism:lane` on each `baptism:state` push —
+pushes fire on presses, about twenty a service. Between pushes the open span grows client-side
+from `state.segmentStartedAt` and the app's shared `now` tick, with no fetch. While armed there is
+no open span. Honour `prefers-reduced-motion`. All colour through tokens; no literals.
 
-- [ ] **Step 2: Run it, watch it fail.**
-- [ ] **Step 3: Implement.** The chart renders two lanes on one x axis: *timer* (testimony `--color-accent`, baptism `--color-live-9`, gaps hatched in `--color-line`, person number by the existing `laneLabel` fit rule) and *plan* (the service timeline's items, outlined). Hover puts `StripHover` on the strip. Live growth appends off `baptism:state` without rebuilding the path, honouring `prefers-reduced-motion`. All colour through tokens; no literals.
-- [ ] **Step 4: Run it, watch it pass.**
+**Empty states, each honest:** no service open → the lane draws from the service recording and
+none is open; a session with no raw rows → no timing detail was recorded for it.
+
+- [ ] **Step 1: Failing test** — `gapSpans` covers exactly the stretches no span covers,
+  including the armed stretch and a pause, and returns nothing for a continuous run.
+- [ ] **Step 2: Watch it fail.**
+- [ ] **Step 3: Implement** the chart.
+- [ ] **Step 4: Watch it pass**, then prove the refetch is change-driven: a test that emits two
+  `baptism:state` pushes and advances fake time by a minute asserts exactly two lane fetches.
 - [ ] **Step 5: Commit** — `feat: the baptism session draws as a timer lane over the plan lane`
 
-## Task 11: people table, past sessions, trends
+## Task 13: people, past sessions, trends
 
-**Files:** `renderer/settings/sections/baptisms/{people-table,past-sessions,trends}.tsx` + `trends.test.ts`
+**Files:** `renderer/settings/sections/baptisms/{people-table,past-sessions,trends}.tsx`,
+`renderer/settings/sections/baptisms/trends.ts`, `trends.test.ts`
 
-- [ ] **Step 1: Failing test** for the trends derivation: eight most recent baptism services, average, and change against the eight before; a partial set must not compare against a full one.
-- [ ] **Step 2: Run it, watch it fail.**
-- [ ] **Step 3: Implement.** People table on the rundown's scale (10px uppercase headers, 13px rows, mono tabular) with a per-person split bar. Past sessions as History-shaped list rows linking to the service page. Trends: four sparkline tiles (Baptized per service, Avg testimony, Avg baptism, Whole segment).
-- [ ] **Step 4: Run it, watch it pass.**
+**Build what the mockup shows.**
+
+- **People** — the rundown's scale: 10px uppercase headers, 13px rows, mono tabular figures; `#`,
+  Person, Testimony, Baptism, Total, and a split bar per person in the two phase colours. In
+  grouped mode a person not yet baptized shows a dash under Baptism, not `0:00`.
+- **Past sessions** — History list-row shape: the service and date, then Baptized, Avg testimony,
+  Avg baptism, Total; each row links with `historyServiceHref` (Task 10). Keep delete, behind the
+  same confirm the old panel used.
+- **Trends** — four tiles: Baptized per service, Avg testimony, Avg baptism, Whole segment. Reuse
+  `Sparkline` from `../history-trends/sparkline` and `TREND_WINDOW` (8) from
+  `../history-trends/trends`: the last eight baptism services, and the change against the eight
+  before. Whole segment is wall clock, which is what a planner budgets.
+
+The like-for-like rule already governs History's trends (`MIN_PRIOR_DAYS`,
+`COMPARABLE_ABOVE`): a partial set is not compared against a full one. Apply the same rule
+rather than inventing a second.
+
+- [ ] **Step 1: Failing tests** for `trends.ts`: eight most recent against the eight before; with
+  fewer than the comparable minimum, no change figure rather than a misleading one.
+- [ ] **Step 2: Watch them fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Watch them pass.**
 - [ ] **Step 5: Commit** — `feat: the Baptisms tab gets per-person splits, past sessions and trends`
 
-## Task 12: PR 2 docs, gate and PR
+## Task 14: a failed session save reaches the operator
 
-- [ ] Docs: `docs/features/scriptview-and-baptisms.md` describes the tab.
+**Files:** `main/types/baptism.ts`, `main/services/baptism-timer-service.ts`,
+`renderer/settings/sections/baptisms/timer-card.tsx`, a test beside `baptism-armed.test.ts`
+
+Ruling 15 routed this here. `finalize()` calls `baptismStore.addSession(...).catch((err) =>
+console.error(...))`, so a failed write reads to the operator as a clean finish — a direct
+violation of the do-not-swallow rule, on the data this whole overhaul protects.
+
+Add `saveError: string | null` to `BaptismState`. `finalize()` sets it when `addSession` rejects
+and commits again so the push carries it; a later successful save or a `reset()` clears it. The
+Timer card shows it plainly: the session did not save, the raw rows still hold it, and it can be
+rebuilt. Keep the existing `[baptism-timer] session save failed:` log line.
+
+This is the one task in this PR that edits the timer service. Touch nothing else in it.
+
+- [ ] **Step 1: Failing test** — stub `addSession` to reject, finish a session, assert
+  `state.saveError` is set and survives into the next push; a following successful finish clears it.
+- [ ] **Step 2: Watch it fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Watch it pass.**
+- [ ] **Step 5: Commit** — `fix: a failed baptism save says so instead of reading as finished`.
+  NO `Beta-only` trailer: the swallowing `catch` ships on `main`.
+
+## Task 15: docs, the deferred corrections, drive, PR
+
+- [ ] `docs/features/scriptview-and-baptisms.md` describes the tab. Correct two claims the final
+  review flagged: `baptismDefaultMode` has no UI writer and decides only a fresh data dir, so do
+  not describe it as configurable; and the Logging section omits the two lines an operator most
+  needs, `[baptism-timer] persist failed:` and `[baptism-timer] session save failed:`.
+- [ ] Correct two code comments the final review flagged as wrong: the "ONE entry point" claim on
+  `advance()` (the panel routes through it only while armed) and its echo in
+  `docs/reference/api.md`; and `rebuild-baptism.ts`'s MODE rule, which names `reset()` clearing
+  the mode as the mechanism when `reset()` preserves it — the real cause is that `setMode()`
+  emits no row.
 - [ ] `npm run type-check && npm run lint && npm test`, read in-session.
-- [ ] **Drive the real UI at 1280 and 600 wide, light and dark.** A control that renders is not a control that does anything — press every button and watch the lane, the strip and the table respond.
-- [ ] Three review passes, then open the PR with both standing questions answered.
+- [ ] **Drive the real UI at 1280 and 600 wide, light and dark**, on `STAGE_UTILITY_PORT=8799`
+  with an empty data dir. Press every button. Watch the lane, the strip, the table and the trends
+  respond. Kill by port.
+- [ ] Three review passes, then open the PR with `--base fix/baptism-session-integrity`, answering
+  both standing questions.
 
 ---
 
 # PR 3 — History integration
 
-Branch: `feat/baptisms-in-history`.
+Branch: `feat/baptisms-in-history`, stacked on `feat/baptisms-tab`, opened with
+`--base feat/baptisms-tab`.
 
-## Task 13: the Baptisms card, cross-links and rebuild
+**Handoffs:** the lane (Task 9) and chart (Task 12) are reused, never copied. `historyServiceHref`
+(Task 10) is how every link is built. Ruling 31 is binding: a rebuild must NOT merge through
+`baptismStore.addSessions`, which de-duplicates on id, until Task 16 makes the ids comparable.
+A session split across a mid-session `serviceKey` roll (an overrunning 9am rolling into the 11am)
+writes its `start` and its `finish` into different directories and cannot be rebuilt; the replay
+already reports it, and nothing here should pretend otherwise.
 
-**Files:** `renderer/settings/sections/service-history-section.tsx`, `renderer/lib/link-baptisms.ts`, `main/services/history-edit.ts`, `main/services/history-export.ts`
+## Task 16: rebuilt session ids match the stored ones
 
-- [ ] **Step 1: Failing test** — rebuilding a service's baptisms from raw replaces the stored sessions for that `serviceKey` and leaves every other service's untouched.
-- [ ] **Step 2: Run it, watch it fail.**
-- [ ] **Step 3: Implement.** The card gets the stat strip, the read-only two-lane chart and the splits inline. The dead-end sentence is replaced by a link to the Baptisms tab, and the tab's rows link back. `rebuildServiceRecords` gains baptisms via `readBaptismRows` + `rebuildBaptismSessions`. The `baptisms` export sheet picks up the new fields.
-- [ ] **Step 4: Run it, watch it pass.**
+**Files:** `main/services/archive/sample-archive.ts`, `main/services/baptism-timer-service.ts`,
+`main/services/archive/rebuild-baptism-roundtrip.test.ts`
+
+Ruling 31, measured: across fifty driven sessions the row's `at` ran 0–1ms behind the timer's own
+stamp, and 4% of rebuilt ids did not match. Give `recordBaptism` an optional trailing
+`at = new Date().toISOString()` and thread it through `emitRaw`; `start()` passes its `now`,
+`finalize()` passes `finishedAt`; the other call sites stay untouched. No column changes, so no
+header roll. Do NOT carry the timestamp in the free-text `detail` column.
+
+- [ ] **Step 1: Failing test** — the round-trip suite asserts rebuilt `id`, `startedAt` and
+  `finishedAt` are EQUAL to the stored ones, across many driven sessions. Watch it fail on today's
+  code at a rate you can see.
+- [ ] **Step 2–4:** implement, watch it pass.
+- [ ] **Step 5: Commit** — `fix: a rebuilt baptism session carries the id it was stored under`,
+  with `Beta-only: true` as the last paragraph: the raw layer exists only on this branch.
+
+## Task 17: Rebuild from raw gains baptisms
+
+**Files:** `main/services/history-edit.ts` (`rebuildServiceRecords`), `main/services/baptism-store.ts`,
+`renderer/settings/sections/baptisms/header.tsx`, `docs/data-archive.md`
+
+`rebuildServiceRecords` rebuilds the SPL, timeline and attendance records from raw. It gains
+baptisms: read the rows, `rebuildBaptismSessions`, and REPLACE that `serviceKey`'s stored sessions
+— a new `baptismStore.replaceSessionsFor(serviceKey, sessions)` — leaving every other service's
+untouched. The Baptisms tab's header gains the Rebuild from raw action the mockup shows, now real.
+`docs/data-archive.md`'s Rebuild-from-raw table flips baptisms to available.
+
+- [ ] **Step 1: Failing test** — rebuilding one service's baptisms replaces its sessions and leaves
+  another service's byte-identical; rebuilding an intact store changes nothing.
+- [ ] **Step 2–4:** implement, watch it pass.
+- [ ] **Step 5: Commit** — `feat: Rebuild from raw rebuilds a service's baptisms`
+
+## Task 18: the Baptisms card on a service's History page
+
+**Files:** `renderer/settings/sections/service-history-section.tsx`,
+`renderer/settings/sections/history-service-header.tsx` (`SERVICE_SECTIONS`)
+
+The card keeps its place above Attendance and Sound and stops being six flat tiles. It gets the
+stat strip, the two-lane chart read-only for that service (Task 12, fed Task 9's spans for that
+`serviceKey`), and the per-person splits inline. The dead-end sentence "Per-person splits are in
+the Baptisms tab" goes; an "Open in Baptisms" link replaces it. The section nav gains Baptisms
+when the service has any.
+
+- [ ] **Step 1: Failing test** — a service with a linked session renders the chart and the splits
+  and no dead-end sentence; a service without one renders no Baptisms card and no nav entry.
+- [ ] **Step 2–4:** implement, watch it pass.
 - [ ] **Step 5: Commit** — `feat: a service's History page shows its baptisms in full`
 
-## Task 13b: a service in the All-services list says it had baptisms
+## Task 19: a service in the All-services list says it had baptisms
 
-**Files:** `renderer/settings/sections/service-history-section.tsx`, `renderer/settings/sections/history-list-rows.test.tsx`
+Unchanged from the original Task 13b, including its reasoning: **not a new column** —
+`ROW_COLUMNS` prints a dash under a heading a row has nothing for, so a Baptized column would dash
+out every ordinary Sunday — and **not on the calendar**, which is shaded by service count with no
+dots by an earlier decision. The count joins the subtitle (`<series> · <n> items · 7 baptized`),
+with a droplet badge by the title, and a service with none gains nothing at all. Use
+`baptismStats(...).people`, which PR 1 corrected to count actual baptisms.
 
-**Interfaces:**
-- Consumes: `linkBaptisms(all, timeline)`, `baptismStats(sessions)` from `renderer/lib/link-baptisms.ts`.
+- [ ] **Step 1: Failing tests** — a row with baptisms says how many in its subtitle; a row with
+  none gains no marker and no dash. Reuse the file's existing render harness.
+- [ ] **Step 2–4:** implement, watch it pass; prove the second test red by making the count
+  unconditional.
+- [ ] **Step 5: Commit** — `feat: a History list row says how many were baptized`
 
-**Not a new column.** `ROW_COLUMNS` is a fixed track list, and the row renderer
-deliberately prints a dash under a heading a row has nothing for rather than
-closing the gap and sliding the rest left. A `Baptized` column would therefore
-put a dash on every ordinary Sunday, which is nearly all of them, to serve the
-two or three a year that have one. The count goes where the row already carries
-optional facts instead.
+## Task 20: docs, gate, drive, PR
 
-**Not on the calendar either.** The History calendar is shaded by service count
-with no dots and no counts, by an explicit earlier decision. A baptism dot would
-reopen it.
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `renderer/settings/sections/history-list-rows.test.tsx`:
-
-```tsx
-describe("a row for a service with baptisms", () => {
-  it("says how many were baptized, in the line that already carries the series", () => {
-    // The subtitle is "<series> · <n> items". A baptism is the rarest and most
-    // notable thing a Sunday can carry, and the row is where someone scanning
-    // the month would look for it.
-    const row = renderRow({ serviceKey: "st1:p1:t1", baptized: 7 });
-    assert.match(row.subtitle, /7 baptized/);
-  });
-
-  it("says nothing at all on a service that had none", () => {
-    const row = renderRow({ serviceKey: "st1:p2:t1", baptized: 0 });
-    assert.doesNotMatch(row.subtitle, /baptized/);
-    assert.doesNotMatch(row.subtitle, /—/, "an ordinary Sunday gains no empty marker");
-  });
-});
-```
-
-Match the file's existing render helper rather than inventing `renderRow` — read
-the neighbouring tests and reuse their harness.
-
-- [ ] **Step 2: Run it and watch it fail**
-
-Run: `npm test -- --test-name-pattern="a row for a service with baptisms"`
-Expected: FAIL — the subtitle is `<series> · <n> items` with no baptism count.
-
-- [ ] **Step 3: Implement**
-
-Compute per row from the sessions already loaded for the list, and extend the
-existing `under` line:
-
-```tsx
-            const bapCount = baptismStats(linkBaptisms(baptisms, s)).people;
-            // Appended to the line that already carries the series and the item
-            // count, NOT given a column: see ROW_COLUMNS, where a row with
-            // nothing for a column prints a dash. Most Sundays have no baptisms,
-            // and a column of dashes to serve three services a year is a worse
-            // row for everyone.
-            const under = [s.seriesTitle, itemCount, bapCount ? `${bapCount} baptized` : null]
-              .filter(Boolean)
-              .join(" · ");
-```
-
-Add a droplet badge beside the title on rows where `bapCount > 0`, using the
-`DropletIcon` the operator panel already uses and `--color-accent`, so the row
-reads at a glance without the reader parsing the subtitle.
-
-- [ ] **Step 4: Run it and watch it pass**
-
-Run: `npm test -- --test-name-pattern="a row for a service"` → PASS
-Prove the guard: make the count unconditional and watch the second test fail.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add renderer/settings/sections/service-history-section.tsx renderer/settings/sections/history-list-rows.test.tsx
-git commit -m "feat: a History list row says how many were baptized"
-```
-
-- [ ] Docs `docs/features/attendance-and-history.md`; gate; drive it; three passes; PR.
+- [ ] `docs/features/attendance-and-history.md` — the Baptisms card, the list-row count, the
+  service URL.
+- [ ] `npm run type-check && npm run lint && npm test`, read in-session.
+- [ ] Drive it: open a service from a Baptisms past-session link, confirm it lands; rebuild a
+  service's baptisms from raw; watch the card and the list row.
+- [ ] Three review passes, then open the PR with `--base feat/baptisms-tab`.
 
 ---
 
@@ -1251,7 +1520,7 @@ git commit -m "feat: a History list row says how many were baptized"
 
 Branch: `feat/baptism-actions` (this repo), then `feat/baptism-variables` in the module repo.
 
-## Task 14: `baptism.*` automation actions
+## Task 21: `baptism.*` automation actions
 
 **Files:** `main/services/automation-actions.ts`, `main/services/automation-coverage.test.ts`
 
@@ -1265,7 +1534,7 @@ Branch: `feat/baptism-actions` (this repo), then `feat/baptism-variables` in the
 - [ ] **Step 4: Run it, watch it pass.**
 - [ ] **Step 5: Commit** — `feat: advance and back are baptism automation actions`
 
-## Task 15: `baptism-timer` object fields
+## Task 22: `baptism-timer` object fields
 
 **Files:** `main/types/views.ts`, `renderer/main/layout-renderer.tsx` (the `BaptismTimer` component), `renderer/editor/inspector.tsx`
 
@@ -1275,7 +1544,7 @@ Branch: `feat/baptism-actions` (this repo), then `feat/baptism-variables` in the
 - [ ] **Step 4: Run it, watch it pass.**
 - [ ] **Step 5: Commit** — `feat: the baptism timer object reads testimony, session, phase and person`
 
-## Task 16: the Companion module
+## Task 23: the Companion module
 
 **Repo:** `Cornerstone-Production/companion-module-cornerstone-stageutility`. Separate branch, separate PR.
 
@@ -1298,10 +1567,26 @@ Branch: `feat/baptism-actions` (this repo), then `feat/baptism-variables` in the
 
 ## Self-review against the spec
 
-**Coverage.** Two bugs → Tasks 1, 2. Grouped default → Task 3. Armed → Task 4. Raw source → Task 5. Emit calls → Task 6. Rebuild → Task 7. Tab header/figures → Task 9. Two-lane chart → Task 10. People/past/trends → Task 11. History card, cross-links, rebuild, export → Task 13; the list row's baptism count → Task 13b. Automation actions → Task 14. Object fields → Task 15. Companion → Task 16. Logging lands in Tasks 2 and 6. Docs land per PR in Tasks 8, 12, 13, 16.
+**Coverage.** Two bugs → Tasks 1, 2. Grouped default → Task 3. Armed → Task 4. Raw source → Task 5.
+Emit calls → Task 6. Replay → Task 7. The lane's data → Task 9. The service URL → Task 10. Tab
+header, figures, section nav and timer card → Task 11. Two-lane chart → Task 12. People, past
+sessions, trends → Task 13. A failed save reaching the operator → Task 14. Comparable rebuilt ids →
+Task 16. Rebuild from raw for baptisms → Task 17. The History card → Task 18. The list-row count →
+Task 19. Automation actions → Task 21. Object fields → Task 22. Companion → Task 23. Docs land per PR
+in Tasks 8, 15, 20 and 23.
 
 **Named but deliberately deferred.** Person identity stays numeric, per the spec's closing section.
+The raw rows' `reset` and `undo` detail text under-describes what happened (PR 1 review minors M1,
+M2); changing emitted row content would move the replay and the lane together, so it waits for a PR
+that owns both.
 
-**Type consistency.** `advance()` is the one name used by Task 4 (service), Task 4 Step 5 (route + `renderer/lib/api.ts`), Task 14 (`baptism.advance`) and Task 16 (Companion). `rebuildBaptismSessions(rows, identity)` is pure in Task 7 and consumed that way in Task 13. `ARCHIVE_SOURCES` is the exported name in Tasks 5 and 7. `BaptismRawFields` is defined in Task 5 and consumed in Task 6.
+**Type consistency.** `advance()` is the one name used by Task 4, Task 21 and Task 23.
+`rebuildBaptismSessions(rows, identity)` is pure in Task 7 and consumed that way in Task 17.
+`BaptismSpan` and `baptismLaneSpans` are defined in Task 9 and consumed in Tasks 12 and 18.
+`historyServiceHref` is defined in Task 10 and consumed in Tasks 13, 18 and 20. `saveError` is
+defined in Task 14 and read only by the Timer card.
 
-**One open verification, flagged for the implementer.** Task 6 Step 2 derives `serviceDate` by splitting the service key as a fallback. Confirm `serviceTimelineRecorder.getCurrent()?.serviceDate` first and prefer it — the other recorders read the field rather than parsing the key, and this plan should not be the one place that parses.
+**Refreshed after PR 1.** PR 2 and PR 3 were rewritten against the code PR 1 left. The original
+sections assumed the lane could be drawn from `BaptismState` durations, assumed History had a URL
+for one service, and put Rebuild from raw in PR 2's header while the replay had no safe caller. Each
+was checked against source before the rewrite.
