@@ -61,8 +61,15 @@ class BaptismTimerService {
     return baptismStore.deleteSession(id);
   }
 
-  /** Last item auto-start considered, so one item cannot fire twice. */
+  /** Last item auto-start considered a DONE deal for — either nothing to do, or
+   *  it actually moved the phase. An item whose action was ignored (wrong mode
+   *  for the section it is bound to) is deliberately left off this, so a later
+   *  tick on the same item retries once the operator fixes the mode — PCO can
+   *  sit on one song for minutes and the operator has no way to force a tick. */
   private lastAutoItemId: string | null = null;
+  /** Last item warned about being ignored, so the operator sees the reason once
+   *  per item rather than once per ~1.5s poll for as long as PCO sits on it. */
+  private lastWarnedItemId: string | null = null;
 
   private elapsedMs(): number {
     return segmentElapsedMs(this.state);
@@ -80,7 +87,6 @@ class BaptismTimerService {
   async onLiveTick(live: PcoLiveDTO): Promise<void> {
     if (live.mode !== "item" || !live.currentItemId) return;
     if (live.currentItemId === this.lastAutoItemId) return; // only on a change
-    this.lastAutoItemId = live.currentItemId;
 
     const [settings, triggers] = await Promise.all([
       settingsStore.get(),
@@ -93,7 +99,12 @@ class BaptismTimerService {
       triggers,
       auto: settings.baptismAutoStart ?? null,
     });
-    if (action === null) return;
+    if (action === null) {
+      // Nothing to do for this item -- the ordinary case -- so it is settled
+      // and does not need re-reading on every subsequent tick it stays live.
+      this.lastAutoItemId = live.currentItemId;
+      return;
+    }
 
     // Compare the phase the action was supposed to produce against the phase we
     // actually got. startBaptisms() returns early unless the mode is grouped,
@@ -104,15 +115,22 @@ class BaptismTimerService {
     else this.startBaptisms();
 
     if (this.state.phase === before) {
-      console.warn(
-        `[baptism] auto-start: "${live.label ?? live.currentItemId}" is bound to the ` +
-          `${action === "start-baptisms" ? "baptisms" : "testimonies"} but the timer is in ` +
-          `${this.state.mode} mode and stayed in "${before}" — ignored`,
-      );
+      // Deliberately NOT recorded on lastAutoItemId: PCO can sit on this item for
+      // minutes, and the operator's fix (switching the mode) only helps if the
+      // next tick re-evaluates it rather than treating it as already handled.
+      if (this.lastWarnedItemId !== live.currentItemId) {
+        this.lastWarnedItemId = live.currentItemId;
+        console.warn(
+          `[baptism] auto-start: "${live.label ?? live.currentItemId}" is bound to the ` +
+            `${action === "start-baptisms" ? "baptisms" : "testimonies"} but the timer is in ` +
+            `${this.state.mode} mode and stayed in "${before}" — ignored`,
+        );
+      }
       return;
     }
 
-    console.info(`[baptism] auto-start: started ${this.state.phase} from "${live.label ?? ""}"`);
+    this.lastAutoItemId = live.currentItemId;
+    console.log(`[baptism] auto-start: started ${this.state.phase} from "${live.label ?? ""}"`);
     this.state = { ...this.state, autoStartedFrom: live.label ?? null };
     this.commit();
   }

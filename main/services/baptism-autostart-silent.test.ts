@@ -59,4 +59,57 @@ describe("auto-start in per-person mode", () => {
       "the panel must not say it started from an item when nothing moved",
     );
   });
+
+  // A different item id than the sibling test above ("song-2" not "song-1") --
+  // the service is a singleton and its lastAutoItemId/lastWarnedItemId bookkeeping
+  // is not reset between tests, so reusing an id would make this test's outcome
+  // depend on what a PREVIOUS test already did to that id.
+  it("retries an ignored item once the operator fixes the mode, warning only once", async () => {
+    await baptismTriggersStore.set(PLAN_ID, { testimonyItemId: null, baptismItemId: "song-2" });
+    baptismTimerService.start(); // phase: testimony, per-person
+
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const tick = () =>
+        baptismTimerService.onLiveTick({
+          mode: "item",
+          currentItemId: "song-2",
+          label: "Great Are You Lord",
+        } as never);
+
+      // PCO holds on this item for a while — two ticks before the operator acts.
+      await tick();
+      await tick();
+
+      assert.equal(
+        baptismTimerService.getState().phase,
+        "testimony",
+        "still wrong mode for a grouped-only trigger — nothing should have moved",
+      );
+      assert.equal(warnings.length, 1, "the second tick on the SAME ignored item must not warn again");
+
+      // The operator reads the warning and fixes the workflow, but PCO is still
+      // sitting on the exact same item — nothing else changed.
+      baptismTimerService.reset();
+      baptismTimerService.setMode("grouped");
+      baptismTimerService.start(); // phase: testimony, grouped
+
+      await tick();
+
+      const s = baptismTimerService.getState();
+      assert.equal(s.phase, "baptism", "the same item must be re-evaluated once the mode is fixed");
+      assert.equal(
+        s.autoStartedFrom,
+        "Great Are You Lord",
+        "the retry that actually moved the phase should say so",
+      );
+      assert.equal(warnings.length, 1, "a retry that succeeds must not add another warning");
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
