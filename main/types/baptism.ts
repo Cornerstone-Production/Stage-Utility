@@ -106,6 +106,19 @@ export interface BaptismSession {
   serviceKey?: string | null;
 }
 
+/**
+ * The store's id for a session that began at `startedAt`.
+ *
+ * One function, two callers that must never disagree: the live finalize() and
+ * the replay that re-derives a lost session from `baptism.csv`. The id is what
+ * baptismStore.addSession de-duplicates on — finish, undo, finish again
+ * re-finalizes the SAME session, and two rows sharing a start with different
+ * ids had History counting one service's people twice.
+ */
+export function baptismSessionId(startedAt: string): string {
+  return `bap-${Date.parse(startedAt)}`;
+}
+
 /** One operator action, as the raw layer records it. Never a derived total:
  *  the file is what happened, and the totals are replayed from it.
  *

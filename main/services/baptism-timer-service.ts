@@ -11,6 +11,7 @@
 // resumes the running clock — segmentStartedAt is an absolute timestamp). Finished
 // sessions are logged for review. Running elapsed is derived client-side.
 
+import { baptismSessionId } from "../types/stage.js";
 import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSession, BaptismState } from "../types/stage.js";
 import { settingsStore } from "./settings-store.js";
 import { baptismTriggersStore } from "./baptism-triggers-store.js";
@@ -520,7 +521,7 @@ class BaptismTimerService {
     this.emitRaw("finish", 0, `people=${people.length}`);
     if (people.length > 0 && this.state.sessionStartedAt) {
       void baptismStore.addSession({
-        id: `bap-${Date.parse(this.state.sessionStartedAt)}`,
+        id: baptismSessionId(this.state.sessionStartedAt),
         startedAt: this.state.sessionStartedAt,
         finishedAt,
         people,
