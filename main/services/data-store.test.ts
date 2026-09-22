@@ -103,6 +103,36 @@ describe("DataStore", () => {
     assert.equal(new Set(items).size, 20, "every concurrent append must be distinct and present");
   });
 
+  // A store's first read is not on the write queue, so a save can land while the
+  // read is still in flight. The read used to finish by installing the bytes it
+  // had read — older than the save — as the cache, and the store served that
+  // stale copy from then on. The NEXT save, built on it, erased the first from
+  // disk as well. Found when a baptism session saved while the round-trip
+  // harness first read the store vanished from both.
+  test("a save that lands during the store's first read is not undone by it", async () => {
+    for (let i = 0; i < 10; i++) {
+      const { store, file } = freshStore();
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.writeFile(file, JSON.stringify({ count: 1, items: ["old"] }), "utf8");
+
+      const read = store.load(); // the first read, still in flight when...
+      const write = store.save({ count: 2, items: ["saved"] }); // ...this lands
+      await Promise.all([read, write]);
+
+      assert.deepEqual(
+        await store.load(),
+        { count: 2, items: ["saved"] },
+        "the store serves the save, not the bytes its first read began with",
+      );
+      await store.update((c) => ({ ...c, count: c.count + 1 }));
+      assert.deepEqual(
+        JSON.parse(await fs.readFile(file, "utf8")),
+        { count: 3, items: ["saved"] },
+        "the next save builds on the first, rather than erasing it from disk",
+      );
+    }
+  });
+
   test("a failed write does not wedge the queue for later writers", async () => {
     const { store } = freshStore();
     await store.save({ count: 0, items: [] });
