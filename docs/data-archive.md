@@ -13,6 +13,7 @@ While a service is live, append-only CSVs are written under
 | `spl.csv` | 1 Hz reading, every metric on the row | `at`, `itemId`, `item`, then one per metric |
 | `attendance.csv` | people-counter poll | `at`, then one per counter field |
 | `events.csv` | plan-item change, automation rule firing | `at`, `source`, `kind`, `detail`, `itemId`, `plannedLengthSec`, `preService` |
+| `baptism.csv` | press on the baptism timer | `at`, `event`, `mode`, `phase`, `personNumber`, `baptismIndex`, `segmentMs`, `itemId`, `item`, `detail` |
 | `manifest.json` | — schema version and the files present | — |
 
 An event row's last three columns describe the plan item on a `kind=item` row and
@@ -21,6 +22,15 @@ rebuilt from the raw rows rather than only from the title: a title is not an
 identity, and a planned length appears nowhere else in the raw layer. Rows written
 before those columns shipped keep their narrower file and still read back — the
 rebuild matches them to the stored record by title instead.
+
+A baptism row is one press, never a total: Start, each testimony ending, the
+baptisms arming, each person baptized, pause, resume, Undo, Finish and Reset. The
+finished session in `baptism.json` is derived from them, so a session lost to a
+corrupt file, or to a crash between the debounced save and the next write, can be
+re-derived from the presses instead of being gone. `undo` is recorded as its own
+row rather than the row it cancels being removed — the file is append-only, so
+what was undone is still in it and only that marker says so. An operator pressing
+Undo does not lose a service; a file that lost the marker would count the mis-tap.
 
 Nothing is written outside a service.
 
