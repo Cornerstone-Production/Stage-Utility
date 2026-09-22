@@ -107,18 +107,27 @@ export interface BaptismSession {
 }
 
 /** One operator action, as the raw layer records it. Never a derived total:
- *  the file is what happened, and the totals are replayed from it. */
-export type BaptismRawEvent =
-  | "start"
-  | "testimony-end"
-  | "baptisms-armed"
-  | "baptisms-start"
-  | "person-complete"
-  | "pause"
-  | "resume"
-  | "undo"
-  | "finish"
-  | "reset";
+ *  the file is what happened, and the totals are replayed from it.
+ *
+ *  A runtime array, not a bare `type` union, so a guard can enforce its
+ *  membership exactly rather than parsing this file's source text — see
+ *  baptism-raw-event.test.ts. The replay task switches on these names; one
+ *  added or renamed without that switch learning about it is silent data
+ *  loss the replay cannot detect on its own. */
+export const BAPTISM_RAW_EVENTS = [
+  "start",
+  "testimony-end",
+  "baptisms-armed",
+  "baptisms-start",
+  "person-complete",
+  "pause",
+  "resume",
+  "undo",
+  "finish",
+  "reset",
+] as const;
+
+export type BaptismRawEvent = (typeof BAPTISM_RAW_EVENTS)[number];
 
 /** One `baptism.csv` row. The column set is FIXED — see recordBaptism. */
 export interface BaptismRawFields {

@@ -396,11 +396,24 @@ class BaptismTimerService {
       // person in a grouped session auto-finishes straight into finalize()
       // rather than reaching a `return this.commit()` of its own, so this call
       // is the only chance to record their completion at all.
-      this.emitRaw(
-        "person-complete",
-        justBaptized.baptizeMs,
-        `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
-      );
+      //
+      // Guarded on `!armed`: /api/baptism/next is a documented route reachable
+      // directly while armed (see the comment above), and calling it there
+      // closes person 0 having never run a clock — segmentStartedAt is null
+      // and segmentAccumMs is 0, so elapsedMs() reads 0 the same as it would
+      // for a genuine instant baptism. A person-complete row cannot tell those
+      // apart, and a replay reading "a person-complete row exists" as "this
+      // person was baptized" would invent one that never happened. Nothing is
+      // lost by skipping it: this person already has a testimony-end row (or
+      // was folded into baptisms-armed, for whoever arms last), correctly
+      // carrying baptizeMs: 0 until a real press updates it.
+      if (!this.state.armed) {
+        this.emitRaw(
+          "person-complete",
+          justBaptized.baptizeMs,
+          `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
+        );
+      }
       if (this.state.baptismIndex + 1 < people.length) {
         this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment() };
         return this.commit();
@@ -439,11 +452,19 @@ class BaptismTimerService {
     } else if (this.state.phase === "baptism") {
       const justBaptized: BaptismPerson = { ...people[this.state.baptismIndex]!, baptizeMs: this.elapsedMs() };
       people = people.map((p, i) => (i === this.state.baptismIndex ? justBaptized : p));
-      this.emitRaw(
-        "person-complete",
-        justBaptized.baptizeMs,
-        `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
-      );
+      // Guarded on `!armed` for the same reason as next()'s grouped-baptism
+      // branch: Finish pressed right after arming, before anyone has stepped
+      // up, closes a person who never ran a clock. Writing a person-complete
+      // row for them would tell a replay a baptism happened that did not —
+      // per-person mode never sets `armed`, so this can only suppress the
+      // grouped case, and per-person's own row above is unaffected.
+      if (!this.state.armed) {
+        this.emitRaw(
+          "person-complete",
+          justBaptized.baptizeMs,
+          `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
+        );
+      }
     }
     return this.finalize(people);
   }
