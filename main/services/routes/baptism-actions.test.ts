@@ -73,6 +73,16 @@ interface ActionCase {
   setup: () => Promise<void> | void;
   /** Sent as the POST body, for the one action that reads one. */
   body?: Record<string, unknown>;
+  /** Expected response status. Defaults to 200 — every action here reaches a
+   *  handler that succeeds against the precondition `setup` built. "rebuild"
+   *  is the one exception: it does not touch this timer at all (it merges a
+   *  SERVICE's stored baptisms, keyed by serviceKey, not this in-memory
+   *  session), so its row proves the route wiring the cheap way — a missing
+   *  serviceKey, refused before rebuildServiceBaptisms ever runs — rather
+   *  than standing up a real archive here on top of the extensive coverage
+   *  rebuild-baptism-merge.test.ts and baptism-rebuild-route.test.ts already
+   *  give the merge itself. */
+  status?: number;
   /** What must be true of the TIMER'S OWN state afterward — checked against
    *  getState(), not just the response JSON, though the handlers return the
    *  same object either way; asserting against the service directly is what
@@ -234,6 +244,14 @@ const ACTIONS: ActionCase[] = [
     body: { mode: "per-person" },
     check: (s) => assert.equal(s.mode, "per-person"),
   },
+  {
+    action: "rebuild",
+    // No body at all — see the ActionCase.status doc comment above for why
+    // this row does not stand up a real archive to drive a genuine merge.
+    setup: () => { timer.reset(); },
+    status: 400,
+    check: (s) => assert.equal(s.phase, "idle", "a rejected rebuild must not touch the live timer"),
+  },
 ];
 
 // EXACT, sorted, one entry per line — never a bare count: a count cannot tell
@@ -273,11 +291,11 @@ describe("POST /api/baptism/<action>", () => {
     assert.deepEqual([...BAPTISM_ACTIONS].sort(), EXPECTED_ACTIONS);
   });
 
-  for (const { action, setup, body, check } of ACTIONS) {
+  for (const { action, setup, body, status = 200, check } of ACTIONS) {
     it(`/api/baptism/${action} reaches the real handler for it`, async () => {
       await setup();
       const out = await callRoute(historyRoutes, `/api/baptism/${action}`, { method: "POST", body });
-      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      assert.equal(out.status, status, `expected ${status}, got ${out.status}: ${out.body}`);
       check(timer.getState());
       timer.reset();
     });
