@@ -163,8 +163,8 @@ describe("mergeRebuilt — 'no write at all' for an intact session, guarded not 
   });
 });
 
-// Ruling 65: unlike addSession/addSessions, mergeRebuilt must NEVER evict an
-// existing session to make room for a rebuild — an existing session used to
+// Unlike addSession/addSessions, mergeRebuilt must NEVER evict an existing
+// session to make room for a rebuild — an existing session used to
 // be exactly as likely to fall off the cap as anything else, sorted
 // newest-first and sliced. A rebuild's job is to reconstruct data the
 // operator already has, not delete some of it to fit the rest in.

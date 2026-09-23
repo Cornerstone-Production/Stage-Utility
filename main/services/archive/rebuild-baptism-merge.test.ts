@@ -479,7 +479,7 @@ describe("rebuildServiceBaptisms — matching across services", () => {
 });
 
 describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
-  // Ruling 65: a rebuild never evicts, however new its own session is —
+  // A rebuild never evicts, however new its own session is —
   // "added" has to mean "actually landed in the store," not "was in the
   // batch handed to it." A session this rebuild wanted to add but the store
   // had no room for must be counted under `full`, not `added`, and the log
@@ -552,8 +552,8 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     }
   });
 
-  // Ruling 65's own required proof: a rebuild must never evict an existing
-  // session to make room for another, for ANY reason — not this rebuild's
+  // A rebuild must never evict an existing session to make room for
+  // another, for ANY reason — not this rebuild's
   // own untouched "kept" session, not anyone else's. Only an update (which
   // replaces a session's own fields without changing how many the store
   // holds) is exempt from the cap; an add is not. RED on the code this
@@ -581,8 +581,8 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     // This service's own OTHER session — no rebuilt counterpart at all (a
     // service-key roll, or one predating the raw layer). Under the old,
     // eviction-based cap this was exactly the session on the losing side
-    // once the store went one over the limit; Ruling 65 says it must
-    // survive untouched instead.
+    // once the store went one over the limit; it must survive untouched
+    // instead.
     const keptSession = {
       id: "bap-cap-never-evicts-kept-1",
       startedAt: "2026-09-23T09:00:00.000Z",

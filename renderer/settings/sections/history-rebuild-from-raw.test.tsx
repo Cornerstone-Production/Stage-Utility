@@ -319,8 +319,8 @@ describe("History: Rebuild from raw", () => {
     assert.match(shown, /newer in the store/, `missing the 'newer' reason: ${shown}`);
   });
 
-  // A rebuild never evicts an existing session to make room (Ruling 65) — at
-  // the MAX_SESSIONS cap it simply stops adding new baptism sessions, and
+  // A rebuild never evicts an existing session to make room — at the
+  // MAX_SESSIONS cap it simply stops adding new baptism sessions, and
   // History's own result must say so in plain words, only when it happened.
   test("names a full store only when it turned any baptism session away", async (t) => {
     const calls: Call[] = [];
