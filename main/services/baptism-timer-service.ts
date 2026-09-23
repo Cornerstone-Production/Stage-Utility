@@ -59,13 +59,14 @@ function idleState(mode: BaptismMode): BaptismState {
  * errno NUMBER, and both halves of the reason come from Node's own table for
  * it. No string the error carries — message, code, path — reaches the screen,
  * so an error that is not a system error gets a fixed sentence rather than its
- * message. Both lookups throw on anything but a negative integer, and this runs
- * inside a rejection handler, where a throw is an unhandled rejection — hence
- * the guard.
+ * message. Both lookups throw ERR_OUT_OF_RANGE on anything but a negative safe
+ * integer — an integer below Number.MIN_SAFE_INTEGER included — and this runs
+ * inside a rejection handler, where a throw is an unhandled rejection that
+ * lands before saveError is set — hence the guard.
  */
 function saveFailureReason(err: unknown): string {
   const errno = (err as { errno?: unknown } | null | undefined)?.errno;
-  if (typeof errno === "number" && Number.isInteger(errno) && errno < 0) {
+  if (typeof errno === "number" && Number.isSafeInteger(errno) && errno < 0) {
     const name = getSystemErrorName(errno);
     const description = getSystemErrorMessage(errno);
     // An errno Node does not know reads "Unknown system error <n>" for both.

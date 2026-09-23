@@ -276,4 +276,22 @@ describe("what a failed save may put on the screen is built from the errno alone
   it("anything thrown that is not an object at all gets the fixed sentence too", async () => {
     assert.equal(await reasonFor(SECRET), "an unexpected error; the log has the details");
   });
+
+  it("an errno past the safe-integer range gets the fixed sentence, and the handler does not throw", async () => {
+    // Both lookups throw ERR_OUT_OF_RANGE on any integer below
+    // Number.MIN_SAFE_INTEGER. Inside the rejection handler that throw is an
+    // unhandled rejection, and it lands before saveError is set: the log line
+    // written, nothing on any screen.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => void unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const reason = await reasonFor(Object.assign(new Error(`could not write ${SECRET}`), { errno: -(2 ** 60) }));
+      assert.equal(reason, "an unexpected error; the log has the details");
+      await sleep(20); // room for a stray rejection to surface
+      assert.deepEqual(unhandled.map(String), [], "the rejection handler itself must not throw");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
