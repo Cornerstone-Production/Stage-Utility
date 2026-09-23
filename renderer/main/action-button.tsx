@@ -25,10 +25,12 @@ export function ActionButton({
   ts: CSSProperties;
 }) {
   const [busy, setBusy] = useState(false);
-  const actions = useAutomationActions();
+  const { actions, error: registryError } = useAutomationActions();
   const action = actions?.find((a) => a.id === config.actionId) ?? null;
-  // Only once the registry has actually answered: a read that failed, or has
-  // not landed yet, must not brand a perfectly good action-button as broken.
+  // Only once the registry has actually answered: a read that has not landed
+  // yet must not brand a perfectly good action-button as broken. A read that
+  // FAILED is a third state, distinct from both — see registryError below —
+  // so it is deliberately excluded here rather than folded into "unknown".
   const unknown = !!config.actionId && !!actions && !action;
   const label = config.label || action?.label || config.actionId || "Action";
 
@@ -75,7 +77,7 @@ export function ActionButton({
         borderRadius: "inherit",
         cursor: interactive ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
-        opacity: unknown ? 0.6 : 1,
+        opacity: unknown || registryError ? 0.6 : 1,
       }}
     >
       <span style={{ display: "flex", alignItems: "center", gap: "0.4em" }}>
@@ -89,6 +91,15 @@ export function ActionButton({
       {unknown && (
         <span style={{ fontSize: "0.5em", opacity: 0.85, color: "var(--red-9)", lineHeight: 1.1 }}>
           unknown action
+        </span>
+      )}
+      {/* A distinct failure from "unknown": the list itself could not be
+          read, so nothing can be said about whether config.actionId is
+          valid — showing "unknown action" here would be a claim this button
+          has no basis for. */}
+      {registryError && (
+        <span style={{ fontSize: "0.5em", opacity: 0.85, color: "var(--amber-9)", lineHeight: 1.1 }}>
+          action list could not be loaded
         </span>
       )}
     </button>

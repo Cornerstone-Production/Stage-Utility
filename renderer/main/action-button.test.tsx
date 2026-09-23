@@ -33,18 +33,29 @@ afterEach(() => cleanup());
 
 /** What the registry answers for GET /api/automation/registry, for the
  *  duration of one test — restored in afterEach so tests cannot see each
- *  other's fixture. */
-let registryActions: { id: string; label: string }[] | null = [
+ *  other's fixture. `null` fails the read; `"malformed"` answers 200 with no
+ *  `actions` array, which must be treated as a failure too. */
+let registryActions: { id: string; label: string }[] | null | "malformed" = [
   { id: "baptism.advance", label: "Advance the baptism timer" },
   { id: "baptism.back", label: "Step the baptism timer back" },
 ];
+/** Every POST /api/log/client call, so a failure can be proven to actually
+ *  reach the server's log rather than only the browser console. */
+let logCalls: { tag: string; message: string }[] = [];
 before(() => {
-  (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
+  (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown, init?: unknown) => {
     const u = String(url);
     if (u.includes("/api/automation/registry")) {
       if (registryActions === null) throw new Error("registry unreachable");
-      const body = { triggers: [], conditions: [], actions: registryActions };
+      const body = registryActions === "malformed" ? {} : { triggers: [], conditions: [], actions: registryActions };
       return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+    }
+    if (u.includes("/api/log/client")) {
+      const body = JSON.parse(String((init as { body?: unknown } | undefined)?.body ?? "{}")) as {
+        tag: string;
+        message: string;
+      };
+      logCalls.push(body);
     }
     const body = { ok: true, detail: "" };
     return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
@@ -55,6 +66,7 @@ afterEach(() => {
     { id: "baptism.advance", label: "Advance the baptism timer" },
     { id: "baptism.back", label: "Step the baptism timer back" },
   ];
+  logCalls = [];
 });
 
 function renderButton(config: { type: "action-button"; actionId: string; label?: string }) {
@@ -107,5 +119,33 @@ describe("action-button — an id the registry no longer has", () => {
     const { container } = renderButton({ type: "action-button", actionId: "" });
     await act(() => new Promise((r) => setTimeout(r, 10)));
     assert.doesNotMatch(container.textContent ?? "", /unknown/i);
+  });
+});
+
+describe("action-button — the registry itself could not be loaded", () => {
+  test("says the action list could not be loaded, rather than a bare id or a silent nothing", async () => {
+    registryActions = null; // GET /api/automation/registry rejects
+    const { container } = renderButton({ type: "action-button", actionId: "baptism.advance", label: "ADVANCE" });
+    await waitFor(() => assert.match(container.textContent ?? "", /could not be loaded/i));
+  });
+
+  test("logs the failure to the server, not only the browser console", async () => {
+    registryActions = null;
+    renderButton({ type: "action-button", actionId: "baptism.advance" });
+    await waitFor(() => assert.ok(logCalls.length > 0, "expected a POST /api/log/client call"));
+    assert.match(logCalls[0]!.message, /registry|could not/i);
+  });
+
+  test("a 200 with no actions array is treated as a failure too, not silence", async () => {
+    registryActions = "malformed";
+    const { container } = renderButton({ type: "action-button", actionId: "baptism.advance" });
+    await waitFor(() => assert.match(container.textContent ?? "", /could not be loaded/i));
+  });
+
+  test("does not also claim the action is unknown — the two failures read differently", async () => {
+    registryActions = null;
+    const { container } = renderButton({ type: "action-button", actionId: "baptism.advance" });
+    await waitFor(() => assert.match(container.textContent ?? "", /could not be loaded/i));
+    assert.doesNotMatch(container.textContent ?? "", /unknown action/i);
   });
 });

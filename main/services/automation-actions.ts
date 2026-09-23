@@ -480,6 +480,13 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       if (ctx.simulate) return ok("would advance the baptism timer");
       const before = baptismTimerService.getState();
       const after = baptismTimerService.advance();
+      // advance() falls through to next() in the baptism phase, and next()'s
+      // grouped branch is a documented no-op (same reference back) for a
+      // restored record with nobody at the current baptismIndex — the exact
+      // shape undo() guards against below. Silently reporting success there
+      // is the one thing this action must never do: it is what a physical key
+      // fires.
+      if (after === before) return fail("the baptism timer did not move — this session was restored with nobody at this position");
       return ok(describeBaptismAdvance(before, after));
     },
   },

@@ -15,11 +15,12 @@ import * as path from "node:path";
 // getUserDataPath()'s lazy, memoized resolution (see app-paths.ts).
 process.env.STAGE_UTILITY_DATA ??= await fs.mkdtemp(path.join(os.tmpdir(), "stage-automation-actions-"));
 
-import type { PcoLiveDTO } from "../types/stage.js";
+import type { BaptismState, PcoLiveDTO } from "../types/stage.js";
 import { AUTOMATION_ACTIONS, liveDeps } from "./automation-actions.js";
 import { advanceGuard } from "./automation-pco-items.js";
 import { reaperDeps } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
+import { baptismStore } from "./baptism-store.js";
 
 describe("advanceGuard", () => {
   it("allows the step when the next item matches", () => {
@@ -244,6 +245,42 @@ describe("baptism actions", () => {
       assert.equal(r.ok, true);
       assert.match(r.detail, /would/);
       assert.equal(baptismTimerService.getState(), before, "simulate must not call the real service");
+    });
+
+    it("reports failure rather than false success against a restored, corrupted record", async () => {
+      // Grouped, phase baptism, baptismIndex 0, armed false, people EMPTY — the
+      // exact restored-record shape baptism-timer-service.ts guards in three
+      // places. advance() falls through to next(), whose grouped/baptism
+      // branch is a documented no-op for this shape (logs "nobody at
+      // baptismIndex 0" and returns the SAME state object). Loaded through
+      // baptismStore + init(), the way a real restored record arrives, not by
+      // reaching into the service's private state.
+      const corrupted: BaptismState = {
+        mode: "grouped",
+        phase: "baptism",
+        personNumber: 1,
+        baptismIndex: 0,
+        armed: false,
+        segmentStartedAt: null,
+        segmentAccumMs: 0,
+        sessionStartedAt: "2026-09-20T12:00:00.000Z",
+        finishedAt: null,
+        people: [],
+        pendingTestimonyMs: null,
+        serviceTitle: null,
+        serviceTypeId: null,
+        planId: null,
+      };
+      await baptismStore.saveCurrent(corrupted);
+      await baptismTimerService.init();
+      const before = baptismTimerService.getState();
+
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: false });
+
+      assert.equal(r.ok, false, "advance must not report success when the timer did not move");
+      assert.match(r.detail, /did not move/);
+      assert.equal(baptismTimerService.getState(), before, "the state must be exactly unchanged");
+      await baptismStore.saveCurrent(null);
     });
   });
 
