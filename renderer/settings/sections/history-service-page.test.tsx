@@ -105,9 +105,22 @@ function baptisms() {
       serviceTypeId: "salt",
       planId: "plan-1",
       serviceKey: KEY,
-      people: [{ id: "p1", name: "A", testifyMs: 120_000, baptizeMs: 60_000 }],
+      people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
     },
   ];
+}
+
+/** GET /api/baptism/lane's own shape — the session's two spans, matching
+ *  baptisms()'s own testimony/baptism split and finish time exactly, so the
+ *  chart this fixture draws agrees with the figures the card's strip and
+ *  table print for the same session. */
+function baptismLane() {
+  return {
+    spans: [
+      { kind: "testimony", person: 1, startedAt: iso("20:45:00"), endedAt: iso("20:47:00") },
+      { kind: "baptism", person: 1, startedAt: iso("20:51:00"), endedAt: iso("20:52:00") },
+    ],
+  };
 }
 
 function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } = {}) {
@@ -117,6 +130,7 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
     if (method !== "GET") return ok({ ok: true });
     if (url === "/api/baptism/sessions") return ok(opts.baptisms ? baptisms() : []);
+    if (/^\/api\/baptism\/lane\?/.test(url)) return ok(opts.baptisms ? baptismLane() : { spans: [] });
     if (url === "/api/service-timeline") return ok(opts.timelineRecords ?? [timeline()]);
     if (url === "/api/attendance/history") return ok([attendance()]);
     if (url === "/api/spl/summary") return ok([]);
@@ -136,14 +150,37 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
+  await import("@tanstack/react-router");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-async function openTheService(Section: React.ComponentType) {
+/** A real (memory-history) router carrying /history/manage (where this page
+ *  itself lives, so useSelectedServiceKey's own navigation has somewhere
+ *  real to resolve) and /baptism (the Baptisms card's "Open in Baptisms"
+ *  link) — the same mechanism past-sessions.test.tsx uses for its own
+ *  cross-link, so the rendered href is AppLink/Link's real resolution, never
+ *  a hand-built string compared against itself. Only the ONE test that
+ *  needs a real destination for that link asks for this; every other test
+ *  keeps rendering with no router at all, exactly as before. */
+function routerWithBaptismDestination() {
+  const rootRoute = createRootRoute({});
+  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
+  const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
+  return createRouter({
+    routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
+    history: createMemoryHistory({ initialEntries: ["/history/manage"] }),
+  });
+}
+
+async function openTheService(Section: React.ComponentType, opts: { router?: ReturnType<typeof routerWithBaptismDestination> } = {}) {
+  const section = opts.router
+    ? React.createElement(RouterContextProvider, { router: opts.router, children: React.createElement(Section) })
+    : React.createElement(Section);
   const view = render(
-    React.createElement(TooltipProvider, null, React.createElement(Section), React.createElement(ConfirmHost)),
+    React.createElement(TooltipProvider, null, section, React.createElement(ConfirmHost)),
   );
   await settle();
   await settle();
@@ -223,9 +260,9 @@ describe("the History service page", () => {
     }
   });
 
-  test("Baptisms is a card between Rundown and Attendance, and not in the nav", async (t) => {
+  test("Baptisms is a card between Rundown and Attendance, in the nav in the same order, with the chart and splits inline", async (t) => {
     installFetch({ baptisms: true });
-    const view = await openTheService(ServiceHistorySection);
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
     t.after(() => cleanup());
 
     const cards = [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label"));
@@ -234,17 +271,34 @@ describe("the History service page", () => {
       ["Rundown", "Baptisms", "Attendance", "Sound"],
       "baptism timings explain the overrun in the table right above them",
     );
-    // Deliberately absent from the nav: it is there on a baptism weekend and
-    // gone the rest, and an entry that comes and goes reads as a fault.
+    // A service that HAS baptisms gains a nav entry, in the same order the
+    // card actually sits in — a live one no longer means a stale entry
+    // pointing nowhere, which is what the OLD "never in the nav" rule was
+    // guarding against before per-person splits moved onto this page.
     const nav = [...view.container.querySelectorAll('[data-testid="history-service-header"] nav a')].map((a) => text(a));
-    assert.deepEqual(nav, ["Rundown", "Attendance", "Sound"]);
-    // The card is a card, not a bare block, and carries real figures.
+    assert.deepEqual(nav, ["Rundown", "Baptisms", "Attendance", "Sound"]);
+
     const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
     assert.match(bap.className, /su-card/);
-    assert.match(text(bap), /Baptized/);
+    assert.match(text(bap), /Baptized/, "the stat strip");
+    // The dead-end sentence PR 2 already removed must never come back once
+    // this card has something real to show instead.
+    assert.doesNotMatch(text(bap), /Per-person splits are in the Baptisms tab/);
+    // The per-person splits (Ruling 49) are INLINE, not a link elsewhere.
+    assert.match(text(bap), /Person 1/, "the per-person split table");
+    assert.match(text(bap), /Testimony/);
+    // The chart itself: an SVG carrying the same "Baptism session timeline"
+    // label the live Session card's own SVG uses (SessionSvg is shared, not
+    // copied — see session-chart.tsx).
+    const svg = bap.querySelector('svg[aria-label="Baptism session timeline"]');
+    assert.ok(svg, "expected the two-lane chart, read-only, inside the card");
+    // "Open in Baptisms" replaces the dead end with a real link to the tab.
+    const openLink = [...bap.querySelectorAll("a")].find((a) => text(a).includes("Open in Baptisms"));
+    assert.ok(openLink, "expected an Open in Baptisms link");
+    assert.equal(openLink!.getAttribute("href"), "/baptism");
   });
 
-  test("a baptism-free service has no Baptisms card at all", async (t) => {
+  test("a baptism-free service has no Baptisms card at all, and no nav entry for it", async (t) => {
     installFetch();
     const view = await openTheService(ServiceHistorySection);
     t.after(() => cleanup());
@@ -252,6 +306,8 @@ describe("the History service page", () => {
       [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")),
       ["Rundown", "Attendance", "Sound"],
     );
+    const nav = [...view.container.querySelectorAll('[data-testid="history-service-header"] nav a')].map((a) => text(a));
+    assert.deepEqual(nav, ["Rundown", "Attendance", "Sound"], "no Baptisms entry when the service has none");
   });
 
   test("the arriving page speaks the same vocabulary as a service's page", async (t) => {

@@ -2,7 +2,7 @@ import { errorMessage } from "@main/services/errors";
 import type { RebuildOutcome } from "@main/services/history-edit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
+import { linkBaptisms, baptismStats, type BaptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
@@ -20,10 +20,12 @@ import { confirm, EmptyState, SkeletonRows, Button, toast, Select, SelectContent
 import { copyText } from "../../lib/clipboard";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
+import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingDot, RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
-import { useStoredKeysVersion } from "./history-chart";
+import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, overrunStats, serviceRowFigures } from "./history-service-header";
+import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
+import { HistorySessionChart } from "./baptisms/session-chart";
 import { TrendsCard } from "./history-trends/trends-card";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
@@ -1048,6 +1050,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const det = detail; // narrow for the async handler
     const linkedBap = linkBaptisms(baptisms, detail);
     const bapStats = baptismStats(linkedBap);
+    // The Baptisms entry rides alongside SERVICE_SECTIONS's own three, in the
+    // same order the cards actually sit in the page — the header takes this
+    // list rather than holding a second const of its own, so the two can
+    // never disagree about which sections exist for THIS service. Only when
+    // the service has a linked session: a nav entry that comes and goes read
+    // as a fault before this card had anything real to show, and it still
+    // would if it appeared for every ordinary Sunday.
+    const sections = linkedBap.length > 0
+      ? [SERVICE_SECTIONS[0], { id: "history-baptisms", label: "Baptisms" }, ...SERVICE_SECTIONS.slice(1)]
+      : SERVICE_SECTIONS;
     async function copyReport() {
       const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
       if (ok) toast.success("Report copied to clipboard");
@@ -1292,6 +1304,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           now={nowTick}
           readOnly={readOnly}
           meta={metaLine}
+          sections={sections}
           onBack={() => setSelectedKey(null)}
           onEditTimes={startEditTimes}
           onCopyReport={copyReport}
@@ -1475,19 +1488,26 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         {/* Baptism timings sit with the rundown above rather than after the audio:
             they are timing data, and on a baptism weekend they explain the overrun
             in the table right above them. Only rendered when a session links, so a
-            normal service is unchanged — which is also why it is not in the
-            section nav: a nav entry that is there most weeks and gone the rest
-            reads as a bug. */}
+            normal service is unchanged — which is also why the nav entry above
+            comes and goes with it, rather than sitting empty most weeks.
+            What was six flat tiles and a dead-end sentence pointing at the
+            Baptisms tab is now the same stat strip, the same two-lane chart
+            (read-only, HistorySessionChart in baptisms/session-chart.tsx —
+            never a second copy of SessionSvg), and the per-person splits
+            themselves, inline — restoring what PR 2 removed until this card
+            existed to show it. */}
         {linkedBap.length > 0 && (
-          <SectionCard title="Baptisms">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Baptized" value={String(bapStats.people)} accent="text-fg" />
-              <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
-              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-fg" />
-              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-fg" />
-              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
-              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
-            </div>
+          <SectionCard
+            id="history-baptisms"
+            title="Baptisms"
+            headerRight={
+              <AppLink to="/baptism" className="text-caption1 text-accent hover:underline">
+                Open in Baptisms →
+              </AppLink>
+            }
+          >
+            <StatStrip figures={baptismCardFigures(bapStats)} hover={null} live={null} announce={false} />
+            <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} />
           </SectionCard>
         )}
 
@@ -1965,25 +1985,49 @@ function SoundSection({
  * inside this card, a find-in-page hit. Carrying both would add up and land
  * every jump a header's height too low.
  */
-function SectionCard({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+function SectionCard({
+  id,
+  title,
+  headerRight,
+  children,
+}: {
+  id?: string;
+  title: string;
+  /** A control beside the title, on the same row — the Baptisms card's own
+   *  "Open in Baptisms" link. Absent for every other card today. */
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section
       id={id}
       aria-label={title}
       className="su-card flex flex-col gap-3 px-4 py-4 max-sm:px-3"
     >
-      <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+      <div className="flex items-center gap-3">
+        <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+        {headerRight && <span className="ml-auto">{headerRight}</span>}
+      </div>
       {children}
     </section>
   );
 }
 
-function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
-  return (
-    <div className="rounded-lg border border-line bg-fill/40 px-3 py-2">
-      <div className="text-caption2 uppercase tracking-wider text-fg-subtle">{label}</div>
-      <div className={`font-mono text-title3 font-medium tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="text-caption2 text-fg-subtle">{sub}</div>}
-    </div>
-  );
+/**
+ * The Baptisms card's own stat strip — the same six figures the tiles it
+ * replaces showed (baptismStats, over every session History linked to this
+ * service), on StatStrip's shared scale rather than a bespoke tile grid, so
+ * this card reads like every other figure row on the page instead of a one-
+ * off. `people` never counts a testimony alone — see baptismStats' own doc
+ * comment.
+ */
+function baptismCardFigures(stats: BaptismStats): StatFigure[] {
+  return [
+    { key: "people", label: "Baptized", value: String(stats.people) },
+    { key: "total", label: "Total time", value: fmtDur(stats.totalSec), color: "var(--color-accent)" },
+    { key: "testimony", label: "Testimony total", value: fmtDur(stats.testimonySec) },
+    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec) },
+    { key: "avgTestimony", label: "Avg testimony", value: fmtDur(stats.avgTestimonySec) },
+    { key: "avgBaptism", label: "Avg baptism", value: fmtDur(stats.avgBaptismSec) },
+  ];
 }

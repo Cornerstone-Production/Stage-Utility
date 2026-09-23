@@ -476,6 +476,11 @@ export interface ServiceHeaderProps {
   onDelete: () => void;
   /** Live only — items before now stop counting toward the pacing readout. */
   onResetPacing: () => void;
+  /** The nav's own list — SERVICE_SECTIONS by default. The caller passes a
+   *  longer one for a service the Baptisms card applies to (Task 18): the
+   *  header must not hold a second, competing const of its own, since the two
+   *  could drift on which sections exist at all. */
+  sections?: readonly { id: string; label: string }[];
 }
 
 export function ServiceHeader({
@@ -492,6 +497,7 @@ export function ServiceHeader({
   onRebuild,
   onDelete,
   onResetPacing,
+  sections = SERVICE_SECTIONS,
 }: ServiceHeaderProps) {
   const live = timeline.endedAt == null;
   // `serviceKpis` reads the Smaart metric selection through `servicePeakLevel`,
@@ -517,7 +523,7 @@ export function ServiceHeader({
   // Attendance while Sound filled the screen).
   const ref = useRef<HTMLElement | null>(null);
   const bottom = useHeaderInset(ref);
-  const active = useSectionNav(SERVICE_SECTIONS.map((s) => s.id), bottom);
+  const active = useSectionNav(sections.map((s) => s.id), bottom);
 
   return (
     <header
@@ -622,7 +628,7 @@ export function ServiceHeader({
       </div>
 
       <nav aria-label="Sections of this service" className="flex items-center gap-1 text-caption1">
-        {SERVICE_SECTIONS.map((s) => (
+        {sections.map((s) => (
           <a
             key={s.id}
             href={`#${s.id}`}
