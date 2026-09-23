@@ -247,8 +247,15 @@ describe("undo around the first person in takes back one press, not two", () => 
 
 /** armed === true implies segmentStartedAt === null, always. An armed segment
  *  has no clock running by definition — see BaptismState.armed — so the two
- *  can never legitimately coexist. */
-function assertNotArmedAndRunning(state: { armed?: boolean; segmentStartedAt: string | null }, where: string): void {
+ *  can never legitimately coexist.
+ *
+ *  One-directional on purpose, and named to say so: idle and paused states
+ *  also have segmentStartedAt === null without being armed, so "not armed"
+ *  alone implies nothing about the clock. Call this only where armed may be
+ *  true; a call site that already knows armed is false proves nothing by
+ *  calling it and should assert the specific invariant that holds there
+ *  instead (see the I3 and M8 tests below). */
+function assertArmedImpliesNoClock(state: { armed?: boolean; segmentStartedAt: string | null }, where: string): void {
   if (state.armed) {
     assert.equal(state.segmentStartedAt, null, `${where}: armed is true but a clock is running`);
   }
@@ -268,7 +275,7 @@ describe("armed is contained — it cannot survive the action that ends it", () 
     // "Resume" — the exact race the reviewer named.
     const after = baptismTimerService.resume();
     assert.equal(after.armed, true, "resume() must leave armed alone, not silently clear it");
-    assertNotArmedAndRunning(after, "after resume() while armed");
+    assertArmedImpliesNoClock(after, "after resume() while armed");
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);
@@ -308,7 +315,8 @@ describe("armed is contained — it cannot survive the action that ends it", () 
     assert.equal(after.baptismIndex, 1, "moved to the next person");
     assert.notEqual(after.segmentStartedAt, null, "a clock is now running");
     assert.equal(after.armed ?? false, false, "armed must not survive next() while it was true");
-    assertNotArmedAndRunning(after, "after next() while armed");
+    // No assertArmedImpliesNoClock call here: armed is already known false, so
+    // it would check nothing beyond the two assertions immediately above.
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);
@@ -328,7 +336,11 @@ describe("armed is contained — it cannot survive the action that ends it", () 
     assert.equal(restored.phase, "baptism");
     assert.equal(restored.finishedAt, null);
     assert.equal(restored.armed ?? false, false, "restoring into a redo must not read as armed");
-    assertNotArmedAndRunning(restored, "after undo() out of a finished session");
+    // The invariant that actually holds once armed is known false here: this
+    // undo branch resumes through startSegment(0), so a clock must now be
+    // running. assertArmedImpliesNoClock would check nothing (armed is false),
+    // so assert that directly instead.
+    assert.notEqual(restored.segmentStartedAt, null, "undo out of a finished baptism must resume a running clock");
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);
