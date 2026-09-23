@@ -222,9 +222,9 @@ describe("History opens the service named in its URL", () => {
   });
 });
 
-// Final review, Minor 9: the `onResolved` subscription in
-// useSelectedServiceKey (service-history-section.tsx) was untested —
-// removing it stayed green, even though it is the ONLY thing that reacts to
+// The `onResolved` subscription in useSelectedServiceKey
+// (service-history-section.tsx) was untested — removing it stayed green,
+// even though it is the ONLY thing that reacts to
 // Back, Forward, or a link landing on this page from elsewhere (a click's own
 // `setSelectedKey` sets local state directly; see this file's own header).
 describe("the onResolved subscription (Back, Forward, or a link landing here)", () => {

@@ -168,9 +168,9 @@ test("the note stays up while the next session runs, since Start carries the fai
   assert.ok(text!.includes(DISK));
 });
 
-// Final review, Minor 5: a single field let session A fail, session B ALSO
-// fail, and B's retry landing clear the note entirely -- A was never written.
-// The note is now a list; this proves both a failed session's own entry shows
+// A single field let session A fail, session B ALSO fail, and B's retry
+// landing clear the note entirely -- A was never written. The note is now a
+// list; this proves both a failed session's own entry shows
 // and that a second failure does not replace the first.
 test("two failed sessions both show their own line, naming their own reason", async () => {
   const OTHER = "EACCES: permission denied";

@@ -7,12 +7,12 @@
 // now lands as an entry on BaptismState.saveErrors and goes out on a push of its
 // own.
 //
-// A LIST, not a single field (final review, Minor 5): session A failing, then
-// session B ALSO failing, then B alone saving on retry, used to clear the
-// single field entirely — A was never written, but B's own successful retry
-// matched whatever id the field currently held, which by then was B's, not
-// A's. See "two sessions fail; only the retried one's entry clears" below,
-// the reviewer's own probe for the gap.
+// A LIST, not a single field: session A failing, then session B ALSO
+// failing, then B alone saving on retry, used to clear the single field
+// entirely — A was never written, but B's own successful retry matched
+// whatever id the field currently held, which by then was B's, not A's. See
+// "two sessions fail; only the retried one's entry clears" below for that
+// exact shape.
 //
 // Driven through the REAL timer with only addSession stubbed, and read off the
 // pushes themselves, through the same broadcast hub the SSE transport listens
@@ -244,8 +244,8 @@ describe("a session save that fails reaches the operator", () => {
     rec().current = null;
   });
 
-  // The reviewer's own probe: TWO sessions both fail (not one succeeding
-  // directly), and only the SECOND is retried. The single-field design
+  // TWO sessions both fail (not one succeeding directly), and only the
+  // SECOND is retried. The single-field design
   // overwrote its own id to B's the moment B failed, so B's later successful
   // retry cleared the ONE field entirely — A was never written, and the note
   // (and its serviceKey, which PR 3's Rebuild offer reads) ended up naming B,

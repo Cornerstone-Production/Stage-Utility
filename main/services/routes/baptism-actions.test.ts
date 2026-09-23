@@ -1,8 +1,8 @@
 // The `/api/baptism/` action switch in history-routes.ts — every action
 // driven through the REAL route against the REAL timer, asserting the state
 // the timer actually reaches. Replaces a guard that read the switch's SOURCE
-// TEXT for its case labels: a re-reviewer proved that guard stayed green when
-// a route was replaced with a comment naming it
+// TEXT for its case labels: that guard stayed green when a route was
+// replaced with a comment naming it
 // (`// case "dismiss-save-error": not wired`), because a comment satisfies a
 // `case "x":` regex exactly as well as real code does, and nothing sent a POST
 // through the route to notice nothing answered. Pinning labels also cannot
@@ -16,13 +16,13 @@
 // phase: tested from idle or from a running testimony, an advance<->start or
 // advance<->next swap would produce the identical result and this guard would
 // not notice. Both red proofs below (a handler swap, the same comment
-// substitution the re-reviewer used) confirm the design actually catches what
+// substitution above) confirm the design actually catches what
 // it is meant to.
 //
 // A THIRD gap survived the first version of this file: ACTIONS/EXPECTED_ACTIONS
-// were checked against each other, never against the real switch. A reviewer
-// added `case "scratch-new-untested-action":` to history-routes.ts and this
-// whole file, plus route-coverage.test.ts, stayed green — the deleted
+// were checked against each other, never against the real switch. Adding
+// `case "scratch-new-untested-action":` to history-routes.ts left this
+// whole file, plus route-coverage.test.ts, green — the deleted
 // text-scanning guard would have caught that shape (a new `case` label), and
 // the replacement lost it by only ever reading its OWN table. Closed with the
 // type system, per CLAUDE.md's stated preference over a text scan: the switch
@@ -240,9 +240,9 @@ const ACTIONS: ActionCase[] = [
 // an action added in one row and removed in another from no change. Checked
 // against TWO things below, not one: this file's OWN table (so a row cannot
 // go missing silently) AND history-routes.ts's real BAPTISM_ACTIONS export
-// (so this list cannot drift from the switch it is meant to describe — the
-// gap a reviewer found by adding a case neither this file nor
-// route-coverage.test.ts noticed).
+// (so this list cannot drift from the switch it is meant to describe —
+// adding a case neither this file nor route-coverage.test.ts noticed is
+// exactly the gap that check exists for).
 const EXPECTED_ACTIONS = [
   "advance",
   "baptized",

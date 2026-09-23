@@ -90,9 +90,9 @@ describe("gapSpans", () => {
 });
 
 describe("sessionWindow", () => {
-  // Important 1 (final review): this used to take every span and plan item
-  // the WHOLE SERVICE ever had and widen the domain to whatever any of them
-  // covered. Seeded with a realistic service and driven for real, a session
+  // This used to take every span and plan item the WHOLE SERVICE ever had
+  // and widen the domain to whatever any of them covered. Seeded with a
+  // realistic service and driven for real, a session
   // that actually ran about 25m to 47m read as an 0m-85m axis, because a
   // countdown 25 minutes before it and a 38-minute sermon after it were still
   // feeding the same min/max. Rebuilt to read ONLY the session's own recorded
@@ -167,8 +167,8 @@ describe("clipToSession", () => {
     assert.equal(out!.endedAt, iso(T0 + 300_000));
   });
 
-  // This is Important 1's own bug, at the arithmetic level: before this fix,
-  // an item entirely outside the session (the sermon, the closing) still fed
+  // The same bug, at the arithmetic level: before this fix, an item entirely
+  // outside the session (the sermon, the closing) still fed
   // sessionWindow's min/max and drew as a wide "not counted" block covering
   // it, or a bare-number label once the whole domain widened around it.
   test("entirely before the window is dropped", () => {
@@ -193,7 +193,9 @@ describe("clipToSession", () => {
 describe("sessionSpans", () => {
   test("keeps only spans starting inside [startMs, endMs] — an earlier, unrelated session's own is dropped", () => {
     // The lane route returns every session in the service's baptism.csv
-    // concatenated (baptism-lane.ts's own header) — Important 1's other half.
+    // concatenated (baptism-lane.ts's own header) — the reason sessionSpans
+    // exists at all, alongside sessionWindow reading only this session's own
+    // recorded start/finish.
     const spans = [
       span({ person: 1, startedAt: iso(T0 - 3_600_000), endedAt: iso(T0 - 3_500_000) }),
       span({ person: 1, startedAt: iso(T0), endedAt: iso(T0 + 60_000) }),

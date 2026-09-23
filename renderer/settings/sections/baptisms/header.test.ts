@@ -22,15 +22,14 @@ const BASE: BaptismState = {
   finishedAt: "2026-09-27T16:40:00.000Z",
   people: [],
   pendingTestimonyMs: null,
-  serviceTitle: "Probe",
+  serviceTitle: "Sunday Service",
   serviceTypeId: null,
   planId: null,
 };
 
-// Final review, Minor 7: this printed "baptism 0:00" for a mid-testimony
-// person here, while the People table printed a dash for the identical
-// entry — one rule now, shared between the two (see fmtBaptizeMs in
-// use-baptism-state.ts).
+// This printed "baptism 0:00" for a mid-testimony person here, while the
+// People table printed a dash for the identical entry — one rule now,
+// shared between the two (see fmtBaptizeMs in use-baptism-state.ts).
 describe("baptismReportText", () => {
   test("a mid-testimony person (baptizeMs 0) prints a dash, never baptism 0:00", () => {
     const text = baptismReportText(

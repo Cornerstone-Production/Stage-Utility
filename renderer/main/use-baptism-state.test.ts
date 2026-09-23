@@ -104,10 +104,9 @@ describe("once someone is actually baptized", () => {
   });
 });
 
-// Final review, Minor 7: Copy report printed fmtClock(0) ("0:00") for a
-// mid-testimony person while the People table printed a dash for the exact
-// same entry — one rule, shared, so the two cannot disagree about the same
-// person again.
+// Copy report printed fmtClock(0) ("0:00") for a mid-testimony person while
+// the People table printed a dash for the exact same entry — one rule,
+// shared, so the two cannot disagree about the same person again.
 describe("fmtBaptizeMs", () => {
   test("not yet baptized (0ms) is a dash, never fmtClock's 0:00", () => {
     assert.equal(fmtBaptizeMs(0), "—");

@@ -76,12 +76,12 @@ test("no service open — no serviceKey at all — says so and draws nothing", a
   assert.equal(!!document.getElementById("s-session"), true, "expected the Session card's anchor id");
 });
 
-// Final review, Important 4: with no service open and the timer RUNNING, this
-// used to say "No session recorded yet -- the chart draws once the timer
-// starts", which is false while a clock is visibly running -- rendered to
-// confirm, per the review. This is the failure case the `raw: no service
-// open, session not archived` log line exists for; see docs/features/
-// scriptview-and-baptisms.md's own matching paragraph.
+// With no service open and the timer RUNNING, this used to say "No session
+// recorded yet -- the chart draws once the timer starts", which is false
+// while a clock is visibly running -- rendered to confirm. This is the
+// failure case the `raw: no service open, session not archived` log line
+// exists for; see docs/features/scriptview-and-baptisms.md's own matching
+// paragraph.
 test("with no service open and the timer running, it says so plainly instead of the idle message", async () => {
   await mount({
     ...BASE,
@@ -149,8 +149,8 @@ test("a session with recorded spans draws the lane and its legend", async () => 
   assert.equal(!!screen.queryByText("Plan item"), true, "expected the legend's Plan item entry");
 });
 
-// Final review, Important 2: the width effect ran once, on the FIRST render,
-// while the lane was still loading and SessionSvg — which used to own the
+// The width effect ran once, on the FIRST render, while the lane was still
+// loading and SessionSvg — which used to own the
 // only ref — had not mounted yet, so the observer never attached and the
 // chart stayed at its fixed 640px default. Measured live at 1280px wide, the
 // container was 982px but the chart drew at 640, centered with empty space
@@ -208,8 +208,8 @@ test("the chart re-lays out when its host resizes, even though the host was empt
   }
 });
 
-// Final review, Important 1: the window used to be the WHOLE SERVICE's plan
-// and spans, not the session's. Seeded with a realistic running order — a
+// The window used to be the WHOLE SERVICE's plan and spans, not the
+// session's. Seeded with a realistic running order — a
 // countdown before the session, a sermon and closing after it — and driven
 // for real, the axis read 0m to 85m for a session that ran about 25m to 47m,
 // with a "not counted" block covering the sermon and closing. Reproduced here
@@ -472,10 +472,9 @@ test("a failed lane fetch on a live session says the next press tries again", as
   }
 });
 
-// Final review, Minor 6: a finished session's plan-timeline fetch failing used
-// to only log and return [], so the plan lane drew empty with no explanation
-// at all — the timer lane still drew correctly, since this is a plan-only
-// fetch failure.
+// A finished session's plan-timeline fetch failing used to only log and
+// return [], so the plan lane drew empty with no explanation at all — the
+// timer lane still drew correctly, since this is a plan-only fetch failure.
 test("a failed plan-timeline fetch shows its own note, and still reaches the log", async () => {
   const logCalls: { tag: string; message: string }[] = [];
   const realFetch = globalThis.fetch;

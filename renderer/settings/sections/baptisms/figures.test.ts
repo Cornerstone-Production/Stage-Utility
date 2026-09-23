@@ -34,10 +34,10 @@ describe("baptismFigures", () => {
     assert.equal(by(f, "count"), "0");
   });
 
-  // Final review, Minor 8: only idle and the count were covered here — Timed's
-  // own LIVE arithmetic (the running segment, and per-person's banked
-  // pendingTestimonyMs) was untested, and either could be dropped from the sum
-  // without this file noticing.
+  // Only idle and the count were covered here — Timed's own LIVE arithmetic
+  // (the running segment, and per-person's banked pendingTestimonyMs) was
+  // untested, and either could be dropped from the sum without this file
+  // noticing.
   it("timed adds the pending testimony AND the running segment on top of banked totals", () => {
     const segStart = started + 10 * 60_000;
     const now = segStart + 45_000; // 45s into the currently running baptism
