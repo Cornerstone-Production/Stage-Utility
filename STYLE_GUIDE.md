@@ -204,7 +204,7 @@ flows through automatically.
 | **Field / FieldSet / FieldGroup / FieldContent / FieldLabel / FieldDescription** | the form-row system: `FieldSet` = `rounded-lg border-line`; `FieldGroup` = `divide-y divide-gray-a4`; `Field` = `px-3 py-2.5 bg-bg`, horizontal stacks below `sm`; `FieldLabel` = `text-footnote font-medium text-fg`; `FieldDescription` = `text-caption2 text-fg-subtle`. |
 
 Other primitives in the folder follow the same token conventions (Dialog, confirm /
-AlertDialog, ScrollArea, Separator, EmptyState, Skeleton, Status, InfoHint,
+AlertDialog, ScrollArea, Separator, EmptyState, ErrorNote, Skeleton, Status, InfoHint,
 Collapsible, Toast, UnsavedBanner, ButtonGroup, TooltipProvider, ErrorBoundary).
 
 ---

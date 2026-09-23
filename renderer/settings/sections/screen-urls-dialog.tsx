@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
-import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDescription, Input, toast } from "../../components/ui";
+import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDescription, ErrorNote, Input, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
@@ -150,11 +150,7 @@ export function ScreenUrlsDialog({
             />
           </div>
 
-          {error && (
-            <p role="alert" className="rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-              {error}
-            </p>
-          )}
+          {error && <ErrorNote>{error}</ErrorNote>}
 
           <div className="flex justify-end gap-2">
             {/* Cancel discards: the stored slug is untouched until Save. */}
