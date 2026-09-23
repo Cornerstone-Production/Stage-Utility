@@ -30,8 +30,8 @@ import type { StatFigure } from "../settings/sections/history-chart";
  * parent and child, so hovering a segment has to travel back up through this
  * component to reach the strip it replaces.
  *
- * The People, Past sessions and Trends cards (Task 13) live beside the Timer
- * and Session cards in the same module, and replace the inline per-person log
+ * The People, Past sessions and Trends cards live beside the Timer and
+ * Session cards in the same module, and replace the inline per-person log
  * and expandable past-sessions list this component used to carry directly —
  * see git history for the shape they superseded. `sessions` and its load
  * failure are still owned here rather than in either card, because BOTH Past

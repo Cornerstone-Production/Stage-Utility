@@ -235,12 +235,11 @@ export function sessionSpans(
 
 /**
  * Elapsed-minute tick offsets from the session's own start ("0m", "1m", ...),
- * per the approved mockup (mockup-v3.html's own `draw()`, near its `stepMin`
- * line): a 1-minute step up to an 8-minute session, 2 minutes up to 20, 5
- * beyond. The mockup does not cover a session past an hour; this widens to 10
- * minutes there, so an hour-plus session does not draw a tick every 5 minutes
- * (36+ of them) — said here rather than left silent, since it is this file's
- * own addition, not the mockup's.
+ * matching the approved design: a 1-minute step up to an 8-minute session, 2
+ * minutes up to 20, 5 beyond. That design does not cover a session past an
+ * hour; this widens to 10 minutes there, so an hour-plus session does not
+ * draw a tick every 5 minutes (36+ of them) — said here rather than left
+ * silent, since it is this file's own addition, not the approved design's.
  *
  * LOCAL to this chart, not a change to `history-chart/geometry.ts`'s
  * `timeTicks()`: every History chart's domain is a whole SERVICE, tens of

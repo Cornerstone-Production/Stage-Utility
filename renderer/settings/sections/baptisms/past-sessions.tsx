@@ -4,16 +4,15 @@
 //
 // Supersedes baptism-operator.tsx's old expandable list. That list's own
 // expand arrow showed a finished session's per-person splits; this card does
-// not reproduce that view — the mockup does not show one either, and the
-// richer replacement (the SAME lane and table Session renders, read-only, on
-// History's own Baptisms card) is PR 3's Task 18, which reuses the spans this
-// PR's Session card already draws rather than a second copy (see progress.md's
-// Ruling 38, T9|T18). Nothing recorded is lost: every person's split is still
-// on the session, Copy report and the CSV export both still carry it, and a
-// keyed session's cross-link lands on the right service today even before
-// PR 3 richens what is there. Only the per-person VIEW of a past session is a
-// PR 3 stop rather than an expand arrow here — the same kind of interim gap
-// Ruling 39 already accepted for the header's Rebuild action.
+// not reproduce that view. The richer replacement — the SAME lane and table
+// Session renders, read-only, on History's own Baptisms card — is a later
+// PR's work, reusing the spans this PR's Session card already draws rather
+// than a second copy. Nothing recorded is lost in the meantime: every
+// person's split is still on the session, Copy report and the export both
+// still carry it, and a keyed session's cross-link lands on the right service
+// today even before that richer view exists. Only the per-person VIEW of a
+// past session waits for it, not an expand arrow here — the same kind of
+// interim gap already accepted for the header's Rebuild action.
 //
 // Counts and averages come from baptismStats, applied to ONE session at a
 // time — never s.people.length, which would count a grouped session's

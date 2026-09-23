@@ -102,7 +102,7 @@ describe("sessionWindow", () => {
   // now that this no longer reaches for them.
   //
   // The whole "a dangling open span from a crash, read back two days later"
-  // test family Fix round 1 added here is gone, not just renamed: that class
+  // test family that used to live here is gone, not just renamed: that class
   // of bug lived in treating an OPEN SPAN's absence of an end as "maybe now,
   // maybe not" (see the old take()). This function no longer looks at a span
   // at all, so a dangling one — from this session or any other in the same
@@ -262,12 +262,11 @@ describe("planLaneItems", () => {
 });
 
 describe("sessionAxisTicks", () => {
-  // Fix round 1 (from drive 2), the TIME AXIS finding: a domain under
-  // history-chart's own 10-minute tick floor drew no axis at all — confirmed
-  // live against a real seeded ~30-second session (zero <line> and zero
-  // axis <text> elements in the rendered SVG). This is a SEPARATE, local
-  // tick function precisely so history-chart/geometry.ts's timeTicks() does
-  // not have to change for every other chart that uses it.
+  // A domain under history-chart's own 10-minute tick floor drew no axis at
+  // all — confirmed live against a real seeded ~30-second session (zero
+  // <line> and zero axis <text> elements in the rendered SVG). This is a
+  // SEPARATE, local tick function precisely so history-chart/geometry.ts's
+  // timeTicks() does not have to change for every other chart that uses it.
   test("a 4-minute session — at most 8 minutes — steps by 1 minute, 0m through 4m", () => {
     const ticks = sessionAxisTicks(T0, T0 + 4 * 60_000);
     assert.deepEqual(
@@ -348,11 +347,11 @@ describe("timerHoverFigures", () => {
     assert.equal(f.find((x) => x.key === "hoverEnd")?.label, "Still running");
   });
 
-  // Fix round 1 (from drive 2), the HOVER SECONDS finding: Started and Ended
-  // used to share formatClock's default (minute) precision, so a sub-minute
-  // segment — common for a baptism, see docs/features/scriptview-and-
-  // baptisms.md — could show the identical string for both, e.g. both
-  // "4:51", beside a duration figure that correctly read "0:03".
+  // Started and Ended used to share formatClock's default (minute) precision,
+  // so a sub-minute segment — common for a baptism, see
+  // docs/features/scriptview-and-baptisms.md — could show the identical
+  // string for both, e.g. both "4:51", beside a duration figure that
+  // correctly read "0:03".
   test("a sub-minute segment's Started and Ended differ, because both now carry seconds", () => {
     const short: TimerLaneItem = { ...testimony, startedAt: iso(T0), endedAt: iso(T0 + 3_000) };
     const f = timerHoverFigures(short, T0 + 999_999);

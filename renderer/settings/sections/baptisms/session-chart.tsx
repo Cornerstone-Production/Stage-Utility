@@ -1,8 +1,8 @@
 // session-chart.tsx — the Session card: a baptism session drawn as two lanes
 // on one time axis, timer over plan, so the planning conversation can answer
 // "how much of the song set did the baptisms take" — which no single lane can,
-// because the dunks spread across several songs. See mockup-v3.html's Session
-// card and docs/superpowers/sdd/2026-09-21-baptisms-overhaul/task-12-brief.md.
+// because the dunks spread across several songs. See "The Session chart" in
+// docs/features/scriptview-and-baptisms.md for what an operator sees.
 //
 // NOT HistoryChart: that component needs a series[] and a yScale, and this
 // chart has no y axis — a baptism session is a sequence, not a measurement over
@@ -10,10 +10,10 @@
 // the text measurer and keepAxisLabels' collision avoidance, so overlap
 // stacking, clipping and the live edge behave exactly as History's do. The
 // axis TICKS themselves are this chart's own (session-lane.ts's
-// sessionAxisTicks) — Fix round 1 (from drive 2) moved off history-chart's
-// timeTicks(), whose 10-minute floor drew no axis at all for the sub-ten-
-// minute sessions this chart commonly has to draw; see that function's own
-// comment. The SVG itself is this file's own.
+// sessionAxisTicks): this chart moved off history-chart's timeTicks(), whose
+// 10-minute floor drew no axis at all for the sub-ten-minute sessions this
+// chart commonly has to draw; see that function's own comment. The SVG itself
+// is this file's own.
 //
 // WHAT IS NOT UNIT-TESTED HERE, AND WHY — same reasoning as history-chart.tsx's
 // own note: jsdom loads no stylesheet and lays nothing out, so a test cannot see
@@ -25,8 +25,7 @@
 // needs a real render but asserts on element presence, not pixels), and the
 // three empty-state branches rendering the right text (session-chart.test.tsx).
 // Checked in a real browser against seeded, real recorded sessions — short and
-// long, both workflows — as part of Task 15's drive; see that task's report
-// for what was seen and its screenshots.
+// long, both workflows.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 

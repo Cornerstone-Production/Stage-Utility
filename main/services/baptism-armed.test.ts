@@ -232,7 +232,9 @@ describe("undo around the first person in takes back one press, not two", () => 
  *  alone implies nothing about the clock. Call this only where armed may be
  *  true; a call site that already knows armed is false proves nothing by
  *  calling it and should assert the specific invariant that holds there
- *  instead (see the I3 and M8 tests below). */
+ *  instead — see the tests below that step forward or undo out of an armed
+ *  section, each of which asserts directly what its own clock must be doing
+ *  once armed reads false, rather than calling this helper for nothing. */
 function assertArmedImpliesNoClock(state: { armed?: boolean; segmentStartedAt: string | null }, where: string): void {
   if (state.armed) {
     assert.equal(state.segmentStartedAt, null, `${where}: armed is true but a clock is running`);

@@ -8,8 +8,8 @@
 // row, a damaged stamp, rows that belong to no session.
 //
 // The fixtures past the first describe were transcribed from driven runs of the
-// real baptismTimerService, times rounded to seconds. The first describe is the
-// task brief's own; its pause fixture omits the `testimony-end` that a real
+// real baptismTimerService, times rounded to seconds. The first describe
+// predates that: its pause fixture omits the `testimony-end` that a real
 // per-person finish() writes before `finish`, which the lane closes the same
 // span on either way.
 

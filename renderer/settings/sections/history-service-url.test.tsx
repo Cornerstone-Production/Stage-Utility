@@ -1,7 +1,6 @@
 // History's selection used to be a bare `useState<string | null>(null)`, with
-// no URL behind it — see the History overhaul's Task 10. That left the
-// Baptisms tab's past-session links (PR 2's Task 13) with nowhere to send an
-// operator: there was no address that opened one service.
+// no URL behind it. That left the Baptisms tab's past-session links with
+// nowhere to send an operator: there was no address that opened one service.
 //
 // `historyServiceHref` is now the one place that URL is built, and
 // `ServiceHistorySection` reads `?service=<key>` on load and writes it back
@@ -164,10 +163,12 @@ function renderHistoryAt(initialUrl: string) {
 
 describe("historyServiceHref", () => {
   test("builds the operator page's URL for a service key, percent-encoded", () => {
-    // Colons are why this is a search param and not a path segment (see the
-    // brief) — asserted here as the literal encoded string, not round-tripped
-    // back through a decoder, so a change to either the path or the param name
-    // fails this test directly.
+    // Colons are why this is a search param and not a path segment: a service
+    // key looks like "weekend:plan-1:1100", which a path segment cannot carry
+    // without its own encoding rule, while a search param handles it with
+    // ordinary percent-encoding. Asserted here as the literal encoded string,
+    // not round-tripped back through a decoder, so a change to either the path
+    // or the param name fails this test directly.
     assert.equal(historyServiceHref(KEY), "/history/manage?service=weekend%3Aplan-1%3A1100");
   });
 });

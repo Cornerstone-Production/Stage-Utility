@@ -1,9 +1,8 @@
 // trends-card.tsx — the Baptisms tab's Trends card: four tiles over the last
 // TREND_WINDOW sessions against the TREND_WINDOW before, so a planner can
 // answer "how long do baptisms take" from history instead of guessing off one
-// Sunday. See mockup-v3.html's Trends card and trends.ts for the arithmetic
-// and for why COMPARABLE_ABOVE/TrendMeasure do not carry over from
-// history-trends.
+// Sunday. See trends.ts for the arithmetic and for why
+// COMPARABLE_ABOVE/TrendMeasure do not carry over from history-trends.
 //
 // NAMED trends-card.tsx, not trends.tsx, deliberately matching
 // history-trends/trends-card.tsx beside history-trends/trends.ts: a renderer

@@ -290,10 +290,10 @@ test("plan items before and after the session are left off the chart, not just s
   }
 });
 
-// Fix round 1 (from drive 2), the CUSTOMIZE finding: the mockup's Session
-// card has a Customize control and the plan built this tab on History's own
-// CustomizePopover/prefs mechanism, but the shipped card had neither — the
-// plan lane always drew, with no way to turn it off.
+// The Session card's own design has a Customize control, built on History's
+// own CustomizePopover/prefs mechanism like every other chart in this app,
+// but the shipped card had neither — the plan lane always drew, with no way
+// to turn it off.
 test("Customize toggles the plan lane off, and the choice persists across a remount", async () => {
   localStorage.removeItem(SESSION_LANES_STORAGE_KEY);
   const timeline: ServiceTimeline = {
@@ -382,11 +382,11 @@ test("Customize toggles the plan lane off, and the choice persists across a remo
   }
 });
 
-// Fix round 1, finding I2: a failed baptism:lane fetch used to set spans: []
-// and log with a bare console.warn — so the operator saw "No timing detail
-// was recorded for this session" (a claim about the SESSION) for what was
-// actually a network blip or a server restart, with the real cause sitting
-// in a devtools console nobody has open.
+// A failed baptism:lane fetch used to set spans: [] and log with a bare
+// console.warn — so the operator saw "No timing detail was recorded for this
+// session" (a claim about the SESSION) for what was actually a network blip
+// or a server restart, with the real cause sitting in a devtools console
+// nobody has open.
 test("a failed lane fetch shows its own note, not 'no timing detail', and reaches the log", async () => {
   const logCalls: { tag: string; message: string }[] = [];
   const realFetch = globalThis.fetch;
