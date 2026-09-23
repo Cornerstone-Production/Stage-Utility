@@ -620,7 +620,7 @@ describe("POST /api/history/rebuild", () => {
       const json = out.json as {
         timeline: { rebuilt: boolean };
         baptism: { rebuilt: boolean; items: number; missing: boolean };
-        baptismDetail: { updated: number; added: number };
+        baptismDetail: { updated: number; added: number; full: number };
         failed: string[];
       };
       assert.equal(json.timeline.rebuilt, true, "precondition: the timeline leg must land first for this to be a PARTIAL failure");
@@ -628,6 +628,7 @@ describe("POST /api/history/rebuild", () => {
       assert.equal(json.baptism.rebuilt, false, "a failed write must not read as rebuilt");
       assert.equal(json.baptismDetail.added, 0, "the write failed — the plan's own optimistic added count must not leak into the response");
       assert.equal(json.baptismDetail.updated, 0, "the write failed — the plan's own optimistic updated count must not leak into the response");
+      assert.equal(json.baptismDetail.full, 0, "the write failed outright — nothing was turned away for being full, so full must not claim otherwise");
 
       // The [history] line for THIS leg must name the real reason, not
       // RebuildFailedError's own fixed sentence — that sentence belongs on
