@@ -123,6 +123,9 @@ class TestProdCom extends ProdComService {
   public get retryArmed(): boolean {
     return this.wsRetryArmed;
   }
+  public get sseUpNow(): boolean {
+    return this.sseStreamUp;
+  }
   /** The SSE stream's own priming (channels, keywords, backfill). */
   public settled(): Promise<void> {
     return this.priming;
@@ -750,6 +753,12 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // could then no longer reach it, leaking it for the life of the process.
     // This runs every half hour for ever on a box whose socket carries nothing,
     // so a leak here is not a one-off.
+    //
+    // This case alone no longer needs the `this.req !== req` guard to pass:
+    // connect()'s own `!this.onWebSocket` and `!this.ws` checks (see
+    // prodcom-transport-invariants.test.ts) already block a second SSE stream
+    // or a second socket while promoted, on their own. See the reconfigure
+    // case below for the scenario that guard is actually load-bearing for.
     const stub = await startProdComStub({ channels: CHANNELS, refuseWebSocket: true });
     const svc = new TestProdCom();
     t.after(async () => {
@@ -783,6 +792,48 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     );
     assert.equal(stub.openWebSockets, 1, "a second socket was opened beside the promoted one and leaked");
     assert.equal(svc.onWebSocketNow, true, "the promoted socket was lost");
+  });
+
+  it("a reconfigure while the old SSE request is being torn down does not corrupt the new one", async (t) => {
+    // The scenario the `this.req !== req` guard actually exists for: teardown()
+    // (configure() calling restart() calling stop()) runs dropFallbackStream()
+    // on the OLD request the instant a reconfigure happens, and connectSse()
+    // for the NEW box can already be under way by the time that destroy's
+    // belated 'error' fires. Without the identity check, that stale handler
+    // would null `this.req` out from under the NEW request and schedule a
+    // reconnect that has nothing to do with it — every future event for the
+    // NEW request then sees `this.req !== req` (true, now pointing at nothing)
+    // and bails, leaking an open SSE connection to the new box that nothing
+    // ever watches, reconnects, or reports on again.
+    const stubA = await startProdComStub({ channels: CHANNELS });
+    const stubB = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stubA.close();
+      await stubB.close();
+    });
+
+    svc.configure("127.0.0.1", stubA.port, null);
+    await eventually(() => svc.sseUpNow, "the first SSE stream to come up");
+
+    svc.configure("127.0.0.1", stubB.port, null); // reconfigure mid-flight
+    await eventually(() => stubB.sseOpens >= 1, "the new SSE stream to open against the new box");
+    await eventually(() => svc.sseUpNow, "the new SSE stream to come up");
+    // A corrupted this.req does not fail cleanly — it storms: each stale
+    // handler nulls this.req, connect() reads that as room for a fresh
+    // attempt, and the fresh attempt's own handlers are just as vulnerable to
+    // the NEXT stale event. A momentary "connected" is not evidence of health
+    // on its own; a settled connection count is.
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(stubB.sseOpens, 1, `reconfiguring caused a reconnect storm against the new box: ${stubB.sseOpens} open(s)`);
+    assert.equal(svc.sseUpNow, true, "the new connection did not stay up");
+
+    // And the transport actually works: a line the old request's stale
+    // teardown would have silently dropped by nulling this.req out from
+    // under the new one.
+    stubB.sseSend(spoken("after-reconfigure"));
+    await eventually(() => svc.texts().includes("after-reconfigure"), "a line on the NEW box to land");
   });
 
   it("names the refusal, not silence, when a known-silent box then refuses the upgrade", async (t) => {
