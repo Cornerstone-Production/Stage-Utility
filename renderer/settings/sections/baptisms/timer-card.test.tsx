@@ -273,6 +273,27 @@ const findInBody = (label: string) =>
 const rebuildButtonsIn = (root: ParentNode) =>
   [...root.querySelectorAll('[role="alert"] button')].filter((b) => (b.textContent ?? "").includes("Rebuild from raw")) as HTMLButtonElement[];
 
+const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+/** Opens the button's own tooltip via keyboard focus (Radix's Tooltip opens
+ *  on hover AND focus) and reads its rendered text, then closes it again —
+ *  same technique as header.test.tsx's own tooltipTextOf, and the same reason
+ *  it works even on a disabled button: jsdom does not enforce a real
+ *  browser's "a disabled element cannot receive focus." */
+async function tooltipTextOf(btn: HTMLElement): Promise<string> {
+  fireEvent.focus(btn);
+  await act(async () => {
+    await settle();
+    await settle();
+  });
+  const shown = text(document.querySelector('[role="tooltip"]'));
+  fireEvent.blur(btn);
+  await act(async () => {
+    await settle();
+  });
+  return shown;
+}
+
 test("a failed entry with a serviceKey offers its own Rebuild from raw; one with none is disabled and says why", async () => {
   const { root, restore } = await mountWithRebuild(
     {
@@ -289,6 +310,11 @@ test("a failed entry with a serviceKey offers its own Rebuild from raw; one with
     assert.equal(buttons.length, 2, "expected one Rebuild action per failed entry");
     assert.equal(buttons[0]!.disabled, false, "an entry with a serviceKey, not live, must be usable");
     assert.equal(buttons[1]!.disabled, true, "an entry with no serviceKey has no raw rows to rebuild from");
+    assert.match(
+      await tooltipTextOf(buttons[1]!),
+      /no service open.*no raw rows/i,
+      "expected the disabled entry's own tooltip to say WHY, not just that it is off",
+    );
   } finally {
     restore();
   }
