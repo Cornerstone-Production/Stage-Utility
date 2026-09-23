@@ -352,10 +352,12 @@ Two things to know:
 and each returns the new timer state: `start`, `baptized`, `start-baptisms`,
 `next`, `advance`, `undo`, `finish`, `pause`, `resume`, `reset`,
 `dismiss-save-error` (clears the note a failed session save leaves), and `mode`
-(`{mode: "grouped"|"per-person"}`). `advance` is the phase-aware primary press —
-what the operator's main button does, whatever phase the timer is in — meant for
-callers (automations, Companion) that should not have to know the current phase
-to drive the timer forward. `GET` and `POST /api/baptism/triggers` read
+(`{mode: "grouped"|"per-person"}`). `advance` dispatches to whichever action is
+legal for the timer's current phase — meant for a caller (an automation,
+Companion) that should not have to track phase to drive the timer forward. The
+operator panel itself calls it only while armed ("First person in"); once a
+phase is running the panel already knows which specific action applies and
+calls that one directly. `GET` and `POST /api/baptism/triggers` read
 and set which plan items start each phase, and
 `DELETE /api/baptism/sessions/:id` removes one saved session.
 

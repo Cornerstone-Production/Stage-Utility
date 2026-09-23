@@ -393,9 +393,13 @@ class BaptismTimerService {
   }
 
   /**
-   * The phase-aware primary press — whatever the operator panel's main button
-   * does right now. ONE entry point, so a Companion key, a layout button and the
-   * panel cannot disagree about which action is legal in which phase.
+   * The phase-aware primary press — dispatches to whichever action is legal
+   * for the CURRENT phase, so a caller that does not track phase (Companion,
+   * an automation) has one action that is always safe to press. The operator
+   * panel itself routes through this only while armed ("First person in");
+   * once a phase is running the panel already knows which specific action
+   * applies (start/next/baptized/finish) and calls that one directly — see
+   * timer-card.tsx's primaryChannel.
    */
   advance(): BaptismState {
     if (this.state.phase === "idle") return this.start();
