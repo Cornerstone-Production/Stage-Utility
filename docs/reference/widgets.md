@@ -425,6 +425,16 @@ and average are building-only — the zone endpoint does not report them. See
 |---|---|---|
 | **Baptism timer** | The running baptism clock, or the session's totals | The baptism recorder |
 
+**Baptism timer** picks one of nine fields: **Live** (the running testimony or
+baptism clock), **Testimony** (this person's testimony, once banked — frozen
+while their baptism itself is timed), **Session** (wall clock since the session
+started, never paused), **Phase** (the word — idle, armed, testimony or
+baptism), **Person** (`Person 3`, or `3 of 7` in grouped mode once the
+testimony pass has run — per-person mode never has a total), **Count**,
+**Total time**, **Average per person** and **Last person**. Armed reads as its
+own word rather than a running clock or a person number, on every field — the
+baptisms have begun but nobody has stepped up yet.
+
 See [ScriptView and Baptisms](../features/scriptview-and-baptisms.md).
 
 ## Control
