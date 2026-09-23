@@ -20,7 +20,7 @@
 // pctChange (reused from trends-card.tsx) already refuses to divide by a basis
 // at or below zero on its own.
 
-import { MIN_PRIOR_DAYS, TREND_WINDOW } from "../history-trends/trends";
+import { MIN_PRIOR_DAYS, TREND_WINDOW, mean } from "../history-trends/trends";
 
 export { MIN_PRIOR_DAYS, TREND_WINDOW };
 
@@ -56,10 +56,6 @@ export interface BaptismTrendTile {
   prior: number | null;
   /** How many prior sessions actually fed `prior`. Zero when `prior` is null. */
   priorCount: number;
-}
-
-function mean(values: number[]): number {
-  return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
 function tile(values: number[], window: number): BaptismTrendTile {
