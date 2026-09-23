@@ -204,10 +204,16 @@ Baptisms tab does, but folds them into "what was written" (`added`,
 as its own clause when nonzero, since its one line already covers three
 other legs.
 
-Reachable from both places: the Baptisms tab's own **Rebuild from raw**, in
-its header, targets one service on its own (`POST /api/baptism/rebuild`);
+Reachable from three places, all of which post the same merge: the Baptisms
+tab's own **Rebuild from raw**, in its header, targets one service on its own
+(`POST /api/baptism/rebuild`); a save-failure entry's own **Rebuild from raw**,
+in the Timer card's note, targets that entry's own service the same way;
 History's **Rebuild from raw** runs the same merge as one more leg alongside
-timings, sound and attendance.
+timings, sound and attendance. An **added** session that also names a
+save-failure entry's own id clears that entry on the server, whichever of the
+three routes did the restoring — see
+[Recovery](features/scriptview-and-baptisms.md#recovery) for what the note
+itself shows.
 
 ### Raw in the bundle, effective in the workbook
 

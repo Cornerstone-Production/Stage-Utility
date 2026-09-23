@@ -20,6 +20,13 @@
 // The Rebuild from raw button's LOGIC — which serviceKey it targets, when it
 // is disabled and why, and that it confirms before posting — is behaviour,
 // not layout, and IS unit-tested in header.test.tsx.
+//
+// useServiceLive, baptismRebuildDisabledReason, rebuildTargetLabel and
+// runBaptismRebuild are exported for timer-card.tsx's save-failure note
+// (task 17b): each failed session gets its own Rebuild action for its own
+// serviceKey, never state.serviceKey, and has to confirm, recheck and report
+// a rebuild exactly the way this header does — reusing these rather than
+// writing a second copy is the whole point.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
@@ -192,7 +199,7 @@ interface LiveCheck {
  * race this hook exists to close. A null key always reads as `not-live`,
  * since there is nothing to be live.
  */
-function useServiceLive(serviceKey: string | null): LiveCheck {
+export function useServiceLive(serviceKey: string | null): LiveCheck {
   const [answer, setAnswer] = useState<{ key: string | null; status: LiveStatus }>({ key: null, status: "not-live" });
   // The one true "what are we asking about right now", read at the moment an
   // async answer is about to be written — never the STALE value a `.then()`
@@ -305,6 +312,95 @@ export function baptismRebuildDisabledReason(args: {
   return "Nothing has been recorded yet — there is no service to rebuild";
 }
 
+/**
+ * How Rebuild from raw names its target in a confirm dialog: title and date
+ * together when both exist, whichever one exists alone, or a neutral
+ * fallback when neither does. Shared so the header's own action and each
+ * save-failure entry's own (task 17b, which has a date from its session id
+ * but never a title) describe "this service" the same way rather than two
+ * slightly different sentences drifting apart.
+ */
+export function rebuildTargetLabel(title: string | null, date: string | null): string {
+  return title && date ? `${title} (${fmtDate(date)})` : (title ?? (date ? fmtDate(date) : "this service"));
+}
+
+/**
+ * Confirm before writing, naming the service — the exact dialog this header
+ * has always shown, pulled out so task 17b's per-entry Rebuild action reuses
+ * the same wording rather than a second copy of it.
+ */
+async function confirmBaptismRebuild(targetLabel: string): Promise<boolean> {
+  return confirm({
+    title: "Rebuild from raw?",
+    message:
+      `Recomputes ${targetLabel}'s baptism sessions from the presses recorded in the data archive. ` +
+      "Existing sessions are updated, or added to if the rows have one the store does not — never " +
+      "deleted, even one these rows cannot reproduce (a session removed from Past sessions can come back).",
+    confirmLabel: "Rebuild",
+    destructive: true,
+  });
+}
+
+/**
+ * Confirm, recheck liveness right before the write, POST, and report — the
+ * one place this repo posts to POST /api/baptism/rebuild, so the header's
+ * own action and the save-failure note's per-entry one (task 17b) cannot
+ * refuse, confirm or report a rebuild differently. `liveCheck` is always the
+ * CALLER's own `useServiceLive()`: the header's targetServiceKey and a
+ * failed entry's own serviceKey are never the same question, and each needs
+ * its own answer rather than sharing one hook instance.
+ */
+export async function runBaptismRebuild(args: {
+  serviceKey: string;
+  targetLabel: string;
+  liveCheck: LiveCheck;
+  onRebuilt: () => void;
+}): Promise<void> {
+  if (!(await confirmBaptismRebuild(args.targetLabel))) return;
+  // Asked again, right now: the confirm dialog can sit open long enough for
+  // the target to start recording, and posting into that would be a race
+  // the operator did not cause. Only an outright "live" answer refuses here
+  // — "failed" or a slow "not live" are not reasons to hold back a POST the
+  // server will refuse on its own if it has to.
+  if ((await args.liveCheck.recheck()) === "live") {
+    toast.error("This service started recording again — rebuild once it ends");
+    return;
+  }
+  try {
+    const out = await invoke<BaptismRebuildOutcome>("baptism:rebuild", { serviceKey: args.serviceKey });
+    args.onRebuilt();
+    toast.success(describeBaptismRebuild(out));
+  } catch (e) {
+    // A 409 is a DECISION, not one failure — the route answers it for two
+    // opposite reasons (ServiceIsLiveError and NoRawRowsError both refuse
+    // with 409), and treating every 409 as "started recording again" is its
+    // own bug: a service recorded before the raw layer existed has a
+    // timeline record but no baptism.csv at all, which is exactly this
+    // page's own fallback target on a freshly upgraded server until the
+    // first new session lands — every click toasted the live-service
+    // message, flipped the button to "still recording," and re-enabled it
+    // within 30 seconds only to repeat. The server's own `code` on the
+    // response tells the two apart.
+    const code = (e as ApiError)?.code;
+    if (code === "live") {
+      // The recheck above narrows the race but cannot close it: the service
+      // can still start recording in the moment between that check and this
+      // POST landing. Reflect that without waiting for yet another round
+      // trip, rather than the generic failure message.
+      args.liveCheck.markLive();
+      toast.error("This service started recording again — rebuild once it ends");
+      return;
+    }
+    if (code === "no-raw-rows") {
+      // Not a liveness problem at all — leave the button exactly as it was
+      // and say what the server actually refused on.
+      toast.error(errorMessage(e));
+      return;
+    }
+    toast.error(`Rebuild failed: ${errorMessage(e)}`);
+  }
+}
+
 export interface BaptismHeaderProps {
   state: BaptismState;
   /**
@@ -371,8 +467,7 @@ export function BaptismHeader({
   // once the operator can see what "this" is.
   const targetTitle = state.serviceKey ? state.serviceTitle : (mostRecentSession?.title ?? null);
   const targetDate = state.serviceKey ? (state.sessionStartedAt ?? state.finishedAt) : (mostRecentSession?.startedAt ?? null);
-  const targetLabel = targetTitle && targetDate ? `${targetTitle} (${fmtDate(targetDate)})`
-    : targetTitle ?? (targetDate ? fmtDate(targetDate) : "this service");
+  const targetLabel = rebuildTargetLabel(targetTitle, targetDate);
 
   // Whether the SERVICE (not the baptism timer — a finished session's service
   // can still be recording) is live, asked of the server directly — see
@@ -390,59 +485,7 @@ export function BaptismHeader({
 
   async function onRebuild() {
     if (!targetServiceKey || disabledReason) return;
-    if (!(await confirm({
-      title: "Rebuild from raw?",
-      message:
-        `Recomputes ${targetLabel}'s baptism sessions from the presses recorded in the data archive. ` +
-        "Existing sessions are updated, or added to if the rows have one the store does not — never " +
-        "deleted, even one these rows cannot reproduce (a session removed from Past sessions can come back).",
-      confirmLabel: "Rebuild",
-      destructive: true,
-    }))) {
-      return;
-    }
-    // Asked again, right now: the confirm dialog can sit open long enough for
-    // the target to start recording, and posting into that would be a race
-    // the operator did not cause. Only an outright "live" answer refuses here
-    // — "failed" or a slow "not live" are not reasons to hold back a POST the
-    // server will refuse on its own if it has to.
-    if ((await liveCheck.recheck()) === "live") {
-      toast.error("This service started recording again — rebuild once it ends");
-      return;
-    }
-    try {
-      const out = await invoke<BaptismRebuildOutcome>("baptism:rebuild", { serviceKey: targetServiceKey });
-      onRebuilt();
-      toast.success(describeBaptismRebuild(out));
-    } catch (e) {
-      // A 409 is a DECISION, not one failure — the route answers it for two
-      // opposite reasons (ServiceIsLiveError and NoRawRowsError both refuse
-      // with 409), and treating every 409 as "started recording again" is
-      // its own bug: a service recorded before the raw layer existed has a
-      // timeline record but no baptism.csv at all, which is exactly this
-      // page's own fallback target on a freshly upgraded server until the
-      // first new session lands — every click toasted the live-service
-      // message, flipped the button to "still recording," and re-enabled it
-      // within 30 seconds only to repeat. The server's own `code` on the
-      // response tells the two apart.
-      const code = (e as ApiError)?.code;
-      if (code === "live") {
-        // The recheck above narrows the race but cannot close it: the
-        // service can still start recording in the moment between that
-        // check and this POST landing. Reflect that without waiting for
-        // yet another round trip, rather than the generic failure message.
-        liveCheck.markLive();
-        toast.error("This service started recording again — rebuild once it ends");
-        return;
-      }
-      if (code === "no-raw-rows") {
-        // Not a liveness problem at all — leave the button exactly as it
-        // was and say what the server actually refused on.
-        toast.error(errorMessage(e));
-        return;
-      }
-      toast.error(`Rebuild failed: ${errorMessage(e)}`);
-    }
+    await runBaptismRebuild({ serviceKey: targetServiceKey, targetLabel, liveCheck, onRebuilt });
   }
 
   // The header's own geometry, measured — see useHeaderInset's own doc

@@ -18,6 +18,7 @@ import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
 import { baptismStore, MAX_SESSIONS as MAX_BAPTISM_SESSIONS } from "./baptism-store.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
@@ -1109,6 +1110,13 @@ async function planBaptismRebuild(serviceKey: string, serviceDate: string): Prom
  * The write itself is wrapped: a filesystem failure here must reach the log,
  * scrubbed, and never the response or the toast — the same discipline
  * rebuildServiceRecords already applies to its other three legs.
+ *
+ * Also the one place that tells the live baptism timer which sessions this
+ * rebuild actually restored (see baptismTimerService.clearRestoredSaveErrors)
+ * — being shared by both callers is exactly why: a save-failure entry's own
+ * per-session Rebuild button (task 17b) posts through rebuildServiceBaptisms,
+ * but an operator can just as easily restore the same session through
+ * History's whole-service rebuild, and the note must clear either way.
  */
 async function applyBaptismRebuild(
   serviceKey: string,
@@ -1139,9 +1147,9 @@ async function applyBaptismRebuild(
     return { updated: 0, added: 0, full: 0 };
   }
 
-  let added: number, full: number;
+  let added: number, addedIds: ReadonlySet<string>, full: number;
   try {
-    ({ added, full } = await baptismStore.mergeRebuilt(plan.toWrite));
+    ({ added, addedIds, full } = await baptismStore.mergeRebuilt(plan.toWrite));
   } catch (err) {
     // Logged here, with the real reason, for BOTH callers — but re-thrown
     // RAW, not wrapped in RebuildFailedError: this function is shared by
@@ -1155,6 +1163,13 @@ async function applyBaptismRebuild(
     console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
     throw err;
   }
+
+  // A session with no stored counterpart at all is exactly what a
+  // saveErrors entry describes — Finish never got it into the store. Any
+  // id in `addedIds` that also names a saveErrors entry is that entry's own
+  // session restored, on the server, whichever route got here; the id the
+  // cap left in `full` instead is not, and stays.
+  baptismTimerService.clearRestoredSaveErrors(addedIds);
 
   // Every update lands unconditionally — replacing a session's own fields
   // never changes how many sessions the store holds, so an update is never

@@ -90,7 +90,7 @@ export function BaptismOperator() {
         sessionsLoadFailed={sessionsError}
         onRebuilt={reloadSessions}
       />
-      <TimerCard state={state} onFinished={reloadSessions} />
+      <TimerCard state={state} onFinished={reloadSessions} onRebuilt={reloadSessions} />
       <SessionChart state={state} onHover={setHoverFigures} />
       <PeopleCard state={state} />
       <PastSessionsCard sessions={sessions} loadError={sessionsError} onDelete={(id) => void deleteSession(id)} />

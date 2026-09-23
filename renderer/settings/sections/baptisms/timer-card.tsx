@@ -13,16 +13,17 @@
 // the same six numbers (and more) whether or not anyone has been baptized yet.
 
 import { useState } from "react";
-import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, PauseIcon, PlayIcon } from "lucide-react";
+import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, PauseIcon, PlayIcon, WrenchIcon } from "lucide-react";
 
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
-import { sessionIdStartedAt } from "@main/types/stage";
+import { sessionIdStartedAt, type BaptismSaveError } from "@main/types/stage";
 import { invoke, type IpcChannel } from "../../../lib/api";
 import { Button, confirm, toast } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
 import { summarizeBaptism, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { useServerNow } from "../../../lib/server-clock";
 import { BaptismTriggersPanel } from "../../../main/baptism-triggers-panel";
+import { useServiceLive, baptismRebuildDisabledReason, rebuildTargetLabel, runBaptismRebuild } from "./header";
 
 /**
  * Invoke a channel, tracking a busy flag around it and surfacing a failure as
@@ -53,15 +54,71 @@ async function act(
   }
 }
 
+/**
+ * One save-failure entry's own "Rebuild from raw" — targets THAT entry's own
+ * serviceKey, never `state.serviceKey` (the header's own target, which is
+ * the NEXT session's once one has started — see baptismSubline). Reuses the
+ * header's live check, disabled-reason table and confirm/POST/report flow
+ * outright (useServiceLive, baptismRebuildDisabledReason, rebuildTargetLabel,
+ * runBaptismRebuild in ./header) rather than a second copy of any of them.
+ *
+ * A separate component, not inline in the `saveErrors.map()` below, because
+ * each entry's live check is its own `useServiceLive()` call — a Hook can't
+ * run inside a callback passed to `.map()`.
+ *
+ * A successful rebuild clears THIS entry on the SERVER (see
+ * baptismTimerService.clearRestoredSaveErrors) and the next `baptism:state`
+ * push is what removes it from the note — this component never removes it
+ * itself. `onRebuilt` only tells Past sessions and Trends (which read the
+ * store, not this push) to reload.
+ */
+function SaveErrorRebuild({ entry, onRebuilt }: { entry: BaptismSaveError; onRebuilt: () => void }) {
+  const liveCheck = useServiceLive(entry.serviceKey ?? null);
+  const disabledReason = entry.serviceKey == null
+    ? "This session ran with no service open — there are no raw rows to rebuild it from"
+    : baptismRebuildDisabledReason({
+      targetServiceKey: entry.serviceKey,
+      liveStatus: liveCheck.status,
+      sessionsLoadFailed: false,
+      mostRecentSession: null,
+    });
+
+  async function onClick() {
+    if (!entry.serviceKey || disabledReason) return;
+    await runBaptismRebuild({
+      serviceKey: entry.serviceKey,
+      targetLabel: rebuildTargetLabel(null, sessionIdStartedAt(entry.sessionId)),
+      liveCheck,
+      onRebuilt,
+    });
+  }
+
+  return (
+    <Button
+      size="small"
+      disabled={disabledReason != null}
+      onClick={() => void onClick()}
+      className="shrink-0"
+      tooltip={disabledReason ?? "Recompute this session from the raw rows in the data archive"}
+    >
+      <WrenchIcon className="size-3.5" /> Rebuild from raw
+    </Button>
+  );
+}
+
 export interface TimerCardProps {
   state: BaptismState;
   /** Called after a Finish action succeeds, so the Past sessions and Trends
    *  cards (past-sessions.tsx, trends-card.tsx) pick up the newly logged
    *  session. */
   onFinished: () => void;
+  /** Called after a save-failure entry's own Rebuild from raw actually
+   *  reaches the server, so Past sessions and Trends (which read the store,
+   *  not this card's `state` prop) can pick up whatever it restored. */
+  onRebuilt: () => void;
 }
 
-export function TimerCard({ state, onFinished }: TimerCardProps) {
+export function TimerCard({ state, onFinished, onRebuilt }: TimerCardProps) {
   const [busy, setBusy] = useState(false);
 
   // The SERVER's clock. segmentStartedAt is stamped by the server, so a console
@@ -196,21 +253,26 @@ export function TimerCard({ state, onFinished }: TimerCardProps) {
               failing, then B alone saving on retry, must not read as A having
               been resolved too. One Dismiss for all of them, because after
               the workflow toggle the state can hold nobody, where neither
-              Reset nor Undo renders. No rebuild offer yet — nothing in the
-              app replays a baptism session from its raw rows. */}
+              Reset nor Undo renders. Each entry also gets its own Rebuild
+              from raw, for THAT entry's own serviceKey — a rebuild that
+              restores it clears it here, on the server, via a push; see
+              SaveErrorRebuild above. */}
           {!!state.saveErrors?.length && (
             <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
               <div className="flex-1">
                 <p className="font-semibold">
                   {state.saveErrors.length === 1 ? "A session did not save." : `${state.saveErrors.length} sessions did not save.`}
                 </p>
-                <ul className="mt-1 flex flex-col gap-0.5">
+                <ul className="mt-1 flex flex-col gap-1">
                   {state.saveErrors.map((e) => {
                     const startedAt = sessionIdStartedAt(e.sessionId);
                     return (
-                      <li key={e.sessionId}>
-                        {startedAt ? `${fmtDate(startedAt)}: ` : ""}
-                        Finish could not write it to Past sessions ({e.reason}).
+                      <li key={e.sessionId} className="flex flex-wrap items-center gap-2">
+                        <span>
+                          {startedAt ? `${fmtDate(startedAt)}: ` : ""}
+                          Finish could not write it to Past sessions ({e.reason}).
+                        </span>
+                        <SaveErrorRebuild entry={e} onRebuilt={onRebuilt} />
                       </li>
                     );
                   })}

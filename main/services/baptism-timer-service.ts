@@ -812,6 +812,31 @@ class BaptismTimerService {
     return this.commit();
   }
 
+  /**
+   * A rebuild — the header's own, History's whole-service one, or a
+   * save-failure entry's own per-session button, whichever path actually
+   * wrote it — put these ids into the store for the first time. Any of them
+   * naming a saveErrors entry is exactly what that entry was waiting for:
+   * the session it said never saved is now the one Past sessions shows, so
+   * the note clears here too, and the push carries it to every screen. See
+   * applyBaptismRebuild in history-edit.ts, the one place that calls this,
+   * for why `restoredIds` is `mergeRebuilt`'s own write-time `addedIds`
+   * rather than a rebuild's merely-planned ones — an id the store's cap
+   * turned away was never restored, and its entry stays, with the rebuild's
+   * own result saying why.
+   */
+  clearRestoredSaveErrors(restoredIds: ReadonlySet<string>): void {
+    const before = this.state.saveErrors ?? [];
+    if (!before.length || restoredIds.size === 0) return;
+    const cleared = before.filter((e) => restoredIds.has(e.sessionId));
+    if (!cleared.length) return;
+    console.log(
+      `[baptism] rebuild restored ${cleared.map((e) => e.sessionId).join(", ")} — save-failure note cleared`,
+    );
+    this.state = { ...this.state, saveErrors: before.filter((e) => !restoredIds.has(e.sessionId)) };
+    this.commit();
+  }
+
   /** Clear everything back to idle (keeps the chosen mode). */
   reset(): BaptismState {
     this.state = idleState(this.state.mode);

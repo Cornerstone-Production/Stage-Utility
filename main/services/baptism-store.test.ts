@@ -216,4 +216,47 @@ describe("mergeRebuilt never evicts, even at the cap", () => {
       await baptismStore.deleteSession(updateId);
     }
   });
+
+  // task 17b clears a save-failure entry by id, only for a session mergeRebuilt
+  // ACTUALLY wrote — never one merely planned. A bare added COUNT cannot say
+  // which of several candidates landed, so this proves addedIds names exactly
+  // the one the cap let through, in the order offered, and never the update
+  // (which was never "added" at all) or the one the cap turned away.
+  it("addedIds names exactly the sessions that fit, never an update and never the one the cap turned away", async () => {
+    const keptId = "bap-cap-ids-kept";
+    const firstNewId = "bap-cap-ids-first-new";
+    const secondNewId = "bap-cap-ids-second-new";
+    const kept = { id: keptId, startedAt: new Date(Date.UTC(2026, 0, 1)).toISOString(), finishedAt: null, people: [] } as unknown as BaptismSession;
+    await baptismStore.addSession(kept);
+
+    // Exactly ONE slot free under the cap.
+    const before = await baptismStore.listSessions();
+    const filler = Array.from({ length: Math.max(0, MAX_SESSIONS - 1 - before.length) }, (_, i) => session(60_000 + i));
+    if (filler.length > 0) await baptismStore.addSessions(filler);
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS - 1, "precondition: exactly one slot free");
+
+    const firstNew = { id: firstNewId, startedAt: new Date(Date.UTC(2026, 0, 4)).toISOString(), finishedAt: null, people: [] } as unknown as BaptismSession;
+    const secondNew = { id: secondNewId, startedAt: new Date(Date.UTC(2026, 0, 5)).toISOString(), finishedAt: null, people: [] } as unknown as BaptismSession;
+    const updatedKept = { ...kept, finishedAt: "2026-01-01T01:00:00.000Z" };
+
+    try {
+      const { added, addedIds, full } = await baptismStore.mergeRebuilt([updatedKept, firstNew, secondNew]);
+      assert.equal(full, 1, "only one of the two brand-new sessions fits");
+      assert.equal(added, 1, "added must equal addedIds.size, by construction");
+      assert.deepEqual(
+        [...addedIds],
+        [firstNewId],
+        "addedIds must name the ONE that actually landed, in the order offered — never the update, never the one the cap turned away",
+      );
+
+      const all = await baptismStore.listSessions();
+      assert.ok(all.some((s) => s.id === firstNewId), "the first new session must actually be in the store");
+      assert.ok(!all.some((s) => s.id === secondNewId), "the second new session must not be in the store");
+    } finally {
+      for (const f of filler) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(keptId);
+      await baptismStore.deleteSession(firstNewId);
+      await baptismStore.deleteSession(secondNewId);
+    }
+  });
 });

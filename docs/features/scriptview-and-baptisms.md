@@ -323,6 +323,17 @@ line, never another's. **Dismiss** on the note, or **Reset**, clears every
 line at once. Past sessions does not list an unsaved session; its rows in
 `baptism.csv` still hold it, if a service was open while it ran.
 
+Each line also has its own **Rebuild from raw**, for that session's own
+service — never whichever session the tab is showing next, which by then may
+be a different one. It is disabled, with a reason, while that service is
+still recording, and when the session ran with no service open at all (no
+raw rows exist to rebuild it from). A rebuild that finds the session in its
+rows restores it to Past sessions and clears that line, whether it ran from
+the note's own button, this tab's header, or History's whole-service Rebuild
+— whichever one actually did it. A rebuild that does not find it — the rows
+never reached a finish, a row could not be read, or the store is already
+full — reports why, and the line stays.
+
 ## Logging
 
 Failures and skipped auto-start actions are logged under `[baptism]`, so a
