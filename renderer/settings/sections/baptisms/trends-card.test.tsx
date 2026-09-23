@@ -96,6 +96,36 @@ describe("TrendsCard", () => {
     assert.equal(tile!.querySelector("[data-trend-change]")?.textContent, "no prior window yet");
   });
 
+  test("a full prior window that averaged 0 baptized says so, distinct from no prior window at all", () => {
+    // Same shape as the fabricated-change guard above, but with a FULL prior
+    // window (8, not below MIN_PRIOR_DAYS) where nobody was baptized —
+    // testimonies only, baptizeMs 0 throughout — so tile.prior is 0, not
+    // null, and pctChange refuses to divide by a basis at or below zero.
+    // Before this fix, that read identically to "no prior window yet".
+    const prior = Array.from({ length: 8 }, (_, i) =>
+      session({
+        id: `p${i}`,
+        startedAt: `2026-08-0${i + 1}T15:00:00.000Z`,
+        people: [{ testimonyMs: 60_000, baptizeMs: 0 }],
+      }),
+    );
+    const recent = Array.from({ length: 8 }, (_, i) =>
+      session({
+        id: `r${i}`,
+        startedAt: `2026-09-0${i + 1}T15:00:00.000Z`,
+        people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+      }),
+    );
+    const view = render(React.createElement(TrendsCard, { sessions: [...prior, ...recent] }));
+    const tile = view.container.querySelector('[data-trend-tile="Baptized per service"]')!;
+    assert.equal(tile.querySelector("[data-trend-value]")?.textContent, "1.0", "sanity: a real latest average");
+    assert.equal(
+      tile.querySelector("[data-trend-change]")?.textContent,
+      "prior window averaged 0",
+      "must not read as 'no prior window yet' — a full window of 8 fed it",
+    );
+  });
+
   test("Baptized per service colours an increase ok and a decrease danger; duration tiles never claim a direction", () => {
     // TrendsCard always uses the default TREND_WINDOW (8), so the "recent"
     // window needs a full 8 sessions to mean anything — 8 prior at 1 person

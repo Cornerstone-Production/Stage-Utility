@@ -148,6 +148,20 @@ export function TrendsCard({ sessions, loadError = false }: TrendsCardProps) {
   );
 }
 
+/**
+ * What the change slot says when there is no change figure — two different
+ * facts that used to share one caption ("no prior window yet"):
+ *
+ * - no prior window exists at all (tile.prior is null, below MIN_PRIOR_DAYS)
+ * - a full prior window exists but averaged (rounds to) zero, so a percentage
+ *   change has no basis to divide by (see pctChange) — reachable today only
+ *   by "Baptized per service", the one tile that IS a percentage.
+ */
+function noChangeCaption(tile: BaptismTrendTile): string {
+  if (tile.latest == null) return "—";
+  return tile.prior != null ? "prior window averaged 0" : "no prior window yet";
+}
+
 function Tile({
   label,
   tile,
@@ -184,7 +198,7 @@ function Tile({
                   : "text-fg-subtle",
           )}
         >
-          {delta ? delta.text : tile.latest != null ? "no prior window yet" : "—"}
+          {delta ? delta.text : noChangeCaption(tile)}
         </span>
       </div>
       <Sparkline
