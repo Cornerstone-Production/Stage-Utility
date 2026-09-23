@@ -490,12 +490,7 @@ describe("undoing and redoing a baptism writes a second person-complete row, and
     await sleep(5);
     baptismTimerService.next(); // person 1 (index 0) baptized — a mis-tap, too early
     baptismTimerService.undo(); // back to index 0, clock restarted
-    // 40ms, not 9: the assertion below requires the two attempts to have
-    // genuinely different durations, and measured runs under load closed a 5ms
-    // vs 9ms gap to 1ms twice. It fails red rather than passing wrongly, so
-    // this is a flake risk and not a vacuous guard — but it is nearly free to
-    // remove.
-    await sleep(40); // the REAL baptism runs longer
+    await sleep(80); // the REAL baptism, far longer than the undone ~5ms attempt
     baptismTimerService.next(); // person 1 (index 0) baptized again — the real one
     await sleep(5);
     const finished = baptismTimerService.next(); // person 2 (index 1) baptized — auto-finishes
@@ -526,10 +521,15 @@ describe("undoing and redoing a baptism writes a second person-complete row, and
       Math.round(finished.people[0]!.baptizeMs),
       "the LAST index-0 row is the authoritative one, not the first (too-early) attempt",
     );
-    assert.notEqual(
-      personCompleteRows[0]![c.idx("segmentMs")],
-      personCompleteRows[1]![c.idx("segmentMs")],
-      "the two attempts must have genuinely different durations, or last-wins is unproven",
+    // A threshold between the two attempts, not a comparison between two live
+    // measurements: an 80ms sleep measures at least ~79ms and the undone
+    // attempt ~5ms, so 50 sits with a wide margin on both sides. Comparing the
+    // two measured values directly (assert.notEqual) is what closed to a 1ms
+    // gap twice under load — a fixed floor does not narrow the way two live
+    // timings can.
+    assert.ok(
+      Number(personCompleteRows[1]![c.idx("segmentMs")]) >= 50,
+      `the second (real) attempt's time must survive as the authoritative row (got ${personCompleteRows[1]![c.idx("segmentMs")]}ms)`,
     );
   });
 });
