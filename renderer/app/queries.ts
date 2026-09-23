@@ -15,7 +15,6 @@ import { useQuery } from "@tanstack/react-query";
 import { invoke, type IpcChannel } from "../lib/api";
 import type { WirelessChannel } from "../settings/types";
 
-/** Matches settings-view.tsx's local helper, so the moved queryFns are identical. */
 function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
   return invoke<T>(channel, payload);
 }

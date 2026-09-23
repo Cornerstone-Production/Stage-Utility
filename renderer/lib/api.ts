@@ -88,15 +88,19 @@ function del<T>(path: string): Promise<T> {
  * union (TS2678). A new channel is a member here AND a case there.
  *
  * `invoke()` takes this union rather than `string`, so every channel reaching
- * it has to be a member to compile: a literal, a ternary, a typed variable, or
- * the parameter of a wrapper however deeply nested. A wrapper whose channel is
- * `string` cannot forward to it at all. The way past that is a cast or an
- * `any`; a channel chosen at runtime belongs in an `as const` table instead,
- * as in use-stream-state.ts.
+ * it has to be a member to compile: a literal, a ternary, a typed variable
+ * (baptism-operator.tsx's `primaryChannel`), or the parameter of a wrapper
+ * however deeply nested. A wrapper whose channel is `string` cannot forward to
+ * it at all. The ways past that are a cast, an `any`, and handing `invoke`
+ * itself to a METHOD-syntax signature that declares `string`: TypeScript
+ * checks method parameters bivariantly, so
+ * `{ send(channel: string): Promise<unknown> }` accepts it where the property
+ * form `send: (channel: string) => Promise<unknown>` does not. A channel chosen
+ * at runtime belongs in an `as const` table instead, as in use-stream-state.ts.
  *
  * What a type cannot say is whether a channel still has a caller. That
- * direction, and a backstop for a literal cast past this union, stay with the
- * text scans in api-channels.test.ts.
+ * direction stays with the text scans in api-channels.test.ts, which also
+ * catch a literal cast past this union, but only at a call they recognise.
  */
 export type IpcChannel =
   | "action:invoke"

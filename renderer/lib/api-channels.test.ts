@@ -7,9 +7,12 @@
 // rendered, accepted input, and could not persist a thing.
 //
 // `invoke()` takes the IpcChannel union, so `tsc` is the first guard: a channel
-// with no case does not compile, called directly or through any wrapper. These
-// scans are the second: a backstop for a literal cast past the type, and the
-// only check on the reverse direction, a channel that has lost its last caller.
+// with no case does not compile, called directly or through a wrapper
+// (IpcChannel's doc comment in api.ts names the ways around it). These scans are
+// the second: a backstop for a literal cast past the type, at a call they
+// recognise, and the only check on the reverse direction, a channel that has
+// lost its last caller. That check reads raw text, so a comment quoting the
+// channel satisfies it.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -39,8 +42,8 @@ function handledChannels(): Set<string> {
 /**
  * The names that dispatch an IPC channel in this file.
  *
- * Scanning for `invoke("...")` alone missed roughly ninety call sites: four
- * panels define a local `ipc()` that forwards to invoke, and one aliases the
+ * Scanning for `invoke("...")` alone missed roughly ninety call sites: panels
+ * define a local `ipc()` that forwards to invoke, and other files alias the
  * import. Between them they cover the whole wireless, integrations and settings
  * surface — exactly where the failure this test exists for lives. A guard blind
  * to the code it guards is worse than none, because it reads as covered.
@@ -50,15 +53,19 @@ function handledChannels(): Set<string> {
  * api.ts and never should have one.
  *
  * Not exhaustive over forwarders, so a green run does not mean every wrapper
- * was scanned. The `function` pattern walks from a declaration's `{` to the
- * first `}` looking for `invoke`, which misses:
+ * was scanned. Names are resolved per file, and the `function` pattern walks
+ * from a declaration's `{` to the first `}` looking for `invoke`, which misses:
  *  - a forwarder NESTED in another function when no `}` comes between the
  *    outer `{` and the inner `invoke`: the match starts at the outer
  *    `function`, records the outer name and swallows the inner declaration,
  *    so calls through the inner helper are never scanned;
- *  - a forwarder whose own body closes a brace before its `invoke`;
- *  - a forwarder of a forwarder: useStageSettings's writeState() and writeTo()
- *    reach invoke through ipc(), and only ipc() is found;
+ *  - a forwarder whose own body closes a brace before its `invoke`, or whose
+ *    return type holds one (`Promise<{ ok: boolean }>`);
+ *  - a forwarder whose type parameters nest a `>`
+ *    (`<T extends Record<string, unknown>>`);
+ *  - a forwarder of a forwarder: useStageSettings's writeTo() reaches invoke
+ *    through ipc(), and writeState() through writeTo(); only ipc() is found;
+ *  - a forwarder declared in one file and called from another;
  *  - an arrow function or a method.
  * Each shape, probed with an unwired channel, left these tests green. The type
  * is what covers them: invoke() takes IpcChannel, so a forwarder whose channel
@@ -83,7 +90,7 @@ function invokedChannels(): Map<string, string[]> {
     if (path.resolve(file) === API_TS) continue;
     const src = fs.readFileSync(file, "utf8");
     const callee = dispatcherNames(src).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    // The colon is required: every one of api.ts's 174 cases is namespaced
+    // The colon is required: every one of api.ts's cases is namespaced
     // `area:action`, and demanding it keeps an over-eager wrapper match from
     // dragging in ordinary string arguments like useState<Target>("app").
     //
@@ -198,9 +205,10 @@ describe("IPC channel wiring", () => {
   });
 
   it("sees channels dispatched through a local ipc() wrapper", () => {
-    // The specific blind spot: four panels forward through a local `ipc()` and one
-    // aliases the import, covering the entire wireless, integrations and settings
-    // surface. Naming one here means a future scan cannot lose them silently.
+    // The specific blind spot: panels forward through a local `ipc()` and other
+    // files alias the import, covering the entire wireless, integrations and
+    // settings surface. Naming one here means a future scan cannot lose them
+    // silently.
     const invoked = invokedChannels();
     const viaWrapper = [...invoked].filter(([, files]) =>
       files.some((f) => f.endsWith("wireless-connections-panel.tsx")),
