@@ -7,9 +7,13 @@
 // NOT HistoryChart: that component needs a series[] and a yScale, and this
 // chart has no y axis — a baptism session is a sequence, not a measurement over
 // time. What IS reused is the lane GEOMETRY (laneSegments/laneLabel/segmentAt),
-// the text measurer and the clock-axis tick helper, so overlap stacking,
-// clipping and the live edge behave exactly as History's do. The SVG itself is
-// this file's own.
+// the text measurer and keepAxisLabels' collision avoidance, so overlap
+// stacking, clipping and the live edge behave exactly as History's do. The
+// axis TICKS themselves are this chart's own (session-lane.ts's
+// sessionAxisTicks) — Fix round 1 (from drive 2) moved off history-chart's
+// timeTicks(), whose 10-minute floor drew no axis at all for the sub-ten-
+// minute sessions this chart commonly has to draw; see that function's own
+// comment. The SVG itself is this file's own.
 //
 // WHAT IS NOT UNIT-TESTED HERE, AND WHY — same reasoning as history-chart.tsx's
 // own note: jsdom loads no stylesheet and lays nothing out, so a test cannot see
@@ -28,7 +32,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BaptismSpan } from "@main/services/archive/baptism-lane";
 import { errorMessage } from "@main/services/errors";
 
-import { formatClock } from "../../../lib/clock-format";
 import { invoke, onNotification } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
@@ -43,12 +46,13 @@ import {
   type LaneSegment,
   type StatFigure,
 } from "../history-chart";
-import { timeTicks } from "../history-chart/geometry";
 import { LANE_LABEL_PADDING } from "../history-chart/lane";
 import { makeTextMeasurer } from "../history-chart/measure-text";
 import {
   gapSpans,
   planLaneItems,
+  sessionAxisLabel,
+  sessionAxisTicks,
   sessionWindow,
   timerHoverFigures,
   timerLaneItems,
@@ -392,8 +396,13 @@ function SessionSvg({
     const span = domainEndMs - domainStartMs || 1;
     return plotX0 + ((ms - domainStartMs) / span) * (plotX1 - plotX0);
   };
-  const axisText = (t: number) => formatClock(new Date(t).toISOString());
-  const ticks = useMemo(() => timeTicks(domainStartMs, domainEndMs), [domainStartMs, domainEndMs]);
+  // Elapsed minutes since the session's own start ("0m", "1m", ...), not a
+  // clock time — see sessionAxisTicks's own comment for why this chart does
+  // not reuse history-chart's timeTicks(). keepAxisLabels is still the SAME
+  // shared collision-avoidance geometry every History chart's axis uses; only
+  // the ticks and the text handed to it are this chart's own.
+  const axisText = (t: number) => sessionAxisLabel(t, domainStartMs);
+  const ticks = useMemo(() => sessionAxisTicks(domainStartMs, domainEndMs), [domainStartMs, domainEndMs]);
   const labelledTicks = keepAxisLabels(ticks, { xOf, text: axisText, measure, plotX0, plotX1 });
 
   // segmentAt's own signature returns the DECLARED `LaneSegment`, which loses

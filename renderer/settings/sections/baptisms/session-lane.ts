@@ -166,6 +166,54 @@ export function sessionWindow(
 }
 
 /**
+ * Elapsed-minute tick offsets from the session's own start ("0m", "1m", ...),
+ * per the approved mockup (mockup-v3.html's own `draw()`, near its `stepMin`
+ * line): a 1-minute step up to an 8-minute session, 2 minutes up to 20, 5
+ * beyond. The mockup does not cover a session past an hour; this widens to 10
+ * minutes there, so an hour-plus session does not draw a tick every 5 minutes
+ * (36+ of them) — said here rather than left silent, since it is this file's
+ * own addition, not the mockup's.
+ *
+ * LOCAL to this chart, not a change to `history-chart/geometry.ts`'s
+ * `timeTicks()`: every History chart's domain is a whole SERVICE, tens of
+ * minutes to a few hours, and its 10-minute floor (for anything under 90
+ * minutes) is right for that. A baptism SESSION is commonly much shorter — a
+ * single press-to-press segment is often under a minute (see
+ * docs/features/scriptview-and-baptisms.md's "Armed, then running") — and
+ * `timeTicks`'s own floor draws NO axis at all, zero ticks, for any session
+ * under ten minutes. Changing that floor would also change History's own
+ * attendance and sound charts, which this fix must not touch.
+ *
+ * Returns absolute ms timestamps (like `timeTicks`), so `xOf`/`keepAxisLabels`
+ * in session-chart.tsx need no change beyond which tick array and which text
+ * formatter they are handed.
+ */
+export function sessionAxisTicks(domainStartMs: number, domainEndMs: number): number[] {
+  if (!Number.isFinite(domainStartMs) || !Number.isFinite(domainEndMs) || domainEndMs <= domainStartMs) return [];
+  const spanMs = domainEndMs - domainStartMs;
+  const stepMs =
+    spanMs <= 8 * 60_000
+      ? 60_000
+      : spanMs <= 20 * 60_000
+        ? 2 * 60_000
+        : spanMs <= 60 * 60_000
+          ? 5 * 60_000
+          : 10 * 60_000;
+  const out: number[] = [];
+  for (let t = domainStartMs; t <= domainEndMs; t += stepMs) out.push(t);
+  return out;
+}
+
+/** "0m", "1m", ... — minutes elapsed since the session's own start. Never a
+ *  clock time: this axis answers "how long has this session run", the same
+ *  question the Trends card's "Whole segment" figure answers in words, not
+ *  "what time is it" — the one thing every other clock-anchored axis in this
+ *  app (History's own charts) is for. */
+export function sessionAxisLabel(t: number, domainStartMs: number): string {
+  return `${Math.round((t - domainStartMs) / 60_000)}m`;
+}
+
+/**
  * What the page's stat strip says while a timer segment is hovered: the
  * person, the phase and its duration, and the boundary times — press to
  * press, the same thing a person's own row in the People card means.

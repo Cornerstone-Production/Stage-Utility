@@ -13,6 +13,8 @@ import { formatClock as formatClockFixture } from "../../../lib/clock-format.js"
 import {
   gapSpans,
   planLaneItems,
+  sessionAxisLabel,
+  sessionAxisTicks,
   sessionWindow,
   timerHoverFigures,
   timerLaneItems,
@@ -207,6 +209,68 @@ describe("planLaneItems", () => {
     // lane's own overlap stacking correct.
     const [item] = planLaneItems([{ ...base, startedAt: iso(T0), endedAt: null, preService: true } as never]);
     assert.equal(item.preService, false);
+  });
+});
+
+describe("sessionAxisTicks", () => {
+  // Fix round 1 (from drive 2), the TIME AXIS finding: a domain under
+  // history-chart's own 10-minute tick floor drew no axis at all — confirmed
+  // live against a real seeded ~30-second session (zero <line> and zero
+  // axis <text> elements in the rendered SVG). This is a SEPARATE, local
+  // tick function precisely so history-chart/geometry.ts's timeTicks() does
+  // not have to change for every other chart that uses it.
+  test("a 4-minute session — at most 8 minutes — steps by 1 minute, 0m through 4m", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 4 * 60_000);
+    assert.deepEqual(
+      ticks.map((t) => sessionAxisLabel(t, T0)),
+      ["0m", "1m", "2m", "3m", "4m"],
+    );
+  });
+
+  test("an 8-minute session — the boundary itself — is still the 1-minute step", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 8 * 60_000);
+    assert.equal(ticks.length, 9); // 0m..8m
+  });
+
+  test("a 12-minute session — over 8, at most 20 — steps by 2 minutes", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 12 * 60_000);
+    assert.deepEqual(
+      ticks.map((t) => sessionAxisLabel(t, T0)),
+      ["0m", "2m", "4m", "6m", "8m", "10m", "12m"],
+    );
+  });
+
+  test("a 30-minute session — over 20, at most 60 — steps by 5 minutes", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 30 * 60_000);
+    assert.deepEqual(
+      ticks.map((t) => sessionAxisLabel(t, T0)),
+      ["0m", "5m", "10m", "15m", "20m", "25m", "30m"],
+    );
+  });
+
+  test("a 90-minute session — over an hour, past what the mockup covers — steps by 10 minutes", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 90 * 60_000);
+    assert.deepEqual(
+      ticks.map((t) => sessionAxisLabel(t, T0)),
+      ["0m", "10m", "20m", "30m", "40m", "50m", "60m", "70m", "80m", "90m"],
+    );
+  });
+
+  test("a zero-or-negative span draws no axis rather than looping forever", () => {
+    assert.deepEqual(sessionAxisTicks(T0, T0), []);
+    assert.deepEqual(sessionAxisTicks(T0, T0 - 1), []);
+  });
+
+  test("a non-finite bound draws no axis", () => {
+    assert.deepEqual(sessionAxisTicks(NaN, T0 + 60_000), []);
+    assert.deepEqual(sessionAxisTicks(T0, Infinity), []);
+  });
+});
+
+describe("sessionAxisLabel", () => {
+  test("is elapsed minutes from the session's own start, never a clock time", () => {
+    assert.equal(sessionAxisLabel(T0, T0), "0m");
+    assert.equal(sessionAxisLabel(T0 + 150_000, T0), "3m"); // 2m30s rounds to 3m
   });
 });
 
