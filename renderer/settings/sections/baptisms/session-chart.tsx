@@ -247,9 +247,17 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
         ) : error ? (
           // Distinct from BOTH empty notes below on purpose — a failed fetch
           // is not a session that recorded nothing, and must never read as
-          // one. Self-clears on the next successful push; nothing here
-          // retries by hand.
-          <ErrorNote text="Couldn't load the timing lane — retrying on the next update." />
+          // one. The lane refetches on a live baptism:state push, which only
+          // a press sends, and on mount. A finished session gets no push
+          // until someone presses something, so it is told to reload rather
+          // than promised a retry that may never come.
+          <ErrorNote
+            text={
+              live
+                ? "Couldn't load the timing lane — it tries again at the next press."
+                : "Couldn't load the timing lane. Reload the page to try again."
+            }
+          />
         ) : !win || spans.length === 0 ? (
           <EmptyNote text="No timing detail was recorded for this session." />
         ) : (

@@ -154,6 +154,14 @@ test("a failed lane fetch shows its own note, not 'no timing detail', and reache
     await settle();
 
     assert.equal(!!screen.queryByText(/Couldn't load the timing lane/i), true, "expected the fetch-failure note");
+    // This session is finished: no baptism:state push arrives until somebody
+    // presses something, so nothing will retry the fetch by itself.
+    assert.equal(
+      !!screen.queryByText(/retrying|next update|next press/i),
+      false,
+      "a finished session's note must not promise a retry that no push will trigger",
+    );
+    assert.equal(!!screen.queryByText(/Reload the page to try again/i), true, "it says what does retry: a reload");
     assert.equal(
       !!screen.queryByText(/No timing detail was recorded/i),
       false,
@@ -168,6 +176,36 @@ test("a failed lane fetch shows its own note, not 'no timing detail', and reache
       logCalls.some((c) => c.tag === "baptism" && /session lane fetch failed/i.test(c.message)),
       `expected a logToServer("baptism", ...) call naming the lane fetch — got ${JSON.stringify(logCalls)}`,
     );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a failed lane fetch on a live session says the next press tries again", async () => {
+  // Live, every press pushes baptism:state and the lane refetches on each push
+  // — session-chart-refetch.test.tsx proves that plumbing.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    if (String(input).includes("/api/baptism/lane")) throw new Error("network down");
+    return { ok: true, status: 200, json: async () => null, text: async () => "" };
+  }) as unknown as typeof fetch;
+  try {
+    render(
+      React.createElement(SessionChart, {
+        state: {
+          ...BASE,
+          phase: "testimony",
+          personNumber: 1,
+          serviceKey: "st1:plan1:fetch-fails-live",
+          sessionStartedAt: "2026-09-20T15:00:00.000Z",
+          segmentStartedAt: "2026-09-20T15:00:00.000Z",
+        },
+      }),
+    );
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText(/tries again at the next press/i), true, "expected the live wording");
+    assert.equal(!!screen.queryByText(/Reload the page/i), false, "a live session retries by itself; no reload needed");
   } finally {
     globalThis.fetch = realFetch;
   }
