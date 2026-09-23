@@ -108,6 +108,10 @@ export type StubOptions = {
   failKeywords?: boolean;
   /** Reply 500 to `GET /api/v1/transcript`. */
   failTranscript?: boolean;
+  /** Reply 500 to `GET /api/v1/transcript/stream` instead of opening it — a box
+   *  whose SSE fallback itself is unreachable, distinct from sseCloseImmediately
+   *  (which opens the stream and then ends it). */
+  failSseStream?: boolean;
   /** Open the SSE stream and immediately end it, so the client keeps
    *  reconnecting — a box whose transcript stream will not stay up. */
   sseCloseImmediately?: boolean;
@@ -185,6 +189,9 @@ export type ProdComStub = {
   /** Start or stop failing `GET /api/v1/transcript` AFTER the stub is running,
    *  so a test can let a connection prime and then break the endpoint under it. */
   setFailTranscript(fail: boolean): void;
+  /** Start or stop failing `GET /api/v1/transcript/stream` AFTER the stub is
+   *  running, so a test can drop a healthy SSE stream into a 500 loop. */
+  setFailSseStream(fail: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -299,6 +306,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     failKeywords: options.failKeywords === true,
     refuseWebSocket: options.refuseWebSocket === true,
     failTranscript: options.failTranscript === true,
+    failSseStream: options.failSseStream === true,
   };
   /** Responses already held once by `transcriptDelayMs`. */
   const held = new WeakSet<http.ServerResponse>();
@@ -405,6 +413,11 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     }
 
     if (url.pathname === "/api/v1/transcript/stream") {
+      if (state.failSseStream) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
+        return;
+      }
       state.sseOpens++;
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       if (options.sseCloseImmediately) {
@@ -549,6 +562,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     setFailTranscript: (fail: boolean) => {
       state.failTranscript = fail;
+    },
+    setFailSseStream: (fail: boolean) => {
+      state.failSseStream = fail;
     },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
     wsTranscript: (entry, wrap = "data") => {

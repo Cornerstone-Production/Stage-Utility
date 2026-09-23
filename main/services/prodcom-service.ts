@@ -602,6 +602,18 @@ export class ProdComService extends ConnectionLifecycle {
    * torn down merely to let an unproven WebSocket attempt take its place.
    */
   private req: http.ClientRequest | null = null;
+  /**
+   * Whether the SSE fallback is actually streaming right now — true only from
+   * its 200 response, false the moment that response ends, errors, or is torn
+   * down (dropFallbackStream, which promotion and teardown both go through).
+   *
+   * `req` is not this: it is non-null from the instant the GET is issued, well
+   * before ProdCom has answered at all, so a websocket attempt that finishes
+   * (open, refused, or given up on) while that request is still connecting —
+   * or after it already failed and the retry hasn't fired yet — must not read
+   * `req` and conclude captions are flowing. Only a live response does that.
+   */
+  private sseUp = false;
   /** The WebSocket, whenever an attempt is open — proven or not. */
   private ws: WebSocket | null = null;
   /** Whether `ws` has completed its handshake, independent of whether it has
@@ -794,6 +806,12 @@ export class ProdComService extends ConnectionLifecycle {
    *  NOT imply the SSE fallback is closed — see onWebSocketTransport for that. */
   protected get wsAttemptOpen(): boolean {
     return this.wsOpen;
+  }
+
+  /** Test seam: whether the SSE fallback is actually streaming right now — see
+   *  `sseUp`'s own comment for why this is not simply "req is non-null". */
+  protected get sseStreamUp(): boolean {
+    return this.sseUp;
   }
 
   /**
@@ -1027,6 +1045,7 @@ export class ProdComService extends ConnectionLifecycle {
    * WebSocket: drop the handlers first, then close.
    */
   private dropFallbackStream(): void {
+    this.sseUp = false;
     const req = this.req;
     this.req = null;
     req?.destroy();
@@ -1771,8 +1790,13 @@ export class ProdComService extends ConnectionLifecycle {
       // Only while this box is known to carry nothing does the card need to say
       // a re-test is under way — the SSE stream is reporting "Streaming from
       // host:port" throughout, proven or not, and this only overrides it for the
-      // one minute the re-test runs.
-      this.report("connected", this.wsSilentBox ? RETESTING_CARD_MESSAGE : `Streaming from ${host}:${port}`);
+      // one minute the re-test runs. That override is only truthful while SSE
+      // is actually up: an unproven socket opening says nothing about whether
+      // captions are flowing anywhere, so while SSE is down this reports
+      // nothing and leaves the card on whatever SSE's own path last said.
+      if (this.sseUp) {
+        this.report("connected", this.wsSilentBox ? RETESTING_CARD_MESSAGE : `Streaming from ${host}:${port}`);
+      }
       // Only the transcript stream is consumed here. The live box offers
       // transcript / status / automation / activity (the spec's list says
       // "channel" instead of "activity" and is wrong about that).
@@ -1997,9 +2021,12 @@ export class ProdComService extends ConnectionLifecycle {
   /**
    * Give up on a WebSocket attempt that never proved delivery — whether it was
    * refused, dropped before opening, timed out on its heartbeat, or was shown
-   * silent by the check above. The SSE fallback is untouched: it was already
-   * carrying captions this whole time and stays exactly as it was. Only the
-   * retry cadence and the card's message change.
+   * silent by the check above. The SSE fallback, when it is actually up, is
+   * untouched: it stays exactly as it was, and only the retry cadence and the
+   * card's message change. When SSE is NOT up — this unproven attempt was
+   * running against a box that is unreachable on both transports — there is
+   * nothing here to truthfully call "connected", so nothing is reported and
+   * the card is left on whatever SSE's own path already said.
    */
   private giveUpOnUnprovenWebSocket(reason: string, detail: string | null = null): void {
     this.closeSocket();
@@ -2008,11 +2035,15 @@ export class ProdComService extends ConnectionLifecycle {
     if (!this.running || !this.host || !this.port) return;
     // Keyed on THIS attempt's reason, not on wsSilentBox: a known-silent box that
     // starts refusing the upgrade outright is a different, fresher problem, and
-    // the card must say so rather than keep blaming the earlier silence.
-    this.report(
-      "connected",
-      reason === SILENT_SOCKET_REASON ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${this.host}:${this.port}`,
-    );
+    // the card must say so rather than keep blaming the earlier silence. Gated
+    // on sseUp: giving up on an unproven socket may only OVERRIDE the card's
+    // message while SSE is the thing actually carrying captions.
+    if (this.sseUp) {
+      this.report(
+        "connected",
+        reason === SILENT_SOCKET_REASON ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${this.host}:${this.port}`,
+      );
+    }
     this.armWebSocketRetry();
   }
 
@@ -2054,7 +2085,9 @@ export class ProdComService extends ConnectionLifecycle {
       console.warn(
         `[prodcom] websocket unavailable (${scrub(reason)}) — ` +
           (stillOnFallback
-            ? `captions stay on the transcript SSE fallback${out.note}`
+            ? this.sseUp
+              ? `captions stay on the transcript SSE fallback${out.note}`
+              : `captions have no live transport until SSE reconnects${out.note}`
             : `falling back to the transcript SSE stream${out.note}`) +
           (detail ? ` — the box said: ${scrub(detail)}` : ""),
       );
@@ -2175,6 +2208,7 @@ export class ProdComService extends ConnectionLifecycle {
         // The stream is open: the ramp has done its job, so the next drop
         // retries in 4s rather than wherever the back-off had climbed to.
         this.resetBackoff();
+        this.sseUp = true;
         // A box already known to carry nothing on its WebSocket says so on the
         // card, whatever prompted THIS particular (re)connect — an unproven
         // attempt's own give-up never touches this stream, so by the time this
@@ -2206,6 +2240,7 @@ export class ProdComService extends ConnectionLifecycle {
         res.on("end", () => {
           if (this.req !== req) return;
           this.req = null;
+          this.sseUp = false;
           this.clearSseIdleWatchdog();
           this.report("disconnected", null);
           this.countSseReconnect();
@@ -2214,6 +2249,7 @@ export class ProdComService extends ConnectionLifecycle {
         res.on("error", () => {
           if (this.req !== req) return;
           this.req = null;
+          this.sseUp = false;
           this.clearSseIdleWatchdog();
           this.countSseReconnect();
           this.scheduleReconnect();
