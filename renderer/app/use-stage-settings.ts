@@ -25,7 +25,7 @@ import { viewSurface } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke, type ApiError, type IpcChannel } from "../lib/api";
+import { invoke as ipc, type ApiError, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
@@ -46,10 +46,6 @@ import {
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
-
-function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(channel, payload);
-}
 
 /**
  * `ids` in the order given, then anything not named, in its existing order.

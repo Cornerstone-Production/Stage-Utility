@@ -1,7 +1,7 @@
 import { isMask } from "@main/services/mask";
 import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
-import { invoke, onNotification, type IpcChannel } from "../lib/api";
+import { invoke as ipc, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
 import { useSlideOnMove } from "../lib/use-slide-on-move";
@@ -58,11 +58,6 @@ import { cn } from "../lib/cn";
 import { formatClock } from "../lib/clock-format";
 
 // ---- helpers ----------------------------------------------------------------
-
-function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(channel, payload);
-}
-
 
 /**
  * Cards that Getting Started can point at, by integration id.
@@ -549,7 +544,7 @@ export function IntegrationDialog({
     }))) return;
     setIsClearing(true);
     try {
-      await invoke("prodcom:clearTranscript");
+      await ipc("prodcom:clearTranscript");
       toast.success("Transcript cleared.");
     } catch (err) {
       toast.error(`Could not clear the transcript: ${errorMessage(err)}`);

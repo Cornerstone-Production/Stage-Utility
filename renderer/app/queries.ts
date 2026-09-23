@@ -12,12 +12,8 @@
 // reality. queries.test.ts asserts the exact strings for that reason.
 
 import { useQuery } from "@tanstack/react-query";
-import { invoke, type IpcChannel } from "../lib/api";
+import { invoke as ipc } from "../lib/api";
 import type { WirelessChannel } from "../settings/types";
-
-function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(channel, payload);
-}
 
 export const QUERY_KEYS = {
   stageState: ["stage:getState"] as const,

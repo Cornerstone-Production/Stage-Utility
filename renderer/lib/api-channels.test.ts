@@ -42,11 +42,11 @@ function handledChannels(): Set<string> {
 /**
  * The names that dispatch an IPC channel in this file.
  *
- * Scanning for `invoke("...")` alone missed roughly ninety call sites: panels
- * define a local `ipc()` that forwards to invoke, and other files alias the
- * import. Between them they cover the whole wireless, integrations and settings
- * surface — exactly where the failure this test exists for lives. A guard blind
- * to the code it guards is worse than none, because it reads as covered.
+ * Scanning for `invoke("...")` alone missed roughly ninety call sites: the
+ * panels that call it as `ipc`. Between them they cover the whole wireless,
+ * integrations and settings surface — exactly where the failure this test
+ * exists for lives. A guard blind to the code it guards is worse than none,
+ * because it reads as covered.
  *
  * Resolved per file rather than by matching any callee: `onNotification` takes a
  * channel-shaped string too, but those are SSE event names with no case in
@@ -76,7 +76,7 @@ function dispatcherNames(src: string): string[] {
   const names = new Set(["invoke"]);
   for (const m of src.matchAll(/\bimport\s*\{[^}]*\binvoke\s+as\s+([\w$]+)/g)) names.add(m[1]!);
   for (const m of src.matchAll(/\bconst\s+([\w$]+)\s*=\s*invoke\b/g)) names.add(m[1]!);
-  // A local forwarder: `function ipc<T>(channel, ...) { return invoke<T>(...) }`.
+  // A local forwarder: `function run(channel) { ... invoke(channel) ... }`.
   for (const m of src.matchAll(/\bfunction\s+([\w$]+)\s*(?:<[^>]*>)?\s*\([^)]*\)[^{]*\{[^}]*\binvoke\b/g)) {
     names.add(m[1]!);
   }
@@ -204,11 +204,10 @@ describe("IPC channel wiring", () => {
     assert.deepEqual(revived, [], `these are dispatched again — drop them from the list: ${revived}`);
   });
 
-  it("sees channels dispatched through a local ipc() wrapper", () => {
-    // The specific blind spot: panels forward through a local `ipc()` and other
-    // files alias the import, covering the entire wireless, integrations and
-    // settings surface. Naming one here means a future scan cannot lose them
-    // silently.
+  it("sees channels dispatched through an ipc alias of invoke", () => {
+    // The specific blind spot: these panels import invoke as `ipc`, covering the
+    // entire wireless, integrations and settings surface. Naming one here means
+    // a future scan cannot lose them silently.
     const invoked = invokedChannels();
     const viaWrapper = [...invoked].filter(([, files]) =>
       files.some((f) => f.endsWith("wireless-connections-panel.tsx")),

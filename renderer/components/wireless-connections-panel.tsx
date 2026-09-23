@@ -1,6 +1,6 @@
 import { FORM_MASK, isMask } from "@main/services/mask";
 import { errorMessage } from "@main/services/errors";
-import { invoke, onNotification, type IpcChannel } from "../lib/api";
+import { invoke as ipc, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,13 +38,6 @@ import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { numberFieldValue } from "./integration-number-fields";
-
-// ---- helpers ----------------------------------------------------------------
-
-function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(channel, payload);
-}
-
 
 // ---- single connection card -------------------------------------------------
 
