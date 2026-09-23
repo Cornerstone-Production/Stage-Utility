@@ -1430,7 +1430,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
               <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
             </div>
-            <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
           </SectionCard>
         )}
 
