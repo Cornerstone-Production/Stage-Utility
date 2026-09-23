@@ -168,7 +168,7 @@ function Tile({
     <div data-trend-tile={label} className="flex flex-col gap-1.5 rounded-lg border border-line bg-fill/40 px-3 py-2.5">
       <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">{label}</span>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span data-trend-value className="font-mono text-[22px] font-semibold leading-none tabular-nums text-fg">
+        <span data-trend-value className="font-mono text-[26px] font-semibold leading-none tabular-nums text-fg">
           {tile.latest == null ? "—" : fmtValue(tile.latest)}
         </span>
         <span

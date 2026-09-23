@@ -1,7 +1,9 @@
 // trends-card.test.tsx — baptismTrendPoint's reduction from a session,
 // fmtClockDelta's formatting, and the TrendsCard's three states (loaded,
 // empty, load-failed). NOT tested here: tile layout and wrapping — jsdom lays
-// nothing out. See trends-card.tsx's own header.
+// nothing out — nor the headline figure's type size, which the approved mockup
+// sets at 26px: jsdom loads no stylesheet, so a computed font size is only
+// readable in a real browser. See trends-card.tsx's own header.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
