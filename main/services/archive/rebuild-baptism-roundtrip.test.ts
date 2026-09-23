@@ -270,7 +270,7 @@ describe("a real session containing an undo replays back into the session the st
     await sleep(8);
     baptismTimerService.next(); // person 1 baptized — a mis-tap, too early
     baptismTimerService.undo(); // back to person 1
-    await sleep(40); // the real baptism runs measurably longer
+    await sleep(80); // the real baptism, far longer than the undone ~8ms attempt
     baptismTimerService.next(); // person 1 baptized for real
     await sleep(8);
     const finished = baptismTimerService.next(); // person 2 — auto-finishes
@@ -283,8 +283,11 @@ describe("a real session containing an undo replays back into the session the st
       2,
       "three person-complete rows describe two people — counting rows would report three",
     );
+    // Threshold between the two attempts, not on the sleep: an 80ms sleep
+    // measures at least ~79ms and the undone attempt ~8ms. `>= 40` after
+    // `sleep(40)` raced timer resolution — it failed reporting 39ms.
     assert.ok(
-      replayed!.people[0]!.baptizeMs >= 40,
+      replayed!.people[0]!.baptizeMs >= 50,
       `the second attempt's time survived the replay (got ${replayed!.people[0]!.baptizeMs}ms, ` +
         "which is the first, undone attempt)",
     );
@@ -315,7 +318,7 @@ describe("a real session containing an undo replays back into the session the st
     await sleep(12);
     baptismTimerService.next(); // index 1 baptized — a beat early
     baptismTimerService.undo(); // back to index 1, NOT index 0
-    await sleep(42); // the real baptism, measurably longer
+    await sleep(80); // the real baptism, far longer than the undone ~12ms attempt
     baptismTimerService.next(); // index 1 baptized for real
     await sleep(11);
     const finished = baptismTimerService.next(); // index 2 (last) — auto-finishes
@@ -328,9 +331,13 @@ describe("a real session containing an undo replays back into the session the st
       replayed!.people[0]!.baptizeMs > 0,
       `person 0's baptism must survive an undo aimed at person 1 (got ${replayed!.people[0]!.baptizeMs}ms)`,
     );
+    // The threshold sits well between the two attempts rather than on the sleep
+    // itself: an 80ms sleep measures at least ~79ms, and the undone attempt is
+    // ~12ms, so 50 leaves room on both sides. Asserting `>= 42` after
+    // `sleep(42)` raced timer resolution and failed about one run in five.
     assert.ok(
-      replayed!.people[1]!.baptizeMs >= 42,
-      "person 1 carries the corrected attempt, not the one that was undone",
+      replayed!.people[1]!.baptizeMs >= 50,
+      `person 1 carries the corrected attempt, not the one that was undone (got ${replayed!.people[1]!.baptizeMs}ms)`,
     );
   });
 
