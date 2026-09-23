@@ -369,6 +369,63 @@ describe("a real session containing an undo replays back into the session the st
     );
   });
 
+  it("First person in pressed early and undone — the section re-arms, nobody dropped", async () => {
+    // Undo after "First person in" takes back that press alone: armed again,
+    // everyone still in `people`. Its row is `undo` with phase=baptism at
+    // baptismIndex 0, which the replay reads as un-baptizing index 0 — and
+    // person 1 has no completion row yet, so there is nothing to zero. The
+    // replay has no rule of its own for this press; this proves it needs none.
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(12);
+    baptismTimerService.next(); // person 1's testimony ends
+    await sleep(12);
+    const armed = baptismTimerService.startBaptisms(); // person 2's testimony folds in, section arms
+    baptismTimerService.advance(); // "First person in", a beat early
+    await sleep(40); // nobody is in the water
+    baptismTimerService.undo(); // armed again, both people still waiting
+    await sleep(20); // the real walk-up
+    baptismTimerService.advance(); // "First person in"
+    await sleep(12);
+    baptismTimerService.advance(); // "Next person in"
+    await sleep(12);
+    const finished = baptismTimerService.finish(); // "Last person out"
+
+    assert.equal(finished.people.length, 2, "sanity: two people testified, so the session holds two");
+    assert.deepEqual(
+      finished.people.map((p) => p.testimonyMs),
+      armed.people.map((p) => p.testimonyMs),
+      "sanity: no testimony absorbed the undone press or the walk-up after it",
+    );
+
+    await assertRoundTrip(ctx, "grouped, First person in undone");
+
+    // The rows the replay just read: no completion for index 0 before the undo.
+    const rows = (await readBaptismRows(ctx.serviceKey, ctx.serviceDate))!;
+    assert.deepEqual(rows.map((r) => r.event), [
+      "reset",
+      "start",
+      "testimony-end",
+      "baptisms-armed",
+      "baptisms-start",
+      "undo",
+      "baptisms-start",
+      "person-complete",
+      "person-complete",
+      "finish",
+    ]);
+    const undoRow = rows.find((r) => r.event === "undo")!;
+    assert.deepEqual(
+      { phase: undoRow.phase, baptismIndex: undoRow.baptismIndex, detail: undoRow.detail },
+      { phase: "baptism", baptismIndex: "0", detail: "from baptism" },
+      "the undo lands in the baptism section at index 0, not back in the testimonies",
+    );
+  });
+
   it("per-person Baptized pressed early, undone, then pressed again", async () => {
     const ctx = freshCtx();
     openService(ctx);

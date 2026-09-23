@@ -535,9 +535,11 @@ class BaptismTimerService {
   }
 
   /** Step back one action — fixes a mis-tap without losing the session. Every
-   *  branch resumes a real clock (startSegment()), so none of them can restore
-   *  into the armed state — armed means nobody has pressed yet, and undo only
-   *  runs after some press already happened. */
+   *  branch but one resumes a real clock (startSegment()). The exception is
+   *  taking back "First person in": the press before it armed the section, so
+   *  undoing it returns to armed with no clock running — a clock restored there
+   *  would time person 1 from the Undo press, the one thing armed exists to
+   *  prevent. */
   undo(): BaptismState {
     const s = this.state;
     if (s.mode === "per-person") {
@@ -580,20 +582,38 @@ class BaptismTimerService {
         // pendingTestimonyMs, not in people). Unguarded, the pop below read
         // .testimonyMs off undefined — a TypeError out of undo(), a 500 from
         // POST /api/baptism/undo, and no Undo left for the rest of the service.
-        //
-        // Back to the testimony section — pop the person startBaptisms()
-        // folded in when it armed, resuming them as the in-progress testimony.
-        // Left unpopped, a later re-arm folds them AGAIN beside the leftover
-        // completed entry: a one-person service finishes as two, silently.
-        //
-        // Resumed from the folded entry's OWN banked testimonyMs, not zero —
-        // arming on the wrong song, undoing, and re-arming when the right song
-        // goes live is an ordinary Sunday sequence, and restarting at zero
-        // records only the seconds between the two arms while discarding the
-        // whole testimony that ran before the first one.
-        const people = [...s.people];
-        const folded = people.pop()!;
-        this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(folded.testimonyMs) };
+        // That record also restores without `armed`, so the guard covers both
+        // halves below, not just the one that pops: without it, the re-arm
+        // half would re-arm a session with nobody in it rather than letting it
+        // reach the branch below that logs it.
+        if (!s.armed) {
+          // Not armed, so person 1's clock has started (and may be paused
+          // since): the press being taken back is "First person in", not the
+          // arming. Back to armed — the shape startBaptisms() arms into, no
+          // clock and nothing banked — with `people` untouched: the person the
+          // arming folded in has not been baptized, so they are still waiting.
+          // Person 1's time is discarded; it was the mis-tap. Returning to the
+          // testimonies here, as the armed half does, took back the arming too,
+          // and left the last testimony's clock running over the walk-up until
+          // "Start baptisms" was pressed a second time.
+          this.state = { ...s, armed: true, segmentStartedAt: null, segmentAccumMs: 0 };
+        } else {
+          // Still armed, so the press being taken back is the arming itself.
+          // Back to the testimony section — pop the person startBaptisms()
+          // folded in when it armed, resuming them as the in-progress
+          // testimony. Left unpopped, a later re-arm folds them AGAIN beside the
+          // leftover completed entry: a one-person service finishes as two,
+          // silently.
+          //
+          // Resumed from the folded entry's OWN banked testimonyMs, not zero —
+          // arming on the wrong song, undoing, and re-arming when the right song
+          // goes live is an ordinary Sunday sequence, and restarting at zero
+          // records only the seconds between the two arms while discarding the
+          // whole testimony that ran before the first one.
+          const people = [...s.people];
+          const folded = people.pop()!;
+          this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(folded.testimonyMs) };
+        }
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
         const idx = s.people.length - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));

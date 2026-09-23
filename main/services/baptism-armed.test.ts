@@ -19,6 +19,8 @@ const { sampleArchive } = await import("./archive/sample-archive.js");
 type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
 const rec = () => serviceTimelineRecorder as unknown as Held;
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Spies on console.log for lines starting with `prefix`, so a silent no-op
  *  guard can be proven to say why it did nothing rather than just that it
  *  didn't throw. Restore with release() even on assertion failure. */
@@ -116,6 +118,122 @@ describe("grouped baptisms begin armed", () => {
     const back = baptismTimerService.undo();
     assert.equal(back.phase, "testimony");
     assert.equal(back.armed ?? false, false, "undo must not leave a stale armed flag on the testimony phase");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+});
+
+// "First person in" is the press made most often during the songs, so tapping
+// it a beat early and pressing Undo is the likeliest mis-tap in the grouped
+// workflow. undo() at baptismIndex 0 returned to the testimonies whether or not
+// that press had happened: it took back the first press AND the arming, left
+// the last testifier's testimony clock running, and that testimony absorbed
+// everything until "Start baptisms" was pressed again.
+describe("undo around the first person in takes back one press, not two", () => {
+  it("after First person in, undo re-arms: no clock, nothing banked, the folded person still waiting", async () => {
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start(); // person 1's testimony
+    await sleep(30);
+    baptismTimerService.next(); // person 1's testimony banked, person 2's begins
+    await sleep(40);
+    const armedAt = baptismTimerService.startBaptisms(); // person 2's testimony folds in, the section arms
+    assert.equal(armedAt.people.length, 2, "sanity: both testimonies are in");
+
+    baptismTimerService.advance(); // "First person in", a beat early: nobody is in the water
+    await sleep(150);
+    const undone = baptismTimerService.undo();
+
+    // Nothing but that press changed the state since the arming, so taking back
+    // exactly that press lands on exactly the state "Start baptisms" armed into:
+    // phase baptism, armed, no clock, nothing banked, and the same people —
+    // person 2, folded in by the arming, still waiting to be baptized, carrying
+    // the testimony time the arming banked for them and not a millisecond more.
+    assert.deepEqual(undone, armedAt, "undo after First person in must take back that press alone");
+
+    await sleep(150); // the real walk-up, which belongs to nobody while armed
+    const running = baptismTimerService.advance(); // "First person in", for real
+    assert.equal(running.armed ?? false, false, "sanity: the re-armed section takes the first press again");
+    assert.notEqual(running.segmentStartedAt, null, "sanity: and starts person 1's clock");
+    await sleep(40); // person 1's baptism
+    baptismTimerService.advance(); // "Next person in"
+    await sleep(30); // person 2's baptism
+    const finished = baptismTimerService.finish(); // "Last person out"
+
+    assert.deepEqual(
+      finished.people.map((p) => p.testimonyMs),
+      armedAt.people.map((p) => p.testimonyMs),
+      "every testimony is exactly what the arming banked — none absorbed the undone press or the walk-up",
+    );
+    const [first, second] = finished.people;
+    // Person 1 carries only the baptism after the second press (~40ms). Had the
+    // undo kept their clock, the undone press's 150ms would be on them; had it
+    // restarted their clock instead of re-arming, the 150ms walk-up would be.
+    assert.ok(
+      first!.baptizeMs >= 30 && first!.baptizeMs < 100,
+      `person 1's baptism runs from the second First person in (got ${first!.baptizeMs}ms)`,
+    );
+    assert.ok(second!.baptizeMs > 0, "person 2 was baptized");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("undo after First person in banks nothing, even with person 1's clock paused", async () => {
+    // The test above cannot see a re-arm that forgets to clear the bank:
+    // advance() had already zeroed it. A pause is what puts time there, and left
+    // behind it would sit on the armed readout, which must hold at 0:00.
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    await sleep(20);
+    const armedAt = baptismTimerService.startBaptisms();
+    baptismTimerService.advance(); // "First person in"
+    await sleep(30);
+    const paused = baptismTimerService.pause();
+    assert.ok((paused.segmentAccumMs ?? 0) > 0, "sanity: the pause banked person 1's time");
+
+    assert.deepEqual(baptismTimerService.undo(), armedAt, "re-armed with nothing banked, exactly as the arming left it");
+
+    baptismTimerService.reset();
+    await baptismStore.saveCurrent(null);
+  });
+
+  it("while still armed, undo returns to the testimonies and resumes the last one from its banked time", async () => {
+    // "Start baptisms" pressed too early, or armed by the wrong song. Pinned
+    // beside the case above because both are the same undo() branch split on
+    // `armed`: this half must keep doing exactly this.
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    baptismTimerService.next();
+    await sleep(40); // a testimony long enough that resuming from zero cannot match it
+    const armedAt = baptismTimerService.startBaptisms();
+    const folded = armedAt.people[armedAt.people.length - 1]!;
+    assert.ok(folded.testimonyMs > 0, "sanity: the folded testimony banked real time");
+
+    const undone = baptismTimerService.undo();
+    assert.deepEqual(
+      {
+        phase: undone.phase,
+        armed: undone.armed ?? false,
+        people: undone.people,
+        personNumber: undone.personNumber,
+        segmentAccumMs: undone.segmentAccumMs,
+      },
+      {
+        phase: "testimony",
+        armed: false,
+        // The folded testimony leaves `people`, or a re-arm folds it a second time...
+        people: armedAt.people.slice(0, -1),
+        // ...and is the one speaking again,
+        personNumber: armedAt.people.length,
+        // resumed from what the arming banked, not from zero.
+        segmentAccumMs: folded.testimonyMs,
+      },
+    );
+    assert.notEqual(undone.segmentStartedAt, null, "the resumed testimony's clock is running");
 
     baptismTimerService.reset();
     await baptismStore.saveCurrent(null);
