@@ -654,6 +654,108 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
   });
 });
 
+// A plan built from planBaptismRebuild's own read of the store can be stale
+// by the time the write it describes actually runs: an operator can delete a
+// session this plan matched, or an unrelated save can land, in the gap
+// between the two. `added` must come from what the write itself just did,
+// never from subtracting a write-time count out of a plan-time one — that
+// subtraction can drift from reality, and near the cap can go negative.
+describe("rebuildServiceBaptisms — the store changes between planning and writing", () => {
+  it("reports added from what the write actually did, not from a stale plan-time count", async () => {
+    const KEY = "race-added-svc";
+    const DATE = "2026-09-23";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+
+    // 1999 filler sessions for other services, dated well into the future,
+    // plus this service's own single session below, for exactly 2000: the
+    // store starts already at the cap.
+    const filler = Array.from({ length: 1999 }, (_, i) => {
+      const at = new Date(Date.parse("2039-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
+      return {
+        id: baptismSessionId(at), startedAt: at, finishedAt: at,
+        people: [{ testimonyMs: 1, baptizeMs: 1 }], title: null, serviceTypeId: null, planId: null,
+        serviceKey: `race-filler-${i}`,
+      };
+    });
+    await baptismStore.addSessions(filler as never);
+
+    // This service's own session, matched by exact id to the first row
+    // below. The PLAN classifies it as an update — right, at planning time.
+    const toDeleteStartedAt = "2026-09-23T10:00:00.000Z";
+    const toBeDeleted = {
+      id: baptismSessionId(toDeleteStartedAt),
+      startedAt: toDeleteStartedAt,
+      finishedAt: "2026-09-23T10:03:00.000Z", // earlier than the row's own finish below
+      people: [{ testimonyMs: 1, baptizeMs: 1 }], title: "Stored Title", serviceTypeId: "st1", planId: "plan-1",
+      serviceKey: KEY,
+    };
+    await baptismStore.addSession(toBeDeleted as never);
+    assert.equal((await baptismStore.listSessions()).length, 2000, "precondition: the store is at the cap");
+
+    // Two rows: one matches toBeDeleted by exact id (a planned update); one
+    // has no stored counterpart at all (a planned add).
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      `${toDeleteStartedAt},start,per-person,testimony,1,0,0,,,`,
+      "2026-09-23T10:03:30.000Z,testimony-end,per-person,testimony,1,0,210000,,,",
+      "2026-09-23T10:04:00.000Z,finish,per-person,testimony,1,0,240000,,,",
+      "2026-09-23T11:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-23T11:05:00.000Z,testimony-end,per-person,testimony,1,0,300000,,,",
+      "2026-09-23T11:05:00.000Z,finish,per-person,testimony,1,0,300000,,,",
+      "",
+    ].join("\n"));
+
+    // The store changes AFTER planBaptismRebuild has already read it, right
+    // as the write is about to apply: an operator deletes toBeDeleted (the
+    // session the plan matched), and an unrelated save adds one more
+    // session, putting the store back at the cap. mergeRebuilt itself does
+    // not know or care that either of these ids was ever "planned" as
+    // anything — it only sees what is actually in the store, and what it
+    // was actually handed, right now.
+    const originalMerge = baptismStore.mergeRebuilt.bind(baptismStore);
+    const concurrentFillerId = "race-concurrent-filler";
+    baptismStore.mergeRebuilt = async (sessions) => {
+      await baptismStore.deleteSession(toBeDeleted.id);
+      await baptismStore.addSession({
+        id: concurrentFillerId,
+        startedAt: "2039-06-01T00:00:00.000Z",
+        finishedAt: "2039-06-01T00:00:00.000Z",
+        people: [{ testimonyMs: 1, baptizeMs: 1 }],
+        title: null,
+        serviceTypeId: null,
+        planId: null,
+        serviceKey: "race-concurrent-svc",
+      } as never);
+      return originalMerge(sessions);
+    };
+
+    try {
+      const outcome = await rebuildServiceBaptisms(KEY);
+
+      // toBeDeleted is gone by the time the write runs, so the row that
+      // would have updated it finds nothing to match — it falls in beside
+      // the genuinely new row as an unconsumed session the write must try
+      // to ADD instead. The store is back at exactly 2000 (the delete freed
+      // a slot, the concurrent add refilled it), so neither of those two
+      // fits: both are `full`, none are `added`. The buggy subtraction
+      // (plan.addedIds.size [1] - full [2]) computes -1 here; the actual
+      // write added nothing, and nothing is exactly what a caller reading
+      // the response should be told.
+      assert.equal(outcome.added, 0, "neither unconsumed session had room — added must not go negative or otherwise disagree with reality");
+      assert.ok(outcome.added >= 0, "added must never be negative");
+      assert.equal(outcome.full, 2, "both the orphaned update target and the genuinely new session were turned away");
+
+      const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+      assert.equal(forService.length, 0, "toBeDeleted is gone and nothing new landed — this service holds nothing");
+    } finally {
+      baptismStore.mergeRebuilt = originalMerge;
+      for (const f of filler) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(toBeDeleted.id);
+      await baptismStore.deleteSession(concurrentFillerId);
+    }
+  });
+});
+
 // ── A correction made after the service closed: the store can know more than the rows ──
 describe("rebuildServiceBaptisms — a correction made after the service closed", () => {
   it("Finish, the service closes, Undo and a longer re-Finish: the rebuild must not revert it", async () => {

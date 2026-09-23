@@ -1139,9 +1139,9 @@ async function applyBaptismRebuild(
     return { updated: 0, added: 0, full: 0 };
   }
 
-  let full: number;
+  let added: number, full: number;
   try {
-    ({ full } = await baptismStore.mergeRebuilt(plan.toWrite));
+    ({ added, full } = await baptismStore.mergeRebuilt(plan.toWrite));
   } catch (err) {
     // Logged here, with the real reason, for BOTH callers — but re-thrown
     // RAW, not wrapped in RebuildFailedError: this function is shared by
@@ -1158,11 +1158,12 @@ async function applyBaptismRebuild(
 
   // Every update lands unconditionally — replacing a session's own fields
   // never changes how many sessions the store holds, so an update is never
-  // capacity-limited. Only an ADD can be turned away, at the MAX_SESSIONS
-  // cap; `full` names how many of this rebuild's own new sessions the store
-  // had no room for (never evicted to make room — see mergeRebuilt).
+  // capacity-limited. `added` and `full` both come straight from
+  // mergeRebuilt's own write-time count, never derived here by subtracting
+  // one of them from plan.addedIds.size: the store can change between
+  // planning this rebuild and applying it, and a plan-time count minus a
+  // write-time one can drift from what actually happened, even go negative.
   const updated = plan.updatedIds.size;
-  const added = plan.addedIds.size - full;
   if (full > 0) {
     console.warn(
       `[baptism] rebuild: the store is full at ${scrub(MAX_BAPTISM_SESSIONS)} sessions — ` +

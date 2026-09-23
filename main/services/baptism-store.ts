@@ -116,12 +116,23 @@ class BaptismStore {
    * oldest session to fit a rebuild in is exactly the "delete an operator's
    * data to tidy something up" this repo forbids. If adding every session
    * this batch wants to APPEND would push the store past MAX_SESSIONS, only
-   * as many as fit are added (in the order handed in), and the rest are
+   * as many as fit are added (in the order handed in); the rest are
    * reported back as `full` rather than silently dropped or evicted to make
    * room. An operator who wants those in has one option: delete some old
    * sessions and rebuild again. Every REPLACEMENT lands unconditionally —
    * overwriting an existing session's own fields never changes how many
    * sessions the store holds, so it is never capacity-limited.
+   *
+   * Returns `added` — how many of `sessions` actually landed as a NEW entry
+   * — alongside `full`, both counted here, at write time, from the same
+   * batch the write itself just applied. A caller must not re-derive either
+   * one from its own plan-time count of how many rows it expected to add:
+   * the store can change between planning a rebuild and applying it (an
+   * operator deleting a session this rebuild had matched, another save
+   * landing), and subtracting a stale plan-time count from a fresh
+   * write-time one can drift, even go negative. These two numbers can't:
+   * `added + full` is exactly `sessions.length` minus however many were
+   * REPLACEMENTS, by construction.
    *
    * See rebuildServiceBaptisms in history-edit.ts, which is the only caller
    * and decides what belongs in `sessions`, and already refuses to let two
@@ -138,8 +149,8 @@ class BaptismStore {
    * merely claimed: DataStore.update() skips the write entirely when the
    * mutator hands back the object it was given.
    */
-  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ full: number }> {
-    if (sessions.length === 0) return { full: 0 };
+  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ added: number; full: number }> {
+    if (sessions.length === 0) return { added: 0, full: 0 };
     const seen = new Set<string>();
     for (const s of sessions) {
       if (seen.has(s.id)) {
@@ -148,6 +159,7 @@ class BaptismStore {
       seen.add(s.id);
     }
 
+    let added = 0;
     let full = 0;
     await this.store.update((file) => {
       let changed = false;
@@ -169,15 +181,22 @@ class BaptismStore {
       // how much room is left under the cap, with no eviction involved.
       const toAdd = [...incoming.values()];
       const room = Math.max(0, MAX_SESSIONS - next.length);
-      full = Math.max(0, toAdd.length - room);
-      for (const s of toAdd.slice(0, room)) {
+      // `added` and `full` both come from the SAME toAdd/room right here, at
+      // write time, rather than being derived by the caller from a plan-time
+      // count — the store can change between planning a rebuild and applying
+      // it (an operator deleting a matched session, another save landing),
+      // and a caller subtracting a stale plan-time count could go negative.
+      // Returning the real count the write itself just produced cannot.
+      added = Math.min(toAdd.length, room);
+      full = toAdd.length - added;
+      for (const s of toAdd.slice(0, added)) {
         changed = true;
         next.push(s);
       }
       if (!changed) return file;
       return { ...file, sessions: next };
     });
-    return { full };
+    return { added, full };
   }
 
   async deleteSession(id: string): Promise<boolean> {
