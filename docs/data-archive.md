@@ -171,10 +171,10 @@ compare:
 
 | Rebuilt finish vs. stored | People match | Result |
 |---|---|---|
-| later by more than 100ms | — | **Updated** — a genuinely later Finish the store never saved (presses made after the service closed, or a serviceKey roll, an Undo and a longer re-Finish that never reached that service's rows again) |
+| later by more than 100ms | — | **Updated** — a genuinely later Finish the store never saved (a re-Finish that DID reach the row, because the service was still open, but whose own save to `baptism.json` failed at the time) |
 | within 100ms (the same Finish) | yes | **Unchanged** — reproduced exactly; nothing written |
 | within 100ms (the same Finish) | no | **Disagreeing** — the store is authoritative for the same Finish, so it is left exactly as it is, and the disagreement is logged: it can only mean a lost row or a replay defect |
-| earlier by more than 100ms | — | **Newer** — the store's own correction is newer than what these rows can show; a rebuild must never revert it |
+| earlier by more than 100ms | — | **Newer** — the store's own correction is newer than what these rows can show (presses made after the service closed, or a serviceKey roll — an Undo and a longer re-Finish that never reached that service's rows again); a rebuild must never revert it |
 | either side's finish time will not parse | — | **Left as stored** either way, logged: there is no reliable answer to compare against |
 
 100ms separates real clock skew (at most a few milliseconds) from a human
@@ -183,12 +183,18 @@ session with a readable finish time is **added**; one whose finish time will
 not parse is discarded, not added, and logged. A stored session with no
 rebuilt counterpart at all is **kept**, left exactly as it is.
 
-The `[baptism]` log line and the Baptisms tab's own result both name every
-one of updated, added, unchanged, newer, disagreeing and kept. History's
-result names the same six, folded into "what was written" (added, updated)
-and "left alone" (unchanged is not shown — nothing to say about a session
-that needed no change — but newer, disagreeing and kept each get their own
-count), since its one line already covers three other legs.
+Three surfaces report this, at three different levels of detail. The
+`[baptism]` log line names all seven: `updated` and `added` as running
+counts, then `unchanged`, `newer`, `disagreeing` and `kept` as running
+counts too (zero included), and `invalid` only when it is not zero. The
+Baptisms tab's own result names six of the seven — the same list minus
+`unchanged`, since a session the rows reproduced exactly needed nothing
+said about it — with `updated` and `added` always shown and the rest only
+when they are not zero. History's result names the same six the Baptisms
+tab does, but folds them into "what was written" (`added`, `updated`, shown
+only when nonzero) and a "left alone" breakdown (`newer`, `disagreeing`,
+`invalid`, `kept`, each shown only when nonzero), since its one line
+already covers three other legs.
 
 Reachable from both places: the Baptisms tab's own **Rebuild from raw**, in
 its header, targets one service on its own (`POST /api/baptism/rebuild`);
