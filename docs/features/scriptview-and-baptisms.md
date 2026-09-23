@@ -206,8 +206,8 @@ baptism length, and the total. Each row with a known service links to that
 service's page in Service History; a session recorded before that link
 existed has no service key to link with, and renders without one rather than
 a broken link. Delete removes a session after confirming — its raw rows in
-`baptism.csv` are untouched, so it can still be replayed once a rebuild action
-exists for baptisms (see Recovery, below).
+`baptism.csv` are untouched, so **Rebuild from raw** can bring it back (see
+Recovery, below).
 
 A **Trends** card averages the last eight sessions against the eight before
 them, across four figures: baptized per service, average testimony, average
@@ -302,12 +302,14 @@ clean restart), or — in a grouped baptism section nobody had stepped into yet
 Every press on the timer appends a row to `baptism.csv`, the same append-only
 file the rest of the archive uses. A session that `baptism.json` loses — a
 corrupt file, or a crash between the debounced save and the next write — is not
-gone: it can be replayed from those rows. The derived record is a cache of what
-the presses already said, not the only copy of it — but unlike an item's
-recorded timing, there is no **Rebuild from raw** entry for it yet, so that
-replay is not something an operator can trigger from the app. See
-[Data archive](../data-archive.md) for the column list, which presses are
-recorded, and what the append-only rule buys the rest of the archive.
+gone: **Rebuild from raw**, in History, replays it from those rows. The derived
+record is a cache of what the presses already said, not the only copy of it.
+Unlike an item's recorded timing, a baptism rebuild never replaces what is
+already stored — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for why. See [Data archive](../data-archive.md) for the column list, which
+presses are recorded, and what the append-only rule buys the rest of the
+archive.
 
 A save that fails says so. If Finish cannot write a session to
 `baptism.json`, the Timer card shows a line for it under the readout — that

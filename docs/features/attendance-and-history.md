@@ -559,10 +559,14 @@ the top.
 **Rebuild from raw**, in the header's action group, discards a recording's stored
 summaries and derives them again from the rows in the
 [data archive](../data-archive.md): item timings from the plan-item event rows,
-sound levels from the SPL samples, attendance from the record's own samples. For
-a capture the recorder got wrong — the raw rows are append-only and keep the
-evening as it happened. Item time corrections survive it: they are an overlay
-over the rebuilt run, not a change to it.
+sound levels from the SPL samples, attendance from the record's own samples, and
+baptism sessions from `baptism.csv`. For a capture the recorder got wrong — the
+raw rows are append-only and keep the evening as it happened. Item time
+corrections survive it: they are an overlay over the rebuilt run, not a change
+to it. Baptisms are the one exception to "rebuild replaces": the sessions it
+reconstructs are merged into what is already stored rather than replacing it,
+so a session the rows cannot reproduce is left alone rather than deleted — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
 
 While a service is recording, **Reset pacing** (in the live service's detail
 here, and beside the Previous/Next controls wherever the console offers them)

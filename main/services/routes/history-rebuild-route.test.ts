@@ -187,6 +187,9 @@ describe("POST /api/history/rebuild", () => {
       timeline: { rebuilt: true, items: 3, missing: false },
       spl: { rebuilt: false, items: 0, missing: true },
       attendance: { rebuilt: true, items: 3, missing: false },
+      // No baptism.csv for this fixture at all — see baptism-rebuild-route.test.ts
+      // and rebuild-baptism-merge.test.ts for the baptism leg itself.
+      baptism: { rebuilt: false, items: 0, missing: true },
       failed: [],
     });
 
@@ -368,6 +371,7 @@ describe("POST /api/history/rebuild", () => {
       timeline: { rebuilt: false, items: 1, missing: false },
       spl: { rebuilt: false, items: 0, missing: true },
       attendance: { rebuilt: true, items: 3, missing: false },
+      baptism: { rebuilt: false, items: 0, missing: true },
       failed: [],
     });
     // `items: 1` is the corrupted record, unchanged — and `rebuilt: false` is
@@ -474,6 +478,49 @@ describe("POST /api/history/rebuild", () => {
       const att = await attendanceStore.get(KEY);
       assert.equal(att?.peakOccupancy, 0, "the cached record was recomputed despite the write failing");
       assert.equal(att?.minOccupancy, null, "the cached record was recomputed despite the write failing");
+    });
+  });
+
+  // The whole-service rebuild's own baptism leg — the merge rule itself
+  // (matched/added/kept, the skew tolerance, never a delete) is
+  // rebuild-baptism-merge.test.ts's job; this proves History's own
+  // /api/history/rebuild actually reaches it and reports it as one of the
+  // legs, per Ruling 5: "History's existing rebuild result shows the new
+  // baptism leg."
+  describe("the baptism leg", () => {
+    const BAPTISM_CSV = [
+      "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+      "2026-09-17T23:50:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-17T23:52:00.000Z,testimony-end,per-person,testimony,1,0,120000,,,",
+      "2026-09-17T23:52:00.000Z,finish,per-person,testimony,1,0,0,,,",
+      "",
+    ].join("\n");
+
+    beforeEach(async () => {
+      const { baptismStore } = await import("../baptism-store.js");
+      for (const s of (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY)) {
+        await baptismStore.deleteSession(s.id);
+      }
+    });
+
+    it("merges a session from baptism.csv alongside the other three legs", async () => {
+      await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
+
+      const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+        method: "POST",
+        body: { serviceKey: KEY },
+      });
+
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { baptism: { rebuilt: boolean; items: number; missing: boolean } };
+      assert.deepEqual(json.baptism, { rebuilt: true, items: 1, missing: false });
+
+      const { baptismStore } = await import("../baptism-store.js");
+      const sessions = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+      assert.equal(sessions.length, 1, "the session merged by the whole-service rebuild did not land");
+      assert.equal(sessions[0]!.people[0]!.testimonyMs, 120_000);
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
   });
 });

@@ -96,6 +96,56 @@ class BaptismStore {
     return added;
   }
 
+  /**
+   * Apply a rebuild's reconciled sessions in ONE write, so a crash mid-merge
+   * cannot leave the store half updated.
+   *
+   * Each session either REPLACES the stored entry with the same id (one the
+   * rebuild matched and brought up to date) or is APPENDED (one it found no
+   * stored counterpart for). Everything else already in the file — every
+   * session this rebuild did not touch, whichever service it names — is left
+   * exactly as it was. This never removes a session; see
+   * rebuildServiceBaptisms in history-edit.ts, which is the only caller and
+   * decides what belongs in `sessions`.
+   *
+   * A session identical, field for field, to what is already stored leaves
+   * that entry as that SAME object rather than a new one carrying equal
+   * values, so an already-intact store's file is untouched byte for byte:
+   * DataStore.update() skips the write entirely when the mutator hands back
+   * the object it was given. `updated` still counts it — the rebuild DID
+   * reconcile it with the rows, and reporting 0 for a session that was
+   * checked and found correct is indistinguishable from one nothing looked
+   * at.
+   */
+  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ updated: number; added: number }> {
+    if (sessions.length === 0) return { updated: 0, added: 0 };
+    let updated = 0;
+    let added = 0;
+    await this.store.update((file) => {
+      let changed = false;
+      const incoming = new Map(sessions.map((s) => [s.id, s]));
+      const next = file.sessions.map((existing) => {
+        const repl = incoming.get(existing.id);
+        if (!repl) return existing;
+        incoming.delete(existing.id);
+        updated += 1;
+        if (repl.finishedAt === existing.finishedAt && JSON.stringify(repl.people) === JSON.stringify(existing.people)) {
+          return existing; // matched, but nothing about it actually differs — no write needed for this one
+        }
+        changed = true;
+        return repl;
+      });
+      for (const s of incoming.values()) {
+        added += 1;
+        changed = true;
+        next.push(s);
+      }
+      if (!changed) return file;
+      return { ...file, sessions: next.slice(0, MAX_SESSIONS) };
+    });
+    return { updated, added };
+  }
+
   async deleteSession(id: string): Promise<boolean> {
     let existed = false;
     await this.store.update((file) => {

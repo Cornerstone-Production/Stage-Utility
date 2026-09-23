@@ -21,6 +21,7 @@ import {
   deleteServiceRecords,
   editServiceWindow,
   mergeServiceRecords,
+  rebuildServiceBaptisms,
   rebuildServiceRecords,
   recalcAttendance,
   setItemCounted,
@@ -120,6 +121,7 @@ export const BAPTISM_ACTIONS = [
   "mode",
   "next",
   "pause",
+  "rebuild",
   "reset",
   "resume",
   "start",
@@ -408,6 +410,22 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "mode": {
           const body = (await readBody(req)) as Record<string, unknown>;
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
+          return;
+        }
+        // Merges this service's baptism sessions from baptism.csv into the
+        // stored ones — the Baptisms tab's own Rebuild from raw, independent
+        // of the timing/SPL/attendance rebuild at /api/history/rebuild (which
+        // gains the same merge as its own baptism leg). Throws rather than
+        // reporting a partial success: 409 while the service is still
+        // recording or when it has no baptism.csv at all, 500 with the reason
+        // for an unknown serviceKey. See rebuildServiceBaptisms.
+        case "rebuild": {
+          const body = await readBodyOrEmpty(req);
+          if (typeof body.serviceKey !== "string") {
+            error(res, "body.serviceKey (string) required");
+            return;
+          }
+          json(res, await rebuildServiceBaptisms(body.serviceKey));
           return;
         }
         default: {

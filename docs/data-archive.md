@@ -28,8 +28,7 @@ baptisms arming, the first person stepping up, each person baptized, pause,
 resume, Undo, Finish and Reset. The
 finished session in `baptism.json` is derived from them, so a session lost to a
 corrupt file, or to a crash between the debounced save and the next write, is
-derivable from the presses instead of being gone — though, unlike item timings
-and sound levels, there is no operator action wired up to do it yet; see
+derivable from the presses instead of being gone; see
 [Rebuild from raw](#rebuild-from-raw). `undo` is recorded as its own
 row rather than the row it cancels being removed — the file is append-only, so
 what was undone is still in it and only that marker says so. An operator pressing
@@ -125,7 +124,7 @@ them again from the rows underneath, each from its own file:
 | Item timings | `events.csv` | Every `kind=item` row in time order. An item going live again within ten minutes of its last entry closing is the operator stepping back and reopens that entry; anything later is a re-run with its own. Each entry ends when the next row fires, the last at the recording's end |
 | Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
 | Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
-| Baptism sessions | `baptism.csv` | Not yet reachable from this action. The replay itself exists and is tested, but no operator control calls it — a session lost to `baptism.json` today has nothing on screen to rebuild it with |
+| Baptism sessions | `baptism.csv` | See [Baptisms are merged, never replaced](#baptisms-are-merged-never-replaced) — unlike the other three, this leg never deletes a stored session |
 
 It reports what it **derived** and, separately, what it left alone: a record the
 raw layer holds nothing for is untouched and said to be untouched, rather than
@@ -147,6 +146,29 @@ rebuild no longer produces at all is dropped, and the [history] log names it.
 Rows written before the item id and planned length were archived carry only a
 title. Those are matched to the stored record by title; a title the record never
 held gets an id derived from the title, and the log says which.
+
+### Baptisms are merged, never replaced
+
+The other three legs above replace what they hold; baptism sessions do not,
+because `baptism.json` can hold a session the rows never could: one split
+across a mid-session `serviceKey` roll (its start and finish land in two
+different archive directories, so no single replay produces it), one recorded
+before the raw layer existed, or one whose rows were lost outright. Replacing
+a service's whole set of sessions with what the rebuild reconstructs would
+delete every one of those.
+
+So the rebuild merges instead. Each session it reconstructs is matched against
+every stored session (by `id`, or by `startedAt` within two seconds for one
+recorded before per-person splits made the id exact) — matched, it updates in
+place, keeping its own id, start time and labels and taking only its people
+and finish time from the rows; unmatched, it is added. A stored session with
+no match in the rebuilt rows is left exactly as it is. The result names how
+many were updated, added, and left alone, and the [baptism] log line says the
+same.
+
+`POST /api/baptism/rebuild` runs this for one service on its own; History's
+**Rebuild from raw** runs the same merge as one more leg alongside timings,
+sound and attendance.
 
 ### Raw in the bundle, effective in the workbook
 

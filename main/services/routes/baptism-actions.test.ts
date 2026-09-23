@@ -251,6 +251,7 @@ const EXPECTED_ACTIONS = [
   "mode",
   "next",
   "pause",
+  "rebuild",
   "reset",
   "resume",
   "start",
