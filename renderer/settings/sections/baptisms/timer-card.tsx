@@ -54,9 +54,9 @@ async function act(
 
 export interface TimerCardProps {
   state: BaptismState;
-  /** Called after a Finish action succeeds, so the page's past-sessions list
-   *  (still on baptism-operator.tsx for now — see Task 13) picks up the newly
-   *  logged session. */
+  /** Called after a Finish action succeeds, so the Past sessions and Trends
+   *  cards (past-sessions.tsx, trends-card.tsx) pick up the newly logged
+   *  session. */
   onFinished: () => void;
 }
 

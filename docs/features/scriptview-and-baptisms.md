@@ -164,6 +164,32 @@ stands in for "now" at the right edge. A session with no service open draws
 nothing and says so; one with no raw rows recorded for it (an older session,
 or one the archive never saw) says that instead of drawing an empty lane.
 
+## People, Past sessions and Trends
+
+Below the Session chart, a **People** card lists everyone timed in the current
+(or just-finished) session — a number, testimony, baptism and total, plus a
+split bar showing how much of each person's time was testimony versus baptism.
+In grouped mode, someone who has testified but has not yet been baptized shows
+a dash under Baptism rather than `0:00`, which would otherwise claim a baptism
+that has not happened yet took no time.
+
+A **Past sessions** card lists every finished session, newest first: the
+service and date, then how many were baptized, the average testimony and
+baptism length, and the total. Each row with a known service links to that
+service's page in Service History; a session recorded before that link
+existed has no service key to link with, and renders without one rather than
+a broken link. Delete removes a session after confirming — its raw rows in
+`baptism.csv` are untouched, so it can still be replayed once a rebuild action
+exists for baptisms (see Recovery, below).
+
+A **Trends** card averages the last eight sessions against the eight before
+them, across four figures: baptized per service, average testimony, average
+baptism, and the whole segment's wall-clock length — what a planner budgets
+for next week, since it includes the walk to the water and every gap the
+timer lane draws as "not counted". Below three prior sessions to compare
+against, a tile shows its figure with no change against it, rather than a
+percentage or a delta computed from too little history to mean anything.
+
 ## Starting from the plan
 
 The timer can start itself, since the two ends of a baptism differ:
@@ -267,3 +293,8 @@ timer:
   recorded` — a press landed on a session that was restored into a shape it
   should never be in; the press did nothing (Finish still closes the session,
   just without a row for whoever was mid-baptism).
+- `could not load past sessions: …` — the Past sessions and Trends cards'
+  fetch failed; both say so on screen rather than reading as no history.
+- `delete session <id> failed: …` — a delete did not reach the server; the row
+  is restored and the operator sees a toast rather than a change with no
+  explanation.

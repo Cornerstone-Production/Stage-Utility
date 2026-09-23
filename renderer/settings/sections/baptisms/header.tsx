@@ -36,9 +36,10 @@ import {
   baptismFigures,
 } from "./figures";
 
-/** The five sections the nav links to, in page order — Session, People, Past
- *  sessions and Trends are later tasks in this same PR (12 and 13); their ids
- *  are reserved here so the nav does not have to change shape when they land. */
+/** The five sections the nav links to, in page order. Session (Task 12),
+ *  People, Past sessions and Trends (Task 13) each render as their own card in
+ *  baptism-operator.tsx; their ids are defined here so the nav and the cards
+ *  cannot disagree about where a link lands. */
 export const BAPTISM_SECTIONS = [
   { id: "s-timer", label: "Timer" },
   { id: "s-session", label: "Session" },
