@@ -192,12 +192,16 @@ describe("baptismLaneSpans: undo", () => {
     ]);
   });
 
-  it("grouped, back out of the baptisms: the folded testimony resumes and the baptism is dropped", () => {
+  it("grouped, back out of the baptisms in two presses: First person in re-arms, then the folded testimony resumes", () => {
+    // One Undo takes back one press, so leaving a started baptism section for
+    // the testimonies takes two: the first re-arms (person 1's clock dropped),
+    // the second takes back the arming.
     assert.deepEqual(lane([
       row(0,   { event: "start", phase: "testimony", personNumber: "1" }),
       row(22,  { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "22000" }),
       row(44,  { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "22000" }),
       row(44,  { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(60,  { event: "undo", phase: "baptism", personNumber: "2", baptismIndex: "0", detail: "from baptism" }),
       row(67,  { event: "undo", phase: "testimony", personNumber: "2", baptismIndex: "0", detail: "from baptism" }),
       row(88,  { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "43000" }),
       row(88,  { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
@@ -210,6 +214,49 @@ describe("baptismLaneSpans: undo", () => {
       ["testimony", 2, 67, 88],
       ["baptism", 1, 88, 110],
       ["baptism", 2, 110, 130],
+    ]);
+  });
+
+  it("grouped, First person in taken back: person 1's clock is dropped and the section re-arms", () => {
+    // The undo row is the step back's exactly (see "within the baptisms"
+    // below). What differs is whose clock it stopped: person 1's own, the
+    // latest span, so there is no earlier press to re-time — the section
+    // re-arms, and the wait until the next baptisms-start is a gap.
+    assert.deepEqual(lane([
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(20, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "20000" }),
+      row(40, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "20000" }),
+      row(45, { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(55, { event: "undo", phase: "baptism", personNumber: "2", baptismIndex: "0", detail: "from baptism" }),
+      row(70, { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(90, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "0", segmentMs: "20000" }),
+      row(110, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "20000" }),
+      row(110, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1" }),
+    ]), [
+      ["testimony", 1, 0, 20],
+      ["testimony", 2, 20, 40],
+      ["baptism", 1, 70, 90],
+      ["baptism", 2, 90, 110],
+    ]);
+  });
+
+  it("grouped, First person in taken back while paused: the same, though nothing was open at the undo", () => {
+    assert.deepEqual(lane([
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(20, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "20000" }),
+      row(40, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "20000" }),
+      row(45, { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(50, { event: "pause", phase: "baptism", personNumber: "2", baptismIndex: "0", segmentMs: "5000" }),
+      row(55, { event: "undo", phase: "baptism", personNumber: "2", baptismIndex: "0", detail: "from baptism" }),
+      row(70, { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(90, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "0", segmentMs: "20000" }),
+      row(110, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "20000" }),
+      row(110, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1" }),
+    ]), [
+      ["testimony", 1, 0, 20],
+      ["testimony", 2, 20, 40],
+      ["baptism", 1, 70, 90],
+      ["baptism", 2, 90, 110],
     ]);
   });
 

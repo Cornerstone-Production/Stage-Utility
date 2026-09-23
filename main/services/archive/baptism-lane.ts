@@ -63,26 +63,37 @@
 //    collides between the modes:
 //
 //      grouped     testimony  a testimony resumed: the one next() closed, the
-//                             one baptisms-armed folded in, or the one a Finish
-//                             closed. The testimony after it and every baptism
-//                             are dropped.
-//      grouped     baptism    the baptism at the row's index re-timed, from the
-//                             baptism section or reopening a finished session.
-//                             That person's and the next person's baptisms drop.
+//                             one baptisms-armed folded in (the arming taken
+//                             back), or the one a Finish closed. The testimony
+//                             after it and every baptism are dropped.
+//      grouped     baptism    the baptism at the row's index re-timed: a step
+//                             back from the next person, or reopening a session
+//                             Finish closed mid-baptism. That person's and the
+//                             next person's baptisms drop.
 //      per-person  testimony  baptized() or a Finish mid-testimony taken back:
 //                             the testimony resumes, and its baptism, if it had
 //                             one, drops.
 //      per-person  baptism    next() or a finish taken back: that person's
 //                             baptism is re-timed, the next testimony drops.
 //
-//    One shape the landing phase cannot show: a grouped undo reopening a
-//    session finished while ARMED re-arms instead of re-timing. No clock runs,
-//    so it opens nothing, and the wait until `baptisms-start` is a gap like the
-//    first one. The row has no `armed` column; the `finish` straight before it
-//    tells, having closed an armed section if no clock started after
-//    `baptisms-armed`. finish() leaves the timer idle, where no press but Undo,
-//    Start or Reset writes a row, so an undo reopening a finish is always the
-//    row right after it.
+//    Two grouped undos land in the baptism phase and RE-ARM instead: no clock
+//    runs, so they open nothing, and the wait until the next `baptisms-start` is
+//    a gap like the first one. The row has no `armed` column, and each is
+//    byte-identical to a re-timing row above, so the lane tells them apart by
+//    what came before it:
+//
+//      - "First person in" taken back writes baptism, baptismIndex 0, "from
+//        baptism" — exactly what a step back from person 2 onto person 1
+//        writes. The difference is whose clock the undo stopped: person 1's
+//        own, where a step back stops person 2's. So when the latest span is
+//        person 1's baptism, running or banked by a pause, that clock is
+//        thrown away and the section re-arms; there is no earlier press of
+//        theirs to re-time.
+//      - Reopening a session finished while armed. The `finish` straight
+//        before it tells, having closed an armed section if no clock started
+//        after `baptisms-armed`. finish() leaves the timer idle, where no press
+//        but Undo, Start or Reset writes a row, so an undo reopening a finish
+//        is always the row right after it.
 //
 //  • A session's spans are what its last `finish` logged. reset() clears the
 //    timer and logs nothing, so a session reset before it finished leaves no
@@ -154,9 +165,10 @@ class LaneSession {
   people = 0;
   /** Grouped only: when the section armed, while no baptism clock has run. */
   armedAt: string | null = null;
-  /** Whether the row just read was a `finish` that closed an armed section. The
-   *  undo straight after it re-arms (see the header). */
-  finishedArmed = false;
+  /** The `finish` just read, or null after any other row. An undo straight
+   *  after a finish reopens the session, and re-arms if that finish closed an
+   *  armed section (see the header). */
+  justFinished: { armed: boolean } | null = null;
   /** The spans as this session's last `finish` logged them. */
   logged: BaptismSpan[] | null = null;
 
@@ -177,6 +189,13 @@ class LaneSession {
    *  running span is never among them. `person` omitted drops every person's. */
   drop(kind: SpanKind, person?: number): void {
     this.spans = this.spans.filter((s) => s.kind !== kind || (person !== undefined && s.person !== person));
+  }
+
+  /** Whether the latest span is this person's of this kind: the clock an undo
+   *  just stopped, whether it was running or a pause had already banked it. */
+  lastSpanIs(kind: SpanKind, person: number): boolean {
+    const last = this.spans[this.spans.length - 1];
+    return last !== undefined && last.kind === kind && last.person === person;
   }
 
   /** A clock started with no row (see the header): open its span at `at` minus
@@ -222,8 +241,8 @@ export function baptismLaneSpans(rows: BaptismRow[], serviceKey = ""): BaptismSp
     const index = cellNumber(r.baptismIndex);
     const grouped = session.mode === "grouped";
     const endsSession = rawEvent(ordered[i + 1]?.event) === "finish";
-    const afterArmedFinish = session.finishedArmed;
-    session.finishedArmed = false;
+    const reopens = session.justFinished;
+    session.justFinished = null;
 
     switch (event) {
       case "testimony-end":
@@ -269,9 +288,16 @@ export function baptismLaneSpans(rows: BaptismRow[], serviceKey = ""): BaptismSp
 
       case "undo":
         session.close(at);
-        if (grouped && r.phase === "baptism" && afterArmedFinish) {
-          // Reopening a session finished while armed: the timer re-arms, and no
-          // clock runs until a baptisms-start says one did.
+        // The two undos that re-arm (see the header): no clock runs until a
+        // baptisms-start says one did.
+        if (grouped && r.phase === "baptism" && reopens?.armed) {
+          // Reopening a session finished while armed: nothing ran to drop.
+          session.armedAt = at;
+          break;
+        }
+        if (grouped && r.phase === "baptism" && !reopens && index === 0 && session.lastSpanIs("baptism", 1)) {
+          // "First person in" taken back: the clock it started is thrown away.
+          session.drop("baptism", 1);
           session.armedAt = at;
           break;
         }
@@ -297,7 +323,7 @@ export function baptismLaneSpans(rows: BaptismRow[], serviceKey = ""): BaptismSp
 
       case "finish":
         session.close(at);
-        session.finishedArmed = session.armedAt !== null;
+        session.justFinished = { armed: session.armedAt !== null };
         // A copy: a later undo must not reach back into what this finish logged.
         session.logged = session.spans.map((s) => ({ ...s }));
         break;

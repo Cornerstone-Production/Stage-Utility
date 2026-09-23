@@ -403,7 +403,10 @@ describe("a real session containing an undo: the lane is still the time the stor
     await assertLaneMatchesStore(ctx, "grouped, undo at index 1 of three");
   });
 
-  it("the arming undone after the first person had stepped in", async () => {
+  // "First person in" taken back re-arms, and its undo row is byte-identical to
+  // a step back from person 2 onto person 1 — baptism, baptismIndex 0, "from
+  // baptism". The step back is covered above; these are the re-arm.
+  it("First person in taken back: person 1's clock is thrown away, and the re-armed wait is a gap", async () => {
     const ctx = begin("grouped");
     timer.start();
     await sleep(STRETCH_MS);
@@ -411,16 +414,45 @@ describe("a real session containing an undo: the lane is still the time the stor
     await sleep(STRETCH_MS);
     timer.startBaptisms();
     timer.advance();
-    await sleep(STRETCH_MS); // person 1's baptism, thrown away with the arming
-    timer.undo(); // person 2's testimony resumes
+    await sleep(STRETCH_MS); // person 1's clock, thrown away by the undo
+    const undoneAt = Date.now();
+    timer.undo(); // armed again: nobody's clock runs, person 2 still waiting
+    await sleep(STRETCH_MS); // still waiting for person 1
+    timer.advance(); // "First person in", this time for real
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.finish();
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, First person in taken back");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
+    const wait = Date.parse(spans[2]!.startedAt) - undoneAt;
+    assert.ok(wait >= STRETCH_MS / 2, `the re-armed wait is a gap, not person 1's baptism (got ${wait}ms)`);
+  });
+
+  it("First person in taken back while paused: the same, though no clock was running to stop", async () => {
+    // The pause already closed person 1's span, so nothing is open at the undo
+    // — whose clock it was has to be read off the last span, not the open one.
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
     await sleep(STRETCH_MS);
     timer.startBaptisms();
+    timer.advance();
+    await sleep(STRETCH_MS);
+    timer.pause(); // person 1's clock banked
+    await sleep(STRETCH_MS);
+    timer.undo(); // armed again, the bank thrown away with the press
+    await sleep(STRETCH_MS);
     timer.advance();
     await sleep(STRETCH_MS);
     timer.next();
     await sleep(STRETCH_MS);
     timer.finish();
-    await assertLaneMatchesStore(ctx, "grouped, arming undone mid-baptism");
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, First person in taken back while paused");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
   });
 
   it("grouped finish, undo, finish again: the baptism Finish closed, re-timed", async () => {

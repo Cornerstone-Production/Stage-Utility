@@ -1075,6 +1075,11 @@ gaps in the original plan, each confirmed against source:
   `(testimony, from baptism)` pops the person `baptisms-armed` folded in; `(baptism, from
   baptism)` does not pop and re-times the baptism at the new index; `(baptism, from idle)`
   un-finishes. The `detail` text collides between modes — key on `mode` and `phase`.
+  **Corrected since:** two grouped `baptism` undos RE-ARM rather than re-time, byte-identical to
+  a re-timing row — "First person in" taken back (PR 1, `c7b6af4d`) writes exactly what a step
+  back onto person 1 writes, and reopening a Finish pressed while armed (Task 14) writes a
+  `(baptism, from idle)`. The lane tells them apart by what precedes the row: the latest span
+  being person 1's own baptism, or the `finish` before it having closed an armed section.
 - `emitRaw` queues the append and does NOT await it, and `commit()` broadcasts `baptism:state`
   synchronously. A reader that fetches rows on the push can beat the row to disk.
 - Everything PR 1 hardened in `main/services/baptism-timer-service.ts` stays hardened. Task 14
