@@ -826,6 +826,9 @@ export class ProdComService extends ConnectionLifecycle {
   protected get heartbeatTimeoutMs(): number {
     return WS_HEARTBEAT_TIMEOUT_MS;
   }
+  protected get streamIdleMs(): number {
+    return STREAM_IDLE_MS;
+  }
   protected get reconnectMs(): number {
     return RECONNECT_MS;
   }
@@ -983,11 +986,11 @@ export class ProdComService extends ConnectionLifecycle {
   private armSseIdleWatchdog(): void {
     this.clearSseIdleWatchdog();
     this.sseIdleTimer = setTimeout(() => {
-      console.warn(`[prodcom] no transcript data for ${STREAM_IDLE_MS / 1000}s — treating the stream as dead`);
+      console.warn(`[prodcom] no transcript data for ${this.streamIdleMs / 1000}s — treating the stream as dead`);
       this.report("error", "Transcript stream went silent — reconnecting");
       this.dropFallbackStream();
       this.scheduleReconnect();
-    }, STREAM_IDLE_MS);
+    }, this.streamIdleMs);
     this.sseIdleTimer.unref?.();
   }
 
@@ -1043,8 +1046,16 @@ export class ProdComService extends ConnectionLifecycle {
    * connect(), which could reopen a second stream beside one still finishing its
    * own teardown. Exactly the rule closeSocket() has always followed for the
    * WebSocket: drop the handlers first, then close.
+   *
+   * The idle watchdog is cleared here too, not left to the caller: every path
+   * that drops the stream on purpose (promotion, teardown) must disarm the
+   * timer that assumes the stream is still there, or a promoted WebSocket that
+   * is carrying captions perfectly well gets its card flipped to "Transcript
+   * stream went silent" up to streamIdleMs later, for a stream that was closed
+   * on purpose rather than one that actually went quiet.
    */
   private dropFallbackStream(): void {
+    this.clearSseIdleWatchdog();
     this.sseUp = false;
     const req = this.req;
     this.req = null;
