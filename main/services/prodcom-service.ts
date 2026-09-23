@@ -2349,13 +2349,21 @@ export class ProdComService extends ConnectionLifecycle {
       }
       this.partials.delete(ch);
       this.syncPartialSweep();
-      if (this.addFinal(line)) {
+      const changed = this.addFinal(line);
+      // Suppressing an unchanged final is only correct while a SECOND transport
+      // is genuinely in the picture (`wsOpen`: an unproven WebSocket open beside
+      // SSE) — that is the one window where "identical to what's already
+      // stored" really does mean "the other transport just delivered this".
+      // Outside it, an unchanged final still broadcasts: a consumer that
+      // subscribed between two otherwise-identical deliveries (a freshly
+      // enabled automation rule, a display that just mounted) has seen NEITHER
+      // of them, and "the content matches what was already stored" says
+      // nothing about what THAT listener has seen. demand-gating.test.ts pins
+      // this — a rule enabled between two identical single-transport
+      // deliveries must still see the second.
+      if (changed || !this.wsOpen) {
         this.flushTranscript(); // finals land immediately
       } else {
-        // The other transport already delivered this exact id and text — not a
-        // revision, the same finished line twice. Applying it again changed
-        // nothing, so broadcasting again would tell every open display nothing
-        // happened, over the wire, for no reason.
         this.noteDuplicateFinalSuppressed();
       }
     } else {
