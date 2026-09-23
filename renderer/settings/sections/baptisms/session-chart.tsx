@@ -288,7 +288,20 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
       </div>
       <div ref={hostRef} className="flex flex-col gap-3 p-4">
         {!loaded ? null : !serviceKey ? (
-          <EmptyNote text="No session recorded yet — the chart draws once the timer starts." />
+          live ? (
+            // Distinct from the idle empty note below: the timer IS running
+            // (final review, Important 4) — a plan item auto-started it, or
+            // the operator pressed Start, with no PCO service open. Saying
+            // "the chart draws once the timer starts" while a clock is
+            // visibly running is false, and this is exactly the failure case
+            // emitRaw's own `raw: no service open, session not archived` log
+            // line exists for: this session's presses are not being written
+            // anywhere, so there will never be anything for this chart, or
+            // Past sessions, to show for it.
+            <EmptyNote text="No service is open, so this session's presses are not being archived and the chart has nothing to draw." />
+          ) : (
+            <EmptyNote text="No session recorded yet — the chart draws once the timer starts." />
+          )
         ) : error ? (
           // Distinct from BOTH empty notes below on purpose — a failed fetch
           // is not a session that recorded nothing, and must never read as

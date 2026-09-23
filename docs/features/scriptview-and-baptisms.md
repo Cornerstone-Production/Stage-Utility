@@ -184,9 +184,12 @@ boundary times on the header's stat strip.
 
 The chart is live while a session is running, refetching only on the timer's
 own presses rather than on a timer; a finished session's own recorded window
-stands in for "now" at the right edge. A session with no service open draws
-nothing and says so; one with no raw rows recorded for it (an older session,
-or one the archive never saw) says that instead of drawing an empty lane.
+stands in for "now" at the right edge. Before a first session it says so
+rather than drawing nothing unexplained; if the timer is running with no PCO
+service open, it says that instead — this session's presses are not being
+archived, so there is nothing for the chart to ever draw for it. One with no
+raw rows recorded for it (an older session, or one the archive never saw)
+says that instead of drawing an empty lane.
 
 ## People, Past sessions and Trends
 

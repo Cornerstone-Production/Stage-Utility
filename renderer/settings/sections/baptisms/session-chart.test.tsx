@@ -76,6 +76,34 @@ test("no service open — no serviceKey at all — says so and draws nothing", a
   assert.equal(!!document.getElementById("s-session"), true, "expected the Session card's anchor id");
 });
 
+// Final review, Important 4: with no service open and the timer RUNNING, this
+// used to say "No session recorded yet -- the chart draws once the timer
+// starts", which is false while a clock is visibly running -- rendered to
+// confirm, per the review. This is the failure case the `raw: no service
+// open, session not archived` log line exists for; see docs/features/
+// scriptview-and-baptisms.md's own matching paragraph.
+test("with no service open and the timer running, it says so plainly instead of the idle message", async () => {
+  await mount({
+    ...BASE,
+    serviceKey: null,
+    phase: "testimony",
+    personNumber: 1,
+    sessionStartedAt: "2026-09-20T15:00:00.000Z",
+    segmentStartedAt: "2026-09-20T15:00:00.000Z",
+  });
+
+  assert.equal(
+    !!screen.queryByText(/No service is open/i),
+    true,
+    "expected the running-without-a-service note",
+  );
+  assert.equal(
+    !!screen.queryByText(/No session recorded yet/i),
+    false,
+    "must not read as idle when the timer is visibly running",
+  );
+});
+
 test("a session with no raw rows says timing detail is missing, not a blank chart", async () => {
   await mount(
     {
