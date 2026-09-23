@@ -477,16 +477,20 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       "action is legal in which phase.",
     params: [],
     run: async (_params, ctx) => {
-      if (ctx.simulate) return ok("would advance the baptism timer");
-      const before = baptismTimerService.getState();
-      const after = baptismTimerService.advance();
       // advance() falls through to next() in the baptism phase, and next()'s
       // grouped branch is a documented no-op (same reference back) for a
       // restored record with nobody at the current baptismIndex — the exact
       // shape undo() guards against below. Silently reporting success there
       // is the one thing this action must never do: it is what a physical key
-      // fires.
-      if (after === before) return fail("the baptism timer did not move — this session was restored with nobody at this position");
+      // fires. advanceWouldChange() is the SAME predicate next()'s own guard
+      // runs on, so a dry run cannot say "would advance" over a state a real
+      // press would refuse.
+      const refusal = "the baptism timer did not move — this session was restored with nobody at this position";
+      if (!baptismTimerService.advanceWouldChange()) return fail(refusal);
+      if (ctx.simulate) return ok("would advance the baptism timer");
+      const before = baptismTimerService.getState();
+      const after = baptismTimerService.advance();
+      if (after === before) return fail(refusal);
       return ok(describeBaptismAdvance(before, after));
     },
   },
@@ -497,6 +501,9 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
     help: "Undoes the last press without losing the session — fixes a mis-tap.",
     params: [],
     run: async (_params, ctx) => {
+      // undoWouldChange() is the same predicate undo()'s own guards run on —
+      // see baptism.advance above for why a dry run must ask it too.
+      if (!baptismTimerService.undoWouldChange()) return fail("nothing to undo");
       if (ctx.simulate) return ok("would step the baptism timer back");
       const before = baptismTimerService.getState();
       const after = baptismTimerService.undo();

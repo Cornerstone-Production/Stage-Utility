@@ -417,6 +417,28 @@ class BaptismTimerService {
     return this.next();
   }
 
+  /** Side-effect-free mirror of advance()'s branches, for automation's simulate
+   *  mode. Every branch above always succeeds except the final next() call in
+   *  grouped/baptism, which no-ops against the same restored-record shape
+   *  hasGroupedBaptismTarget() below guards — reusing that one predicate here
+   *  (rather than re-deriving "would this succeed") is what keeps a dry run
+   *  agreeing with what a real press would do. */
+  advanceWouldChange(): boolean {
+    const s = this.state;
+    if (s.phase === "idle") return true;
+    if (s.armed) return true;
+    if (s.phase === "testimony") return true;
+    if (s.mode === "per-person") return true;
+    return this.hasGroupedBaptismTarget();
+  }
+
+  /** grouped/baptism has somewhere to step forward to only if someone is
+   *  actually waiting at baptismIndex — see next()'s grouped-baptism branch
+   *  below, the one place this used to be written out inline. */
+  private hasGroupedBaptismTarget(): boolean {
+    return this.state.phase === "baptism" && this.state.people.length > 0;
+  }
+
   /** Step forward one action — meaning depends on mode + phase:
    *   per-person/baptism  → finish this person, start the next testimony
    *   grouped/testimony   → finish this testimony, start the next testimony
@@ -443,10 +465,10 @@ class BaptismTimerService {
       this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment(0) };
       return this.commit();
     }
-    if (this.state.phase === "baptism" && this.state.people.length > 0) {
-      // `people.length > 0` guards the same restored-record shape undo()'s
-      // baptismIndex===0 branch guards against: a pre-mode record restores as
-      // grouped/baptism/baptismIndex 0 with an empty people list (see
+    if (this.hasGroupedBaptismTarget()) {
+      // `hasGroupedBaptismTarget()` guards the same restored-record shape
+      // undo()'s baptismIndex===0 branch guards against: a pre-mode record
+      // restores as grouped/baptism/baptismIndex 0 with an empty people list (see
       // baptism-armed.test.ts), and this branch used to index into that empty
       // array unconditionally — a TypeError out of next(), a 500 from
       // POST /api/baptism/next AND /api/baptism/advance (advance() is the
@@ -647,6 +669,41 @@ class BaptismTimerService {
     return this.commit();
   }
 
+  /** Per-mode, per-branch predicates behind undo()'s if/else-if chain below,
+   *  pulled out so undoWouldChange() (automation's simulate mode) asks the
+   *  exact question undo() itself asks, rather than a hand-copied mirror that
+   *  could quietly stop matching it. */
+  private canUndoPerPersonBaptism(): boolean {
+    return this.state.mode === "per-person" && this.state.phase === "baptism";
+  }
+
+  /** Shared by both modes — undo() checks this identically in the per-person
+   *  and grouped chains below. */
+  private hasTestimonyToUndo(): boolean {
+    return this.state.phase === "testimony" && this.state.people.length > 0;
+  }
+
+  /** Shared by both modes — same reasoning as hasTestimonyToUndo() above. */
+  private hasFinishedSessionToUndo(): boolean {
+    return this.state.phase === "idle" && !!this.state.finishedAt && this.state.people.length > 0;
+  }
+
+  private canUndoGroupedMidBaptism(): boolean {
+    return this.state.mode === "grouped" && this.state.phase === "baptism" && this.state.baptismIndex > 0;
+  }
+
+  /** The complement of canUndoGroupedMidBaptism() at baptismIndex 0 — only has
+   *  somewhere to go if someone is actually in `people` (see the corrupted-
+   *  record comment inside undo() below). */
+  private canUndoGroupedFirstBaptism(): boolean {
+    return (
+      this.state.mode === "grouped" &&
+      this.state.phase === "baptism" &&
+      this.state.baptismIndex === 0 &&
+      this.state.people.length > 0
+    );
+  }
+
   /** Step back one action — fixes a mis-tap without losing the session. Every
    *  branch but two resumes a real clock (startSegment()). The exceptions both
    *  return to armed with no clock running: taking back "First person in",
@@ -658,7 +715,7 @@ class BaptismTimerService {
   undo(): BaptismState {
     const s = this.state;
     if (s.mode === "per-person") {
-      if (s.phase === "baptism") {
+      if (this.canUndoPerPersonBaptism()) {
         // Back into the testimony we just closed. `pendingTestimonyMs` is where
         // baptized() parked it, and it does not apply in the testimony phase —
         // but clearing it without resuming FROM it throws the whole testimony
@@ -666,11 +723,11 @@ class BaptismTimerService {
         // undone, then finished fifty seconds later, recorded as fifty seconds.
         // Third site of this shape; see the two grouped branches below.
         this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment(s.pendingTestimonyMs ?? 0) };
-      } else if (s.phase === "testimony" && s.people.length > 0) {
+      } else if (this.hasTestimonyToUndo()) {
         const people = [...s.people];
         const last = people.pop()!;
         this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0) };
-      } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
+      } else if (this.hasFinishedSessionToUndo()) {
         // finish() pushed the person it closed either way; finishedFrom says
         // which segment that was, so this reopens it rather than assuming a
         // baptism. Assumed, a Finish pressed mid-testimony came back with the
@@ -687,7 +744,7 @@ class BaptismTimerService {
       } else return s;
     } else {
       // grouped
-      if (s.phase === "testimony" && s.people.length > 0) {
+      if (this.hasTestimonyToUndo()) {
         // Resume the popped person's testimony from the time it had already
         // banked, NOT from zero: next() was pressed a beat early, and the
         // minutes they had already spoken live nowhere but this entry. Same
@@ -695,11 +752,11 @@ class BaptismTimerService {
         const people = [...s.people];
         const last = people.pop()!;
         this.state = { ...s, people, personNumber: Math.max(1, s.personNumber - 1), ...this.startSegment(last.testimonyMs) };
-      } else if (s.phase === "baptism" && s.baptismIndex > 0) {
+      } else if (this.canUndoGroupedMidBaptism()) {
         const idx = s.baptismIndex - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
         this.state = { ...s, people, baptismIndex: idx, ...this.startSegment(0) };
-      } else if (s.phase === "baptism" && s.baptismIndex === 0 && s.people.length > 0) {
+      } else if (this.canUndoGroupedFirstBaptism()) {
         // `people.length > 0` is load-bearing, matching the sibling branches
         // that pop: init() restores a record saved before `mode` existed onto
         // the grouped default, and a per-person session saved mid-baptism has
@@ -740,7 +797,7 @@ class BaptismTimerService {
           const folded = people.pop()!;
           this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(folded.testimonyMs) };
         }
-      } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
+      } else if (this.hasFinishedSessionToUndo()) {
         // Back to where Finish was pressed, which is not always the last
         // person. This assumed it was, and was right only for "Last person out":
         // Finish while baptizing person 1 of 3 came back on person 3, skipping
@@ -780,6 +837,19 @@ class BaptismTimerService {
     }
     this.emitRaw("undo", 0, `from ${s.phase}`);
     return this.commit();
+  }
+
+  /** Side-effect-free mirror of undo()'s success conditions above, built from
+   *  the same private predicates undo() branches on — never a hand-copied
+   *  expression that could drift out of step with what a real press does. */
+  undoWouldChange(): boolean {
+    return (
+      this.canUndoPerPersonBaptism() ||
+      this.hasTestimonyToUndo() ||
+      this.hasFinishedSessionToUndo() ||
+      this.canUndoGroupedMidBaptism() ||
+      this.canUndoGroupedFirstBaptism()
+    );
   }
 
   /** The operator has read the failed-save note and dismissed it — the one way

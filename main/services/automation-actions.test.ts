@@ -160,6 +160,29 @@ describe("reaper.transport", () => {
   });
 });
 
+/** Grouped, phase baptism, baptismIndex 0, armed false, people EMPTY — the
+ *  exact restored-record shape baptism-timer-service.ts guards in three
+ *  places. advance() falls through to next(), whose grouped/baptism branch
+ *  is a documented no-op for this shape. */
+function corruptedGroupedBaptismRecord(): BaptismState {
+  return {
+    mode: "grouped",
+    phase: "baptism",
+    personNumber: 1,
+    baptismIndex: 0,
+    armed: false,
+    segmentStartedAt: null,
+    segmentAccumMs: 0,
+    sessionStartedAt: "2026-09-20T12:00:00.000Z",
+    finishedAt: null,
+    people: [],
+    pendingTestimonyMs: null,
+    serviceTitle: null,
+    serviceTypeId: null,
+    planId: null,
+  };
+}
+
 describe("baptism actions", () => {
   afterEach(() => {
     baptismTimerService.reset();
@@ -248,30 +271,9 @@ describe("baptism actions", () => {
     });
 
     it("reports failure rather than false success against a restored, corrupted record", async () => {
-      // Grouped, phase baptism, baptismIndex 0, armed false, people EMPTY — the
-      // exact restored-record shape baptism-timer-service.ts guards in three
-      // places. advance() falls through to next(), whose grouped/baptism
-      // branch is a documented no-op for this shape (logs "nobody at
-      // baptismIndex 0" and returns the SAME state object). Loaded through
-      // baptismStore + init(), the way a real restored record arrives, not by
-      // reaching into the service's private state.
-      const corrupted: BaptismState = {
-        mode: "grouped",
-        phase: "baptism",
-        personNumber: 1,
-        baptismIndex: 0,
-        armed: false,
-        segmentStartedAt: null,
-        segmentAccumMs: 0,
-        sessionStartedAt: "2026-09-20T12:00:00.000Z",
-        finishedAt: null,
-        people: [],
-        pendingTestimonyMs: null,
-        serviceTitle: null,
-        serviceTypeId: null,
-        planId: null,
-      };
-      await baptismStore.saveCurrent(corrupted);
+      // Loaded through baptismStore + init(), the way a real restored record
+      // arrives, not by reaching into the service's private state.
+      await baptismStore.saveCurrent(corruptedGroupedBaptismRecord());
       await baptismTimerService.init();
       const before = baptismTimerService.getState();
 
@@ -280,6 +282,19 @@ describe("baptism actions", () => {
       assert.equal(r.ok, false, "advance must not report success when the timer did not move");
       assert.match(r.detail, /did not move/);
       assert.equal(baptismTimerService.getState(), before, "the state must be exactly unchanged");
+      await baptismStore.saveCurrent(null);
+    });
+
+    it("simulate against a refusing state reports the SAME refusal a real press would, not a blanket 'would advance'", async () => {
+      await baptismStore.saveCurrent(corruptedGroupedBaptismRecord());
+      await baptismTimerService.init();
+      const before = baptismTimerService.getState();
+
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: true });
+
+      assert.equal(r.ok, false, "a dry run over a refusing state must report the refusal, not false success");
+      assert.match(r.detail, /did not move/);
+      assert.equal(baptismTimerService.getState(), before, "simulate must never touch the real service");
       await baptismStore.saveCurrent(null);
     });
   });
@@ -302,6 +317,17 @@ describe("baptism actions", () => {
       const r = await AUTOMATION_ACTIONS["baptism.back"]!.run({}, { simulate: false });
       assert.equal(r.ok, false);
       assert.match(r.detail, /nothing to undo/);
+    });
+
+    it("simulate from idle reports the SAME refusal a real press would, not 'would step the baptism timer back'", async () => {
+      baptismTimerService.reset();
+      const before = baptismTimerService.getState();
+
+      const r = await AUTOMATION_ACTIONS["baptism.back"]!.run({}, { simulate: true });
+
+      assert.equal(r.ok, false, "a dry run over idle must report the refusal, not false success");
+      assert.match(r.detail, /nothing to undo/);
+      assert.equal(baptismTimerService.getState(), before, "simulate must never touch the real service");
     });
   });
 
