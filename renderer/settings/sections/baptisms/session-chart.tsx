@@ -15,9 +15,13 @@
 // own note: jsdom loads no stylesheet and lays nothing out, so a test cannot see
 // a block positioned a pixel off, a label that overflows its bar, or the
 // live-edge pulse actually pulsing. What IS unit-tested: the arithmetic
-// (session-lane.ts) and the fetch-on-push behaviour (session-chart-refetch.test.tsx,
-// which needs a real render but asserts on invoke() call counts, not on pixels).
-// The visual result was checked in a browser against a real recorded session.
+// (session-lane.ts), the fetch-on-push behaviour (session-chart-refetch.test.tsx,
+// which needs a real render but asserts on invoke() call counts, not on pixels),
+// and the three empty-state branches rendering the right text
+// (session-chart.test.tsx). NOT YET checked in a real browser against a
+// recorded session — no server was running to point one at while this was
+// built. That check still needs to happen before this ships, same as any
+// other layout-dependent claim this module makes.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
