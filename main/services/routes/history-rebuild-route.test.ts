@@ -485,8 +485,7 @@ describe("POST /api/history/rebuild", () => {
   // (matched/added/kept, the skew tolerance, never a delete) is
   // rebuild-baptism-merge.test.ts's job; this proves History's own
   // /api/history/rebuild actually reaches it and reports it as one of the
-  // legs, per Ruling 5: "History's existing rebuild result shows the new
-  // baptism leg."
+  // legs, alongside item timings, SPL and attendance.
   describe("the baptism leg", () => {
     const BAPTISM_CSV = [
       "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
@@ -523,7 +522,7 @@ describe("POST /api/history/rebuild", () => {
       await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
 
-    // I4: a count read as an achievement even when nothing was derived is
+    // A count read as an achievement even when nothing was derived is
     // exactly the failure RebuiltRecord's own doc comment exists to prevent.
     it("reports rebuilt: false when the rows reconstruct zero sessions", async () => {
       await fs.writeFile(
@@ -549,13 +548,53 @@ describe("POST /api/history/rebuild", () => {
 
       await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
+
+    // "Updated" has to mean the content actually changed. A second rebuild
+    // over rows that already produced exactly what is stored must report
+    // the session as unchanged, not updated — and must not touch the
+    // underlying file at all, the same no-op guarantee baptism-store.test.ts
+    // already proves for the standalone route.
+    it("a second rebuild over the same rows reports the session unchanged, with zero writes to baptism.json", async () => {
+      await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
+
+      const first = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      assert.equal(first.status, 200, `expected 200, got ${first.status}: ${first.body}`);
+
+      const { baptismStore } = await import("../baptism-store.js");
+      const internals = (baptismStore as unknown as { store: { writeRaw: (d: unknown) => Promise<void> } }).store;
+      const original = internals.writeRaw.bind(internals);
+      let writes = 0;
+      internals.writeRaw = async (d: unknown) => {
+        writes += 1;
+        return original(d);
+      };
+      let second: Awaited<ReturnType<typeof callRoute>>;
+      try {
+        second = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      } finally {
+        internals.writeRaw = original;
+      }
+
+      assert.equal(second.status, 200, `expected 200, got ${second.status}: ${second.body}`);
+      const json = second.json as {
+        baptism: { rebuilt: boolean; items: number; missing: boolean };
+        baptismDetail: { updated: number; added: number; unchanged: number };
+      };
+      assert.equal(json.baptism.rebuilt, false, "reproducing the same session exactly is not a rebuild — nothing was written");
+      assert.equal(json.baptismDetail.updated, 0, "nothing about the session differs, so it must not count as updated");
+      assert.equal(json.baptismDetail.added, 0);
+      assert.equal(json.baptismDetail.unchanged, 1, "the one session that matched exactly must be counted as unchanged");
+      assert.equal(writes, 0, "an intact session must never reach the underlying write, even through the whole-service route");
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
   });
 
-  // M5: a service whose ONLY raw material is a baptism.csv that reconstructs
+  // A service whose ONLY raw material is a baptism.csv that reconstructs
   // nothing must not be told "No raw rows exist" — that archive plainly has
   // rows, even though none of them assemble into a session.
-  describe("M5 — baptism.csv exists but reconstructs nothing, and nothing else can be derived either", () => {
-    const KEY2 = "st1:plan-2:m5";
+  describe("baptism.csv exists but reconstructs nothing, and nothing else can be derived either", () => {
+    const KEY2 = "st1:plan-2:reconstructs-nothing";
     const DATE2 = "2026-09-19";
 
     it("answers normally rather than refusing 'No raw rows exist'", async () => {

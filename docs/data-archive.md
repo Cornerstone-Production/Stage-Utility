@@ -124,7 +124,7 @@ them again from the rows underneath, each from its own file:
 | Item timings | `events.csv` | Every `kind=item` row in time order. An item going live again within ten minutes of its last entry closing is the operator stepping back and reopens that entry; anything later is a re-run with its own. Each entry ends when the next row fires, the last at the recording's end |
 | Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
 | Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
-| Baptism sessions | `baptism.csv` | See [Baptisms are merged, never replaced](#baptisms-are-merged-never-replaced) — unlike the other three, this leg never deletes a stored session |
+| Baptism sessions | `baptism.csv` | See [Baptisms are merged, never replaced](#baptisms-are-merged-never-replaced) — unlike the other three, this leg never deletes a session on its own; the only thing that can remove one is the same session-count cap every ordinary save already enforces |
 
 It reports what it **derived** and, separately, what it left alone: a record the
 raw layer holds nothing for is untouched and said to be untouched, rather than
@@ -159,20 +159,36 @@ delete every one of those.
 
 So the rebuild merges instead. Each rebuilt session is matched against EVERY
 stored session first by `id`, decided for the whole batch before any session
-falls back to the next rule, then by `startedAt` within two seconds for one
-recorded before the timer threaded its own stamp straight through to the row
-(older sessions can be off by about a millisecond). A match updates in place —
-keeping its own id, start time and labels, and taking people and finish time
-from the rows — UNLESS the rebuilt finish time is EARLIER than the store's own,
-in which case the stored session is left exactly as it is: presses made after
-the service closed, or after a `serviceKey` roll, never reach that service's
-rows (a Finish, then the service ending, then an Undo and a longer re-Finish),
-so the store can know a correction the rows cannot show, and a rebuild must
-never revert it. An unmatched session is added. A stored session with no match
-at all is left exactly as it is. The `[baptism]` log line names how many were
-updated, added, newer than their own rows, and left alone unreproduced; the
-Baptisms tab's own result does too. History's result names the total and how
-many were added, since its one line already covers three other legs.
+falls back to the next rule, then against the nearest still-unmatched stored
+session within two seconds of its `startedAt` — nearest across every
+candidate pair at once, not merely the first one tried, for one recorded
+before the timer threaded its own stamp straight through to the row (older
+sessions can be off by about a millisecond).
+
+A match keeps the stored session's own id, start time and labels no matter
+what; what happens to its people and finish time depends on how the two
+compare:
+
+| Rebuilt finish vs. stored | People match | Result |
+|---|---|---|
+| later by more than 100ms | — | **Updated** — a genuinely later Finish the store never saved (presses made after the service closed, or a serviceKey roll, an Undo and a longer re-Finish that never reached that service's rows again) |
+| within 100ms (the same Finish) | yes | **Unchanged** — reproduced exactly; nothing written |
+| within 100ms (the same Finish) | no | **Disagreeing** — the store is authoritative for the same Finish, so it is left exactly as it is, and the disagreement is logged: it can only mean a lost row or a replay defect |
+| earlier by more than 100ms | — | **Newer** — the store's own correction is newer than what these rows can show; a rebuild must never revert it |
+| either side's finish time will not parse | — | **Left as stored** either way, logged: there is no reliable answer to compare against |
+
+100ms separates real clock skew (at most a few milliseconds) from a human
+undoing a Finish and pressing it again, which takes far longer. An unmatched
+session with a readable finish time is **added**; one whose finish time will
+not parse is discarded, not added, and logged. A stored session with no
+rebuilt counterpart at all is **kept**, left exactly as it is.
+
+The `[baptism]` log line and the Baptisms tab's own result both name every
+one of updated, added, unchanged, newer, disagreeing and kept. History's
+result names the same six, folded into "what was written" (added, updated)
+and "left alone" (unchanged is not shown — nothing to say about a session
+that needed no change — but newer, disagreeing and kept each get their own
+count), since its one line already covers three other legs.
 
 Reachable from both places: the Baptisms tab's own **Rebuild from raw**, in
 its header, targets one service on its own (`POST /api/baptism/rebuild`);

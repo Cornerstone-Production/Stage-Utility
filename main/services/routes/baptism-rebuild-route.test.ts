@@ -24,6 +24,7 @@ const { serviceTimelineStore } = await import("../service-timeline-store.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { baptismStore } = await import("../baptism-store.js");
 const { serviceDirPath } = await import("../archive/archive-paths.js");
+const { baptismSessionId } = await import("../../types/stage.js");
 
 const KEY = "st1:plan-1:bap-route";
 const DATE = "2026-09-20";
@@ -128,7 +129,7 @@ describe("POST /api/baptism/rebuild", () => {
     });
 
     assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
-    assert.deepEqual(out.json, { rows: 3, sessions: 1, updated: 0, added: 1, newer: 0, kept: 0 });
+    assert.deepEqual(out.json, { rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
 
     const sessions = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
     assert.equal(sessions.length, 1, "the rebuilt session did not land in the store");
@@ -149,7 +150,10 @@ describe("POST /api/baptism/rebuild", () => {
     });
 
     assert.equal(second.status, 200, `expected 200, got ${second.status}: ${second.body}`);
-    assert.deepEqual(second.json, { rows: 3, sessions: 1, updated: 1, added: 0, newer: 0, kept: 0 });
+    // The second rebuild reproduces the SAME session exactly — that is
+    // "unchanged", not "updated": nothing about it actually differs, so
+    // nothing is written the second time either.
+    assert.deepEqual(second.json, { rows: 3, sessions: 1, updated: 0, added: 0, unchanged: 1, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
     assert.equal((await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY).length, 1, "a re-run duplicated the session");
   });
 
@@ -165,6 +169,11 @@ describe("POST /api/baptism/rebuild", () => {
     baptismStore.mergeRebuilt = async () => {
       throw new Error("EACCES: permission denied, open '/var/data/.baptism.json.21844.2.tmp'");
     };
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
     let thrown: unknown;
     try {
       await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY } });
@@ -172,6 +181,7 @@ describe("POST /api/baptism/rebuild", () => {
       thrown = err;
     } finally {
       baptismStore.mergeRebuilt = original;
+      console.warn = realWarn;
     }
 
     assert.ok(thrown, "a write failure answered as though it had succeeded");
@@ -185,6 +195,75 @@ describe("POST /api/baptism/rebuild", () => {
       (thrown as Error).message,
       /var\/data|EACCES/,
       `the absolute path or errno leaked into the response: ${(thrown as Error).message}`,
+    );
+    // The response is deliberately generic; the reason has to actually reach
+    // the log, or an operator debugging this at 9am on a Sunday has nothing
+    // to read. A test that only checks the response's own wording cannot
+    // fail if this line were removed entirely.
+    const line = warnings.find((w) => w.includes("[baptism]") && w.includes(KEY));
+    assert.ok(line, `expected a [baptism] line naming ${KEY}'s failure; got: ${JSON.stringify(warnings)}`);
+    assert.match(line!, /failed/);
+    assert.match(line!, /EACCES/, "the LOG line (never the response) is where the real reason belongs");
+  });
+
+  // The log line's own leading count must mean the same thing as the
+  // response's `sessions` field. A rebuild that only found the store's own
+  // correction newer than its rows writes nothing, but it DID find a session
+  // that corresponds to one now in the store — the response says `sessions:
+  // 1`, and the log line must not say "0 sessions" right beside it.
+  it("a newer-only rebuild logs the same session count the response reports", async () => {
+    const dir = serviceDirPath(KEY, DATE);
+    await fs.mkdir(dir, { recursive: true });
+    const rowStart = "2026-09-20T09:40:00.000Z";
+    const rowFinish = "2026-09-20T09:41:00.000Z";
+    await fs.writeFile(
+      path.join(dir, "baptism.csv"),
+      [
+        "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+        `${rowStart},start,per-person,testimony,1,0,0,,,`,
+        `${rowFinish},testimony-end,per-person,testimony,1,0,60000,,,`,
+        `${rowFinish},finish,per-person,testimony,1,0,60000,,,`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    // The store's own finish is 200ms LATER than the row's — a correction
+    // the rows cannot show, well past the 100ms tie band.
+    const storedFinish = "2026-09-20T09:41:00.200Z";
+    await baptismStore.addSession({
+      id: baptismSessionId(rowStart),
+      startedAt: rowStart,
+      finishedAt: storedFinish,
+      people: [{ testimonyMs: 60_200, baptizeMs: 0 }],
+      title: "Sunday Gathering",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as never);
+
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    let out: Awaited<ReturnType<typeof callRoute>>;
+    try {
+      out = await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY } });
+    } finally {
+      console.log = realLog;
+    }
+
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    const json = out.json as { sessions: number; newer: number };
+    assert.equal(json.newer, 1, "precondition: the store's own correction must read as newer, not updated");
+    assert.equal(json.sessions, 1, "precondition: the response counts a newer session as one that corresponds to the store");
+
+    const line = logs.find((l) => l.includes("[baptism] rebuild:") && l.includes(KEY));
+    assert.ok(line, `expected a [baptism] rebuild summary line; got: ${JSON.stringify(logs)}`);
+    assert.match(
+      line!,
+      /rebuild: 1 sessions from/,
+      `the log line's own count must agree with the response's sessions:${json.sessions}, not read "0 sessions": ${line}`,
     );
   });
 });

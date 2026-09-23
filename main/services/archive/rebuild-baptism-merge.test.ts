@@ -1,27 +1,43 @@
 // rebuild-baptism-merge.test.ts — rebuildServiceBaptisms MERGES a service's
 // baptism sessions into the store; it never replaces them.
 //
-// Ruling 57 overturned the original plan text ("REPLACE that serviceKey's
-// stored sessions"): replacing a service's whole set would delete every
-// stored session the rows cannot reproduce — a session split across a
-// mid-session serviceKey roll (its start and finish land in two directories,
-// so the replay drops it), one recorded before the raw layer existed, or one
-// whose rows were lost. CLAUDE.md: never delete an operator's data to tidy
-// something up.
+// Replacing a service's whole set would delete every stored session the rows
+// cannot reproduce — a session split across a mid-session serviceKey roll (its
+// start and finish land in two directories, so the replay drops it), one
+// recorded before the raw layer existed, or one whose rows were lost.
+// CLAUDE.md: never delete an operator's data to tidy something up.
 //
-// Three scenarios, each proven red in this session (see the report for the
-// exact commands and output):
+// A rebuilt row and the stored session it matches land in one of six buckets:
 //
-//   1. An intact store — real sessions, driven through the real timer so
-//      their ids and stamps are exact (Task 16) — is untouched byte for byte.
-//      Red against a merge that silently reorders the array on every write
-//      instead of leaving an unmatched entry exactly where it was.
-//   2. A stored session the rows cannot reproduce (the roll case) survives a
-//      rebuild of that service untouched. Red against a REPLACE that drops
-//      anything not in the rebuilt set.
-//   3. A stored session recorded before Task 16, whose startedAt is 1ms off
-//      the row's, is updated in place — not duplicated. Red against
-//      id-only matching, which cannot see the two describe the same session.
+//   - unchanged   — the same Finish (within 100ms), identical people. Nothing
+//                   is written.
+//   - updated     — a genuinely later Finish (more than 100ms later) that the
+//                   store never saved. The stored session's people/finishedAt
+//                   are overwritten from the rebuilt row.
+//   - disagreeing — the same Finish, but the people differ. The store is
+//                   authoritative for a Finish it already has, so it is left
+//                   exactly as it was, and this is logged: it can only mean a
+//                   lost row or a replay defect.
+//   - newer       — the stored session's own Finish is LATER than the row's,
+//                   by more than 100ms — a correction the rows cannot show
+//                   (e.g. an Undo and a longer re-Finish made after the
+//                   service closed, when nothing more can reach the rows).
+//                   Left exactly as stored.
+//   - invalid     — either side's finish time could not be read. A match is
+//                   left exactly as stored rather than compared; an unmatched
+//                   row is discarded rather than added.
+//   - added       — no stored counterpart at all, and the row's own finish
+//                   time is readable. Added as a new session.
+//
+// Matching itself is two passes: every rebuilt row is matched against a
+// stored session by id first, for the whole incoming batch; whatever is left
+// is then paired off by proximity (within 2 seconds of its own startedAt),
+// nearest pair first across the WHOLE remaining set — never by looping over
+// the rebuilt rows in array order and letting whichever is considered first
+// claim a stored session merely for being looked at first.
+//
+// Every scenario below is proven red against the bug it guards; see the PR
+// this file shipped in for the exact commands and failing output.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -97,7 +113,8 @@ describe("rebuildServiceBaptisms — an intact store", () => {
     const outcome = await rebuildServiceBaptisms(ctx.serviceKey);
     const after = await readStoreFile();
 
-    assert.equal(outcome.updated, 2, "both real sessions should be matched and reconciled");
+    assert.equal(outcome.unchanged, 2, "both real sessions should be matched and found identical to what the rows reconstruct");
+    assert.equal(outcome.updated, 0, "an exact replay of an intact session is nothing to update");
     assert.equal(outcome.added, 0);
     assert.equal(outcome.kept, 0);
     assert.equal(after, before, "an intact store must not be rewritten by its own rebuild, byte for byte");
@@ -152,28 +169,27 @@ describe("rebuildServiceBaptisms — the roll case", () => {
 });
 
 describe("rebuildServiceBaptisms — the skew case", () => {
-  it("updates a session whose stored startedAt is 1ms off the row's, in place", async () => {
+  it("matches a session whose stored startedAt is 1ms off the row's, without rewriting it", async () => {
     const KEY = "skew-svc";
     const DATE = "2026-09-20";
-    // Deliberately different from the stored session's own labels below (M2):
-    // a matched session keeps ITS OWN title/serviceTypeId/planId, never the
+    // Deliberately different from the stored session's own labels below: a
+    // matched session keeps ITS OWN title/serviceTypeId/planId, never the
     // timeline record's — the rows cannot carry those labels at all, and only
     // an UNMATCHED (added) session should ever pick them up from the timeline.
     await serviceTimelineStore.upsert(timeline(KEY, DATE, "Timeline Title"));
 
-    // Recorded before Task 16: the ROW's own stamp is a separate, later read
-    // of the clock than the store's (see rebuild-baptism.ts's header) — so
-    // the store's startedAt/finishedAt (and therefore its id) are both
-    // EARLIER than what the row itself says, by about 1ms. This is clock
-    // skew noise, not a real correction, and must not be read as "the store
-    // is newer" (C1) — the rebuild still applies.
+    // A session recorded before start()/finalize() threaded their own stamp
+    // straight through to the row they emit: back then the row was a
+    // separate, later read of the clock, so the store's startedAt (and
+    // therefore its id) reads about 1ms off the row's. That is clock-read
+    // noise, not a real correction, and must not stop the two being matched.
     const storedStartedAt = "2026-09-20T12:00:00.001Z";
     const rowStartedAt = "2026-09-20T12:00:00.000Z";
     const staleSession = {
       id: baptismSessionId(storedStartedAt),
       startedAt: storedStartedAt,
-      finishedAt: "2026-09-20T12:03:59.999Z",
-      people: [{ testimonyMs: 1, baptizeMs: 1 }], // deliberately stale, to prove the update lands
+      finishedAt: "2026-09-20T12:03:59.999Z", // 1ms inside the row's own finish — the same Finish
+      people: [{ testimonyMs: 100_000, baptizeMs: 140_000 }], // what the row below reconstructs too
       title: "Stored Title",
       serviceTypeId: "stored-type",
       planId: "stored-plan",
@@ -199,8 +215,9 @@ describe("rebuildServiceBaptisms — the skew case", () => {
 
     const outcome = await rebuildServiceBaptisms(KEY);
 
-    assert.equal(outcome.updated, 1, "the skewed session should be matched, not added as a duplicate");
-    assert.equal(outcome.added, 0);
+    assert.equal(outcome.unchanged, 1, "the skewed session should be matched, and needs no rewrite since its content already agrees");
+    assert.equal(outcome.updated, 0);
+    assert.equal(outcome.added, 0, "matched — must not ALSO be added as a duplicate");
 
     const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
     assert.equal(forService.length, 1, "exactly one session for this service — no duplicate");
@@ -209,9 +226,13 @@ describe("rebuildServiceBaptisms — the skew case", () => {
     assert.deepEqual(
       forService[0]!.people,
       [{ testimonyMs: 100_000, baptizeMs: 140_000 }],
-      "people come from the rebuild, which is what the rows know and the store did not",
+      "the STORED people survive untouched — they already agreed with what the rows reconstruct",
     );
-    assert.equal(forService[0]!.finishedAt, "2026-09-20T12:04:00.000Z", "finishedAt comes from the rebuild too");
+    assert.equal(
+      forService[0]!.finishedAt,
+      "2026-09-20T12:03:59.999Z",
+      "the STORED finishedAt survives — nothing is written when nothing disagrees",
+    );
     assert.equal(forService[0]!.title, "Stored Title", "the STORED title survives — the rows carry no label at all");
     assert.equal(forService[0]!.serviceTypeId, "stored-type", "the STORED serviceTypeId survives");
     assert.equal(forService[0]!.planId, "stored-plan", "the STORED planId survives");
@@ -220,20 +241,20 @@ describe("rebuildServiceBaptisms — the skew case", () => {
 
 // ── Two rebuilt sessions close enough together to contend for one match ────
 //
-// Both scenarios below share one CSV shape: A is a per-person Start then
+// Every scenario below shares one CSV shape: A is a per-person Start then
 // Finish mid-testimony (finish() pushes the running testimony as a person, so
 // it IS logged) 1 second later, then Reset, then B starts 1.5 seconds after A
-// did and runs a full testimony + baptism. Transcribed from the reviewer's
-// P1/P2 probes (zz-review-probe.test.ts) into real, committed tests.
+// did and runs a full testimony + baptism.
 const HEADER_ROW = "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail";
 
 function twoCloseSessionsCsv(t: string, taEnd: string, tb: string, tbEnd: string): string {
   // B's own testimony-end, 118.5s (matching its own segmentMs) after B's
   // start — computed relative to `tb`, not a hardcoded absolute timestamp:
   // every test using this fixture picks its own well-separated hour (see the
-  // P1 test's comment on why), and a fixed clock string here would sort out
-  // of order the moment `tb` moved to a different hour, corrupting the whole
-  // replay ("skipped N row(s) belonging to no started session").
+  // id-matching describe block's own comment on why), and a fixed clock
+  // string here would sort out of order the moment `tb` moved to a different
+  // hour, corrupting the whole replay ("skipped N row(s) belonging to no
+  // started session").
   const tbTestimonyEnd = new Date(Date.parse(tb) + 118_500).toISOString();
   return [
     HEADER_ROW,
@@ -255,24 +276,25 @@ async function writeBaptismCsv(key: string, date: string, csv: string): Promise<
   await fs.writeFile(path.join(dir, "baptism.csv"), csv, "utf8");
 }
 
-describe("rebuildServiceBaptisms — id matching decided for the whole batch before the 2s fallback runs (P1)", () => {
+describe("rebuildServiceBaptisms — id matches are decided for the whole batch before the close-in-time fallback runs", () => {
   it("restores a deleted session and leaves its sibling's stored labels alone", async () => {
     const KEY = "p1-svc";
     const DATE = "2026-09-20";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
     // Its own well-separated hour: baptismStore is a singleton shared by
-    // every test in this file, and matching is deliberately GLOBAL (ruling
-    // 2) — two tests using overlapping timestamps would match each other's
-    // leftover sessions instead of their own fixtures.
+    // every test in this file, and matching is deliberately global — two
+    // tests using overlapping timestamps would match each other's leftover
+    // sessions instead of their own fixtures.
     const t = "2026-09-20T18:00:00.000Z";
     const taEnd = "2026-09-20T18:00:01.000Z";
     const tb = "2026-09-20T18:00:01.500Z"; // 1.5s after A's start
     const tbEnd = "2026-09-20T18:04:00.000Z";
     await writeBaptismCsv(KEY, DATE, twoCloseSessionsCsv(t, taEnd, tb, tbEnd));
 
-    // B as the live timer stored it: exact id (post-Task 16), its OWN title —
-    // A was deleted from Past sessions, and Ruling 59/I3 says a rebuild may
-    // bring it back.
+    // B as the live timer stored it: an exact id match, and its own title. A
+    // was deleted from Past sessions — the raw rows do not know a session was
+    // deleted any more than they know one was corrected, so a rebuild is
+    // allowed to bring it back.
     await baptismStore.addSession({
       id: baptismSessionId(tb),
       startedAt: tb,
@@ -288,7 +310,7 @@ describe("rebuildServiceBaptisms — id matching decided for the whole batch bef
     const stored = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
 
     assert.equal(outcome.added, 1, "A should be added back");
-    assert.equal(outcome.updated, 1, "B should be matched by its exact id, not disturbed by A's fallback");
+    assert.equal(outcome.unchanged, 1, "B should be matched by its exact id and found to already agree, not disturbed by A's fallback");
     assert.ok(stored.some((s) => s.id === baptismSessionId(t)), "deleted session A was not restored");
     assert.equal(
       stored.find((s) => s.id === baptismSessionId(tb))?.title,
@@ -298,29 +320,35 @@ describe("rebuildServiceBaptisms — id matching decided for the whole batch bef
   });
 });
 
-describe("rebuildServiceBaptisms — the nearest candidate wins, not the first found (P2)", () => {
-  it("updates each of two close, pre-Task-16-skewed sessions with its OWN rebuilt people, never the other's", async () => {
+describe("rebuildServiceBaptisms — two close, pre-exact-stamp-skewed sessions are never cross-wired", () => {
+  it("keeps each of two close sessions' own recorded people — never the other's, and never swapped", async () => {
     const KEY = "p2-svc";
     const DATE = "2026-09-20";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
-    // Its own well-separated hour — see P1's own comment on why.
+    // Its own well-separated hour — see the previous describe block's own comment on why.
     const t = "2026-09-20T19:00:00.000Z";
     const taEnd = "2026-09-20T19:00:01.000Z";
     const tb = "2026-09-20T19:00:01.500Z";
     const tbEnd = "2026-09-20T19:04:00.000Z";
     await writeBaptismCsv(KEY, DATE, twoCloseSessionsCsv(t, taEnd, tb, tbEnd));
 
-    const sa = "2026-09-20T19:00:00.001Z"; // stored 1ms after its own row, as before Task 16
+    // A: 1ms off the row's own start (2026-09-20T19:00:00.000Z) — the kind of
+    // clock-read noise a session recorded before the exact-stamp fix can
+    // carry (see the skew-case test above); not an exact id match, so this
+    // falls to the close-in-time fallback. Its stored people are a
+    // placeholder, deliberately different from what the row reconstructs.
+    const sa = "2026-09-20T19:00:00.001Z";
     await baptismStore.addSession({
       id: baptismSessionId(sa),
       startedAt: sa,
-      finishedAt: "2026-09-20T19:00:00.999Z", // earlier than the row's own 19:00:01.000 finish
+      finishedAt: "2026-09-20T19:00:00.999Z", // the same Finish as the row's own 19:00:01.000, within the tie band
       people: [{ testimonyMs: 1, baptizeMs: 0 }],
       title: "Stored Title",
       serviceTypeId: "st1",
       planId: "plan-1",
       serviceKey: KEY,
     } as unknown as BaptismSession);
+    // B: an exact id match, and its stored people already agree with the row.
     await baptismStore.addSession({
       id: baptismSessionId(tb),
       startedAt: tb,
@@ -337,10 +365,22 @@ describe("rebuildServiceBaptisms — the nearest candidate wins, not the first f
     const a = stored.find((s) => s.id === baptismSessionId(sa))!;
     const b = stored.find((s) => s.id === baptismSessionId(tb))!;
 
-    assert.equal(outcome.updated, 2, "both A and B should be matched and reconciled, not swapped or duplicated");
-    assert.deepEqual(a.people, [{ testimonyMs: 1000, baptizeMs: 0 }], "A got B's people instead of its own");
-    assert.deepEqual(b.people, [{ testimonyMs: 118_500, baptizeMs: 120_000 }], "B got A's people instead of its own");
-    assert.ok(Date.parse(b.finishedAt) > Date.parse(b.startedAt), "B now finishes before it starts — the two were swapped");
+    // A's placeholder people disagree with what the row reconstructs at the
+    // same Finish, so the store — authoritative for a Finish it already has
+    // — is left alone; B's already agree, so it needs no rewrite either.
+    // Neither classification is a wrong-match bug on its own, but a matching
+    // bug (A and B swapped, or one applied to the other) would show up as
+    // exactly this shape too, which is why both people arrays are checked.
+    assert.equal(outcome.disagreeing, 1, "A's placeholder people should be left alone, not silently replaced");
+    assert.equal(outcome.unchanged, 1, "B already agrees with the row and needs no rewrite");
+    assert.equal(outcome.updated, 0);
+    assert.equal(stored.length, 2, "two sessions, not a duplicate");
+    assert.deepEqual(a.people, [{ testimonyMs: 1, baptizeMs: 0 }], "A's own stored people must survive untouched — not overwritten with B's");
+    assert.deepEqual(
+      b.people,
+      [{ testimonyMs: 118_500, baptizeMs: 120_000 }],
+      "B's own stored people must survive untouched — not overwritten with A's",
+    );
   });
 });
 
@@ -349,7 +389,7 @@ describe("rebuildServiceBaptisms — the 2-second ceiling", () => {
     const KEY = "ceiling-svc";
     const DATE = "2026-09-20";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
-    // Its own well-separated hour — see the P1 test's own comment on why.
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
     const rowStart = "2026-09-20T20:00:03.000Z";
     await writeBaptismCsv(
       KEY,
@@ -391,7 +431,7 @@ describe("rebuildServiceBaptisms — matching across services", () => {
     const OTHER_KEY = "some-other-service";
     const DATE = "2026-09-20";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
-    // Its own well-separated hour — see the P1 test's own comment on why.
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
     const rowStart = "2026-09-20T21:00:00.000Z";
     await writeBaptismCsv(
       KEY,
@@ -404,8 +444,9 @@ describe("rebuildServiceBaptisms — matching across services", () => {
         "",
       ].join("\n"),
     );
-    // Same id the rebuild will derive, but stored under a DIFFERENT service —
-    // as ruling 2 requires, matched against every stored session so a
+    // Same id the rebuild will derive, but stored under a DIFFERENT service,
+    // with placeholder people that disagree with what the row reconstructs —
+    // matched against every stored session, not only this service's, so a
     // rebuild can never add a second copy of one the store already has.
     await baptismStore.addSession({
       id: baptismSessionId(rowStart),
@@ -421,19 +462,22 @@ describe("rebuildServiceBaptisms — matching across services", () => {
     const outcome = await rebuildServiceBaptisms(KEY);
     const all = await baptismStore.listSessions();
 
-    assert.equal(outcome.updated, 1, "the cross-service id match should be recognised, not skipped");
+    assert.equal(outcome.disagreeing, 1, "the cross-service id match should be recognised, and its placeholder people left alone");
+    assert.equal(outcome.updated, 0);
     assert.equal(outcome.added, 0, "matched — must not ALSO be added as a duplicate under KEY");
     assert.equal(all.filter((s) => s.id === baptismSessionId(rowStart)).length, 1, "no duplicate of this id anywhere in the store");
-    assert.equal(
-      all.find((s) => s.id === baptismSessionId(rowStart))?.serviceKey,
-      OTHER_KEY,
-      "the matched session keeps ITS OWN serviceKey — a rebuild of KEY must not re-key it",
+    const matched = all.find((s) => s.id === baptismSessionId(rowStart));
+    assert.equal(matched?.serviceKey, OTHER_KEY, "the matched session keeps ITS OWN serviceKey — a rebuild of KEY must not re-key it");
+    assert.deepEqual(
+      matched?.people,
+      [{ testimonyMs: 1, baptizeMs: 0 }],
+      "the matched session's people must survive untouched — the store is authoritative for the same Finish",
     );
   });
 });
 
 describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
-  it("stores what it reports as added when the added session is newer than everything else", async () => {
+  it("stores what it reports as added when the added session is newer than everything else, and logs which filler session the cap evicted", async () => {
     const KEY = "cap-svc";
     const DATE = "2026-09-21";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
@@ -447,7 +491,8 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
       };
     });
     await baptismStore.addSessions(filler as never);
-    assert.equal((await baptismStore.listSessions()).length, 2000, "precondition: the store is at the cap");
+    const atCap = await baptismStore.listSessions();
+    assert.equal(atCap.length, 2000, "precondition: the store is at the cap");
 
     await writeBaptismCsv(KEY, DATE, [
       HEADER_ROW,
@@ -457,19 +502,47 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
       "",
     ].join("\n"));
 
-    const outcome = await rebuildServiceBaptisms(KEY);
+    // Not necessarily filler[0]: this file's own earlier describe blocks share
+    // this same process-wide store, so some of their sessions already occupy
+    // slots, and addSessions above may already have capped away filler's own
+    // oldest few to make room for them. Whichever filler session the cap kept
+    // as its oldest survivor is the one about to be evicted next — captured
+    // here so the log-line assertion below can name it rather than guess.
+    const oldestFillerId = atCap
+      .filter((s) => (s.serviceKey ?? "").startsWith("old-"))
+      .reduce((oldest, s) => (Date.parse(s.startedAt) < Date.parse(oldest.startedAt) ? s : oldest)).id;
+
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+    let outcome: Awaited<ReturnType<typeof rebuildServiceBaptisms>>;
+    try {
+      outcome = await rebuildServiceBaptisms(KEY);
+    } finally {
+      console.warn = realWarn;
+    }
     const all = await baptismStore.listSessions();
 
     assert.equal(outcome.added, 1, "the new 2026 session is newer than every 2020 filler session and must survive the cap");
     assert.ok(all.some((s) => s.serviceKey === KEY), "reported added, but the session is not in the store");
     assert.equal(all.length, 2000, "the cap still holds — the oldest filler session fell off instead");
+
+    assert.equal(
+      all.some((s) => s.id === oldestFillerId),
+      false,
+      "the oldest filler session should be the one the cap evicted to make room",
+    );
+    const evictionLine = warnings.find((w) => w.includes("[baptism]") && w.includes("evicted"));
+    assert.ok(evictionLine, `the eviction was not logged: ${JSON.stringify(warnings)}`);
+    assert.ok(evictionLine!.includes("evicted 1 session"), `the log line does not say exactly one session was evicted: ${evictionLine}`);
+    assert.ok(evictionLine!.includes(oldestFillerId), `the log line does not name which session it evicted: ${evictionLine}`);
   });
 });
 
-// ── Ruling 59 / C1: the store can know more than the rows ───────────────────
+// ── A correction made after the service closed: the store can know more than the rows ──
 describe("rebuildServiceBaptisms — a correction made after the service closed", () => {
   it("Finish, the service closes, Undo and a longer re-Finish: the rebuild must not revert it", async () => {
-    const ctx = freshCtx("c1-newer");
+    const ctx = freshCtx("closed-then-corrected");
     await serviceTimelineStore.upsert(timeline(ctx.serviceKey, ctx.serviceDate));
     openService(ctx);
 
@@ -490,7 +563,7 @@ describe("rebuildServiceBaptisms — a correction made after the service closed"
     held.current!.endedAt = new Date().toISOString();
 
     baptismTimerService.undo(); // reopens the finished session — no service open, nothing archived
-    await sleep(40); // a much longer baptism than the first, undone attempt
+    await sleep(200); // a much longer baptism than the first, undone attempt — comfortably past the 100ms tie band
     const secondFinish = baptismTimerService.finish(); // re-finalizes the SAME session, still not archived
     await storedSessions(ctx, 1);
     await sampleArchive.flush();
@@ -509,5 +582,310 @@ describe("rebuildServiceBaptisms — a correction made after the service closed"
     assert.equal(outcome.updated, 0, "the older, row-only version must not be applied over it");
     assert.equal(after.finishedAt, secondFinish.finishedAt, "the correction was reverted to the first, shorter Finish");
     assert.deepEqual(after.people, secondFinish.people, "the corrected baptizeMs was reverted");
+  });
+});
+
+describe("rebuildServiceBaptisms — the close-in-time fallback matches from every candidate, not by which rebuilt session is looked at first", () => {
+  it("does not let an earlier rebuilt session steal a later one's own closest stored match", async () => {
+    const KEY = "global-sort-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
+    const t = "2026-09-20T06:00:00.000Z";
+    const taEnd = "2026-09-20T06:00:01.000Z";
+    const tb = "2026-09-20T06:00:01.500Z"; // 1.5s after A's start
+    const tbEnd = "2026-09-20T06:04:00.000Z";
+    await writeBaptismCsv(KEY, DATE, twoCloseSessionsCsv(t, taEnd, tb, tbEnd));
+
+    // Only B has a stored counterpart — A was deleted — and B's is skewed 1ms
+    // earlier than its own row on both ends, so it is not an exact id match
+    // and must be found by proximity. B's stored copy sits 1ms from B's own
+    // row but only 1.499s from A's — still inside the 2-second fallback
+    // window, so a fallback that matches per rebuilt session in array order
+    // can let A, considered first, claim it for being looked at first, before
+    // B's own turn ever comes.
+    const skewedB = "2026-09-20T06:00:01.499Z";
+    await baptismStore.addSession({
+      id: baptismSessionId(skewedB),
+      startedAt: skewedB,
+      finishedAt: "2026-09-20T06:03:59.999Z",
+      people: [{ testimonyMs: 118_500, baptizeMs: 120_000 }],
+      title: "Stored B",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const stored = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+
+    assert.equal(stored.length, 2, "two sessions, not three — B must not be duplicated");
+    assert.ok(
+      stored.some((s) => s.id === baptismSessionId(t)),
+      "the deleted session A was never restored",
+    );
+    assert.equal(
+      stored.filter((s) => s.people[0]?.baptizeMs === 120_000).length,
+      1,
+      "B's stored copy exists more than once — A's fallback match stole it, and B was added again fresh under its own id",
+    );
+    assert.equal(outcome.added, 1, "A has no stored counterpart and must be added");
+    assert.equal(outcome.unchanged, 1, "B's stored copy already agrees with what the row reconstructs — nothing to write");
+    assert.equal(outcome.updated, 0);
+    assert.equal(outcome.newer, 0, "A must not consume B's stored copy and read as a stale correction the rebuild leaves alone");
+  });
+});
+
+describe("rebuildServiceBaptisms — two competing close-in-time candidates each go to their own nearest match", () => {
+  it("does not swap two sessions' people even when each is also within range of the other's row", async () => {
+    const KEY = "nearest-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
+    const t = "2026-09-20T08:00:00.000Z";
+    const taEnd = "2026-09-20T08:00:01.000Z";
+    const tb = "2026-09-20T08:00:01.500Z";
+    const tbEnd = "2026-09-20T08:04:00.000Z";
+    await writeBaptismCsv(KEY, DATE, twoCloseSessionsCsv(t, taEnd, tb, tbEnd));
+
+    // Both A and B are stored 1ms earlier than their own row on both ends —
+    // neither is an exact id match, so both fall to the close-in-time
+    // fallback — and each is genuinely closer to its OWN row (1ms) than to
+    // the OTHER's (1.5s), but both distances are still inside the 2-second
+    // window, so a fallback that does not consider every candidate together
+    // could still assign either session to the wrong row.
+    await baptismStore.addSession({
+      id: baptismSessionId("2026-09-20T07:59:59.999Z"),
+      startedAt: "2026-09-20T07:59:59.999Z",
+      finishedAt: "2026-09-20T08:00:00.999Z",
+      people: [{ testimonyMs: 1000, baptizeMs: 0 }],
+      title: "A",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+    await baptismStore.addSession({
+      id: baptismSessionId("2026-09-20T08:00:01.499Z"),
+      startedAt: "2026-09-20T08:00:01.499Z",
+      finishedAt: "2026-09-20T08:03:59.999Z",
+      people: [{ testimonyMs: 118_500, baptizeMs: 120_000 }],
+      title: "B",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const stored = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+
+    assert.equal(stored.length, 2, "two sessions, not a duplicate");
+    assert.deepEqual(
+      stored.find((s) => s.title === "A")?.people,
+      [{ testimonyMs: 1000, baptizeMs: 0 }],
+      "A must keep its own people, not B's",
+    );
+    assert.deepEqual(
+      stored.find((s) => s.title === "B")?.people,
+      [{ testimonyMs: 118_500, baptizeMs: 120_000 }],
+      "B must keep its own people, not A's",
+    );
+    assert.equal(outcome.unchanged, 2, "both already agree with their own row and need no rewrite");
+    assert.equal(outcome.updated, 0);
+
+    // This exercises the same close-in-time fallback as the describe block
+    // above, so it is not separately proven red against the old,
+    // per-rebuilt-session matching: a "whichever is considered first" bug can
+    // pass this particular fixture by luck, since each session's position in
+    // the rebuilt array here happens to match its own distance order too.
+  });
+});
+
+describe("rebuildServiceBaptisms — a lost row must not let an incomplete replay overwrite a complete session", () => {
+  it("keeps the stored two-person session when the rows can only reconstruct one, even though they agree on when it finished", async () => {
+    const KEY = "lost-row-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
+    //
+    // Person 1's rows are complete; person 2's are entirely missing, as
+    // csv-appender.ts logs and continues past a failed append rather than
+    // stopping the recording. The finish row still names two people, but the
+    // replay can only reconstruct the one whose rows survived.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-20T01:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-20T01:01:00.000Z,testimony-end,per-person,baptism,1,0,60000,,,",
+      "2026-09-20T01:02:00.000Z,person-complete,per-person,baptism,1,0,60000,,,",
+      "2026-09-20T01:05:00.000Z,finish,per-person,testimony,3,0,0,,,people=2",
+      "",
+    ].join("\n"));
+
+    const originalPeople = [
+      { testimonyMs: 60_000, baptizeMs: 60_000 },
+      { testimonyMs: 50_000, baptizeMs: 40_000 },
+    ];
+    await baptismStore.addSession({
+      id: baptismSessionId("2026-09-20T01:00:00.000Z"),
+      startedAt: "2026-09-20T01:00:00.000Z",
+      finishedAt: "2026-09-20T01:05:00.000Z", // EXACTLY the row's own finish — equal must not mean "the rows win"
+      people: originalPeople,
+      title: "Stored",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const s = (await baptismStore.listSessions()).find((x) => x.serviceKey === KEY)!;
+
+    assert.equal(outcome.disagreeing, 1, "the same Finish, but the rows can only show one of the two people — left as stored");
+    assert.equal(outcome.updated, 0);
+    assert.equal(s.people.length, 2, "the complete, two-person record must survive");
+    assert.deepEqual(s.people, originalPeople, "nothing about the stored session was overwritten");
+  });
+});
+
+// This describe block's two cases, and the unmatched case in the next describe
+// block below, all reach the same "either side is unreadable" guard as "does
+// not overwrite a valid stored session with an unreadable row finish time"
+// further down — the one case in this group actually proven red against the
+// bug it guards (see this file's own PR for the command and failing output).
+// The other three were deliberately not each independently red-proofed, since
+// they exercise the identical branch; this note is that choice on the record,
+// not an oversight.
+describe("rebuildServiceBaptisms — an unreadable stored finish time is never treated as the rows winning", () => {
+  it("a garbled stored finish time is left exactly as it was", async () => {
+    const KEY = "garbled-stored-finish-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-20T02:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-20T02:01:00.000Z,testimony-end,per-person,testimony,1,0,60000,,,",
+      "2026-09-20T02:01:00.000Z,finish,per-person,testimony,1,0,60000,,,",
+      "",
+    ].join("\n"));
+
+    const originalPeople = [{ testimonyMs: 1, baptizeMs: 0 }];
+    await baptismStore.addSession({
+      id: baptismSessionId("2026-09-20T02:00:00.000Z"),
+      startedAt: "2026-09-20T02:00:00.000Z",
+      finishedAt: "not-a-date",
+      people: originalPeople,
+      title: "Stored",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const s = (await baptismStore.listSessions()).find((x) => x.serviceKey === KEY)!;
+
+    assert.equal(outcome.invalid, 1, "the stored finish time could not be read, so the match could not be compared");
+    assert.equal(s.finishedAt, "not-a-date", "the garbled value must survive — the rows do not get to replace it");
+    assert.deepEqual(s.people, originalPeople, "nothing about the stored session was overwritten");
+  });
+
+  it("a missing stored finish time is left exactly as it was", async () => {
+    const KEY = "missing-stored-finish-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-20T03:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-20T03:01:00.000Z,testimony-end,per-person,testimony,1,0,60000,,,",
+      "2026-09-20T03:01:00.000Z,finish,per-person,testimony,1,0,60000,,,",
+      "",
+    ].join("\n"));
+
+    const originalPeople = [{ testimonyMs: 1, baptizeMs: 0 }];
+    await baptismStore.addSession({
+      id: baptismSessionId("2026-09-20T03:00:00.000Z"),
+      startedAt: "2026-09-20T03:00:00.000Z",
+      // No finishedAt at all.
+      people: originalPeople,
+      title: "Stored",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const s = (await baptismStore.listSessions()).find((x) => x.serviceKey === KEY)!;
+
+    assert.equal(outcome.invalid, 1, "the stored finish time could not be read, so the match could not be compared");
+    assert.equal(s.finishedAt, undefined, "the missing value must stay missing — the rows do not get to fill it in");
+    assert.deepEqual(s.people, originalPeople, "nothing about the stored session was overwritten");
+  });
+});
+
+describe("rebuildServiceBaptisms — an unreadable finish time in the rows is never trusted", () => {
+  it("does not overwrite a valid stored session with an unreadable row finish time", async () => {
+    const KEY = "garbled-row-finish-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own comment on why.
+    //
+    // The finish row's own `at` column is unreadable — a real, previously-
+    // reachable defect let a comparison like this fall through and write the
+    // literal garbage value over a valid stored session. This is the one case
+    // in the unreadable-finish-time group (see the note above the previous
+    // describe block) actually proven red against that defect.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-20T04:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-20T04:01:00.000Z,testimony-end,per-person,testimony,1,0,60000,,,",
+      "garbage,finish,per-person,testimony,1,0,60000,,,",
+      "",
+    ].join("\n"));
+
+    const originalPeople = [{ testimonyMs: 60_000, baptizeMs: 480_000 }];
+    await baptismStore.addSession({
+      id: baptismSessionId("2026-09-20T04:00:00.000Z"),
+      startedAt: "2026-09-20T04:00:00.000Z",
+      finishedAt: "2026-09-20T04:09:00.000Z",
+      people: originalPeople,
+      title: "Stored",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as unknown as BaptismSession);
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const s = (await baptismStore.listSessions()).find((x) => x.serviceKey === KEY)!;
+
+    assert.equal(outcome.invalid, 1, "the row's own finish time could not be read, so the match could not be compared");
+    assert.equal(
+      s.finishedAt,
+      "2026-09-20T04:09:00.000Z",
+      "the valid stored finish time must survive — never replaced by the unreadable row value",
+    );
+    assert.deepEqual(s.people, originalPeople, "nothing about the stored session was overwritten");
+  });
+
+  it("does not add a session whose own finish time cannot be read", async () => {
+    const KEY = "garbled-row-finish-unmatched-svc";
+    const DATE = "2026-09-20";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    // Its own well-separated hour — see the id-matching describe block's own
+    // comment on why. Same broken shape as above, but nothing is stored for
+    // this service at all.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-20T05:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-20T05:01:00.000Z,testimony-end,per-person,testimony,1,0,60000,,,",
+      "garbage,finish,per-person,testimony,1,0,60000,,,",
+      "",
+    ].join("\n"));
+
+    const outcome = await rebuildServiceBaptisms(KEY);
+    const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+
+    assert.equal(forService.length, 0, "a session whose own finish time cannot be read must not be added");
+    assert.equal(outcome.invalid, 1);
+    assert.equal(outcome.added, 0);
+    assert.equal(outcome.kept, 0, "nothing was stored for this service to begin with");
   });
 });
