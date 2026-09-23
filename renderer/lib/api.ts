@@ -96,12 +96,20 @@ function del<T>(path: string): Promise<T> {
  * bivariantly, so anything whose channel is IpcChannel (`invoke`, a typed
  * wrapper, a class or object-literal method) can stand in for
  * `{ send(channel: string): Promise<unknown> }`, where the property form
- * `send: (channel: string) => Promise<unknown>` rejects it. A channel chosen
- * at runtime belongs in an `as const` table instead, as in use-stream-state.ts.
+ * `send: (channel: string) => Promise<unknown>` rejects it. Lint requires the
+ * property form throughout renderer/ (`@typescript-eslint/method-signature-style`),
+ * which leaves class and object-literal methods (the latter taken as a type
+ * with `typeof`) and constructors, bivariant the same way, and any signature
+ * declared outside renderer/. A channel chosen at runtime is written
+ * as a literal in each call that can send it, a ternary or one call per choice,
+ * as use-stream-state.ts does: a table read through a key or a generic hides
+ * which entry is sent.
  *
- * What a type cannot say is whether a channel still has a caller. That
- * direction stays with the text scans in api-channels.test.ts, which also
- * catch a literal cast past this union, but only at a call they recognise.
+ * What a type cannot say is whether a channel still has a caller. That is
+ * api-channels.test.ts, which asks the type checker which literal channels
+ * actually reach invoke(), and refuses the routes past this union it can see:
+ * a cast, an `any`, and invoke, a forwarder or an object holding one handed on
+ * as a value.
  */
 export type IpcChannel =
   | "action:invoke"

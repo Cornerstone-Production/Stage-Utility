@@ -55,11 +55,8 @@ import { onNotification } from "../lib/api";
  * widget, and it is the reason the cache exists. It just does not veto the read.
  *
  * @param read  issues the one-shot hydrate. A thunk rather than a channel name,
- *              so the invoke call and its quoted channel stay written out at the
- *              call site: api-channels.test.ts matches that call shape and cannot
- *              see a channel handed through a variable. (Do not write an example
- *              of the shape here — a channel named only by prose satisfying that
- *              scan is a trap this repo has already fallen into once.)
+ *              so each caller writes its own invoke call, with its channel and
+ *              the type it answers, in one place.
  * @param pushChannel  SSE channel carrying the live frames.
  * @param options.clearOnReadFailure  drop back to null when the hydrate fails,
  *   instead of keeping whatever was already there. OFF by default, which is what

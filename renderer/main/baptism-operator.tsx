@@ -86,10 +86,9 @@ export function BaptismOperator() {
 
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
-  // Typed against the full IpcChannel union, not `string` — an unwired or
-  // misspelled channel assigned below fails `tsc`, rather than depending on
-  // the text scans in api-channels.test.ts (which cannot see a channel behind
-  // a variable at all; see IpcChannel's own doc comment).
+  // Typed against the full IpcChannel union, not `string`, so an unwired or
+  // misspelled channel assigned below fails `tsc`; api-channels.test.ts reads
+  // each assignment to know which channels this button can send.
   let primaryChannel: IpcChannel;
   if (state.armed) {
     // Grouped only: the song is live but nobody's clock has started. This press is
