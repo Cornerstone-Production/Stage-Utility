@@ -222,6 +222,16 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(640);
+  // THE REF GOES ON THE ALWAYS-RENDERED CONTENT DIV BELOW, not on SessionSvg's
+  // own wrapper. This effect runs once, on mount, and returns early when the
+  // host is not there — but while the lane is still loading, none of the three
+  // branches below render SessionSvg at all, so a ref that only existed on
+  // SessionSvg's own div was never there yet when this ran, and — deps being
+  // `[]` — never got a second chance once the lane finished loading and
+  // SessionSvg finally mounted. The chart stayed at its 640px default,
+  // letterboxed in its card, for the rest of the page's life (Important 2,
+  // final review). history-chart.tsx hit the identical bug the same way and
+  // fixed it the same way; see its own "THE REF GOES ON BOTH BRANCHES" note.
   useEffect(() => {
     const el = hostRef.current;
     if (!el || typeof ResizeObserver !== "function") return;
@@ -276,7 +286,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
           }}
         />
       </div>
-      <div className="flex flex-col gap-3 p-4">
+      <div ref={hostRef} className="flex flex-col gap-3 p-4">
         {!loaded ? null : !serviceKey ? (
           <EmptyNote text="No session recorded yet — the chart draws once the timer starts." />
         ) : error ? (
@@ -297,7 +307,6 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
           <EmptyNote text="No timing detail was recorded for this session." />
         ) : (
           <SessionSvg
-            hostRef={hostRef}
             svgRef={svgRef}
             width={width}
             win={win}
@@ -371,7 +380,6 @@ function Legend() {
 }
 
 interface SessionSvgProps {
-  hostRef: React.RefObject<HTMLDivElement | null>;
   svgRef: React.RefObject<SVGSVGElement | null>;
   width: number;
   win: { startMs: number; endMs: number };
@@ -393,7 +401,6 @@ interface SessionSvgProps {
 }
 
 function SessionSvg({
-  hostRef,
   svgRef,
   width,
   win,
@@ -467,7 +474,7 @@ function SessionSvg({
   const running = live && !!lastSpan && lastSpan.endedAt === null;
 
   return (
-    <div ref={hostRef} className="lane-wrap">
+    <div className="lane-wrap">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${H}`}

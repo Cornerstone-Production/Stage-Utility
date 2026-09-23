@@ -16,7 +16,7 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { SessionChart, SESSION_LANES_STORAGE_KEY } = await import("./session-chart.js");
 
@@ -119,6 +119,65 @@ test("a session with recorded spans draws the lane and its legend", async () => 
   assert.equal(!!screen.queryByText("Testimony"), true, "expected the legend's Testimony entry");
   assert.equal(!!screen.queryByText("Baptism"), true, "expected the legend's Baptism entry");
   assert.equal(!!screen.queryByText("Plan item"), true, "expected the legend's Plan item entry");
+});
+
+// Final review, Important 2: the width effect ran once, on the FIRST render,
+// while the lane was still loading and SessionSvg — which used to own the
+// only ref — had not mounted yet, so the observer never attached and the
+// chart stayed at its fixed 640px default. Measured live at 1280px wide, the
+// container was 982px but the chart drew at 640, centered with empty space
+// either side. history-chart.tsx hit the identical bug; see this file's own
+// fix comment on hostRef for the shared cause and history-chart.test.tsx's
+// "measuring its own width" describe block for the sibling proof this one
+// follows (a fake ResizeObserver, since jsdom implements neither the real API
+// nor layout). This one goes further and proves an actual RE-LAYOUT, not just
+// that something got observed, because the finding was specifically that a
+// resize AFTER the lane loads had no effect.
+test("the chart re-lays out when its host resizes, even though the host was empty on the very first render", async () => {
+  let trigger: (() => void) | null = null;
+  let observed: Element | null = null;
+  const real = (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver;
+  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    constructor(cb: () => void) {
+      trigger = cb;
+    }
+    observe(el: Element) {
+      observed = el;
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+  try {
+    await mount(
+      {
+        ...BASE,
+        serviceKey: "st1:plan1:resize",
+        finishedAt: "2026-09-20T15:10:00.000Z",
+        sessionStartedAt: "2026-09-20T15:00:00.000Z",
+      },
+      {
+        spans: [
+          { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:01:48.000Z" },
+        ],
+      },
+    );
+
+    assert.ok(observed, "expected the host to be observed once the lane finished loading and the chart drew");
+    const svg = screen.getByRole("img", { name: /Baptism session timeline/i }) as unknown as SVGSVGElement;
+    assert.equal(svg.getAttribute("viewBox")?.split(" ")[2], "640", "sanity: the default width before any resize");
+
+    Object.defineProperty(observed!, "clientWidth", { value: 900, configurable: true });
+    act(() => trigger!());
+    await settle();
+
+    assert.equal(
+      svg.getAttribute("viewBox")?.split(" ")[2],
+      "900",
+      "the chart must re-lay out to the host's new width once it resizes",
+    );
+  } finally {
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = real;
+  }
 });
 
 // Final review, Important 1: the window used to be the WHOLE SERVICE's plan
