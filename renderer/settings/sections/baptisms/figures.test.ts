@@ -33,4 +33,30 @@ describe("baptismFigures", () => {
     );
     assert.equal(by(f, "count"), "0");
   });
+
+  // Final review, Minor 8: only idle and the count were covered here — Timed's
+  // own LIVE arithmetic (the running segment, and per-person's banked
+  // pendingTestimonyMs) was untested, and either could be dropped from the sum
+  // without this file noticing.
+  it("timed adds the pending testimony AND the running segment on top of banked totals", () => {
+    const segStart = started + 10 * 60_000;
+    const now = segStart + 45_000; // 45s into the currently running baptism
+    const f = baptismFigures(
+      {
+        ...base,
+        mode: "per-person",
+        phase: "baptism",
+        finishedAt: null,
+        segmentStartedAt: new Date(segStart).toISOString(),
+        segmentAccumMs: 0,
+        pendingTestimonyMs: 90_000, // this person's testimony, closed, not yet paired
+        people: [{ testimonyMs: 60_000, baptizeMs: 40_000 }], // one already-finished person
+      } as never,
+      now,
+    );
+    // banked totalMs 100_000 (60_000+40_000) + pending 90_000 + live 45_000 =
+    // 235_000ms = 3:55. Dropping either the pending testimony or the running
+    // segment from the sum would read something other than 3:55.
+    assert.equal(by(f, "timed"), "3:55");
+  });
 });
