@@ -249,8 +249,11 @@ function KeyValueField({
   );
 }
 
-/** Renders one param from its spec — the reason a new provider needs no UI work. */
-function ParamField({
+/** Renders one param from its spec — the reason a new provider needs no UI work.
+ *  Exported so the layout editor's action-button inspector renders the SAME
+ *  fields the rule editor does for the same action, rather than a second copy
+ *  that could drift from it. */
+export function ParamField({
   spec,
   value,
   onChange,

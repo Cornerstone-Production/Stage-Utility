@@ -79,6 +79,7 @@ import {
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { CuePicker } from "./cue-picker";
+import { ActionButtonInspector } from "./action-button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -1335,6 +1336,7 @@ export function Inspector({
           </>
         );
       })()}
+      {c.type === "action-button" && <ActionButtonInspector c={c} onConfig={onConfig} />}
       {c.type === "cue-button" && (() => {
         return (
           <>

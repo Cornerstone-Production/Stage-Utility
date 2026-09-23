@@ -13,6 +13,7 @@ import { Loader2Icon } from "lucide-react";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { toast } from "../components/ui";
+import { useAutomationActions } from "./use-automation-actions";
 
 export function ActionButton({
   config,
@@ -24,6 +25,12 @@ export function ActionButton({
   ts: CSSProperties;
 }) {
   const [busy, setBusy] = useState(false);
+  const actions = useAutomationActions();
+  const action = actions?.find((a) => a.id === config.actionId) ?? null;
+  // Only once the registry has actually answered: a read that failed, or has
+  // not landed yet, must not brand a perfectly good action-button as broken.
+  const unknown = !!config.actionId && !!actions && !action;
+  const label = config.label || action?.label || config.actionId || "Action";
 
   async function fire() {
     if (!interactive || busy) return;
@@ -54,22 +61,36 @@ export function ActionButton({
       type="button"
       onClick={fire}
       disabled={!interactive || busy}
-      aria-label={config.label || config.actionId || "Action"}
+      aria-label={label}
       style={{
         ...ts,
         width: "100%",
         height: "100%",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: "0.4em",
+        gap: "0.15em",
         border: "none",
         borderRadius: "inherit",
         cursor: interactive ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
+        opacity: unknown ? 0.6 : 1,
       }}
     >
-      {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : (config.label || "Action")}
+      <span style={{ display: "flex", alignItems: "center", gap: "0.4em" }}>
+        {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : label}
+      </span>
+      {/* Said plainly rather than left to a press: pressing an unknown action
+          already gets a toast off the server's own "unknown action" refusal
+          (action-invoke.ts), but that only ever shows once the operator has
+          already tried it. A layout built against a renamed or removed
+          action must not render identically to a working one until then. */}
+      {unknown && (
+        <span style={{ fontSize: "0.5em", opacity: 0.85, color: "var(--red-9)", lineHeight: 1.1 }}>
+          unknown action
+        </span>
+      )}
     </button>
   );
 }

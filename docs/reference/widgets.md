@@ -456,6 +456,16 @@ nothing.
 see the same text. See [OSC](../integrations/osc.md) and
 [RossTalk](../integrations/rosstalk.md).
 
+**Action button** picks an **Action** from the same registry the
+[automation rules editor](../automation.md) offers — every action in
+[Actions](../automation.md#actions), including advancing or stepping back
+through the [baptism timer](../features/scriptview-and-baptisms.md). Choosing
+one that takes parameters (a Companion button coordinate, a RossTalk command)
+shows the same fields the rule editor would show for it. **Label** is blank by
+default, which draws the action's own name; type one to override it. A button
+saved against an action that has since been removed or renamed still shows its
+stored id, marked as unknown, rather than doing nothing when pressed.
+
 **Cue button** binds to a cue. The picker lists **Built in** first — the cues
 the app ships for OBS, REAPER, ProVideoPlayer and itself, which need no rule
 behind them ([built-in cues](../automation.md#built-in-cues)) — and then **Your
