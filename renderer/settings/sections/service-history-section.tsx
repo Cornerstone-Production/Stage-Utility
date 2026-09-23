@@ -207,13 +207,16 @@ export function editedTooltip(it: ServiceTimelineItem): string {
   return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
 }
 
-/** The keys of RebuildOutcome that are actual LEGS (each a RebuiltRecord) —
- *  `failed` is a list, not a leg, and `baptismDetail` is baptism's own extra
- *  detail, not a fifth leg of its own. */
-type RebuildLegName = Exclude<keyof RebuildOutcome, "failed" | "baptismDetail">;
+/** The keys of RebuildOutcome that are REPLACE-style legs (each a
+ *  RebuiltRecord, reported by the generic done/left split below) —
+ *  `failed` is a list, not a leg; `baptismDetail` is baptism's own extra
+ *  detail, not a fifth leg; and `baptism` itself is reported SEPARATELY (see
+ *  describeRebuild), because unlike the other three it is a MERGE, never a
+ *  replace, with its own six-way split of what happened to each session. */
+type RebuildLegName = Exclude<keyof RebuildOutcome, "failed" | "baptismDetail" | "baptism">;
 
 /**
- * The noun each leg counts, in the order they are reported.
+ * The noun each REPLACE-style leg counts, in the order they are reported.
  *
  * Keyed by the REAL RebuildOutcome (imported from history-edit.ts, not
  * hand-mirrored — a second copy of this shape is exactly how it drifted
@@ -228,9 +231,32 @@ const REBUILD_LEG_NOUNS: Record<RebuildLegName, string> = {
   timeline: "item timings",
   spl: "SPL items",
   attendance: "attendance samples",
-  baptism: "baptism sessions",
 };
 const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [RebuildLegName, string][];
+
+/**
+ * Baptism's own contribution to the sentence, as one self-contained clause —
+ * never folded into the generic done/left split above, because a session
+ * left alone can be left alone for four different reasons (never matched, a
+ * store correction newer than the rows, a disagreement with the rows, or an
+ * unreadable finish time) and the operator needs to be able to tell them
+ * apart, not just see a bare "left alone: baptism sessions".
+ */
+function describeBaptismLeg(items: number, d: NonNullable<RebuildOutcome["baptismDetail"]>): string {
+  const written: string[] = [];
+  if (d.added > 0) written.push(`${d.added} added`);
+  if (d.updated > 0) written.push(`${d.updated} updated`);
+  const head = `${items} baptism sessions` + (written.length ? `: ${written.join(", ")}` : "");
+
+  const leftParts: string[] = [];
+  if (d.newer > 0) leftParts.push(`${d.newer} newer in the store`);
+  if (d.disagreeing > 0) leftParts.push(`${d.disagreeing} disagreeing with the rows`);
+  if (d.invalid > 0) leftParts.push(`${d.invalid} unreadable`);
+  if (d.kept > 0) leftParts.push(`${d.kept} not in the raw rows`);
+  const leftTotal = d.newer + d.disagreeing + d.invalid + d.kept;
+
+  return leftTotal > 0 ? `${head}; left alone: ${leftTotal} (${leftParts.join(", ")})` : head;
+}
 
 /**
  * What a rebuild actually did, in a sentence.
@@ -240,16 +266,11 @@ const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [RebuildLegName, strin
  * rebuild that changed nothing once reported "Rebuilt: 12 items".
  */
 export function describeRebuild(out: RebuildOutcome): string {
-  const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => {
-    // Baptism is a MERGE, not a replace (I3): a bare session count cannot
-    // tell "recomputed the same two sessions" from "added one back after a
-    // Delete", and the second is exactly the case an operator needs to see.
-    if (k === "baptism" && out.baptismDetail) {
-      return `${out[k].items} ${noun} (${out.baptismDetail.added} added)`;
-    }
-    return `${out[k].items} ${noun}`;
-  });
+  const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
   const left = REBUILD_LEGS.filter(([k]) => !out[k].rebuilt && !out[k].missing).map(([, noun]) => noun);
+  if (!out.baptism.missing && out.baptismDetail) {
+    (out.baptism.rebuilt ? done : left).push(describeBaptismLeg(out.baptism.items, out.baptismDetail));
+  }
   const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
   if (left.length) parts.push(`left alone: ${left.join(", ")}`);
   if (out.failed.length) parts.push(`could not save: ${out.failed.join(", ")}`);
@@ -1041,7 +1062,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (!(await confirm({
         title: "Rebuild from raw?",
         message:
-          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. Baptism sessions are merged in the same way: updated or added, never deleted — a session removed from Past sessions can come back. The raw rows themselves are not touched.",
+          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. Baptism sessions are merged instead of replaced: updated or added, never deleted — a session removed from Past sessions can come back. The raw rows themselves are not touched.",
         confirmLabel: "Rebuild",
         destructive: true,
       }))) return;
