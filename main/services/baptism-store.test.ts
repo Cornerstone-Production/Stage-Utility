@@ -86,12 +86,19 @@ describe("baptism sessions", () => {
 });
 
 describe("addSession is idempotent by id", () => {
+  beforeEach(async () => {
+    await baptismStore.addSessions([]); // ensure the store is loaded
+    for (const s of await baptismStore.listSessions()) await baptismStore.deleteSession(s.id);
+  });
+
   it("replaces a session carrying an id already stored", async () => {
     // finish -> undo -> finish re-finalizes the SAME session: `id` is derived
     // from sessionStartedAt, which undo does not change. Prepending a second
     // row makes linkBaptisms count that service's people twice in History.
-    const first = { ...session(1), people: [{ testimonyMs: 1000, baptizeMs: 500 }] } as BaptismSession;
-    const corrected = { ...session(1), people: [{ testimonyMs: 9000, baptizeMs: 500 }] } as BaptismSession;
+    // id 777777 falls outside every range the other describes in this file use,
+    // so this test does not depend on running after (or before) them.
+    const first = { ...session(777_777), people: [{ testimonyMs: 1000, baptizeMs: 500 }] } as BaptismSession;
+    const corrected = { ...session(777_777), people: [{ testimonyMs: 9000, baptizeMs: 500 }] } as BaptismSession;
 
     await baptismStore.addSession(first);
     await baptismStore.addSession(corrected);
