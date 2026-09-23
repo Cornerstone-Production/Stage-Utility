@@ -51,6 +51,7 @@ const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { sampleArchive } = await import("./archive/sample-archive.js");
 const { parseRows } = await import("./csv.js");
+const { BAPTISM_RAW_EVENTS } = await import("../types/stage.js");
 
 type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
 const rec = () => serviceTimelineRecorder as unknown as Held;
@@ -865,6 +866,65 @@ describe("pausing and resuming land in the raw layer", () => {
       Number(c.filter("resume")[0]![c.idx("segmentMs")]),
       Math.round(banked),
       "the resume row carries the same banked total it resumed from",
+    );
+  });
+});
+
+// Every test above drives one method or one bug at a time, so full coverage of
+// BAPTISM_RAW_EVENTS is an accident of how many of those add up — nothing
+// asserts the sum is complete, and nothing stops it shrinking silently if a
+// describe above is trimmed or reworked. This drives one real session per
+// mode through pause, resume, undo (a different branch in each mode), the
+// armed start, and a natural finish, then checks the SET of events actually
+// written against the full type, not a count: a count cannot tell a dropped
+// event from a renamed one.
+describe("every BAPTISM_RAW_EVENT the type declares is reachable from a real session", () => {
+  it("driving both modes through pause, resume, undo, arming and finish writes every declared event", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+
+    // per-person: reset, start, testimony-end, pause, resume, person-complete,
+    // undo (testimony-phase branch), finish.
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.baptized();
+    await sleep(2);
+    baptismTimerService.pause();
+    baptismTimerService.resume();
+    await sleep(2);
+    baptismTimerService.next(); // person 1 complete, person 2's testimony begins
+    await sleep(2);
+    baptismTimerService.undo(); // mis-tap: back into person 1's baptism
+    await sleep(2);
+    baptismTimerService.finish(); // closes the session
+
+    // grouped: start, testimony-end, baptisms-armed, baptisms-start,
+    // person-complete, undo (baptism-phase branch), finish.
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.next(); // person 1's testimony banked, person 2's begins
+    await sleep(2);
+    baptismTimerService.startBaptisms(); // person 2's testimony folds in, section arms
+    baptismTimerService.advance(); // "First person in" — armed ends, clock starts
+    await sleep(2);
+    baptismTimerService.next(); // person 1 baptized, person 2's clock starts
+    await sleep(2);
+    baptismTimerService.undo(); // mis-tap: re-time person 1
+    await sleep(2);
+    baptismTimerService.next(); // person 1 baptized again, person 2's clock starts
+    await sleep(2);
+    baptismTimerService.next(); // person 2 (LAST) baptized — auto-finishes
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    const written = [...new Set(c.events())].sort();
+    assert.deepEqual(
+      written,
+      [...BAPTISM_RAW_EVENTS].sort(),
+      "every event BaptismRawEvent declares must be reachable from a real session",
     );
   });
 });
