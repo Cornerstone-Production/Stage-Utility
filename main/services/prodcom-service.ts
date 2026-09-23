@@ -655,9 +655,23 @@ export class ProdComService extends ConnectionLifecycle {
    * not the same as knowing nothing was missed.
    */
   private wsBaselineRows: number | null = null;
-  /** Whether the current socket has ever delivered a transcript entry. Once
-   *  true the socket is proven and costs no further REST calls. */
+  /** Whether the current socket has ever delivered a transcript entry — once
+   *  true, PROMOTED. Does not mean the silence check is done for good: it
+   *  keeps running post-promotion too (see wsDeliveredThisWindow), because
+   *  ProdCom 2.3.2's websocket is known to deliver once and then go quiet
+   *  while still answering heartbeats. */
   private wsDelivered = false;
+  /**
+   * Delivered at least one transcript entry since the silence check's timer
+   * was last armed — the post-promotion equivalent of `!wsDelivered` above,
+   * which the check can no longer use once `wsDelivered` is permanently true.
+   *
+   * Read and reset to false at the start of each post-promotion check: a
+   * window where this is true is a window the socket proved itself in, no
+   * REST call needed. A window where it is false is what triggers asking
+   * ProdCom whether anything was actually said.
+   */
+  private wsDeliveredThisWindow = false;
 
   /**
    * Whether `{"type":"subscribe","events":["transcript"]}` is suspected of being
@@ -932,6 +946,7 @@ export class ProdComService extends ConnectionLifecycle {
     // which describe the BOX and are cleared by configure() alone.
     this.wsBaselineRows = null;
     this.wsDelivered = false;
+    this.wsDeliveredThisWindow = false;
     this.skippedSources.clear();
     // A new connection re-reads the keyword list and says so again. The list
     // itself is deliberately KEPT across the teardown: if the re-read fails,
@@ -1128,9 +1143,13 @@ export class ProdComService extends ConnectionLifecycle {
 
   /**
    * Whether the check still has a question to ask ABOUT `ws`: the WebSocket is
-   * the live transport, `ws` is still the socket this service holds, and it has
-   * delivered nothing. Re-read after every await — a frame can land, or the
-   * socket can be replaced, while REST is out.
+   * the live transport and `ws` is still the socket this service holds.
+   *
+   * Deliberately says nothing about whether `ws` has delivered — the check
+   * runs both before promotion (has it delivered ANYTHING yet) and after
+   * (has it stopped, having once delivered), and the caller is what tells
+   * those apart. Re-read after every await regardless: a frame can land, or
+   * the socket can be replaced, while REST is out.
    *
    * Identity, not `this.ws !== null`, and the difference is the whole point.
    * `connectionEpoch` is bumped only by teardown(), and an ordinary drop does
@@ -1143,12 +1162,15 @@ export class ProdComService extends ConnectionLifecycle {
    * slow transcript read coinciding with one drop.
    */
   private silenceCheckStillOpen(ws: WebSocket | null): boolean {
-    return this.running && this.wsOpen && ws !== null && this.ws === ws && !this.wsDelivered;
+    return this.running && this.wsOpen && ws !== null && this.ws === ws;
   }
 
   /**
-   * One transcript entry has arrived over the socket. It is proven; stop asking,
-   * and — unless it already is — promote it to the live transport.
+   * One transcript entry has arrived over the socket. The FIRST one proves it
+   * and — unless it already is — promotes it to the live transport. Every one
+   * after that marks the current silence-check window as accounted for, which
+   * is what lets the check keep running post-promotion instead of trusting one
+   * frame for the rest of the connection's life.
    *
    * Also the only thing that clears wsSilentBox, which is the point: a box is
    * "silent" until a socket delivers, not until a socket opens. noteWebSocketHealthy
@@ -1156,11 +1178,13 @@ export class ProdComService extends ConnectionLifecycle {
    * could not be used for this.
    */
   private noteWebSocketDelivered(): void {
+    // Unconditional, unlike everything below: a promoted socket calls this on
+    // every delivered frame, not just its first.
+    this.wsDeliveredThisWindow = true;
     if (this.wsDelivered) return;
     this.wsDelivered = true;
-    // Housekeeping, not the guard: `wsDelivered` in silenceCheckStillOpen is
-    // what stops the check acting, and has to be, because a frame can arrive
-    // while the REST request is already out. This just saves the wake-up.
+    // Housekeeping, not the guard: this just saves the wake-up for a check
+    // that is about to be re-armed in promoteWebSocket() anyway.
     this.clearSilenceCheck();
     // A box that has proven itself is preferred from here on — the same as a
     // fresh configure(), so the next SSE reconnect does not wait out the retry
@@ -1189,6 +1213,13 @@ export class ProdComService extends ConnectionLifecycle {
    * This is the ONLY place the WebSocket becomes the live transport — opening it,
    * subscribing, and even a healthy heartbeat all prove the PEER is alive, not
    * that the SUBSCRIPTION delivers, which is the gap ProdCom 2.3.2 sits in.
+   *
+   * Promotion is not permanent on the strength of this one frame: ProdCom
+   * 2.3.2's websocket is known to deliver once and then go quiet while still
+   * answering heartbeats, which is the original incident. armSilenceCheck()
+   * keeps the same REST-backed check running on the same clock — see
+   * runSilenceCheck's onWebSocket branch for what it does differently now
+   * that the socket is trusted rather than on probation.
    */
   private promoteWebSocket(): void {
     this.onWebSocket = true;
@@ -1197,6 +1228,7 @@ export class ProdComService extends ConnectionLifecycle {
       `[prodcom] the websocket delivered a transcript entry — captions move to it and the SSE fallback closes`,
     );
     this.report("connected", `Streaming from ${this.host}:${this.port}`);
+    this.armSilenceCheck();
   }
 
   /**
@@ -1306,6 +1338,11 @@ export class ProdComService extends ConnectionLifecycle {
     // for exactly that.
     const quiet = everyMs(this.wsSilenceCheckMs);
 
+    if (this.onWebSocket) {
+      await this.runPromotedSilenceCheck(host, port, ws, quiet);
+      return;
+    }
+
     // Probation. This box has already been shown to accept a socket and carry
     // nothing on it, with AND without the subscribe frame, so the burden of
     // proof is on the socket rather than on REST: deliver something inside one
@@ -1391,6 +1428,96 @@ export class ProdComService extends ConnectionLifecycle {
         `instead of every ${WS_RETRY_EVERY}, starting ${this.alternateSubscribeMode()}`,
     );
     this.giveUpOnUnprovenWebSocket(SILENT_SOCKET_REASON);
+  }
+
+  /**
+   * The silence check's post-promotion mode: the socket has already proven
+   * itself once, so the question is no longer "has it EVER delivered" but "is
+   * it STILL delivering" — ProdCom 2.3.2 is known to answer heartbeats forever
+   * on a socket that has stopped carrying the transcript, which is the
+   * original incident this whole file exists to catch.
+   *
+   * A window the socket delivered anything in costs no REST call — same
+   * principle as probation, just re-checked every window instead of asked
+   * once — but the baseline still has to move forward on that window, or the
+   * NEXT silent window's REST read would find every already-delivered line
+   * sitting past a baseline that never advanced and misread routine silence
+   * as a miss.
+   */
+  private async runPromotedSilenceCheck(
+    host: string,
+    port: number,
+    ws: WebSocket | null,
+    quiet: string,
+  ): Promise<void> {
+    const deliveredThisWindow = this.wsDeliveredThisWindow;
+    this.wsDeliveredThisWindow = false;
+
+    if (deliveredThisWindow) {
+      const epoch = this.connectionEpoch;
+      const fresh = await this.readTranscriptRowCount(host, port);
+      if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
+      if (fresh !== null) this.wsBaselineRows = fresh;
+      this.armSilenceCheck();
+      return;
+    }
+
+    const baseline = this.wsBaselineRows;
+    if (baseline === null) {
+      console.debug(`[prodcom] promoted websocket quiet for ${quiet}, but this connection has no transcript baseline`);
+      this.armSilenceCheck();
+      return;
+    }
+
+    const epoch = this.connectionEpoch;
+    const answer = await this.spokenLinesBeyond(host, port, baseline);
+    if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
+    if (this.wsDeliveredThisWindow) {
+      // A frame landed while REST was out — this window is accounted for
+      // after all. Leave the verdict to the next one rather than act on a
+      // read that was already stale by the time it arrived.
+      this.armSilenceCheck();
+      return;
+    }
+
+    if (!answer.ok) {
+      // Exactly probation's tolerance: "no lines" and "could not ask" must
+      // not be confused, or an unreachable REST endpoint under a socket that
+      // is genuinely still working tears down a transport that was fine.
+      const out = this.wsOutages.fail("silence-check", answer.error, this.now());
+      if (out.log) {
+        console.warn(
+          `[prodcom] could not check whether the promoted websocket is missing transcript lines ` +
+            `(${scrub(answer.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+        );
+      }
+      this.armSilenceCheck();
+      return;
+    }
+    const askable = this.wsOutages.ok("silence-check", this.now());
+    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
+
+    if (answer.spoken === 0) {
+      // Quiet room, not a silent socket.
+      console.debug(`[prodcom] promoted websocket quiet for ${quiet}, and ProdCom has no spoken lines since`);
+      this.armSilenceCheck();
+      return;
+    }
+
+    // Proven once, silent since: demote rather than trust the one frame that
+    // promoted it. demoteToSse() reopens SSE, whose own connect primes REST
+    // (channels, keywords, backfill) and so covers the gap this leaves.
+    this.wsSilentBox = true;
+    console.warn(
+      `[prodcom] the promoted websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
+        `${answer.spoken} spoken line(s) it never carried — falling back to the SSE stream, which backfills ` +
+        `the gap, and re-testing the websocket every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
+        `${everyMs(this.wsRetryIntervalMs)} from here`,
+    );
+    this.closeSocket();
+    this.onWebSocket = false;
+    this.report("disconnected", null);
+    this.demoteToSse("stopped delivering while promoted — ProdCom shows spoken lines it never carried");
   }
 
   /**
@@ -1797,6 +1924,7 @@ export class ProdComService extends ConnectionLifecycle {
       // the socket this one replaced can never be used to judge this one.
       this.wsBaselineRows = null;
       this.wsDelivered = false;
+      this.wsDeliveredThisWindow = false;
       this.noteWebSocketHealthy();
       // Only while this box is known to carry nothing does the card need to say
       // a re-test is under way — the SSE stream is reporting "Streaming from

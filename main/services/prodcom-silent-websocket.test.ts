@@ -482,10 +482,15 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     await eventually(() => svc!.texts().includes("spoken-on-the-fallback"), "an SSE event to land");
   });
 
-  it("leaves a working socket alone, and never spends a REST call on it", async (t) => {
-    // The other half of the guard. A socket that has delivered is proven: the
-    // check is disarmed for that connection and asks nothing, however long it
-    // then sits quiet.
+  it("keeps checking a delivering socket, but does not tear it down over a quiet room", async (t) => {
+    // The controller's ruling: promotion is not permanent on the strength of
+    // one frame, so the check must keep running rather than go silent for
+    // good the moment a socket first proves itself — see
+    // prodcom-idle-after-promotion.test.ts's sibling concern for the SSE side
+    // of the same principle. What it must NOT do is act on a quiet room:
+    // ProdCom's history holds nothing beyond this connection's baseline the
+    // whole time, so every window after the one delivery has nothing to
+    // demote over.
     const { stub, svc } = await running(t, { entries: [spoken("in-prodcoms-history")] });
     await eventually(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
@@ -497,13 +502,9 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       stub.wsPing();
       await sleep(60);
     }
-    assert.equal(
-      silenceChecks(stub),
-      0,
-      "a socket that has already delivered was still being checked against REST",
-    );
-    assert.equal(svc.onWebSocketNow, true, "a proven socket was torn down");
-    assert.equal(stub.sseOpens, 1, "a proven socket kept reconnecting the fallback it had already closed");
+    assert.ok(silenceChecks(stub) > 0, "the check stopped running after the socket's first delivery");
+    assert.equal(svc.onWebSocketNow, true, "a delivering socket sitting in a quiet room was torn down");
+    assert.equal(stub.sseOpens, 1, "a quiet room reopened the fallback that promotion had already closed");
   });
 
   it("leaves the socket alone when REST cannot be asked, and says so", async (t) => {
