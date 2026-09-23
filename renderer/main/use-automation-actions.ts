@@ -2,12 +2,19 @@
 // object: resolving `actionId` to a human label when its own `label` is
 // blank, and saying when a stored id no longer exists.
 //
-// A plain one-shot fetch, not useStatusChannel: the registry has no live push
-// channel (it changes only when the app itself changes, never at runtime), so
-// there is nothing to subscribe to — unlike obs:status or cue-live, which
-// hydrate once and then stay live.
+// A shared react-query cache, not a private one-shot fetch: a panel of several
+// action-buttons each mount this hook, and a private fetch per mount meant a
+// three-button panel fired three identical GET /api/automation/registry
+// requests. Same queryKey the inspector and the automation section already
+// use, so every ActionButton on screen (and either editor surface, if ever
+// open at the same time) settles from one request. `retry` and
+// `refetchOnWindowFocus` are off to match the one-shot semantics this hook
+// always had — the registry has no live push channel (it changes only when
+// the app itself changes, never at runtime), so retrying it, or re-reading it
+// every time an operator's browser tab regains focus, only adds noise around
+// a failure that will not resolve itself.
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
@@ -30,30 +37,27 @@ export interface AutomationActionsState {
   error: boolean;
 }
 
-/** Never throws: a failure is returned in `error`, logged to the server (not
- *  only the browser console — see client-log.ts), and the caller decides what
- *  to show. Swallowing it here is exactly the shape this repo's "a new catch
- *  either rethrows or returns the failure" rule exists to catch: an
- *  unreachable server used to leave every action-button on screen reading a
- *  bare id with nothing saying why. */
+/** Never throws out of the hook: a failure is returned in `error`, logged to
+ *  the server (not only the browser console — see client-log.ts) once per
+ *  failed fetch, and the caller decides what to show. Swallowing it here is
+ *  exactly the shape this repo's "a new catch either rethrows or returns the
+ *  failure" rule exists to catch: an unreachable server used to leave every
+ *  action-button on screen reading a bare id with nothing saying why. */
 export function useAutomationActions(): AutomationActionsState {
-  const [state, setState] = useState<AutomationActionsState>({ actions: null, error: false });
-  useEffect(() => {
-    let cancelled = false;
-    void invoke<{ actions?: AutomationActionSpec[] }>("automation:registry")
-      .then((r) => {
-        if (cancelled) return;
+  const { data, isError } = useQuery({
+    queryKey: ["automation:registry"],
+    retry: false,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      try {
+        const r = await invoke<{ actions?: AutomationActionSpec[] }>("automation:registry");
         if (!Array.isArray(r?.actions)) throw new Error("answered with no actions array");
-        setState({ actions: r.actions, error: false });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
+        return r.actions;
+      } catch (err) {
         logToServer("action-button", `could not load the automation registry: ${errorMessage(err)}`);
-        setState({ actions: null, error: true });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return state;
+        throw err;
+      }
+    },
+  });
+  return { actions: data ?? null, error: isError };
 }
