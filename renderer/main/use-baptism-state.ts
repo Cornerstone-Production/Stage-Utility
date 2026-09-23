@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
+import { reduceBaptismPeople } from "../lib/baptism-people";
 import { formatClock } from "../lib/clock-format";
 import { useStatusChannel } from "./use-status-channel";
 
@@ -31,21 +32,15 @@ export function useBaptismState(): BaptismState | null {
  * count, not by everyone who happened to testify.
  */
 export function summarizeBaptism(s: BaptismState | null) {
-  const people = s?.people ?? [];
-  const baptized = people.filter((p) => p.baptizeMs > 0);
-  const count = baptized.length;
-  const totalTestimonyMs = people.reduce((a, p) => a + p.testimonyMs, 0);
-  const totalBaptizeMs = baptized.reduce((a, p) => a + p.baptizeMs, 0);
-  const totalBaptizedPersonMs = baptized.reduce((a, p) => a + p.testimonyMs + p.baptizeMs, 0);
-  const totalMs = totalTestimonyMs + totalBaptizeMs;
+  const r = reduceBaptismPeople(s?.people ?? []);
   return {
-    count,
-    totalTestimonyMs,
-    totalBaptizeMs,
-    totalMs,
-    avgTestimonyMs: people.length ? totalTestimonyMs / people.length : 0,
-    avgBaptizeMs: count ? totalBaptizeMs / count : 0,
-    avgPersonMs: count ? totalBaptizedPersonMs / count : 0,
+    count: r.baptized,
+    totalTestimonyMs: r.totalTestimonyMs,
+    totalBaptizeMs: r.totalBaptizeMs,
+    totalMs: r.totalTestimonyMs + r.totalBaptizeMs,
+    avgTestimonyMs: r.testified ? r.totalTestimonyMs / r.testified : 0,
+    avgBaptizeMs: r.baptized ? r.totalBaptizeMs / r.baptized : 0,
+    avgPersonMs: r.baptized ? r.totalBaptizedPersonMs / r.baptized : 0,
   };
 }
 
