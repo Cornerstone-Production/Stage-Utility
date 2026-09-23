@@ -168,3 +168,47 @@ describe("a session save that fails reaches the operator", () => {
     assert.equal(cleared.saveError ?? null, null, "Reset is the operator dismissing it");
   });
 });
+
+// The reason goes to every screen on the LAN, so it must be path-free by
+// construction: built from the errno number alone, never from a string the
+// error carries. Today's write path only rejects with fs errors, so these
+// errors are made by hand — which is the point: they are the ones a filter on
+// the message or the code would let through.
+describe("what a failed save may put on the screen is built from the errno alone", () => {
+  const SECRET = path.join(TMP, "private", "baptism.json");
+
+  async function reasonFor(error: unknown): Promise<string | null | undefined> {
+    const log = captureError("[baptism-timer] session save failed:");
+    const restore = stubAddSession(async () => {
+      throw error;
+    });
+    try {
+      const mark = await finishOnePerson();
+      return (await pushWhere(mark, (s) => !!s.saveError, "carrying saveError")).saveError;
+    } finally {
+      restore();
+      log.release();
+      timer.reset();
+    }
+  }
+
+  it("an error with no errno gets a fixed sentence, never its own message", async () => {
+    const reason = await reasonFor(new Error(`could not write ${SECRET}`));
+    assert.equal(reason, "an unexpected error; the log has the details");
+    assert.ok(!reason!.includes(TMP), "the message named a path, and none of it may reach the screen");
+  });
+
+  it("a system error's own code and message are not read — only its errno", async () => {
+    const doctored = Object.assign(new Error(`EACCES: permission denied, open '${SECRET}'`), {
+      errno: -13,
+      code: SECRET,
+      path: SECRET,
+    });
+    const reason = await reasonFor(doctored);
+    assert.equal(reason, "EACCES: permission denied", "both halves come from Node's table for errno -13");
+  });
+
+  it("anything thrown that is not an object at all gets the fixed sentence too", async () => {
+    assert.equal(await reasonFor(SECRET), "an unexpected error; the log has the details");
+  });
+});

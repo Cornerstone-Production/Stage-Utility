@@ -11,7 +11,7 @@
 // resumes the running clock — segmentStartedAt is an absolute timestamp). Finished
 // sessions are logged for review. Running elapsed is derived client-side.
 
-import { getSystemErrorMessage } from "node:util";
+import { getSystemErrorMessage, getSystemErrorName } from "node:util";
 
 import { baptismSessionId } from "../types/stage.js";
 import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSession, BaptismState } from "../types/stage.js";
@@ -25,7 +25,6 @@ import { baptismStore } from "./baptism-store.js";
 import { stageController } from "./stage-controller.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { sampleArchive } from "./archive/sample-archive.js";
-import { errorMessage } from "./errors.js";
 
 function idleState(mode: BaptismMode): BaptismState {
   return {
@@ -56,17 +55,23 @@ function idleState(mode: BaptismMode): BaptismState {
  * Finish driven against a read-only data directory carried exactly that in the
  * pushed state. The log line keeps the whole error.
  *
- * getSystemErrorMessage throws on anything but a negative integer, and this runs
- * inside a rejection handler, where a throw is an unhandled rejection — hence the
- * guard.
+ * Path-free by construction, not by filtering: the only input read is the
+ * errno NUMBER, and both halves of the reason come from Node's own table for
+ * it. No string the error carries — message, code, path — reaches the screen,
+ * so an error that is not a system error gets a fixed sentence rather than its
+ * message. Both lookups throw on anything but a negative integer, and this runs
+ * inside a rejection handler, where a throw is an unhandled rejection — hence
+ * the guard.
  */
 function saveFailureReason(err: unknown): string {
-  const e = err as Partial<NodeJS.ErrnoException> | null | undefined;
-  const errno = e?.errno;
-  if (typeof e?.code === "string" && typeof errno === "number" && Number.isInteger(errno) && errno < 0) {
-    return `${e.code}: ${getSystemErrorMessage(errno)}`;
+  const errno = (err as { errno?: unknown } | null | undefined)?.errno;
+  if (typeof errno === "number" && Number.isInteger(errno) && errno < 0) {
+    const name = getSystemErrorName(errno);
+    const description = getSystemErrorMessage(errno);
+    // An errno Node does not know reads "Unknown system error <n>" for both.
+    return name === description ? description : `${name}: ${description}`;
   }
-  return errorMessage(err);
+  return "an unexpected error; the log has the details";
 }
 
 class BaptismTimerService {
