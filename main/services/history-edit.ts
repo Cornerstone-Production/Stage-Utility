@@ -803,14 +803,14 @@ interface BaptismRebuildPlan {
   /** The STORED ids of matched sessions whose people/finishedAt the rebuild's
    *  rows actually updated. */
   updatedIds: Set<string>;
-  /** Matched to a rebuilt session, but the STORE's own finishedAt was not
-   *  earlier than the rebuilt one's — left exactly as stored. Presses made
-   *  after the service closed, or after a serviceKey roll, never reach that
-   *  service's rows (emitRaw needs an open service — see currentServiceKey),
-   *  so the store can know a correction the rows do not: a Finish, the
-   *  service ending, then an Undo and a longer re-Finish. Overwriting that
-   *  with what the (now stale) rows say is the bug an operator would have no
-   *  way to notice until the number was already wrong. */
+  /** Matched to a rebuilt session, but the STORE's own finishedAt was LATER
+   *  than the rebuilt one's — left exactly as stored. Presses made after the
+   *  service closed, or after a serviceKey roll, never reach that service's
+   *  rows (emitRaw needs an open service — see currentServiceKey), so the
+   *  store can know a correction the rows do not: a Finish, the service
+   *  ending, then an Undo and a longer re-Finish. Overwriting that with what
+   *  the (now stale) rows say is the bug an operator would have no way to
+   *  notice until the number was already wrong. */
   newer: number;
   /** Stored sessions naming this serviceKey that no rebuilt session matched —
    *  left exactly as they are, never removed. A session split across a
@@ -993,8 +993,8 @@ export interface BaptismRebuildOutcome {
   updated: number;
   /** No match in the store at all; added as a new session. */
   added: number;
-  /** Matched, but the store's own finishedAt was not earlier than the
-   *  rebuilt one's — left exactly as stored rather than reverted. */
+  /** Matched, but the store's own finishedAt was LATER than the rebuilt
+   *  one's — left exactly as stored rather than reverted. */
   newer: number;
   /** Stored sessions for this service the rebuild found no counterpart for —
    *  left untouched. */

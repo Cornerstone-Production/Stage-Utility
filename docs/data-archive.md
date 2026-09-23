@@ -157,14 +157,22 @@ before the raw layer existed, or one whose rows were lost outright. Replacing
 a service's whole set of sessions with what the rebuild reconstructs would
 delete every one of those.
 
-So the rebuild merges instead. Each session it reconstructs is matched against
-every stored session (by `id`, or by `startedAt` within two seconds for one
-recorded before per-person splits made the id exact) — matched, it updates in
-place, keeping its own id, start time and labels and taking only its people
-and finish time from the rows; unmatched, it is added. A stored session with
-no match in the rebuilt rows is left exactly as it is. The result names how
-many were updated, added, and left alone, and the [baptism] log line says the
-same.
+So the rebuild merges instead. Each rebuilt session is matched against EVERY
+stored session first by `id`, decided for the whole batch before any session
+falls back to the next rule, then by `startedAt` within two seconds for one
+recorded before the timer threaded its own stamp straight through to the row
+(older sessions can be off by about a millisecond). A match updates in place —
+keeping its own id, start time and labels, and taking people and finish time
+from the rows — UNLESS the rebuilt finish time is EARLIER than the store's own,
+in which case the stored session is left exactly as it is: presses made after
+the service closed, or after a `serviceKey` roll, never reach that service's
+rows (a Finish, then the service ending, then an Undo and a longer re-Finish),
+so the store can know a correction the rows cannot show, and a rebuild must
+never revert it. An unmatched session is added. A stored session with no match
+at all is left exactly as it is. The `[baptism]` log line names how many were
+updated, added, newer than their own rows, and left alone unreproduced; the
+Baptisms tab's own result does too. History's result names the total and how
+many were added, since its one line already covers three other legs.
 
 Reachable from both places: the Baptisms tab's own **Rebuild from raw**, in
 its header, targets one service on its own (`POST /api/baptism/rebuild`);

@@ -300,9 +300,10 @@ thing.
 | Method | Path | Purpose |
 |--------|------|---------|
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
+| GET | `/api/history/live?serviceKey=<key>` | Read-only: `{ live }`, whether any recorder is actively writing this key right now — the same check every write route in this section refuses on. A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
-| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all, `500` with the reason for any other failure |
+| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all, `500` for any other failure (no detail in the body — the reason is on the server's own log) |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
@@ -375,8 +376,10 @@ read.
 live timer: it replays that service's `baptism.csv` and MERGES the result into
 the stored sessions, never replacing them — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
-Answers `{ rows, sessions, updated, added, kept }`. `409` while that service is
-recording, and `409` when it has no `baptism.csv` at all. `/api/history/rebuild`
+Answers `{ rows, sessions, updated, added, newer, kept }`. `400` for a body
+with no `serviceKey`; `409` while that service is recording, and `409` when it
+has no `baptism.csv` at all; `500` for any other failure, with no detail in
+the body. `/api/history/rebuild`
 runs the same merge as its own baptism leg.
 
 **Updates, backup and the archive** — see
