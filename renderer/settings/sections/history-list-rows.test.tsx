@@ -581,6 +581,33 @@ describe("a history load that failed, rather than came back empty", () => {
     // The rest of the page is unaffected: the timings loaded fine.
     assert.ok(view.container.querySelectorAll("[data-history-row]").length > 0, "the day list went too");
   });
+
+  // A swallowing `.catch(() => setBaptisms([]))` made a genuinely down fetch
+  // indistinguishable from a month with no baptisms at all — silently, on
+  // every row. baptism-operator.tsx's own reloadSessions() already logs and
+  // flags this exact fetch; the list must do the same, once, not per row.
+  test("a failed baptism-sessions read says so, once, never reading as a baptism-free month", async () => {
+    const { view, warned } = await withFailures((url) => url === "/api/baptism/sessions");
+    const txt = (view.container.textContent ?? "").replace(/\s+/g, " ");
+    assert.ok(
+      txt.includes("Baptism counts could not be loaded"),
+      `expected a note that baptism counts failed to load: ${txt.slice(0, 300)}`,
+    );
+    // Exactly once for the whole list — not a copy under every row.
+    const notes = [...view.container.querySelectorAll('[role="alert"]')].filter((n) =>
+      (n.textContent ?? "").includes("Baptism counts could not be loaded"),
+    );
+    assert.equal(notes.length, 1, `expected exactly one note, found ${notes.length}`);
+    assert.ok(
+      warned.some((l) => l.startsWith("[baptism] could not load past sessions") && l.includes("socket hang up")),
+      `no tagged [baptism] line naming the reason: ${warned.join(" | ")}`,
+    );
+    // Neither row claims a real "0 baptized" — a failure must not manufacture
+    // a false figure any more than it may hide behind a true one.
+    assert.doesNotMatch(txt, /\b0 baptized\b/);
+    // The rest of the page is unaffected: the timings loaded fine.
+    assert.ok(view.container.querySelectorAll("[data-history-row]").length > 0, "the day list went too");
+  });
 });
 
 describe("what the All services page is made of", () => {

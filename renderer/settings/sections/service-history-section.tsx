@@ -368,9 +368,11 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
  * service that hasn't gone live yet has attendance but no timeline. Union'd on
  * `serviceKey` so that service is still one row, not a missing one.
  */
-/** The three loads the page opens with. Named so a failure can be attributed to
- *  one of them rather than to "history". */
-type HistoryLoad = "timeline" | "attendance" | "spl";
+/** The loads the page opens with. Named so a failure can be attributed to one
+ *  of them rather than to "history". `baptisms` is loaded for the whole page
+ *  (the All-services list needs it too — see the effect below), not per
+ *  selection, but it is the same kind of failure the other three are. */
+type HistoryLoad = "timeline" | "attendance" | "spl" | "baptisms";
 
 interface HistoryRow {
   serviceKey: string;
@@ -489,8 +491,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
   const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
-  // Baptism sessions (cross-linked to a service by time overlap).
-  const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
+  // Baptism sessions (cross-linked to a service by time overlap). `null`
+  // until the first fetch resolves — a failure resets it to `[]`, same as a
+  // genuinely baptism-free month, but `loadFailed.has("baptisms")` is what
+  // tells the two apart; nothing here may treat "not answered yet" or "the
+  // read failed" as "there is nothing to report".
+  const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
   // Attendance records for all services — the day rows and the Trends card are
   // both built from these.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
@@ -851,15 +857,32 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // disagree — see linkBaptisms.ts). Refetched on reloadKey so a Rebuild
   // from raw (which can restore or update a session) is reflected without a
   // full reload, whether or not a service happens to be open at the time.
+  //
+  // A failure is not a baptism-free month. This used to `.catch(() =>
+  // setBaptisms([]))`, the exact lie the OTHER three loads on this page were
+  // already fixed not to tell — a down fetch and a genuine zero read
+  // identically, silently, on every row. Logged the same way
+  // baptism-operator.tsx's own reloadSessions() logs this exact fetch, and
+  // flagged through the same loadFailed/noteLoaded pair timeline/attendance/
+  // spl already use, so the list can say so once rather than nowhere.
   useEffect(() => {
     let cancelled = false;
     invoke<BaptismSession[]>("baptism:sessions")
-      .then((b) => !cancelled && setBaptisms(b))
-      .catch(() => !cancelled && setBaptisms([]));
+      .then((b) => {
+        if (cancelled) return;
+        setBaptisms(b);
+        noteLoaded("baptisms");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setBaptisms([]);
+        logToServer("baptism", `could not load past sessions: ${errorMessage(err)}`);
+        setLoadFailed((prev) => (prev.has("baptisms") ? prev : new Set(prev).add("baptisms")));
+      });
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, noteLoaded]);
 
   // The calendar and the day list are GLOBAL — every service type, so you can
   // navigate to any of them. Nothing on this page scopes to one type any more:
@@ -1061,7 +1084,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     // them. Leaving the tiles in place beside the header put Started, Planned,
     // Actual and Avg overrun on screen twice.
     const det = detail; // narrow for the async handler
-    const linkedBap = linkBaptisms(baptisms, detail);
+    const linkedBap = linkBaptisms(baptisms ?? [], detail);
     const bapStats = baptismStats(linkedBap);
     // The Baptisms entry rides alongside SERVICE_SECTIONS's own three, in the
     // same order the cards actually sit in the page — the header takes this
@@ -1645,6 +1668,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               />
             </div>
           </div>
+          {/* Once for the whole list, never per row: a row that failed to
+              learn its own baptism count looks IDENTICAL to one with a real
+              zero, and there is no per-row way to spell "unknown" without a
+              dash ROW_COLUMNS deliberately never puts under this figure. */}
+          {loadFailed.has("baptisms") && (
+            <p role="alert" className="text-caption2 text-danger-11">
+              Baptism counts could not be loaded; the log has the details.
+            </p>
+          )}
           {monthGroups.map((group, gi) => (
             <div
               key={group.date}
@@ -1737,7 +1769,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // The SAME linkBaptisms + baptismStats pair the open service's
             // own Baptisms card uses, so a row's count and that service's
             // page can never disagree about the same service.
-            const bapCount = baptismStats(linkBaptisms(baptisms, s)).people;
+            const bapCount = baptismStats(linkBaptisms(baptisms ?? [], s)).people;
             const under = [s.seriesTitle, itemCount, bapCount > 0 ? `${bapCount} baptized` : null]
               .filter(Boolean)
               .join(" \u00b7 ");
