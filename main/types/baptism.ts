@@ -93,9 +93,10 @@ export interface BaptismState {
    * every screen on the LAN. The write settles after Finish has returned, so
    * this arrives on a push of its own rather than on Finish's response.
    *
-   * Cleared by a later save that lands, and by Reset. Carried across Start and
-   * the workflow toggle: a plan item going live starts the next session with
-   * nobody at the screen, and that must not erase a failure nobody has seen.
+   * Cleared by a later save that lands, by Reset, and by the operator
+   * dismissing it (dismissSaveError). Carried across Start and the workflow
+   * toggle: a plan item going live starts the next session with nobody at the
+   * screen, and that must not erase a failure nobody has seen.
    *
    * Optional like every field added after this shape first shipped: a record
    * persisted before it existed restores with none.

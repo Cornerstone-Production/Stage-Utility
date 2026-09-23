@@ -49,6 +49,7 @@ function baptismActions(): string[] {
 const EXPECTED_ACTIONS = [
   "advance",
   "baptized",
+  "dismiss-save-error",
   "finish",
   "mode",
   "next",

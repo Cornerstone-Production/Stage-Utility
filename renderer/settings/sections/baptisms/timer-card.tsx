@@ -186,16 +186,28 @@ export function TimerCard({ state, onFinished }: TimerCardProps) {
 
           {/* Directly under the readout, because the readout above it says
               "Finished" either way. Not gated on the finished readout: Start
-              carries the failure into the next session (see
-              BaptismState.saveError), so it stays up until a save lands or
-              Reset clears it. No rebuild offer yet — nothing in the app replays
-              a baptism session from its raw rows. */}
+              and the workflow toggle carry the failure (see
+              BaptismState.saveError), so it stays up until a save lands, Reset
+              clears it, or the operator dismisses it here. Its own Dismiss
+              because after the toggle the state holds nobody, and neither
+              Reset nor Undo renders. No rebuild offer yet — nothing in the app
+              replays a baptism session from its raw rows. */}
           {state.saveError && (
-            <p role="alert" className="rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-              <span className="font-semibold">The last session did not save.</span> Finish could not write it to Past
-              sessions ({state.saveError}). Its presses are still in the service&rsquo;s raw archive, baptism.csv, if a
-              service was open while it ran.
-            </p>
+            <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
+              <p className="flex-1">
+                <span className="font-semibold">The last session did not save.</span> Finish could not write it to Past
+                sessions ({state.saveError}). Its presses are still in the service&rsquo;s raw archive, baptism.csv, if a
+                service was open while it ran.
+              </p>
+              <Button
+                size="small"
+                disabled={busy}
+                onClick={() => void act(setBusy, "baptism:dismissSaveError")}
+                className="shrink-0 text-danger-11 hover:bg-danger-9/15"
+              >
+                Dismiss
+              </Button>
+            </div>
           )}
 
           <div className="flex flex-wrap items-center gap-2">

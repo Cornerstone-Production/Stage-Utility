@@ -2,9 +2,9 @@
 //
 // BaptismState.saveError is set when the write behind Finish rejects (see
 // baptism-save-error.test.ts for the server half). This proves the card renders
-// it: a note announced as an alert, naming the reason, and saying where the
-// session still exists. Without it the readout says "Finished" over a session
-// Past sessions will never list.
+// it: a note announced as an alert, naming the reason, saying where the session
+// still exists, and carrying its own Dismiss. Without it the readout says
+// "Finished" over a session Past sessions will never list.
 //
 // NOT proved here: how the note LOOKS. jsdom loads no stylesheet, so its colour,
 // its border and whether it reads as an error beside the readout cannot be seen
@@ -21,7 +21,7 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.
 
 const teardown = installRenderDom();
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { TimerCard } = await import("./timer-card.js");
 const { TooltipProvider } = await import("../../../components/ui/index.js");
@@ -87,6 +87,64 @@ test("a finished session whose save failed says it did not save, why, and where 
 test("a save that did not fail claims nothing", async () => {
   const root = await mount(FINISHED);
   assert.equal(alertText(root), null, "no alert when saveError is null");
+});
+
+/** Mount with a fetch that records every request and stays installed until
+ *  `restore` — a click after mount goes through the real invoke() to it. */
+async function mountRecording(state: BaptismState): Promise<{ root: HTMLElement; calls: string[]; restore: () => void }> {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string, init?: RequestInit) => {
+    calls.push(`${init?.method ?? "GET"} ${String(input)}`);
+    return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+  }) as unknown as typeof fetch;
+  const view = render(
+    React.createElement(TooltipProvider, null, React.createElement(TimerCard, { state, onFinished: () => {} })),
+  );
+  await settle();
+  return { root: view.container, calls, restore: () => void (globalThis.fetch = realFetch) };
+}
+
+const buttonNamed = (root: ParentNode, label: string) =>
+  [...root.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label);
+
+test("the note has its own Dismiss, and pressing it asks the server to clear the failure", async () => {
+  const { root, calls, restore } = await mountRecording({ ...FINISHED, saveError: DISK });
+  try {
+    const dismiss = buttonNamed(root, "Dismiss");
+    assert.equal(!!dismiss, true, "expected a Dismiss control on the note");
+    assert.equal(!!dismiss!.closest('[role="alert"]'), true, "it belongs to the note, not to the row of timer controls");
+    fireEvent.click(dismiss!);
+    await settle();
+    assert.ok(
+      calls.some((c) => c.startsWith("POST ") && c.endsWith("/api/baptism/dismiss-save-error")),
+      `expected a POST to /api/baptism/dismiss-save-error, got ${JSON.stringify(calls)}`,
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("after the workflow toggle the state holds nobody, and Dismiss is the only thing that clears the note", async () => {
+  // setMode() carries saveError into a fresh idle state: no people, nothing
+  // finished. The card renders no Reset and no Undo there.
+  const { root, restore } = await mountRecording({
+    ...FINISHED,
+    mode: "per-person",
+    personNumber: 0,
+    finishedAt: null,
+    sessionStartedAt: null,
+    people: [],
+    saveError: DISK,
+  });
+  try {
+    assert.notEqual(alertText(root), null, "the note is up");
+    assert.equal(!!buttonNamed(root, "Reset"), false, "sanity: no Reset in an empty idle state");
+    assert.equal(!!buttonNamed(root, "Undo"), false, "sanity: no Undo either");
+    assert.equal(!!buttonNamed(root, "Dismiss"), true, "so the note needs a control of its own");
+  } finally {
+    restore();
+  }
 });
 
 test("the note stays up while the next session runs, since Start carries the failure", async () => {

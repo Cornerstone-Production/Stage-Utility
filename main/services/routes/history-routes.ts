@@ -368,6 +368,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "pause": json(res, baptismTimerService.pause()); return;
         case "resume": json(res, baptismTimerService.resume()); return;
         case "reset": json(res, baptismTimerService.reset()); return;
+        case "dismiss-save-error": json(res, baptismTimerService.dismissSaveError()); return;
         case "mode": {
           const body = (await readBody(req)) as Record<string, unknown>;
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));

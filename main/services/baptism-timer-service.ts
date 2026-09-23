@@ -744,6 +744,18 @@ class BaptismTimerService {
     return this.commit();
   }
 
+  /** The operator has read a failed save's note and dismissed it — the one way
+   *  to clear it besides a save that lands or Reset, and the only one after
+   *  the workflow toggle has carried it into a state with nobody in it, where
+   *  the Timer card offers neither Reset nor Undo. Touches nothing else, and
+   *  writes no raw row: it is not a press on the timer. */
+  dismissSaveError(): BaptismState {
+    if (!this.state.saveError) return this.state;
+    console.log(`[baptism-timer] save failure dismissed: ${this.state.saveError}`);
+    this.state = { ...this.state, saveError: null };
+    return this.commit();
+  }
+
   /** Clear everything back to idle (keeps the chosen mode). */
   reset(): BaptismState {
     this.state = idleState(this.state.mode);

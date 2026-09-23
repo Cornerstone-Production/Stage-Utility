@@ -127,6 +127,7 @@ export type IpcChannel =
   | "baptism:advance"
   | "baptism:baptized"
   | "baptism:deleteSession"
+  | "baptism:dismissSaveError"
   | "baptism:finish"
   | "baptism:get"
   | "baptism:getTriggers"
@@ -608,6 +609,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/baptism/finish");
     case "baptism:reset":
       return post<T>("/api/baptism/reset");
+    case "baptism:dismissSaveError":
+      return post<T>("/api/baptism/dismiss-save-error");
     case "baptism:deleteSession": {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);

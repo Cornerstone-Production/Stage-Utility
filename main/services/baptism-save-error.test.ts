@@ -169,6 +169,71 @@ describe("a session save that fails reaches the operator", () => {
   });
 });
 
+// Switching the workflow carries the failure into an idle state with nobody
+// in it, where the Timer card renders neither Reset nor Undo — so without a
+// control of its own the note stayed up until some later session's save.
+// Dismissing is the operator's choice, and only theirs: nothing else clears it.
+describe("the operator can dismiss a failed save", () => {
+  async function failSave(): Promise<void> {
+    const log = captureError("[baptism-timer] session save failed:");
+    const restore = stubAddSession(rejecting);
+    try {
+      const mark = await finishOnePerson();
+      await pushWhere(mark, (s) => !!s.saveError, "carrying saveError");
+    } finally {
+      restore();
+      log.release();
+    }
+  }
+
+  function captureDismissLog(): { lines: string[]; release: () => void } {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("[baptism-timer] save failure dismissed")) lines.push(args[0]);
+      else original(...args);
+    };
+    return { lines, release: () => void (console.log = original) };
+  }
+
+  it("clears it after the workflow toggle, where no other control shows, and says so on a push", async () => {
+    await failSave();
+    const toggled = timer.setMode("per-person");
+    assert.equal(toggled.saveError, REASON, "sanity: the toggle carried it");
+    assert.equal(toggled.people.length, 0, "sanity: nobody in the state, so the card offers no Reset or Undo");
+
+    const log = captureDismissLog();
+    const mark = pushes.length;
+    let dismissed: BaptismState;
+    try {
+      dismissed = timer.dismissSaveError();
+    } finally {
+      log.release();
+    }
+    assert.equal(dismissed.saveError, null);
+    assert.equal(pushes[mark]?.saveError, null, "every screen hears it on a push, not just this caller");
+    assert.equal(dismissed.mode, "per-person", "and nothing else about the state moves");
+    assert.deepEqual(log.lines, [`[baptism-timer] save failure dismissed: ${REASON}`]);
+    timer.reset();
+  });
+
+  it("leaves a running session exactly as it was", async () => {
+    await failSave();
+    const running = timer.start(); // the next session, carrying the failure
+    assert.equal(running.saveError, REASON, "sanity");
+    const dismissed = timer.dismissSaveError();
+    assert.deepEqual({ ...dismissed, saveError: REASON }, running, "only saveError changed");
+    timer.reset();
+  });
+
+  it("with nothing to dismiss, pushes nothing", () => {
+    timer.reset();
+    const mark = pushes.length;
+    timer.dismissSaveError();
+    assert.equal(pushes.length, mark, "no failure, no push");
+  });
+});
+
 // The reason goes to every screen on the LAN, so it must be path-free by
 // construction: built from the errno number alone, never from a string the
 // error carries. Today's write path only rejects with fs errors, so these
