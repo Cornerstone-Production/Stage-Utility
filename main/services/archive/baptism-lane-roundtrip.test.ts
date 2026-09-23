@@ -48,7 +48,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { BaptismPerson } from "../../types/stage.js";
+import type { BaptismPerson, BaptismState } from "../../types/stage.js";
 import type { BaptismSpan } from "./baptism-lane.js";
 import type { BaptismRow } from "./rebuild-baptism.js";
 
@@ -57,6 +57,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { baptismTimerService: timer } = await import("../baptism-timer-service.js");
+const { baptismStore } = await import("../baptism-store.js");
 const { sampleArchive } = await import("./sample-archive.js");
 const { readBaptismRows } = await import("./rebuild-baptism.js");
 const { baptismLaneSpans } = await import("./baptism-lane.js");
@@ -764,6 +765,65 @@ describe("the clock a direct next() starts while armed", () => {
     timer.finish();
     await assertLaneMatchesStore(ctx, "direct next() while armed, then a pause");
     await assertLaneMatchesStore(ctx, "direct next() while armed, then a pause, its row stripped", 1, withoutDirectNextStart);
+  });
+});
+
+// A session PR 1 finished while armed was persisted before finishedFrom
+// existed. Restored on this code it has none, and Undo takes undo()'s fallback:
+// it reopens a running baptism at index 0 and writes only the undo row a re-arm
+// writes — the one clock this code starts that the rows do not show. Driven
+// through the real store and init(), which is how such a record arrives.
+describe("the clock undo()'s fallback starts for a record saved before finishedFrom existed", () => {
+  async function restoreAsSavedBeforeFinishedFrom(): Promise<void> {
+    const { finishedFrom: _notYetInvented, ...legacy } = timer.getState();
+    void _notYetInvented;
+    await baptismStore.saveCurrent(legacy as BaptismState);
+    await timer.init();
+    assert.equal(timer.getState().finishedFrom ?? null, null, "sanity: restored with no finishedFrom");
+  }
+
+  it("undone, then undone again: the second Undo re-arms on the silent clock", async () => {
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.startBaptisms();
+    timer.finish(); // while armed
+    await restoreAsSavedBeforeFinishedFrom();
+    const reopened = timer.undo();
+    assert.equal(reopened.armed ?? false, false, "sanity: the fallback reopens a running baptism");
+    assert.equal(reopened.baptismIndex, 0);
+    await sleep(STRETCH_MS);
+    assert.equal(timer.undo().armed, true, "sanity: the second Undo re-arms");
+    await sleep(STRETCH_MS);
+    timer.advance();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next(); // auto-finishes
+
+    const spans = await assertLaneMatchesStore(ctx, "restored armed Finish, undone twice");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
+  });
+
+  it("undone, then run: the silent clock is placed from the person-complete that ends it", async () => {
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.startBaptisms();
+    timer.finish(); // while armed
+    await restoreAsSavedBeforeFinishedFrom();
+    timer.undo(); // person 1's clock runs, and no row says so
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next(); // auto-finishes
+
+    const spans = await assertLaneMatchesStore(ctx, "restored armed Finish, undone, then run");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
   });
 });
 

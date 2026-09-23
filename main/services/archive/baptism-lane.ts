@@ -112,9 +112,10 @@
 //
 // ── A clock started from armed with no row of its own ────────────────────────
 //
-// Every clock the emitter starts after arming now writes `baptisms-start`. PR 1's
-// emitter, which ships before this one, started one silently on two presses, and
-// rows are append-only, so the files it wrote keep them:
+// A clock can start that the rows do not show: they say nothing, or say the
+// section re-armed, while a baptism clock runs. PR 1's emitter, which ships
+// before this one, did it on two presses, and rows are append-only, so the files
+// it wrote keep them:
 //
 //  - POST /api/baptism/next while ARMED — a documented route; advance() is what
 //    the panel sends — closes person 1 without a row, since nobody's clock ran,
@@ -124,6 +125,13 @@
 //    with a clock running, writing only its `undo` row. It re-arms now, and the
 //    lane reads that row as the re-arm (see the undo rule above), so in an old
 //    file the clock it started is silent too.
+//
+// And one path in this code still does it. A session PR 1 finished while armed
+// was persisted before `finishedFrom` existed, so after the upgrade it restores
+// with none, and Undo takes undo()'s fallback for such records: it reopens a
+// running baptism at index 0 and writes only its `undo` row — exactly what the
+// re-arm writes. From that row on the clock is silent, so while that session is
+// live the lane draws nothing running until the next row arrives.
 //
 // The first row after a silent start is usually the `pause` that banks that
 // clock or the `person-complete` that ends it, and either way its segmentMs is
@@ -135,14 +143,16 @@
 // index, which only index 0 allows, it re-arms as it does after "First person
 // in": nothing was drawn, and the timer threw that time away. Landing one index
 // before it, it is a step back and re-times that person like any other. The
-// silent clock's index is the person after the armed one for the first press,
-// and the index the undo row names for the second.
+// silent clock's index is the person after the armed one for next(), and the
+// index the undo row names for a reopened armed Finish — PR 1's or the
+// fallback's.
 //
-// Nothing the emitter writes now reaches any of this: every clock it starts has
-// its row, and an armed timer's undo lands in the testimonies.
-// baptism-lane-roundtrip.test.ts holds the first shape to the store by stripping
-// the row from real sessions; the second, which no current press produces, is
-// held by fixtures in baptism-lane.test.ts.
+// Apart from that fallback, nothing the emitter writes reaches any of this:
+// every other clock it starts has its row, and an armed timer's undo lands in
+// the testimonies. baptism-lane-roundtrip.test.ts drives the fallback through a
+// restored record, and holds next()'s shape to the store by stripping the row
+// from real sessions; PR 1's reopened armed Finish, which no current press
+// produces, is held by fixtures in baptism-lane.test.ts.
 
 import { BAPTISM_RAW_EVENTS, type BaptismMode, type BaptismRawEvent } from "../../types/stage.js";
 import { scrub } from "../scrub.js";
@@ -181,9 +191,9 @@ class LaneSession {
   people = 0;
   /** Grouped only: when the section armed, while no baptism clock has run. */
   armedAt: string | null = null;
-  /** Grouped only, read while armed: the index an old file's clock started
-   *  with no row of its own would be at (see the header) — the person after
-   *  the armed one, or the one a reopened armed Finish's undo row names. */
+  /** Grouped only, read while armed: the index a clock started with no row of
+   *  its own would be at (see the header) — the person after the armed one, or
+   *  the one a reopened armed Finish's undo row names. */
   silentIndex = 1;
   /** The `finish` just read, or null after any other row. An undo straight
    *  after a finish reopens the session, and re-arms if that finish closed an
@@ -312,8 +322,10 @@ export function baptismLaneSpans(rows: BaptismRow[], serviceKey = ""): BaptismSp
         // The two undos that re-arm (see the header): no clock runs until a
         // baptisms-start says one did.
         if (grouped && r.phase === "baptism" && reopens?.armed) {
-          // Reopening a session finished while armed: nothing ran to drop. An
-          // old file's undo here started a clock at the index it names.
+          // Reopening a session finished while armed: nothing ran to drop.
+          // An old file's undo here started a clock at the index it names, and
+          // so does undo()'s fallback for a record saved before finishedFrom
+          // existed (see the header).
           session.armedAt = at;
           session.silentIndex = index;
           break;
@@ -326,10 +338,12 @@ export function baptismLaneSpans(rows: BaptismRow[], serviceKey = ""): BaptismSp
           break;
         }
         if (grouped && r.phase === "baptism" && !reopens && session.armedAt !== null && index === session.silentIndex) {
-          // Only an old file gets here — an armed timer's undo lands in the
-          // testimonies — so a clock started with no row was running at this
-          // index, and the undo re-arms on it as on "First person in". None of
-          // that clock was drawn, so nothing drops. See the header.
+          // Only a silent clock gets here — an armed timer's undo lands in
+          // the testimonies — so one was running at this index: an old file's,
+          // or the one undo()'s fallback starts for a record finished while
+          // armed before finishedFrom existed. The undo re-arms on it as on
+          // "First person in". None of that clock was drawn, so nothing drops.
+          // See the header.
           session.armedAt = at;
           break;
         }
