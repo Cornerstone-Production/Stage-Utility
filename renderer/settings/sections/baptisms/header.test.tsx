@@ -438,6 +438,64 @@ test("a target change reads as 'checking', never the previous key's own answer, 
   }
 });
 
+// The BACKSTOP's own ask has no cancellation on the in-flight promise once
+// the target moves to B — clearInterval only stops FUTURE ticks, never one
+// already fired. A's backstop tick landing after B has already gotten its
+// own correct answer must not overwrite it: that stranded B at "checking"
+// forever, because the backstop itself was written to skip scheduling while
+// checking, so nothing was left to ever ask again.
+test("A's late backstop answer landing after the target has moved to B does not strand B at 'checking'", async () => {
+  mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  let askedAOnce = false;
+  const { fetchFn, releasePendingLive } = stubFetch({
+    live: (key) => {
+      if (key !== "svc-a") return false; // B always resolves not-live immediately
+      if (!askedAOnce) {
+        askedAOnce = true;
+        return true; // A's own initial ask: live, so its backstop starts
+      }
+      return null; // A's backstop tick: held open until released below
+    },
+  });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fetchFn;
+  try {
+    const view = render(
+      React.createElement(TooltipProvider, null,
+        React.createElement(BaptismHeader, { state: { ...IDLE, serviceKey: "svc-a" }, sessions: [], onRebuilt: () => {} }),
+        React.createElement(ConfirmHost)),
+    );
+    await flush();
+    assert.equal(rebuildButton(view.container).disabled, true, "precondition: A is live");
+
+    // A's backstop fires and its own ask is now the pending one.
+    await act(async () => { mock.timers.tick(30_000); });
+    await flush();
+
+    // The target moves to B before A's backstop answer lands.
+    view.rerender(
+      React.createElement(TooltipProvider, null,
+        React.createElement(BaptismHeader, { state: { ...IDLE, serviceKey: "svc-b" }, sessions: [], onRebuilt: () => {} }),
+        React.createElement(ConfirmHost)),
+    );
+    await flush();
+    assert.equal(rebuildButton(view.container).disabled, false, "precondition: B's own answer (not live) must already have landed");
+
+    // A's stale backstop answer finally arrives.
+    releasePendingLive();
+    await flush();
+
+    assert.equal(
+      rebuildButton(view.container).disabled,
+      false,
+      "B's own correct answer must not be overwritten by A's late, stale backstop answer",
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+    mock.timers.reset();
+  }
+});
+
 // ── A failed ask gets its own reason, and does not silently pass as "live" ──
 
 test("a failed live check disables the button with its OWN reason, not a silent 'still recording'", async () => {
