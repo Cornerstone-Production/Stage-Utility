@@ -352,6 +352,12 @@ timer:
   just without a row for whoever was mid-baptism).
 - `could not load past sessions: …` — the Past sessions and Trends cards'
   fetch failed; both say so on screen rather than reading as no history.
+- `session lane fetch failed for <serviceKey>: …` — the Session chart's timer
+  lane could not be fetched; the chart shows its own note rather than reading
+  as a session that recorded nothing.
+- `plan timeline fetch failed for <serviceKey>: …` — the Session chart's plan
+  lane could not be fetched; the chart shows its own note rather than drawing
+  an empty plan lane with no explanation.
 - `delete session <id> failed: …` — a delete did not reach the server; the row
   is restored and the operator sees a toast rather than a change with no
   explanation.
