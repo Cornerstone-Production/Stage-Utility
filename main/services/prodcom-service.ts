@@ -40,7 +40,7 @@
 import * as crypto from "node:crypto";
 import * as http from "http";
 
-import type { TranscriptLineDTO } from "../types/stage.js";
+import type { ProdcomChannelDTO, TranscriptLineDTO } from "../types/stage.js";
 import { broadcast, channelInDemand } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
@@ -721,6 +721,10 @@ export class ProdComService extends ConnectionLifecycle {
   private channels = new Map<string, ChannelMeta>();
   private channelsFetchedAt = 0;
   private channelRefreshInFlight = false;
+  /** Serialised form of the last "prodcom:channels" broadcast, so a throttled
+   *  refresh that came back identical (the common case) does not push a frame
+   *  nobody's list actually changed. Null until the first broadcast. */
+  private lastChannelsBroadcast: string | null = null;
 
   /**
    * Compiled patterns for every keyword ProdCom marks `isSensitive`, split the
@@ -913,6 +917,10 @@ export class ProdComService extends ConnectionLifecycle {
     // still redacting with the last known words is the safe direction, and
     // dropping them would silently un-redact every display.
     this.lastKeywordSummary = null;
+    // Same reasoning as the keyword summary above: a fresh connection announces
+    // its channel list at least once, even to a client that was already
+    // watching one that happened to look identical.
+    this.lastChannelsBroadcast = null;
     this.redactionLogged = false;
     // In-flight speech does not survive the stream. Whatever was mid-utterance
     // when the connection went will be re-sent or finalised on the other side; an
@@ -1534,6 +1542,20 @@ export class ProdComService extends ConnectionLifecycle {
     this.pruneStalePartials();
     this.pruneStaleFinals();
     return [...this.finals.map((e) => e.line), ...[...this.partials.values()].map((e) => e.line)];
+  }
+
+  /**
+   * ProdCom's own channel list, straight from `GET /api/v1/channels` — every
+   * channel the box has, whether or not it has ever spoken.
+   *
+   * Sorted by name (falling back to id) so the renderer's list order does not
+   * depend on Map insertion order, which is ProdCom's own response order and
+   * not something either side has promised the other.
+   */
+  getChannels(): ProdcomChannelDTO[] {
+    return [...this.channels.entries()]
+      .map(([id, meta]) => ({ id, name: meta.name, color: meta.color }))
+      .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id));
   }
 
   /** Hide sensitive keywords, or don't, per the operator's setting. */
@@ -2560,7 +2582,24 @@ export class ProdComService extends ConnectionLifecycle {
     }
     this.channels = next;
     this.channelsFetchedAt = this.now();
+    this.broadcastChannelsIfChanged();
     return { embedded };
+  }
+
+  /**
+   * Push the current channel list on "prodcom:channels" if it differs from the
+   * last thing sent — the same change-driven rule as every other broadcast in
+   * this app, so a throttled re-read that came back identical (the common case:
+   * this runs on every reconnect, and a box's channel list rarely changes
+   * between them) does not cost every open settings panel a frame.
+   */
+  private broadcastChannelsIfChanged(): void {
+    if (!channelInDemand("prodcom:channels")) return;
+    const list = this.getChannels();
+    const signature = JSON.stringify(list);
+    if (signature === this.lastChannelsBroadcast) return;
+    this.lastChannelsBroadcast = signature;
+    broadcast("prodcom:channels", list);
   }
 
   /** The one operator-facing line for a channel-list failure, so both callers

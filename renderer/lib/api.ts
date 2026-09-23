@@ -87,6 +87,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/prodcom/transcript");
     case "prodcom:clearTranscript":
       return post<T>("/api/prodcom/transcript/clear");
+    case "prodcom:getChannels":
+      return apiFetch<T>("/api/prodcom/channels");
 
     case "stage:listServiceTypes":
       return apiFetch<T>("/api/service-types");

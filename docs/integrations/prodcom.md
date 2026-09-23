@@ -300,6 +300,12 @@ sensitive keywords** is on by default; see
 **On a layout:** add object → **transcription strip**. Options: latest-line vs.
 multi-speaker scrolling feed, max lines, and hide specific channels by name.
 
+Settings → Integrations → **ProdCom** → **Transcription colors** lists every
+channel ProdCom has — whether or not it has spoken yet — plus any channel that
+has spoken or has a saved color but is missing from ProdCom's own list (a
+rename or removal in ProdCom since). It refreshes on the same cadence the
+service already refreshes channels for keywords.
+
 ## Sensitive keywords
 
 ProdCom keywords carry an `isSensitive` flag, and ProdCom replaces matched text
