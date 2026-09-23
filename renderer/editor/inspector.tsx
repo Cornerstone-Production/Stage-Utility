@@ -202,6 +202,100 @@ function PvpLayerPicker({
   );
 }
 
+/** A RossTalk command, as the catalogue route sends it (no `format`). */
+type RossTalkCommandDTO = { id: string; label: string; family: string; params: RossTalkParam[]; help?: string };
+
+/**
+ * Inspector controls for a RossTalk button: the target, the command (only the
+ * target's own family), the command's parameters and the label.
+ *
+ * It reads the target list and command catalogue itself, so they are fetched
+ * only when a RossTalk button is the object being edited. The Inspector used to
+ * read them for every object; it remounts per selection, so that was once per
+ * object selected, whatever its type.
+ */
+function RossTalkButtonConfig({
+  c,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "rosstalk-button" }>;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  const [targets, setTargets] = useState<RossTalkTarget[]>([]);
+  const [catalogue, setCatalogue] = useState<RossTalkCommandDTO[]>([]);
+  useEffect(() => {
+    void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
+      .then((r) => setTargets(r.targets))
+      .catch(() => {});
+    void invoke<RossTalkCommandDTO[]>("rosstalk:commands")
+      .then(setCatalogue)
+      .catch(() => {});
+  }, []);
+  const target = targets.find((t) => t.id === c.targetId) ?? null;
+  const family = target?.config.family ?? "carbonite";
+  // Only ever offer commands for THIS target's family — a Carbonite XPT sent
+  // to an Ultrix is a different command entirely.
+  const commands = catalogue.filter((cmd) => cmd.family === family);
+  const command = commands.find((cmd) => cmd.id === c.commandId) ?? null;
+  return (
+    <>
+      <RowSelect
+        label="Target"
+        value={c.targetId ?? ""}
+        options={[
+          { value: "", label: "Pick a target…" },
+          ...targets.map((t) => ({
+            value: t.id,
+            label: `${t.name} (${t.config.family ?? "carbonite"})`,
+          })),
+        ]}
+        onChange={(v) => onConfig({ ...c, targetId: v || null, commandId: null, params: {} })}
+      />
+      <RowSelect
+        label="Command"
+        hint={target ? undefined : "Pick a target first"}
+        value={c.commandId ?? ""}
+        options={[
+          { value: "", label: "Pick a command…" },
+          ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
+        ]}
+        onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
+      />
+      {command?.params.map((p) =>
+        p.type === "number" ? (
+          <RowNumber
+            key={p.key}
+            label={p.label}
+            hint={p.help}
+            value={Number(c.params[p.key] ?? p.min ?? 0)}
+            min={p.min}
+            max={p.max}
+            onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}
+          />
+        ) : p.type === "enum" ? (
+          <RowSelect
+            key={p.key}
+            label={p.label}
+            hint={p.help}
+            value={String(c.params[p.key] ?? "")}
+            options={(p.options ?? []).map((o) => ({ value: o, label: o }))}
+            onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+          />
+        ) : (
+          <RowText
+            key={p.key}
+            label={p.label}
+            hint={p.help}
+            value={String(c.params[p.key] ?? "")}
+            onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+          />
+        ),
+      )}
+      <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+    </>
+  );
+}
+
 /** Inspector controls for the people-graph object: live vs. a recorded service,
  *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
 function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
@@ -447,22 +541,6 @@ export function Inspector({
   // cues:all channel and start the server's Companion read. Hooks cannot be
   // conditional, so the flag is the argument.
   const cues = useCueLive(c.type === "cue-button");
-  // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
-  // once here rather than per-object; both are small and change rarely.
-  const [rosstalkTargets, setRosstalkTargets] = useState<RossTalkTarget[]>([]);
-  const [rosstalkCommands, setRosstalkCommands] = useState<
-    { id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]
-  >([]);
-  useEffect(() => {
-    void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
-      .then((r) => setRosstalkTargets(r.targets))
-      .catch(() => {});
-    void invoke<{ id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]>(
-      "rosstalk:commands",
-    )
-      .then(setRosstalkCommands)
-      .catch(() => {});
-  }, []);
   // The followed teams, for the scores object's team select. The SAME query key
   // the settings panel writes through, so following a new team there populates
   // this select without a reload.
@@ -1209,71 +1287,7 @@ export function Inspector({
           <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
-      {c.type === "rosstalk-button" && (() => {
-        const target = rosstalkTargets.find((t) => t.id === c.targetId) ?? null;
-        const family = target?.config.family ?? "carbonite";
-        // Only ever offer commands for THIS target's family — a Carbonite XPT sent
-        // to an Ultrix is a different command entirely.
-        const commands = rosstalkCommands.filter((cmd) => cmd.family === family);
-        const command = commands.find((cmd) => cmd.id === c.commandId) ?? null;
-        return (
-          <>
-            <RowSelect
-              label="Target"
-              value={c.targetId ?? ""}
-              options={[
-                { value: "", label: "Pick a target…" },
-                ...rosstalkTargets.map((t) => ({
-                  value: t.id,
-                  label: `${t.name} (${t.config.family ?? "carbonite"})`,
-                })),
-              ]}
-              onChange={(v) => onConfig({ ...c, targetId: v || null, commandId: null, params: {} })}
-            />
-            <RowSelect
-              label="Command"
-              hint={target ? undefined : "Pick a target first"}
-              value={c.commandId ?? ""}
-              options={[
-                { value: "", label: "Pick a command…" },
-                ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
-              ]}
-              onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
-            />
-            {command?.params.map((p) =>
-              p.type === "number" ? (
-                <RowNumber
-                  key={p.key}
-                  label={p.label}
-                  hint={p.help}
-                  value={Number(c.params[p.key] ?? p.min ?? 0)}
-                  min={p.min}
-                  max={p.max}
-                  onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}
-                />
-              ) : p.type === "enum" ? (
-                <RowSelect
-                  key={p.key}
-                  label={p.label}
-                  hint={p.help}
-                  value={String(c.params[p.key] ?? "")}
-                  options={(p.options ?? []).map((o) => ({ value: o, label: o }))}
-                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
-                />
-              ) : (
-                <RowText
-                  key={p.key}
-                  label={p.label}
-                  hint={p.help}
-                  value={String(c.params[p.key] ?? "")}
-                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
-                />
-              ),
-            )}
-            <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
-          </>
-        );
-      })()}
+      {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {
         const oc = c; // narrowed osc-button config (preserved into nested fns)
