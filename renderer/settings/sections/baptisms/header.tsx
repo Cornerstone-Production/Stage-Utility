@@ -7,7 +7,7 @@
 // an anchor jump into the section below it) and a second, differently-behaving
 // solution here would only teach an operator that "sections of a page" work
 // differently on two tabs for no reason. RecordingPill, useSectionNav and
-// HEADER_INSET_VAR are reused outright; StatStrip and CustomizePopover come from
+// useHeaderInset are reused outright; StatStrip and CustomizePopover come from
 // the same history-chart module every other section's figures use.
 //
 // NOT unit-tested, for the same reason ServiceHeader is not: `position: sticky`,
@@ -18,7 +18,7 @@
 // tested in figures.test.ts; the pieces borrowed from history-service-header.tsx
 // are proven by its own test file.
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import { CopyIcon, DownloadIcon } from "lucide-react";
 
 import { cn } from "../../../lib/cn";
@@ -26,7 +26,7 @@ import { Button, toast } from "../../../components/ui";
 import { copyText } from "../../../lib/clipboard";
 import { useServerNow } from "../../../lib/server-clock";
 import { fmtClock, fmtDate } from "../../../main/use-baptism-state";
-import { RecordingPill, useSectionNav, HEADER_INSET_VAR } from "../history-service-header";
+import { RecordingPill, useSectionNav, useHeaderInset } from "../history-service-header";
 import { CustomizePopover, StatStrip, useStoredKeys, type StatFigure } from "../history-chart";
 import {
   BAPTISM_FIGURES,
@@ -126,34 +126,12 @@ export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps
     window.location.assign("/api/history/export?include=baptisms");
   }
 
-  // The header's own geometry, measured — see HEADER_INSET_VAR's own comment in
-  // history-service-header.tsx for why this cannot be a fixed number: the action
-  // group wraps to a second line on a narrow window, and the height this header
-  // settles at is not the one it first renders at.
+  // The header's own geometry, measured — see useHeaderInset's own doc
+  // comment in history-service-header.tsx for why this cannot be a fixed
+  // number: the action group wraps to a second line on a narrow window, and
+  // the height this header settles at is not the one it first renders at.
   const ref = useRef<HTMLElement | null>(null);
-  const [bottom, setBottom] = useState(150);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const root = document.documentElement;
-    const write = () => {
-      const r = el.getBoundingClientRect();
-      const pane = el.closest<HTMLElement>("[data-scroll-restoration-id]");
-      const paneTop = pane ? pane.getBoundingClientRect().top : 0;
-      root.style.setProperty(HEADER_INSET_VAR, `${Math.max(0, Math.round(r.bottom - paneTop))}px`);
-      setBottom(Math.round(r.bottom));
-    };
-    write();
-    const drop = () => root.style.removeProperty(HEADER_INSET_VAR);
-    if (typeof ResizeObserver === "undefined") return drop;
-    const obs = new ResizeObserver(write);
-    obs.observe(el);
-    return () => {
-      obs.disconnect();
-      drop();
-    };
-  }, []);
-
+  const bottom = useHeaderInset(ref);
   const active = useSectionNav(BAPTISM_SECTIONS.map((s) => s.id), bottom);
 
   return (
