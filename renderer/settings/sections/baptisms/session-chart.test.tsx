@@ -120,3 +120,55 @@ test("a session with recorded spans draws the lane and its legend", async () => 
   assert.equal(!!screen.queryByText("Baptism"), true, "expected the legend's Baptism entry");
   assert.equal(!!screen.queryByText("Plan item"), true, "expected the legend's Plan item entry");
 });
+
+// Fix round 1, finding I2: a failed baptism:lane fetch used to set spans: []
+// and log with a bare console.warn — so the operator saw "No timing detail
+// was recorded for this session" (a claim about the SESSION) for what was
+// actually a network blip or a server restart, with the real cause sitting
+// in a devtools console nobody has open.
+test("a failed lane fetch shows its own note, not 'no timing detail', and reaches the log", async () => {
+  const logCalls: { tag: string; message: string }[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/log/client")) {
+      logCalls.push(JSON.parse(String(init?.body ?? "{}")));
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    }
+    if (url.includes("/api/baptism/lane")) throw new Error("network down");
+    return { ok: true, status: 200, json: async () => null, text: async () => "" };
+  }) as unknown as typeof fetch;
+
+  try {
+    render(
+      React.createElement(SessionChart, {
+        state: {
+          ...BASE,
+          serviceKey: "st1:plan1:fetch-fails",
+          finishedAt: "2026-09-20T15:10:00.000Z",
+          sessionStartedAt: "2026-09-20T15:00:00.000Z",
+        },
+      }),
+    );
+    await settle();
+    await settle();
+
+    assert.equal(!!screen.queryByText(/Couldn't load the timing lane/i), true, "expected the fetch-failure note");
+    assert.equal(
+      !!screen.queryByText(/No timing detail was recorded/i),
+      false,
+      "a failed fetch must not read as a session that recorded nothing",
+    );
+    assert.equal(
+      !!screen.queryByText(/No session recorded yet/i),
+      false,
+      "a failed fetch must not read as no session at all either",
+    );
+    assert.ok(
+      logCalls.some((c) => c.tag === "baptism" && /session lane fetch failed/i.test(c.message)),
+      `expected a logToServer("baptism", ...) call naming the lane fetch — got ${JSON.stringify(logCalls)}`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

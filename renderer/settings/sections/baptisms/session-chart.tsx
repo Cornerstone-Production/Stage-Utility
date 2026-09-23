@@ -26,9 +26,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { BaptismSpan } from "@main/services/archive/baptism-lane";
+import { errorMessage } from "@main/services/errors";
 
 import { formatClock } from "../../../lib/clock-format";
 import { invoke, onNotification } from "../../../lib/api";
+import { logToServer } from "../../../lib/client-log";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { useServerNow } from "../../../lib/server-clock";
 import { useServiceTimeline } from "../../../main/use-service-timeline";
@@ -71,15 +73,24 @@ const AXIS_H = 18;
  * this component's own mount fetch already accounts for; refetching on it too
  * would be a second read of the same truth, not a new one).
  *
+ * `error` is its OWN field, never folded into an empty `spans: []` — a fetch
+ * that failed (a network blip, a server restart mid-service) is not a session
+ * that recorded nothing, and the two used to be indistinguishable on screen.
+ * A later push clears it naturally: fetching is already change-driven, so the
+ * next successful read replaces it without anything here needing to retry by
+ * hand.
+ *
  * Exported for session-chart-refetch.test.tsx, which drives this through the
  * real renderer/lib/api.ts with a fake EventSource and proves the fetch count
  * tracks pushes, not elapsed time — the guard a polling implementation fails.
  */
-export function useSessionLane(serviceKey: string | null): { spans: BaptismSpan[]; loaded: boolean } {
+export function useSessionLane(
+  serviceKey: string | null,
+): { spans: BaptismSpan[]; loaded: boolean; error: boolean } {
   // Keyed by the serviceKey it was fetched FOR, so switching services (or
   // losing one) shows loading/empty rather than the previous session's spans
   // for the one render before the new fetch resolves.
-  const [fetched, setFetched] = useState<{ key: string; spans: BaptismSpan[] } | null>(null);
+  const [fetched, setFetched] = useState<{ key: string; spans: BaptismSpan[]; error: boolean } | null>(null);
   const [rev, setRev] = useState(0);
 
   useEffect(() => {
@@ -94,12 +105,14 @@ export function useSessionLane(serviceKey: string | null): { spans: BaptismSpan[
     let cancelled = false;
     invoke<{ spans: BaptismSpan[] }>("baptism:lane", { serviceKey })
       .then((res) => {
-        if (!cancelled) setFetched({ key: serviceKey, spans: res.spans });
+        if (!cancelled) setFetched({ key: serviceKey, spans: res.spans, error: false });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        console.warn(`[baptism] session lane fetch failed for ${serviceKey}:`, err);
-        setFetched({ key: serviceKey, spans: [] });
+        // Reaches /log — a bare console.warn only ever reached a devtools
+        // console nobody has open at 9am on a Sunday. See client-log.ts.
+        logToServer("baptism", `session lane fetch failed for ${serviceKey}: ${errorMessage(err)}`);
+        setFetched({ key: serviceKey, spans: [], error: true });
       });
     return () => {
       cancelled = true;
@@ -108,9 +121,9 @@ export function useSessionLane(serviceKey: string | null): { spans: BaptismSpan[
     // on a live "baptism:state" push — see the first effect.
   }, [serviceKey, rev]);
 
-  if (!serviceKey) return { spans: [], loaded: true };
-  if (fetched?.key !== serviceKey) return { spans: [], loaded: false };
-  return { spans: fetched.spans, loaded: true };
+  if (!serviceKey) return { spans: [], loaded: true, error: false };
+  if (fetched?.key !== serviceKey) return { spans: [], loaded: false, error: false };
+  return { spans: fetched.spans, loaded: true, error: fetched.error };
 }
 
 /**
@@ -118,6 +131,12 @@ export function useSessionLane(serviceKey: string | null): { spans: BaptismSpan[
  * with nothing to refetch on — a finished session's own recorded timeline does
  * not change under it, unlike the live one (see useServiceTimeline, which
  * refetches on "service-timeline:history" for exactly that reason).
+ *
+ * A failure here degrades quietly to an empty plan lane rather than its own
+ * visible state: unlike the timer lane, it never produces a WRONG statement
+ * on screen (the timer lane still draws; there is simply no plan block under
+ * it), so the fix this needed was only to stop the failure being silent —
+ * see logToServer below.
  */
 function usePastPlanItems(serviceKey: string | null, active: boolean): ServiceTimelineItem[] {
   const [fetched, setFetched] = useState<{ key: string; items: ServiceTimelineItem[] } | null>(null);
@@ -130,7 +149,7 @@ function usePastPlanItems(serviceKey: string | null, active: boolean): ServiceTi
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        console.warn(`[baptism] plan timeline fetch failed for ${serviceKey}:`, err);
+        logToServer("baptism", `plan timeline fetch failed for ${serviceKey}: ${errorMessage(err)}`);
         setFetched({ key: serviceKey, items: [] });
       });
     return () => {
@@ -166,7 +185,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   // trailing gap grow toward now or stop at the recorded window's end.
   const live = state.phase !== "idle";
 
-  const { spans, loaded } = useSessionLane(serviceKey);
+  const { spans, loaded, error } = useSessionLane(serviceKey);
   const currentTimeline = useServiceTimeline();
   const pastItems = usePastPlanItems(serviceKey, !live);
   // The live timeline can outrun this session (a producer moves on to the next
@@ -225,6 +244,12 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
       <div className="flex flex-col gap-3 p-4">
         {!loaded ? null : !serviceKey ? (
           <EmptyNote text="No session recorded yet — the chart draws once the timer starts." />
+        ) : error ? (
+          // Distinct from BOTH empty notes below on purpose — a failed fetch
+          // is not a session that recorded nothing, and must never read as
+          // one. Self-clears on the next successful push; nothing here
+          // retries by hand.
+          <ErrorNote text="Couldn't load the timing lane — retrying on the next update." />
         ) : !win || spans.length === 0 ? (
           <EmptyNote text="No timing detail was recorded for this session." />
         ) : (
@@ -257,6 +282,18 @@ function EmptyNote({ text }: { text: string }) {
     <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted">
       {text}
     </div>
+  );
+}
+
+/** A fetch that failed, not a session that recorded nothing — the same
+ *  danger-toned alert banner import-layout.tsx and screen-urls-dialog.tsx use
+ *  for exactly this distinction. `role="alert"` announces it immediately,
+ *  unlike EmptyNote's two neutral states. */
+function ErrorNote({ text }: { text: string }) {
+  return (
+    <p role="alert" className="rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
+      {text}
+    </p>
   );
 }
 
