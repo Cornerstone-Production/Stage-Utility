@@ -726,11 +726,19 @@ export class RemoteServer {
       } catch (err) {
         const msg = errorMessage(err);
         const status = handlerErrorStatus(err);
+        // A thrown error's own `code`, when it declares one (ServiceIsLiveError
+        // and NoRawRowsError both do) — a caller cannot tell one 409 refusal
+        // from a different one by status code alone, and a machine-readable
+        // reason belongs on the response, not just in the human sentence. Only
+        // forwarded for a status we actually recognise: an arbitrary failure
+        // that maps to the generic 500 can carry a Node errno of its own
+        // (`err.code === "EACCES"`, say) that must never reach the wire.
+        const code = status === 500 ? undefined : (err as { code?: unknown } | null)?.code;
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
         // The reader paused an over-limit body rather than destroying the socket,
         // so the response reaches the client; closing after it releases the rest.
         if (status === 413) res.setHeader("Connection", "close");
-        error(res, msg, status);
+        error(res, msg, status, typeof code === "string" ? code : undefined);
       }
     };
 

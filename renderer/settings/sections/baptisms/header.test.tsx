@@ -109,7 +109,10 @@ interface FetchCall {
  *  function resolves IMMEDIATELY, which is what most tests want; `null` lets a
  *  test observe the "checking" state before choosing when the answer lands.
  *  `rebuildAnswer` answers POST /api/baptism/rebuild, or throws its value as a
- *  4xx/5xx body when `rebuildStatus` is set. */
+ *  4xx/5xx body when `rebuildStatus` is set — including its own `code`, the
+ *  same machine-readable field the real `error()` helper puts on the wire for
+ *  ServiceIsLiveError ("live") and NoRawRowsError ("no-raw-rows"), which are
+ *  BOTH 409s and must not be told apart by status alone. */
 function stubFetch(
   opts: {
     live?: boolean | ((serviceKey: string) => boolean | null);
@@ -141,7 +144,10 @@ function stubFetch(
     }
     if (url.includes("/api/baptism/rebuild")) {
       if (opts.rebuildStatus && opts.rebuildStatus >= 400) {
-        return ok({ error: (opts.rebuildAnswer as { error?: string })?.error ?? "Rebuild refused" }, opts.rebuildStatus);
+        const a = opts.rebuildAnswer as { error?: string; code?: string } | undefined;
+        const errBody: { error: string; code?: string } = { error: a?.error ?? "Rebuild refused" };
+        if (a?.code) errBody.code = a.code;
+        return ok(errBody, opts.rebuildStatus);
       }
       return ok(opts.rebuildAnswer ?? { rows: 3, sessions: 1, updated: 1, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
     }
@@ -622,7 +628,7 @@ test("a 409 the recheck did not catch still refuses cleanly and marks the target
   const { view, restore } = await mount(state, [], {
     live: false, // the recheck itself says not-live — the POST is what refuses
     rebuildStatus: 409,
-    rebuildAnswer: { error: "That service is recording right now — it cannot be rebuilt until it ends." },
+    rebuildAnswer: { error: "That service is recording right now — it cannot be rebuilt until it ends.", code: "live" },
   });
   try {
     fireEvent.click(rebuildButton(view.container));
@@ -633,6 +639,44 @@ test("a 409 the recheck did not catch still refuses cleanly and marks the target
     const shown = lastToast();
     assert.match(shown, /started recording again/, `expected the 409-specific refusal, not a generic one: ${shown}`);
     assert.equal(rebuildButton(view.container).disabled, true, "a 409 the client did not predict must still mark the target live");
+  } finally {
+    restore();
+  }
+});
+
+// A session recorded before the raw layer existed has a timeline record but
+// no baptism.csv — POST /api/baptism/rebuild refuses that with 409 too
+// (NoRawRowsError), for a completely different reason than "still recording"
+// (ServiceIsLiveError). That is exactly this header's own fallback target on
+// a freshly upgraded server until the first new session lands, so treating
+// every 409 as "started recording again" toasted the wrong message, flipped
+// the button to disabled, and re-enabled it 30 seconds later only to repeat
+// on the next click.
+test("a no-raw-rows 409 shows the server's own sentence and leaves the button enabled — not 'started recording again'", async () => {
+  const state: BaptismState = { ...IDLE, serviceKey: "svc-pre-raw-layer" };
+  const { view, restore } = await mount(state, [], {
+    live: false,
+    rebuildStatus: 409,
+    rebuildAnswer: {
+      error: "No raw rows exist for this recording — there is nothing to rebuild it from.",
+      code: "no-raw-rows",
+    },
+  });
+  try {
+    fireEvent.click(rebuildButton(view.container));
+    await settle();
+    fireEvent.click(findButton(document.body, "Rebuild")!);
+    await settle();
+    await settle();
+    const shown = lastToast();
+    assert.notEqual(shown, "NO TOAST", "expected a toast naming the actual refusal");
+    assert.match(shown, /No raw rows exist/, `expected the server's own sentence, got: ${shown}`);
+    assert.doesNotMatch(shown, /started recording again/, "a no-raw-rows refusal is not a liveness problem");
+    assert.equal(
+      rebuildButton(view.container).disabled,
+      false,
+      "a no-raw-rows refusal must not flip the button to 'still recording'",
+    );
   } finally {
     restore();
   }

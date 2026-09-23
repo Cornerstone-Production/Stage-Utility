@@ -42,6 +42,13 @@ const RECORDERS = [serviceTimelineRecorder, attendanceRecorder, splRecorder];
 /** Thrown past the route handlers so remote-server can answer 409. */
 export class ServiceIsLiveError extends Error {
   readonly status = 409;
+  /** Machine-readable, alongside the human sentence in `message` — a 409
+   *  is a decision, not a failure, and a caller that needs to tell THIS
+   *  decision from NoRawRowsError's own 409 (both refuse to rebuild, for
+   *  opposite reasons) cannot do that from the status code alone. See
+   *  `error()` in routes/context.ts, which is what actually puts this on
+   *  the wire. */
+  readonly code = "live";
   constructor(action: string) {
     super(`That service is recording right now — it cannot be ${action} until it ends.`);
     this.name = "ServiceIsLiveError";
@@ -521,6 +528,11 @@ const NO_RECORD: RebuiltRecord = { rebuilt: false, items: 0, missing: true };
  *  replaced. 409, like the live-service refusal. */
 export class NoRawRowsError extends Error {
   readonly status = 409;
+  /** See ServiceIsLiveError's own comment on `code` — this 409 means the
+   *  opposite thing (nothing to rebuild FROM, not something already
+   *  running), and a caller deciding what to do next has to be able to
+   *  tell the two apart. */
+  readonly code = "no-raw-rows";
   constructor() {
     super("No raw rows exist for this recording — there is nothing to rebuild it from.");
     this.name = "NoRawRowsError";

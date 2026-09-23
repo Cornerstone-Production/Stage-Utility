@@ -379,14 +379,30 @@ export function BaptismHeader({
       onRebuilt();
       toast.success(describeBaptismRebuild(out));
     } catch (e) {
-      // The recheck above narrows the race but cannot close it: the service
-      // can still start recording in the moment between that check and this
-      // POST landing. When that is what happened, say so — and reflect it
-      // without waiting for yet another round trip — rather than the generic
-      // failure message every other rejection gets.
-      if ((e as ApiError)?.status === 409) {
+      // A 409 is a DECISION, not one failure — the route answers it for two
+      // opposite reasons (ServiceIsLiveError and NoRawRowsError both refuse
+      // with 409), and treating every 409 as "started recording again" is
+      // its own bug: a service recorded before the raw layer existed has a
+      // timeline record but no baptism.csv at all, which is exactly this
+      // page's own fallback target on a freshly upgraded server until the
+      // first new session lands — every click toasted the live-service
+      // message, flipped the button to "still recording," and re-enabled it
+      // within 30 seconds only to repeat. The server's own `code` on the
+      // response tells the two apart.
+      const code = (e as ApiError)?.code;
+      if (code === "live") {
+        // The recheck above narrows the race but cannot close it: the
+        // service can still start recording in the moment between that
+        // check and this POST landing. Reflect that without waiting for
+        // yet another round trip, rather than the generic failure message.
         liveCheck.markLive();
         toast.error("This service started recording again — rebuild once it ends");
+        return;
+      }
+      if (code === "no-raw-rows") {
+        // Not a liveness problem at all — leave the button exactly as it
+        // was and say what the server actually refused on.
+        toast.error(errorMessage(e));
         return;
       }
       toast.error(`Rebuild failed: ${errorMessage(e)}`);

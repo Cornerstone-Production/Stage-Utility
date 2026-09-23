@@ -380,9 +380,12 @@ Answers `{ rows, sessions, updated, added, unchanged, newer, disagreeing,
 invalid, kept }` — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
 for what each of the six outcome categories means. `400` for a body
-with no `serviceKey`; `409` while that service is recording, and `409` when it
-has no `baptism.csv` at all; `500` for any other failure, with no detail in
-the body. `/api/history/rebuild`
+with no `serviceKey`; `409` while that service is recording, and a DIFFERENT
+`409` when it has no `baptism.csv` at all (a session recorded before the raw
+layer existed has a timeline record but none) — both carry a body of
+`{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"`
+for the second, since a client cannot tell two 409s apart by status alone;
+`500` for any other failure, with no detail in the body. `/api/history/rebuild`
 runs the same merge as its own baptism leg.
 
 **Updates, backup and the archive** — see

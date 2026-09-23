@@ -84,6 +84,12 @@ describe("POST /api/baptism/rebuild", () => {
     assert.ok(thrown, "a service with no baptism archive answered as though it rebuilt something");
     assert.equal(handlerErrorStatus(thrown), 409);
     assert.match((thrown as Error).message, /No raw rows exist for this recording/);
+    // Two DIFFERENT 409s (this one, and "the service is recording" below) are
+    // otherwise indistinguishable by status alone — a client cannot decide
+    // what to do next without a machine-readable reason. This is the ONE way
+    // a session recorded before the raw layer existed (a timeline record, no
+    // baptism.csv) answers, and it must not read as "still recording".
+    assert.equal((thrown as { code?: string }).code, "no-raw-rows");
   });
 
   it("refuses with a sentence while that service is recording", async () => {
@@ -115,6 +121,7 @@ describe("POST /api/baptism/rebuild", () => {
       (thrown as Error).message,
       "That service is recording right now — it cannot be rebuilt until it ends.",
     );
+    assert.equal((thrown as { code?: string }).code, "live", "must be tellable apart from the no-raw-rows 409 above");
     assert.equal((await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY).length, 0, "a refused rebuild wrote anyway");
   });
 
