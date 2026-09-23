@@ -164,7 +164,7 @@ describe("POST /api/baptism/rebuild", () => {
     assert.equal((await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY).length, 1, "a re-run duplicated the session");
   });
 
-  // I2: the standalone rebuild must wrap its write exactly like
+  // The standalone rebuild must wrap its write exactly like
   // rebuildServiceRecords does — no absolute path, no raw fs error message,
   // reaching the response or (by extension) the header's toast.
   it("wraps a write failure: no path in the response, and a [baptism] line names the reason", async () => {
