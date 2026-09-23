@@ -453,6 +453,120 @@ describe("a real session containing an undo replays back into the session the st
   });
 });
 
+// Undo after Finish reopens the session where Finish was pressed (see
+// baptism-undo-finish.test.ts). Each reopening writes one `undo` row landing in
+// the phase it reopened, and the replay has to make the same people of it the
+// timer did.
+describe("a real session reopened by an Undo after Finish replays back into the session the store recorded", () => {
+  it("Finish while baptizing person 1 of 3, undone, then run to the end", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.startBaptisms(); // three people, armed
+    baptismTimerService.advance(); // person 1 in
+    await sleep(8);
+    baptismTimerService.finish(); // pressed two people early
+    assert.equal(baptismTimerService.undo().baptismIndex, 0, "sanity: reopened on person 1");
+    await sleep(8);
+    baptismTimerService.next(); // person 1 out, person 2 in
+    await sleep(8);
+    baptismTimerService.next(); // person 2 out, person 3 in
+    await sleep(8);
+    const finished = baptismTimerService.next(); // person 3 out — auto-finishes
+
+    assert.equal(finished.people.length, 3);
+    assert.ok(finished.people.every((p) => p.baptizeMs > 0), "sanity: all three were baptized, nobody skipped");
+
+    await assertRoundTrip(ctx, "grouped, early Finish undone");
+  });
+
+  it("Finish while armed, undone, then everyone baptized in order", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.startBaptisms(); // two people, armed
+    baptismTimerService.finish(); // before anyone stepped in
+    assert.equal(baptismTimerService.undo().armed, true, "sanity: armed again");
+    baptismTimerService.advance(); // person 1 in
+    await sleep(8);
+    baptismTimerService.next(); // person 2 in
+    await sleep(8);
+    const finished = baptismTimerService.next(); // auto-finishes
+
+    assert.ok(finished.people.every((p) => p.baptizeMs > 0), "sanity: both baptized, person 1 not skipped");
+
+    await assertRoundTrip(ctx, "grouped, armed Finish undone");
+  });
+
+  it("Finish during the testimonies, undone, then on into the baptisms", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.finish(); // closes person 2's testimony, no baptisms
+    assert.equal(baptismTimerService.undo().phase, "testimony", "sanity: person 2's testimony reopened");
+    await sleep(8);
+    baptismTimerService.startBaptisms();
+    baptismTimerService.advance();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    const finished = baptismTimerService.next(); // auto-finishes
+
+    assert.equal(finished.people.length, 2, "sanity: the reopened testimony is still one person");
+
+    await assertRoundTrip(ctx, "grouped, testimony Finish undone");
+  });
+
+  it("per-person Finish during a testimony, undone, then baptized", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    baptismTimerService.next(); // person 1 complete, person 2's testimony
+    await sleep(8);
+    baptismTimerService.finish(); // closes person 2's testimony, never baptized
+    assert.equal(baptismTimerService.undo().phase, "testimony", "sanity: person 2's testimony reopened");
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 2);
+
+    const [replayed] = await assertRoundTrip(ctx, "per-person, testimony Finish undone");
+    assert.equal(
+      replayed!.people.length,
+      2,
+      "the undo pops the person that Finish pushed, however much it looks like the per-person undo that pops nobody",
+    );
+  });
+});
+
 describe("a service with no baptism archive has nothing to rebuild from", () => {
   it("readBaptismRows returns null, the same contract rebuildSplItems has", async () => {
     assert.equal(await readBaptismRows("st1:plan1:never-recorded", "2026-09-20"), null);

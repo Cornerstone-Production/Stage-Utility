@@ -257,6 +257,15 @@ anyone. A segment is time already banked plus time since it last resumed, and bo
 the operator page and the display object read the same fields, so a paused clock
 shows the same everywhere.
 
+## Undo
+
+Undo takes back the last press, so a mis-tap costs nothing. A testimony it
+returns to picks up from the time it had already banked; a baptism it returns
+to starts over from the Undo press. After Finish it reopens the session where
+Finish was pressed: the testimony that was running, the person mid-baptism, or
+— in a grouped baptism section nobody had stepped into yet — the wait for the
+first person, with no clock running.
+
 ## Recovery
 
 Every press on the timer appends a row to `baptism.csv`, the same append-only

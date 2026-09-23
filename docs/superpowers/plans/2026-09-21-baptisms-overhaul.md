@@ -1466,6 +1466,21 @@ before the row existed, and its round trip derives the lane from real sessions w
 stripped so it stays tested. Commit `fix: a clock started by next() while armed writes its row`,
 with `Beta-only: true`: `armed` and the raw layer have never shipped on `main`.
 
+**Undo after an early Finish (Ruling 46).** The finished-session undo branches assumed where
+Finish was pressed. Grouped reopened the last person's baptism: Finish on person 1 of 3 came back
+on person 3, and Finish while armed came back baptizing person 2 with person 1 skipped. The same
+assumption had two more instances, fixed with them: a grouped Finish during the testimonies came
+back mid-baptism, and a per-person Finish during a testimony came back with that testimony frozen
+under a running baptism clock. The state alone cannot say where Finish was pressed — `finalize()`
+leaves `baptismIndex`, but armed and a Finish during the testimonies finalize identically — and
+rows exist only while a service is open, so `finalize()` records `finishedFrom` (`"testimony" |
+"baptism" | "armed"`) and Undo reopens that: the testimony resumed from its banked time, the
+baptism at the index Finish left re-timed from zero, or the armed section with no clock. The
+replay learns that a per-person testimony undo straight after `finish` pops the person `finish()`
+pushed; the lane learns that an undo straight after a `finish` that closed an armed section
+re-arms. Commit `fix: undo after an early Finish reopens where Finish was pressed`, no `Beta-only`
+trailer: the grouped branch ships on `main` with this defect.
+
 ## Task 15: docs, the deferred corrections, drive, PR
 
 - [ ] `docs/features/scriptview-and-baptisms.md` describes the tab. Correct two claims the final

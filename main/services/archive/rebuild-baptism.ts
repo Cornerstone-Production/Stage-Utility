@@ -42,12 +42,21 @@
 //    pushed a person. Grouped `testimony-end` always pushes.
 //
 //  • An `undo` row's `phase` is the phase it landed IN; its `detail` names the
-//    phase it came FROM. The people effect follows from (mode, phase) alone —
-//    `detail` is corroborating only, which matters because the same (phase,
-//    detail) pair means opposite things in the two modes: `phase=testimony
-//    detail="from baptism"` pops the folded person in grouped mode and pops
-//    NOBODY in per-person mode. There are seven (mode, phase, from) triples in
-//    the emitter, four grouped and three per-person.
+//    phase it came FROM. The people effect follows from the mode, that phase,
+//    and whether the undo reopens a finish — never from `detail`, which is
+//    corroborating only, because the same (phase, detail) pair means opposite
+//    things in the two modes: `phase=testimony detail="from baptism"` pops the
+//    folded person in grouped mode and pops NOBODY in per-person mode. There
+//    are nine (mode, phase, from) triples in the emitter, five grouped and
+//    four per-person.
+//
+//  • Undo after Finish reopens the session where Finish was pressed, so a
+//    per-person `phase=testimony` undo is one of two things: baptized() taken
+//    back, which pops nobody, or a Finish pressed mid-testimony taken back,
+//    which pops the person finish() pushed. Row order tells them apart.
+//    finish() leaves the timer idle, where no press but Undo, Start or Reset
+//    writes a row, so the undo that reopens a finish is always the row right
+//    after that `finish`.
 //
 //  • A session can carry TWO `finish` rows — finish, undo out of idle, finish
 //    again — and is ONE session. baptismStore.addSession replaces by id rather
@@ -105,6 +114,9 @@ interface OpenSession {
   /** Where this session's last `finish` already logged it in the output, so a
    *  second `finish` replaces that entry instead of adding a second session. */
   logged: number | null;
+  /** Whether the row just read was this session's `finish`. An `undo` straight
+   *  after one reopens the finished session; see the header. */
+  justFinished: boolean;
 }
 
 /** Counters for what a damaged file made this skip, reported as one line rather
@@ -169,7 +181,7 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         skips.unknownMode += 1;
         mode = "grouped";
       }
-      open = { mode, startedAt: at, people: [], pendingTestimonyMs: null, logged: null };
+      open = { mode, startedAt: at, people: [], pendingTestimonyMs: null, logged: null, justFinished: false };
       continue;
     }
 
@@ -177,6 +189,9 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
       if (r.event !== "reset") skips.noSession += 1;
       continue;
     }
+
+    const reopening = open.justFinished;
+    open.justFinished = r.event === "finish";
 
     switch (r.event) {
       case "testimony-end":
@@ -218,14 +233,20 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         break;
 
       case "undo":
-        // `phase` is where the undo LANDED. Together with the mode that is the
-        // whole rule; see the header for why `detail` is not consulted.
+        // `phase` is where the undo LANDED. Together with the mode, and whether
+        // it reopens a finish, that is the whole rule; see the header for why
+        // `detail` is not consulted.
         if (open.mode === "per-person") {
           if (r.phase === "testimony") {
-            // Un-baptized: the banked testimony went back into the running
-            // clock and a later testimony-end re-banks the corrected total.
-            // Belt and braces like the clear in person-complete above — the
-            // corrected total always overwrites this before anything reads it.
+            // Reopening a Finish pressed mid-testimony: finish() pushed that
+            // testimony as a person, and the undo takes it back into the
+            // running clock. Otherwise this is baptized() taken back, which
+            // pops nobody.
+            if (reopening) open.people.pop();
+            // Either way the banked testimony went back into the running clock
+            // and a later testimony-end re-banks the corrected total. Belt and
+            // braces like the clear in person-complete above — the corrected
+            // total always overwrites this before anything reads it.
             open.pendingTestimonyMs = null;
           } else {
             // Stepped back into the person just completed (from the next

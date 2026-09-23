@@ -61,6 +61,19 @@ export interface BaptismState {
   sessionStartedAt: string | null;
   /** ISO when the session was finished (totals frozen); null while active. */
   finishedAt: string | null;
+  /**
+   * Where the session was when Finish closed it: the segment it closed, or
+   * "armed" for a grouped baptism section nobody had stepped into. Null while a
+   * session runs.
+   *
+   * finalize() resets phase and armed, and what is left cannot say whether
+   * anybody had started: armed and a Finish during the testimonies both finish
+   * as baptismIndex 0 with every baptizeMs at 0. Undo reads this to reopen the
+   * session where Finish found it, rather than on the last person's baptism.
+   * Absent on records finished before it existed; Undo then reopens a baptism
+   * at the baptismIndex Finish left.
+   */
+  finishedFrom?: "testimony" | "baptism" | "armed" | null;
   /** People whose testimony has closed. In grouped mode this fills during the
    *  testimony pass, before anyone is baptized — `baptizeMs` sits at 0 until a
    *  baptism actually closes that entry. A person is "baptized" (see

@@ -37,6 +37,7 @@ function idleState(mode: BaptismMode): BaptismState {
     segmentStartedAt: null,
     sessionStartedAt: null,
     finishedAt: null,
+    finishedFrom: null,
     people: [],
     pendingTestimonyMs: null,
     serviceTitle: null,
@@ -555,7 +556,18 @@ class BaptismTimerService {
     // the last person) while armed used to persist `{ phase: "idle", armed: true }`
     // to disk, and init() restored it — the panel checks `armed` before
     // `phase === "idle"`, so a finished session read as "Baptize person 1."
-    this.state = { ...this.state, phase: "idle", armed: false, segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
+    this.state = {
+      ...this.state,
+      phase: "idle",
+      armed: false,
+      segmentStartedAt: null,
+      pendingTestimonyMs: null,
+      finishedAt,
+      people,
+      // What this reset throws away that Undo needs back: whether a clock was
+      // running, and in which section. See BaptismState.finishedFrom.
+      finishedFrom: this.state.armed ? "armed" : this.state.phase === "testimony" ? "testimony" : "baptism",
+    };
     this.emitRaw("finish", 0, `people=${people.length}`);
     if (people.length > 0 && this.state.sessionStartedAt) {
       void baptismStore
@@ -593,11 +605,13 @@ class BaptismTimerService {
   }
 
   /** Step back one action — fixes a mis-tap without losing the session. Every
-   *  branch but one resumes a real clock (startSegment()). The exception is
-   *  taking back "First person in": the press before it armed the section, so
-   *  undoing it returns to armed with no clock running — a clock restored there
-   *  would time person 1 from the Undo press, the one thing armed exists to
-   *  prevent. */
+   *  branch but two resumes a real clock (startSegment()). The exceptions both
+   *  return to armed with no clock running: taking back "First person in",
+   *  since the press before it armed the section, and undoing a Finish pressed
+   *  while armed, since nobody had stepped in. A clock restored there would
+   *  time person 1 from the Undo press, the one thing armed exists to prevent.
+   *  Undoing any Finish returns to where Finish was pressed; see
+   *  BaptismState.finishedFrom. */
   undo(): BaptismState {
     const s = this.state;
     if (s.mode === "per-person") {
@@ -614,9 +628,19 @@ class BaptismTimerService {
         const last = people.pop()!;
         this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0) };
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
+        // finish() pushed the person it closed either way; finishedFrom says
+        // which segment that was, so this reopens it rather than assuming a
+        // baptism. Assumed, a Finish pressed mid-testimony came back with the
+        // testimony frozen and a baptism clock running over the rest of it.
         const people = [...s.people];
         const last = people.pop()!;
-        this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0), finishedAt: null };
+        if (s.finishedFrom === "testimony") {
+          // Never reached its baptism: the testimony resumes from what it
+          // banked, like every return into a testimony.
+          this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, pendingTestimonyMs: null, ...this.startSegment(last.testimonyMs), finishedAt: null, finishedFrom: null };
+        } else {
+          this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0), finishedAt: null, finishedFrom: null };
+        }
       } else return s;
     } else {
       // grouped
@@ -674,9 +698,32 @@ class BaptismTimerService {
           this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(folded.testimonyMs) };
         }
       } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
-        const idx = s.people.length - 1;
-        const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(0), finishedAt: null };
+        // Back to where Finish was pressed, which is not always the last
+        // person. This assumed it was, and was right only for "Last person out":
+        // Finish while baptizing person 1 of 3 came back on person 3, skipping
+        // person 2, and Finish while armed came back baptizing person 2 with
+        // person 1 skipped.
+        if (s.finishedFrom === "armed") {
+          // Nobody had stepped in: back to waiting for the first press, with
+          // every clock stopped. The shape startBaptisms() arms into.
+          this.state = { ...s, phase: "baptism", baptismIndex: 0, armed: true, segmentStartedAt: null, segmentAccumMs: 0, finishedAt: null, finishedFrom: null };
+        } else if (s.finishedFrom === "testimony") {
+          // Finish closed the testimony section: pop the testimony it pushed and
+          // resume it from what it banked, as the testimony branch above does.
+          const people = [...s.people];
+          const last = people.pop()!;
+          this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(last.testimonyMs), finishedAt: null, finishedFrom: null };
+        } else {
+          // A baptism, re-timed from zero like every return into one, at the
+          // index finalize() left: the person Finish closed, and for next()'s
+          // auto-finish the last person. A record finished before finishedFrom
+          // existed lands here too — never worse than the last person, which is
+          // what this assumed before. Clamped so a damaged record cannot point
+          // next() past the end of `people`.
+          const idx = Math.min(Math.max(0, s.baptismIndex), s.people.length - 1);
+          const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
+          this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(0), finishedAt: null, finishedFrom: null };
+        }
       } else if (s.phase === "baptism" && s.baptismIndex === 0) {
         // The complement of the guarded branch above: baptismIndex === 0 with
         // an EMPTY people list — the same restored-record shape, caught here

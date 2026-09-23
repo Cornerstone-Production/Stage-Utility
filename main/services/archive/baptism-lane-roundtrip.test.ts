@@ -423,7 +423,7 @@ describe("a real session containing an undo: the lane is still the time the stor
     await assertLaneMatchesStore(ctx, "grouped, arming undone mid-baptism");
   });
 
-  it("grouped finish, undo, finish again: the last baptism re-timed", async () => {
+  it("grouped finish, undo, finish again: the baptism Finish closed, re-timed", async () => {
     const ctx = begin("grouped");
     timer.start();
     await sleep(STRETCH_MS);
@@ -481,6 +481,99 @@ describe("a real session containing an undo: the lane is still the time the stor
     await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "per-person, finish/undo/finish");
+  });
+});
+
+// Undo after Finish reopens the session where Finish was pressed (see
+// baptism-undo-finish.test.ts), so the lane has to reopen it there too.
+describe("a real session reopened by an Undo after Finish: the lane is still the time the store recorded", () => {
+  it("Finish while baptizing person 1 of 3, undone: person 1 re-timed, nobody skipped", async () => {
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.startBaptisms(); // three people, armed
+    timer.advance();
+    await sleep(STRETCH_MS); // person 1's first attempt, thrown away with the Finish
+    timer.finish();
+    const undoneAt = Date.now();
+    timer.undo();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next(); // person 3 out — auto-finishes
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, early Finish undone");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "testimony 3", "baptism 1", "baptism 2", "baptism 3"]);
+    const first = spans.find((s) => s.kind === "baptism" && s.person === 1)!;
+    assert.ok(Date.parse(first.startedAt) >= undoneAt, "person 1's baptism is the one timed from the Undo");
+  });
+
+  it("Finish while armed, undone: armed again, and the wait before the first press is a gap", async () => {
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.startBaptisms(); // two people, armed
+    timer.finish(); // before anyone stepped in
+    const undoneAt = Date.now();
+    timer.undo(); // armed again
+    await sleep(STRETCH_MS); // still waiting for person 1: nobody's time
+    timer.advance();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next(); // auto-finishes
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, armed Finish undone");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
+    const wait = Date.parse(spans[2]!.startedAt) - undoneAt;
+    assert.ok(wait >= STRETCH_MS / 2, `the re-armed wait is a gap, not person 1's baptism (got ${wait}ms)`);
+  });
+
+  it("Finish during the testimonies, undone: the testimony resumes", async () => {
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.finish(); // closes person 2's testimony
+    timer.undo(); // person 2 resumes
+    await sleep(STRETCH_MS);
+    timer.startBaptisms();
+    timer.advance();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.finish();
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, testimony Finish undone");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "testimony 2", "baptism 1", "baptism 2"]);
+  });
+
+  it("per-person Finish during a testimony, undone: the testimony resumes, then its baptism", async () => {
+    const ctx = begin("per-person");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.baptized();
+    await sleep(STRETCH_MS);
+    timer.next(); // person 2's testimony
+    await sleep(STRETCH_MS);
+    timer.finish(); // closes person 2's testimony
+    timer.undo(); // person 2 resumes
+    await sleep(STRETCH_MS);
+    timer.baptized();
+    await sleep(STRETCH_MS);
+    timer.finish();
+
+    const spans = await assertLaneMatchesStore(ctx, "per-person, testimony Finish undone");
+    assert.deepEqual(shape(spans), ["testimony 1", "baptism 1", "testimony 2", "testimony 2", "baptism 2"]);
   });
 });
 

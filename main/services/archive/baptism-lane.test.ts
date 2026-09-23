@@ -234,7 +234,7 @@ describe("baptismLaneSpans: undo", () => {
     ]);
   });
 
-  it("grouped, un-finishing a closed session re-times its last baptism", () => {
+  it("grouped, un-finishing a closed session re-times the baptism Finish closed", () => {
     assert.deepEqual(lane([
       row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
       row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "20000" }),
@@ -247,6 +247,29 @@ describe("baptismLaneSpans: undo", () => {
     ]), [
       ["testimony", 1, 0, 20],
       ["baptism", 1, 45, 68],
+    ]);
+  });
+
+  it("grouped, un-finishing a session finished while armed re-arms: nothing runs until baptisms-start", () => {
+    // The same (baptism, from idle) undo row as above, the opposite effect: the
+    // finish before it closed an armed section, so the undo goes back to waiting
+    // for the first press. Opened as a baptism, the wait from 50s to 70s would
+    // be drawn as person 1's.
+    assert.deepEqual(lane([
+      row(0,   { event: "start", phase: "testimony", personNumber: "1" }),
+      row(20,  { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "20000" }),
+      row(40,  { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "20000" }),
+      row(45,  { event: "finish", phase: "idle", personNumber: "2", detail: "people=2" }),
+      row(50,  { event: "undo", phase: "baptism", personNumber: "2", baptismIndex: "0", detail: "from idle" }),
+      row(70,  { event: "baptisms-start", phase: "baptism", personNumber: "2" }),
+      row(90,  { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "0", segmentMs: "20000" }),
+      row(110, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "20000" }),
+      row(110, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1" }),
+    ]), [
+      ["testimony", 1, 0, 20],
+      ["testimony", 2, 20, 40],
+      ["baptism", 1, 70, 90],
+      ["baptism", 2, 90, 110],
     ]);
   });
 
