@@ -20,6 +20,7 @@ import { scrub } from "../scrub.js";
 import {
   deleteServiceRecords,
   editServiceWindow,
+  isServiceLive,
   mergeServiceRecords,
   rebuildServiceBaptisms,
   rebuildServiceRecords,
@@ -132,6 +133,23 @@ export type BaptismAction = (typeof BAPTISM_ACTIONS)[number];
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
+    // Read-only: whether a service is live right now, for a CLIENT to decide
+    // whether to offer an action the server would otherwise refuse — the
+    // Baptisms header's own Rebuild button asks this before enabling itself,
+    // rather than guessing from a record it happens to already have (a guess
+    // that read a just-ended service as still live until the next tick, or a
+    // live one as safe the moment an unrelated broadcast arrived). Shares
+    // isServiceLive with assertNotLive, so the two can never disagree about
+    // the same key.
+    if (method === "GET" && pathname === "/api/history/live") {
+      const serviceKey = c.url.searchParams.get("serviceKey");
+      if (!serviceKey) {
+        error(res, "serviceKey query parameter required");
+        return;
+      }
+      json(res, { live: isServiceLive(serviceKey) });
+      return;
+    }
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
     if (method === "POST" && pathname === "/api/history/window") {
       const body = await readBodyOrEmpty(req);

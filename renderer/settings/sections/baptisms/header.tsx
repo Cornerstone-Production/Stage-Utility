@@ -21,18 +21,18 @@
 // is disabled and why, and that it confirms before posting — is behaviour,
 // not layout, and IS unit-tested in header.test.tsx.
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import type { BaptismRebuildOutcome } from "@main/services/history-edit";
 
 import { cn } from "../../../lib/cn";
-import { invoke } from "../../../lib/api";
+import { invoke, onNotification } from "../../../lib/api";
+import { logToServer } from "../../../lib/client-log";
 import { Button, confirm, toast } from "../../../components/ui";
 import { copyText } from "../../../lib/clipboard";
 import { useServerNow } from "../../../lib/server-clock";
-import { useServiceTimeline } from "../../../main/use-service-timeline";
 import { fmtBaptizeMs, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { RecordingPill, useSectionNav, useHeaderInset } from "../history-service-header";
 import { CustomizePopover, StatStrip, useStoredKeys, type StatFigure } from "../history-chart";
@@ -121,6 +121,81 @@ export function describeBaptismRebuild(out: BaptismRebuildOutcome): string {
   return `Rebuilt from raw: ${parts.join(", ")}`;
 }
 
+/**
+ * Whether `serviceKey` is being recorded right now, per the SERVER — the
+ * exact question `POST /api/baptism/rebuild`'s own 409 answers, asked before
+ * the click rather than after. `GET /api/history/live` shares
+ * `assertNotLive`'s own expression, so this can never disagree with the
+ * server's actual refusal the way a client-side guess once could: reading a
+ * just-ended service as still live until the next unrelated tick, or a live
+ * one as safe the moment any OTHER service's record happened to broadcast.
+ *
+ * Re-asked on mount, on every `serviceKey` change, and on every
+ * "service-timeline:history" push — a push is a HINT that something changed
+ * somewhere, never an answer about this one key. Defaults to `true` (assume
+ * live) until the first answer lands, so a click cannot race a still-loading
+ * "no" into a 409 the operator did not expect; `null` serviceKey always
+ * reads as not-live, since there is nothing to be live.
+ */
+function useServiceLive(serviceKey: string | null): boolean {
+  const [live, setLive] = useState(true);
+
+  useEffect(() => {
+    // No effect to run at all for a null key — its "not live" answer is
+    // derived below, without a setState-in-effect that would otherwise fire
+    // on every render this component mounts with no target.
+    if (!serviceKey) return;
+    let cancelled = false;
+    const ask = () => {
+      invoke<{ live: boolean }>("history:live", { serviceKey })
+        .then((res) => {
+          if (!cancelled) setLive(res.live);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          logToServer("baptism", `could not check whether ${serviceKey} is live: ${errorMessage(err)}`);
+          // Left as whatever it last was — see useStatusChannel's own
+          // reasoning for why a failed read does not overwrite a good value.
+        });
+    };
+    ask();
+    const off = onNotification("service-timeline:history", () => ask());
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [serviceKey]);
+
+  return serviceKey != null && live;
+}
+
+/**
+ * Why Rebuild from raw is disabled, or `null` when it is not.
+ *
+ * Pure and exported so each of the three "nothing to target" reasons is
+ * provable directly in header.test.tsx: the rendered TOOLTIP text needs
+ * Radix's hover machinery to ever reach the DOM (jsdom mounts nothing while a
+ * Tooltip is closed), so a test could otherwise only see one shared
+ * `disabled=true` and never tell the three states apart. Conflating them
+ * would send an operator to reload a page that was actually fine (a load
+ * failure), or to look for a "missing" recording that a session simply
+ * predates the serviceKey field on (the third case) — neither is "nothing has
+ * ever been recorded here", the fourth and only truly empty case.
+ */
+export function baptismRebuildDisabledReason(args: {
+  targetServiceKey: string | null;
+  live: boolean;
+  sessionsLoadFailed: boolean;
+  mostRecentSession: { serviceKey?: string | null } | null;
+}): string | null {
+  if (args.targetServiceKey != null) {
+    return args.live ? "This service is still recording — rebuild once it ends" : null;
+  }
+  if (args.sessionsLoadFailed) return "Past sessions could not be loaded — reload the page and try again";
+  if (args.mostRecentSession) return "The most recent session has no linked service to rebuild from";
+  return "Nothing has been recorded yet — there is no service to rebuild";
+}
+
 export interface BaptismHeaderProps {
   state: BaptismState;
   /**
@@ -132,17 +207,28 @@ export interface BaptismHeaderProps {
    */
   hoverFigures?: StatFigure[] | null;
   /**
-   * Finished sessions, newest first — read only for `sessions[0]?.serviceKey`,
-   * the service Rebuild from raw targets when nothing is currently showing.
+   * Finished sessions, newest first — read only for `sessions[0]`, the
+   * service (and its title/date) Rebuild from raw targets when nothing is
+   * currently showing.
    */
   sessions: BaptismSession[];
+  /** True when the fetch behind `sessions` itself failed — distinct from a
+   *  genuinely empty list, so "nothing has been recorded yet" is never shown
+   *  for a page that simply could not find out. */
+  sessionsLoadFailed?: boolean;
   /** Called after Rebuild from raw actually reaches the server, so Past
    *  sessions and Trends (which read the store, not this page's own live
    *  state) can pick up whatever it changed. */
   onRebuilt: () => void;
 }
 
-export function BaptismHeader({ state, hoverFigures = null, sessions, onRebuilt }: BaptismHeaderProps) {
+export function BaptismHeader({
+  state,
+  hoverFigures = null,
+  sessions,
+  sessionsLoadFailed = false,
+  onRebuilt,
+}: BaptismHeaderProps) {
   // Ticks only while a session is live — an idle or finished session's figures
   // do not move, and a timer nobody needs is a timer that outlives the page for
   // no reason (this shell is a persistent app, not a route that unmounts).
@@ -167,35 +253,40 @@ export function BaptismHeader({ state, hoverFigures = null, sessions, onRebuilt 
   // Which service Rebuild from raw targets: the one this page is showing,
   // running or finished (state.serviceKey survives past Finish — see
   // baptismSubline above); failing that, the most recent PAST session's own
-  // key. Null when neither exists — nothing has ever been recorded here.
-  const targetServiceKey = state.serviceKey ?? sessions[0]?.serviceKey ?? null;
+  // key. Null when neither exists — nothing has ever been recorded here, or
+  // (see disabledReason below) something failed short of an actual key.
+  const mostRecentSession = sessions[0] ?? null;
+  const targetServiceKey = state.serviceKey ?? mostRecentSession?.serviceKey ?? null;
+
+  // Named for the confirm below — "rebuild this?" is only a real question
+  // once the operator can see what "this" is.
+  const targetTitle = state.serviceKey ? state.serviceTitle : (mostRecentSession?.title ?? null);
+  const targetDate = state.serviceKey ? (state.sessionStartedAt ?? state.finishedAt) : (mostRecentSession?.startedAt ?? null);
+  const targetLabel = targetTitle && targetDate ? `${targetTitle} (${fmtDate(targetDate)})`
+    : targetTitle ?? (targetDate ? fmtDate(targetDate) : "this service");
 
   // Whether the SERVICE (not the baptism timer — a finished session's service
-  // can still be recording) is live, decided the way History's own rebuild
-  // control does: off the currently-recording ServiceTimeline's own key, the
-  // same "current" record `assertNotLive` refuses a rebuild against
-  // server-side. Reused rather than re-derived — session-chart.tsx answers
-  // the identical question (`currentTimeline?.serviceKey === serviceKey`) for
-  // its own plan lane, and a second definition of "live" is how the two could
-  // disagree about the same session.
-  const currentTimeline = useServiceTimeline();
-  const rebuildLive = targetServiceKey != null && currentTimeline?.serviceKey === targetServiceKey;
+  // can still be recording) is live, asked of the server directly — see
+  // useServiceLive's own comment for why a client-side guess is not this.
+  const rebuildLive = useServiceLive(targetServiceKey);
 
-  const rebuildTooltip =
-    targetServiceKey == null
-      ? "Nothing has been recorded yet — there is no service to rebuild"
-      : rebuildLive
-        ? "This service is still recording — rebuild once it ends"
-        : "Recompute this service's baptism sessions from the raw rows in the data archive";
+  const disabledReason = baptismRebuildDisabledReason({
+    targetServiceKey,
+    live: rebuildLive,
+    sessionsLoadFailed,
+    mostRecentSession,
+  });
+
+  const rebuildTooltip = disabledReason ?? "Recompute this service's baptism sessions from the raw rows in the data archive";
 
   async function onRebuild() {
-    if (!targetServiceKey || rebuildLive) return;
+    if (!targetServiceKey || disabledReason) return;
     if (!(await confirm({
       title: "Rebuild from raw?",
       message:
-        "Recomputes this service's baptism sessions from the presses recorded in the data archive. " +
+        `Recomputes ${targetLabel}'s baptism sessions from the presses recorded in the data archive. ` +
         "Existing sessions are updated, or added to if the rows have one the store does not — never " +
-        "deleted, even one these rows cannot reproduce.",
+        "deleted, even one these rows cannot reproduce (a session removed from Past sessions can come back).",
       confirmLabel: "Rebuild",
       destructive: true,
     }))) {
@@ -253,7 +344,7 @@ export function BaptismHeader({ state, hoverFigures = null, sessions, onRebuilt 
           <Button
             variant="filled"
             size="small"
-            disabled={targetServiceKey == null || rebuildLive}
+            disabled={disabledReason != null}
             onClick={() => void onRebuild()}
             tooltip={rebuildTooltip}
           >

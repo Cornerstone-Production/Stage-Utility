@@ -180,6 +180,7 @@ export type IpcChannel =
   | "displays:refresh"
   | "history:deleteMilestone"
   | "history:editWindow"
+  | "history:live"
   | "history:listMilestones"
   | "history:merge"
   | "history:rebuild"
@@ -580,6 +581,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
+
+    case "history:live":
+      return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
 
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
