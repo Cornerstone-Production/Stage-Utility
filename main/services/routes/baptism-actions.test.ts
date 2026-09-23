@@ -213,15 +213,14 @@ const ACTIONS: ActionCase[] = [
       });
       timer.finish();
       try {
-        for (let i = 0; i < 200 && !timer.getState().saveError; i++) await sleep(5);
+        for (let i = 0; i < 200 && !timer.getState().saveErrors?.length; i++) await sleep(5);
       } finally {
         restore();
       }
-      assert.ok(timer.getState().saveError, "sanity: the precondition failed to produce a failed save");
+      assert.ok(timer.getState().saveErrors?.length, "sanity: the precondition failed to produce a failed save");
     },
     check: (s) => {
-      assert.equal(s.saveError ?? null, null);
-      assert.equal(s.saveErrorSessionId ?? null, null);
+      assert.deepEqual(s.saveErrors ?? [], []);
     },
   },
   {

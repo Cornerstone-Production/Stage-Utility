@@ -14,7 +14,7 @@
 import { getSystemErrorMessage, getSystemErrorName } from "node:util";
 
 import { baptismSessionId } from "../types/stage.js";
-import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSession, BaptismState } from "../types/stage.js";
+import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSaveError, BaptismSession, BaptismState } from "../types/stage.js";
 import { settingsStore } from "./settings-store.js";
 import { baptismTriggersStore } from "./baptism-triggers-store.js";
 import { autoStartAction } from "./baptism-autostart.js";
@@ -42,10 +42,20 @@ function idleState(mode: BaptismMode): BaptismState {
     serviceTitle: null,
     serviceTypeId: null,
     planId: null,
-    saveError: null,
-    saveErrorSessionId: null,
-    saveErrorServiceKey: null,
+    saveErrors: [],
   };
+}
+
+/** `list` with `entry` appended, or substituted in place for an entry that
+ *  already names the same session — a session that fails to save twice (a
+ *  retry that fails again) updates its own reason rather than appending a
+ *  second entry for itself. */
+function upsertSaveError(list: readonly BaptismSaveError[], entry: BaptismSaveError): BaptismSaveError[] {
+  const i = list.findIndex((e) => e.sessionId === entry.sessionId);
+  if (i === -1) return [...list, entry];
+  const next = [...list];
+  next[i] = entry;
+  return next;
 }
 
 /**
@@ -64,7 +74,7 @@ function idleState(mode: BaptismMode): BaptismState {
  * message. Both lookups throw ERR_OUT_OF_RANGE on anything but a negative safe
  * integer — an integer below Number.MIN_SAFE_INTEGER included — and this runs
  * inside a rejection handler, where a throw is an unhandled rejection that
- * lands before saveError is set — hence the guard.
+ * lands before the failure is ever added to saveErrors — hence the guard.
  */
 function saveFailureReason(err: unknown): string {
   const errno = (err as { errno?: unknown } | null | undefined)?.errno;
@@ -302,21 +312,15 @@ class BaptismTimerService {
     }
   }
 
-  /** Switch workflow — only allowed while idle. Preserves nothing else but a
-   *  failed save, which only a save of the session that failed, Reset, or the
-   *  operator's Dismiss may clear (see BaptismState.saveError). Its session
-   *  id and serviceKey travel with it — the scoped clear needs the id to
-   *  still match once THIS session eventually saves, and PR 3's Rebuild
-   *  offer needs the serviceKey to still name the failed service once this
-   *  one has replaced it in state.serviceKey. */
+  /** Switch workflow — only allowed while idle. Preserves nothing else but
+   *  failed saves, which only that session's own successful save, Reset, or
+   *  the operator's Dismiss may clear (see BaptismState.saveErrors). */
   setMode(mode: BaptismMode): BaptismState {
     if (mode !== "per-person" && mode !== "grouped") return this.state;
     if (this.state.phase !== "idle") return this.state;
     this.state = {
       ...idleState(mode),
-      saveError: this.state.saveError ?? null,
-      saveErrorSessionId: this.state.saveErrorSessionId ?? null,
-      saveErrorServiceKey: this.state.saveErrorServiceKey ?? null,
+      saveErrors: this.state.saveErrors ?? [],
     };
     return this.commit();
   }
@@ -343,12 +347,10 @@ class BaptismTimerService {
       // with the timing and attendance recorded alongside it, including when an
       // overrunning service rolls PCO's current service time forward.
       serviceKey: currentServiceKey(),
-      // The previous session's failed save, if any, and which session and
-      // service it belongs to. A plan item going live calls this with nobody
-      // at the screen; see BaptismState.saveError.
-      saveError: this.state.saveError ?? null,
-      saveErrorSessionId: this.state.saveErrorSessionId ?? null,
-      saveErrorServiceKey: this.state.saveErrorServiceKey ?? null,
+      // Any earlier sessions' failed saves, not yet resolved. A plan item
+      // going live calls this with nobody at the screen; see
+      // BaptismState.saveErrors.
+      saveErrors: this.state.saveErrors ?? [],
     };
     // No manual/auto provenance here: at this point in start(), this.state.
     // autoStartedFrom is always whatever idleState() left it as (unset) —
@@ -612,14 +614,16 @@ class BaptismTimerService {
         })
         .then(
           () => {
-            // A save that lands clears an earlier failure — but ONLY for the
-            // SAME session: comparing ids, not just "is anything showing",
-            // because an unrelated session's clean save must not erase the
-            // only record that this one never saved. A session re-finished
-            // after an Undo keeps its id (sessionStartedAt is untouched by
-            // undo), so that case still clears here.
-            if (this.state.saveErrorSessionId !== savedId) return;
-            this.state = { ...this.state, saveError: null, saveErrorSessionId: null, saveErrorServiceKey: null };
+            // A save that lands clears an earlier failure — but ONLY that
+            // session's own entry: an unrelated session's clean save must not
+            // erase a different session's failure, which was never written.
+            // A session re-finished after an Undo keeps its id
+            // (sessionStartedAt is untouched by undo), so that case still
+            // clears its own entry here.
+            const before = this.state.saveErrors ?? [];
+            const after = before.filter((e) => e.sessionId !== savedId);
+            if (after.length === before.length) return; // nothing of this session's was showing
+            this.state = { ...this.state, saveErrors: after };
             this.commit();
           },
           (err: unknown) => {
@@ -630,9 +634,11 @@ class BaptismTimerService {
             console.error("[baptism-timer] session save failed:", err);
             this.state = {
               ...this.state,
-              saveError: saveFailureReason(err),
-              saveErrorSessionId: savedId,
-              saveErrorServiceKey: savedServiceKey,
+              saveErrors: upsertSaveError(this.state.saveErrors ?? [], {
+                sessionId: savedId,
+                serviceKey: savedServiceKey,
+                reason: saveFailureReason(err),
+              }),
             };
             this.commit();
           },
@@ -776,16 +782,18 @@ class BaptismTimerService {
     return this.commit();
   }
 
-  /** The operator has read a failed save's note and dismissed it — the one way
-   *  to clear it besides a save of the session that failed or Reset, and the
+  /** The operator has read the failed-save note and dismissed it — the one way
+   *  to clear EVERY entry besides its own session saving or Reset, and the
    *  only one after the workflow toggle has carried it into a state with
    *  nobody in it, where the Timer card offers neither Reset nor Undo.
    *  Touches nothing else, and writes no raw row: it is not a press on the
    *  timer. */
   dismissSaveError(): BaptismState {
-    if (!this.state.saveError) return this.state;
-    console.log(`[baptism-timer] save failure dismissed: ${this.state.saveError}`);
-    this.state = { ...this.state, saveError: null, saveErrorSessionId: null, saveErrorServiceKey: null };
+    if (!this.state.saveErrors?.length) return this.state;
+    console.log(
+      `[baptism-timer] save failure dismissed: ${this.state.saveErrors.map((e) => e.reason).join("; ")}`,
+    );
+    this.state = { ...this.state, saveErrors: [] };
     return this.commit();
   }
 

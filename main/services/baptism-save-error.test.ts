@@ -4,7 +4,15 @@
 // before the write settles. A rejection used to be `.catch`-ed with a log line
 // and nothing else, so the operator's screen read "Finished" for a session that
 // was never written — on the one record this app keeps of a baptism. The failure
-// now lands on BaptismState.saveError and goes out on a push of its own.
+// now lands as an entry on BaptismState.saveErrors and goes out on a push of its
+// own.
+//
+// A LIST, not a single field (final review, Minor 5): session A failing, then
+// session B ALSO failing, then B alone saving on retry, used to clear the
+// single field entirely — A was never written, but B's own successful retry
+// matched whatever id the field currently held, which by then was B's, not
+// A's. See "two sessions fail; only the retried one's entry clears" below,
+// the reviewer's own probe for the gap.
 //
 // Driven through the REAL timer with only addSession stubbed, and read off the
 // pushes themselves, through the same broadcast hub the SSE transport listens
@@ -21,7 +29,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-save-error-")
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-import { baptismSessionId, type BaptismState } from "../types/stage.js";
+import { baptismSessionId, type BaptismSaveError, type BaptismState } from "../types/stage.js";
 
 const { baptismTimerService: timer } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
@@ -46,8 +54,13 @@ async function pushWhere(from: number, test: (s: BaptismState) => boolean, what:
     if (hit) return hit;
     await sleep(5);
   }
-  const seen = pushes.slice(from).map((s) => ({ phase: s.phase, saveError: s.saveError }));
+  const seen = pushes.slice(from).map((s) => ({ phase: s.phase, saveErrors: s.saveErrors }));
   assert.fail(`no push ${what} within 1s; pushes since: ${JSON.stringify(seen)}`);
+}
+
+/** The entry for `sessionId` in a state's saveErrors, or undefined. */
+function errorEntry(s: BaptismState, sessionId: string): BaptismSaveError | undefined {
+  return s.saveErrors?.find((e) => e.sessionId === sessionId);
 }
 
 type AddSession = typeof baptismStore.addSession;
@@ -111,20 +124,23 @@ describe("a session save that fails reaches the operator", () => {
   it("arrives on a push, survives the next press, and a save that lands clears it", async () => {
     const log = captureError("[baptism-timer] session save failed:");
     const restore = stubAddSession(rejecting);
+    let sessionId!: string;
     try {
       const mark = await finishOnePerson();
       // Finish returns before the write settles, so its OWN push cannot know
       // yet — the failure has to travel on a push of its own.
-      assert.equal(pushes[mark]!.saveError ?? null, null, "sanity: Finish's own push predates the failure");
+      assert.deepEqual(pushes[mark]!.saveErrors ?? [], [], "sanity: Finish's own push predates the failure");
+      sessionId = baptismSessionId(timer.getState().sessionStartedAt!);
 
-      const failed = await pushWhere(mark, (s) => !!s.saveError, "carrying saveError");
-      assert.equal(failed.saveError, REASON, "the push names what went wrong");
+      const failed = await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
+      const entry = errorEntry(failed, sessionId);
+      assert.equal(entry?.reason, REASON, "the push names what went wrong");
       assert.ok(
-        !failed.saveError!.includes(TMP),
+        !entry!.reason.includes(TMP),
         "and not where: the state goes to every screen on the LAN, where a filesystem path must never be readable",
       );
       assert.equal(failed.phase, "idle", "and it is the finished session's push, the one on the operator's screen");
-      assert.equal(timer.getState().saveError, REASON);
+      assert.equal(errorEntry(timer.getState(), sessionId)?.reason, REASON);
       assert.equal(log.lines.length, 1, "the [baptism-timer] session save failed: line is still written");
       assert.equal(log.lines[0]![1], FS_ERROR, "and the log line keeps the whole error, path and all");
 
@@ -132,7 +148,7 @@ describe("a session save that fails reaches the operator", () => {
       const beforeUndo = pushes.length;
       const reopened = timer.undo();
       assert.equal(reopened.finishedAt, null, "sanity: Undo reopened the session");
-      assert.equal(pushes[beforeUndo]!.saveError, REASON, "the next push still carries it");
+      assert.equal(errorEntry(pushes[beforeUndo]!, sessionId)?.reason, REASON, "the next push still carries it");
     } finally {
       restore();
       log.release();
@@ -141,8 +157,8 @@ describe("a session save that fails reaches the operator", () => {
     // Finish again with the store writing: the save lands, and says so.
     const retry = pushes.length;
     timer.finish();
-    await pushWhere(retry, (s) => s.phase === "idle" && s.saveError === null, "clearing saveError");
-    assert.equal(timer.getState().saveError, null, "a save that lands clears the failure");
+    await pushWhere(retry, (s) => s.phase === "idle" && !errorEntry(s, sessionId), "clearing the saveErrors entry");
+    assert.equal(errorEntry(timer.getState(), sessionId), undefined, "a save that lands clears the failure");
     const stored = await baptismStore.listSessions();
     assert.equal(stored.length, 1, "sanity: the retried session really is in the store");
 
@@ -154,48 +170,44 @@ describe("a session save that fails reaches the operator", () => {
     const restore = stubAddSession(rejecting);
     try {
       const mark = await finishOnePerson();
-      await pushWhere(mark, (s) => !!s.saveError, "carrying saveError");
+      await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
     } finally {
       restore();
       log.release();
     }
 
-    const failedId = timer.getState().saveErrorSessionId;
+    const failedId = timer.getState().saveErrors?.[0]?.sessionId;
     assert.ok(failedId, "sanity: the failed session's own id was captured");
 
     // A PCO auto-start calls exactly start() — it must not erase a failure
     // before anybody has looked at the screen.
     const toggled = timer.setMode("per-person");
-    assert.equal(toggled.saveError, REASON, "switching the workflow keeps it");
-    assert.equal(toggled.saveErrorSessionId, failedId, "and keeps naming which session it was");
+    assert.equal(errorEntry(toggled, failedId!)?.reason, REASON, "switching the workflow keeps it");
     const started = timer.start();
     assert.equal(started.phase, "testimony", "sanity: a new session is running");
-    assert.equal(started.saveError, REASON, "starting the next session keeps it");
-    assert.equal(started.saveErrorSessionId, failedId, "starting the next session keeps naming it too");
+    assert.equal(errorEntry(started, failedId!)?.reason, REASON, "starting the next session keeps it");
 
     const cleared = timer.reset();
-    assert.equal(cleared.saveError ?? null, null, "Reset is the operator dismissing it");
-    assert.equal(cleared.saveErrorSessionId ?? null, null, "Reset clears the id alongside the message");
-    assert.equal(cleared.saveErrorServiceKey ?? null, null, "Reset clears the serviceKey alongside the message");
+    assert.deepEqual(cleared.saveErrors ?? [], [], "Reset is the operator dismissing every entry");
   });
 
   it("a different session's successful save does not clear an earlier one's unsaved failure", async () => {
     // Session A fails to save, the operator runs session B, B saves cleanly —
     // the note must remain, because A was never written. Without the scope,
-    // B's success clears saveError for anybody whose id happens to be
-    // showing, regardless of whose save actually landed.
+    // B's success clears A's entry too, regardless of whose save actually
+    // landed.
     rec().current = { serviceKey: "st1:plan1:save-error-scope", serviceDate: "2026-09-20", endedAt: null };
     const log = captureError("[baptism-timer] session save failed:");
     const restore = stubAddSession(rejecting);
     try {
       const mark = await finishOnePerson(); // session A
-      await pushWhere(mark, (s) => !!s.saveError, "carrying saveError for A");
+      await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry for A");
     } finally {
       restore();
       log.release();
     }
-    const failedId = timer.getState().saveErrorSessionId;
-    const failedServiceKey = timer.getState().saveErrorServiceKey;
+    const failedId = timer.getState().saveErrors?.[0]?.sessionId;
+    const failedServiceKey = timer.getState().saveErrors?.[0]?.serviceKey;
     assert.ok(failedId, "sanity: A's own id was captured");
     assert.equal(failedServiceKey, "st1:plan1:save-error-scope", "sanity: A's own serviceKey was captured");
 
@@ -205,8 +217,7 @@ describe("a session save that fails reaches the operator", () => {
     // addSession back).
     await sleep(5); // guarantee B's sessionStartedAt differs from A's
     const started = timer.start();
-    assert.equal(started.saveError, REASON, "sanity: starting B still carries A's note");
-    assert.equal(started.saveErrorSessionId, failedId, "sanity: and still names A specifically");
+    assert.equal(errorEntry(started, failedId!)?.reason, REASON, "sanity: starting B still carries A's note");
     await sleep(5);
     const mark2 = pushes.length;
     const finishedB = timer.finish();
@@ -217,9 +228,9 @@ describe("a session save that fails reaches the operator", () => {
     // before asserting it did not.
     await sleep(80);
     const after = timer.getState();
-    assert.equal(after.saveError, REASON, "A's note must survive an unrelated session's successful save");
-    assert.equal(after.saveErrorSessionId, failedId, "still scoped to A's id, not B's");
-    assert.equal(after.saveErrorServiceKey, failedServiceKey, "still naming A's service, not B's");
+    assert.equal(errorEntry(after, failedId!)?.reason, REASON, "A's note must survive an unrelated session's successful save");
+    assert.equal(errorEntry(after, failedId!)?.serviceKey, failedServiceKey, "still naming A's service, not B's");
+    assert.equal(after.saveErrors?.length, 1, "B's own clean save must not add a second entry for B");
 
     // Checked by id, not by count: earlier tests in this file leave their own
     // successful saves in this same shared store, so the store's total size
@@ -233,48 +244,96 @@ describe("a session save that fails reaches the operator", () => {
     rec().current = null;
   });
 
-  it("saveErrorSessionId and saveErrorServiceKey persist and restore alongside saveError", async () => {
+  // The reviewer's own probe: TWO sessions both fail (not one succeeding
+  // directly), and only the SECOND is retried. The single-field design
+  // overwrote its own id to B's the moment B failed, so B's later successful
+  // retry cleared the ONE field entirely — A was never written, and the note
+  // (and its serviceKey, which PR 3's Rebuild offer reads) ended up naming B,
+  // the wrong session to offer a rebuild for.
+  it("two sessions fail; only the retried one's entry clears, A's stays exactly as it was", async () => {
+    rec().current = { serviceKey: "st1:plan1:save-error-ab", serviceDate: "2026-09-20", endedAt: null };
+    const log = captureError("[baptism-timer] session save failed:");
+    const restore = stubAddSession(rejecting);
+    try {
+      const markA = await finishOnePerson(); // session A fails
+      await pushWhere(markA, (s) => !!s.saveErrors?.length, "carrying A's entry");
+
+      // Session B starts WITHOUT a Reset, and also fails.
+      await sleep(5); // guarantee B's sessionStartedAt differs from A's
+      timer.start();
+      await sleep(5);
+      const markB = pushes.length;
+      timer.finish();
+      await pushWhere(markB, (s) => (s.saveErrors?.length ?? 0) >= 2, "carrying both A's and B's entries");
+    } finally {
+      restore();
+      log.release();
+    }
+    const ids = timer.getState().saveErrors!.map((e) => e.sessionId);
+    assert.equal(ids.length, 2, "sanity: two distinct sessions both failed");
+    const [idA, idB] = ids as [string, string];
+    assert.notEqual(idA, idB);
+    const reasonA = errorEntry(timer.getState(), idA)!.reason;
+
+    // Undo + Finish retries B specifically; the store really writes now
+    // (restore() above put the real addSession back).
+    const beforeRetry = pushes.length;
+    const reopened = timer.undo();
+    assert.equal(reopened.finishedAt, null, "sanity: Undo reopened B");
+    timer.finish();
+    await pushWhere(beforeRetry, (s) => !errorEntry(s, idB), "clearing B's own entry");
+
+    const after = timer.getState();
+    assert.equal(errorEntry(after, idA)?.reason, reasonA, "A must stay listed after B saves");
+    assert.equal(errorEntry(after, idB), undefined, "B's own retried entry must be the one that clears");
+    assert.equal(after.saveErrors?.length, 1, "exactly A remains — not zero, not both");
+
+    const stored = await baptismStore.listSessions();
+    assert.ok(stored.some((s) => s.id === idB), "B's retried session must actually be in the store");
+    assert.ok(!stored.some((s) => s.id === idA), "A's session must never appear in the store");
+
+    timer.reset();
+    rec().current = null;
+  });
+
+  it("a saveErrors entry persists and restores across a restart", async () => {
     rec().current = { serviceKey: "st1:plan1:save-error-persist", serviceDate: "2026-09-20", endedAt: null };
     const log = captureError("[baptism-timer] session save failed:");
     const restore = stubAddSession(rejecting);
     try {
       const mark = await finishOnePerson();
-      await pushWhere(mark, (s) => !!s.saveError, "carrying saveError");
+      await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
     } finally {
       restore();
       log.release();
     }
     const before = timer.getState();
-    assert.ok(before.saveErrorSessionId, "sanity: the failed session's id was captured");
-    assert.equal(before.saveErrorServiceKey, "st1:plan1:save-error-persist", "sanity: and its serviceKey");
+    assert.equal(before.saveErrors?.length, 1, "sanity: the failed session's entry was captured");
+    assert.equal(before.saveErrors?.[0]?.serviceKey, "st1:plan1:save-error-persist", "sanity: and its serviceKey");
 
     await sleep(850); // past commit()'s 800ms persist debounce
     await timer.init(); // simulates a restart: reads back whatever was actually written
     const after = timer.getState();
-    assert.equal(after.saveError, before.saveError, "the message survives a restart");
-    assert.equal(after.saveErrorSessionId, before.saveErrorSessionId, "the failed session's id survives a restart");
-    assert.equal(
-      after.saveErrorServiceKey,
-      before.saveErrorServiceKey,
-      "and its serviceKey, for PR 3's Rebuild offer",
-    );
+    assert.deepEqual(after.saveErrors, before.saveErrors, "the entry survives a restart — reason, id and serviceKey alike");
 
     timer.reset();
     rec().current = null;
   });
 });
 
-// Switching the workflow carries the failure into an idle state with nobody
+// Switching the workflow carries every entry into an idle state with nobody
 // in it, where the Timer card renders neither Reset nor Undo — so without a
 // control of its own the note stayed up until some later session's save.
-// Dismissing is the operator's choice, and only theirs: nothing else clears it.
+// Dismissing is the operator's choice, and only theirs: nothing else clears
+// every entry at once (a session's OWN successful save still clears only
+// its own, as the tests above prove).
 describe("the operator can dismiss a failed save", () => {
   async function failSave(): Promise<void> {
     const log = captureError("[baptism-timer] session save failed:");
     const restore = stubAddSession(rejecting);
     try {
       const mark = await finishOnePerson();
-      await pushWhere(mark, (s) => !!s.saveError, "carrying saveError");
+      await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
     } finally {
       restore();
       log.release();
@@ -294,7 +353,7 @@ describe("the operator can dismiss a failed save", () => {
   it("clears it after the workflow toggle, where no other control shows, and says so on a push", async () => {
     await failSave();
     const toggled = timer.setMode("per-person");
-    assert.equal(toggled.saveError, REASON, "sanity: the toggle carried it");
+    assert.equal(toggled.saveErrors?.length, 1, "sanity: the toggle carried it");
     assert.equal(toggled.people.length, 0, "sanity: nobody in the state, so the card offers no Reset or Undo");
 
     const log = captureDismissLog();
@@ -305,9 +364,12 @@ describe("the operator can dismiss a failed save", () => {
     } finally {
       log.release();
     }
-    assert.equal(dismissed.saveError, null);
-    assert.equal(pushes[mark]?.saveError, null, "every screen hears it on a push, not just this caller");
+    assert.deepEqual(dismissed.saveErrors, []);
+    assert.deepEqual(pushes[mark]?.saveErrors, [], "every screen hears it on a push, not just this caller");
     assert.equal(dismissed.mode, "per-person", "and nothing else about the state moves");
+    // One entry only, so the joined log line reads identically to the old
+    // single-field message — see dismissSaveError's own comment for the
+    // multi-entry case.
     assert.deepEqual(log.lines, [`[baptism-timer] save failure dismissed: ${REASON}`]);
     timer.reset();
   });
@@ -315,20 +377,13 @@ describe("the operator can dismiss a failed save", () => {
   it("leaves a running session exactly as it was", async () => {
     await failSave();
     const running = timer.start(); // the next session, carrying the failure
-    assert.equal(running.saveError, REASON, "sanity");
-    assert.ok(running.saveErrorSessionId, "sanity: the failed session's id carried forward too");
+    assert.equal(running.saveErrors?.length, 1, "sanity: the failed session's entry carried forward too");
     const dismissed = timer.dismissSaveError();
-    assert.equal(dismissed.saveErrorSessionId, null, "dismiss clears the id, not just the message");
-    assert.equal(dismissed.saveErrorServiceKey, null, "dismiss clears the serviceKey, not just the message");
+    assert.deepEqual(dismissed.saveErrors, [], "dismiss clears the whole list, not just trims it");
     assert.deepEqual(
-      {
-        ...dismissed,
-        saveError: REASON,
-        saveErrorSessionId: running.saveErrorSessionId,
-        saveErrorServiceKey: running.saveErrorServiceKey,
-      },
+      { ...dismissed, saveErrors: running.saveErrors },
       running,
-      "only the saveError/saveErrorSessionId/saveErrorServiceKey trio changed",
+      "only saveErrors changed",
     );
     timer.reset();
   });
@@ -349,14 +404,15 @@ describe("the operator can dismiss a failed save", () => {
 describe("what a failed save may put on the screen is built from the errno alone", () => {
   const SECRET = path.join(TMP, "private", "baptism.json");
 
-  async function reasonFor(error: unknown): Promise<string | null | undefined> {
+  async function reasonFor(error: unknown): Promise<string | undefined> {
     const log = captureError("[baptism-timer] session save failed:");
     const restore = stubAddSession(async () => {
       throw error;
     });
     try {
       const mark = await finishOnePerson();
-      return (await pushWhere(mark, (s) => !!s.saveError, "carrying saveError")).saveError;
+      const pushed = await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
+      return pushed.saveErrors![0]!.reason;
     } finally {
       restore();
       log.release();
@@ -387,8 +443,8 @@ describe("what a failed save may put on the screen is built from the errno alone
   it("an errno past the safe-integer range gets the fixed sentence, and the handler does not throw", async () => {
     // Both lookups throw ERR_OUT_OF_RANGE on any integer below
     // Number.MIN_SAFE_INTEGER. Inside the rejection handler that throw is an
-    // unhandled rejection, and it lands before saveError is set: the log line
-    // written, nothing on any screen.
+    // unhandled rejection, and it lands before the failure is ever added to
+    // saveErrors: the log line written, nothing on any screen.
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => void unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);

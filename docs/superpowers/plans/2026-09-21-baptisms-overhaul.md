@@ -1450,6 +1450,13 @@ baptism session — Task 17 wires Rebuild from raw in PR 3 — so that sentence 
 looking for a button that does not exist, the shape Ruling 35's I2 already caught in the docs.
 Task 17 adds the offer.
 
+**Corrected again, by the final review's Minor 5:** the single `saveError`/`saveErrorSessionId`/
+`saveErrorServiceKey` trio above shipped, then proved incomplete — session A failing, session B
+ALSO failing, then B alone saving on retry, cleared the single field entirely, since B's failure
+had already overwritten the id and serviceKey it named. `BaptismState.saveErrors` replaces the
+trio with one list, `{ sessionId, serviceKey, reason }` per unresolved failure; a session's own
+successful save removes only its own entry.
+
 This is the one task in this PR that edits the timer service. Rulings 44 and 46 folded two more
 fixes into it, below, each its own commit. Touch nothing else in it.
 

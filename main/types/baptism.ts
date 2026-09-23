@@ -88,43 +88,41 @@ export interface BaptismState {
   serviceTypeId: string | null;
   planId: string | null;
   /**
-   * Why the last Finish could not write its session to the saved sessions, or
-   * null when nothing failed. The reason only, never a path: this state goes to
-   * every screen on the LAN. The write settles after Finish has returned, so
-   * this arrives on a push of its own rather than on Finish's response.
+   * Sessions Finish could not write to the saved sessions, oldest first — or
+   * absent/empty when nothing has failed. Never a path, only a reason: this
+   * state goes to every screen on the LAN. Each write settles after Finish has
+   * already returned, so a failure arrives on a push of its own rather than on
+   * Finish's response.
    *
-   * Cleared by a later save of the SAME session landing (see
-   * saveErrorSessionId) — never by an unrelated session's save succeeding — by
-   * Reset, and by the operator dismissing it (dismissSaveError). Carried
-   * across Start and the workflow toggle: a plan item going live starts the
-   * next session with nobody at the screen, and that must not erase a failure
-   * nobody has seen.
+   * A LIST, not a single failure (final review, Minor 5): a single field let
+   * session A fail, session B ALSO fail, and B's retry (Undo + Finish)
+   * landing clear the note entirely — A was never written, but the field had
+   * already been overwritten to name B, so B's own success matched it. Here,
+   * a failed save appends an entry (or replaces the entry with the same
+   * sessionId, for a session that fails again); a session's OWN successful
+   * save removes only that session's entry; Reset and the operator
+   * dismissing (dismissSaveError) clear every entry. Carried across Start and
+   * the workflow toggle: a plan item going live starts the next session with
+   * nobody at the screen, and that must not erase a failure nobody has seen.
    *
    * Optional like every field added after this shape first shipped: a record
    * persisted before it existed restores with none.
    */
-  saveError?: string | null;
-  /**
-   * The id of the session saveError describes, or null alongside it.
-   *
-   * A later successful save clears saveError only when ITS OWN session's id
-   * matches this one. Without the scope, session A fails to save, the
-   * operator runs session B, B saves cleanly, and A's note vanished although
-   * A was never written — the only trace of a lost baptism, cleared by
-   * something that had nothing to do with it. Carried and cleared everywhere
-   * saveError is carried and cleared.
-   */
-  saveErrorSessionId?: string | null;
-  /**
-   * The serviceKey of the session saveError describes.
-   *
-   * Not the same as this state's own serviceKey once a later session has
-   * started — that field has moved on to describe the CURRENT session, and
-   * the failed one's service is recoverable only from here. PR 3 uses this to
-   * offer Rebuild from raw for the service that actually failed, not whatever
-   * service is live when the operator finally reads the note.
-   */
-  saveErrorServiceKey?: string | null;
+  saveErrors?: BaptismSaveError[];
+}
+
+/** One session Finish could not write, as `BaptismState.saveErrors` keeps it. */
+export interface BaptismSaveError {
+  /** `baptismSessionId(startedAt)` of the session that failed to save — what a
+   *  later successful save of the SAME session matches on to remove this
+   *  entry, and never any other session's. */
+  sessionId: string;
+  /** The serviceKey of the session that failed, for PR 3's Rebuild offer —
+   *  not necessarily this state's OWN serviceKey, which may have moved on to
+   *  a later session by the time the operator reads this. */
+  serviceKey: string | null;
+  /** Why, never where — see saveFailureReason in baptism-timer-service.ts. */
+  reason: string;
 }
 
 /** A finished baptism session, kept for later review. */
@@ -172,6 +170,23 @@ export interface BaptismSession {
  */
 export function baptismSessionId(startedAt: string): string {
   return `bap-${Date.parse(startedAt)}`;
+}
+
+/**
+ * The reverse of baptismSessionId: the session's own `startedAt`, as an ISO
+ * string, or null for anything that is not one of this function's own ids —
+ * an id from a future shape this version does not recognize, say.
+ *
+ * Exists so BaptismState.saveErrors, which keeps only `{ sessionId,
+ * serviceKey, reason }` (never the session's own record — the session that
+ * failed to save is, by definition, not sitting in the store), can still name
+ * WHEN the failed session ran without carrying a fourth, redundant field that
+ * would only ever restate what the id already encodes.
+ */
+export function sessionIdStartedAt(sessionId: string): string | null {
+  if (!sessionId.startsWith("bap-")) return null;
+  const ms = Number(sessionId.slice("bap-".length));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 /** One operator action, as the raw layer records it. Never a derived total:

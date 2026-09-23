@@ -16,10 +16,11 @@ import { useState } from "react";
 import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, PauseIcon, PlayIcon } from "lucide-react";
 
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
+import { sessionIdStartedAt } from "@main/types/stage";
 import { invoke, type IpcChannel } from "../../../lib/api";
 import { Button, confirm, toast } from "../../../components/ui";
 import { cn } from "../../../lib/cn";
-import { summarizeBaptism, fmtClock } from "../../../main/use-baptism-state";
+import { summarizeBaptism, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { useServerNow } from "../../../lib/server-clock";
 import { BaptismTriggersPanel } from "../../../main/baptism-triggers-panel";
 
@@ -186,21 +187,38 @@ export function TimerCard({ state, onFinished }: TimerCardProps) {
 
           {/* Directly under the readout, because the readout above it says
               "Finished" either way. Not gated on the finished readout: Start
-              and the workflow toggle carry the failure (see
-              BaptismState.saveError), so it stays up until THAT SAME session
-              saves, Reset clears it, or the operator dismisses it here — an
-              unrelated session saving cleanly in the meantime does not clear
-              it (saveErrorSessionId scopes the match). Its own Dismiss
-              because after the toggle the state holds nobody, and neither
-              Reset nor Undo renders. No rebuild offer yet — nothing in the app
-              replays a baptism session from its raw rows. */}
-          {state.saveError && (
+              and the workflow toggle carry every entry (see
+              BaptismState.saveErrors), so each stays up until THAT SAME
+              session saves, Reset clears the list, or the operator dismisses
+              it here — an unrelated session saving cleanly in the meantime
+              clears only its own entry, never another's. A LIST, not the
+              latest failure only: session A failing, then session B ALSO
+              failing, then B alone saving on retry, must not read as A having
+              been resolved too. One Dismiss for all of them, because after
+              the workflow toggle the state can hold nobody, where neither
+              Reset nor Undo renders. No rebuild offer yet — nothing in the
+              app replays a baptism session from its raw rows. */}
+          {!!state.saveErrors?.length && (
             <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-              <p className="flex-1">
-                <span className="font-semibold">The last session did not save.</span> Finish could not write it to Past
-                sessions ({state.saveError}). Its presses are still in the service&rsquo;s raw archive, baptism.csv, if a
-                service was open while it ran.
-              </p>
+              <div className="flex-1">
+                <p className="font-semibold">
+                  {state.saveErrors.length === 1 ? "A session did not save." : `${state.saveErrors.length} sessions did not save.`}
+                </p>
+                <ul className="mt-1 flex flex-col gap-0.5">
+                  {state.saveErrors.map((e) => {
+                    const startedAt = sessionIdStartedAt(e.sessionId);
+                    return (
+                      <li key={e.sessionId}>
+                        {startedAt ? `${fmtDate(startedAt)}: ` : ""}
+                        Finish could not write it to Past sessions ({e.reason}).
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="mt-1">
+                  Its presses are still in the service&rsquo;s raw archive, baptism.csv, if a service was open while it ran.
+                </p>
+              </div>
               <Button
                 size="small"
                 disabled={busy}

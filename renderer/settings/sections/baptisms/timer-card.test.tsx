@@ -1,10 +1,10 @@
 // timer-card.test.tsx — the Timer card says so when Finish could not save.
 //
-// BaptismState.saveError is set when the write behind Finish rejects (see
-// baptism-save-error.test.ts for the server half). This proves the card renders
-// it: a note announced as an alert, naming the reason, saying where the session
-// still exists, and carrying its own Dismiss. Without it the readout says
-// "Finished" over a session Past sessions will never list.
+// BaptismState.saveErrors gets an entry when the write behind Finish rejects
+// (see baptism-save-error.test.ts for the server half). This proves the card
+// renders it: a note announced as an alert, naming the reason, saying where
+// the session still exists, and carrying its own Dismiss. Without it the
+// readout says "Finished" over a session Past sessions will never list.
 //
 // NOT proved here: how the note LOOKS. jsdom loads no stylesheet, so its colour,
 // its border and whether it reads as an error beside the readout cannot be seen
@@ -25,11 +25,13 @@ const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { TimerCard } = await import("./timer-card.js");
 const { TooltipProvider } = await import("../../../components/ui/index.js");
+const { baptismSessionId } = await import("@main/types/stage");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-/** What the server puts in saveError: the reason, never a path (see saveFailureReason). */
+/** What the server puts in a saveErrors entry's reason: never a path (see
+ *  saveFailureReason). */
 const DISK = "ENOSPC: no space left on device";
 
 /** A grouped session just finished: one person testified and was baptized. */
@@ -48,8 +50,13 @@ const FINISHED: BaptismState = {
   serviceTitle: "9am",
   serviceTypeId: "svc-1",
   planId: "plan-1",
-  saveError: null,
+  saveErrors: [],
 };
+
+/** One saveErrors entry for `sessionStartedAt` (FINISHED's own, by default). */
+function failedSave(reason: string, sessionStartedAt = FINISHED.sessionStartedAt!) {
+  return [{ sessionId: baptismSessionId(sessionStartedAt), serviceKey: null, reason }];
+}
 
 /** BaptismTriggersPanel, inside the card, reads the plan and its bindings; an
  *  empty answer leaves it rendering nothing, which is all this test needs. */
@@ -76,7 +83,7 @@ const alertText = (root: ParentNode): string | null => {
 };
 
 test("a finished session whose save failed says it did not save, why, and where it still is", async () => {
-  const root = await mount({ ...FINISHED, saveError: DISK });
+  const root = await mount({ ...FINISHED, saveErrors: failedSave(DISK) });
   const text = alertText(root);
   assert.notEqual(text, null, "expected an alert on the card");
   assert.match(text!, /did not save/, "it says plainly that the session did not save");
@@ -86,7 +93,7 @@ test("a finished session whose save failed says it did not save, why, and where 
 
 test("a save that did not fail claims nothing", async () => {
   const root = await mount(FINISHED);
-  assert.equal(alertText(root), null, "no alert when saveError is null");
+  assert.equal(alertText(root), null, "no alert when saveErrors is empty");
 });
 
 /** Mount with a fetch that records every request and stays installed until
@@ -109,7 +116,7 @@ const buttonNamed = (root: ParentNode, label: string) =>
   [...root.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label);
 
 test("the note has its own Dismiss, and pressing it asks the server to clear the failure", async () => {
-  const { root, calls, restore } = await mountRecording({ ...FINISHED, saveError: DISK });
+  const { root, calls, restore } = await mountRecording({ ...FINISHED, saveErrors: failedSave(DISK) });
   try {
     const dismiss = buttonNamed(root, "Dismiss");
     assert.equal(!!dismiss, true, "expected a Dismiss control on the note");
@@ -126,7 +133,7 @@ test("the note has its own Dismiss, and pressing it asks the server to clear the
 });
 
 test("after the workflow toggle the state holds nobody, and Dismiss is the only thing that clears the note", async () => {
-  // setMode() carries saveError into a fresh idle state: no people, nothing
+  // setMode() carries saveErrors into a fresh idle state: no people, nothing
   // finished. The card renders no Reset and no Undo there.
   const { root, restore } = await mountRecording({
     ...FINISHED,
@@ -135,7 +142,7 @@ test("after the workflow toggle the state holds nobody, and Dismiss is the only 
     finishedAt: null,
     sessionStartedAt: null,
     people: [],
-    saveError: DISK,
+    saveErrors: failedSave(DISK),
   });
   try {
     assert.notEqual(alertText(root), null, "the note is up");
@@ -154,9 +161,29 @@ test("the note stays up while the next session runs, since Start carries the fai
     finishedAt: null,
     people: [],
     segmentStartedAt: "2026-09-20T16:00:00.000Z",
-    saveError: DISK,
+    saveErrors: failedSave(DISK),
   });
   const text = alertText(root);
   assert.notEqual(text, null, "the alert is not tied to the finished readout");
   assert.ok(text!.includes(DISK));
+});
+
+// Final review, Minor 5: a single field let session A fail, session B ALSO
+// fail, and B's retry landing clear the note entirely -- A was never written.
+// The note is now a list; this proves both a failed session's own entry shows
+// and that a second failure does not replace the first.
+test("two failed sessions both show their own line, naming their own reason", async () => {
+  const OTHER = "EACCES: permission denied";
+  const root = await mount({
+    ...FINISHED,
+    saveErrors: [
+      ...failedSave(DISK, "2026-09-13T15:00:00.000Z"),
+      ...failedSave(OTHER, "2026-09-20T15:00:00.000Z"),
+    ],
+  });
+  const text = alertText(root);
+  assert.notEqual(text, null, "expected an alert on the card");
+  assert.ok(text!.includes(DISK), `expected the first session's own reason: ${text}`);
+  assert.ok(text!.includes(OTHER), `expected the second session's own reason: ${text}`);
+  assert.match(text!, /2 sessions did not save/, "the note counts both, not just the latest");
 });
