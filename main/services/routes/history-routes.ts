@@ -96,6 +96,38 @@ async function baptismLaneFor(serviceKey: string): Promise<BaptismSpan[]> {
   return baptismLaneSpans(rows, serviceKey);
 }
 
+/**
+ * Every action `POST /api/baptism/<action>` actually handles, as a SORTED
+ * runtime array — one entry per line, never a bare count, for the reason
+ * this repo's other exact-list guards give: a count cannot tell an add plus
+ * a remove from no change. `as const` so BaptismAction below is a literal
+ * union, not `string`.
+ *
+ * Ties the switch below to this array through the exhaustiveness check at
+ * its `default:` (see baptism-actions.test.ts's own module comment for why a
+ * text scan of the switch was not enough): a `case` label not in this array
+ * fails at its own line (`tsc` TS2678, not comparable to `BaptismAction`),
+ * and an array member with no `case` fails at `default:` (its literal is not
+ * assignable to `never`). baptism-actions.test.ts checks the third direction
+ * this array cannot check itself — its own table of driven actions against
+ * this array, at runtime — so an entry here with no test row is caught too.
+ */
+export const BAPTISM_ACTIONS = [
+  "advance",
+  "baptized",
+  "dismiss-save-error",
+  "finish",
+  "mode",
+  "next",
+  "pause",
+  "reset",
+  "resume",
+  "start",
+  "start-baptisms",
+  "undo",
+] as const;
+export type BaptismAction = (typeof BAPTISM_ACTIONS)[number];
+
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
@@ -356,7 +388,11 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       }
     }
     if (method === "POST" && pathname.startsWith("/api/baptism/")) {
-      const action = pathname.slice("/api/baptism/".length);
+      // Cast, not a runtime guard: the switch below is what decides whether
+      // this string is actually one of BAPTISM_ACTIONS. The cast exists so
+      // `tsc` treats `action` as that union for the exhaustiveness check at
+      // `default:` below, not to change what the value actually is.
+      const action = pathname.slice("/api/baptism/".length) as BaptismAction;
       switch (action) {
         case "start": json(res, baptismTimerService.start()); return;
         case "baptized": json(res, baptismTimerService.baptized()); return;
@@ -373,6 +409,15 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           const body = (await readBody(req)) as Record<string, unknown>;
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
           return;
+        }
+        default: {
+          // If this line fails to compile, BAPTISM_ACTIONS above lists an
+          // action with no `case` — add one. A runtime string that was never
+          // one of BAPTISM_ACTIONS reaches here too (the cast above changes
+          // nothing about what the value actually is) and falls through to
+          // the routes below, same as any other unmatched path.
+          const exhaustive: never = action;
+          void exhaustive;
         }
       }
     }

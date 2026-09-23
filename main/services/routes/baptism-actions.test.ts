@@ -18,6 +18,19 @@
 // not notice. Both red proofs below (a handler swap, the same comment
 // substitution the re-reviewer used) confirm the design actually catches what
 // it is meant to.
+//
+// A THIRD gap survived the first version of this file: ACTIONS/EXPECTED_ACTIONS
+// were checked against each other, never against the real switch. A reviewer
+// added `case "scratch-new-untested-action":` to history-routes.ts and this
+// whole file, plus route-coverage.test.ts, stayed green — the deleted
+// text-scanning guard would have caught that shape (a new `case` label), and
+// the replacement lost it by only ever reading its OWN table. Closed with the
+// type system, per CLAUDE.md's stated preference over a text scan: the switch
+// in history-routes.ts is now over `action as BaptismAction`, exhaustive
+// against the exported BAPTISM_ACTIONS array, so a `case` not in that array
+// fails `tsc` at its own line and an array member with no `case` fails `tsc`
+// at `default:`. This file checks the one direction `tsc` cannot: an array
+// member nobody wrote a test row for.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -31,7 +44,7 @@ process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../../types/stage.js";
 
-const { historyRoutes } = await import("./history-routes.js");
+const { historyRoutes, BAPTISM_ACTIONS } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { baptismTimerService: timer } = await import("../baptism-timer-service.js");
 const { baptismStore } = await import("../baptism-store.js");
@@ -225,9 +238,12 @@ const ACTIONS: ActionCase[] = [
 ];
 
 // EXACT, sorted, one entry per line — never a bare count: a count cannot tell
-// an action added in one row and removed in another from no change. Checks
-// this file's OWN table against itself, so a row cannot go missing silently;
-// the routes it names are proven live by actually driving every one of them.
+// an action added in one row and removed in another from no change. Checked
+// against TWO things below, not one: this file's OWN table (so a row cannot
+// go missing silently) AND history-routes.ts's real BAPTISM_ACTIONS export
+// (so this list cannot drift from the switch it is meant to describe — the
+// gap a reviewer found by adding a case neither this file nor
+// route-coverage.test.ts noticed).
 const EXPECTED_ACTIONS = [
   "advance",
   "baptized",
@@ -246,6 +262,15 @@ const EXPECTED_ACTIONS = [
 describe("POST /api/baptism/<action>", () => {
   it("drives exactly this sorted list of actions", () => {
     assert.deepEqual(ACTIONS.map((c) => c.action).sort(), EXPECTED_ACTIONS);
+  });
+
+  it("this sorted list is exactly history-routes.ts's own BAPTISM_ACTIONS", () => {
+    // The `tsc` exhaustiveness check (case <-> array member, both
+    // directions) lives in history-routes.ts itself. What ONLY a runtime
+    // check can catch: an entry in that real array with no row in the table
+    // above — reachable, wired, and untested. `tsc` cannot see a MISSING
+    // test any more than the old text scan could.
+    assert.deepEqual([...BAPTISM_ACTIONS].sort(), EXPECTED_ACTIONS);
   });
 
   for (const { action, setup, body, check } of ACTIONS) {
