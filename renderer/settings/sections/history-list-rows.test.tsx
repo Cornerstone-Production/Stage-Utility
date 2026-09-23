@@ -376,15 +376,32 @@ describe("the All services day list", () => {
       return (service.textContent ?? "").replace(/\s+/g, " ").trim();
     }
 
-    test("a row with a linked session says how many were baptized — the SAME number the service's own page shows", async () => {
+    test("a row with a linked session carries the count on the droplet badge, visibly and by name — the SAME number the service's own page shows", async () => {
       installFetch({ baptisms: BAPTIZED });
       const view = await renderList(false, routerWithBaptismDestination());
 
-      const elevenText = rowUnderText(view, ELEVEN.serviceKey);
-      assert.match(elevenText, /\b1 baptized\b/, `expected "1 baptized" in the row's subtitle, got: ${elevenText}`);
+      // Not the subtitle: at 1280 with the calendar beside the list, SERVICE
+      // is the row's only flexible track, and a trailing "N baptized" there
+      // was the first thing truncated away, some widths down to a bare
+      // droplet with no number anywhere. The badge is what survives —
+      // present beside the title itself, never gated by how much of the
+      // subtitle fits.
+      const row = view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!;
+      const badge = row.querySelector("[data-row-baptized]");
+      assert.ok(badge, "expected a droplet badge on a row with a linked session");
+      assert.match((badge!.textContent ?? "").trim(), /^1$/, `expected the badge to show the count itself, got: ${badge!.textContent}`);
+      assert.equal(badge!.getAttribute("aria-label"), "1 baptized", "expected an accessible name spelling out what the digit means");
+
       // baptismStats' own rule: two people TESTIFIED, only one was actually
       // BAPTIZED (baptizeMs > 0) — the row must count the second, not the first.
-      assert.doesNotMatch(elevenText, /\b2 baptized\b/, "must count real baptisms, never testimonies");
+      assert.notEqual(badge!.getAttribute("aria-label"), "2 baptized", "must count real baptisms, never testimonies");
+
+      // The subtitle keeps its OTHER words — series and item count — now that
+      // the badge, not a trailing subtitle clause, is what a screen reader or
+      // a narrow layout can rely on for the count.
+      const elevenText = rowUnderText(view, ELEVEN.serviceKey);
+      assert.match(elevenText, /Rooted/, "expected the series title to remain in the subtitle");
+      assert.doesNotMatch(elevenText, /baptized/i, "the count no longer duplicates into the subtitle text");
 
       // Open the SAME service's own History page and read ITS OWN count off
       // the Baptisms card's stat strip — one fixture, both surfaces.

@@ -1764,15 +1764,21 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
             // Not a new ROW_COLUMNS figure \u2014 that grid dashes out anything a
             // row has nothing for, which would put a dash under "Baptized" on
-            // every ordinary Sunday. Joins the subtitle instead, and a
-            // service with none gains nothing at all: no marker, no dash.
-            // The SAME linkBaptisms + baptismStats pair the open service's
-            // own Baptisms card uses, so a row's count and that service's
-            // page can never disagree about the same service.
+            // every ordinary Sunday. A service with none gains nothing at
+            // all: no marker, no dash. The SAME linkBaptisms + baptismStats
+            // pair the open service's own Baptisms card uses, so a row's
+            // count and that service's page can never disagree about the
+            // same service.
+            //
+            // The count itself lives on the droplet badge beside the title,
+            // not in this joined subtitle: SERVICE is the row's only
+            // flexible track, and a trailing "N baptized" here was the first
+            // thing a narrow width truncated away \u2014 down to a bare,
+            // numberless droplet at the widths where the calendar sits
+            // beside the list. Leaving it off also gives seriesTitle and
+            // itemCount more room before THEY are what gets clipped.
             const bapCount = baptismStats(linkBaptisms(baptisms ?? [], s)).people;
-            const under = [s.seriesTitle, itemCount, bapCount > 0 ? `${bapCount} baptized` : null]
-              .filter(Boolean)
-              .join(" \u00b7 ");
+            const under = [s.seriesTitle, itemCount].filter(Boolean).join(" \u00b7 ");
             // FIXED columns, so the header above the group lines up with every
             // row under it. The figures are picked by key rather than taken in
             // order: a live recording has no `vs plan`, and closing the gap
@@ -1831,10 +1837,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
                       <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                       {bapCount > 0 && (
-                        // Decorative — the subtitle's own "N baptized" already
-                        // says this in words; a screen reader hearing "droplet
-                        // icon" and "N baptized" back to back adds nothing.
-                        <DropletIcon data-row-baptized aria-hidden className="size-3 shrink-0 self-center text-fg-subtle" />
+                        // The badge, not the subtitle, is what a narrow width
+                        // or the calendar-beside-list layout cannot truncate
+                        // away — it sits beside the title itself. The digit is
+                        // real text so it survives on its own; `role="img"`
+                        // plus the full aria-label is the same pattern
+                        // RecordingDot uses for a labelled glyph, so a screen
+                        // reader hears "1 baptized" once rather than "droplet
+                        // icon" and a bare "1" apart from each other.
+                        <span
+                          data-row-baptized
+                          role="img"
+                          aria-label={`${bapCount} baptized`}
+                          title={`${bapCount} baptized`}
+                          className="inline-flex shrink-0 items-center gap-0.5 self-center text-fg-subtle"
+                        >
+                          <DropletIcon aria-hidden className="size-3 shrink-0" />
+                          <span aria-hidden className="text-[10px] font-medium tabular-nums">{bapCount}</span>
+                        </span>
                       )}
                       {live && <RecordingPill />}
                     </span>
