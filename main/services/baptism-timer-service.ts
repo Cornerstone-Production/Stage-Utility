@@ -303,12 +303,12 @@ class BaptismTimerService {
   }
 
   /** Switch workflow — only allowed while idle. Preserves nothing else but a
-   *  failed save, which only a save that lands, Reset, or the operator's
-   *  Dismiss may clear (see BaptismState.saveError). Its session id and
-   *  serviceKey travel with it — the scoped clear needs the id to still match
-   *  once THIS session eventually saves, and PR 3's Rebuild offer needs the
-   *  serviceKey to still name the failed service once this one has replaced
-   *  it in state.serviceKey. */
+   *  failed save, which only a save of the session that failed, Reset, or the
+   *  operator's Dismiss may clear (see BaptismState.saveError). Its session
+   *  id and serviceKey travel with it — the scoped clear needs the id to
+   *  still match once THIS session eventually saves, and PR 3's Rebuild
+   *  offer needs the serviceKey to still name the failed service once this
+   *  one has replaced it in state.serviceKey. */
   setMode(mode: BaptismMode): BaptismState {
     if (mode !== "per-person" && mode !== "grouped") return this.state;
     if (this.state.phase !== "idle") return this.state;
@@ -773,10 +773,11 @@ class BaptismTimerService {
   }
 
   /** The operator has read a failed save's note and dismissed it — the one way
-   *  to clear it besides a save that lands or Reset, and the only one after
-   *  the workflow toggle has carried it into a state with nobody in it, where
-   *  the Timer card offers neither Reset nor Undo. Touches nothing else, and
-   *  writes no raw row: it is not a press on the timer. */
+   *  to clear it besides a save of the session that failed or Reset, and the
+   *  only one after the workflow toggle has carried it into a state with
+   *  nobody in it, where the Timer card offers neither Reset nor Undo.
+   *  Touches nothing else, and writes no raw row: it is not a press on the
+   *  timer. */
   dismissSaveError(): BaptismState {
     if (!this.state.saveError) return this.state;
     console.log(`[baptism-timer] save failure dismissed: ${this.state.saveError}`);
