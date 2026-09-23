@@ -710,6 +710,12 @@ describe("the no-service warning logs once per session, not once per press", () 
 // the undo, 40ms after) so a loaded machine cannot close the gap — with the
 // bug the value is bounded ABOVE by roughly the second sleep, and the
 // assertion's floor is the first.
+//
+// Bounded above as well as below: measured 188-196ms across repeated runs,
+// idle and under artificial CPU load, for a nominal 150+40. A floor alone
+// would also pass a double-count (the banked segment added in twice, or
+// added to itself) — that lands north of 300ms, so a 250ms ceiling sits with
+// ~55ms of headroom over every real run and excludes it by a wide margin.
 describe("undo() resumes a popped person's testimony from its banked time, not from zero", () => {
   it("grouped/armed: armed on the wrong song, undone, re-armed — the whole testimony survives", async () => {
     const ctx = freshCtx();
@@ -730,6 +736,11 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
       finished.people[0]!.testimonyMs >= 150,
       `the whole testimony survives the undo — got ${finished.people[0]!.testimonyMs}ms, ` +
         "which means the resumed segment restarted at zero and kept only the gap after the undo",
+    );
+    assert.ok(
+      finished.people[0]!.testimonyMs <= 250,
+      `got ${finished.people[0]!.testimonyMs}ms, well above the ~190ms a correct resume produces — ` +
+        "the banked segment may be getting counted twice",
     );
 
     const rows = await baptismRows(ctx);
@@ -770,6 +781,11 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
       `person 1's testimony resumed from what pendingTestimonyMs held — got ${finished.people[0]!.testimonyMs}ms, ` +
         "which means the undo dropped the banked testimony and restarted their clock at zero",
     );
+    assert.ok(
+      finished.people[0]!.testimonyMs <= 250,
+      `got ${finished.people[0]!.testimonyMs}ms, well above the ~190ms a correct resume produces — ` +
+        "the banked segment may be getting counted twice",
+    );
 
     const rows = await baptismRows(ctx);
     const c = cols(rows);
@@ -808,6 +824,11 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
       finished.people[0]!.testimonyMs >= 150,
       `person 1's testimony resumed from what it had banked — got ${finished.people[0]!.testimonyMs}ms, ` +
         "which means the undo restarted their clock at zero",
+    );
+    assert.ok(
+      finished.people[0]!.testimonyMs <= 250,
+      `got ${finished.people[0]!.testimonyMs}ms, well above the ~190ms a correct resume produces — ` +
+        "the banked segment may be getting counted twice",
     );
 
     const rows = await baptismRows(ctx);
