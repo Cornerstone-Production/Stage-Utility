@@ -11,27 +11,48 @@ ProdCom (prodcom.io) exposes an HTTP + WebSocket Application API (default port
 at `/docs` on the box. Field names here come from that document, not from
 guesswork.
 
-`prodcom-service.ts` holds one WebSocket to `GET /api/v1/ws`, subscribes to the
-`transcript` stream, normalises each entry into a `TranscriptLineDTO`, keeps a
-rolling buffer (up to 100 lines from the last four hours), and re-broadcasts on
-the `prodcom:transcript` channel.
+`prodcom-service.ts` runs two transports and picks whichever has actually
+proven it delivers:
 
-It reconnects 4 s after a connection drops, then doubles that for each further
-failure in a row, clamped by the service window the way every other integration
-is — so a box that is off all week is not dialled every four seconds all week.
-Any connection that comes up resets the ramp, so a drop mid-service is always
-retried in about four seconds.
+- **SSE**, `GET /api/v1/transcript/stream` — connected from the moment this
+  service starts, and the live transport for as long as the WebSocket is
+  unproven. On ProdCom 2.3.2 that is always: its WebSocket accepts the upgrade,
+  heartbeats, and never once published a transcript frame in testing.
+- **WebSocket**, `GET /api/v1/ws`, subscribed to the `transcript` stream —
+  opened beside the SSE stream, never instead of it. The first transcript entry
+  it actually delivers **promotes** it: the SSE stream closes, and the
+  WebSocket becomes the live transport. A build that starts publishing on the
+  socket takes over automatically the moment it proves it.
 
-ProdCom sends a `{"type":"ping"}` heartbeat over that socket every 30 seconds
+Either way, each entry is normalised into a `TranscriptLineDTO`, kept in a
+rolling buffer (up to 100 lines from the last four hours), and re-broadcast on
+the `prodcom:transcript` channel. Entries carry ProdCom's own `id`; a line is
+revised in place under that id until `inProgress` is false, so a line that
+arrives on both transports while the WebSocket is unproven is applied and
+broadcast once, not twice.
+
+The SSE connection reconnects 4 s after it drops, then doubles that for each
+further failure in a row, clamped by the service window the way every other
+integration is — so a box that is off all week is not dialled every four
+seconds all week. Any connection that comes up resets the ramp, so a drop
+mid-service is always retried in about four seconds. A **promoted** WebSocket
+that later dies falls straight back to the SSE stream immediately, with
+backfill (below) covering whatever gap that leaves; an **unproven** WebSocket
+attempt that fails never touches the SSE stream at all, and is retried on its
+own, slower cadence — see [The WebSocket
+attempt](#the-websocket-attempt-and-a-socket-that-carries-nothing).
+
+ProdCom sends a `{"type":"ping"}` heartbeat over the WebSocket every 30 seconds
 whether or not anyone is speaking, and the app answers it. Three missed
 heartbeats (90 s of total silence) means the box is gone, not that the room is
-quiet, so the connection is dropped and reopened.
+quiet, so that connection is dropped.
 
 A heartbeat proves the box is alive; it does not prove the subscription is
-delivering. See [A socket that carries nothing](#a-socket-that-carries-nothing)
-for the check that covers the difference.
+delivering. See [The WebSocket attempt and a socket that carries
+nothing](#the-websocket-attempt-and-a-socket-that-carries-nothing) for the
+check that covers the difference.
 
-On (re)connect the app primes itself from REST, in this order:
+On every SSE (re)connect the app primes itself from REST, in this order:
 
 - `GET /api/v1/channels` for each channel's name and colour, keyed by channel id
 - `GET /api/v1/keywords` and `GET /api/v1/channels/{id}/keywords` for the words
@@ -51,6 +72,11 @@ older than that horizon are skipped on backfill even when the server returned
 them. So a reconnect cannot re-import a service from days ago just because
 ProdCom's own history still holds it.
 
+A WebSocket attempt does not repeat any of this priming — the SSE stream already
+owns keeping channels, keywords and the buffer current for as long as any
+WebSocket attempt is unproven, so a re-test costs exactly one REST call (the
+silence check's row-count baseline below), not a fresh channel read and backfill.
+
 Only entries whose `source` is `audio` become captions. A message an operator
 typed into a comms channel (`typed`) and a line ProdCom's own automations
 produced (`automation`) are skipped and logged once per kind per connection —
@@ -66,32 +92,34 @@ display picks its own colour.
 If a key is required, it is sent as `Authorization: Bearer <key>` — the one
 security scheme the specification declares.
 
-### A socket that carries nothing
+### The WebSocket attempt, and a socket that carries nothing
 
 A ProdCom build can accept the upgrade, list the transcript stream in its welcome
 frame, answer every heartbeat, and then deliver no transcript entry at all — while
 `GET /api/v1/transcript` goes on returning the same lines. Nothing about the
 connection looks wrong from the client's side, so without a specific check the
-captions display simply stays empty and the integration card reads connected.
+captions display would look empty while the integration card read connected.
+Captions never actually depend on this: the SSE stream is live throughout, so
+the worst this can do is delay how soon the WebSocket takes over.
 
-While the WebSocket is the live transport and has delivered **no** transcript
-entry, the app asks REST one question at the one-minute mark: has ProdCom
-recorded any `source: audio` entries beyond the ones it already held when this
-socket opened? Typed and automation entries do not count — they never become
-captions, so a socket that did not deliver one has missed nothing.
+While a WebSocket attempt is open and has delivered **no** transcript entry, the
+app asks REST one question at the one-minute mark: has ProdCom recorded any
+`source: audio` entries beyond the ones it already held when this socket opened?
+Typed and automation entries do not count — they never become captions, so a
+socket that did not deliver one has missed nothing.
 
-The question is asked as a **row count**, not as a time. On connect the app reads
+The question is asked as a **row count**, not as a time. On open the app reads
 `meta.totalCount` from `GET /api/v1/transcript`, and the check then reads the
 rows past that offset. No timestamp is compared on either side, because a ProdCom
 is an appliance whose clock is its own: a box running fast would answer "yes" for
-lines spoken before the socket ever opened and get a healthy connection torn
-down, and a box running slow would answer "no" for ever and hide the very failure
-this check exists to catch. A row count has neither failure — ProdCom's
-transcript is append-only and ascending from the oldest entry, so rows beyond the
-baseline are exactly the rows added since.
+lines spoken before the socket ever opened and get a working attempt condemned,
+and a box running slow would answer "no" for ever and hide the very failure this
+check exists to catch. A row count has neither failure — ProdCom's transcript is
+append-only and ascending from the oldest entry, so rows beyond the baseline are
+exactly the rows added since.
 
-If the count cannot be read the check does nothing at all for that connection,
-and says so on connect.
+If the count cannot be read the check does nothing at all for that attempt, and
+says so when it opens.
 
 - **Nothing spoken** — nothing was missed. The question is asked again a minute
   later.
@@ -100,64 +128,74 @@ and says so on connect.
   transport that is working gets torn down.
 - **Lines the socket never delivered** — the socket is reopened **without** the
   `subscribe` frame, on the theory that ProdCom's own subscription filter is what
-  swallowed them. If that socket then delivers, captions stay on the WebSocket
-  and the log records which subscription worked.
-- **Silent both ways** — captions move to the SSE fallback, and the integration
-  card says `Fallback stream — the websocket carried no transcript` rather than
-  claiming a healthy socket. That message describes why captions moved **this
-  time**, not what is known about the box: a later attempt on the same ProdCom
-  that is refused outright reports the ordinary `Streaming from host:port`, since
-  a refused upgrade is a different failure from a socket that opens and says
-  nothing.
+  swallowed them. If that socket then delivers, it is promoted — see below — and
+  the log records which subscription worked.
+- **Silent both ways** — the attempt gives up: the socket closes, and the
+  integration card says `Fallback stream — the websocket carried no transcript`
+  rather than claiming a healthy socket, even though the SSE stream carrying
+  captions was never touched. That message describes why the WebSocket is not
+  trusted **this time**, not what is known about the box: a later attempt on the
+  same ProdCom that is refused outright reports the ordinary
+  `Streaming from host:port`, since a refused upgrade is a different failure from
+  a socket that opens and says nothing.
 
-The first transcript entry over a socket ends the check for that connection: a
-socket that is carrying the transcript is never asked again and costs no further
-REST calls.
+The first transcript entry over a socket **promotes** it: the SSE stream that had
+been carrying captions closes, the WebSocket becomes the live transport, and the
+check that got it there is never asked again for that connection. A promoted
+WebSocket that later dies falls straight back to the SSE stream (reopened
+immediately, with backfill covering the gap); it is not "known silent" — it just
+proved itself — so a fresh attempt after it earns its way back to promotion the
+same as any other.
 
-### The SSE fallback
+### Retrying the WebSocket while it stays unproven
 
-If the WebSocket will not come up, the app falls back to the older
-`GET /api/v1/transcript/stream` and keeps offering the WebSocket again: every
-third reconnect, and every five minutes whether or not anything reconnects. Both
-rules are needed. The counter handles a box that is dropping the fallback anyway;
-the timer handles a fallback that is up and quiet, which never reconnects and so
+An attempt that gives up without proving itself — refused, dropped before
+opening, or shown silent above — never touches the SSE stream: nothing about the
+fallback changes, because it was never the thing being tested. Only the retry
+cadence and the card's message change.
+
+The app keeps offering the WebSocket again: every third SSE reconnect, and every
+five minutes whether or not the SSE stream reconnects at all. Both rules are
+needed. The counter handles a box that is dropping the SSE connection anyway; the
+timer handles an SSE stream that is up and quiet, which never reconnects and so
 never counts — a ProdCom that has been restarted and would now upgrade is picked
-up within five minutes rather than at the next restart of this server.
-
-The timer's attempt is made **beside** the live stream, not in place of it. If
-the WebSocket opens, the fallback is dropped and the app switches to it; if it
-does not, the fallback is untouched and nothing else happens — no reconnect, no
-re-read of channels or keywords, no backfill, and no second refusal diagnosis.
-So a box that genuinely has no WebSocket costs one refused upgrade every five
-minutes and nothing more.
+up within five minutes rather than at the next restart of this server. Every
+attempt this cadence makes is opened **beside** the SSE stream, exactly like the
+very first one — nothing about a periodic re-test is special-cased, which is what
+keeps it from costing a fresh SSE stream, a channel read, a keyword read or a
+200-line backfill: a box that genuinely has no WebSocket costs one refused
+upgrade every five minutes and nothing more.
 
 Both rules widen — to every 20 reconnects and every 30 minutes — once a box has
-been shown to [accept a socket and carry nothing on
-it](#a-socket-that-carries-nothing). A refused upgrade is free, by the paragraph
-above; a socket that *opens* is not, because opening it drops the fallback and it
-is then given a minute to prove itself. On such a box the re-test is on
-probation: it must deliver a transcript entry within that minute or captions go
-straight back to the fallback, with no REST call, because the question has
-already been answered for this box. The card reads `Re-testing the websocket that
-carried no transcript` while that minute runs, and no recovery is announced until
-a transcript entry actually arrives. A re-test that does deliver clears the
-verdict and keeps the socket.
+been shown to [carry nothing on its
+socket](#the-websocket-attempt-and-a-socket-that-carries-nothing). A refused
+upgrade is free, by the paragraph above; a socket that *opens* is not quite free
+either, because it is given a whole minute to prove itself before it is dropped
+again — a REST call and a closed socket every five minutes is worth spacing out
+once the question has already been answered for this box. On such a box the
+re-test is on probation: it must deliver a transcript entry within that minute or
+it is dropped again, with no REST call. The card reads `Re-testing the websocket
+that carried no transcript` while that minute runs — the SSE stream is still what
+a display is reading throughout — and no recovery is announced until a transcript
+entry actually arrives and promotes it.
 
 Consecutive re-tests **alternate** between sending the `subscribe` frame and not
 sending it, and the log line says which the next one will use. Neither shape is
 assumed permanent: a ProdCom build that fixes the subscription and requires the
 frame would otherwise be re-tested unsubscribed for ever, dropped a minute later
-every time, and cost a caption gap every half hour on a box that had been fixed.
+every time, and cost a delayed promotion every half hour on a box that had been
+fixed.
 
 Everything the app learns about a box's WebSocket is forgotten when the
 integration is reconfigured or re-enabled, so an upgraded or replaced ProdCom
 gets a clean first attempt with the documented `subscribe` frame.
 
-That stream sends no keepalive of any kind, so on that path a dropped cable is
-caught by TCP keepalive probing the box every 30 s, and a box
-that answers TCP while its application has stopped is caught by a 15-minute
-data-silence timer — which cannot tell a dead box from a quiet evening, and is
-the reason the WebSocket is preferred.
+The SSE stream sends no keepalive of any kind, so a dropped cable on that path is
+caught by TCP keepalive probing the box every 30 s, and a box that answers TCP
+while its application has stopped is caught by a 15-minute data-silence timer —
+which cannot tell a dead box from a quiet evening, and is the reason a promoted
+WebSocket, with ProdCom's real 30-second heartbeat, is preferred once one proves
+itself.
 
 ### Diagnostics
 
@@ -169,8 +207,11 @@ a sweep every five seconds clears a stale partial even when nobody else speaks.
 
 The `/log` page has the evidence when something looks wrong:
 
-- `[prodcom] websocket open — streams offered: …` on every connection
-- `[prodcom] no websocket frame for 90s — heartbeat missed …` when the box goes
+- `[prodcom] websocket open — streams offered: …` on every WebSocket attempt
+- `[prodcom] the websocket delivered a transcript entry — captions move to it and
+  the SSE fallback closes` — the promotion, the moment it happens
+- `[prodcom] no websocket frame for 90s — heartbeat missed …` when an open socket
+  goes quiet, whether or not it was promoted
 - `[prodcom] websocket delivered no transcript in 60s while ProdCom has at least
   N spoken line(s) since it opened — reopening it without the subscribe frame`,
   and then either `[prodcom] the websocket delivers the transcript with no
@@ -179,29 +220,33 @@ The `/log` page has the evidence when something looks wrong:
   when it does not. `[prodcom] the websocket has carried no transcript in 60s and
   this box has failed that test before …` is a later re-test being dropped, and
   `[prodcom] the websocket is carrying the transcript again …` is one that came
-  good. `[prodcom] could not read the transcript row count (…)` on connect means
-  this connection has no baseline and the check will not run at all for it.
+  good. `[prodcom] could not read the transcript row count (…)` on open means
+  this attempt has no baseline and the check will not run at all for it.
   `[prodcom] could not check whether the websocket is missing transcript
   lines (…)` means REST did not answer and nothing was changed — once per outage
   with a reminder every 15 minutes, not once per check, and
   `[prodcom] the silent-socket check can reach ProdCom again` when it recovers.
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
-- `[prodcom] websocket unavailable (…) — falling back to the transcript SSE stream`
-  once per outage, not once per retry, with a reminder carrying the attempt count
-  every 15 minutes while it lasts, and `[prodcom] websocket is back …` when it
-  recovers. The per-retry "retrying the websocket after N SSE reconnect(s)" is
-  `console.debug`, so it is in the terminal but deliberately not on `/log`. The
-  five-minute retry logs nothing at all: it neither drops the stream nor counts a
-  reconnect, so there is nothing for it to report until it succeeds, and then
-  `websocket is back` says so.
+- `[prodcom] websocket unavailable (…) — captions stay on the transcript SSE
+  fallback` when an unproven attempt gives up (the SSE stream was never touched
+  to reach this point), or `[prodcom] websocket unavailable (…) — falling back to
+  the transcript SSE stream` when a **promoted** WebSocket dies and the SSE
+  stream is being reopened. Either way it is once per outage, not once per retry,
+  with a reminder carrying the attempt count every 15 minutes while it lasts, and
+  `[prodcom] websocket is back …` when it recovers. The per-retry "retrying the
+  websocket after N SSE reconnect(s)" is `console.debug`, so it is in the
+  terminal but deliberately not on `/log`. The five-minute retry logs nothing at
+  all on a refusal: it neither drops the SSE stream nor counts a reconnect, so
+  there is nothing to report until it succeeds, and then `websocket is back`
+  says so.
 
   The reason in that line names the HTTP status the handshake was refused with.
   Node's WebSocket exposes no status for a refused upgrade — a 426, a 401 and a
   missing route all arrive as close code 1006 — so the same URL is asked once
-  over plain HTTP before the fallback opens. That probe is bounded: 4 s of socket
-  silence, and a 6-second wall-clock deadline that a box answering with an
-  endless body cannot push back. If it runs out, the fallback opens on the bare
+  over plain HTTP before the attempt gives up. That probe is bounded: 4 s of
+  socket silence, and a 6-second wall-clock deadline that a box answering with an
+  endless body cannot push back. If it runs out, the attempt gives up on the bare
   close reason rather than waiting:
 
   | Reason | Means |
@@ -229,6 +274,10 @@ The `/log` page has the evidence when something looks wrong:
   final lands on a channel that has no partial while others do (the renamed
   channel case), and `[prodcom] transcript cleared by operator` naming every live
   partial and its age when the clear button is pressed
+- `[prodcom] a finished line arrived on both the websocket and the SSE
+  fallback — duplicate suppressed`, once per connection, the first time a line
+  delivered by both transports while the WebSocket is unproven is applied once
+  rather than broadcast twice
 
 Text is never logged, only its length, and neither is any keyword — only counts.
 `PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how

@@ -43,9 +43,9 @@ class TestProdCom extends ProdComService {
   protected override get probeDeadlineMs(): number {
     return 400;
   }
-  protected override noteWebSocketDown(reason: string, detail: string | null = null): void {
+  protected override noteWebSocketDown(reason: string, detail: string | null = null, stillOnFallback = false): void {
     this.downs.push({ reason, detail });
-    super.noteWebSocketDown(reason, detail);
+    super.noteWebSocketDown(reason, detail, stillOnFallback);
   }
   /** A reconnect, as scheduleReconnect() would run it. */
   public reconnectNow(): Promise<void> {
@@ -282,6 +282,10 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     });
     svc.configure("127.0.0.1", server.port, null);
     await eventually(() => probes(server) === 1, "the probe to go out");
+    // The SSE fallback is already live by now — connect() opens it beside the
+    // WebSocket attempt from the start. What stop() must prevent is the probe's
+    // eventual (stale) answer opening ANOTHER one once this service has let go.
+    const sseOpensBeforeStop = server.sseOpens();
 
     svc.stop();
     // Within a fraction of the probe's own deadline, which is 400 ms here: the
@@ -289,7 +293,11 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     // window would pass whether or not teardown() does anything. What is under
     // test is that STOPPING takes the socket with it.
     await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 150);
-    assert.equal(server.sseOpens(), 0, "a stopped service opened a fallback anyway");
+    assert.equal(
+      server.sseOpens(),
+      sseOpensBeforeStop,
+      "a stopped service's stale probe answer opened another fallback stream",
+    );
   });
 
   it("a second refusal while a probe is in flight does not start a second probe", async (t) => {
@@ -328,28 +336,44 @@ describe("a refused upgrade is diagnosed before falling back", () => {
 
     svc.configure("127.0.0.1", old.port, null);
     await eventually(() => probes(old) === 1, "the probe against the old box");
+    // The old box's OWN fallback opened at connect(), same as any other — that is
+    // not what this guards. What must not happen is the stale probe's answer,
+    // arriving after we have moved on, opening ANOTHER one against it.
+    const oldSseAtSwitch = old.sseOpens();
     svc.configure("127.0.0.1", next.port, null); // the operator repoints it
 
     await eventually(() => next.sseOpens() > 0, "the NEW box's fallback to open", 3000);
-    assert.equal(old.sseOpens(), 0, "the old box's probe opened a stream against a box we have left");
+    assert.equal(
+      old.sseOpens(),
+      oldSseAtSwitch,
+      "the old box's stale probe answer opened another stream against a box we have left",
+    );
   });
 
-  it("does not probe when the WebSocket was up and dropped normally", async (t) => {
-    // The normal-drop path retries the same transport and never falls back, so
-    // there is nothing to diagnose — and a probe there would put an extra
-    // request on the box on every ordinary reconnect.
+  it("does not probe a socket that opened and dropped without ever delivering", async (t) => {
+    // A socket that completed the handshake is not a refusal, so it must never
+    // reach the probe — that diagnosis is for a socket that never opened at all,
+    // and probing this one would put an extra request on the box on every
+    // ordinary drop. It is still unproven, though (nothing here ever delivered a
+    // transcript entry), so it is worth ONE outage line same as a refusal would
+    // be — the SSE fallback carried captions the whole time regardless.
     const { stub, svc } = await onARealWebSocket(t);
-    await eventually(() => svc.onWebSocketNow, "the websocket to be the live transport");
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
     const before = stub.requests.filter((r) => r.headers["user-agent"] === PROBE_USER_AGENT).length;
     stub.wsDropAll();
-    await eventually(() => !svc.onWebSocketNow, "the drop to be noticed");
+    await eventually(() => !svc.wsOpenNow, "the drop to be noticed");
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(
       stub.requests.filter((r) => r.headers["user-agent"] === PROBE_USER_AGENT).length,
       before,
-      "a normal drop was diagnosed as a refusal",
+      "a socket that had opened was diagnosed with a refused-upgrade probe",
     );
-    assert.deepEqual(svc.downs, [], "a normal drop must not be reported as the websocket being unavailable");
+    assert.equal(svc.downs.length, 1, "an unproven socket dropping was not reported as the websocket being unavailable");
+    assert.doesNotMatch(
+      svc.downs[0]!.reason,
+      /closed before open/,
+      "a socket that had opened was described as one that never did",
+    );
   });
 });
 
@@ -368,7 +392,8 @@ async function onARealWebSocket(t: TestContext) {
 }
 
 class WsTestProdCom extends TestProdCom {
-  public get onWebSocketNow(): boolean {
-    return this.onWebSocketTransport;
+  /** Whether a WebSocket attempt is currently open, proven or not. */
+  public get wsOpenNow(): boolean {
+    return this.wsAttemptOpen;
   }
 }
