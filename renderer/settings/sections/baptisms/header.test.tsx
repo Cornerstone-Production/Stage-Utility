@@ -223,9 +223,9 @@ test("confirming calls onRebuilt so Past sessions and Trends can refresh", async
   }
 });
 
-test("describeBaptismRebuild names updated, added and kept — never just a bare count", () => {
+test("describeBaptismRebuild names updated, added, newer and kept — never just a bare count", () => {
   assert.equal(
-    describeBaptismRebuild({ rows: 5, sessions: 2, updated: 1, added: 1, kept: 3 }),
-    "Rebuilt from raw: 1 updated, 1 added, 3 left alone",
+    describeBaptismRebuild({ rows: 5, sessions: 6, updated: 1, added: 1, newer: 1, kept: 3 }),
+    "Rebuilt from raw: 1 updated, 1 added, 1 newer than their rows, 3 left alone",
   );
 });

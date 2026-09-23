@@ -17,7 +17,7 @@ import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
-import { baptismStore } from "./baptism-store.js";
+import { baptismStore, MAX_SESSIONS as MAX_BAPTISM_SESSIONS } from "./baptism-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
@@ -49,6 +49,18 @@ export class ServiceIsLiveError extends Error {
 }
 
 /**
+ * Whether any recorder is actively writing this serviceKey right now — the
+ * ONE definition of "live" for a service. `assertNotLive` refuses on it, and
+ * `GET /api/history/live` (history-routes.ts) answers it directly, so a
+ * client's own guess at whether a service is live and the server's actual
+ * refusal can never disagree about the same key the way a client-side
+ * approximation once could.
+ */
+export function isServiceLive(serviceKey: string): boolean {
+  return RECORDERS.some((r) => r.isRecording(serviceKey));
+}
+
+/**
  * Refuse to touch a record the recorders are still writing.
  *
  * Every function in this file rewrites a stored record, and a recorder holding
@@ -65,7 +77,7 @@ export class ServiceIsLiveError extends Error {
  * ending is minutes away.
  */
 export function assertNotLive(serviceKey: string, action: string): void {
-  if (RECORDERS.some((r) => r.isRecording(serviceKey))) throw new ServiceIsLiveError(action);
+  if (isServiceLive(serviceKey)) throw new ServiceIsLiveError(action);
 }
 
 /** Release every recorder's copy of these keys. Called BEFORE the first awaited
@@ -631,16 +643,28 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
       // Unlike NO_RECORD's 0, "missing" here does not imply zero sessions: a
       // session recorded before the raw layer existed has no baptism.csv
       // behind it at all and still counts. `items` is always this service's
-      // true session count, whichever branch this is.
-      outcome.baptism = { rebuilt: true, items: bapPlan.kept + bapPlan.toWrite.filter((s) => (s.serviceKey ?? null) === serviceKey).length, missing: false };
-      if (bapPlan.toWrite.length > 0) {
-        pending.push({
-          name: "baptism",
-          write: async () => {
-            await applyBaptismRebuild(serviceKey, bapPlan);
-          },
-        });
-      }
+      // true session count, whichever branch this is. `rebuilt` is true only
+      // when there is something to WRITE — sessions the rows reconstruct but
+      // that match nothing changed are "newer", not "rebuilt" (see
+      // BaptismRebuildPlan.newer): a count read as an achievement even when
+      // nothing landed is the exact failure RebuiltRecord's own doc exists to
+      // prevent.
+      outcome.baptism = {
+        rebuilt: bapPlan.toWrite.length > 0,
+        items: bapPlan.kept + bapPlan.newer + bapPlan.toWrite.filter((s) => (s.serviceKey ?? null) === serviceKey).length,
+        missing: false,
+      };
+      // Pushed whenever baptism.csv exists, even with nothing to WRITE: a
+      // service whose rows exist but reconstruct nothing is not the same as
+      // one with no raw rows at all, and leaving this leg out of `pending`
+      // when every OTHER leg is also empty made the whole rebuild answer "No
+      // raw rows exist" while baptism.csv plainly had some.
+      pending.push({
+        name: "baptism",
+        write: async () => {
+          await applyBaptismRebuild(serviceKey, bapPlan);
+        },
+      });
     } else {
       outcome.baptism = { rebuilt: false, items: bapPlan.kept, missing: true };
     }
@@ -754,11 +778,28 @@ interface BaptismRebuildPlan {
    *  recorded, matching NoRawRowsError; [] means recorded a header and
    *  nothing else, which is a normal (if usually pointless) merge. */
   rows: BaptismRow[] | null;
-  /** Sessions to hand to baptismStore.mergeRebuilt: a MATCHED session keeps
-   *  the stored one's id/startedAt/title/serviceTypeId/planId/serviceKey and
-   *  takes people/finishedAt from the rebuild; an UNMATCHED one is the
-   *  rebuilt session verbatim. */
+  /** Sessions to hand to baptismStore.mergeRebuilt: a MATCHED-and-newer
+   *  session keeps the stored one's id/startedAt/title/serviceTypeId/planId/
+   *  serviceKey and takes people/finishedAt from the rebuild; an UNMATCHED
+   *  one is the rebuilt session verbatim. A matched-but-OLDER session (see
+   *  `newer` below) is never in this list at all — there is nothing to write
+   *  for it. */
   toWrite: BaptismSession[];
+  /** The ids (as they appear in `toWrite`) of sessions with no stored
+   *  counterpart at all. */
+  addedIds: Set<string>;
+  /** The STORED ids of matched sessions whose people/finishedAt the rebuild's
+   *  rows actually updated. */
+  updatedIds: Set<string>;
+  /** Matched to a rebuilt session, but the STORE's own finishedAt was not
+   *  earlier than the rebuilt one's — left exactly as stored. Presses made
+   *  after the service closed, or after a serviceKey roll, never reach that
+   *  service's rows (emitRaw needs an open service — see currentServiceKey),
+   *  so the store can know a correction the rows do not: a Finish, the
+   *  service ending, then an Undo and a longer re-Finish. Overwriting that
+   *  with what the (now stale) rows say is the bug an operator would have no
+   *  way to notice until the number was already wrong. */
+  newer: number;
   /** Stored sessions naming this serviceKey that no rebuilt session matched —
    *  left exactly as they are, never removed. A session split across a
    *  mid-session serviceKey roll, or one recorded before the raw layer
@@ -771,13 +812,28 @@ interface BaptismRebuildPlan {
  * Derive this service's baptism sessions from `baptism.csv` and work out what
  * merging them into the store would do.
  *
- * Matched by `id`; failing that, by `startedAt` within BAPTISM_SKEW_MS — see
- * its own comment. Matched against EVERY stored session, not only this
- * service's, so a rebuild can never add a second copy of a session the store
- * already has under a different key (see mergeServiceRecords, which can
- * re-key a record's identity onto a different serviceKey; baptism sessions
- * are not touched by that today, but the rebuild must not assume they never
- * will be).
+ * Two passes, not one, and the order is load-bearing:
+ *
+ *   1. Match every rebuilt session against a stored one by `id`, for the
+ *      WHOLE batch, before any session moves on to the fallback below. One
+ *      rebuilt session's id match must never be pre-empted by a DIFFERENT
+ *      rebuilt session's 2-second fallback grabbing the same stored session
+ *      first — that is exactly how two sessions 1.5 seconds apart once had
+ *      their `people` swapped: the fallback ran per-session, so the first
+ *      rebuilt session (not itself id-matched) claimed the SECOND session's
+ *      exact id-match by proximity before the second session's own turn to
+ *      look for its id ever came.
+ *   2. Whatever id matching left unmatched gets the NEAREST still-unconsumed
+ *      stored session within BAPTISM_SKEW_MS — nearest by elapsed time, never
+ *      merely the first one encountered in the store's own (newest-first)
+ *      order, which is a different session whenever more than one candidate
+ *      falls inside the window.
+ *
+ * Matched against EVERY stored session, not only this service's, so a
+ * rebuild can never add a second copy of a session the store already has
+ * under a different key (see mergeServiceRecords, which can re-key a
+ * record's identity onto a different serviceKey; baptism sessions are not
+ * touched by that today, but the rebuild must not assume they never will be).
  *
  * Never a replace. Pure with respect to the store: reads
  * baptismStore.listSessions() but writes nothing, so both callers below can
@@ -789,7 +845,7 @@ async function planBaptismRebuild(serviceKey: string, serviceDate: string): Prom
   const storedForService = () => allStored.filter((s) => s.serviceKey === serviceKey);
 
   if (rows === null) {
-    return { rows: null, toWrite: [], kept: storedForService().length };
+    return { rows: null, toWrite: [], addedIds: new Set(), updatedIds: new Set(), newer: 0, kept: storedForService().length };
   }
 
   const tl = await serviceTimelineStore.get(serviceKey);
@@ -800,48 +856,116 @@ async function planBaptismRebuild(serviceKey: string, serviceDate: string): Prom
     planId: tl?.planId ?? null,
   });
 
+  // Pass 1: id matches, decided for the whole batch first.
   const consumed = new Set<string>();
-  const toWrite: BaptismSession[] = [];
+  const idMatch = new Map<BaptismSession, BaptismSession>();
   for (const r of rebuilt) {
-    const match =
-      allStored.find((s) => !consumed.has(s.id) && s.id === r.id) ??
-      allStored.find(
-        (s) => !consumed.has(s.id) && Math.abs(Date.parse(s.startedAt) - Date.parse(r.startedAt)) <= BAPTISM_SKEW_MS,
-      );
-    if (match) {
-      consumed.add(match.id);
-      // The stored session's own identity; only what the rows know and the
-      // store might not (a re-finish after an Undo whose save then failed)
-      // comes from the rebuild.
-      toWrite.push({ ...match, people: r.people, finishedAt: r.finishedAt });
-    } else {
-      toWrite.push(r);
+    const m = allStored.find((s) => !consumed.has(s.id) && s.id === r.id);
+    if (m) {
+      consumed.add(m.id);
+      idMatch.set(r, m);
     }
   }
+
+  // Pass 2: the 2-second fallback, nearest candidate wins, over whatever
+  // pass 1 left unmatched.
+  const toWrite: BaptismSession[] = [];
+  const addedIds = new Set<string>();
+  const updatedIds = new Set<string>();
+  let newer = 0;
+  for (const r of rebuilt) {
+    let match = idMatch.get(r) ?? null;
+    if (!match) {
+      let bestDelta = Infinity;
+      for (const s of allStored) {
+        if (consumed.has(s.id)) continue;
+        const delta = Math.abs(Date.parse(s.startedAt) - Date.parse(r.startedAt));
+        if (delta <= BAPTISM_SKEW_MS && delta < bestDelta) {
+          match = s;
+          bestDelta = delta;
+        }
+      }
+      if (match) consumed.add(match.id);
+    }
+
+    if (!match) {
+      addedIds.add(r.id);
+      toWrite.push(r);
+      continue;
+    }
+
+    // The store may know more than these rows ever can — see `newer` above.
+    if (Date.parse(r.finishedAt) < Date.parse(match.finishedAt)) {
+      newer += 1;
+      continue; // left exactly as stored: not written, not reported as touched
+    }
+    updatedIds.add(match.id);
+    // The stored session's own identity; only what the rows know and the
+    // store might not otherwise have (a re-finish whose earlier save failed)
+    // comes from the rebuild.
+    toWrite.push({ ...match, people: r.people, finishedAt: r.finishedAt });
+  }
+
   const kept = storedForService().filter((s) => !consumed.has(s.id)).length;
-  return { rows, toWrite, kept };
+  return { rows, toWrite, addedIds, updatedIds, newer, kept };
 }
 
 /**
  * Write a baptism-rebuild plan and log the merge — the one place that calls
  * baptismStore.mergeRebuilt, shared by rebuildServiceBaptisms and
  * rebuildServiceRecords's baptism leg so the two cannot log this differently.
- * A no-op (and silent) when there is nothing to write: a service whose rows
- * produce nothing writes nothing.
+ *
+ * Logs even when there is nothing to WRITE: a service whose rows produce no
+ * change still has something worth saying (how many were newer than their
+ * own rows, how many were left alone entirely), and a silent no-op here is
+ * exactly the gap that made `kept` invisible in the log for a service whose
+ * merge changed nothing.
+ *
+ * The write itself is wrapped: a filesystem failure here must reach the log,
+ * scrubbed, and never the response or the toast — the same discipline
+ * rebuildServiceRecords already applies to its other three legs.
  */
 async function applyBaptismRebuild(
   serviceKey: string,
   plan: BaptismRebuildPlan,
 ): Promise<{ updated: number; added: number }> {
-  if (plan.toWrite.length === 0) return { updated: 0, added: 0 };
-  const { updated, added } = await baptismStore.mergeRebuilt(plan.toWrite);
-  // Every interpolation through scrub(), including the ones this file computed
-  // itself (a count, never anything a request typed): log-injection.test.ts
-  // reads the source, and an exception for "this one is obviously safe" is how
-  // the rule stops being a rule.
+  const rowCount = (plan.rows ?? []).length;
+  if (plan.toWrite.length === 0) {
+    console.log(
+      `[baptism] rebuild: 0 sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
+        `0 updated, 0 added, ${scrub(plan.newer)} newer than rows, ${scrub(plan.kept)} kept unreproduced`,
+    );
+    return { updated: 0, added: 0 };
+  }
+
+  let dropped: string[];
+  try {
+    ({ dropped } = await baptismStore.mergeRebuilt(plan.toWrite));
+  } catch (err) {
+    // Nothing reaches the response or the toast beyond RebuildFailedError's
+    // own fixed sentence: a write failure here names an absolute path, and
+    // this answer reaches a LAN-visible page the same way rebuildServiceRecords's
+    // own write failures do.
+    console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
+    throw new RebuildFailedError(errorMessage(err));
+  }
+
+  // A session this rebuild wanted to add or update can still fall out of the
+  // MAX_SESSIONS cap on the write itself (2000 sessions — practically
+  // unreachable, but "reported as added/updated" must mean "actually
+  // stored," not "was in the batch handed to the store."
+  const droppedSet = new Set(dropped);
+  const added = [...plan.addedIds].filter((id) => !droppedSet.has(id)).length;
+  const updated = [...plan.updatedIds].filter((id) => !droppedSet.has(id)).length;
+  if (dropped.length > 0) {
+    console.warn(
+      `[baptism] rebuild: the ${scrub(MAX_BAPTISM_SESSIONS)}-session cap dropped ${scrub(dropped.length)} of ` +
+        `this rebuild's own sessions for ${scrub(serviceKey)}`,
+    );
+  }
   console.log(
-    `[baptism] rebuild: ${scrub(updated + added)} sessions from ${scrub((plan.rows ?? []).length)} rows for ` +
-      `${scrub(serviceKey)} — ${scrub(updated)} updated, ${scrub(added)} added, ${scrub(plan.kept)} kept unreproduced`,
+    `[baptism] rebuild: ${scrub(added + updated)} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
+      `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(plan.newer)} newer than rows, ${scrub(plan.kept)} kept unreproduced`,
   );
   return { updated, added };
 }
@@ -850,13 +974,16 @@ async function applyBaptismRebuild(
 export interface BaptismRebuildOutcome {
   /** Raw rows read from baptism.csv. */
   rows: number;
-  /** Sessions rebuildBaptismSessions reconstructed from them (updated + added). */
+  /** Sessions rebuildBaptismSessions reconstructed from them (updated + added + newer). */
   sessions: number;
   /** Matched an existing stored session; its people/finishedAt were brought
    *  up to date. */
   updated: number;
   /** No match in the store at all; added as a new session. */
   added: number;
+  /** Matched, but the store's own finishedAt was not earlier than the
+   *  rebuilt one's — left exactly as stored rather than reverted. */
+  newer: number;
   /** Stored sessions for this service the rebuild found no counterpart for —
    *  left untouched. */
   kept: number;
@@ -873,7 +1000,11 @@ export interface BaptismRebuildOutcome {
  *
  * A MERGE, never a replace — see planBaptismRebuild. Refuses a live service
  * the same way rebuildServiceRecords does, and a service with no baptism.csv
- * at all the same way it refuses a recording with no raw rows.
+ * at all the same way it refuses a recording with no raw rows. It can also
+ * re-add a session an operator deleted from Past sessions: the raw rows do
+ * not know a session was deleted any more than they know one was corrected,
+ * and that is the one way an older service's lost session can come back at
+ * all — the caller's own confirm text says so.
  */
 export async function rebuildServiceBaptisms(serviceKey: string): Promise<BaptismRebuildOutcome> {
   assertNotLive(serviceKey, "rebuilt");
@@ -895,7 +1026,7 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
   }
 
   const { updated, added } = await applyBaptismRebuild(serviceKey, plan);
-  return { rows: plan.rows.length, sessions: updated + added, updated, added, kept: plan.kept };
+  return { rows: plan.rows.length, sessions: updated + added + plan.newer, updated, added, newer: plan.newer, kept: plan.kept };
 }
 
 /**

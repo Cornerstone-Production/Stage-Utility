@@ -20,8 +20,12 @@ interface BaptismFile {
  * number small enough to reach in normal use is a data-loss mechanism wearing a
  * cap's clothing. At a few hundred bytes each, 2000 sessions is well under a
  * megabyte and no church reaches it.
+ *
+ * Exported so a rebuild's own log line (history-edit.ts) can name the same
+ * number this file enforces, rather than a second copy of "2000" the two
+ * could drift on.
  */
-const MAX_SESSIONS = 2000;
+export const MAX_SESSIONS = 2000;
 
 class BaptismStore {
   private store = new DataStore<BaptismFile>("baptism.json", { current: null, sessions: [] }, "runtime");
@@ -106,21 +110,38 @@ class BaptismStore {
    * session this rebuild did not touch, whichever service it names — is left
    * exactly as it was. This never removes a session; see
    * rebuildServiceBaptisms in history-edit.ts, which is the only caller and
-   * decides what belongs in `sessions`.
+   * decides what belongs in `sessions`, and already refuses to let two
+   * rebuilt sessions claim the same stored one. This is the second line of
+   * defence: two sessions sharing an id here can only mean the caller's own
+   * matching has a bug, and a `Map` built from `sessions` would silently keep
+   * the LAST of them and drop the other's data — the exact silent-collapse
+   * shape this refuses instead.
    *
    * A session identical, field for field, to what is already stored leaves
    * that entry as that SAME object rather than a new one carrying equal
-   * values, so an already-intact store's file is untouched byte for byte:
-   * DataStore.update() skips the write entirely when the mutator hands back
-   * the object it was given. `updated` still counts it — the rebuild DID
-   * reconcile it with the rows, and reporting 0 for a session that was
-   * checked and found correct is indistinguishable from one nothing looked
-   * at.
+   * values, so an already-intact store's file is untouched byte for byte —
+   * verified by `baptism-store.test.ts`'s spy on the underlying write, not
+   * merely claimed: DataStore.update() skips the write entirely when the
+   * mutator hands back the object it was given.
+   *
+   * Returns the ids from `sessions` that did not survive the MAX_SESSIONS
+   * cap — sorted newest-first before the cap is applied, so the sessions this
+   * rebuild is adding or updating are exactly as likely to survive as
+   * anything else already stored, rather than being appended past a cap
+   * already full of older entries and sliced straight back off. Empty on any
+   * realistic install; the caller must not count a dropped id as written.
    */
-  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ updated: number; added: number }> {
-    if (sessions.length === 0) return { updated: 0, added: 0 };
-    let updated = 0;
-    let added = 0;
+  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ dropped: string[] }> {
+    if (sessions.length === 0) return { dropped: [] };
+    const seen = new Set<string>();
+    for (const s of sessions) {
+      if (seen.has(s.id)) {
+        throw new Error(`mergeRebuilt received two sessions sharing id "${s.id}" — refusing rather than silently keeping one`);
+      }
+      seen.add(s.id);
+    }
+
+    let dropped: string[] = [];
     await this.store.update((file) => {
       let changed = false;
       const incoming = new Map(sessions.map((s) => [s.id, s]));
@@ -128,7 +149,6 @@ class BaptismStore {
         const repl = incoming.get(existing.id);
         if (!repl) return existing;
         incoming.delete(existing.id);
-        updated += 1;
         if (repl.finishedAt === existing.finishedAt && JSON.stringify(repl.people) === JSON.stringify(existing.people)) {
           return existing; // matched, but nothing about it actually differs — no write needed for this one
         }
@@ -136,14 +156,25 @@ class BaptismStore {
         return repl;
       });
       for (const s of incoming.values()) {
-        added += 1;
         changed = true;
         next.push(s);
       }
       if (!changed) return file;
-      return { ...file, sessions: next.slice(0, MAX_SESSIONS) };
+
+      if (next.length <= MAX_SESSIONS) return { ...file, sessions: next };
+
+      // Over the cap: newest-first before slicing, the same rule addSessions
+      // already applies, so the oldest sessions are what falls off — never a
+      // session this very rebuild just added or updated, unless it is
+      // genuinely among the oldest MAX_SESSIONS in the whole store.
+      const survivors = [...next]
+        .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+        .slice(0, MAX_SESSIONS);
+      const survivorIds = new Set(survivors.map((s) => s.id));
+      dropped = sessions.map((s) => s.id).filter((id) => !survivorIds.has(id));
+      return { ...file, sessions: survivors };
     });
-    return { updated, added };
+    return { dropped };
   }
 
   async deleteSession(id: string): Promise<boolean> {

@@ -128,7 +128,7 @@ describe("POST /api/baptism/rebuild", () => {
     });
 
     assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
-    assert.deepEqual(out.json, { rows: 3, sessions: 1, updated: 0, added: 1, kept: 0 });
+    assert.deepEqual(out.json, { rows: 3, sessions: 1, updated: 0, added: 1, newer: 0, kept: 0 });
 
     const sessions = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
     assert.equal(sessions.length, 1, "the rebuilt session did not land in the store");
@@ -149,7 +149,42 @@ describe("POST /api/baptism/rebuild", () => {
     });
 
     assert.equal(second.status, 200, `expected 200, got ${second.status}: ${second.body}`);
-    assert.deepEqual(second.json, { rows: 3, sessions: 1, updated: 1, added: 0, kept: 0 });
+    assert.deepEqual(second.json, { rows: 3, sessions: 1, updated: 1, added: 0, newer: 0, kept: 0 });
     assert.equal((await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY).length, 1, "a re-run duplicated the session");
+  });
+
+  // I2: the standalone rebuild must wrap its write exactly like
+  // rebuildServiceRecords does — no absolute path, no raw fs error message,
+  // reaching the response or (by extension) the header's toast.
+  it("wraps a write failure: no path in the response, and a [baptism] line names the reason", async () => {
+    const dir = serviceDirPath(KEY, DATE);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "baptism.csv"), BAPTISM_CSV, "utf8");
+
+    const original = baptismStore.mergeRebuilt.bind(baptismStore);
+    baptismStore.mergeRebuilt = async () => {
+      throw new Error("EACCES: permission denied, open '/var/data/.baptism.json.21844.2.tmp'");
+    };
+    let thrown: unknown;
+    try {
+      await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY } });
+    } catch (err) {
+      thrown = err;
+    } finally {
+      baptismStore.mergeRebuilt = original;
+    }
+
+    assert.ok(thrown, "a write failure answered as though it had succeeded");
+    assert.equal(handlerErrorStatus(thrown), 500);
+    assert.equal(
+      (thrown as Error).message,
+      "That recording could not be rebuilt, and nothing was changed. The log says why.",
+      "the raw filesystem error must not reach the response",
+    );
+    assert.doesNotMatch(
+      (thrown as Error).message,
+      /var\/data|EACCES/,
+      `the absolute path or errno leaked into the response: ${(thrown as Error).message}`,
+    );
   });
 });

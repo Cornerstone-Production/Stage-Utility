@@ -522,5 +522,88 @@ describe("POST /api/history/rebuild", () => {
 
       await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
+
+    // I4: a count read as an achievement even when nothing was derived is
+    // exactly the failure RebuiltRecord's own doc comment exists to prevent.
+    it("reports rebuilt: false when the rows reconstruct zero sessions", async () => {
+      await fs.writeFile(
+        path.join(serviceDirPath(KEY, DATE), "baptism.csv"),
+        [
+          "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+          "2026-09-17T23:50:00.000Z,start,per-person,testimony,1,0,0,,,",
+          "2026-09-17T23:50:05.000Z,reset,per-person,idle,0,0,0,,,",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+        method: "POST",
+        body: { serviceKey: KEY },
+      });
+
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { baptism: { rebuilt: boolean; items: number; missing: boolean } };
+      assert.equal(json.baptism.rebuilt, false, "a start immediately reset derived nothing — must not read as rebuilt");
+      assert.equal(json.baptism.missing, false, "the archive exists — this is not the same as no baptism.csv at all");
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
+  });
+
+  // M5: a service whose ONLY raw material is a baptism.csv that reconstructs
+  // nothing must not be told "No raw rows exist" — that archive plainly has
+  // rows, even though none of them assemble into a session.
+  describe("M5 — baptism.csv exists but reconstructs nothing, and nothing else can be derived either", () => {
+    const KEY2 = "st1:plan-2:m5";
+    const DATE2 = "2026-09-19";
+
+    it("answers normally rather than refusing 'No raw rows exist'", async () => {
+      await serviceTimelineStore.upsert({
+        serviceKey: KEY2,
+        serviceTypeId: "st1",
+        serviceTypeName: "Weekend",
+        planId: "plan-2",
+        planTitle: "M5 Service",
+        seriesTitle: null,
+        serviceDate: DATE2,
+        serviceTimeId: "m5",
+        serviceTimeStartsAt: null,
+        startedAt: "2026-09-19T09:00:00.000Z",
+        endedAt: "2026-09-19T10:30:00.000Z",
+        items: [], // no events.csv at all — timeline has nothing to derive from
+      } as never);
+      await attendanceStore.delete(KEY2);
+      await splHistoryStore.delete(KEY2);
+
+      const dir = serviceDirPath(KEY2, DATE2);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, "baptism.csv"),
+        [
+          "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+          "2026-09-19T09:40:00.000Z,start,per-person,testimony,1,0,0,,,",
+          "2026-09-19T09:40:05.000Z,reset,per-person,idle,0,0,0,,,",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      let thrown: unknown;
+      let out: Awaited<ReturnType<typeof callRoute>> | undefined;
+      try {
+        out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY2 } });
+      } catch (err) {
+        thrown = err;
+      }
+
+      assert.equal(thrown, undefined, `must not refuse — baptism.csv has rows: ${String(thrown)}`);
+      assert.equal(out!.status, 200, `expected 200, got ${out!.status}: ${out!.body}`);
+      const json = out!.json as { baptism: { rebuilt: boolean; missing: boolean } };
+      assert.equal(json.baptism.missing, false, "baptism.csv exists — this service is not missing raw baptism data");
+      assert.equal(json.baptism.rebuilt, false, "nothing was actually derived");
+
+      await fs.rm(dir, { recursive: true, force: true });
+    });
   });
 });

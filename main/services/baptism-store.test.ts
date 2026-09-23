@@ -109,3 +109,56 @@ describe("addSession is idempotent by id", () => {
     assert.equal(mine[0].people[0].testimonyMs, 9000, "the later write wins");
   });
 });
+
+describe("mergeRebuilt refuses two sessions sharing one id (I1)", () => {
+  it("throws rather than silently keeping the last of a duplicate pair", async () => {
+    const a = { ...session(600), people: [{ testimonyMs: 1, baptizeMs: 1 }] };
+    const b = { ...session(600), people: [{ testimonyMs: 2, baptizeMs: 2 }] }; // same id, different content
+    await assert.rejects(
+      () => baptismStore.mergeRebuilt([a, b]),
+      /sharing id/,
+      "two sessions with the same id must be refused, not silently collapsed by a Map",
+    );
+  });
+});
+
+/** Reach into the store's own internals to spy on the underlying write — the
+ *  same technique history-rebuild-route.test.ts uses on other stores'
+ *  `upsert`. `private` is compile-time only; this proves the claim in
+ *  mergeRebuilt's own doc comment rather than trusting it. */
+function spyOnWrite(): { calls: () => number; restore: () => void } {
+  const internals = (baptismStore as unknown as { store: { writeRaw: (data: unknown) => Promise<void> } }).store;
+  const original = internals.writeRaw.bind(internals);
+  let calls = 0;
+  internals.writeRaw = async (data: unknown) => {
+    calls += 1;
+    return original(data);
+  };
+  return { calls: () => calls, restore: () => { internals.writeRaw = original; } };
+}
+
+describe("mergeRebuilt — 'no write at all' for an intact session, guarded not just claimed (M3)", () => {
+  it("does not touch the underlying write when the session already matches exactly", async () => {
+    const s = { ...session(700), people: [{ testimonyMs: 5, baptizeMs: 5 }] };
+    await baptismStore.addSession(s);
+    const spy = spyOnWrite();
+    try {
+      await baptismStore.mergeRebuilt([{ ...s }]); // a new object, identical content
+      assert.equal(spy.calls(), 0, "an already-intact session must not reach the underlying write");
+    } finally {
+      spy.restore();
+    }
+  });
+
+  it("does write when the session's content genuinely changed", async () => {
+    const s = { ...session(701), people: [{ testimonyMs: 5, baptizeMs: 5 }] };
+    await baptismStore.addSession(s);
+    const spy = spyOnWrite();
+    try {
+      await baptismStore.mergeRebuilt([{ ...s, people: [{ testimonyMs: 99, baptizeMs: 99 }] }]);
+      assert.equal(spy.calls(), 1, "a real change must still reach the underlying write");
+    } finally {
+      spy.restore();
+    }
+  });
+});

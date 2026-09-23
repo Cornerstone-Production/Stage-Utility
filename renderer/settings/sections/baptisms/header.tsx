@@ -107,9 +107,18 @@ export function baptismReportText(state: BaptismState, figures: readonly StatFig
  * What a baptism-only rebuild did, in a sentence — the same "say what
  * changed" discipline describeRebuild uses for History's whole-service one,
  * over the narrower shape rebuildServiceBaptisms answers with.
+ *
+ * `newer` and `kept` are both "left alone", but for different reasons worth
+ * telling apart: `kept` is a session these rows never touched at all; `newer`
+ * is one they DID match, and the store's own copy won because it is newer
+ * than what the rows can show (a correction made after the service closed).
+ * Folding them into one number would hide that the second kind exists at all.
  */
 export function describeBaptismRebuild(out: BaptismRebuildOutcome): string {
-  return `Rebuilt from raw: ${out.updated} updated, ${out.added} added, ${out.kept} left alone`;
+  const parts = [`${out.updated} updated`, `${out.added} added`];
+  if (out.newer > 0) parts.push(`${out.newer} newer than their rows`);
+  if (out.kept > 0) parts.push(`${out.kept} left alone`);
+  return `Rebuilt from raw: ${parts.join(", ")}`;
 }
 
 export interface BaptismHeaderProps {
