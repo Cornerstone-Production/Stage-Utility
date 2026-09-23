@@ -522,6 +522,7 @@ test("the confirm names the target service's title and date", async () => {
     await settle();
     const dialog = text(document.body);
     assert.match(dialog, /Sunday Gathering/, `the confirm did not name the service: ${dialog}`);
+    assert.match(dialog, /Sep 20/, `the confirm named the service but not its date: ${dialog}`);
     fireEvent.click(findButton(document.body, "Cancel")!);
   } finally {
     restore();
