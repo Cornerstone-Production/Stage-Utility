@@ -11,6 +11,8 @@
 // resumes the running clock — segmentStartedAt is an absolute timestamp). Finished
 // sessions are logged for review. Running elapsed is derived client-side.
 
+import { getSystemErrorMessage } from "node:util";
+
 import { baptismSessionId } from "../types/stage.js";
 import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSession, BaptismState } from "../types/stage.js";
 import { settingsStore } from "./settings-store.js";
@@ -23,6 +25,7 @@ import { baptismStore } from "./baptism-store.js";
 import { stageController } from "./stage-controller.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { sampleArchive } from "./archive/sample-archive.js";
+import { errorMessage } from "./errors.js";
 
 function idleState(mode: BaptismMode): BaptismState {
   return {
@@ -39,7 +42,30 @@ function idleState(mode: BaptismMode): BaptismState {
     serviceTitle: null,
     serviceTypeId: null,
     planId: null,
+    saveError: null,
   };
+}
+
+/**
+ * What a failed save may say on the operator's screen: why, never where.
+ *
+ * BaptismState goes to every screen on the LAN, and a filesystem path must never
+ * be readable there (see port-holder.ts) — while a failed write's own message
+ * names the absolute path of the file it was writing, data directory and all. A
+ * Finish driven against a read-only data directory carried exactly that in the
+ * pushed state. The log line keeps the whole error.
+ *
+ * getSystemErrorMessage throws on anything but a negative integer, and this runs
+ * inside a rejection handler, where a throw is an unhandled rejection — hence the
+ * guard.
+ */
+function saveFailureReason(err: unknown): string {
+  const e = err as Partial<NodeJS.ErrnoException> | null | undefined;
+  const errno = e?.errno;
+  if (typeof e?.code === "string" && typeof errno === "number" && Number.isInteger(errno) && errno < 0) {
+    return `${e.code}: ${getSystemErrorMessage(errno)}`;
+  }
+  return errorMessage(err);
 }
 
 class BaptismTimerService {
@@ -267,11 +293,13 @@ class BaptismTimerService {
     }
   }
 
-  /** Switch workflow — only allowed while idle (preserves nothing else). */
+  /** Switch workflow — only allowed while idle. Preserves nothing else but a
+   *  failed save, which only a save that lands or Reset may clear (see
+   *  BaptismState.saveError). */
   setMode(mode: BaptismMode): BaptismState {
     if (mode !== "per-person" && mode !== "grouped") return this.state;
     if (this.state.phase !== "idle") return this.state;
-    this.state = idleState(mode);
+    this.state = { ...idleState(mode), saveError: this.state.saveError ?? null };
     return this.commit();
   }
 
@@ -297,6 +325,9 @@ class BaptismTimerService {
       // with the timing and attendance recorded alongside it, including when an
       // overrunning service rolls PCO's current service time forward.
       serviceKey: currentServiceKey(),
+      // The previous session's failed save, if any. A plan item going live
+      // calls this with nobody at the screen; see BaptismState.saveError.
+      saveError: this.state.saveError ?? null,
     };
     // No manual/auto provenance here: at this point in start(), this.state.
     // autoStartedFrom is always whatever idleState() left it as (unset) —
@@ -520,16 +551,36 @@ class BaptismTimerService {
     this.state = { ...this.state, phase: "idle", armed: false, segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
     this.emitRaw("finish", 0, `people=${people.length}`);
     if (people.length > 0 && this.state.sessionStartedAt) {
-      void baptismStore.addSession({
-        id: baptismSessionId(this.state.sessionStartedAt),
-        startedAt: this.state.sessionStartedAt,
-        finishedAt,
-        people,
-        title: this.state.serviceTitle,
-        serviceTypeId: this.state.serviceTypeId,
-        planId: this.state.planId,
-        serviceKey: this.state.serviceKey ?? null,
-      }).catch((err) => console.error("[baptism-timer] session save failed:", err));
+      void baptismStore
+        .addSession({
+          id: baptismSessionId(this.state.sessionStartedAt),
+          startedAt: this.state.sessionStartedAt,
+          finishedAt,
+          people,
+          title: this.state.serviceTitle,
+          serviceTypeId: this.state.serviceTypeId,
+          planId: this.state.planId,
+          serviceKey: this.state.serviceKey ?? null,
+        })
+        .then(
+          () => {
+            // A save that lands clears an earlier failure: the store is writing
+            // again, and a session re-finished after an Undo keeps its id, so
+            // this write replaced the one that failed.
+            if (!this.state.saveError) return;
+            this.state = { ...this.state, saveError: null };
+            this.commit();
+          },
+          (err: unknown) => {
+            // This was a catch that only logged, so a failed write read to the
+            // operator as a clean finish. The log line stays for /log; the state
+            // carries the failure to the screen. It settles after Finish has
+            // already returned and pushed, so it needs a commit of its own.
+            console.error("[baptism-timer] session save failed:", err);
+            this.state = { ...this.state, saveError: saveFailureReason(err) };
+            this.commit();
+          },
+        );
     }
     return this.commit();
   }

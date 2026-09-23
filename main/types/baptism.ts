@@ -74,6 +74,20 @@ export interface BaptismState {
   serviceTitle: string | null;
   serviceTypeId: string | null;
   planId: string | null;
+  /**
+   * Why the last Finish could not write its session to the saved sessions, or
+   * null when nothing failed. The reason only, never a path: this state goes to
+   * every screen on the LAN. The write settles after Finish has returned, so
+   * this arrives on a push of its own rather than on Finish's response.
+   *
+   * Cleared by a later save that lands, and by Reset. Carried across Start and
+   * the workflow toggle: a plan item going live starts the next session with
+   * nobody at the screen, and that must not erase a failure nobody has seen.
+   *
+   * Optional like every field added after this shape first shipped: a record
+   * persisted before it existed restores with none.
+   */
+  saveError?: string | null;
 }
 
 /** A finished baptism session, kept for later review. */

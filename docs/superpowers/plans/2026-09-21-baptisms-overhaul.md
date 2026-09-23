@@ -1429,10 +1429,20 @@ Ruling 15 routed this here. `finalize()` calls `baptismStore.addSession(...).cat
 console.error(...))`, so a failed write reads to the operator as a clean finish — a direct
 violation of the do-not-swallow rule, on the data this whole overhaul protects.
 
-Add `saveError: string | null` to `BaptismState`. `finalize()` sets it when `addSession` rejects
-and commits again so the push carries it; a later successful save or a `reset()` clears it. The
-Timer card shows it plainly: the session did not save, the raw rows still hold it, and it can be
-rebuilt. Keep the existing `[baptism-timer] session save failed:` log line.
+Add `saveError?: string | null` to `BaptismState` — optional, like every field added after the
+shape first shipped (`armed`, `segmentAccumMs`, `serviceKey`), so typed fixtures that predate it
+need no edit. `finalize()` sets it when `addSession` rejects and commits again so the push carries
+it; a later successful save or a `reset()` clears it. `start()` and `setMode()` carry it: both
+rebuild the state from `idleState()`, and a plan item going live calls `start()` with nobody at
+the screen, which would erase the failure before anyone saw it. The Timer card shows it plainly:
+the session did not save, and its raw rows still hold it if a service was open while it ran —
+rows are only written while one is. Keep the existing `[baptism-timer] session save failed:` log
+line, and add it to the doc's Logging list in the same commit.
+
+**Corrected:** the card does NOT say the session can be rebuilt. Nothing in PR 2 replays a
+baptism session — Task 17 wires Rebuild from raw in PR 3 — so that sentence would send an operator
+looking for a button that does not exist, the shape Ruling 35's I2 already caught in the docs.
+Task 17 adds the offer.
 
 This is the one task in this PR that edits the timer service. Touch nothing else in it.
 
@@ -1448,8 +1458,9 @@ This is the one task in this PR that edits the timer service. Touch nothing else
 
 - [ ] `docs/features/scriptview-and-baptisms.md` describes the tab. Correct two claims the final
   review flagged: `baptismDefaultMode` has no UI writer and decides only a fresh data dir, so do
-  not describe it as configurable; and the Logging section omits the two lines an operator most
-  needs, `[baptism-timer] persist failed:` and `[baptism-timer] session save failed:`.
+  not describe it as configurable; and the Logging section omits `[baptism-timer] persist
+  failed:`, one of the two lines an operator most needs. (The other, `[baptism-timer] session save
+  failed:`, landed with Task 14, the change that made that failure reach the screen.)
 - [ ] Correct two code comments the final review flagged as wrong: the "ONE entry point" claim on
   `advance()` (the panel routes through it only while armed) and its echo in
   `docs/reference/api.md`; and `rebuild-baptism.ts`'s MODE rule, which names `reset()` clearing
@@ -1497,7 +1508,11 @@ header roll. Do NOT carry the timestamp in the free-text `detail` column.
 ## Task 17: Rebuild from raw gains baptisms
 
 **Files:** `main/services/history-edit.ts` (`rebuildServiceRecords`), `main/services/baptism-store.ts`,
-`renderer/settings/sections/baptisms/header.tsx`, `docs/data-archive.md`
+`renderer/settings/sections/baptisms/header.tsx`, `renderer/settings/sections/baptisms/timer-card.tsx`,
+`docs/data-archive.md`
+
+The Timer card's save-failure note (Task 14) gains the rebuild offer it leaves out until this
+action exists.
 
 `rebuildServiceRecords` rebuilds the SPL, timeline and attendance records from raw. It gains
 baptisms: read the rows, `rebuildBaptismSessions`, and REPLACE that `serviceKey`'s stored sessions

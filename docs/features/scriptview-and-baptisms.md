@@ -269,6 +269,12 @@ replay is not something an operator can trigger from the app. See
 [Data archive](../data-archive.md) for the column list, which presses are
 recorded, and what the append-only rule buys the rest of the archive.
 
+A save that fails says so. If Finish cannot write the session to
+`baptism.json`, the Timer card shows why, under the readout, and keeps showing
+it — through the next Start too — until a later save lands or Reset clears it.
+Past sessions does not list that session; its rows in `baptism.csv` still hold
+it, if a service was open while it ran.
+
 ## Logging
 
 Failures and skipped auto-start actions are logged under `[baptism]`, so a
@@ -287,6 +293,8 @@ timer:
   not survive a restart.
 - `raw: emit failed: <event> …` — the timer's own state updated, but writing its
   row failed; only the row is missing, not the action.
+- `[baptism-timer] session save failed: …` — Finish could not write the session
+  to `baptism.json`. The Timer card says so as well (see Recovery, above).
 - `next: ignored, the restored session has nobody at baptismIndex …` /
   `undo: ignored, the restored session has nobody at baptismIndex 0` /
   `finish: closing with nobody at baptismIndex … — no person-complete row
