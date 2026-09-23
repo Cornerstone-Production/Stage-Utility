@@ -534,6 +534,20 @@ describe("a real session reopened by an Undo after Finish: the lane is still the
     const undoneAt = Date.now();
     timer.undo();
     await sleep(STRETCH_MS);
+    // Read live, while person 1's re-timed clock runs. The undo row is baptism,
+    // baptismIndex 0 with person 1's closed span last — what "First person in"
+    // taken back looks like too. Only the finish straight before it says this
+    // one reopens a session; misread as the re-arm, nothing would be running
+    // here, and the finished lane below could not show it: the next row's
+    // segmentMs places the clock either way.
+    const live = await laneOf(ctx);
+    const running = live[live.length - 1]!;
+    assert.deepEqual(
+      [running.kind, running.person, running.endedAt],
+      ["baptism", 1, null],
+      `person 1's clock runs from the Undo, so the live lane ends with it open: ${JSON.stringify(shape(live))}`,
+    );
+    assert.ok(Date.parse(running.startedAt) >= undoneAt, "opened at the undo");
     timer.next();
     await sleep(STRETCH_MS);
     timer.next();
@@ -544,6 +558,33 @@ describe("a real session reopened by an Undo after Finish: the lane is still the
     assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "testimony 3", "baptism 1", "baptism 2", "baptism 3"]);
     const first = spans.find((s) => s.kind === "baptism" && s.person === 1)!;
     assert.ok(Date.parse(first.startedAt) >= undoneAt, "person 1's baptism is the one timed from the Undo");
+  });
+
+  it("Finish while baptizing person 1, undone, then First person in taken back: the reopened clock is what drops", async () => {
+    // The second Undo is the re-arm. Had the first been misread as one too,
+    // this one would find no span of person 1's to drop and take the step
+    // back instead — drawing the re-armed wait as person 1's baptism.
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.startBaptisms();
+    timer.advance();
+    await sleep(STRETCH_MS);
+    timer.finish();
+    timer.undo(); // reopens person 1, re-timed
+    await sleep(STRETCH_MS);
+    assert.equal(timer.undo().armed, true, "sanity: First person in taken back re-arms");
+    await sleep(STRETCH_MS);
+    timer.advance();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next(); // auto-finishes
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, early Finish undone, then First person in taken back");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
   });
 
   it("Finish while armed, undone: armed again, and the wait before the first press is a gap", async () => {
