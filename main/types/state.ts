@@ -95,6 +95,11 @@ export interface StageState {
   iconGlyphs?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
+  /** When true, a channel with no custom pick above uses ProdCom's own colour
+   *  for it instead of the distinct auto colour. Off by default: ProdCom 2.3.2
+   *  repeats colours across channels (five share one hex, six share another),
+   *  so the distinct auto colour is the more useful default. */
+  followProdcomColors: boolean;
   /** Live battery bays from any Shure SBC charger connections. */
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */

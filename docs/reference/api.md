@@ -401,7 +401,7 @@ recorder is running. Pass `{override: true}` to go anyway.
 `/api/taper-window`, `/api/checklist-sources`, `/api/kiosk-discovery`,
 `/api/baptism-auto-start`, `/api/ndi-enabled`, `/api/onboarding-dismissed`,
 `/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
-`/api/caption-colors`.
+`/api/caption-colors`, `/api/caption-colors/follow-prodcom`.
 
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a

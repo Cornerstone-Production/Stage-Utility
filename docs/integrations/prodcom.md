@@ -300,11 +300,31 @@ sensitive keywords** is on by default; see
 **On a layout:** add object → **transcription strip**. Options: latest-line vs.
 multi-speaker scrolling feed, max lines, and hide specific channels by name.
 
+## Caption colors
+
 Settings → Integrations → **ProdCom** → **Transcription colors** lists every
 channel ProdCom has — whether or not it has spoken yet — plus any channel that
 has spoken or has a saved color but is missing from ProdCom's own list (a
 rename or removal in ProdCom since). It refreshes on the same cadence the
 service already refreshes channels for keywords.
+
+Every caption's color — the full transcription view, the dashboard/stage
+strips, the transcript-strip layout object, and this panel's own swatches — is
+decided by one rule, in this order:
+
+1. **A custom pick**, made on this panel, always wins.
+2. Otherwise, **Follow ProdCom's channel colors** (off by default): when on, a
+   channel with no custom pick uses the color ProdCom itself assigns it.
+3. Otherwise, the **distinct auto color** — deterministic per channel, and the
+   default. ProdCom 2.3.2 does send a color per channel (`GET
+   /api/v1/channels`), but it repeats them — on the real box, five channels
+   share one hex and six share another — so a distinct auto color is more
+   useful until the operator explicitly asks for ProdCom's own palette.
+
+Resetting a channel (the picker's undo icon) returns it to whichever of 2 or 3
+is active — ProdCom's color if following is on, the auto color if not. The
+setting is stored alongside the per-channel picks, so both travel together in
+a config export and restore.
 
 ## Sensitive keywords
 

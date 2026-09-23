@@ -372,6 +372,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "captions:setChannelColor":
       return post<T>("/api/caption-colors", p);
+    case "captions:setFollowProdcomColors":
+      return post<T>("/api/caption-colors/follow-prodcom", p);
 
     // ── In-app self-update ───────────────────────────────────────────────
     case "update:status":
