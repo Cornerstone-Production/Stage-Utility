@@ -441,10 +441,30 @@ describe("baptismLaneSpans: session boundaries", () => {
 });
 
 describe("baptismLaneSpans: the clock a direct next() starts while armed", () => {
+  it("opens it on the baptisms-start that next() writes, at the person that row names", () => {
+    // The file as the emitter writes it: no row for person 1 (nobody's clock
+    // ran), and baptisms-start for person 2's — the row advance() writes for
+    // person 1's, one index further in.
+    assert.deepEqual(lane([
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(23, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "23000" }),
+      row(43, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "20000" }),
+      row(55, { event: "baptisms-start", phase: "baptism", personNumber: "2", baptismIndex: "1" }),
+      row(87, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "32000" }),
+      row(87, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1" }),
+    ]), [
+      ["testimony", 1, 0, 23],
+      ["testimony", 2, 23, 43],
+      ["baptism", 2, 55, 87],
+    ]);
+  });
+
+  // The rest are files from before next() wrote that row: the same presses
+  // with baptisms-start missing, which is what the lane infers the span from.
   it("places it from the person-complete that ends it", () => {
-    // next() while armed writes no row for person 1 (nobody's clock ran) and
-    // none for person 2's clock starting. person-complete's segmentMs is that
-    // clock's whole run: 87s - 32s puts its start at 55s.
+    // No row for person 1, and none for person 2's clock starting.
+    // person-complete's segmentMs is that clock's whole run: 87s - 32s puts its
+    // start at 55s.
     assert.deepEqual(lane([
       row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
       row(23, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "23000" }),

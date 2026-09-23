@@ -401,8 +401,8 @@ describe("closing a person while still armed writes no person-complete row for t
     const c = cols(rows);
     assert.deepEqual(
       c.events(),
-      ["reset", "start", "testimony-end", "baptisms-armed", "person-complete", "finish"],
-      "exactly one person-complete row — for the person who actually ran a clock",
+      ["reset", "start", "testimony-end", "baptisms-armed", "baptisms-start", "person-complete", "finish"],
+      "exactly one person-complete row — for the person who actually ran a clock, after the baptisms-start that started it",
     );
     const personCompleteRows = c.filter("person-complete");
     assert.equal(
@@ -411,6 +411,59 @@ describe("closing a person while still armed writes no person-complete row for t
       "the row names index 1 (the real baptism), never index 0 (the skipped one)",
     );
     assert.equal(Number(personCompleteRows[0]![c.idx("segmentMs")]), Math.round(finished.people[1]!.baptizeMs));
+  });
+});
+
+// Grouped next() while ARMED starts the next person's clock through
+// startSegment(), and wrote no row for it: the one clock start the raw log
+// never recorded, so the lane had to infer that span backwards from the next
+// row's segmentMs. advance()'s armed branch has always written baptisms-start;
+// this is the same kind of press, reached through the documented
+// POST /api/baptism/next.
+describe("a clock that starts writes a row, whichever route starts it", () => {
+  it("next() while armed writes baptisms-start for the person whose clock it starts", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.next(); // person 1 testimony done, person 2 testimony starts
+    await sleep(2);
+    baptismTimerService.startBaptisms(); // folds person 2's testimony, arms
+    const running = baptismTimerService.next(); // DIRECTLY: index 0 skipped, index 1's clock starts
+    assert.equal(running.baptismIndex, 1, "sanity: the clock that started is index 1's");
+    assert.notEqual(running.segmentStartedAt, null, "sanity: a clock is running");
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "testimony-end", "baptisms-armed", "baptisms-start"]);
+    const startRow = c.filter("baptisms-start")[0]!;
+    assert.equal(startRow[c.idx("baptismIndex")], "1", "the row names the person whose clock started, not the one skipped");
+    assert.equal(startRow[c.idx("phase")], "baptism");
+    assert.equal(startRow[c.idx("segmentMs")], "0", "the clock starts from zero, as advance()'s own row says");
+  });
+
+  it("next() while armed on the only person starts no clock, and writes no baptisms-start", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.startBaptisms(); // folds the only person, arms
+    const finished = baptismTimerService.next(); // nobody left to start: auto-finishes instead
+    assert.equal(finished.phase, "idle", "sanity: next() past the last person finishes the session");
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(
+      c.events(),
+      ["reset", "start", "baptisms-armed", "finish"],
+      "no clock started, so no row may claim one did",
+    );
   });
 });
 

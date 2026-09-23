@@ -462,7 +462,14 @@ class BaptismTimerService {
         );
       }
       if (this.state.baptismIndex + 1 < people.length) {
+        const fromArmed = this.state.armed === true; // read before startSegment() clears it
         this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment(0) };
+        // A clock started from armed writes the row advance()'s armed branch
+        // writes, and at the same point: after the state moves, so it names the
+        // person whose clock this is. Without it this was the one clock start
+        // the raw log never recorded — the person-complete above is suppressed
+        // while armed, rightly, and nothing else stood in for it.
+        if (fromArmed) this.emitRaw("baptisms-start", 0);
         return this.commit();
       }
       // last person baptized → close the session.

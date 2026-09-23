@@ -24,9 +24,10 @@
 //    grouped `testimony-end` (next() starts the next testimony in the same
 //    press); per-person `testimony-end` at phase=baptism (baptized() starts that
 //    person's baptism — at phase=testimony it is finish() closing a testimony
-//    and starts nothing); `baptisms-start` (the first baptism);
-//    `person-complete` (the next person); `resume` (the paused segment, same
-//    kind and person); and `undo` (below).
+//    and starts nothing); `baptisms-start` (the first baptism after arming,
+//    whether advance() or a direct next() started it); `person-complete` (the
+//    next person); `resume` (the paused segment, same kind and person); and
+//    `undo` (below).
 //
 //  • Grouped `person-complete` opens the next baptism only while someone is left
 //    to baptize. Past the last person next() auto-finishes instead. The count is
@@ -87,17 +88,23 @@
 //    session's mode. Rows before the first `start` or after a `reset` belong to
 //    no session and are not drawn — the timer had no session to record them in.
 //
-// ── The one transition that writes no row ────────────────────────────────────
+// ── A clock started from armed with no row of its own ────────────────────────
 //
 // POST /api/baptism/next while ARMED — a documented route; advance() is what the
 // panel sends — closes person 1 without a row, since nobody's clock ran, and
-// starts person 2's clock without a row at all. The first row after it is the
-// `pause` that banks that clock or the `person-complete` that ends it, and
-// either way its segmentMs is the clock's whole run, because the clock started
-// from zero. So the span is placed at that row's time minus its segmentMs: the
-// timer's own measurement, not a guess. Without it the lane would draw counted
-// time as a gap. The emitter should write `baptisms-start` on that path; this
-// reads the file as it is.
+// starts person 2's clock. It writes `baptisms-start` for that clock, so every
+// file the emitter writes today opens that span on its own row. It once wrote
+// nothing there, and rows are append-only: a file written then has the same
+// presses with that one row missing.
+//
+// For those files: the first row after the silent start is the `pause` that
+// banks that clock or the `person-complete` that ends it, and either way its
+// segmentMs is the clock's whole run, because the clock started from zero. So
+// the span is placed at that row's time minus its segmentMs: the timer's own
+// measurement, not a guess. Without it the lane would draw counted time as a
+// gap. Nothing the emitter writes now reaches this path — every session shape
+// in baptism-lane-roundtrip.test.ts goes through `baptisms-start` — and that
+// test holds it to the store by stripping the row from real sessions.
 
 import { BAPTISM_RAW_EVENTS, type BaptismMode, type BaptismRawEvent } from "../../types/stage.js";
 import { scrub } from "../scrub.js";

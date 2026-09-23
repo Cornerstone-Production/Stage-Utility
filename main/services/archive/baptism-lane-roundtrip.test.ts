@@ -50,6 +50,7 @@ import * as path from "node:path";
 
 import type { BaptismPerson } from "../../types/stage.js";
 import type { BaptismSpan } from "./baptism-lane.js";
+import type { BaptismRow } from "./rebuild-baptism.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-lane-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -86,11 +87,15 @@ function begin(mode: "grouped" | "per-person"): Ctx {
   return ctx;
 }
 
-async function laneOf(ctx: Ctx): Promise<BaptismSpan[]> {
+/** Rows as read, unless a scenario needs the file as an older emitter wrote it. */
+type RowEdit = (rows: BaptismRow[]) => BaptismRow[];
+const asWritten: RowEdit = (rows) => rows;
+
+async function laneOf(ctx: Ctx, edit: RowEdit = asWritten): Promise<BaptismSpan[]> {
   await sampleArchive.flush();
   const rows = await readBaptismRows(ctx.serviceKey, ctx.serviceDate);
   assert.ok(rows && rows.length > 0, "the archive holds rows for this service");
-  return baptismLaneSpans(rows!, ctx.serviceKey);
+  return baptismLaneSpans(edit(rows!), ctx.serviceKey);
 }
 
 /** One clock at a time: every span ends before the next begins, and only the
@@ -137,8 +142,13 @@ function assertSpansArePeople(spans: BaptismSpan[], people: BaptismPerson[], why
  * Derive this service's lane from its real rows and hold it to the sessions the
  * store recorded. Returns the spans so a scenario can make its own claims.
  */
-async function assertLaneMatchesStore(ctx: Ctx, why: string, sessions = 1): Promise<BaptismSpan[]> {
-  const spans = await laneOf(ctx);
+async function assertLaneMatchesStore(
+  ctx: Ctx,
+  why: string,
+  sessions = 1,
+  edit: RowEdit = asWritten,
+): Promise<BaptismSpan[]> {
+  const spans = await laneOf(ctx, edit);
   // listSessions() is newest-first; the lane is chronological.
   const stored = [...(await storedSessions(ctx, sessions))].reverse();
   assert.equal(stored.length, sessions, `${why}: the store holds ${sessions} session(s) for this service`);
@@ -509,8 +519,25 @@ describe("session boundaries on a real lane", () => {
   });
 });
 
-describe("the clock a direct next() starts while armed, with no row of its own", () => {
-  it("is placed from the person-complete that ends it", async () => {
+/**
+ * The file as it read before a direct next() while armed wrote a row: the same
+ * presses, minus that press's `baptisms-start`. advance() writes its own at
+ * baptismIndex 0 and only the direct next() writes one further in, so that is
+ * the row removed — and exactly one, or the strip proved nothing.
+ */
+const withoutDirectNextStart: RowEdit = (rows) => {
+  const kept = rows.filter((r) => !(r.event === "baptisms-start" && r.baptismIndex !== "0"));
+  assert.equal(rows.length - kept.length, 1, "exactly one baptisms-start came from the direct next()");
+  return kept;
+};
+
+describe("the clock a direct next() starts while armed", () => {
+  // Each session is read twice. As written, the clock opens on the
+  // baptisms-start row the direct next() writes. With that row stripped — a
+  // file from before it existed — the lane still places the clock from the row
+  // that ends or banks it, the only path in baptism-lane.ts that nothing the
+  // emitter writes now reaches.
+  it("opens on its own baptisms-start, and without it is placed from the person-complete that ends it", async () => {
     const ctx = begin("grouped");
     timer.start();
     await sleep(STRETCH_MS);
@@ -518,21 +545,23 @@ describe("the clock a direct next() starts while armed, with no row of its own",
     await sleep(STRETCH_MS);
     timer.startBaptisms();
     await sleep(STRETCH_MS);
-    timer.next(); // POST /api/baptism/next while armed: person 1 skipped, person 2's clock starts, no row
+    timer.next(); // POST /api/baptism/next while armed: person 1 skipped, person 2's clock starts
     await sleep(STRETCH_MS);
     timer.finish();
     const spans = await assertLaneMatchesStore(ctx, "direct next() while armed");
     assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 2"]);
+    const inferred = await assertLaneMatchesStore(ctx, "direct next() while armed, its row stripped", 1, withoutDirectNextStart);
+    assert.deepEqual(shape(inferred), ["testimony 1", "testimony 2", "baptism 2"]);
   });
 
-  it("is placed from the pause that banks it", async () => {
+  it("opens on its own baptisms-start, and without it is placed from the pause that banks it", async () => {
     const ctx = begin("grouped");
     timer.start();
     await sleep(STRETCH_MS);
     timer.next();
     await sleep(STRETCH_MS);
     timer.startBaptisms();
-    timer.next(); // silent
+    timer.next(); // direct, while armed
     await sleep(STRETCH_MS);
     timer.pause();
     await sleep(STRETCH_MS);
@@ -540,6 +569,7 @@ describe("the clock a direct next() starts while armed, with no row of its own",
     await sleep(STRETCH_MS);
     timer.finish();
     await assertLaneMatchesStore(ctx, "direct next() while armed, then a pause");
+    await assertLaneMatchesStore(ctx, "direct next() while armed, then a pause, its row stripped", 1, withoutDirectNextStart);
   });
 });
 

@@ -1128,7 +1128,8 @@ driven sessions when Task 9 was built; the three corrections are marked.
 - **Corrected — one transition writes no row.** `POST /api/baptism/next` while armed starts
   the next person's baptism clock without a row. The first row after it (`pause` or
   `person-complete`) carries that clock's whole run in `segmentMs`, so the span is placed at
-  that row's time minus it. The emitter should write `baptisms-start` there (Task 14 or later).
+  that row's time minus it. Task 14 makes the emitter write `baptisms-start` there; the inference
+  stays for files written before that row existed.
 - A still-running session ends with one span whose `endedAt` is null.
 
 **The guard that matters — a round-trip invariant.** Drive real sessions through the real
@@ -1444,7 +1445,8 @@ baptism session — Task 17 wires Rebuild from raw in PR 3 — so that sentence 
 looking for a button that does not exist, the shape Ruling 35's I2 already caught in the docs.
 Task 17 adds the offer.
 
-This is the one task in this PR that edits the timer service. Touch nothing else in it.
+This is the one task in this PR that edits the timer service. Rulings 44 and 46 folded two more
+fixes into it, below, each its own commit. Touch nothing else in it.
 
 - [ ] **Step 1: Failing test** — stub `addSession` to reject, finish a session, assert
   `state.saveError` is set and survives into the next push; a following successful finish clears it.
@@ -1453,6 +1455,16 @@ This is the one task in this PR that edits the timer service. Touch nothing else
 - [ ] **Step 4: Watch it pass.**
 - [ ] **Step 5: Commit** — `fix: a failed baptism save says so instead of reading as finished`.
   NO `Beta-only` trailer: the swallowing `catch` ships on `main`.
+
+**A clock that starts writes a row (Ruling 44).** Grouped `next()` while armed starts the next
+person's clock through `startSegment()` and writes no row. Emit `baptisms-start` there exactly as
+`advance()`'s armed branch does: after the state moves, so the row names the person whose clock it
+is — index 1, the person after the one skipped. With one person, `next()` while armed
+auto-finishes and starts no clock, so it writes none. The lane's inference of that span
+(`startedSilently`) is then reached by nothing the emitter writes; it stays, for files written
+before the row existed, and its round trip derives the lane from real sessions with the row
+stripped so it stays tested. Commit `fix: a clock started by next() while armed writes its row`,
+with `Beta-only: true`: `armed` and the raw layer have never shipped on `main`.
 
 ## Task 15: docs, the deferred corrections, drive, PR
 

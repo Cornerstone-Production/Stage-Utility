@@ -186,6 +186,32 @@ describe("a real grouped session replays back into the session the store recorde
 
     await assertRoundTrip(ctx, "grouped, finished while armed");
   });
+
+  it("a direct next() while armed: the skipped person replays unbaptized, the next one baptized", async () => {
+    // POST /api/baptism/next while armed skips person 1 — no row, nobody's clock
+    // ran — and starts person 2's, writing a baptisms-start at index 1 that no
+    // advance() ever writes. The replay reads past it: it carries no session
+    // content.
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.startBaptisms();
+    baptismTimerService.next(); // direct, while armed
+    await sleep(8);
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people[0]!.baptizeMs, 0, "sanity: person 1 was skipped");
+    assert.ok(finished.people[1]!.baptizeMs > 0, "sanity: person 2 ran a clock");
+
+    const [replayed] = await assertRoundTrip(ctx, "grouped, direct next() while armed");
+    assert.equal(replayed!.people[0]!.baptizeMs, 0, "the skipped person replays unbaptized, not as a baptism");
+  });
 });
 
 describe("a real per-person session replays back into the session the store recorded", () => {
