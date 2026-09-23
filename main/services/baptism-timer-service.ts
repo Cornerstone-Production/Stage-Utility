@@ -301,8 +301,8 @@ class BaptismTimerService {
   }
 
   /** Switch workflow — only allowed while idle. Preserves nothing else but a
-   *  failed save, which only a save that lands or Reset may clear (see
-   *  BaptismState.saveError). */
+   *  failed save, which only a save that lands, Reset, or the operator's
+   *  Dismiss may clear (see BaptismState.saveError). */
   setMode(mode: BaptismMode): BaptismState {
     if (mode !== "per-person" && mode !== "grouped") return this.state;
     if (this.state.phase !== "idle") return this.state;
