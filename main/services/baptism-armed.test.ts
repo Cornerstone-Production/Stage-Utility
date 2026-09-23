@@ -45,7 +45,7 @@ describe("default workflow", () => {
   });
 
   it("resumes per-person when a session persisted in that mode, even though the default is grouped", async () => {
-    const resumedSession: any = {
+    const resumedSession: BaptismState = {
       mode: "per-person",
       phase: "idle",
       personNumber: 0,
@@ -60,9 +60,14 @@ describe("default workflow", () => {
       planId: null,
     };
     await baptismStore.saveCurrent(resumedSession);
-    await baptismTimerService.init();
-    assert.equal(baptismTimerService.getState().mode, "per-person");
-    await baptismStore.saveCurrent(null);
+    try {
+      await baptismTimerService.init();
+      assert.equal(baptismTimerService.getState().mode, "per-person");
+    } finally {
+      // Runs even if the assertion above throws, so a failure here does not
+      // leave the persisted per-person session to poison a later test.
+      await baptismStore.saveCurrent(null);
+    }
   });
 });
 
