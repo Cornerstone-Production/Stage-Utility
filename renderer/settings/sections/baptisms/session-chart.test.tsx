@@ -471,3 +471,62 @@ test("a failed lane fetch on a live session says the next press tries again", as
     globalThis.fetch = realFetch;
   }
 });
+
+// Final review, Minor 6: a finished session's plan-timeline fetch failing used
+// to only log and return [], so the plan lane drew empty with no explanation
+// at all — the timer lane still drew correctly, since this is a plan-only
+// fetch failure.
+test("a failed plan-timeline fetch shows its own note, and still reaches the log", async () => {
+  const logCalls: { tag: string; message: string }[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string, init?: RequestInit) => {
+    const url = String(input);
+    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
+    if (url.includes("/api/log/client")) {
+      logCalls.push(JSON.parse(String(init?.body ?? "{}")));
+      return ok({});
+    }
+    if (url.includes("/api/baptism/lane")) {
+      return ok({
+        spans: [
+          { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:01:48.000Z" },
+        ],
+      });
+    }
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) throw new Error("network down");
+    return ok({});
+  }) as unknown as typeof fetch;
+
+  try {
+    render(
+      React.createElement(SessionChart, {
+        state: {
+          ...BASE,
+          serviceKey: "st1:plan1:plan-fetch-fails",
+          finishedAt: "2026-09-20T15:10:00.000Z",
+          sessionStartedAt: "2026-09-20T15:00:00.000Z",
+        },
+      }),
+    );
+    await settle();
+    await settle();
+
+    assert.equal(
+      !!screen.queryByText(/Plan items could not be loaded/i),
+      true,
+      "expected the plan-timeline fetch's own note",
+    );
+    assert.equal(
+      !!screen.queryByRole("img", { name: /Baptism session timeline/i }),
+      true,
+      "the timer lane still draws — only the plan fetch failed",
+    );
+    assert.ok(
+      logCalls.some((c) => c.tag === "baptism" && /plan timeline fetch failed/i.test(c.message)),
+      `expected a logToServer("baptism", ...) call naming the plan timeline fetch — got ${JSON.stringify(logCalls)}`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

@@ -151,32 +151,38 @@ export function useSessionLane(
  * not change under it, unlike the live one (see useServiceTimeline, which
  * refetches on "service-timeline:history" for exactly that reason).
  *
- * A failure here degrades quietly to an empty plan lane rather than its own
- * visible state: unlike the timer lane, it never produces a WRONG statement
- * on screen (the timer lane still draws; there is simply no plan block under
- * it), so the fix this needed was only to stop the failure being silent —
- * see logToServer below.
+ * A failure here degrades to an empty plan lane rather than its own EMPTY-STATE
+ * note: unlike the timer lane, it never produces a WRONG statement on screen —
+ * the timer lane still draws; there is simply no plan block under it. It is
+ * not silent either way, though (final review, Minor 6): logToServer always
+ * reaches /log, and the caller shows its own small note when `error` is true
+ * and the plan lane would otherwise just look empty with nothing said about
+ * why.
  */
-function usePastPlanItems(serviceKey: string | null, active: boolean): ServiceTimelineItem[] {
-  const [fetched, setFetched] = useState<{ key: string; items: ServiceTimelineItem[] } | null>(null);
+function usePastPlanItems(
+  serviceKey: string | null,
+  active: boolean,
+): { items: ServiceTimelineItem[]; error: boolean } {
+  const [fetched, setFetched] = useState<{ key: string; items: ServiceTimelineItem[]; error: boolean } | null>(null);
   useEffect(() => {
     if (!active || !serviceKey) return;
     let cancelled = false;
     invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey })
       .then((tl) => {
-        if (!cancelled) setFetched({ key: serviceKey, items: tl?.items ?? [] });
+        if (!cancelled) setFetched({ key: serviceKey, items: tl?.items ?? [], error: false });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         logToServer("baptism", `plan timeline fetch failed for ${serviceKey}: ${errorMessage(err)}`);
-        setFetched({ key: serviceKey, items: [] });
+        setFetched({ key: serviceKey, items: [], error: true });
       });
     return () => {
       cancelled = true;
     };
   }, [serviceKey, active]);
-  if (!active || !serviceKey) return [];
-  return fetched?.key === serviceKey ? fetched.items : [];
+  if (!active || !serviceKey) return { items: [], error: false };
+  if (fetched?.key !== serviceKey) return { items: [], error: false };
+  return { items: fetched.items, error: fetched.error };
 }
 
 /** The deepest lane index in use, or -1 for no segments — see laneSegments. */
@@ -206,7 +212,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
 
   const { spans, loaded, error } = useSessionLane(serviceKey);
   const currentTimeline = useServiceTimeline();
-  const pastItems = usePastPlanItems(serviceKey, !live);
+  const { items: pastItems, error: planError } = usePastPlanItems(serviceKey, !live);
   // The live timeline can outrun this session (a producer moves on to the next
   // plan the moment the baptisms finish), so it is only this session's plan
   // while its own serviceKey still matches.
@@ -336,6 +342,16 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
             onLeave={onLeave}
             onHover={onHover}
           />
+        )}
+        {/* Only when the plan lane would otherwise draw and just look empty
+            with no explanation — an operator with Plan items toggled off has
+            nothing to be told about a fetch this lane doesn't need either
+            way. The timer lane above is unaffected either way: this is a
+            plan-only fetch (final review, Minor 6). */}
+        {showPlanLane && planError && (
+          <p role="alert" className="text-caption2 text-danger-11">
+            Plan items could not be loaded; the log has the details.
+          </p>
         )}
         <Legend />
       </div>
