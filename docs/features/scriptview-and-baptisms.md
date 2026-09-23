@@ -139,12 +139,36 @@ people are baptized one at a time while the room sings. **Per-person** (a
 testimony immediately followed by that person's baptism, repeated for each
 person) is still there, picked with the Workflow toggle on the page; the toggle
 only responds while the session is idle, so a mode can't be changed out from
-under a session already running. Which one it opens in is a persisted setting,
-`baptismDefaultMode`.
+under a session already running — and the choice persists: it is part of the
+idle state saved to disk, so the next launch reopens in whatever mode was last
+left. Only a data directory with nothing saved yet has no such state to read,
+and opens in **grouped**; that fallback (`baptismDefaultMode`) has no setting
+screen of its own, so it changes only if someone edits the settings file
+directly.
 
 Sessions are named by service and cross-linked into Service History with
 per-person splits and averages. A **Baptism timer** layout object puts the live
 count and timer on a display.
+
+## Header and figures
+
+The header stays visible while the page scrolls: the title **Baptisms**, a
+green **recording** pill whenever the session isn't idle — running, paused, or
+armed and waiting for the first person — and a line naming the service and
+date, or "No session running" before a first session, or "Session finished"
+once one has closed. **Copy report** copies a plain-text summary of the
+current or just-finished session to the clipboard; **Export CSV** downloads
+every baptism ever recorded (the same multi-sheet export History uses, scoped
+to this one sheet).
+
+Six figures sit under the title — **Baptized**, **Timed**, **Wall clock**,
+**Not counted**, **Avg testimony**, **Avg baptism** — customizable like every
+figure strip in the app, all six shown by default. Hovering a segment on the
+Session chart below replaces them with that segment's own person, phase,
+duration and boundary times until the pointer moves on.
+
+A nav under the strip jumps to **Timer**, **Session**, **People**, **Past
+sessions** and **Trends**, highlighting whichever one is on screen.
 
 ## The Session chart
 
@@ -259,12 +283,16 @@ shows the same everywhere.
 
 ## Undo
 
-Undo takes back the last press, so a mis-tap costs nothing. A testimony it
-returns to picks up from the time it had already banked; a baptism it returns
-to starts over from the Undo press. After Finish it reopens the session where
-Finish was pressed: the testimony that was running, the person mid-baptism, or
-— in a grouped baptism section nobody had stepped into yet — the wait for the
-first person, with no clock running.
+Undo takes back the last press. It never leaves the session broken — there is
+always somewhere it can resume from — but the two phases differ in what
+survives: a press that lands back in a testimony resumes it from the time
+already banked, so it costs nothing; a press that lands back in a baptism, or
+in the armed wait before one, discards whatever that segment had counted and
+starts it clean — from the Undo press if a clock is now running, from a frozen
+`0:00` if it lands in armed. After Finish it reopens the session where Finish
+was pressed: the testimony that was running, the person mid-baptism (the same
+clean restart), or — in a grouped baptism section nobody had stepped into yet
+— the wait for the first person, with no clock running.
 
 ## Recovery
 
@@ -305,6 +333,10 @@ timer:
   not survive a restart.
 - `raw: emit failed: <event> …` — the timer's own state updated, but writing its
   row failed; only the row is missing, not the action.
+- `[baptism-timer] persist failed: …` — the debounced save of the in-progress
+  state to `baptism.json` failed; nothing reaches the screen for it, since the
+  state in memory is still correct — only a restart before a later save
+  succeeds would resume from an older point than the last press.
 - `[baptism-timer] session save failed: …` — Finish could not write the session
   to `baptism.json`. The Timer card says so as well (see Recovery, above).
 - `[baptism-timer] save failure dismissed: …` — the operator dismissed that
