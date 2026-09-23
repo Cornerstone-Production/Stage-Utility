@@ -32,10 +32,15 @@
 // dropped or extra stretch is at least twice the allowance of any total it could
 // hide in.
 //
-// PR 3's Task 16 threads the timer's own stamp through emitRaw, so a row will
-// carry exactly the instant the timer used. Tighten this back to a flat
-// millisecond or two then; the proportional allowance is standing in for that
-// fix, not replacing it.
+// This does NOT get tightened later. Only a session's own start and finish are
+// ever exact by construction — they ARE the timestamps sessionStartedAt and
+// finalize()'s finishedAt use, independent of any row's own stamp. Every other
+// boundary (testimony-end, baptisms-armed, a pause, a resume, an undo) has no
+// second, independently-known instant to check its row against; the row's own
+// stamp, taken a moment after the timer read its clock for the same press, is
+// the only timestamp that boundary will ever have. The proportional allowance
+// above is the permanent design for that reason, not a stand-in for a future
+// fix.
 //
 // Shares its harness with rebuild-baptism-roundtrip.test.ts
 // (baptism-roundtrip-harness.ts): a fresh serviceKey per test, because the
