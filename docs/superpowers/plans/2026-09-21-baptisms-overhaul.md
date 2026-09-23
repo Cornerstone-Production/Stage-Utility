@@ -14,7 +14,7 @@
 
 - **Branch per PR off `beta`. Never push to `beta`, `main` or any default branch. Every change is a PR.** Do not merge; the maintainer presses every button.
 - **No emoji anywhere. No `Co-Authored-By` trailer, no "Generated with" footer** in commits, PR bodies or comments.
-- Commit subject line alone by default: `<type>: <what changed>`, types `feat|fix|perf|refactor|docs|test|chore|style`.
+- Commit subject line alone by default: `<type>: <what changed>`, types `feat|fix|perf|refactor|docs|test|build|ci|chore|revert` (this repo's CI, `scripts/check-commit-subjects.mjs`, rejects `style`).
 - **`Beta-only: true` as the LAST paragraph of the commit body** on any `fix:`/`perf:` to something that does not exist on `main`. Everything in this plan except the two defects in Task 1 and Task 2 is new in this cycle.
 - **Every guard ships proven red.** Delete the guard or reintroduce the bug, watch the test fail in the same session, and say so in the commit. A test that passes on the defect it was written for is not a guard.
 - **Exact-count guards are sorted lists, one entry per line — never a bare number.** Two branches adding different entries must merge cleanly.
