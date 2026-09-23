@@ -141,10 +141,10 @@ person) is still there, picked with the Workflow toggle on the page; the toggle
 only responds while the session is idle, so a mode can't be changed out from
 under a session already running — and the choice persists: it is part of the
 idle state saved to disk, so the next launch reopens in whatever mode was last
-left. Only a data directory with nothing saved yet has no such state to read,
-and opens in **grouped**; that fallback (`baptismDefaultMode`) has no setting
-screen of its own, so it changes only if someone edits the settings file
-directly.
+left. Only a data directory with nothing saved yet — or a saved state old
+enough to predate the mode field at all — has no such state to read, and opens
+in **grouped**; that fallback (`baptismDefaultMode`) has no setting screen of
+its own, so it changes only if someone edits the settings file directly.
 
 Sessions are named by service and cross-linked into Service History with
 per-person splits and averages. A **Baptism timer** layout object puts the live
