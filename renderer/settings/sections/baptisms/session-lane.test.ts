@@ -286,7 +286,8 @@ describe("timerHoverFigures", () => {
     assert.equal(by("hoverPerson"), "Person 2");
     assert.equal(by("hoverPhase"), "1:48");
     assert.equal(f.find((x) => x.key === "hoverPhase")?.label, "Testimony");
-    assert.equal(by("hoverEnd"), formatClockFixture(T0 + 108_000));
+    assert.equal(by("hoverStart"), formatClockFixture(T0, { seconds: true }));
+    assert.equal(by("hoverEnd"), formatClockFixture(T0 + 108_000, { seconds: true }));
     assert.equal(f.find((x) => x.key === "hoverEnd")?.label, "Ended");
   });
 
@@ -296,5 +297,20 @@ describe("timerHoverFigures", () => {
     const by = (k: string) => f.find((x) => x.key === k)?.value;
     assert.equal(by("hoverPhase"), "0:40");
     assert.equal(f.find((x) => x.key === "hoverEnd")?.label, "Still running");
+  });
+
+  // Fix round 1 (from drive 2), the HOVER SECONDS finding: Started and Ended
+  // used to share formatClock's default (minute) precision, so a sub-minute
+  // segment — common for a baptism, see docs/features/scriptview-and-
+  // baptisms.md — could show the identical string for both, e.g. both
+  // "4:51", beside a duration figure that correctly read "0:03".
+  test("a sub-minute segment's Started and Ended differ, because both now carry seconds", () => {
+    const short: TimerLaneItem = { ...testimony, startedAt: iso(T0), endedAt: iso(T0 + 3_000) };
+    const f = timerHoverFigures(short, T0 + 999_999);
+    const by = (k: string) => f.find((x) => x.key === k)?.value;
+    assert.equal(by("hoverPhase"), "0:03");
+    assert.notEqual(by("hoverStart"), by("hoverEnd"));
+    assert.equal(by("hoverStart"), formatClockFixture(T0, { seconds: true }));
+    assert.equal(by("hoverEnd"), formatClockFixture(T0 + 3_000, { seconds: true }));
   });
 });

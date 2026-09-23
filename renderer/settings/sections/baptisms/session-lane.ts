@@ -223,6 +223,14 @@ export function sessionAxisLabel(t: number, domainStartMs: number): string {
  * a hovered bar's reported duration always matches its own drawn length.
  * Never `Date.now()`: a caller mid-render already knows the instant its chart
  * is using and must hand it in, or the two could disagree.
+ *
+ * `hoverStart`/`hoverEnd` carry seconds (`{ seconds: true }`), unlike every
+ * other clock in this app: a baptism segment is commonly under a minute (the
+ * mockup's own hover shows seconds for exactly this reason), and without them
+ * Started and Ended can read identically — "4:51" and "4:51" — for a span the
+ * duration figure right beside them correctly calls "0:03". Still `formatClock`,
+ * the same formatter (and so the same time zone handling) every other time in
+ * this chart uses; only the option passed to it changes.
  */
 export function timerHoverFigures(item: TimerLaneItem, windowEndMs: number): StatFigure[] {
   const start = Date.parse(item.startedAt);
@@ -237,11 +245,11 @@ export function timerHoverFigures(item: TimerLaneItem, windowEndMs: number): Sta
       value: fmtClock(durMs),
       color: isTestimony ? "var(--color-accent)" : "var(--color-live-11)",
     },
-    { key: "hoverStart", label: "Started", value: formatClock(item.startedAt) },
+    { key: "hoverStart", label: "Started", value: formatClock(item.startedAt, { seconds: true }) },
     {
       key: "hoverEnd",
       label: item.endedAt === null ? "Still running" : "Ended",
-      value: item.endedAt === null ? "—" : formatClock(item.endedAt),
+      value: item.endedAt === null ? "—" : formatClock(item.endedAt, { seconds: true }),
     },
   ];
 }
