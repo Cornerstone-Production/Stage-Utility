@@ -278,7 +278,7 @@ async function writeBaptismCsv(key: string, date: string, csv: string): Promise<
 
 describe("rebuildServiceBaptisms — id matches are decided for the whole batch before the close-in-time fallback runs", () => {
   it("restores a deleted session and leaves its sibling's stored labels alone", async () => {
-    const KEY = "p1-svc";
+    const KEY = "restored-sibling-svc";
     const DATE = "2026-09-20";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
     // Its own well-separated hour: baptismStore is a singleton shared by
@@ -322,7 +322,7 @@ describe("rebuildServiceBaptisms — id matches are decided for the whole batch 
 
 describe("rebuildServiceBaptisms — two close, pre-exact-stamp-skewed sessions are never cross-wired", () => {
   it("keeps each of two close sessions' own recorded people — never the other's, and never swapped", async () => {
-    const KEY = "p2-svc";
+    const KEY = "no-cross-wire-svc";
     const DATE = "2026-09-20";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
     // Its own well-separated hour — see the previous describe block's own comment on why.

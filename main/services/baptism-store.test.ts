@@ -110,7 +110,7 @@ describe("addSession is idempotent by id", () => {
   });
 });
 
-describe("mergeRebuilt refuses two sessions sharing one id (I1)", () => {
+describe("mergeRebuilt refuses two sessions sharing one id", () => {
   it("throws rather than silently keeping the last of a duplicate pair", async () => {
     const a = { ...session(600), people: [{ testimonyMs: 1, baptizeMs: 1 }] };
     const b = { ...session(600), people: [{ testimonyMs: 2, baptizeMs: 2 }] }; // same id, different content
@@ -137,7 +137,7 @@ function spyOnWrite(): { calls: () => number; restore: () => void } {
   return { calls: () => calls, restore: () => { internals.writeRaw = original; } };
 }
 
-describe("mergeRebuilt — 'no write at all' for an intact session, guarded not just claimed (M3)", () => {
+describe("mergeRebuilt — 'no write at all' for an intact session, guarded not just claimed", () => {
   it("does not touch the underlying write when the session already matches exactly", async () => {
     const s = { ...session(700), people: [{ testimonyMs: 5, baptizeMs: 5 }] };
     await baptismStore.addSession(s);
