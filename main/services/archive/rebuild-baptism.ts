@@ -16,9 +16,13 @@
 // them are counter-intuitive:
 //
 //  • MODE comes from the `start` row, never from the first row of the file.
-//    reset() emits AFTER clearing state, and setMode() emits nothing at all, so
-//    the first row of a per-person session is commonly a `reset` still reading
-//    `mode=grouped` — the mode of the session before it.
+//    setMode() changes it with no row of its own — reset() is not the reason:
+//    it PRESERVES the mode (idleState(this.state.mode)), clearing nothing but
+//    the run in progress. So any row emitted before the next setMode() call —
+//    a `reset` closing out the prior session included — still carries the OLD
+//    mode: the first row of a per-person session is commonly a `reset` still
+//    reading `mode=grouped`, the mode of the session before it, not something
+//    reset erased.
 //
 //  • `person-complete` is NOT unique per person. undo() lets an operator
 //    re-baptise the same `baptismIndex`, and both attempts are in the file. The
