@@ -157,9 +157,9 @@ green **recording** pill whenever the session isn't idle — running, paused, or
 armed and waiting for the first person — and a line naming the service and
 date, or "No session running" before a first session, or "Session finished"
 once one has closed. **Copy report** copies a plain-text summary of the
-current or just-finished session to the clipboard; **Export CSV** downloads
-every baptism ever recorded (the same multi-sheet export History uses, scoped
-to this one sheet).
+current or just-finished session to the clipboard; **Export** downloads every
+baptism ever recorded as an `.xlsx` workbook (the same multi-sheet export
+History uses, scoped to the baptisms sheet).
 
 Six figures sit under the title — **Baptized**, **Timed**, **Wall clock**,
 **Not counted**, **Avg testimony**, **Avg baptism** — customizable like every

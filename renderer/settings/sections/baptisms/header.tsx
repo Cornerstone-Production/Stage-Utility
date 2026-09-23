@@ -123,9 +123,9 @@ export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps
     else toast.error("Couldn't copy the report");
   }
 
-  function onExportCsv() {
-    // The existing multi-sheet export, scoped to the one sheet this page is
-    // about — see GET /api/history/export in history-export.ts.
+  function onExport() {
+    // The existing multi-sheet .xlsx export, scoped to the one sheet this
+    // page is about — see GET /api/history/export in history-export.ts.
     window.location.assign("/api/history/export?include=baptisms");
   }
 
@@ -163,8 +163,8 @@ export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps
           <Button variant="filled" size="small" onClick={onCopyReport} tooltip="Copy a plain-text summary of this session">
             <CopyIcon className="size-3.5 text-fg-muted" /> Copy report
           </Button>
-          <Button variant="filled" size="small" onClick={onExportCsv} tooltip="Download every baptism ever recorded, as a spreadsheet">
-            <DownloadIcon className="size-3.5 text-fg-muted" /> Export CSV
+          <Button variant="filled" size="small" onClick={onExport} tooltip="Download every baptism ever recorded, as a spreadsheet">
+            <DownloadIcon className="size-3.5 text-fg-muted" /> Export
           </Button>
         </div>
       </div>
