@@ -1,7 +1,7 @@
 // timer-card.tsx — the Baptisms tab's Timer card: the readout an operator
 // touches during a live service, and the controls around it.
 //
-// MOVED out of baptism-operator.tsx, not rewritten: every PR 1 behaviour this
+// MOVED out of baptism-operator.tsx, not rewritten: every behaviour this
 // panel was hardened through many review rounds for survives unchanged here —
 // the armed readout, the grouped button labels, Pause hidden while armed, the
 // typed primaryChannel, the workflow toggle locked mid-session, and

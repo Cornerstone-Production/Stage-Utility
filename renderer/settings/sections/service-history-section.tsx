@@ -398,7 +398,7 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
  * read-only `/history`: that page renders this same section (with
  * `readOnly`) and honors the same param, because the selection state below
  * keys off whichever path is actually mounted, but a cross-link (the
- * Baptisms tab, and PR 3's link back) hands the operator the full page.
+ * Baptisms tab's past sessions) hands the operator the full page.
  */
 const HISTORY_MANAGE_PATH = "/history/manage";
 /** The search param holding the open service. A search param, not a path
@@ -408,9 +408,8 @@ const HISTORY_SERVICE_PARAM = "service";
 
 /**
  * The URL that opens one service's History page. The one place this is
- * built, so a cross-link (the Baptisms tab's past sessions, and PR 3's link
- * back) never constructs it by hand and cannot drift from what this page
- * actually reads.
+ * built, so a cross-link (the Baptisms tab's past sessions) never constructs
+ * it by hand and cannot drift from what this page actually reads.
  */
 export function historyServiceHref(serviceKey: string): string {
   return `${HISTORY_MANAGE_PATH}?${HISTORY_SERVICE_PARAM}=${encodeURIComponent(serviceKey)}`;
@@ -1548,8 +1547,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         )}
 
         {/* Full attendance + sound detail for the same service occurrence — one
-            place for everything about this service. Each is PR 1's chart module
-            with its own strip and Customize; nothing here restyles them. */}
+            place for everything about this service. Each is the shared chart
+            module with its own strip and Customize; nothing here restyles them. */}
         <SectionCard id="history-attendance" title="Attendance">
           {attendance ? (
             <AttendanceDetail detail={attendance} timeline={detail} />
