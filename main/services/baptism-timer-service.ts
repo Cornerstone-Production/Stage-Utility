@@ -282,8 +282,16 @@ class BaptismTimerService {
    * row is worse than losing one. This is a deliberate exception to this repo's
    * catch-rethrows-or-returns rule, matching the convention sampleArchive's own
    * record methods already document (see recordBaptism).
+   *
+   * `at` threads straight through to recordBaptism's own optional stamp.
+   * start() passes its `now` and finalize() its `finishedAt`, so the `start`
+   * and `finish` rows carry the SAME string already stamped into
+   * sessionStartedAt/finishedAt rather than a separate, moment-later read of
+   * the clock — which is what a rebuilt session's id is derived from
+   * (baptismSessionId). Every other call site omits it: nothing else derives
+   * an id from these rows, so recordBaptism's own clock read is fine.
    */
-  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = ""): void {
+  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = "", at?: string): void {
     try {
       const record = serviceTimelineRecorder.getCurrent();
       if (!record || record.endedAt != null) {
@@ -306,6 +314,7 @@ class BaptismTimerService {
           item: this.liveItem?.title ?? null,
           detail,
         },
+        at,
       );
     } catch (err) {
       console.error("[baptism] raw: emit failed:", event, err);
@@ -359,7 +368,7 @@ class BaptismTimerService {
     // button press and a PCO auto-start, every time. That is worse than no
     // value: the whole point of this row is to report only what happened. The
     // `[baptism] auto-start:` log line already records which one it was.
-    this.emitRaw("start", 0, "");
+    this.emitRaw("start", 0, "", now);
     return this.commit();
   }
 
@@ -594,7 +603,7 @@ class BaptismTimerService {
       // running, and in which section. See BaptismState.finishedFrom.
       finishedFrom: this.state.armed ? "armed" : this.state.phase === "testimony" ? "testimony" : "baptism",
     };
-    this.emitRaw("finish", 0, `people=${people.length}`);
+    this.emitRaw("finish", 0, `people=${people.length}`, finishedAt);
     if (people.length > 0 && this.state.sessionStartedAt) {
       // Captured now, not read again inside the callbacks below: this write
       // settles after Finish has returned, and by then this.state may already

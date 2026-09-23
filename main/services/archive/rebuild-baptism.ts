@@ -77,11 +77,13 @@
 //
 //  • `finish` with nobody in `people` logs no session, matching finalize().
 //
-// What it CANNOT reconstruct exactly: `startedAt`, `finishedAt` and therefore
-// `id`. The timer stamps its own state a moment before emitRaw hands the row to
-// the archive, which stamps the row itself — so a replayed session's stamps run
-// a millisecond or two late. The per-person splits, which is what the feature
-// exists to record, come back exactly.
+// What it reconstructs exactly: everything, including `startedAt`, `finishedAt`
+// and therefore `id`. start() and finalize() pass their own stamp through
+// emitRaw to the row (see sample-archive.ts's recordBaptism) instead of letting
+// the archive read its own clock a moment later, so a replayed session's stamps
+// are the same string the store holds, not a separate read of it. The
+// per-person splits, which is what the feature exists to record, come back
+// exactly too.
 
 import { baptismSessionId, type BaptismMode, type BaptismPerson, type BaptismSession } from "../../types/stage.js";
 import { scrub } from "../scrub.js";
@@ -142,24 +144,13 @@ interface Skips {
  * Rows before the first `start`, or after a `reset`, belong to no session and
  * are ignored: the timer had no session to record them against either.
  *
- * THE IDS THIS PRODUCES ARE NOT COMPARABLE TO THE STORE'S. `start()` stamps
- * `sessionStartedAt` from its own clock and then calls `emitRaw`, and
- * `recordBaptism` stamps the row from ITS clock — microseconds later, but often
- * enough across a millisecond boundary that roughly one session in twenty comes
- * back with `bap-<ms>` one higher than the one `finalize()` wrote. Measured over
- * 50 driven sessions: never more than 1ms of skew, ~4% of ids different, and
- * unmoved by CPU load.
- *
- * So a caller must NOT merge a rebuild through `baptismStore.addSessions`,
- * which de-duplicates on id: a rebuilt copy of a session that survived would
- * land beside it rather than being recognised as the same one. Replace by
- * service, or match on `startedAt` within a tolerance.
- *
- * The fix, for whoever wires this up: thread an optional trailing `at` through
- * `emitRaw` and `recordBaptism`, with `start()` passing its own `now` and
- * `finalize()` its `finishedAt`, so the row carries the timer's stamp rather
- * than the archive's. Deliberately not done here — the emitter is live-service
- * code and this was built days before a baptism service.
+ * THE IDS THIS PRODUCES MATCH THE STORE'S EXACTLY. `start()` stamps
+ * `sessionStartedAt` and passes that same string through `emitRaw` to the
+ * `start` row's `at`; `finalize()` does the same with `finishedAt` on the
+ * `finish` row (see sample-archive.ts's recordBaptism). Neither row is a
+ * separate read of the clock, so `baptismStore.addSessions`, which
+ * de-duplicates on id, recognises a rebuilt session as the one it already
+ * holds rather than landing it beside that session as a second copy.
  */
 export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIdentity): BaptismSession[] {
   const out: BaptismSession[] = [];
