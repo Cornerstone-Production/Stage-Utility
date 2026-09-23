@@ -67,8 +67,8 @@ export function PeopleCard({ state }: PeopleCardProps) {
                   <td className="px-3 py-1.5 text-right font-mono tabular-nums text-live-11">
                     {/* fmtBaptizeMs decides the TEXT (shared with Copy report's
                         header.tsx, so the two can't disagree about the same
-                        person — final review, Minor 7); `baptized` only
-                        decides the dimmer colour for the dash. */}
+                        person); `baptized` only decides the dimmer colour
+                        for the dash. */}
                     {baptized ? fmtBaptizeMs(p.baptizeMs) : <span className="text-fg-subtle">{fmtBaptizeMs(p.baptizeMs)}</span>}
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono tabular-nums text-fg">{fmtClock(total)}</td>

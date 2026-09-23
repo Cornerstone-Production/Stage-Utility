@@ -309,14 +309,15 @@ replay is not something an operator can trigger from the app. See
 [Data archive](../data-archive.md) for the column list, which presses are
 recorded, and what the append-only rule buys the rest of the archive.
 
-A save that fails says so. If Finish cannot write the session to
-`baptism.json`, the Timer card shows why, under the readout, and keeps showing
-it — through the next Start and the Workflow toggle too — until that same
-session saves successfully, Reset clears it, or **Dismiss** on the note does.
-A different session saving cleanly does not clear it; the note stays up until
-the session it actually names is saved, reset, or dismissed. Past sessions
-does not list that session; its rows in `baptism.csv` still hold it, if a
-service was open while it ran.
+A save that fails says so. If Finish cannot write a session to
+`baptism.json`, the Timer card shows a line for it under the readout — that
+session's own start time and why — and keeps showing it, through the next
+Start and the Workflow toggle too, until that same session saves
+successfully. A second session that also fails to save gets its own line
+beside the first; a different session saving cleanly clears only its own
+line, never another's. **Dismiss** on the note, or **Reset**, clears every
+line at once. Past sessions does not list an unsaved session; its rows in
+`baptism.csv` still hold it, if a service was open while it ran.
 
 ## Logging
 

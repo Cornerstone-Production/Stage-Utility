@@ -153,10 +153,9 @@ export function useSessionLane(
  * A failure here degrades to an empty plan lane rather than its own EMPTY-STATE
  * note: unlike the timer lane, it never produces a WRONG statement on screen —
  * the timer lane still draws; there is simply no plan block under it. It is
- * not silent either way, though (final review, Minor 6): logToServer always
- * reaches /log, and the caller shows its own small note when `error` is true
- * and the plan lane would otherwise just look empty with nothing said about
- * why.
+ * not silent either way, though: logToServer always reaches /log, and the
+ * caller shows its own small note when `error` is true and the plan lane
+ * would otherwise just look empty with nothing said about why.
  */
 function usePastPlanItems(
   serviceKey: string | null,
@@ -234,9 +233,9 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   // SessionSvg's own div was never there yet when this ran, and — deps being
   // `[]` — never got a second chance once the lane finished loading and
   // SessionSvg finally mounted. The chart stayed at its 640px default,
-  // letterboxed in its card, for the rest of the page's life (Important 2,
-  // final review). history-chart.tsx hit the identical bug the same way and
-  // fixed it the same way; see its own "THE REF GOES ON BOTH BRANCHES" note.
+  // letterboxed in its card, for the rest of the page's life.
+  // history-chart.tsx hit the identical bug the same way and fixed it the
+  // same way; see its own "THE REF GOES ON BOTH BRANCHES" note.
   useEffect(() => {
     const el = hostRef.current;
     if (!el || typeof ResizeObserver !== "function") return;
@@ -294,10 +293,10 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
       <div ref={hostRef} className="flex flex-col gap-3 p-4">
         {!loaded ? null : !serviceKey ? (
           live ? (
-            // Distinct from the idle empty note below: the timer IS running
-            // (final review, Important 4) — a plan item auto-started it, or
-            // the operator pressed Start, with no PCO service open. Saying
-            // "the chart draws once the timer starts" while a clock is
+            // Distinct from the idle empty note below: the timer IS running —
+            // a plan item auto-started it, or the operator pressed Start,
+            // with no PCO service open. Saying "the chart draws once the
+            // timer starts" while a clock is
             // visibly running is false, and this is exactly the failure case
             // emitRaw's own `raw: no service open, session not archived` log
             // line exists for: this session's presses are not being written
@@ -346,7 +345,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
             with no explanation — an operator with Plan items toggled off has
             nothing to be told about a fetch this lane doesn't need either
             way. The timer lane above is unaffected either way: this is a
-            plan-only fetch (final review, Minor 6). */}
+            plan-only fetch. */}
         {showPlanLane && planError && (
           <p role="alert" className="text-caption2 text-danger-11">
             Plan items could not be loaded; the log has the details.

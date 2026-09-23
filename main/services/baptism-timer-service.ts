@@ -787,7 +787,13 @@ class BaptismTimerService {
    *  only one after the workflow toggle has carried it into a state with
    *  nobody in it, where the Timer card offers neither Reset nor Undo.
    *  Touches nothing else, and writes no raw row: it is not a press on the
-   *  timer. */
+   *  timer.
+   *
+   *  The log line names every entry's own reason, joined with "; ", so a
+   *  Sunday-morning read of the log can tell "two sessions failed for two
+   *  different reasons" from "one session, dismissed twice" — with exactly
+   *  one entry (the common case) the joined string is just that entry's own
+   *  reason, unchanged from before this was a list. */
   dismissSaveError(): BaptismState {
     if (!this.state.saveErrors?.length) return this.state;
     console.log(

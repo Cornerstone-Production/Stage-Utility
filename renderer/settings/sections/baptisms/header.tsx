@@ -86,8 +86,8 @@ export function baptismReportText(state: BaptismState, figures: readonly StatFig
   if (state.people.length) {
     lines.push("", "PEOPLE");
     // fmtBaptizeMs, not fmtClock: a mid-testimony entry (baptizeMs 0) must
-    // read as a dash here too, matching the People card for the same person
-    // (final review, Minor 7 — this used to print "baptism 0:00").
+    // read as a dash here too, matching the People card for the same
+    // person — this used to print "baptism 0:00" instead.
     state.people.forEach((p, i) =>
       lines.push(`${i + 1}. testimony ${fmtClock(p.testimonyMs)} · baptism ${fmtBaptizeMs(p.baptizeMs)}`),
     );

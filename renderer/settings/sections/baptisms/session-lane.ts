@@ -126,10 +126,10 @@ export function gapSpans(
  * by SessionChart) because those name the session's real boundary, immune to
  * whatever else the service's plan or the raw file's other sessions happen to
  * cover. This used to take every span and plan item and widen the domain to
- * whatever ANY of them spanned (Important 1 of the final review): seeded with
- * a realistic service — a countdown 25 minutes before the session, the
- * session itself, then a 38-minute sermon and a closing — and driven for
- * real, a session that actually ran about 25m to 47m read as an 0m–85m axis,
+ * whatever ANY of them spanned. Seeded with a realistic service — a
+ * countdown 25 minutes before the session, the session itself, then a
+ * 38-minute sermon and a closing — and driven for real, a session that
+ * actually ran about 25m to 47m read as an 0m–85m axis,
  * with the sermon and closing drawn as one wide "not counted" block and the
  * session's own segments squeezed down to bare numbers. See clipToSession and
  * sessionSpans below for how plan items and spans from elsewhere in the same
@@ -164,8 +164,8 @@ export function sessionWindow(
 
 /**
  * `items`, clipped to `[startMs, endMs]`, with anything entirely outside it
- * dropped — the other half of sessionWindow's own fix (Important 1). The
- * domain no longer widens for a plan item outside the session, but left
+ * dropped — the other half of sessionWindow's own fix. The domain no longer
+ * widens for a plan item outside the session, but left
  * unclipped such an item would still measure its own length against the
  * window's edge and could still be mistaken, by anything reading its
  * startedAt/endedAt later, for something that happened during the session.
@@ -213,8 +213,8 @@ export function clipToSession(items: readonly LaneItem[], startMs: number, endMs
  * every session's spans concatenated (baptism-lane.ts's own header: a
  * finished session's spans are pushed to the output when the NEXT session's
  * `start` row is read) — right for a future whole-service view, wrong for a
- * chart whose axis is one session (Important 1, the same finding
- * sessionWindow's own fix answers).
+ * chart whose axis is one session — the same reason sessionWindow's own
+ * domain no longer reaches across the rest of the service.
  *
  * Selected by START time landing in `[startMs, endMs]`, never by identity: a
  * span carries no session id of its own, but sessions never overlap in real

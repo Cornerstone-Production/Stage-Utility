@@ -58,9 +58,9 @@ export function fmtClockDelta(ms: number): string {
  * apply rather than plotting a point at NaN. Exported for its own test: the
  * arithmetic in trends.ts is only as honest as what feeds it.
  *
- * Also null when NOBODY was baptized (final review, Important 3): an ordinary
- * Finish during the testimonies, a Finish while armed, or a test run finished
- * instead of reset all log a real session with a real wall clock and nothing
+ * Also null when NOBODY was baptized: an ordinary Finish during the
+ * testimonies, a Finish while armed, or a test run finished instead of
+ * reset all log a real session with a real wall clock and nothing
  * baptized. Counted in, each fed `avgBaptismSec: 0` and its own short wall
  * clock into every tile's average — measured against three real sessions plus
  * one such session, "Avg baptism" moved from 45s to 33.75s and "Whole

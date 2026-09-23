@@ -61,8 +61,8 @@ export function fmtClock(ms: number): string {
  * grouped session's `people` fills during the testimony pass, before anyone
  * is baptized, and a per-person session finished mid-baptism leaves the
  * identical shape behind. Shared so the two places that print this cannot
- * disagree about the same person (final review, Minor 7 — Copy report used to
- * print "0:00" here while the table printed a dash for the same entry).
+ * disagree about the same person — Copy report used to print "0:00" here
+ * while the table printed a dash for the same entry.
  */
 export function fmtBaptizeMs(ms: number): string {
   return ms > 0 ? fmtClock(ms) : "—";

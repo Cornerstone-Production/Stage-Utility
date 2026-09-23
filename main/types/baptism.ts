@@ -94,11 +94,11 @@ export interface BaptismState {
    * already returned, so a failure arrives on a push of its own rather than on
    * Finish's response.
    *
-   * A LIST, not a single failure (final review, Minor 5): a single field let
-   * session A fail, session B ALSO fail, and B's retry (Undo + Finish)
-   * landing clear the note entirely — A was never written, but the field had
-   * already been overwritten to name B, so B's own success matched it. Here,
-   * a failed save appends an entry (or replaces the entry with the same
+   * A LIST, not a single failure: a single field let session A fail, session
+   * B ALSO fail, and B's retry (Undo + Finish) landing clear the note
+   * entirely — A was never written, but the field had already been
+   * overwritten to name B, so B's own success matched it. Here, a failed
+   * save appends an entry (or replaces the entry with the same
    * sessionId, for a session that fails again); a session's OWN successful
    * save removes only that session's entry; Reset and the operator
    * dismissing (dismissSaveError) clear every entry. Carried across Start and
