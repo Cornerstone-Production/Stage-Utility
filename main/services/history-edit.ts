@@ -1194,8 +1194,12 @@ export interface BaptismRebuildOutcome {
   /** Raw rows read from baptism.csv. */
   rows: number;
   /** Rebuilt sessions that correspond to a session now in the store: updated
-   *  + added + unchanged + newer + disagreeing — everything except `invalid`,
-   *  which produced no session at all. */
+   *  + added + unchanged + newer + disagreeing — everything except
+   *  `invalid`. An invalid rebuilt row is never itself credited with a
+   *  session: unmatched, it is discarded and produces nothing; matched, the
+   *  stored session it landed on is left exactly as it was, same as if
+   *  nothing had matched at all — so its continued existence counts toward
+   *  `kept`, not toward a row this rebuild actually confirmed. */
   sessions: number;
   /** Matched an existing stored session; its people/finishedAt were brought
    *  up to date (a genuinely later Finish the store had not saved). */

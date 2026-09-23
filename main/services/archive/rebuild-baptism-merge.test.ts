@@ -179,12 +179,14 @@ describe("rebuildServiceBaptisms — the skew case", () => {
     await serviceTimelineStore.upsert(timeline(KEY, DATE, "Timeline Title"));
 
     // A session recorded before start()/finalize() threaded their own stamp
-    // straight through to the row they emit: back then the row was a
-    // separate, later read of the clock, so the store's startedAt (and
-    // therefore its id) reads about 1ms off the row's. That is clock-read
-    // noise, not a real correction, and must not stop the two being matched.
-    const storedStartedAt = "2026-09-20T12:00:00.001Z";
-    const rowStartedAt = "2026-09-20T12:00:00.000Z";
+    // straight through to the row they emit: back then, for both the start
+    // and the finish, the row was a separate, later read of the clock than
+    // the timer's own stamp — so the store's startedAt (and therefore its
+    // id) and finishedAt each read about 1ms earlier than the row's. That is
+    // clock-read noise, not a real correction, and must not stop the two
+    // being matched.
+    const storedStartedAt = "2026-09-20T12:00:00.000Z";
+    const rowStartedAt = "2026-09-20T12:00:00.001Z";
     const staleSession = {
       id: baptismSessionId(storedStartedAt),
       startedAt: storedStartedAt,
