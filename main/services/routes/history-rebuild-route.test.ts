@@ -351,6 +351,10 @@ describe("POST /api/history/rebuild", () => {
     assert.ok(thrown, "a recording with no raw rows answered as though it had rebuilt something");
     assert.equal(handlerErrorStatus(thrown), 409);
     assert.match((thrown as Error).message, /No raw rows exist for this recording/);
+    // This route throws the same NoRawRowsError as /api/baptism/rebuild,
+    // through the same generic dispatcher — its 409 must carry the same
+    // machine-readable code, documented at api.md's /api/history/rebuild row.
+    assert.equal((thrown as { code?: string }).code, "no-raw-rows");
     assert.equal(broadcasts.length, 0, "nothing was derived, so nothing may be broadcast");
     const tl = await serviceTimelineStore.get(KEY);
     assert.equal(tl?.items.length, 1, "the untouched record was rewritten anyway");
