@@ -21,11 +21,12 @@
 // live-edge pulse actually pulsing. What IS unit-tested: the arithmetic
 // (session-lane.ts), the fetch-on-push behaviour (session-chart-refetch.test.tsx,
 // which needs a real render but asserts on invoke() call counts, not on pixels),
-// and the three empty-state branches rendering the right text
-// (session-chart.test.tsx). NOT YET checked in a real browser against a
-// recorded session — no server was running to point one at while this was
-// built. That check still needs to happen before this ships, same as any
-// other layout-dependent claim this module makes.
+// the Customize toggle's wiring and persistence (session-chart.test.tsx, which
+// needs a real render but asserts on element presence, not pixels), and the
+// three empty-state branches rendering the right text (session-chart.test.tsx).
+// Checked in a real browser against seeded, real recorded sessions — short and
+// long, both workflows — as part of Task 15's drive; see that task's report
+// for what was seen and its screenshots.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -37,11 +38,14 @@ import { logToServer } from "../../../lib/client-log";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { useServerNow } from "../../../lib/server-clock";
 import { useServiceTimeline } from "../../../main/use-service-timeline";
+import { toast } from "../../../components/ui";
 import {
+  CustomizePopover,
   keepAxisLabels,
   laneLabel,
   laneSegments,
   segmentAt,
+  useStoredKeys,
   type LaneItem,
   type LaneSegment,
   type StatFigure,
@@ -58,6 +62,15 @@ import {
   timerLaneItems,
   type TimerLaneItem,
 } from "./session-lane";
+
+/** The Session card's own Customize choice: whether the plan lane draws at
+ *  all. One group, one option, deliberately — see the card's own head for
+ *  why nothing else belongs in this popover. A per-browser view preference
+ *  like every other Customize in this app (see history-chart/prefs.ts), not a
+ *  recording setting. */
+export const SESSION_LANES_STORAGE_KEY = "baptism:sessionLanes";
+export const SESSION_LANE_KEYS = ["planItems"];
+export const DEFAULT_SESSION_LANES = ["planItems"];
 
 const LANE_FONT = "500 11px \"IBM Plex Mono\", ui-monospace, monospace";
 const PAD_L = 46;
@@ -201,6 +214,9 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   const now = useServerNow(1000, live);
   const reduced = prefersReducedMotion();
 
+  const [laneKeys, toggleLane] = useStoredKeys(SESSION_LANES_STORAGE_KEY, SESSION_LANE_KEYS, DEFAULT_SESSION_LANES);
+  const showPlanLane = laneKeys.includes("planItems");
+
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(640);
@@ -244,6 +260,16 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
     <div id="s-session" className="su-card flex flex-col">
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
         <h2 className="text-body font-semibold text-fg">Session</h2>
+        <span className="flex-1" />
+        <CustomizePopover
+          label="Customize the Session chart"
+          groups={[{ id: "lanes", label: "Lanes", options: [{ key: "planItems", label: "Plan items" }] }]}
+          selected={laneKeys}
+          onToggle={(key) => {
+            const err = toggleLane(key);
+            if (err) toast.error(`Couldn't remember that: ${err.message}`);
+          }}
+        />
       </div>
       <div className="flex flex-col gap-3 p-4">
         {!loaded ? null : !serviceKey ? (
@@ -277,6 +303,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
             spans={spans}
             timerItems={timerItems}
             planItems={planItems}
+            showPlanLane={showPlanLane}
             hoverX={hoverX}
             onMove={onMove}
             onLeave={onLeave}
@@ -350,6 +377,10 @@ interface SessionSvgProps {
   spans: BaptismSpan[];
   timerItems: TimerLaneItem[];
   planItems: LaneItem[];
+  /** Customize's "Plan items" choice. Off, the plan lane draws nothing and
+   *  the layout closes up to the timer lane's own height — see the geometry
+   *  below, not a CSS hide that would leave the empty row's space behind. */
+  showPlanLane: boolean;
   hoverX: number | null;
   onMove: (e: React.PointerEvent<SVGSVGElement>) => void;
   onLeave: () => void;
@@ -368,6 +399,7 @@ function SessionSvg({
   spans,
   timerItems,
   planItems,
+  showPlanLane,
   hoverX,
   onMove,
   onLeave,
@@ -384,11 +416,11 @@ function SessionSvg({
   const gaps = gapSpans(spans, new Date(domainEndMs).toISOString());
 
   const timerLanes = Math.max(1, maxLane(timerSegments) + 1);
-  const planLanes = Math.max(1, maxLane(planSegments) + 1);
+  const planLanes = showPlanLane ? Math.max(1, maxLane(planSegments) + 1) : 0;
   const timerY0 = PAD_T;
   const timerBandH = timerLanes * ROW_H + (timerLanes - 1) * ROW_GAP;
-  const planY0 = timerY0 + timerBandH + LANE_SPACING;
-  const planBandH = planLanes * ROW_H + (planLanes - 1) * ROW_GAP;
+  const planY0 = timerY0 + timerBandH + (showPlanLane ? LANE_SPACING : 0);
+  const planBandH = showPlanLane ? planLanes * ROW_H + (planLanes - 1) * ROW_GAP : 0;
   const axisY = planY0 + planBandH + 8;
   const H = axisY + AXIS_H + 6;
 
@@ -457,7 +489,9 @@ function SessionSvg({
         })}
 
         <text x={4} y={timerY0 + ROW_H / 2 + 4} className="fill-fg-subtle font-mono text-[11px]">timer</text>
-        <text x={4} y={planY0 + ROW_H / 2 + 4} className="fill-fg-subtle font-mono text-[11px]">plan</text>
+        {showPlanLane && (
+          <text x={4} y={planY0 + ROW_H / 2 + 4} className="fill-fg-subtle font-mono text-[11px]">plan</text>
+        )}
 
         {gaps.map((g, i) => {
           const x0 = Math.min(plotX1, Math.max(plotX0, xOf(Date.parse(g.startedAt))));
@@ -527,31 +561,32 @@ function SessionSvg({
           );
         })}
 
-        {planSegments.filter((s) => s.visible).map((seg, i) => {
-          const y = planY0 + seg.lane * (ROW_H + ROW_GAP);
-          const w = Math.max(0, seg.x1 - seg.x0);
-          const label = laneLabel(seg.item, w, measure);
-          return (
-            <g key={`${seg.item.itemId}-${i}`} data-plan-segment={seg.item.itemId}>
-              <rect
-                x={seg.x0}
-                y={y}
-                width={w}
-                height={ROW_H}
-                rx={4}
-                fill="var(--color-surface-raised)"
-                stroke="var(--color-line-strong)"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-              {label.kind !== "none" && (
-                <text x={seg.x0 + 8} y={y + ROW_H / 2 + 4} pointerEvents="none" className="fill-fg-muted text-[11px]">
-                  {label.text}
-                </text>
-              )}
-            </g>
-          );
-        })}
+        {showPlanLane &&
+          planSegments.filter((s) => s.visible).map((seg, i) => {
+            const y = planY0 + seg.lane * (ROW_H + ROW_GAP);
+            const w = Math.max(0, seg.x1 - seg.x0);
+            const label = laneLabel(seg.item, w, measure);
+            return (
+              <g key={`${seg.item.itemId}-${i}`} data-plan-segment={seg.item.itemId}>
+                <rect
+                  x={seg.x0}
+                  y={y}
+                  width={w}
+                  height={ROW_H}
+                  rx={4}
+                  fill="var(--color-surface-raised)"
+                  stroke="var(--color-line-strong)"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+                {label.kind !== "none" && (
+                  <text x={seg.x0 + 8} y={y + ROW_H / 2 + 4} pointerEvents="none" className="fill-fg-muted text-[11px]">
+                    {label.text}
+                  </text>
+                )}
+              </g>
+            );
+          })}
 
         {running && (
           <>

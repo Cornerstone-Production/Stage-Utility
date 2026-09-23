@@ -16,9 +16,9 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
-const { SessionChart } = await import("./session-chart.js");
+const { SessionChart, SESSION_LANES_STORAGE_KEY } = await import("./session-chart.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -119,6 +119,98 @@ test("a session with recorded spans draws the lane and its legend", async () => 
   assert.equal(!!screen.queryByText("Testimony"), true, "expected the legend's Testimony entry");
   assert.equal(!!screen.queryByText("Baptism"), true, "expected the legend's Baptism entry");
   assert.equal(!!screen.queryByText("Plan item"), true, "expected the legend's Plan item entry");
+});
+
+// Fix round 1 (from drive 2), the CUSTOMIZE finding: the mockup's Session
+// card has a Customize control and the plan built this tab on History's own
+// CustomizePopover/prefs mechanism, but the shipped card had neither — the
+// plan lane always drew, with no way to turn it off.
+test("Customize toggles the plan lane off, and the choice persists across a remount", async () => {
+  localStorage.removeItem(SESSION_LANES_STORAGE_KEY);
+  const timeline: ServiceTimeline = {
+    serviceKey: "st1:plan1:has-plan",
+    serviceTypeId: null,
+    serviceTypeName: null,
+    planId: null,
+    planTitle: null,
+    seriesTitle: null,
+    serviceDate: "2026-09-20",
+    serviceTimeId: null,
+    serviceTimeStartsAt: null,
+    startedAt: "2026-09-20T14:58:00.000Z",
+    endedAt: "2026-09-20T15:06:00.000Z",
+    items: [
+      {
+        itemId: "i1",
+        title: "Baptism Stories",
+        sequence: 0,
+        plannedLengthSec: 300,
+        startedAt: "2026-09-20T14:58:00.000Z",
+        endedAt: "2026-09-20T15:06:00.000Z",
+        actualDurationSec: 480,
+        preService: false,
+      },
+    ],
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
+    if (url.includes("/api/baptism/lane")) {
+      return ok({
+        spans: [
+          { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:01:48.000Z" },
+          { kind: "baptism", person: 1, startedAt: "2026-09-20T15:05:00.000Z", endedAt: "2026-09-20T15:05:42.000Z" },
+        ],
+      });
+    }
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(timeline);
+    return ok({});
+  }) as unknown as typeof fetch;
+
+  try {
+    const state: BaptismState = {
+      ...BASE,
+      serviceKey: "st1:plan1:has-plan",
+      finishedAt: "2026-09-20T15:10:00.000Z",
+      sessionStartedAt: "2026-09-20T15:00:00.000Z",
+      people: [{ testimonyMs: 108_000, baptizeMs: 42_000 }],
+    };
+    render(React.createElement(SessionChart, { state }));
+    await settle();
+    await settle();
+
+    assert.equal(
+      document.querySelectorAll("[data-plan-segment]").length > 0,
+      true,
+      "the plan lane draws by default (Plan items on)",
+    );
+
+    fireEvent.click(screen.getByLabelText("Customize the Session chart"));
+    fireEvent.click(screen.getByText("Plan items"));
+    await settle();
+
+    assert.equal(
+      document.querySelectorAll("[data-plan-segment]").length,
+      0,
+      "toggled off — the plan lane draws nothing",
+    );
+
+    cleanup();
+    render(React.createElement(SessionChart, { state }));
+    await settle();
+    await settle();
+
+    assert.equal(
+      document.querySelectorAll("[data-plan-segment]").length,
+      0,
+      "the choice persisted across a remount, not just within the same mount",
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+    localStorage.removeItem(SESSION_LANES_STORAGE_KEY);
+  }
 });
 
 // Fix round 1, finding I2: a failed baptism:lane fetch used to set spans: []
