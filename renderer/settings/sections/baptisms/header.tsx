@@ -25,7 +25,7 @@ import { cn } from "../../../lib/cn";
 import { Button, toast } from "../../../components/ui";
 import { copyText } from "../../../lib/clipboard";
 import { useServerNow } from "../../../lib/server-clock";
-import { fmtClock, fmtDate } from "../../../main/use-baptism-state";
+import { fmtBaptizeMs, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { RecordingPill, useSectionNav, useHeaderInset } from "../history-service-header";
 import { CustomizePopover, StatStrip, useStoredKeys, type StatFigure } from "../history-chart";
 import {
@@ -85,8 +85,11 @@ export function baptismReportText(state: BaptismState, figures: readonly StatFig
   lines.push("", ...figures.map((f) => `${f.label}: ${f.value}`));
   if (state.people.length) {
     lines.push("", "PEOPLE");
+    // fmtBaptizeMs, not fmtClock: a mid-testimony entry (baptizeMs 0) must
+    // read as a dash here too, matching the People card for the same person
+    // (final review, Minor 7 — this used to print "baptism 0:00").
     state.people.forEach((p, i) =>
-      lines.push(`${i + 1}. testimony ${fmtClock(p.testimonyMs)} · baptism ${fmtClock(p.baptizeMs)}`),
+      lines.push(`${i + 1}. testimony ${fmtClock(p.testimonyMs)} · baptism ${fmtBaptizeMs(p.baptizeMs)}`),
     );
   }
   return lines.join("\n");

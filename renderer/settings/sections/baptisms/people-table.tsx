@@ -21,7 +21,7 @@
 
 import type { ReactNode } from "react";
 
-import { fmtClock } from "../../../main/use-baptism-state";
+import { fmtBaptizeMs, fmtClock } from "../../../main/use-baptism-state";
 
 export interface PeopleCardProps {
   state: BaptismState;
@@ -65,7 +65,11 @@ export function PeopleCard({ state }: PeopleCardProps) {
                   <td className="px-3 py-1.5">Person {i + 1}</td>
                   <td className="px-3 py-1.5 text-right font-mono tabular-nums text-accent">{fmtClock(p.testimonyMs)}</td>
                   <td className="px-3 py-1.5 text-right font-mono tabular-nums text-live-11">
-                    {baptized ? fmtClock(p.baptizeMs) : <span className="text-fg-subtle">—</span>}
+                    {/* fmtBaptizeMs decides the TEXT (shared with Copy report's
+                        header.tsx, so the two can't disagree about the same
+                        person — final review, Minor 7); `baptized` only
+                        decides the dimmer colour for the dash. */}
+                    {baptized ? fmtBaptizeMs(p.baptizeMs) : <span className="text-fg-subtle">{fmtBaptizeMs(p.baptizeMs)}</span>}
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono tabular-nums text-fg">{fmtClock(total)}</td>
                   <td className="px-3 py-1.5">

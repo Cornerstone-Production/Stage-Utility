@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { summarizeBaptism } from "./use-baptism-state.js";
+import { fmtBaptizeMs, summarizeBaptism } from "./use-baptism-state.js";
 
 const BASE_STATE: BaptismState = {
   mode: "grouped",
@@ -101,6 +101,20 @@ describe("once someone is actually baptized", () => {
     // over 3, which would fold in two testimonies nobody has been baptized
     // for yet.
     assert.equal(summarizeBaptism(state).avgPersonMs, 90_000);
+  });
+});
+
+// Final review, Minor 7: Copy report printed fmtClock(0) ("0:00") for a
+// mid-testimony person while the People table printed a dash for the exact
+// same entry — one rule, shared, so the two cannot disagree about the same
+// person again.
+describe("fmtBaptizeMs", () => {
+  test("not yet baptized (0ms) is a dash, never fmtClock's 0:00", () => {
+    assert.equal(fmtBaptizeMs(0), "—");
+  });
+
+  test("an actual baptism duration reads exactly like fmtClock", () => {
+    assert.equal(fmtBaptizeMs(42_000), "0:42");
   });
 });
 

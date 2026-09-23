@@ -54,6 +54,21 @@ export function fmtClock(ms: number): string {
 }
 
 /**
+ * A person's baptizeMs, the way both the People table and Copy report must
+ * print it: a dash for "not yet baptized" (baptizeMs === 0), never fmtClock's
+ * own "0:00" — that would claim a baptism took no time when none has happened
+ * yet. `people-table.tsx`'s own doc comment names the shape this guards: a
+ * grouped session's `people` fills during the testimony pass, before anyone
+ * is baptized, and a per-person session finished mid-baptism leaves the
+ * identical shape behind. Shared so the two places that print this cannot
+ * disagree about the same person (final review, Minor 7 — Copy report used to
+ * print "0:00" here while the table printed a dash for the same entry).
+ */
+export function fmtBaptizeMs(ms: number): string {
+  return ms > 0 ? fmtClock(ms) : "—";
+}
+
+/**
  * "Sun, Sep 27 · 11:34 AM" — when a session (or a past one) started.
  *
  * Shared by the operator page and its header, rather than a private copy in
