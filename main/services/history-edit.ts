@@ -1143,12 +1143,17 @@ async function applyBaptismRebuild(
   try {
     ({ dropped, evicted } = await baptismStore.mergeRebuilt(plan.toWrite));
   } catch (err) {
-    // Nothing reaches the response or the toast beyond RebuildFailedError's
-    // own fixed sentence: a write failure here names an absolute path, and
-    // this answer reaches a LAN-visible page the same way rebuildServiceRecords's
-    // own write failures do.
+    // Logged here, with the real reason, for BOTH callers — but re-thrown
+    // RAW, not wrapped in RebuildFailedError: this function is shared by
+    // rebuildServiceBaptisms (whose own caller must sanitize it before it
+    // can reach a response) and rebuildServiceRecords's write loop (which
+    // already sanitizes ITS OWN leg failures with the exact same fixed
+    // sentence, one layer up). Wrapping here too meant the write loop's own
+    // [history] log line reported "That recording could not be rebuilt, and
+    // nothing was changed" — RebuildFailedError's OWN sentence — instead of
+    // the real reason, since errorMessage() reads `.message`, never `.cause`.
     console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
-    throw new RebuildFailedError(errorMessage(err));
+    throw err;
   }
 
   // A session this rebuild wanted to add or update can still fall out of the
@@ -1252,7 +1257,17 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
     throw new NoRawRowsError();
   }
 
-  const { updated, added, keptEvicted } = await applyBaptismRebuild(serviceKey, plan);
+  let updated: number, added: number, keptEvicted: number;
+  try {
+    ({ updated, added, keptEvicted } = await applyBaptismRebuild(serviceKey, plan));
+  } catch (err) {
+    // applyBaptismRebuild already logged the real reason under [baptism];
+    // this route's own response must not carry it past RebuildFailedError's
+    // fixed sentence — the same discipline rebuildServiceRecords applies to
+    // its other three legs, and the reason THIS function does not also log
+    // is that applyBaptismRebuild already did, once, for both its callers.
+    throw new RebuildFailedError(errorMessage(err));
+  }
   // plan.kept was counted before the write ran — if the cap evicted one of
   // THIS service's own untouched sessions to make room, it is no longer
   // actually in the store, and the count has to say so.

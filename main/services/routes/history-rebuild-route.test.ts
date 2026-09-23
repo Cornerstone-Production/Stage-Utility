@@ -601,11 +601,15 @@ describe("POST /api/history/rebuild", () => {
       baptismStore.mergeRebuilt = async () => {
         throw new Error("EACCES (test double)");
       };
+      const warnings: string[] = [];
+      const realWarn = console.warn;
+      console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
       let out: Awaited<ReturnType<typeof callRoute>>;
       try {
         out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
       } finally {
         baptismStore.mergeRebuilt = original;
+        console.warn = realWarn;
       }
 
       assert.equal(out.status, 200, `a partial failure (an earlier leg already landed) must still answer 200, got ${out.status}: ${out.body}`);
@@ -620,6 +624,20 @@ describe("POST /api/history/rebuild", () => {
       assert.equal(json.baptism.rebuilt, false, "a failed write must not read as rebuilt");
       assert.equal(json.baptismDetail.added, 0, "the write failed — the plan's own optimistic added count must not leak into the response");
       assert.equal(json.baptismDetail.updated, 0, "the write failed — the plan's own optimistic updated count must not leak into the response");
+
+      // The [history] line for THIS leg must name the real reason, not
+      // RebuildFailedError's own fixed sentence — that sentence belongs on
+      // the RESPONSE this route answers with, never on the server's own log,
+      // where an operator debugging this at 9am on a Sunday needs the actual
+      // reason, not a second copy of what the UI already told them.
+      const legLine = warnings.find((w) => w.includes("[history]") && w.includes("could not write the baptism record"));
+      assert.ok(legLine, `expected a [history] line naming the baptism leg's own failure; got: ${JSON.stringify(warnings)}`);
+      assert.match(legLine!, /EACCES \(test double\)/, `the leg's own log line must name the real reason, not a generic sentence: ${legLine}`);
+      assert.doesNotMatch(
+        legLine!,
+        /nothing was changed\. The log says why/,
+        `the leg's own log line must not embed the standalone wrapper's sentence: ${legLine}`,
+      );
 
       await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
