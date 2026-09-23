@@ -1442,6 +1442,10 @@ export function Inspector({
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="live">Live (running clock)</SelectItem>
+                <SelectItem value="testimony">Testimony (this person's, once banked)</SelectItem>
+                <SelectItem value="session">Session (wall clock)</SelectItem>
+                <SelectItem value="phase">Phase (the word)</SelectItem>
+                <SelectItem value="person">Person (number, or N of M)</SelectItem>
                 <SelectItem value="count">Count baptized</SelectItem>
                 <SelectItem value="total">Total time</SelectItem>
                 <SelectItem value="average">Average per person</SelectItem>
