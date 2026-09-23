@@ -146,6 +146,24 @@ Sessions are named by service and cross-linked into Service History with
 per-person splits and averages. A **Baptism timer** layout object puts the live
 count and timer on a display.
 
+## The Session chart
+
+Beneath the timer, a **Session** card draws the whole session as two lanes on
+one time axis: the timer lane (every testimony and baptism, oldest first) over
+the plan lane (the plan items live while it ran). Stretches the timer lane does
+not cover — the armed wait for the first person, an explicit pause, the walk to
+the water — are drawn as gaps reading "not counted", never hidden. Putting the
+plan on the same axis is what answers *how much of the song set did the
+baptisms take*: the dunks spread across several songs, and no single lane can
+say that on its own. Hover a segment for its person, phase, duration and
+boundary times on the header's stat strip.
+
+The chart is live while a session is running, refetching only on the timer's
+own presses rather than on a timer; a finished session's own recorded window
+stands in for "now" at the right edge. A session with no service open draws
+nothing and says so; one with no raw rows recorded for it (an older session,
+or one the archive never saw) says that instead of drawing an empty lane.
+
 ## Starting from the plan
 
 The timer can start itself, since the two ends of a baptism differ:

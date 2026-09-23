@@ -93,9 +93,17 @@ export function baptismReportText(state: BaptismState, figures: readonly StatFig
 
 export interface BaptismHeaderProps {
   state: BaptismState;
+  /**
+   * A hovered Session-chart segment's own figures, replacing the at-rest strip
+   * for as long as the pointer is over it — the same swap History's own
+   * attendance and sound charts make on hover, relocated to this page's own
+   * header strip because the mockup's Session card carries no strip of its own.
+   * Null (the default) shows the Customize-selected at-rest figures.
+   */
+  hoverFigures?: StatFigure[] | null;
 }
 
-export function BaptismHeader({ state }: BaptismHeaderProps) {
+export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps) {
   // Ticks only while a session is live — an idle or finished session's figures
   // do not move, and a timer nobody needs is a timer that outlives the page for
   // no reason (this shell is a persistent app, not a route that unmounts).
@@ -103,6 +111,7 @@ export function BaptismHeader({ state }: BaptismHeaderProps) {
   const [figureKeys, toggleFigure] = useStoredKeys(BAPTISM_FIGURES_STORAGE_KEY, BAPTISM_FIGURE_KEYS, DEFAULT_BAPTISM_FIGURES);
   const allFigures = useMemo(() => baptismFigures(state, now), [state, now]);
   const shown = useMemo(() => allFigures.filter((f) => figureKeys.includes(f.key)), [allFigures, figureKeys]);
+  const displayed = hoverFigures ?? shown;
 
   async function onCopyReport() {
     const ok = await copyText(baptismReportText(state, allFigures));
@@ -178,15 +187,19 @@ export function BaptismHeader({ state }: BaptismHeaderProps) {
         </div>
       </div>
 
-      {/* `announce={false}`: these figures change every second while a session
-          records, and a polite live region would read all six out on every
-          tick — the same reasoning ServiceHeader's own KPI row documents. */}
+      {/* `announce={false}` at rest: these figures change every second while a
+          session records, and a polite live region would read all six out on
+          every tick — the same reasoning ServiceHeader's own KPI row
+          documents. Hovering a Session-chart segment is the opposite case —
+          a static reading that changes only when the pointer moves to a
+          different segment — so that swap is announced, like a chart's own
+          strip. */}
       <div data-testid="baptism-kpis" className="max-sm:-mx-1 max-sm:px-1">
         <StatStrip
-          figures={shown}
+          figures={displayed}
           hover={null}
           live={null}
-          announce={false}
+          announce={hoverFigures != null}
           right={
             <CustomizePopover
               label="Customize the Baptisms figures"

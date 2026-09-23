@@ -6,7 +6,9 @@ import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
 import { useBaptismState, fmtClock, fmtDate } from "./use-baptism-state";
 import { BaptismHeader } from "../settings/sections/baptisms/header";
+import { SessionChart } from "../settings/sections/baptisms/session-chart";
 import { TimerCard } from "../settings/sections/baptisms/timer-card";
+import type { StatFigure } from "../settings/sections/history-chart";
 
 /**
  * Baptisms — an operator stopwatch for baptism services. Each person has a
@@ -17,11 +19,14 @@ import { TimerCard } from "../settings/sections/baptisms/timer-card";
  * surfaced read-only on a display via the "Baptism timer" layout object.
  *
  * The page shell (BaptismHeader: title, recording pill, service sub-line,
- * actions, stat strip, section nav) and the Timer card live in
- * ../settings/sections/baptisms/ — reusing the History module's StatStrip,
- * RecordingPill and section-nav pattern rather than a bespoke header for one
- * more page. This component composes them and keeps two sections that predate
- * that shell: the per-person log and the past-sessions list. Both are
+ * actions, stat strip, section nav), the Timer card and the Session chart live
+ * in ../settings/sections/baptisms/ — reusing the History module's StatStrip,
+ * RecordingPill, lane geometry and section-nav pattern rather than bespoke ones
+ * for one more page. This component composes them, and lifts the Session
+ * chart's hover up into the header's own strip: the two are siblings here, not
+ * parent and child, so hovering a segment has to travel back up through this
+ * component to reach the strip it replaces. It also keeps two sections that
+ * predate that shell: the per-person log and the past-sessions list. Both are
  * SUPERSEDED by later tasks in this same PR (People and Past sessions cards) —
  * they stay here, working exactly as before, until those land.
  */
@@ -29,6 +34,7 @@ export function BaptismOperator() {
   const state = useBaptismState();
   const [sessions, setSessions] = useState<BaptismSession[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [hoverFigures, setHoverFigures] = useState<StatFigure[] | null>(null);
 
   function reloadSessions() {
     invoke<BaptismSession[]>("baptism:sessions").then(setSessions).catch(() => setSessions([]));
@@ -52,8 +58,9 @@ export function BaptismOperator() {
 
   return (
     <div className="flex flex-col gap-4">
-      <BaptismHeader state={state} />
+      <BaptismHeader state={state} hoverFigures={hoverFigures} />
       <TimerCard state={state} onFinished={reloadSessions} />
+      <SessionChart state={state} onHover={setHoverFigures} />
 
       {/* Per-person log — superseded by the People card, Task 13. */}
       {state.people.length > 0 && (

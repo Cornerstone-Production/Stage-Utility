@@ -1349,18 +1349,26 @@ describe("baptismFigures", () => {
 
 **Interfaces:**
 - Consumes: `invoke("baptism:lane", { serviceKey })` (Task 9); `laneSegments`, `laneLabel`,
-  `segmentAt`, `type LaneItem`, `type LaneSegment`, `dateTicks` and the text measurer from
-  `../history-chart`; the service timeline via `invoke("serviceTimeline:get", …)` or
-  `serviceTimeline:getCurrent` for the live session.
+  `segmentAt`, `type LaneItem`, `type LaneSegment` and the text measurer from `../history-chart`;
+  the service timeline via `invoke("serviceTimeline:get", …)` or `serviceTimeline:getCurrent` for
+  the live session.
+  <br>**Corrected during Task 12's build:** the tick helper is `timeTicks`, not `dateTicks`.
+  `dateTicks` is anchored to local-midnight WEEK boundaries for a Trends-scale (weeks-to-years)
+  domain — see its own doc comment in `history-chart/geometry.ts` — and produces zero or one tick
+  for a domain measured in minutes, which is what a baptism session is. `timeTicks` is the
+  clock-anchored helper History's own Attendance and Sound charts use for one service's own
+  x axis, which is the same shape this chart's domain has.
 - Produces: `gapSpans(spans: BaptismSpan[], windowEndIso: string): { startedAt: string; endedAt: string }[]`.
 
 **Build what the mockup's Session card shows.** Two lanes on one x axis: *timer* on top, *plan*
 beneath. Timer spans in `--color-accent` (testimony) and `--color-live-9` (baptism), labelled
 with the person number when the segment fits, by the existing `laneLabel` rule. Gaps between
-spans hatched in `--color-line` and reading "not counted" when wide enough. Plan items outlined,
-labelled with the item title when it fits. The legend beneath. Hover a segment and the strip
-shows the person, the phase, the duration and its boundary times, the way the attendance and
-sound charts do.
+spans read "not counted" when wide enough, drawn exactly as the mockup's own CSS has them
+(`.seg-gap`): a flat `--color-fill` wash with a dashed `--color-line-strong` border — not a
+diagonal hatch texture, whatever this section's own "hatched in `--color-line`" suggested. Plan
+items outlined, labelled with the item title when it fits. The legend beneath. Hover a segment
+and the strip shows the person, the phase, the duration and its boundary times, the way the
+attendance and sound charts do.
 
 **Do not use `HistoryChart`.** It requires a `series[]` and a `yScale`; this chart has no y axis.
 Reuse the lane GEOMETRY — map each `BaptismSpan` onto a `LaneItem` and let `laneSegments`
