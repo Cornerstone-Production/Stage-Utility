@@ -592,7 +592,7 @@ export function ServiceHeader({
               variant="filled"
               size="small"
               onClick={onRebuild}
-              tooltip="Recompute all three records from the raw rows in the data archive — your per-item time corrections are kept"
+              tooltip="Recompute timing, sound and attendance from the raw rows, and merge in this service's baptism sessions — your per-item time corrections are kept"
             >
               <WrenchIcon className="size-3.5 text-fg-muted" /> Rebuild from raw
             </Button>

@@ -207,6 +207,11 @@ export function editedTooltip(it: ServiceTimelineItem): string {
   return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
 }
 
+/** The keys of RebuildOutcome that are actual LEGS (each a RebuiltRecord) —
+ *  `failed` is a list, not a leg, and `baptismDetail` is baptism's own extra
+ *  detail, not a fifth leg of its own. */
+type RebuildLegName = Exclude<keyof RebuildOutcome, "failed" | "baptismDetail">;
+
 /**
  * The noun each leg counts, in the order they are reported.
  *
@@ -214,18 +219,18 @@ export function editedTooltip(it: ServiceTimelineItem): string {
  * hand-mirrored — a second copy of this shape is exactly how it drifted
  * before: this file kept its own RebuiltRecord/RebuildOutcome interfaces with
  * a comment saying they mirrored the server's, and nothing enforced that they
- * still did). A `Record` over every key but `failed` means a leg added on the
- * server and not given a noun here is a missing-property error, not a runtime
- * gap; `Object.entries` preserves the object's own insertion order, so the
- * order below is also the order describeRebuild reports them in.
+ * still did). A `Record` over every leg means one added on the server and not
+ * given a noun here is a missing-property error, not a runtime gap;
+ * `Object.entries` preserves the object's own insertion order, so the order
+ * below is also the order describeRebuild reports them in.
  */
-const REBUILD_LEG_NOUNS: Record<keyof Omit<RebuildOutcome, "failed">, string> = {
+const REBUILD_LEG_NOUNS: Record<RebuildLegName, string> = {
   timeline: "item timings",
   spl: "SPL items",
   attendance: "attendance samples",
   baptism: "baptism sessions",
 };
-const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [keyof Omit<RebuildOutcome, "failed">, string][];
+const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [RebuildLegName, string][];
 
 /**
  * What a rebuild actually did, in a sentence.
@@ -235,7 +240,15 @@ const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [keyof Omit<RebuildOut
  * rebuild that changed nothing once reported "Rebuilt: 12 items".
  */
 export function describeRebuild(out: RebuildOutcome): string {
-  const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
+  const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => {
+    // Baptism is a MERGE, not a replace (I3): a bare session count cannot
+    // tell "recomputed the same two sessions" from "added one back after a
+    // Delete", and the second is exactly the case an operator needs to see.
+    if (k === "baptism" && out.baptismDetail) {
+      return `${out[k].items} ${noun} (${out.baptismDetail.added} added)`;
+    }
+    return `${out[k].items} ${noun}`;
+  });
   const left = REBUILD_LEGS.filter(([k]) => !out[k].rebuilt && !out[k].missing).map(([, noun]) => noun);
   const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
   if (left.length) parts.push(`left alone: ${left.join(", ")}`);
@@ -1028,7 +1041,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (!(await confirm({
         title: "Rebuild from raw?",
         message:
-          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. The raw rows themselves are not touched.",
+          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. Baptism sessions are merged in the same way: updated or added, never deleted — a session removed from Past sessions can come back. The raw rows themselves are not touched.",
         confirmLabel: "Rebuild",
         destructive: true,
       }))) return;
@@ -1281,7 +1294,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
             <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored timing/sound/attendance summaries and derives them again from the archived rows, keeping your item corrections — and merges this service's baptism sessions in from their own raw rows, updating or adding but never deleting.
             </span>
           </div>
         )}

@@ -190,6 +190,12 @@ describe("History: Rebuild from raw", () => {
     const dialog = text(document.body as HTMLElement);
     assert.match(dialog, /Rebuild from raw\?/);
     assert.match(dialog, /per-item time corrections are kept/i);
+    // I3: the confirm names the baptism merge alongside the three legs it
+    // already described, and says plainly that a deleted session can come
+    // back — a rebuild that quietly restores something the operator removed
+    // is not something the confirm may leave unsaid.
+    assert.match(dialog, /baptism sessions are merged/i, `the confirm does not mention the baptism merge: ${dialog}`);
+    assert.match(dialog, /never deleted|can come back/i, `the confirm does not warn that a deleted session can return: ${dialog}`);
 
     const go = button(document.body as HTMLElement, "Rebuild");
     assert.ok(go, `the confirm dialog offered no Rebuild button: ${dialog}`);
@@ -207,6 +213,38 @@ describe("History: Rebuild from raw", () => {
     assert.match(shown, /11 SPL items/, `the toast does not report the SPL count: ${shown}`);
     assert.match(shown, /143 attendance samples/, `the toast does not report the sample count: ${shown}`);
     assert.doesNotMatch(shown, /left alone/, `nothing was left alone, so the toast must not say so: ${shown}`);
+  });
+
+  // M6: hiding the baptism leg from the result must go red — this is exactly
+  // that guard, not just a happy-path render.
+  test("shows the baptism leg, including how many were added, in the result", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: false, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: true, items: 2, missing: false },
+        baptismDetail: { updated: 1, added: 1, newer: 0, kept: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /baptism sessions/, `the baptism leg is missing from the result entirely: ${shown}`);
+    assert.match(shown, /1 added/, `the result does not say how many sessions were added: ${shown}`);
   });
 
   // The defect the per-record shape exists for: a count alone read as an

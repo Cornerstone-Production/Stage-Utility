@@ -480,6 +480,12 @@ export interface RebuildOutcome {
    *  plus every one of this service's sessions the merge found no rebuilt
    *  counterpart for and so left alone). */
   baptism: RebuiltRecord;
+  /** Baptism's own updated/added/newer/kept split — RebuiltRecord's shape is
+   *  shared by all four legs and has no room for it, and a bare session count
+   *  hid that a rebuild had just quietly undone a Delete (I3): "1 baptism
+   *  sessions" said nothing about whether that one was matched or brand new.
+   *  Present exactly when `baptism.missing` is false. */
+  baptismDetail?: { updated: number; added: number; newer: number; kept: number };
   /** Records that were derived but whose write failed AFTER another record's
    *  write had already landed — see rebuildServiceRecords. Empty is the normal
    *  case; a non-empty list means the operator is looking at a half-rebuilt
@@ -653,6 +659,12 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
         rebuilt: bapPlan.toWrite.length > 0,
         items: bapPlan.kept + bapPlan.newer + bapPlan.toWrite.filter((s) => (s.serviceKey ?? null) === serviceKey).length,
         missing: false,
+      };
+      outcome.baptismDetail = {
+        updated: bapPlan.updatedIds.size,
+        added: bapPlan.addedIds.size,
+        newer: bapPlan.newer,
+        kept: bapPlan.kept,
       };
       // Pushed whenever baptism.csv exists, even with nothing to WRITE: a
       // service whose rows exist but reconstruct nothing is not the same as
