@@ -200,10 +200,11 @@ that button is hidden until the first press.
 
 Undo takes back these presses one at a time, latest first. After "First person
 in" it returns to armed: person 1's clock is thrown away and everyone who
-testified is still waiting, so the next press starts person 1 over. While armed, it returns to the
-testimonies, where the last testimony picks up from the time it had already
-banked. Undoing "Next person in" or "Last person out" returns to the person who
-was being baptized, with their clock starting over from the Undo press.
+testified is still waiting, so the next press starts person 1 over. While armed,
+it returns to the testimonies, where the last testimony picks up from the time it
+had already banked. Undoing "Next person in" or "Last person out" returns to the
+person who was being baptized, with their clock starting over from the Undo
+press.
 
 ## Pause
 

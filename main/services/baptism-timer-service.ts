@@ -582,10 +582,11 @@ class BaptismTimerService {
         // pendingTestimonyMs, not in people). Unguarded, the pop below read
         // .testimonyMs off undefined — a TypeError out of undo(), a 500 from
         // POST /api/baptism/undo, and no Undo left for the rest of the service.
-        // That record also restores without `armed`, so the guard covers both
-        // halves below, not just the one that pops: without it, the re-arm
-        // half would re-arm a session with nobody in it rather than letting it
-        // reach the branch below that logs it.
+        // That record also restores with `armed: false` (init() fills the idle
+        // defaults in first), so the guard covers both halves below, not just
+        // the one that pops: without it, the re-arm half would re-arm a session
+        // with nobody in it rather than letting it reach the branch below that
+        // logs it.
         if (!s.armed) {
           // Not armed, so person 1's clock has started (and may be paused
           // since): the press being taken back is "First person in", not the
