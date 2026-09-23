@@ -1,7 +1,7 @@
 import { isMask } from "@main/services/mask";
 import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
-import { invoke, onNotification } from "../lib/api";
+import { invoke, onNotification, type IpcChannel } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
 import { useSlideOnMove } from "../lib/use-slide-on-move";
@@ -59,7 +59,7 @@ import { formatClock } from "../lib/clock-format";
 
 // ---- helpers ----------------------------------------------------------------
 
-function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
+function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 

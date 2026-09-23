@@ -25,7 +25,7 @@ import { viewSurface } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke, type ApiError } from "../lib/api";
+import { invoke, type ApiError, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
@@ -47,7 +47,7 @@ import {
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
 
-function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
+function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
@@ -125,7 +125,7 @@ export function useStageSettings(pinnedViewId?: string) {
    */
   async function writeTo<T>(
     key: string[],
-    channel: string,
+    channel: IpcChannel,
     payload?: unknown,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<T | null> {
@@ -154,7 +154,7 @@ export function useStageSettings(pinnedViewId?: string) {
 
   /** The same, for the writes that return a fresh StageState. */
   async function writeState(
-    channel: string,
+    channel: IpcChannel,
     payload?: unknown,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<boolean> {

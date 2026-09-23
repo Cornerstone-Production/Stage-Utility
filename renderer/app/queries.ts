@@ -12,11 +12,11 @@
 // reality. queries.test.ts asserts the exact strings for that reason.
 
 import { useQuery } from "@tanstack/react-query";
-import { invoke } from "../lib/api";
+import { invoke, type IpcChannel } from "../lib/api";
 import type { WirelessChannel } from "../settings/types";
 
 /** Matches settings-view.tsx's local helper, so the moved queryFns are identical. */
-function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
+function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 

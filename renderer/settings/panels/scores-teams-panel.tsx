@@ -49,11 +49,11 @@ import {
 
 import { LEAGUES, type LeagueId } from "@main/types/scores";
 import { errorMessage } from "@main/services/errors";
-import { invoke } from "../../lib/api";
+import { invoke, type IpcChannel } from "../../lib/api";
 import { toast } from "../../components/ui";
 import { cn } from "../../lib/cn";
 
-function ipc<T>(channel: string, payload?: Record<string, unknown>): Promise<T> {
+function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
   return invoke<T>(channel, payload);
 }
 
