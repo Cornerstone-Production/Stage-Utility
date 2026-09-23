@@ -133,12 +133,18 @@ class BaptismStore {
    * a cap already full of older entries and sliced straight back off. Empty
    * on any realistic install; the caller must not count a dropped id as
    * written. `evicted` names any OTHER stored session — one this rebuild
-   * never touched — that the same slice pushed out to make room; also empty
-   * on any realistic install, and the caller logs it, since a rebuild that
-   * silently cost a different service one of its own sessions is not the
-   * "removes nothing" this merge otherwise guarantees.
+   * never touched, WHICHEVER service it names — that the same slice pushed
+   * out to make room; also empty on any realistic install. The caller logs
+   * it, since a rebuild that silently cost a different service one of its
+   * own sessions is not the "removes nothing" this merge otherwise
+   * guarantees — and, when the evicted session names the SAME service the
+   * rebuild is for, the caller's own `kept`/`items` counts (computed before
+   * this write ran) have to be corrected for it too, or they go on
+   * describing a session the write just quietly removed.
    */
-  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ dropped: string[]; evicted: string[] }> {
+  async mergeRebuilt(
+    sessions: BaptismSession[],
+  ): Promise<{ dropped: string[]; evicted: { id: string; serviceKey: string | null }[] }> {
     if (sessions.length === 0) return { dropped: [], evicted: [] };
     const seen = new Set<string>();
     for (const s of sessions) {
@@ -149,7 +155,7 @@ class BaptismStore {
     }
 
     let dropped: string[] = [];
-    let evicted: string[] = [];
+    let evicted: { id: string; serviceKey: string | null }[] = [];
     await this.store.update((file) => {
       let changed = false;
       const incomingIds = new Set(sessions.map((s) => s.id));
@@ -185,7 +191,9 @@ class BaptismStore {
       // own batch (already counted above, as `dropped`) nor a survivor was
       // sitting in the store untouched and is what the cap, not this merge,
       // evicted to make room.
-      evicted = next.filter((s) => !survivorIds.has(s.id) && !incomingIds.has(s.id)).map((s) => s.id);
+      evicted = next
+        .filter((s) => !survivorIds.has(s.id) && !incomingIds.has(s.id))
+        .map((s) => ({ id: s.id, serviceKey: s.serviceKey ?? null }));
       return { ...file, sessions: survivors };
     });
     return { dropped, evicted };

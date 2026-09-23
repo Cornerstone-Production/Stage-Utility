@@ -493,9 +493,13 @@ export interface RebuildOutcome {
   /** Unlike the other three, this is a MERGE, never a replace — see
    *  rebuildServiceBaptisms. `items` is this service's own baptism sessions
    *  once the merge lands: whatever the store already held for this service,
-   *  plus whatever this rebuild genuinely added — nothing already stored is
-   *  ever removed by a rebuild, so counting it this way needs no per-category
-   *  case analysis to get right. */
+   *  plus whatever this rebuild genuinely added, minus whichever of its own
+   *  untouched sessions the MAX_SESSIONS cap evicted to make room for that —
+   *  a rebuild removes nothing ON ITS OWN, but the same cap every ordinary
+   *  save enforces can still evict a session this rebuild never touched at
+   *  all, and if that session belonged to THIS service, `items` (and
+   *  `baptismDetail.kept`) have to say so rather than describe a session the
+   *  write just quietly removed. */
   baptism: RebuiltRecord;
   /** Baptism's own six-way split — RebuiltRecord's shape is shared by all
    *  four legs and has no room for it, and a bare session count once hid that
@@ -693,7 +697,10 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
         name: "baptism",
         write: async () => {
           try {
-            const { updated, added } = await applyBaptismRebuild(serviceKey, bapPlan);
+            const { updated, added, keptEvicted } = await applyBaptismRebuild(serviceKey, bapPlan);
+            // bapPlan.kept was counted before the write ran — if the cap
+            // evicted one of THIS service's own untouched sessions to make
+            // room, it is no longer actually in the store.
             outcome.baptismDetail = {
               updated,
               added,
@@ -701,13 +708,19 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
               newer: bapPlan.newer,
               disagreeing: bapPlan.disagreeing,
               invalid: bapPlan.invalid,
-              kept: bapPlan.kept,
+              kept: bapPlan.kept - keptEvicted,
             };
-            // Nothing already stored is ever removed by a rebuild, so this
-            // service's post-merge count is exactly what it already held plus
-            // whatever this write genuinely added (post-cap) — see `baptism`'s
-            // own doc comment above.
-            outcome.baptism = { rebuilt: updated + added > 0, items: bapPlan.existingCount + added, missing: false };
+            // This service's post-merge count is exactly what it already held
+            // plus whatever this write genuinely added (post-cap), minus
+            // whichever of its own untouched sessions the SAME cap evicted —
+            // the only two ways this leg's total can ever move, since a
+            // rebuild otherwise removes nothing on its own (see `baptism`'s
+            // own doc comment above).
+            outcome.baptism = {
+              rebuilt: updated + added > 0,
+              items: bapPlan.existingCount + added - keptEvicted,
+              missing: false,
+            };
           } catch (err) {
             outcome.baptismDetail = {
               updated: 0,
@@ -1098,14 +1111,18 @@ async function planBaptismRebuild(serviceKey: string, serviceDate: string): Prom
 async function applyBaptismRebuild(
   serviceKey: string,
   plan: BaptismRebuildPlan,
-): Promise<{ updated: number; added: number }> {
+): Promise<{ updated: number; added: number; keptEvicted: number }> {
   const rowCount = (plan.rows ?? []).length;
   for (const note of plan.invalidNotes) console.warn(`[baptism] rebuild of ${scrub(serviceKey)}: ${scrub(note)}`);
   for (const note of plan.disagreementNotes) console.warn(`[baptism] rebuild of ${scrub(serviceKey)}: ${scrub(note)}`);
 
-  const tail =
+  // `kept` is a parameter, not `plan.kept` read directly: the cap can evict
+  // one of this service's own kept sessions AFTER this is otherwise built,
+  // and the log line has to say what is actually left, not what was left
+  // before a write that has not happened yet.
+  const tail = (kept: number) =>
     `${scrub(plan.unchanged)} unchanged, ${scrub(plan.newer)} newer in the store, ` +
-    `${scrub(plan.disagreeing)} disagreeing with the rows, ${scrub(plan.kept)} not in the raw rows` +
+    `${scrub(plan.disagreeing)} disagreeing with the rows, ${scrub(kept)} not in the raw rows` +
     (plan.invalid > 0 ? `, ${scrub(plan.invalid)} unreadable` : "");
   // The leading count matches BaptismRebuildOutcome.sessions exactly — every
   // rebuilt row that corresponds to a session now in the store, not only the
@@ -1116,13 +1133,13 @@ async function applyBaptismRebuild(
   if (plan.toWrite.length === 0) {
     console.log(
       `[baptism] rebuild: ${scrub(correspond(0, 0))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
-        `0 updated, 0 added, ${scrub(tail)}`,
+        `0 updated, 0 added, ${scrub(tail(plan.kept))}`,
     );
-    return { updated: 0, added: 0 };
+    return { updated: 0, added: 0, keptEvicted: 0 };
   }
 
   let dropped: string[];
-  let evicted: string[];
+  let evicted: { id: string; serviceKey: string | null }[];
   try {
     ({ dropped, evicted } = await baptismStore.mergeRebuilt(plan.toWrite));
   } catch (err) {
@@ -1141,6 +1158,13 @@ async function applyBaptismRebuild(
   const droppedSet = new Set(dropped);
   const added = [...plan.addedIds].filter((id) => !droppedSet.has(id)).length;
   const updated = [...plan.updatedIds].filter((id) => !droppedSet.has(id)).length;
+  // The same cap can ALSO evict one of this service's own sessions that this
+  // rebuild never touched at all — one already counted in `plan.kept`
+  // (nothing matched it) or otherwise part of `plan.existingCount` (the
+  // service's own total before this write ran). Either way the caller's
+  // counts, computed before the write, would otherwise go on describing a
+  // session the write just quietly removed.
+  const keptEvicted = evicted.filter((e) => e.serviceKey === serviceKey).length;
   if (dropped.length > 0) {
     console.warn(
       `[baptism] rebuild: the ${scrub(MAX_BAPTISM_SESSIONS)}-session cap dropped ${scrub(dropped.length)} of ` +
@@ -1150,14 +1174,14 @@ async function applyBaptismRebuild(
   if (evicted.length > 0) {
     console.warn(
       `[baptism] rebuild: the ${scrub(MAX_BAPTISM_SESSIONS)}-session cap evicted ${scrub(evicted.length)} session(s) ` +
-        `this rebuild never touched, to make room: ${scrub(evicted.join(", "))}`,
+        `this rebuild never touched, to make room: ${scrub(evicted.map((e) => e.id).join(", "))}`,
     );
   }
   console.log(
     `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
-      `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail)}`,
+      `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail(plan.kept - keptEvicted))}`,
   );
-  return { updated, added };
+  return { updated, added, keptEvicted };
 }
 
 /** What a baptism-only rebuild did. */
@@ -1228,7 +1252,11 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
     throw new NoRawRowsError();
   }
 
-  const { updated, added } = await applyBaptismRebuild(serviceKey, plan);
+  const { updated, added, keptEvicted } = await applyBaptismRebuild(serviceKey, plan);
+  // plan.kept was counted before the write ran — if the cap evicted one of
+  // THIS service's own untouched sessions to make room, it is no longer
+  // actually in the store, and the count has to say so.
+  const kept = plan.kept - keptEvicted;
   return {
     rows: plan.rows.length,
     sessions: updated + added + plan.unchanged + plan.newer + plan.disagreeing,
@@ -1238,7 +1266,7 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
     newer: plan.newer,
     disagreeing: plan.disagreeing,
     invalid: plan.invalid,
-    kept: plan.kept,
+    kept,
   };
 }
 

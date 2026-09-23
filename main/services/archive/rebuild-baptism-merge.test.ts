@@ -589,6 +589,69 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
       for (const f of dominatingFiller) await baptismStore.deleteSession(f.id);
     }
   });
+
+  // The cap does not only threaten a session THIS rebuild wanted to add or
+  // update — it can just as easily evict one of this SAME service's other
+  // sessions that this rebuild never touched at all (a genuinely "kept" one,
+  // with no rebuilt counterpart). `kept` and `items` are both computed
+  // before the write runs, so either can go on describing a session the
+  // write just quietly removed unless corrected for it afterward.
+  it("counts a kept session as gone once the cap evicts it, not as still kept", async () => {
+    const KEY = "cap-evicts-its-own-kept-svc";
+    const DATE = "2026-09-23";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+
+    // 1999 sessions dated well into the future — enough that, together with
+    // this service's own two sessions below (one kept, one about to be
+    // added), the store holds exactly one over the cap.
+    const dominatingFiller = Array.from({ length: 1999 }, (_, i) => {
+      const at = new Date(Date.parse("2036-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
+      return {
+        id: baptismSessionId(at), startedAt: at, finishedAt: at,
+        people: [{ testimonyMs: 1, baptizeMs: 1 }], title: null, serviceTypeId: null, planId: null,
+        serviceKey: `dominating2-${i}`,
+      };
+    });
+    await baptismStore.addSessions(dominatingFiller as never);
+
+    // This service's own OTHER session — no rebuilt counterpart at all (a
+    // service-key roll, or one predating the raw layer), older than the new
+    // session the CSV below will produce, so it is the one on the losing
+    // side once the store goes one over the cap.
+    const keptSession = {
+      id: "bap-cap-evicts-kept-1",
+      startedAt: "2026-09-23T09:00:00.000Z",
+      finishedAt: "2026-09-23T09:05:00.000Z",
+      people: [{ testimonyMs: 1, baptizeMs: 1 }], title: "Kept", serviceTypeId: null, planId: null,
+      serviceKey: KEY,
+    };
+    await baptismStore.addSession(keptSession as never);
+    assert.equal((await baptismStore.listSessions()).length, 2000, "precondition: the store is at the cap");
+
+    // A genuinely new session for the SAME service, later in the day than
+    // the kept one above — close enough to survive (it is the 2000th
+    // newest), unlike the kept session it displaces.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-23T11:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-23T11:05:00.000Z,testimony-end,per-person,testimony,1,0,300000,,,",
+      "2026-09-23T11:05:00.000Z,finish,per-person,testimony,1,0,300000,,,",
+      "",
+    ].join("\n"));
+
+    try {
+      const outcome = await rebuildServiceBaptisms(KEY);
+      const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+
+      assert.equal(outcome.added, 1, "the new session is the 2000th newest and must survive");
+      assert.equal(outcome.kept, 0, "the OTHER session for this service was evicted by the same cap — it is no longer kept, it is gone");
+      assert.equal(forService.length, 1, "this service must hold exactly the surviving new session, not the evicted kept one too");
+      assert.equal(forService[0]!.id, baptismSessionId("2026-09-23T11:00:00.000Z"));
+    } finally {
+      for (const f of dominatingFiller) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(keptSession.id);
+    }
+  });
 });
 
 // ── A correction made after the service closed: the store can know more than the rows ──
