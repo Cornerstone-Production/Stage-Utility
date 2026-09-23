@@ -82,6 +82,7 @@ import {
   toast,
 } from "../../components/ui";
 import { CompanionPressFields } from "./companion-cues";
+import { ActionPicker } from "../../editor/action-picker";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -365,6 +366,46 @@ export function ParamField({
         className="h-7 text-footnote"
       />
     </Row>
+  );
+}
+
+/**
+ * What an action's params look like below its Select: the companion.press
+ * coordinate picker for that one action, or one ParamField per param
+ * otherwise. Exported for the same reason ParamField is — the layout editor's
+ * action-button inspector renders this SAME choice, not a second copy that
+ * could drift from it.
+ */
+export function ActionParamsFields({
+  actionId,
+  action,
+  params,
+  optionSources,
+  onChange,
+}: {
+  actionId: string;
+  /** The registry's own spec for actionId, or null while the registry has not
+   *  answered yet, or no longer lists a saved id. */
+  action: Spec | null;
+  params: Record<string, string | number>;
+  optionSources: OptionSources;
+  onChange: (params: Record<string, string | number>) => void;
+}) {
+  if (actionId === "companion.press") {
+    return <CompanionPressFields params={params} onChange={(patch) => onChange({ ...params, ...patch })} />;
+  }
+  return (
+    <>
+      {action?.params.map((p) => (
+        <ParamField
+          key={p.key}
+          spec={p}
+          value={params[p.key]}
+          optionSources={optionSources}
+          onChange={(v) => onChange({ ...params, [p.key]: v })}
+        />
+      ))}
+    </>
   );
 }
 
@@ -1021,14 +1062,11 @@ export function RuleEditorBody({
       <Row label="Action">
         {/* Same staleness risk as the Trigger select above: an older release's
             rule can still name an action this registry no longer lists. */}
-        <Select value={draft.action.id} onValueChange={(id) => setDraft({ ...draft, action: { id, params: {} } })}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {registry.actions.map((a) => (
-              <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ActionPicker
+          actions={registry.actions}
+          value={draft.action.id}
+          onChange={(id) => setDraft({ ...draft, action: { id, params: {} } })}
+        />
       </Row>
       {/* One action renders its own params: three coordinates are not
           something an operator can be expected to know, so companion.press
@@ -1036,24 +1074,13 @@ export function RuleEditorBody({
           editable — the picker is a convenience over the same params, not a
           replacement for them, which is what keeps a button that is not in
           Companion's export reachable. */}
-      {draft.action.id === "companion.press" ? (
-        <CompanionPressFields
-          params={draft.action.params}
-          onChange={(patch) =>
-            setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, ...patch } } })
-          }
-        />
-      ) : (
-        action?.params.map((p) => (
-          <ParamField
-            key={p.key}
-            spec={p}
-            value={draft.action.params[p.key]}
-            optionSources={optionSources}
-            onChange={(v) => setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, [p.key]: v } } })}
-          />
-        ))
-      )}
+      <ActionParamsFields
+        actionId={draft.action.id}
+        action={action}
+        params={draft.action.params}
+        optionSources={optionSources}
+        onChange={(params) => setDraft({ ...draft, action: { ...draft.action, params } })}
+      />
 
       <Separator />
       <Row

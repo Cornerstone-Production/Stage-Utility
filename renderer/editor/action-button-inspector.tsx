@@ -6,10 +6,9 @@
 // without mounting the whole Inspector and every other object type's hooks.
 //
 // The action select and the per-parameter fields are the SAME components the
-// automation rule editor uses (ActionPicker's list, ParamField, the
-// companion.press coordinate picker) — one registry, one set of field
-// widgets, so a param this repo already knows how to edit does not grow a
-// second, differently-behaved copy here.
+// automation rule editor uses (ActionPicker, ActionParamsFields) — one
+// registry, one set of field widgets, so a param this repo already knows how
+// to edit does not grow a second, differently-behaved copy here.
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -17,9 +16,8 @@ import { invoke } from "../lib/api";
 import { ActionPicker } from "./action-picker";
 import { Row, RowText } from "./inspector-rows";
 import type { LayoutObjectConfig } from "@main/types/views";
-import { ParamField, type Registry } from "../settings/sections/rule-editor-dialog";
+import { ActionParamsFields, type Registry } from "../settings/sections/rule-editor-dialog";
 import { useOptionSources } from "../settings/sections/automation-option-sources";
-import { CompanionPressFields } from "../settings/sections/companion-cues";
 
 export function ActionButtonInspector({
   c,
@@ -55,22 +53,13 @@ export function ActionButtonInspector({
         />
       </Row>
       {action?.help && <p className="text-caption2 text-fg-muted leading-snug">{action.help}</p>}
-      {c.actionId === "companion.press" ? (
-        <CompanionPressFields
-          params={params as Record<string, string | number>}
-          onChange={(patch) => onConfig({ ...c, params: { ...params, ...patch } })}
-        />
-      ) : (
-        action?.params.map((p) => (
-          <ParamField
-            key={p.key}
-            spec={p}
-            value={params[p.key] as string | number | undefined}
-            optionSources={optionSources}
-            onChange={(v) => onConfig({ ...c, params: { ...params, [p.key]: v } })}
-          />
-        ))
-      )}
+      <ActionParamsFields
+        actionId={c.actionId}
+        action={action}
+        params={params as Record<string, string | number>}
+        optionSources={optionSources}
+        onChange={(next) => onConfig({ ...c, params: next })}
+      />
       <RowText
         label="Label"
         hint="Blank uses the action's own label."
