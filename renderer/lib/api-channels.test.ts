@@ -1,14 +1,15 @@
 // Every channel the UI invokes must have a case in api.ts.
 //
-// `invoke()` takes `channel: string`, so a channel with no case is not a compile
-// error — it throws at runtime, in the click handler, in front of an operator.
-// The baptism trigger panel shipped that way and nobody noticed for months: its
-// load path swallowed the throw, so saved triggers simply read as "none set",
-// and only pressing Save surfaced `Unknown IPC channel`. The panel rendered,
-// accepted input, and could not persist a thing.
+// A channel with no case throws at runtime, in the click handler, in front of an
+// operator. The baptism trigger panel shipped that way and nobody noticed for
+// months: its load path swallowed the throw, so saved triggers simply read as
+// "none set", and only pressing Save surfaced `Unknown IPC channel`. The panel
+// rendered, accepted input, and could not persist a thing.
 //
-// This is the cheap structural guard until `invoke` takes a channel union: scan
-// what the UI actually calls and check every one is wired.
+// `invoke()` takes the IpcChannel union, so `tsc` is the first guard: a channel
+// with no case does not compile, called directly or through any wrapper. These
+// scans are the second: a backstop for a literal cast past the type, and the
+// only check on the reverse direction, a channel that has lost its last caller.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -60,8 +61,9 @@ function handledChannels(): Set<string> {
  *    reach invoke through ipc(), and only ipc() is found;
  *  - an arrow function or a method.
  * Each shape, probed with an unwired channel, left these tests green. The type
- * is what covers them: a forwarder whose channel parameter is IpcChannel gets
- * every call site checked by `tsc` (see IpcChannel in api.ts).
+ * is what covers them: invoke() takes IpcChannel, so a forwarder whose channel
+ * is `string` does not compile, and one whose channel is IpcChannel gets every
+ * call site checked by `tsc` (see IpcChannel in api.ts).
  */
 function dispatcherNames(src: string): string[] {
   const names = new Set(["invoke"]);
@@ -232,6 +234,9 @@ describe("IPC channel wiring", () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({}) })) as unknown as typeof fetch;
     try {
+      // @ts-expect-error not an IpcChannel, on purpose: this is the runtime throw
+      // a caller cast past the type would hit. The directive also pins the type:
+      // loosen invoke() back to `string` and tsc reports the directive unused.
       await assert.rejects(() => invoke("baptism:not-a-real-channel"));
     } finally {
       globalThis.fetch = realFetch;
