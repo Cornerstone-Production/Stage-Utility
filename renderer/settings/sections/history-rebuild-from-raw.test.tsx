@@ -284,6 +284,41 @@ describe("History: Rebuild from raw", () => {
     assert.match(shown, /not in the raw rows/, `missing the 'kept' reason: ${shown}`);
   });
 
+  // A leg that wrote nothing at all must not get its own "left alone:"
+  // phrase nested a second time inside the sentence's own "left alone: ..."
+  // list — the whole leg IS the left-alone content here, and the outer list
+  // already says so once.
+  test("a newer-only baptism result says 'left alone' exactly once", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 1, missing: false },
+        baptismDetail: { updated: 0, added: 0, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    const occurrences = (shown.match(/left alone/g) ?? []).length;
+    assert.equal(occurrences, 1, `expected "left alone" exactly once, got ${occurrences}: ${shown}`);
+    assert.match(shown, /newer in the store/, `missing the 'newer' reason: ${shown}`);
+  });
+
   // The defect the per-record shape exists for: a count alone read as an
   // achievement even for a record the raw layer held nothing for, so a rebuild
   // that changed nothing reported "Rebuilt: 12 items".

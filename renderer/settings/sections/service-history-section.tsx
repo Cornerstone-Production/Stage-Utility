@@ -234,28 +234,20 @@ const REBUILD_LEG_NOUNS: Record<RebuildLegName, string> = {
 };
 const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [RebuildLegName, string][];
 
-/**
- * Baptism's own contribution to the sentence, as one self-contained clause —
- * never folded into the generic done/left split above, because a session
- * left alone can be left alone for four different reasons (never matched, a
- * store correction newer than the rows, a disagreement with the rows, or an
- * unreadable finish time) and the operator needs to be able to tell them
- * apart, not just see a bare "left alone: baptism sessions".
- */
-function describeBaptismLeg(items: number, d: NonNullable<RebuildOutcome["baptismDetail"]>): string {
-  const written: string[] = [];
-  if (d.added > 0) written.push(`${d.added} added`);
-  if (d.updated > 0) written.push(`${d.updated} updated`);
-  const head = `${items} baptism sessions` + (written.length ? `: ${written.join(", ")}` : "");
-
-  const leftParts: string[] = [];
-  if (d.newer > 0) leftParts.push(`${d.newer} newer in the store`);
-  if (d.disagreeing > 0) leftParts.push(`${d.disagreeing} disagreeing with the rows`);
-  if (d.invalid > 0) leftParts.push(`${d.invalid} unreadable`);
-  if (d.kept > 0) leftParts.push(`${d.kept} not in the raw rows`);
-  const leftTotal = d.newer + d.disagreeing + d.invalid + d.kept;
-
-  return leftTotal > 0 ? `${head}; left alone: ${leftTotal} (${leftParts.join(", ")})` : head;
+/** The parenthetical naming WHY each of baptism's own left-alone sessions is
+ *  left alone — a session left alone can be left alone for four different
+ *  reasons (never matched, a store correction newer than the rows, a
+ *  disagreement with the rows, or an unreadable finish time), and the
+ *  operator needs to be able to tell them apart, not just see a bare "left
+ *  alone: baptism sessions". Empty when nothing about baptism was left
+ *  alone at all. */
+function baptismLeftAloneBreakdown(d: NonNullable<RebuildOutcome["baptismDetail"]>): { total: number; text: string } {
+  const parts: string[] = [];
+  if (d.newer > 0) parts.push(`${d.newer} newer in the store`);
+  if (d.disagreeing > 0) parts.push(`${d.disagreeing} disagreeing with the rows`);
+  if (d.invalid > 0) parts.push(`${d.invalid} unreadable`);
+  if (d.kept > 0) parts.push(`${d.kept} not in the raw rows`);
+  return { total: d.newer + d.disagreeing + d.invalid + d.kept, text: parts.join(", ") };
 }
 
 /**
@@ -264,12 +256,35 @@ function describeBaptismLeg(items: number, d: NonNullable<RebuildOutcome["baptis
  * Says what was LEFT ALONE, not only what was derived. A bare count read as an
  * achievement even for a record the raw layer had nothing for — which is how a
  * rebuild that changed nothing once reported "Rebuilt: 12 items".
+ *
+ * Baptism is never folded into the generic done/left split above — it is a
+ * MERGE, not a replace, with its own six-way split of what happened to each
+ * session — but it still contributes to exactly ONE of `done` or `left`,
+ * never both: a leg that wrote nothing must not ALSO get its own "left
+ * alone:" phrase nested inside the sentence's own "left alone: ..." list,
+ * which read as "left alone: 1 baptism sessions; left alone: 1 (1 newer in
+ * the store)" before this said which reasons applied only once.
  */
 export function describeRebuild(out: RebuildOutcome): string {
   const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
   const left = REBUILD_LEGS.filter(([k]) => !out[k].rebuilt && !out[k].missing).map(([, noun]) => noun);
   if (!out.baptism.missing && out.baptismDetail) {
-    (out.baptism.rebuilt ? done : left).push(describeBaptismLeg(out.baptism.items, out.baptismDetail));
+    const d = out.baptismDetail;
+    const { total: leftTotal, text: leftText } = baptismLeftAloneBreakdown(d);
+    if (out.baptism.rebuilt) {
+      // Something was written — this goes in `done`, so its OWN "left
+      // alone: N (...)" sub-clause (for whatever this same leg did NOT
+      // write) is the only place that phrase appears for it.
+      const written: string[] = [];
+      if (d.added > 0) written.push(`${d.added} added`);
+      if (d.updated > 0) written.push(`${d.updated} updated`);
+      const head = `${out.baptism.items} baptism sessions` + (written.length ? `: ${written.join(", ")}` : "");
+      done.push(leftTotal > 0 ? `${head}; left alone: ${leftTotal} (${leftText})` : head);
+    } else {
+      // Nothing was written at all — the WHOLE leg is left alone, and the
+      // outer "left alone: ..." list this joins already says so once.
+      left.push(leftTotal > 0 ? `baptism sessions (${leftText})` : "baptism sessions");
+    }
   }
   const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
   if (left.length) parts.push(`left alone: ${left.join(", ")}`);
