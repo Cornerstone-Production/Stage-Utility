@@ -36,6 +36,7 @@ import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
+import { addBroadcastListener } from "./broadcaster.js";
 import type { ConnState } from "./integration-base.js";
 import { DEFAULT_RECONNECT_SCHEDULE, serviceWindow } from "./service-window.js";
 
@@ -242,6 +243,31 @@ const subscribeFrames = (stub: ProdComStub): number =>
  *  one more or one fewer transition in the middle. */
 const cardMessages = (svc: TestProdCom): (string | null)[] =>
   svc.reports.filter((r) => r.state === "connected").map((r) => r.message);
+
+/**
+ * Collects every "prodcom:transcript" broadcast fired while a test runs, the
+ * same seam prodcom-redaction.test.ts and prodcom-duplicate-broadcast.test.ts
+ * use.
+ *
+ * The headline guards below drove svc.texts() — the internal buffer — instead
+ * of this, so a defect that withheld every broadcast during probation and
+ * every re-test (while still applying lines to the buffer underneath) left
+ * both tests green: they never once asked whether a DISPLAY would have seen
+ * anything.
+ */
+function spyOnTranscriptBroadcasts(): unknown[] {
+  const seen: unknown[] = [];
+  addBroadcastListener((channel, payload) => {
+    if (channel === "prodcom:transcript") seen.push(payload);
+  });
+  return seen;
+}
+
+/** Whether any captured "prodcom:transcript" broadcast carried a line with
+ *  this text. */
+function broadcastCarried(broadcasts: unknown[], text: string): boolean {
+  return broadcasts.some((payload) => Array.isArray(payload) && payload.some((l: { text?: unknown }) => l.text === text));
+}
 
 /**
  * Somebody speaks while the socket is up.
@@ -550,12 +576,21 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // this window — that is what "probation" means — so a caption spoken right
     // now must reach a display over the SSE stream, which has to already be
     // live for that to be possible.
+    //
+    // Asserted on the BROADCAST, not svc.texts(): a version that applies the
+    // line to the buffer but withholds every broadcast during probation is a
+    // version where no display ever sees it, and the buffer alone cannot tell
+    // the two apart.
+    const broadcasts = spyOnTranscriptBroadcasts();
     const { stub, svc } = await running(t);
     await eventually(() => svc.wsOpenNow, "the websocket to open (unproven, on probation)");
     assert.equal(svc.onWebSocketNow, false, "promoted before it ever delivered anything");
 
     stub.sseSend(spoken("live-during-probation"));
-    await eventually(() => svc.texts().includes("live-during-probation"), "the SSE line to land during probation");
+    await eventually(
+      () => broadcastCarried(broadcasts, "live-during-probation"),
+      "the SSE line to be broadcast during probation",
+    );
   });
 });
 
@@ -690,12 +725,19 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // socket, cutting captions for the length of the check. The re-test must
     // never take over the live transport — a line spoken during it has to keep
     // arriving over SSE.
+    //
+    // Asserted on the BROADCAST, not svc.texts() — see the probation case
+    // above for why the buffer alone cannot catch a withheld broadcast.
+    const broadcasts = spyOnTranscriptBroadcasts();
     const { stub, svc } = await silenced(t);
     await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
     assert.equal(svc.onWebSocketNow, false, "the re-test took over the live transport merely by opening");
 
     stub.sseSend(spoken("live-during-the-re-test"));
-    await eventually(() => svc.texts().includes("live-during-the-re-test"), "the SSE line to land during the re-test");
+    await eventually(
+      () => broadcastCarried(broadcasts, "live-during-the-re-test"),
+      "the SSE line to be broadcast during the re-test",
+    );
   });
 
   it("promoting the retry's socket does not open a second one beside it", async (t) => {
