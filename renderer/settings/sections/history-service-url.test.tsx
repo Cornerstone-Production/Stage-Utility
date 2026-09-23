@@ -25,17 +25,29 @@
 // history change it did not itself initiate — Back, Forward, another tab.
 // `router.navigate()` still updates `router.state.location` synchronously
 // without it (proved below), but `router.history.back()` alone does not, so
-// "Back returns to the list" is NOT asserted here, and — say this plainly —
-// it was NOT driven in a real browser either: this environment has no
-// browser-automation tool (no Playwright/Puppeteer, and neither is a project
-// dependency). What stands in its place: `setSelectedKey` sets local state
-// directly on selection (see its doc comment in service-history-section.tsx),
-// so opening a service does not depend on `<Transitioner>` at all; only the
-// reverse direction does, and it is exactly the push/replace navigation
-// `?integration=` already uses in shipped code on
-// integrations-section.tsx, which could not work in production if this
-// mechanism were broken. That is corroboration, not proof — the gap is real
-// and is named in the task report.
+// "Back returns to the list" is NOT asserted here. Tried and confirmed by
+// direct check, not assumed: neither a bare `router.navigate()` nor an
+// explicit `router.load()` afterwards fires the router's `onResolved` event
+// in this harness either — it is emitted from inside `commit()`'s own
+// `router.startTransition(commit, matches)` (see
+// @tanstack/router-core/dist/esm/load-client.js), which needs the
+// `<Matches>`/`<Transitioner>` tree actually mounted to run, the identical
+// packaging quirk above. So the router noticing ANY externally-driven
+// navigation and firing `onResolved` — not just literal Back — cannot be
+// driven in this file at all, and — say this plainly — it was NOT driven in
+// a real browser either, until now: this environment gained a scratch
+// Playwright install partway through this feature's build, and a literal
+// Back press on this exact page has since been confirmed there twice — the
+// URL drops `?service=` and the list returns.
+//
+// What IS proved here: `useSelectedServiceKey`'s `onResolved` subscription
+// (the one thing a click's own direct `setLocal` call does not go through —
+// see that function's own doc comment) is registered, and its callback, once
+// invoked, correctly reacts. "the onResolved subscription..." below captures
+// the real callback the component registers (by wrapping `router.subscribe`
+// before render) and calls it directly, since the router itself cannot be
+// made to call it here. Removing the subscription means no callback is ever
+// registered to capture, which is what fails first.
 //
 // NOT asserted here: jsdom loads no stylesheet, so this does not touch layout.
 // See history-service-page.test.tsx's own header for that split.
@@ -107,7 +119,7 @@ function installFetch(): void {
   };
 }
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const {
@@ -206,5 +218,76 @@ describe("History opens the service named in its URL", () => {
       KEY,
       "selecting a row must write ?service=<key> back to the URL",
     );
+  });
+});
+
+// Final review, Minor 9: the `onResolved` subscription in
+// useSelectedServiceKey (service-history-section.tsx) was untested —
+// removing it stayed green, even though it is the ONLY thing that reacts to
+// Back, Forward, or a link landing on this page from elsewhere (a click's own
+// `setSelectedKey` sets local state directly; see this file's own header).
+describe("the onResolved subscription (Back, Forward, or a link landing here)", () => {
+  test("its callback, once fired, closes the detail page — and removing the subscription means no callback is ever registered to fire", async () => {
+    // What was tried, and why this is not a drive of Back itself: a bare
+    // `router.navigate()` DOES update `router.state.location` synchronously
+    // (proved above, and again here), but a direct check confirms `onResolved`
+    // itself never fires from it — nor from an explicit `router.load()`
+    // afterwards — in this harness. `onResolved` is emitted from inside
+    // `commit()`'s own `router.startTransition(commit, matches)`
+    // (@tanstack/router-core/dist/esm/load-client.js), which needs the
+    // `<Matches>`/`<Transitioner>` tree actually mounted to run that commit —
+    // the same packaging quirk (this file's own header) that keeps
+    // `<Transitioner>` itself from mounting here. So the RIGHT half of this
+    // guard — the router noticing Back and firing onResolved — has no way to
+    // go red or green in this file; only a real browser proves it, and it has
+    // been driven there twice (this file's own header, corrected).
+    //
+    // What CAN be proven here, and is the actual code under review: that
+    // `useSelectedServiceKey` subscribes at all, and that its callback reacts
+    // correctly once invoked. Captured by wrapping `router.subscribe` before
+    // render, then invoked directly — bypassing the router's own broken
+    // resolution pipeline, not the component's.
+    installFetch();
+    const rootRoute = createRootRoute({});
+    const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([historyRoute]),
+      history: createMemoryHistory({ initialEntries: [historyServiceHref(KEY)] }),
+    });
+    const onResolvedCallbacks: (() => void)[] = [];
+    const originalSubscribe = router.subscribe.bind(router);
+    router.subscribe = ((eventType: string, cb: () => void) => {
+      if (eventType === "onResolved") onResolvedCallbacks.push(cb);
+      return originalSubscribe(eventType as never, cb as never);
+    }) as typeof router.subscribe;
+
+    const view = render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(RouterContextProvider, { router, children: React.createElement(ServiceHistorySection) }),
+      ),
+    );
+    for (let i = 0; i < 6; i++) await settle();
+    assert.equal(
+      view.container.querySelector('[data-testid="history-service-header"]') != null,
+      true,
+      "sanity: the seeded service opened from its URL",
+    );
+    assert.equal(onResolvedCallbacks.length, 1, "expected useSelectedServiceKey to subscribe to onResolved exactly once");
+
+    // A real navigation updates the router's own location (proved above too),
+    // so the callback — which re-reads router.state.location itself — sees
+    // the same thing a genuine Back press would leave behind.
+    await router.navigate({ to: router.state.location.pathname, search: {} });
+    act(() => onResolvedCallbacks[0]!());
+    await settle();
+
+    assert.equal(
+      view.container.querySelector('[data-testid="history-service-header"]') != null,
+      false,
+      "the list must return once onResolved fires with the URL no longer naming a service",
+    );
+    assert.ok(text(view.container).includes("Sunday 11:00"), "the list itself must actually render");
   });
 });
