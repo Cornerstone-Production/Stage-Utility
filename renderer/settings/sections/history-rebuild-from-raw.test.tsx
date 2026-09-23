@@ -226,7 +226,7 @@ describe("History: Rebuild from raw", () => {
         spl: { rebuilt: false, items: 11, missing: false },
         attendance: { rebuilt: false, items: 143, missing: false },
         baptism: { rebuilt: true, items: 2, missing: false },
-        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 },
+        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
         failed: [],
       },
     }));
@@ -261,7 +261,7 @@ describe("History: Rebuild from raw", () => {
         spl: { rebuilt: false, items: 11, missing: false },
         attendance: { rebuilt: false, items: 143, missing: false },
         baptism: { rebuilt: true, items: 4, missing: false },
-        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 1 },
+        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 1, full: 0 },
         failed: [],
       },
     }));
@@ -297,7 +297,7 @@ describe("History: Rebuild from raw", () => {
         spl: { rebuilt: false, items: 11, missing: false },
         attendance: { rebuilt: false, items: 143, missing: false },
         baptism: { rebuilt: false, items: 1, missing: false },
-        baptismDetail: { updated: 0, added: 0, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 0 },
+        baptismDetail: { updated: 0, added: 0, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
         failed: [],
       },
     }));
@@ -317,6 +317,66 @@ describe("History: Rebuild from raw", () => {
     const occurrences = (shown.match(/left alone/g) ?? []).length;
     assert.equal(occurrences, 1, `expected "left alone" exactly once, got ${occurrences}: ${shown}`);
     assert.match(shown, /newer in the store/, `missing the 'newer' reason: ${shown}`);
+  });
+
+  // A rebuild never evicts an existing session to make room (Ruling 65) — at
+  // the MAX_SESSIONS cap it simply stops adding new baptism sessions, and
+  // History's own result must say so in plain words, only when it happened.
+  test("names a full store only when it turned any baptism session away", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 1, missing: false },
+        baptismDetail: { updated: 0, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 1, full: 3 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /the store is full, so 3 baptism sessions were not added/, `missing the full-store clause: ${shown}`);
+  });
+
+  test("says nothing about the store being full when nothing was turned away", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: true, items: 2, missing: false },
+        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    assert.doesNotMatch(lastToast(), /\bfull\b/, "full:0 must not mention the store being full at all");
   });
 
   // The defect the per-record shape exists for: a count alone read as an

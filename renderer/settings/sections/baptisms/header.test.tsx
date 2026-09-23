@@ -345,8 +345,53 @@ test("confirming calls onRebuilt so Past sessions and Trends can refresh", async
 
 test("describeBaptismRebuild names updated, added, newer, disagreeing and kept — never just a bare count", () => {
   assert.equal(
-    describeBaptismRebuild({ rows: 5, sessions: 6, updated: 1, added: 1, unchanged: 0, newer: 1, disagreeing: 1, invalid: 0, kept: 3 }),
+    describeBaptismRebuild({
+      rows: 5,
+      sessions: 6,
+      updated: 1,
+      added: 1,
+      unchanged: 0,
+      newer: 1,
+      disagreeing: 1,
+      invalid: 0,
+      kept: 3,
+      full: 0,
+    }),
     "Rebuilt from raw: 1 updated, 1 added, 1 newer than their rows, 1 disagreeing with the rows, 3 left alone",
+  );
+});
+
+test("describeBaptismRebuild names a full store only when it turned any session away", () => {
+  assert.equal(
+    describeBaptismRebuild({
+      rows: 3,
+      sessions: 1,
+      updated: 0,
+      added: 1,
+      unchanged: 0,
+      newer: 0,
+      disagreeing: 0,
+      invalid: 0,
+      kept: 0,
+      full: 2,
+    }),
+    "Rebuilt from raw: 0 updated, 1 added, the store is full, so 2 were not added",
+  );
+  assert.doesNotMatch(
+    describeBaptismRebuild({
+      rows: 3,
+      sessions: 1,
+      updated: 0,
+      added: 1,
+      unchanged: 0,
+      newer: 0,
+      disagreeing: 0,
+      invalid: 0,
+      kept: 0,
+      full: 0,
+    }),
+    /full/,
+    "full:0 must not mention the store being full at all",
   );
 });
 

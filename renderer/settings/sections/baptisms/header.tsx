@@ -120,6 +120,10 @@ export function describeBaptismRebuild(out: BaptismRebuildOutcome): string {
   if (out.disagreeing > 0) parts.push(`${out.disagreeing} disagreeing with the rows`);
   if (out.invalid > 0) parts.push(`${out.invalid} could not be read`);
   if (out.kept > 0) parts.push(`${out.kept} left alone`);
+  // A rebuild never evicts an existing session to make room (see
+  // baptismStore.mergeRebuilt) — at the MAX_SESSIONS cap it simply stops
+  // adding new ones, and says so, rather than silently discarding them.
+  if (out.full > 0) parts.push(`the store is full, so ${out.full} were not added`);
   return `Rebuilt from raw: ${parts.join(", ")}`;
 }
 

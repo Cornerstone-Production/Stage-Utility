@@ -108,15 +108,27 @@ class BaptismStore {
    * rebuild matched and brought up to date) or is APPENDED (one it found no
    * stored counterpart for). Everything else already in the file — every
    * session this rebuild did not touch, whichever service it names — is left
-   * exactly as it was. Removes nothing on its own; the only thing that can
-   * make an existing session disappear is the same MAX_SESSIONS cap every
-   * ordinary save already enforces (see `dropped`/`evicted` below), not this
-   * merge. See rebuildServiceBaptisms in history-edit.ts, which is the only
-   * caller and decides what belongs in `sessions`, and already refuses to
-   * let two rebuilt sessions claim the same stored one. This is the second
-   * line of defence: two sessions sharing an id here can only mean the
-   * caller's own matching has a bug, and a `Map` built from `sessions` would
-   * silently keep the LAST of them and drop the other's data — the exact
+   * exactly as it was.
+   *
+   * NEVER evicts an existing session, unlike addSession/addSessions. A
+   * rebuild's job is to reconstruct data the operator already has, not to
+   * delete some of it to make room for the rest — quietly evicting the
+   * oldest session to fit a rebuild in is exactly the "delete an operator's
+   * data to tidy something up" this repo forbids. If adding every session
+   * this batch wants to APPEND would push the store past MAX_SESSIONS, only
+   * as many as fit are added (in the order handed in), and the rest are
+   * reported back as `full` rather than silently dropped or evicted to make
+   * room. An operator who wants those in has one option: delete some old
+   * sessions and rebuild again. Every REPLACEMENT lands unconditionally —
+   * overwriting an existing session's own fields never changes how many
+   * sessions the store holds, so it is never capacity-limited.
+   *
+   * See rebuildServiceBaptisms in history-edit.ts, which is the only caller
+   * and decides what belongs in `sessions`, and already refuses to let two
+   * rebuilt sessions claim the same stored one. This is the second line of
+   * defence: two sessions sharing an id here can only mean the caller's own
+   * matching has a bug, and a `Map` built from `sessions` would silently
+   * keep the LAST of them and drop the other's data — the exact
    * silent-collapse shape this refuses instead.
    *
    * A session identical, field for field, to what is already stored leaves
@@ -125,27 +137,9 @@ class BaptismStore {
    * verified by `baptism-store.test.ts`'s spy on the underlying write, not
    * merely claimed: DataStore.update() skips the write entirely when the
    * mutator hands back the object it was given.
-   *
-   * `dropped` names the ids FROM `sessions` that did not survive the
-   * MAX_SESSIONS cap — sorted newest-first before the cap is applied, so the
-   * sessions this rebuild is adding or updating are exactly as likely to
-   * survive as anything else already stored, rather than being appended past
-   * a cap already full of older entries and sliced straight back off. Empty
-   * on any realistic install; the caller must not count a dropped id as
-   * written. `evicted` names any OTHER stored session — one this rebuild
-   * never touched, WHICHEVER service it names — that the same slice pushed
-   * out to make room; also empty on any realistic install. The caller logs
-   * it, since a rebuild that silently cost a different service one of its
-   * own sessions is not the "removes nothing" this merge otherwise
-   * guarantees — and, when the evicted session names the SAME service the
-   * rebuild is for, the caller's own `kept`/`items` counts (computed before
-   * this write ran) have to be corrected for it too, or they go on
-   * describing a session the write just quietly removed.
    */
-  async mergeRebuilt(
-    sessions: BaptismSession[],
-  ): Promise<{ dropped: string[]; evicted: { id: string; serviceKey: string | null }[] }> {
-    if (sessions.length === 0) return { dropped: [], evicted: [] };
+  async mergeRebuilt(sessions: BaptismSession[]): Promise<{ full: number }> {
+    if (sessions.length === 0) return { full: 0 };
     const seen = new Set<string>();
     for (const s of sessions) {
       if (seen.has(s.id)) {
@@ -154,11 +148,9 @@ class BaptismStore {
       seen.add(s.id);
     }
 
-    let dropped: string[] = [];
-    let evicted: { id: string; serviceKey: string | null }[] = [];
+    let full = 0;
     await this.store.update((file) => {
       let changed = false;
-      const incomingIds = new Set(sessions.map((s) => s.id));
       const incoming = new Map(sessions.map((s) => [s.id, s]));
       const next = file.sessions.map((existing) => {
         const repl = incoming.get(existing.id);
@@ -170,33 +162,22 @@ class BaptismStore {
         changed = true;
         return repl;
       });
-      for (const s of incoming.values()) {
+      // Whatever is left in `incoming` after every replacement is consumed
+      // are genuinely new sessions. `next.length` here still equals the
+      // store's own current size — every existing session was either kept
+      // or replaced in place, never added or removed — so this is exactly
+      // how much room is left under the cap, with no eviction involved.
+      const toAdd = [...incoming.values()];
+      const room = Math.max(0, MAX_SESSIONS - next.length);
+      full = Math.max(0, toAdd.length - room);
+      for (const s of toAdd.slice(0, room)) {
         changed = true;
         next.push(s);
       }
       if (!changed) return file;
-
-      if (next.length <= MAX_SESSIONS) return { ...file, sessions: next };
-
-      // Over the cap: newest-first before slicing, the same rule addSessions
-      // already applies, so the oldest sessions are what falls off — never a
-      // session this very rebuild just added or updated, unless it is
-      // genuinely among the oldest MAX_SESSIONS in the whole store.
-      const survivors = [...next]
-        .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
-        .slice(0, MAX_SESSIONS);
-      const survivorIds = new Set(survivors.map((s) => s.id));
-      dropped = sessions.map((s) => s.id).filter((id) => !survivorIds.has(id));
-      // Anything the slice removed that was NEITHER part of this rebuild's
-      // own batch (already counted above, as `dropped`) nor a survivor was
-      // sitting in the store untouched and is what the cap, not this merge,
-      // evicted to make room.
-      evicted = next
-        .filter((s) => !survivorIds.has(s.id) && !incomingIds.has(s.id))
-        .map((s) => ({ id: s.id, serviceKey: s.serviceKey ?? null }));
-      return { ...file, sessions: survivors };
+      return { ...file, sessions: next };
     });
-    return { dropped, evicted };
+    return { full };
   }
 
   async deleteSession(id: string): Promise<boolean> {

@@ -18,7 +18,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-store-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { baptismStore } = await import("./baptism-store.js");
+const { baptismStore, MAX_SESSIONS } = await import("./baptism-store.js");
 
 const session = (n: number): BaptismSession =>
   ({
@@ -159,6 +159,61 @@ describe("mergeRebuilt — 'no write at all' for an intact session, guarded not 
       assert.equal(spy.calls(), 1, "a real change must still reach the underlying write");
     } finally {
       spy.restore();
+    }
+  });
+});
+
+// Ruling 65: unlike addSession/addSessions, mergeRebuilt must NEVER evict an
+// existing session to make room for a rebuild — an existing session used to
+// be exactly as likely to fall off the cap as anything else, sorted
+// newest-first and sliced. A rebuild's job is to reconstruct data the
+// operator already has, not delete some of it to fit the rest in.
+describe("mergeRebuilt never evicts, even at the cap", () => {
+  it("adds only what fits, applies every update, and evicts nothing", async () => {
+    const keptId = "bap-cap-unit-kept";
+    const updateId = "bap-cap-unit-update";
+    const kept = { id: keptId, startedAt: new Date(Date.UTC(2026, 0, 1)).toISOString(), finishedAt: null, people: [] } as unknown as BaptismSession;
+    const toUpdate = {
+      id: updateId,
+      startedAt: new Date(Date.UTC(2026, 0, 2)).toISOString(),
+      finishedAt: "2026-01-02T00:00:00.000Z",
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+    } as unknown as BaptismSession;
+    await baptismStore.addSession(kept);
+    await baptismStore.addSession(toUpdate);
+
+    // Fill every remaining slot — whatever this file's earlier tests left
+    // behind — so the store sits exactly at the cap regardless of run order.
+    const before = await baptismStore.listSessions();
+    const filler = Array.from({ length: Math.max(0, MAX_SESSIONS - before.length) }, (_, i) => session(40_000 + i));
+    if (filler.length > 0) await baptismStore.addSessions(filler);
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS, "precondition: the store is at the cap");
+
+    const updatedVersion = { ...toUpdate, finishedAt: "2026-01-02T01:00:00.000Z" };
+    const brandNew = {
+      id: "bap-cap-unit-new",
+      startedAt: new Date(Date.UTC(2026, 0, 3)).toISOString(),
+      finishedAt: null,
+      people: [],
+    } as unknown as BaptismSession;
+
+    try {
+      const { full } = await baptismStore.mergeRebuilt([updatedVersion, brandNew]);
+      const all = await baptismStore.listSessions();
+
+      assert.equal(full, 1, "the store is already full — the brand-new session must be refused, not evicted for");
+      assert.equal(all.length, MAX_SESSIONS, "the store must hold exactly what it held before — an update never changes the count");
+      assert.ok(!all.some((s) => s.id === brandNew.id), "the refused session must not be in the store");
+
+      const stillKept = all.find((s) => s.id === keptId);
+      assert.deepStrictEqual(stillKept, kept, "an untouched existing session must survive byte-identical — never evicted");
+
+      const nowUpdated = all.find((s) => s.id === updateId);
+      assert.equal(nowUpdated?.finishedAt, "2026-01-02T01:00:00.000Z", "the update must still land even though the store is at the cap");
+    } finally {
+      for (const f of filler) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(keptId);
+      await baptismStore.deleteSession(updateId);
     }
   });
 });

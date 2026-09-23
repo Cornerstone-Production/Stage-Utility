@@ -124,7 +124,7 @@ them again from the rows underneath, each from its own file:
 | Item timings | `events.csv` | Every `kind=item` row in time order. An item going live again within ten minutes of its last entry closing is the operator stepping back and reopens that entry; anything later is a re-run with its own. Each entry ends when the next row fires, the last at the recording's end |
 | Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
 | Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
-| Baptism sessions | `baptism.csv` | See [Baptisms are merged, never replaced](#baptisms-are-merged-never-replaced) — unlike the other three, this leg never deletes a session on its own; the only thing that can remove one is the same session-count cap every ordinary save already enforces |
+| Baptism sessions | `baptism.csv` | See [Baptisms are merged, never replaced](#baptisms-are-merged-never-replaced) — unlike the other three, this leg never removes a session at all, not even at the MAX_SESSIONS cap: a new session the store has no room for is simply not added, not evicted for |
 
 It reports what it **derived** and, separately, what it left alone: a record the
 raw layer holds nothing for is untouched and said to be untouched, rather than
@@ -179,22 +179,30 @@ compare:
 
 100ms separates real clock skew (at most a few milliseconds) from a human
 undoing a Finish and pressing it again, which takes far longer. An unmatched
-session with a readable finish time is **added**; one whose finish time will
-not parse is discarded, not added, and logged. A stored session with no
-rebuilt counterpart at all is **kept**, left exactly as it is.
+session with a readable finish time is **added** — unless the store already
+holds MAX_SESSIONS sessions, in which case adding it would mean evicting
+something else to make room, which a rebuild never does; it is counted as
+**full** instead, and logged, exactly as if a rebuild found no unmatched
+sessions to add at all. One whose finish time will not parse is discarded,
+not added, and logged. A stored session with no rebuilt counterpart at all
+is **kept**, left exactly as it is — an update to a DIFFERENT session can
+never displace it, at the cap or otherwise; see
+[Rebuild from raw](#rebuild-from-raw) above.
 
 Three surfaces report this, at three different levels of detail. The
-`[baptism]` log line names all seven: `updated` and `added` as running
-counts, then `unchanged`, `newer`, `disagreeing` and `kept` as running
-counts too (zero included), and `invalid` only when it is not zero. The
-Baptisms tab's own result names six of the seven — the same list minus
-`unchanged`, since a session the rows reproduced exactly needed nothing
-said about it — with `updated` and `added` always shown and the rest only
-when they are not zero. History's result names the same six the Baptisms
-tab does, but folds them into "what was written" (`added`, `updated`, shown
-only when nonzero) and a "left alone" breakdown (`newer`, `disagreeing`,
-`invalid`, `kept`, each shown only when nonzero), since its one line
-already covers three other legs.
+`[baptism]` log line names `updated` and `added` as running counts, then
+`unchanged`, `newer`, `disagreeing` and `kept` as running counts too (zero
+included), `invalid` only when it is not zero, and `full` only when it is
+not zero, in a line of its own naming the cap and how many sessions could
+not be added. The Baptisms tab's own result names every category except
+`unchanged`, since a session the rows reproduced exactly needed nothing said
+about it — `updated` and `added` always shown, the rest (including `full`)
+only when they are not zero. History's result names the same categories the
+Baptisms tab does, but folds them into "what was written" (`added`,
+`updated`, shown only when nonzero), a "left alone" breakdown (`newer`,
+`disagreeing`, `invalid`, `kept`, each shown only when nonzero), and `full`
+as its own clause when nonzero, since its one line already covers three
+other legs.
 
 Reachable from both places: the Baptisms tab's own **Rebuild from raw**, in
 its header, targets one service on its own (`POST /api/baptism/rebuild`);

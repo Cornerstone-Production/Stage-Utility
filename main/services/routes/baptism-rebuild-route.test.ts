@@ -136,7 +136,7 @@ describe("POST /api/baptism/rebuild", () => {
     });
 
     assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
-    assert.deepEqual(out.json, { rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
+    assert.deepEqual(out.json, { rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 });
 
     const sessions = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
     assert.equal(sessions.length, 1, "the rebuilt session did not land in the store");
@@ -160,7 +160,7 @@ describe("POST /api/baptism/rebuild", () => {
     // The second rebuild reproduces the SAME session exactly — that is
     // "unchanged", not "updated": nothing about it actually differs, so
     // nothing is written the second time either.
-    assert.deepEqual(second.json, { rows: 3, sessions: 1, updated: 0, added: 0, unchanged: 1, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
+    assert.deepEqual(second.json, { rows: 3, sessions: 1, updated: 0, added: 0, unchanged: 1, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 });
     assert.equal((await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY).length, 1, "a re-run duplicated the session");
   });
 

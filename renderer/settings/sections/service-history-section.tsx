@@ -258,12 +258,14 @@ function baptismLeftAloneBreakdown(d: NonNullable<RebuildOutcome["baptismDetail"
  * rebuild that changed nothing once reported "Rebuilt: 12 items".
  *
  * Baptism is never folded into the generic done/left split above — it is a
- * MERGE, not a replace, with its own six-way split of what happened to each
- * session — but it still contributes to exactly ONE of `done` or `left`,
- * never both: a leg that wrote nothing must not ALSO get its own "left
- * alone:" phrase nested inside the sentence's own "left alone: ..." list,
- * which read as "left alone: 1 baptism sessions; left alone: 1 (1 newer in
- * the store)" before this said which reasons applied only once.
+ * MERGE, not a replace, with its own split of what happened to each session
+ * — but it still contributes to exactly ONE of `done` or `left`, never
+ * both: a leg that wrote nothing must not ALSO get its own "left alone:"
+ * phrase nested inside the sentence's own "left alone: ..." list, which
+ * read as "left alone: 1 baptism sessions; left alone: 1 (1 newer in the
+ * store)" before this said which reasons applied only once. `full` is
+ * neither written nor left alone — those new sessions were never added at
+ * all, so it gets its own clause, mentioned only when it is nonzero.
  */
 export function describeRebuild(out: RebuildOutcome): string {
   const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
@@ -288,6 +290,13 @@ export function describeRebuild(out: RebuildOutcome): string {
   }
   const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
   if (left.length) parts.push(`left alone: ${left.join(", ")}`);
+  // A rebuild never evicts an existing session to make room (see
+  // baptismStore.mergeRebuilt) — at the MAX_SESSIONS cap it simply stops
+  // adding new baptism sessions, and says so, rather than silently
+  // discarding them.
+  if (out.baptismDetail && out.baptismDetail.full > 0) {
+    parts.push(`the store is full, so ${out.baptismDetail.full} baptism sessions were not added`);
+  }
   if (out.failed.length) parts.push(`could not save: ${out.failed.join(", ")}`);
   return parts.join(" · ");
 }

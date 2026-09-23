@@ -377,9 +377,9 @@ live timer: it replays that service's `baptism.csv` and MERGES the result into
 the stored sessions, never replacing them — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
 Answers `{ rows, sessions, updated, added, unchanged, newer, disagreeing,
-invalid, kept }` — see
+invalid, kept, full }` — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
-for what each of the seven outcome categories means. `400` for a body
+for what each of the eight outcome categories means. `400` for a body
 with no `serviceKey`; `409` while that service is recording, and a DIFFERENT
 `409` when it has no `baptism.csv` at all (a session recorded before the raw
 layer existed has a timeline record but none) — both carry a body of

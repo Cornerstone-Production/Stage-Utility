@@ -479,73 +479,13 @@ describe("rebuildServiceBaptisms — matching across services", () => {
 });
 
 describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
-  it("stores what it reports as added when the added session is newer than everything else, and logs which filler session the cap evicted", async () => {
-    const KEY = "cap-svc";
-    const DATE = "2026-09-21";
-    await serviceTimelineStore.upsert(timeline(KEY, DATE));
-    // 2000 much-older sessions filling the store to capacity.
-    const filler = Array.from({ length: 2000 }, (_, i) => {
-      const at = new Date(Date.parse("2020-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
-      return {
-        id: baptismSessionId(at), startedAt: at, finishedAt: at,
-        people: [{ testimonyMs: 1, baptizeMs: 1 }], title: null, serviceTypeId: null, planId: null,
-        serviceKey: `old-${i}`,
-      };
-    });
-    await baptismStore.addSessions(filler as never);
-    const atCap = await baptismStore.listSessions();
-    assert.equal(atCap.length, 2000, "precondition: the store is at the cap");
-
-    await writeBaptismCsv(KEY, DATE, [
-      HEADER_ROW,
-      "2026-09-21T11:00:00.000Z,start,per-person,testimony,1,0,0,,,",
-      "2026-09-21T11:05:00.000Z,testimony-end,per-person,testimony,1,0,300000,,,",
-      "2026-09-21T11:05:00.000Z,finish,per-person,testimony,1,0,300000,,,",
-      "",
-    ].join("\n"));
-
-    // Not necessarily filler[0]: this file's own earlier describe blocks share
-    // this same process-wide store, so some of their sessions already occupy
-    // slots, and addSessions above may already have capped away filler's own
-    // oldest few to make room for them. Whichever filler session the cap kept
-    // as its oldest survivor is the one about to be evicted next — captured
-    // here so the log-line assertion below can name it rather than guess.
-    const oldestFillerId = atCap
-      .filter((s) => (s.serviceKey ?? "").startsWith("old-"))
-      .reduce((oldest, s) => (Date.parse(s.startedAt) < Date.parse(oldest.startedAt) ? s : oldest)).id;
-
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
-    let outcome: Awaited<ReturnType<typeof rebuildServiceBaptisms>>;
-    try {
-      outcome = await rebuildServiceBaptisms(KEY);
-    } finally {
-      console.warn = realWarn;
-    }
-    const all = await baptismStore.listSessions();
-
-    assert.equal(outcome.added, 1, "the new 2026 session is newer than every 2020 filler session and must survive the cap");
-    assert.ok(all.some((s) => s.serviceKey === KEY), "reported added, but the session is not in the store");
-    assert.equal(all.length, 2000, "the cap still holds — the oldest filler session fell off instead");
-
-    assert.equal(
-      all.some((s) => s.id === oldestFillerId),
-      false,
-      "the oldest filler session should be the one the cap evicted to make room",
-    );
-    const evictionLine = warnings.find((w) => w.includes("[baptism]") && w.includes("evicted"));
-    assert.ok(evictionLine, `the eviction was not logged: ${JSON.stringify(warnings)}`);
-    assert.ok(evictionLine!.includes("evicted 1 session"), `the log line does not say exactly one session was evicted: ${evictionLine}`);
-    assert.ok(evictionLine!.includes(oldestFillerId), `the log line does not name which session it evicted: ${evictionLine}`);
-  });
-
-  // The opposite of the case above: this rebuild's OWN new session is the
-  // one that does NOT survive the cap. "Added" has to mean "actually
-  // landed in the store," not "was in the batch handed to it" — a session
-  // this rebuild wanted to add but the cap immediately evicted again must
-  // not be counted as added.
-  it("does not count a session as added when the cap drops it right back off", async () => {
+  // Ruling 65: a rebuild never evicts, however new its own session is —
+  // "added" has to mean "actually landed in the store," not "was in the
+  // batch handed to it." A session this rebuild wanted to add but the store
+  // had no room for must be counted under `full`, not `added`, and the log
+  // must say the store is full rather than naming an eviction that never
+  // happened.
+  it("does not add a new session when the store is full, and logs how many it could not add", async () => {
     const KEY = "cap-drops-its-own-svc";
     const DATE = "2026-09-23";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
@@ -564,9 +504,10 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     await baptismStore.addSessions(dominatingFiller as never);
     assert.equal((await baptismStore.listSessions()).length, 2000, "precondition: the store is at the cap");
 
-    // This service's own session is dated 2026 — older than every one of
-    // the 2035 fillers above, so merging it in makes 2001 and it is the
-    // one the cap slices back off.
+    // This service's own session has no stored counterpart at all, so the
+    // rebuild wants to ADD it — but the store already holds MAX_SESSIONS,
+    // and a rebuild never evicts anything else to make room, however old or
+    // new either side is.
     await writeBaptismCsv(KEY, DATE, [
       HEADER_ROW,
       "2026-09-23T11:00:00.000Z,start,per-person,testimony,1,0,0,,,",
@@ -575,12 +516,31 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
       "",
     ].join("\n"));
 
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
     try {
-      const outcome = await rebuildServiceBaptisms(KEY);
+      let outcome: Awaited<ReturnType<typeof rebuildServiceBaptisms>>;
+      try {
+        outcome = await rebuildServiceBaptisms(KEY);
+      } finally {
+        console.warn = realWarn;
+      }
       const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
 
-      assert.equal(outcome.added, 0, "the new session did not survive the cap, so it must not be reported as added");
+      assert.equal(outcome.added, 0, "the store is full — this rebuild's own new session must not be added");
+      assert.equal(outcome.full, 1);
       assert.equal(forService.length, 0, "the session that was reported as not-added must not actually be in the store");
+      assert.equal(
+        (await baptismStore.listSessions()).length,
+        2000,
+        "the store must still hold exactly what it held before — nothing evicted to make room",
+      );
+
+      const fullLine = warnings.find((w) => w.includes("[baptism]") && w.includes("full"));
+      assert.ok(fullLine, `the full store was not logged: ${JSON.stringify(warnings)}`);
+      assert.ok(fullLine!.includes("1"), `the log line does not say how many sessions could not be added: ${fullLine}`);
+      assert.ok(!warnings.some((w) => w.includes("evicted")), "nothing should ever be logged as evicted — a rebuild does not evict");
     } finally {
       // This test's own 2000 sessions dominate the entire shared store (that
       // is the point — see the comment above), so every OTHER describe block
@@ -592,49 +552,67 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     }
   });
 
-  // The cap does not only threaten a session THIS rebuild wanted to add or
-  // update — it can just as easily evict one of this SAME service's other
-  // sessions that this rebuild never touched at all (a genuinely "kept" one,
-  // with no rebuilt counterpart). `kept` and `items` are both computed
-  // before the write runs, so either can go on describing a session the
-  // write just quietly removed unless corrected for it afterward.
-  it("counts a kept session as gone once the cap evicts it, not as still kept", async () => {
-    const KEY = "cap-evicts-its-own-kept-svc";
+  // Ruling 65's own required proof: a rebuild must never evict an existing
+  // session to make room for another, for ANY reason — not this rebuild's
+  // own untouched "kept" session, not anyone else's. Only an update (which
+  // replaces a session's own fields without changing how many the store
+  // holds) is exempt from the cap; an add is not. RED on the code this
+  // replaces: the old cap sorted everything newest-first and sliced, so this
+  // service's own untouched, older "kept" session was exactly what fell off
+  // to make room for the add below.
+  it("never evicts an existing session to make room — everything survives except what this write updates in place", async () => {
+    const KEY = "cap-never-evicts-svc";
     const DATE = "2026-09-23";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
 
-    // 1999 sessions dated well into the future — enough that, together with
-    // this service's own two sessions below (one kept, one about to be
-    // added), the store holds exactly one over the cap.
-    const dominatingFiller = Array.from({ length: 1999 }, (_, i) => {
-      const at = new Date(Date.parse("2036-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
+    // 1998 filler sessions, dated well into the future so nothing else in
+    // this shared store can ever outrank them, plus this service's own two
+    // below, for exactly 2000: the store starts already at the cap.
+    const dominatingFiller = Array.from({ length: 1998 }, (_, i) => {
+      const at = new Date(Date.parse("2037-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
       return {
         id: baptismSessionId(at), startedAt: at, finishedAt: at,
         people: [{ testimonyMs: 1, baptizeMs: 1 }], title: null, serviceTypeId: null, planId: null,
-        serviceKey: `dominating2-${i}`,
+        serviceKey: `dominating3-${i}`,
       };
     });
     await baptismStore.addSessions(dominatingFiller as never);
 
     // This service's own OTHER session — no rebuilt counterpart at all (a
-    // service-key roll, or one predating the raw layer), older than the new
-    // session the CSV below will produce, so it is the one on the losing
-    // side once the store goes one over the cap.
+    // service-key roll, or one predating the raw layer). Under the old,
+    // eviction-based cap this was exactly the session on the losing side
+    // once the store went one over the limit; Ruling 65 says it must
+    // survive untouched instead.
     const keptSession = {
-      id: "bap-cap-evicts-kept-1",
+      id: "bap-cap-never-evicts-kept-1",
       startedAt: "2026-09-23T09:00:00.000Z",
       finishedAt: "2026-09-23T09:05:00.000Z",
       people: [{ testimonyMs: 1, baptizeMs: 1 }], title: "Kept", serviceTypeId: null, planId: null,
       serviceKey: KEY,
     };
+    // This service's own session the rebuild WILL match by exact id — an
+    // update replaces its own fields without changing the store's total, so
+    // it must still land even though the store is completely full.
+    const updateStartedAt = "2026-09-23T10:00:00.000Z";
+    const toUpdate = {
+      id: baptismSessionId(updateStartedAt),
+      startedAt: updateStartedAt,
+      finishedAt: "2026-09-23T10:03:00.000Z", // earlier than the row's own finish below
+      people: [{ testimonyMs: 1, baptizeMs: 1 }], title: "Stored Title", serviceTypeId: "st1", planId: "plan-1",
+      serviceKey: KEY,
+    };
     await baptismStore.addSession(keptSession as never);
+    await baptismStore.addSession(toUpdate as never);
     assert.equal((await baptismStore.listSessions()).length, 2000, "precondition: the store is at the cap");
 
-    // A genuinely new session for the SAME service, later in the day than
-    // the kept one above — close enough to survive (it is the 2000th
-    // newest), unlike the kept session it displaces.
+    // Two rows: one matches toUpdate by exact id with a genuinely later
+    // Finish (an update — never capacity-limited); one has no stored
+    // counterpart at all (an add — the one the full store must refuse).
     await writeBaptismCsv(KEY, DATE, [
       HEADER_ROW,
+      `${updateStartedAt},start,per-person,testimony,1,0,0,,,`,
+      "2026-09-23T10:03:30.000Z,testimony-end,per-person,testimony,1,0,210000,,,",
+      "2026-09-23T10:04:00.000Z,finish,per-person,testimony,1,0,240000,,,",
       "2026-09-23T11:00:00.000Z,start,per-person,testimony,1,0,0,,,",
       "2026-09-23T11:05:00.000Z,testimony-end,per-person,testimony,1,0,300000,,,",
       "2026-09-23T11:05:00.000Z,finish,per-person,testimony,1,0,300000,,,",
@@ -643,14 +621,34 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
 
     try {
       const outcome = await rebuildServiceBaptisms(KEY);
-      const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+      const all = await baptismStore.listSessions();
+      const forService = all.filter((s) => s.serviceKey === KEY);
 
-      assert.equal(outcome.added, 1, "the new session is the 2000th newest and must survive");
-      assert.equal(outcome.kept, 0, "the OTHER session for this service was evicted by the same cap — it is no longer kept, it is gone");
-      assert.equal(forService.length, 1, "this service must hold exactly the surviving new session, not the evicted kept one too");
-      assert.equal(forService[0]!.id, baptismSessionId("2026-09-23T11:00:00.000Z"));
+      assert.equal(outcome.updated, 1, "the matched session's genuinely later Finish must still be written even at the cap");
+      assert.equal(outcome.added, 0, "the store is full — the new, unmatched session must not be added");
+      assert.equal(outcome.full, 1);
+      assert.equal(outcome.kept, 1, "the OTHER session for this service must still be kept — never evicted");
+
+      assert.equal(
+        all.length,
+        2000,
+        "the store must hold exactly what it held before — an update never changes the count, and nothing was evicted",
+      );
+      assert.equal(
+        all.filter((s) => (s.serviceKey ?? "").startsWith("dominating3-")).length,
+        1998,
+        "every filler session must still be there",
+      );
+
+      const stillKept = forService.find((s) => s.id === keptSession.id);
+      assert.deepStrictEqual(stillKept, keptSession, "the kept session must survive byte-identical — never touched, let alone evicted");
+
+      const updated = forService.find((s) => s.id === toUpdate.id);
+      assert.equal(updated?.finishedAt, "2026-09-23T10:04:00.000Z", "the update must still land, even though the store is at the cap");
+      assert.equal(forService.length, 2, "this service must hold exactly its updated session and its kept one — no third, since the add was refused");
     } finally {
       for (const f of dominatingFiller) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(toUpdate.id);
       await baptismStore.deleteSession(keptSession.id);
     }
   });
