@@ -537,6 +537,58 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     assert.ok(evictionLine!.includes("evicted 1 session"), `the log line does not say exactly one session was evicted: ${evictionLine}`);
     assert.ok(evictionLine!.includes(oldestFillerId), `the log line does not name which session it evicted: ${evictionLine}`);
   });
+
+  // The opposite of the case above: this rebuild's OWN new session is the
+  // one that does NOT survive the cap. "Added" has to mean "actually
+  // landed in the store," not "was in the batch handed to it" — a session
+  // this rebuild wanted to add but the cap immediately evicted again must
+  // not be counted as added.
+  it("does not count a session as added when the cap drops it right back off", async () => {
+    const KEY = "cap-drops-its-own-svc";
+    const DATE = "2026-09-23";
+    await serviceTimelineStore.upsert(timeline(KEY, DATE));
+
+    // 2000 sessions dated well into the future — newer than literally
+    // everything else this shared store could hold from any other test in
+    // this file, so they fully occupy the cap regardless of run order.
+    const dominatingFiller = Array.from({ length: 2000 }, (_, i) => {
+      const at = new Date(Date.parse("2035-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
+      return {
+        id: baptismSessionId(at), startedAt: at, finishedAt: at,
+        people: [{ testimonyMs: 1, baptizeMs: 1 }], title: null, serviceTypeId: null, planId: null,
+        serviceKey: `dominating-${i}`,
+      };
+    });
+    await baptismStore.addSessions(dominatingFiller as never);
+    assert.equal((await baptismStore.listSessions()).length, 2000, "precondition: the store is at the cap");
+
+    // This service's own session is dated 2026 — older than every one of
+    // the 2035 fillers above, so merging it in makes 2001 and it is the
+    // one the cap slices back off.
+    await writeBaptismCsv(KEY, DATE, [
+      HEADER_ROW,
+      "2026-09-23T11:00:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-23T11:05:00.000Z,testimony-end,per-person,testimony,1,0,300000,,,",
+      "2026-09-23T11:05:00.000Z,finish,per-person,testimony,1,0,300000,,,",
+      "",
+    ].join("\n"));
+
+    try {
+      const outcome = await rebuildServiceBaptisms(KEY);
+      const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+
+      assert.equal(outcome.added, 0, "the new session did not survive the cap, so it must not be reported as added");
+      assert.equal(forService.length, 0, "the session that was reported as not-added must not actually be in the store");
+    } finally {
+      // This test's own 2000 sessions dominate the entire shared store (that
+      // is the point — see the comment above), so every OTHER describe block
+      // in this file that runs after this one would otherwise find the cap
+      // already full and its own ordinary merge silently capped too. Remove
+      // exactly what this test added, in a `finally` so a failed assertion
+      // still cleans up.
+      for (const f of dominatingFiller) await baptismStore.deleteSession(f.id);
+    }
+  });
 });
 
 // ── A correction made after the service closed: the store can know more than the rows ──

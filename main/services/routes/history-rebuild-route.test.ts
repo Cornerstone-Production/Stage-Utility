@@ -588,6 +588,41 @@ describe("POST /api/history/rebuild", () => {
 
       await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
+
+    // The response must say what the write ACTUALLY did, never what the plan
+    // was merely hoping to do — the timeline leg lands first (so this is a
+    // partial failure, 200 with `failed: ["baptism"]`, not a 500), and the
+    // baptism leg's own counts must reflect that its own write never landed.
+    it("reports no updated/added for the baptism leg when its write fails, even after another leg lands", async () => {
+      await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
+
+      const { baptismStore } = await import("../baptism-store.js");
+      const original = baptismStore.mergeRebuilt.bind(baptismStore);
+      baptismStore.mergeRebuilt = async () => {
+        throw new Error("EACCES (test double)");
+      };
+      let out: Awaited<ReturnType<typeof callRoute>>;
+      try {
+        out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      } finally {
+        baptismStore.mergeRebuilt = original;
+      }
+
+      assert.equal(out.status, 200, `a partial failure (an earlier leg already landed) must still answer 200, got ${out.status}: ${out.body}`);
+      const json = out.json as {
+        timeline: { rebuilt: boolean };
+        baptism: { rebuilt: boolean; items: number; missing: boolean };
+        baptismDetail: { updated: number; added: number };
+        failed: string[];
+      };
+      assert.equal(json.timeline.rebuilt, true, "precondition: the timeline leg must land first for this to be a PARTIAL failure");
+      assert.ok(json.failed.includes("baptism"), `expected "baptism" in failed, got: ${JSON.stringify(json.failed)}`);
+      assert.equal(json.baptism.rebuilt, false, "a failed write must not read as rebuilt");
+      assert.equal(json.baptismDetail.added, 0, "the write failed — the plan's own optimistic added count must not leak into the response");
+      assert.equal(json.baptismDetail.updated, 0, "the write failed — the plan's own optimistic updated count must not leak into the response");
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
   });
 
   // A service whose ONLY raw material is a baptism.csv that reconstructs
