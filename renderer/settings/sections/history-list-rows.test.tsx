@@ -133,7 +133,7 @@ const SPL = {
 } as unknown as ServiceSplHistory;
 
 /** The real api.ts, routed by URL — the same approach history-arriving does. */
-function installFetch(opts: { extra?: ServiceTimeline[] } = {}): void {
+function installFetch(opts: { extra?: ServiceTimeline[]; baptisms?: BaptismSession[] } = {}): void {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
     const url = String(input);
     const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
@@ -141,7 +141,15 @@ function installFetch(opts: { extra?: ServiceTimeline[] } = {}): void {
     if (url === "/api/attendance/history") return ok(ATT);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
-    if (url === "/api/baptism/sessions") return ok([]);
+    if (url === "/api/baptism/sessions") return ok(opts.baptisms ?? []);
+    if (url.startsWith("/api/baptism/lane")) return ok({ spans: [] });
+    // Opening a row's detail page reads its own record back by key — the
+    // same [NINE, ELEVEN] the list itself was built from, so the detail
+    // page's own Baptisms card (Task 18) can be checked against the SAME
+    // fixture the list row's count came from.
+    if (url === `/api/service-timeline/${encodeURIComponent(NINE.serviceKey)}`) return ok(NINE);
+    if (url === `/api/service-timeline/${encodeURIComponent(ELEVEN.serviceKey)}`) return ok(ELEVEN);
+    if (url.startsWith("/api/service-timeline/")) return ok(null);
     // The 11 o'clock recorded sound; the 9 did not. One row must print a real
     // dB figure and the other the reason there is none.
     if (url === `/api/spl/history/${encodeURIComponent(ELEVEN.serviceKey)}`) return ok(SPL);
@@ -155,6 +163,23 @@ const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const { ServiceHistorySection } = await import("./service-history-section.js");
 const { serviceKpis, serviceRowFigures } = await import("./history-service-header.js");
+const { baptismSessionFixture } = await import("./baptisms/baptism-session-fixture.js");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
+  await import("@tanstack/react-router");
+
+/** A real (memory-history) router carrying /history/manage (where this page
+ *  lives) and /baptism (the Baptisms card's "Open in Baptisms" link) — the
+ *  same mechanism past-sessions.test.tsx and history-service-page.test.tsx
+ *  use for their own cross-links. */
+function routerWithBaptismDestination() {
+  const rootRoute = createRootRoute({});
+  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
+  const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
+  return createRouter({
+    routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
+    history: createMemoryHistory({ initialEntries: ["/history/manage"] }),
+  });
+}
 
 afterEach(cleanup);
 after(() => {
@@ -162,16 +187,18 @@ after(() => {
   teardown();
 });
 
-async function renderList(readOnly = false) {
+async function renderList(readOnly = false, router?: ReturnType<typeof routerWithBaptismDestination>) {
   let view!: ReturnType<typeof render>;
   await act(async () => {
-    view = render(
-      React.createElement(
-        TooltipProvider,
-        null,
-        React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly }),
-      ),
-    );
+    const section = React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly });
+    // Only when a test needs a real destination for AppLink (the Baptisms
+    // card's "Open in Baptisms") — useRouter({warn:false}) tolerates no
+    // ancestor router just fine, but AppLink/Link itself throws outright
+    // without one, so every OTHER test here keeps rendering with none.
+    const tree = router
+      ? React.createElement(RouterContextProvider, { router, children: section })
+      : section;
+    view = render(React.createElement(TooltipProvider, null, tree));
     // Four turns: the list, the attendance list, the day settling, then the
     // per-row SPL fetches the day's rows kick off once it has.
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
@@ -315,6 +342,77 @@ describe("the All services day list", () => {
     for (const part of ["Sunday 9:00", "Rooted", "2 items", "Weekend"]) {
       assert.ok(text.includes(part), `the row must say "${part}" — it said "${text}"`);
     }
+  });
+
+  // Not a new ROW_COLUMNS figure (that grid dashes out anything a row has
+  // nothing for) and not on the calendar — the count joins the subtitle,
+  // with a droplet badge by the title, using baptismStats(...).people, which
+  // counts actual baptisms, never testimonies. A service with none gains
+  // nothing at all: no marker, no dash — proven together with the marked
+  // row, one fixture, so a floor-only guard on one of the two cannot pass by
+  // testing only the row that is supposed to change.
+  describe("how many were baptized, on the row itself", () => {
+    // ONE session, linked to ELEVEN by its own serviceKey — the same
+    // baptismSessionFixture BaptismSession shape linkBaptisms/baptismStats
+    // read elsewhere. One person actually baptized, one still mid-testimony
+    // (baptizeMs 0) — the count must read 1, never 2, proving it is real
+    // baptisms and not people.length.
+    const BAPTIZED = [
+      baptismSessionFixture({
+        id: "bap-eleven",
+        serviceKey: ELEVEN.serviceKey,
+        startedAt: iso("11:05:00"),
+        finishedAt: iso("11:15:00"),
+        people: [
+          { testimonyMs: 90_000, baptizeMs: 40_000 },
+          { testimonyMs: 60_000, baptizeMs: 0 },
+        ],
+      }),
+    ];
+
+    function rowUnderText(view: Awaited<ReturnType<typeof renderList>>, key: string): string {
+      const row = view.container.querySelector(`[data-history-row="${key}"]`)!;
+      const service = row.querySelector("[data-row-service]")!;
+      return (service.textContent ?? "").replace(/\s+/g, " ").trim();
+    }
+
+    test("a row with a linked session says how many were baptized — the SAME number the service's own page shows", async () => {
+      installFetch({ baptisms: BAPTIZED });
+      const view = await renderList(false, routerWithBaptismDestination());
+
+      const elevenText = rowUnderText(view, ELEVEN.serviceKey);
+      assert.match(elevenText, /\b1 baptized\b/, `expected "1 baptized" in the row's subtitle, got: ${elevenText}`);
+      // baptismStats' own rule: two people TESTIFIED, only one was actually
+      // BAPTIZED (baptizeMs > 0) — the row must count the second, not the first.
+      assert.doesNotMatch(elevenText, /\b2 baptized\b/, "must count real baptisms, never testimonies");
+
+      // Open the SAME service's own History page and read ITS OWN count off
+      // the Task 18 Baptisms card's stat strip — one fixture, both surfaces.
+      await act(async () => {
+        (view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`) as HTMLButtonElement).click();
+        for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+      });
+      const card = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+      assert.ok(card, "expected the service's own Baptisms card to render");
+      // The strip's own label/value pair (StatStrip's Figure: a label <span>,
+      // then a value <span> sibling) — not a substring match on the whole
+      // card's concatenated text, which has no whitespace between adjacent
+      // elements and would need a "Baptized1" spelling nothing else prints.
+      const labelSpan = [...card.querySelectorAll("span")].find((s) => (s.textContent ?? "").trim() === "Baptized");
+      assert.ok(labelSpan, "expected a 'Baptized' figure in the card's own strip");
+      const cardCount = (labelSpan!.nextElementSibling?.textContent ?? "").trim();
+      assert.equal(cardCount, "1", `expected the card's own strip to read Baptized 1, got Baptized ${cardCount}`);
+    });
+
+    test("a row with no linked session gains no marker and no dash", async () => {
+      installFetch({ baptisms: BAPTIZED }); // BAPTIZED links to ELEVEN, not NINE
+      const view = await renderList();
+      const nineText = rowUnderText(view, NINE.serviceKey);
+      assert.doesNotMatch(nineText, /baptized/i, `a service with no linked session must say nothing about it, got: ${nineText}`);
+      assert.doesNotMatch(nineText, / — /, "no dash placeholder either — the figure does not exist as a column");
+      const row = view.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!;
+      assert.equal(row.querySelectorAll("[data-row-baptized]").length, 0, "no droplet badge on a service with no baptisms");
+    });
   });
 
   test("no row carries a Delete, open or read-only, and read-only changes nothing else", async () => {

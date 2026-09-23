@@ -9,7 +9,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { hostTimeZone } from "@main/services/app-timezone";
 import { useStageState } from "../../main/use-stage-state";
-import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
+import { ClockIcon, ChevronRightIcon, DownloadIcon, DropletIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
@@ -839,14 +839,27 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((s) => !cancelled && setSpl(s))
       .catch(() => !cancelled && setSpl(null));
-    // Baptism sessions are cross-linked to the service by time overlap.
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey, reloadKey]);
+
+  // Baptism sessions — loaded ONCE for the whole page, not per selection: the
+  // All-services LIST needs them too, to say how many were baptized per row
+  // (linkBaptisms + baptismStats, the SAME pair the open service's own
+  // Baptisms card uses, so a row's count and that service's page can never
+  // disagree — see linkBaptisms.ts). Refetched on reloadKey so a Rebuild
+  // from raw (which can restore or update a session) is reflected without a
+  // full reload, whether or not a service happens to be open at the time.
+  useEffect(() => {
+    let cancelled = false;
     invoke<BaptismSession[]>("baptism:sessions")
       .then((b) => !cancelled && setBaptisms(b))
       .catch(() => !cancelled && setBaptisms([]));
     return () => {
       cancelled = true;
     };
-  }, [selectedKey, reloadKey]);
+  }, [reloadKey]);
 
   // The calendar and the day list are GLOBAL — every service type, so you can
   // navigate to any of them. Nothing on this page scopes to one type any more:
@@ -1717,12 +1730,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 )
                 : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
-            // The item count whether or not it is recording. The subtitle used
-            // to read "recording\u2026" instead while a record was open, which is
-            // the one thing on the row the pill beside the title already says \u2014
-            // and it cost the reader the only place the row says how many items
-            // have run so far.
-            const under = [s.seriesTitle, itemCount].filter(Boolean).join(" \u00b7 ");
+            // Not a new ROW_COLUMNS figure \u2014 that grid dashes out anything a
+            // row has nothing for, which would put a dash under "Baptized" on
+            // every ordinary Sunday. Joins the subtitle instead, and a
+            // service with none gains nothing at all: no marker, no dash.
+            // The SAME linkBaptisms + baptismStats pair the open service's
+            // own Baptisms card uses (Task 18), so a row's count and that
+            // service's page can never disagree about the same service.
+            const bapCount = baptismStats(linkBaptisms(baptisms, s)).people;
+            const under = [s.seriesTitle, itemCount, bapCount > 0 ? `${bapCount} baptized` : null]
+              .filter(Boolean)
+              .join(" \u00b7 ");
             // FIXED columns, so the header above the group lines up with every
             // row under it. The figures are picked by key rather than taken in
             // order: a live recording has no `vs plan`, and closing the gap
@@ -1780,6 +1798,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                         being clipped with the title beside it. */}
                     <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
                       <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
+                      {bapCount > 0 && (
+                        // Decorative — the subtitle's own "N baptized" already
+                        // says this in words; a screen reader hearing "droplet
+                        // icon" and "N baptized" back to back adds nothing.
+                        <DropletIcon data-row-baptized aria-hidden className="size-3 shrink-0 self-center text-fg-subtle" />
+                      )}
                       {live && <RecordingPill />}
                     </span>
                     {under && <span className="truncate text-[11px] text-fg-subtle">{under}</span>}
