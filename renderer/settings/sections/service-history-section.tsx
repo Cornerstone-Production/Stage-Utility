@@ -1,4 +1,5 @@
 import { errorMessage } from "@main/services/errors";
+import type { RebuildOutcome } from "@main/services/history-edit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
@@ -206,26 +207,25 @@ export function editedTooltip(it: ServiceTimelineItem): string {
   return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
 }
 
-/** One record's share of a Rebuild from raw — mirrors RebuiltRecord in
- *  main/services/history-edit.ts. */
-interface RebuiltRecord {
-  rebuilt: boolean;
-  items: number;
-  missing: boolean;
-}
-interface RebuildOutcome {
-  timeline: RebuiltRecord;
-  spl: RebuiltRecord;
-  attendance: RebuiltRecord;
-  failed: string[];
-}
-
-/** The three legs and the noun each one counts, in the order they are reported. */
-const REBUILD_LEGS = [
-  ["timeline", "item timings"],
-  ["spl", "SPL items"],
-  ["attendance", "attendance samples"],
-] as const;
+/**
+ * The noun each leg counts, in the order they are reported.
+ *
+ * Keyed by the REAL RebuildOutcome (imported from history-edit.ts, not
+ * hand-mirrored — a second copy of this shape is exactly how it drifted
+ * before: this file kept its own RebuiltRecord/RebuildOutcome interfaces with
+ * a comment saying they mirrored the server's, and nothing enforced that they
+ * still did). A `Record` over every key but `failed` means a leg added on the
+ * server and not given a noun here is a missing-property error, not a runtime
+ * gap; `Object.entries` preserves the object's own insertion order, so the
+ * order below is also the order describeRebuild reports them in.
+ */
+const REBUILD_LEG_NOUNS: Record<keyof Omit<RebuildOutcome, "failed">, string> = {
+  timeline: "item timings",
+  spl: "SPL items",
+  attendance: "attendance samples",
+  baptism: "baptism sessions",
+};
+const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [keyof Omit<RebuildOutcome, "failed">, string][];
 
 /**
  * What a rebuild actually did, in a sentence.

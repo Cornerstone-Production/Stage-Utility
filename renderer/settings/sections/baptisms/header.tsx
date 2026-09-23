@@ -10,21 +10,29 @@
 // useHeaderInset are reused outright; StatStrip and CustomizePopover come from
 // the same history-chart module every other section's figures use.
 //
-// NOT unit-tested, for the same reason ServiceHeader is not: `position: sticky`,
-// the ResizeObserver measurement below, and the action group's wrap are all
-// stylesheet/layout, and jsdom loads no stylesheet and reports every geometry as
-// 0. Driven in a real browser instead, light and dark, once a server is running
-// to look at. baptismFigures — the actual arithmetic this header displays — is
-// tested in figures.test.ts; the pieces borrowed from history-service-header.tsx
-// are proven by its own test file.
+// NOT unit-tested for its LAYOUT, for the same reason ServiceHeader is not:
+// `position: sticky`, the ResizeObserver measurement below, and the action
+// group's wrap are all stylesheet/layout, and jsdom loads no stylesheet and
+// reports every geometry as 0. Driven in a real browser instead, light and
+// dark, once a server is running to look at. baptismFigures — the actual
+// arithmetic this header displays — is tested in figures.test.ts; the pieces
+// borrowed from history-service-header.tsx are proven by its own test file.
+// The Rebuild from raw button's LOGIC — which serviceKey it targets, when it
+// is disabled and why, and that it confirms before posting — is behaviour,
+// not layout, and IS unit-tested in header.test.tsx.
 
 import { useMemo, useRef } from "react";
-import { CopyIcon, DownloadIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
+
+import { errorMessage } from "@main/services/errors";
+import type { BaptismRebuildOutcome } from "@main/services/history-edit";
 
 import { cn } from "../../../lib/cn";
-import { Button, toast } from "../../../components/ui";
+import { invoke } from "../../../lib/api";
+import { Button, confirm, toast } from "../../../components/ui";
 import { copyText } from "../../../lib/clipboard";
 import { useServerNow } from "../../../lib/server-clock";
+import { useServiceTimeline } from "../../../main/use-service-timeline";
 import { fmtBaptizeMs, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { RecordingPill, useSectionNav, useHeaderInset } from "../history-service-header";
 import { CustomizePopover, StatStrip, useStoredKeys, type StatFigure } from "../history-chart";
@@ -95,6 +103,15 @@ export function baptismReportText(state: BaptismState, figures: readonly StatFig
   return lines.join("\n");
 }
 
+/**
+ * What a baptism-only rebuild did, in a sentence — the same "say what
+ * changed" discipline describeRebuild uses for History's whole-service one,
+ * over the narrower shape rebuildServiceBaptisms answers with.
+ */
+export function describeBaptismRebuild(out: BaptismRebuildOutcome): string {
+  return `Rebuilt from raw: ${out.updated} updated, ${out.added} added, ${out.kept} left alone`;
+}
+
 export interface BaptismHeaderProps {
   state: BaptismState;
   /**
@@ -105,9 +122,18 @@ export interface BaptismHeaderProps {
    * Null (the default) shows the Customize-selected at-rest figures.
    */
   hoverFigures?: StatFigure[] | null;
+  /**
+   * Finished sessions, newest first — read only for `sessions[0]?.serviceKey`,
+   * the service Rebuild from raw targets when nothing is currently showing.
+   */
+  sessions: BaptismSession[];
+  /** Called after Rebuild from raw actually reaches the server, so Past
+   *  sessions and Trends (which read the store, not this page's own live
+   *  state) can pick up whatever it changed. */
+  onRebuilt: () => void;
 }
 
-export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps) {
+export function BaptismHeader({ state, hoverFigures = null, sessions, onRebuilt }: BaptismHeaderProps) {
   // Ticks only while a session is live — an idle or finished session's figures
   // do not move, and a timer nobody needs is a timer that outlives the page for
   // no reason (this shell is a persistent app, not a route that unmounts).
@@ -127,6 +153,55 @@ export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps
     // The existing multi-sheet .xlsx export, scoped to the one sheet this
     // page is about — see GET /api/history/export in history-export.ts.
     window.location.assign("/api/history/export?include=baptisms");
+  }
+
+  // Which service Rebuild from raw targets: the one this page is showing,
+  // running or finished (state.serviceKey survives past Finish — see
+  // baptismSubline above); failing that, the most recent PAST session's own
+  // key. Null when neither exists — nothing has ever been recorded here.
+  const targetServiceKey = state.serviceKey ?? sessions[0]?.serviceKey ?? null;
+
+  // Whether the SERVICE (not the baptism timer — a finished session's service
+  // can still be recording) is live, decided the way History's own rebuild
+  // control does: off the currently-recording ServiceTimeline's own key, the
+  // same "current" record `assertNotLive` refuses a rebuild against
+  // server-side. Reused rather than re-derived — session-chart.tsx answers
+  // the identical question (`currentTimeline?.serviceKey === serviceKey`) for
+  // its own plan lane, and a second definition of "live" is how the two could
+  // disagree about the same session.
+  const currentTimeline = useServiceTimeline();
+  const rebuildLive = targetServiceKey != null && currentTimeline?.serviceKey === targetServiceKey;
+
+  const rebuildTooltip =
+    targetServiceKey == null
+      ? "Nothing has been recorded yet — there is no service to rebuild"
+      : rebuildLive
+        ? "This service is still recording — rebuild once it ends"
+        : "Recompute this service's baptism sessions from the raw rows in the data archive";
+
+  async function onRebuild() {
+    if (!targetServiceKey || rebuildLive) return;
+    if (!(await confirm({
+      title: "Rebuild from raw?",
+      message:
+        "Recomputes this service's baptism sessions from the presses recorded in the data archive. " +
+        "Existing sessions are updated, or added to if the rows have one the store does not — never " +
+        "deleted, even one these rows cannot reproduce.",
+      confirmLabel: "Rebuild",
+      destructive: true,
+    }))) {
+      return;
+    }
+    try {
+      const out = await invoke<BaptismRebuildOutcome>("baptism:rebuild", { serviceKey: targetServiceKey });
+      onRebuilt();
+      toast.success(describeBaptismRebuild(out));
+    } catch (e) {
+      // Say why. The most likely refusal — the service is still recording —
+      // is one the operator can act on, the same reasoning History's own
+      // rebuildFromRaw gives for its identical catch.
+      toast.error(`Rebuild failed: ${errorMessage(e)}`);
+    }
   }
 
   // The header's own geometry, measured — see useHeaderInset's own doc
@@ -165,6 +240,15 @@ export function BaptismHeader({ state, hoverFigures = null }: BaptismHeaderProps
           </Button>
           <Button variant="filled" size="small" onClick={onExport} tooltip="Download every baptism ever recorded, as a spreadsheet">
             <DownloadIcon className="size-3.5 text-fg-muted" /> Export
+          </Button>
+          <Button
+            variant="filled"
+            size="small"
+            disabled={targetServiceKey == null || rebuildLive}
+            onClick={() => void onRebuild()}
+            tooltip={rebuildTooltip}
+          >
+            <WrenchIcon className="size-3.5 text-fg-muted" /> Rebuild from raw
           </Button>
         </div>
       </div>

@@ -167,6 +167,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: true, items: 12, missing: false },
         spl: { rebuilt: true, items: 11, missing: false },
         attendance: { rebuilt: true, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: [],
       },
     }));
@@ -219,6 +220,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: false, items: 12, missing: false },
         spl: { rebuilt: false, items: 9, missing: false },
         attendance: { rebuilt: true, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: [],
       },
     }));
@@ -248,6 +250,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: true, items: 24, missing: false },
         spl: { rebuilt: true, items: 24, missing: false },
         attendance: { rebuilt: true, items: 571, missing: false },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: ["spl"],
       },
     }));
@@ -275,6 +278,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: true, items: 0, missing: false },
         spl: { rebuilt: false, items: 0, missing: true },
         attendance: { rebuilt: false, items: 0, missing: true },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: [],
       },
     }));

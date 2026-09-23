@@ -140,6 +140,7 @@ export type IpcChannel =
   | "baptism:lane"
   | "baptism:next"
   | "baptism:pause"
+  | "baptism:rebuild"
   | "baptism:reset"
   | "baptism:resume"
   | "baptism:sessions"
@@ -629,6 +630,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
         testimonyItemId: p.testimonyItemId,
         baptismItemId: p.baptismItemId,
       });
+    case "baptism:rebuild":
+      return post<T>("/api/baptism/rebuild", { serviceKey: p.serviceKey });
 
     case "spl:series":
       return apiFetch<T>(

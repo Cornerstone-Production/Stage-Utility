@@ -83,7 +83,7 @@ export function BaptismOperator() {
 
   return (
     <div className="flex flex-col gap-4">
-      <BaptismHeader state={state} hoverFigures={hoverFigures} />
+      <BaptismHeader state={state} hoverFigures={hoverFigures} sessions={sessions} onRebuilt={reloadSessions} />
       <TimerCard state={state} onFinished={reloadSessions} />
       <SessionChart state={state} onHover={setHoverFigures} />
       <PeopleCard state={state} />

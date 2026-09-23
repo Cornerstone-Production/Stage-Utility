@@ -302,10 +302,12 @@ clean restart), or — in a grouped baptism section nobody had stepped into yet
 Every press on the timer appends a row to `baptism.csv`, the same append-only
 file the rest of the archive uses. A session that `baptism.json` loses — a
 corrupt file, or a crash between the debounced save and the next write — is not
-gone: **Rebuild from raw**, in History, replays it from those rows. The derived
-record is a cache of what the presses already said, not the only copy of it.
-Unlike an item's recorded timing, a baptism rebuild never replaces what is
-already stored — see
+gone: **Rebuild from raw**, in this tab's own header or in History's, replays
+it from those rows. The header targets the session it is showing, or the most
+recent past one if none is; it is disabled, with a reason, while that service
+is still recording. The derived record is a cache of what the presses already
+said, not the only copy of it. Unlike an item's recorded timing, a baptism
+rebuild never replaces what is already stored — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
 for why. See [Data archive](../data-archive.md) for the column list, which
 presses are recorded, and what the append-only rule buys the rest of the

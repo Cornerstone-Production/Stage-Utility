@@ -166,9 +166,10 @@ no match in the rebuilt rows is left exactly as it is. The result names how
 many were updated, added, and left alone, and the [baptism] log line says the
 same.
 
-`POST /api/baptism/rebuild` runs this for one service on its own; History's
-**Rebuild from raw** runs the same merge as one more leg alongside timings,
-sound and attendance.
+Reachable from both places: the Baptisms tab's own **Rebuild from raw**, in
+its header, targets one service on its own (`POST /api/baptism/rebuild`);
+History's **Rebuild from raw** runs the same merge as one more leg alongside
+timings, sound and attendance.
 
 ### Raw in the bundle, effective in the workbook
 
