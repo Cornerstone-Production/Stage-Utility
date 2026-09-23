@@ -85,11 +85,17 @@ function del<T>(path: string): Promise<T> {
  * Tied to the switch below by the exhaustiveness check at its `default:` —
  * delete a `case` without removing it here and `ch` still carries that member
  * at `default`, which is not assignable to `never` and fails `tsc`. Delete it
- * from HERE without removing the `case` and nothing breaks (an orphaned case
- * is dead code, not a wiring bug), so this is a floor under a caller's
- * channel, not proof every case here is reachable — pair it with a typed
- * local variable (`let primaryChannel: IpcChannel`, not `string`) at the call
- * site for that direction; see baptism-operator.tsx.
+ * from HERE without removing the `case` ALSO fails `tsc` — not "nothing
+ * breaks" as this comment once claimed. Two errors: the orphaned `case`'s own
+ * literal no longer compares to the narrowed union, and any call site already
+ * typed `IpcChannel` that still sends it (see baptism-operator.tsx) fails the
+ * same way — verified by removing "baptism:pause" alone and reading `tsc`'s
+ * output. What NEITHER direction catches is a caller typed as plain `string`:
+ * it would carry a channel neither list has ever heard of straight through,
+ * so this union is a floor under a caller's OWN channel type, not proof every
+ * case here is reachable from one — pair it with a typed local variable (`let
+ * primaryChannel: IpcChannel`, not `string`) at the call site for that
+ * direction.
  *
  * Complements, not replaces, the text scans in api-channels.test.ts: this
  * catches a channel a caller's own TYPE admits reaching but api.ts stopped
