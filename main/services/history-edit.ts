@@ -1147,9 +1147,9 @@ async function applyBaptismRebuild(
     return { updated: 0, added: 0, full: 0 };
   }
 
-  let added: number, addedIds: ReadonlySet<string>, full: number;
+  let added: number, addedIds: ReadonlySet<string>, updated: number, updatedIds: ReadonlySet<string>, full: number;
   try {
-    ({ added, addedIds, full } = await baptismStore.mergeRebuilt(plan.toWrite));
+    ({ added, addedIds, updated, updatedIds, full } = await baptismStore.mergeRebuilt(plan.toWrite));
   } catch (err) {
     // Logged here, with the real reason, for BOTH callers — but re-thrown
     // RAW, not wrapped in RebuildFailedError: this function is shared by
@@ -1164,21 +1164,23 @@ async function applyBaptismRebuild(
     throw err;
   }
 
-  // A session with no stored counterpart at all is exactly what a
-  // saveErrors entry describes — Finish never got it into the store. Any
-  // id in `addedIds` that also names a saveErrors entry is that entry's own
-  // session restored, on the server, whichever route got here; the id the
-  // cap left in `full` instead is not, and stays.
-  baptismTimerService.clearRestoredSaveErrors(addedIds);
+  // A saveErrors entry describes a session Finish never got into the store
+  // AS IT STANDS — which covers two different write-time outcomes, not one.
+  // No stored counterpart at all (an ADD) is the common case; a session
+  // whose LATER re-Finish is what failed already has a stale counterpart
+  // (its own earlier, successful Finish), so its rebuild can only ever
+  // UPDATE that counterpart to match the raw rows — never add a second one.
+  // Both are "restored" in exactly the sense the note is waiting for. The id
+  // the cap left in `full` instead is neither, and stays.
+  baptismTimerService.clearRestoredSaveErrors(new Set([...addedIds, ...updatedIds]));
 
   // Every update lands unconditionally — replacing a session's own fields
   // never changes how many sessions the store holds, so an update is never
-  // capacity-limited. `added` and `full` both come straight from
-  // mergeRebuilt's own write-time count, never derived here by subtracting
-  // one of them from plan.addedIds.size: the store can change between
-  // planning this rebuild and applying it, and a plan-time count minus a
-  // write-time one can drift from what actually happened, even go negative.
-  const updated = plan.updatedIds.size;
+  // capacity-limited. `added`, `updated` and `full` all come straight from
+  // mergeRebuilt's own write-time count, never derived here from
+  // plan.addedIds.size/plan.updatedIds.size: the store can change between
+  // planning this rebuild and applying it, and a plan-time count can drift
+  // from what actually happened, even go negative.
   if (full > 0) {
     console.warn(
       `[baptism] rebuild: the store is full at ${scrub(MAX_BAPTISM_SESSIONS)} sessions — ` +

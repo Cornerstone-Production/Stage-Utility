@@ -117,6 +117,66 @@ async function realFailedSave(serviceKey: string): Promise<string> {
   return sessionId;
 }
 
+/** Poll listSessions() until `id` actually lands — a successful save is a
+ *  fire-and-forget promise inside finalize(), never awaited by finish()
+ *  itself, and (unlike a FAILED save) a clean first-time save pushes
+ *  NOTHING: finalize()'s own success callback only commits when it actually
+ *  clears a PRIOR saveErrors entry, which a session's first Finish has
+ *  none of. */
+async function waitForStored(id: string, timeoutMs = 3000): Promise<BaptismSession> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const found = (await baptismStore.listSessions()).find((s) => s.id === id);
+    if (found) return found;
+    await sleep(10);
+  }
+  throw new Error(`session ${id} never landed in baptism.json`);
+}
+
+/**
+ * Drive a session to a REAL successful Finish, then Undo it and re-Finish
+ * later with addSession stubbed to reject — a real failed save of a
+ * RE-Finish, on a session the store already has a (now-stale) copy of. The
+ * store's own entry is never touched by the failed second save, so a rebuild
+ * of this service can only UPDATE it (planBaptismRebuild's own rule: a
+ * genuinely later Finish than what the store holds), never add it — this is
+ * exactly the shape addedIds alone cannot clear. Returns the session's own
+ * id and its two finishedAt stamps.
+ */
+async function realFailedReFinish(serviceKey: string): Promise<{ id: string; firstFinishedAt: string; secondFinishedAt: string }> {
+  rec().current = { serviceKey, serviceDate: DATE, endedAt: null };
+  const started = timer.start();
+  assert.equal(started.phase, "testimony", `sanity: start() actually started a session for ${serviceKey}`);
+  await sleep(5);
+  const first = timer.finish(); // REAL save — addSession is not stubbed here
+  assert.equal(first.phase, "idle", "sanity: the session finished the first time");
+  const id = baptismSessionId(timer.getState().sessionStartedAt!);
+  await waitForStored(id); // sanity: the first Finish actually saved
+  const firstFinishedAt = first.finishedAt!;
+
+  const reopened = timer.undo();
+  assert.equal(reopened.finishedAt, null, "sanity: Undo reopened the session");
+  // Well past BAPTISM_FINISH_TIE_MS (100ms) and past the ~12ms clock-skew
+  // ceiling measured elsewhere — this must read as a GENUINELY later Finish,
+  // never "the same one" within the tie band.
+  await sleep(300);
+
+  const restore = stubAddSession(rejecting);
+  let secondFinishedAt!: string;
+  try {
+    const mark = pushes.length;
+    const second = timer.finish();
+    assert.equal(second.phase, "idle", "sanity: the session finished the second time");
+    secondFinishedAt = second.finishedAt!;
+    assert.notEqual(secondFinishedAt, firstFinishedAt, "sanity: the re-Finish has its own, later timestamp");
+    await pushWhere(mark, (s) => !!s.saveErrors?.length, `carrying a saveErrors entry for the re-Finish of ${serviceKey}`);
+  } finally {
+    restore();
+  }
+  rec().current = null;
+  return { id, firstFinishedAt, secondFinishedAt };
+}
+
 after(async () => {
   await fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
 });
@@ -196,6 +256,43 @@ describe("a rebuild that restores a save-failed session clears its note entry", 
       timer.getState().saveErrors?.some((e) => e.sessionId === idC),
       false,
       "the whole-service rebuild must clear the same entry the baptism-only route does",
+    );
+  });
+
+  // The session already has a stored counterpart (the first Finish saved
+  // fine) — a rebuild can only UPDATE it, never add it. addedIds alone
+  // cannot see this: mergeRebuilt must report which ids it actually wrote a
+  // REPLACEMENT for, at write time, the same way it already does for adds.
+  it("a re-Finish's failed save clears too, once the rebuild UPDATES the stored session to match it", async () => {
+    const KEY_D = "st1:plan-1:bap-clears-d3";
+    await prepare(KEY_D);
+    await sleep(2100); // stay outside BAPTISM_SKEW_MS of any earlier test's session
+    const { id, firstFinishedAt, secondFinishedAt } = await realFailedReFinish(KEY_D);
+
+    // The store still holds the FIRST Finish — the second, later one never
+    // landed — so the note is up while the store is stale.
+    const before = await baptismStore.listSessions();
+    const beforeStored = before.find((s) => s.id === id);
+    assert.equal(beforeStored?.finishedAt, firstFinishedAt, "sanity: the store still holds the stale, first Finish");
+    assert.ok(timer.getState().saveErrors?.some((e) => e.sessionId === id), "sanity: the re-Finish's note is up");
+
+    const mark = pushes.length;
+    const out = await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY_D } });
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    const json = out.json as { added: number; updated: number };
+    assert.equal(json.added, 0, "the session already had a stored counterpart — this must not be reported as added");
+    assert.equal(json.updated, 1, "the rebuild must UPDATE the existing session, not add a second one");
+
+    const after = await baptismStore.listSessions();
+    const afterStored = after.find((s) => s.id === id);
+    assert.equal(afterStored?.finishedAt, secondFinishedAt, "the store must now hold the LATER Finish the raw rows show");
+    assert.equal((after.filter((s) => s.id === id)).length, 1, "still exactly one session under this id — never a duplicate");
+
+    await pushWhere(mark, (s) => !s.saveErrors?.some((e) => e.sessionId === id), "clearing the re-Finish's own entry");
+    assert.equal(
+      timer.getState().saveErrors?.some((e) => e.sessionId === id),
+      false,
+      "the entry must clear once the rebuild's UPDATE lands, not only for an ADD",
     );
   });
 });

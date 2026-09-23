@@ -209,9 +209,15 @@ tab's own **Rebuild from raw**, in its header, targets one service on its own
 (`POST /api/baptism/rebuild`); a save-failure entry's own **Rebuild from raw**,
 in the Timer card's note, targets that entry's own service the same way;
 History's **Rebuild from raw** runs the same merge as one more leg alongside
-timings, sound and attendance. An **added** session that also names a
-save-failure entry's own id clears that entry on the server, whichever of the
-three routes did the restoring — see
+timings, sound and attendance. A session the merge **adds or updates** that
+also names a save-failure entry's own id clears that entry on the server,
+whichever of the three routes did the restoring — added covers the ordinary
+case (Finish's own failure left no copy in the store at all); updated covers
+a LATER re-Finish that failed, where the store already holds that session's
+earlier, now-stale Finish and the rebuild brings it up to date instead of
+adding a second copy. A session merely left as it was — unchanged, newer in
+the store, or disagreeing with the rows — never clears the entry, since
+nothing about the stored record changed. See
 [Recovery](features/scriptview-and-baptisms.md#recovery) for what the note
 itself shows.
 

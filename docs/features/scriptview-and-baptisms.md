@@ -327,11 +327,20 @@ Each line also has its own **Rebuild from raw**, for that session's own
 service — never whichever session the tab is showing next, which by then may
 be a different one. It is disabled, with a reason, while that service is
 still recording, and when the session ran with no service open at all (no
-raw rows exist to rebuild it from). A rebuild that finds the session in its
-rows restores it to Past sessions and clears that line, whether it ran from
-the note's own button, this tab's header, or History's whole-service Rebuild
-— whichever one actually did it. A rebuild that does not find it — the rows
-never reached a finish, a row could not be read, or the store is already
+raw rows exist to rebuild it from). A rebuild clears that line the moment it
+actually writes that session, either by **adding** it — the ordinary case,
+since Finish's own failure means the store never had a copy at all — or by
+**updating** an existing one, which only happens when a LATER re-Finish (an
+Undo followed by another Finish) is the one that failed to save: the store
+already holds that session's earlier, now-stale Finish, so the rebuild can
+only bring it up to date, never add a second copy. Either way, whichever
+route actually wrote it — the note's own button, this tab's header, or
+History's whole-service Rebuild — clears the line. A rebuild that leaves the
+session exactly as the store already had it — unchanged, or the store's own
+copy is already newer, or the rows and the store disagree — never clears the
+line, because nothing about the store's own record actually changed. A
+rebuild that does not find it — the rows never reached a finish, a row could
+not be read, or the store is already
 full — reports why, and the line stays.
 
 ## Logging
