@@ -537,6 +537,37 @@ describe("a real session reopened by an Undo after Finish replays back into the 
     await assertRoundTrip(ctx, "grouped, testimony Finish undone");
   });
 
+  it("per-person Finish during a testimony, undone, then Baptized taken back later on", async () => {
+    // The pop belongs to the ONE undo that follows the finish. Baptized taken
+    // back later lands in the testimony phase as well; carried forward to it,
+    // the pop removes person 1, who finished long before.
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    baptismTimerService.next(); // person 1 complete, person 2's testimony
+    await sleep(8);
+    baptismTimerService.finish(); // closes person 2's testimony
+    baptismTimerService.undo(); // person 2's testimony reopened
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    assert.equal(baptismTimerService.undo().phase, "testimony", "sanity: Baptized taken back");
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 2, "sanity: person 1 and person 2");
+
+    await assertRoundTrip(ctx, "per-person, testimony Finish undone, then Baptized taken back");
+  });
+
   it("per-person Finish during a testimony, undone, then baptized", async () => {
     const ctx = freshCtx("replay");
     openService(ctx);

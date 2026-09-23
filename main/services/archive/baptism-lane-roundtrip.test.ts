@@ -569,6 +569,34 @@ describe("a real session reopened by an Undo after Finish: the lane is still the
     assert.ok(wait >= STRETCH_MS / 2, `the re-armed wait is a gap, not person 1's baptism (got ${wait}ms)`);
   });
 
+  it("Finish while armed, undone, then a step back later on: only the undo straight after the finish reopens it", async () => {
+    // The re-arm reading belongs to the ONE undo that follows the finish. The
+    // step back later writes baptism, baptismIndex 0 as well; carried forward to
+    // it, that reading re-arms instead of re-timing person 1, and person 1 and
+    // person 2 each keep the attempt the step back threw away.
+    const ctx = begin("grouped");
+    timer.start();
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.startBaptisms(); // two people, armed
+    timer.finish(); // before anyone stepped in
+    timer.undo(); // armed again
+    await sleep(STRETCH_MS);
+    timer.advance(); // person 1 in
+    await sleep(STRETCH_MS);
+    timer.next(); // person 1 out a beat early, person 2 in
+    await sleep(STRETCH_MS);
+    assert.equal(timer.undo().baptismIndex, 0, "sanity: the step back lands on person 1");
+    await sleep(STRETCH_MS);
+    timer.next();
+    await sleep(STRETCH_MS);
+    timer.next(); // auto-finishes
+
+    const spans = await assertLaneMatchesStore(ctx, "grouped, armed Finish undone, then a step back");
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1", "baptism 2"]);
+  });
+
   it("Finish during the testimonies, undone: the testimony resumes", async () => {
     const ctx = begin("grouped");
     timer.start();
