@@ -1530,8 +1530,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             Baptisms tab is now the same stat strip, the same two-lane chart
             (read-only, HistorySessionChart in baptisms/session-chart.tsx —
             never a second copy of SessionSvg), and the per-person splits
-            themselves, inline — restoring what PR 2 removed until this card
-            existed to show it. */}
+            themselves, inline — restoring what an earlier pass through this
+            page had removed, until this card existed to show it. */}
         {linkedBap.length > 0 && (
           <SectionCard
             id="history-baptisms"

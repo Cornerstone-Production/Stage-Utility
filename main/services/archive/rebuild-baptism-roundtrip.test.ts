@@ -96,11 +96,11 @@ async function assertRoundTrip(ctx: { serviceKey: string; serviceDate: string },
  * Swap the global `Date` for one whose every read — `new Date()` with no
  * arguments, or `Date.now()` — hands back a NEW, strictly later instant, so two
  * reads a moment apart in the same synchronous call can never land on the same
- * millisecond. That reproduces the drift Ruling 31 measured at ~4% on EVERY
- * run rather than at the race's own rate: on today's code, start()'s own stamp
- * and the row's stamp (recordBaptism's own `new Date()`) are two separate reads
- * of this clock, so they now differ every time instead of one session in
- * twenty.
+ * millisecond. On a real clock this drift only shows on about one session in
+ * twenty; forcing every read strictly later reproduces it on EVERY run instead:
+ * on today's code, start()'s own stamp and the row's stamp (recordBaptism's own
+ * `new Date()`) are two separate reads of this clock, so they now differ every
+ * time instead of one session in twenty.
  *
  * `Date.parse` and `Date.UTC` are copied from the real `Date` unchanged —
  * segmentElapsedMs calls `Date.parse` while this is installed (baptized(),
@@ -177,7 +177,8 @@ describe("a rebuilt session's id, startedAt and finishedAt match the stored ones
 
     // finalize() ran twice for one session (Finish, Undo, Finish-via-auto) — the
     // store replaces by id, and the replay must log the SAME id both times, so
-    // this is the path Ruling 31's fix has to hold for, not just a single finish.
+    // this is the path the strictly-increasing clock above has to hold for, not
+    // just a single finish.
     await assertRoundTrip(ctx, "finish, undo, finish again, under the same ticking clock");
   });
 

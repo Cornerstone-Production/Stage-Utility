@@ -93,8 +93,9 @@ test("one linked session with spans draws its chart and its per-person splits in
   assert.match(text(document.querySelector("table")), /Testimony/);
 });
 
-// The controller notes' own example: a reset-and-restart, or two sessions
-// genuinely recorded in one service. The lane endpoint already returns every
+// The two ways a service ends up with more than one session: a reset-and-
+// restart, or two sessions genuinely recorded in one service. The lane
+// endpoint already returns every
 // session's spans concatenated (see sessionSpans' own comment) — this proves
 // TWO past sessions here each get their OWN chart from that one shared fetch.
 test("a service whose baptism.csv holds two sessions draws both, each on its own window", async () => {

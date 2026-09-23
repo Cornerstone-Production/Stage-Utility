@@ -281,8 +281,8 @@ describe("the History service page", () => {
     const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
     assert.match(bap.className, /su-card/);
     assert.match(text(bap), /Baptized/, "the stat strip");
-    // The dead-end sentence PR 2 already removed must never come back once
-    // this card has something real to show instead.
+    // The dead-end sentence this card replaced must never come back now that
+    // it has something real to show instead.
     assert.doesNotMatch(text(bap), /Per-person splits are in the Baptisms tab/);
     // The per-person splits are INLINE now, not a link elsewhere.
     assert.match(text(bap), /Person 1/, "the per-person split table");

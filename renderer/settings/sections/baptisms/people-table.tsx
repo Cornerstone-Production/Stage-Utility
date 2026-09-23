@@ -7,8 +7,8 @@
 // (or just-finished) session's state.people. The read-only History card
 // (service-history-section.tsx, via baptisms/session-chart.tsx's
 // HistorySessionChart) renders PeopleTable directly, once per linked
-// session, for exactly the per-person splits PR 2 removed from that page —
-// the same figures, the same row, never a forked copy of either.
+// session, for exactly the per-person splits that page used to show and then
+// lost — the same figures, the same row, never a forked copy of either.
 //
 // A grouped session's `people` fills during the TESTIMONY pass, before anyone
 // is baptized — see summarizeBaptism's own doc comment. An entry with
