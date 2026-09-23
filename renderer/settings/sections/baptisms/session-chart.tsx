@@ -274,9 +274,18 @@ export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChar
 
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
-  // Same fix, same reason, as SessionChart's own effect above: the ref lives
-  // on content that is always rendered (this div), not on SessionSvg's own
-  // wrapper, which does not exist yet on the render this effect runs in.
+  // THE REF GOES ON CONTENT THAT IS ALWAYS RENDERED — see history-chart.tsx's
+  // own "THE REF GOES ON BOTH BRANCHES" note for the identical bug. This
+  // effect runs ONCE, on mount, before useSessionLane's fetch — which never
+  // resolves synchronously — has any chance to flip `loaded` true. An early
+  // `return null` above this div meant the FIRST render had no element for
+  // the ref to find at all: the effect fired once against
+  // `hostRef.current === null`, attached to nothing, and (deps `[]`) never
+  // ran again once the real content finally existed — the chart was stuck at
+  // its 640px default for the rest of the page's life, regardless of the
+  // card's own real width. The `!loaded` gate now lives INSIDE the div,
+  // around the children alone, so this div — and the ref on it — exists from
+  // the very first render.
   useEffect(() => {
     const el = hostRef.current;
     if (!el || typeof ResizeObserver !== "function") return;
@@ -288,13 +297,11 @@ export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChar
     return () => ro.disconnect();
   }, []);
 
-  if (!loaded) return null;
-
   const multiple = sessions.length > 1;
 
   return (
     <div ref={hostRef} className="flex flex-col gap-5">
-      {sessions.map((session) => {
+      {!loaded ? null : sessions.map((session) => {
         // Only a session KEYED to this exact service can have raw rows in
         // its shared lane at all — one matched by time overlap (a keyless,
         // older session) never ran under this key, so there is nothing in

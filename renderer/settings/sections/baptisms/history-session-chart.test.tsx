@@ -177,3 +177,65 @@ test("a load failure shows its own error note, distinct from 'no timeline was re
   assert.equal(!!screen.queryByText(/Couldn't load the timing lane/i), true, "expected the fetch-failure note");
   assert.equal(!!screen.queryByText(/No timing detail was recorded/i), false, "a fetch failure must not read as a session that recorded nothing");
 });
+
+// Same bug, same fix, as session-chart.test.tsx's own "the chart re-lays out
+// when its host resizes" test: useSessionLane's own fetch never resolves
+// synchronously, so `loaded` is false on the FIRST render and only becomes
+// true once it settles. The host div must render — and be observed —
+// regardless: if the ResizeObserver effect's own ref instead lived on
+// content gated behind `loaded` (an early `return null` before ANY div
+// exists), the effect would fire once against `hostRef.current === null`
+// and never get a second chance, since its deps are `[]` — the observer
+// would never attach to anything, and the chart would be stuck at its
+// 640px default forever, regardless of the card's own real width. This
+// proves the opposite: the SAME host is observed from the very first
+// render, before the lane even resolves, and is still that same element
+// once the chart draws inside it — nothing swapped the div out from under
+// the observer partway through.
+test("the host is observed from the very first render, before the lane even loads, and is still the same element once the chart draws inside it", async () => {
+  let observed: Element | null = null;
+  const realRO = (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver;
+  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    constructor() {}
+    observe(el: Element) {
+      observed = el;
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+  const realFetch = globalThis.fetch;
+  // A fetch that resolves on a LATER microtask/macrotask, never synchronously
+  // — exactly what the real invoke()/apiFetch() path always does — so the
+  // component's FIRST render genuinely has `loaded === false`.
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
+    await new Promise((r) => setTimeout(r, 0));
+    if (url.includes("/api/baptism/lane")) {
+      return ok({
+        spans: [
+          { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:02:00.000Z" },
+        ],
+      });
+    }
+    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
+    return ok({});
+  }) as unknown as typeof fetch;
+  try {
+    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()] }));
+    // The FIRST render, before any fetch has resolved: `loaded` is false,
+    // yet the host div already exists and is already being watched.
+    assert.ok(observed, "expected the host to be observed on the very first render, not stranded until content exists inside it");
+    const observedBeforeLoad = observed;
+
+    await settle();
+    await settle();
+    await settle();
+
+    assert.equal(chartCount(), 1, "sanity: the chart drew once the lane loaded");
+    assert.equal(observed, observedBeforeLoad, "expected the SAME host element throughout — nothing swapped the observed div once the chart appeared inside it");
+  } finally {
+    globalThis.fetch = realFetch;
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = realRO;
+  }
+});
