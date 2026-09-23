@@ -47,8 +47,8 @@ import {
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
 
-function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
-  return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
+function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(channel, payload);
 }
 
 /**
@@ -126,7 +126,7 @@ export function useStageSettings(pinnedViewId?: string) {
   async function writeTo<T>(
     key: string[],
     channel: IpcChannel,
-    payload?: unknown,
+    payload?: Record<string, unknown>,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<T | null> {
     try {
@@ -155,7 +155,7 @@ export function useStageSettings(pinnedViewId?: string) {
   /** The same, for the writes that return a fresh StageState. */
   async function writeState(
     channel: IpcChannel,
-    payload?: unknown,
+    payload?: Record<string, unknown>,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<boolean> {
     return (await writeTo<StageState>(["stage:getState"], channel, payload, opts)) != null;

@@ -16,8 +16,8 @@ import { invoke, type IpcChannel } from "../lib/api";
 import type { WirelessChannel } from "../settings/types";
 
 /** Matches settings-view.tsx's local helper, so the moved queryFns are identical. */
-function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
-  return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
+function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(channel, payload);
 }
 
 export const QUERY_KEYS = {

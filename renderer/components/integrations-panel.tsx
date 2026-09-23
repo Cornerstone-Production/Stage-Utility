@@ -59,8 +59,8 @@ import { formatClock } from "../lib/clock-format";
 
 // ---- helpers ----------------------------------------------------------------
 
-function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
-  return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
+function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(channel, payload);
 }
 
 

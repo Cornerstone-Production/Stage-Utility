@@ -22,8 +22,8 @@ import {
 import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
-function ipc<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
-  return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
+function ipc<T>(channel: IpcChannel, payload?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(channel, payload);
 }
 
 function TargetBadge({ connection, message }: { connection: ConnectionState; message: string | null }) {
