@@ -93,15 +93,38 @@ export interface BaptismState {
    * every screen on the LAN. The write settles after Finish has returned, so
    * this arrives on a push of its own rather than on Finish's response.
    *
-   * Cleared by a later save that lands, by Reset, and by the operator
-   * dismissing it (dismissSaveError). Carried across Start and the workflow
-   * toggle: a plan item going live starts the next session with nobody at the
-   * screen, and that must not erase a failure nobody has seen.
+   * Cleared by a later save of the SAME session landing (see
+   * saveErrorSessionId) — never by an unrelated session's save succeeding — by
+   * Reset, and by the operator dismissing it (dismissSaveError). Carried
+   * across Start and the workflow toggle: a plan item going live starts the
+   * next session with nobody at the screen, and that must not erase a failure
+   * nobody has seen.
    *
    * Optional like every field added after this shape first shipped: a record
    * persisted before it existed restores with none.
    */
   saveError?: string | null;
+  /**
+   * The id of the session saveError describes, or null alongside it.
+   *
+   * A later successful save clears saveError only when ITS OWN session's id
+   * matches this one. Without the scope, session A fails to save, the
+   * operator runs session B, B saves cleanly, and A's note vanished although
+   * A was never written — the only trace of a lost baptism, cleared by
+   * something that had nothing to do with it. Carried and cleared everywhere
+   * saveError is carried and cleared.
+   */
+  saveErrorSessionId?: string | null;
+  /**
+   * The serviceKey of the session saveError describes.
+   *
+   * Not the same as this state's own serviceKey once a later session has
+   * started — that field has moved on to describe the CURRENT session, and
+   * the failed one's service is recoverable only from here. PR 3 uses this to
+   * offer Rebuild from raw for the service that actually failed, not whatever
+   * service is live when the operator finally reads the note.
+   */
+  saveErrorServiceKey?: string | null;
 }
 
 /** A finished baptism session, kept for later review. */

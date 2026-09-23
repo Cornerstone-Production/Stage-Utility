@@ -187,8 +187,10 @@ export function TimerCard({ state, onFinished }: TimerCardProps) {
           {/* Directly under the readout, because the readout above it says
               "Finished" either way. Not gated on the finished readout: Start
               and the workflow toggle carry the failure (see
-              BaptismState.saveError), so it stays up until a save lands, Reset
-              clears it, or the operator dismisses it here. Its own Dismiss
+              BaptismState.saveError), so it stays up until THAT SAME session
+              saves, Reset clears it, or the operator dismisses it here — an
+              unrelated session saving cleanly in the meantime does not clear
+              it (saveErrorSessionId scopes the match). Its own Dismiss
               because after the toggle the state holds nobody, and neither
               Reset nor Undo renders. No rebuild offer yet — nothing in the app
               replays a baptism session from its raw rows. */}

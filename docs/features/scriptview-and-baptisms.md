@@ -280,10 +280,12 @@ recorded, and what the append-only rule buys the rest of the archive.
 
 A save that fails says so. If Finish cannot write the session to
 `baptism.json`, the Timer card shows why, under the readout, and keeps showing
-it — through the next Start and the Workflow toggle too — until a later save
-lands, Reset clears it, or **Dismiss** on the note does. Past sessions does not
-list that session; its rows in `baptism.csv` still hold it, if a service was
-open while it ran.
+it — through the next Start and the Workflow toggle too — until that same
+session saves successfully, Reset clears it, or **Dismiss** on the note does.
+A different session saving cleanly does not clear it; the note stays up until
+the session it actually names is saved, reset, or dismissed. Past sessions
+does not list that session; its rows in `baptism.csv` still hold it, if a
+service was open while it ran.
 
 ## Logging
 
