@@ -11,8 +11,9 @@
 // (IpcChannel's doc comment in api.ts names the ways around it). These scans are
 // the second: a backstop for a literal cast past the type, at a call they
 // recognise, and the only check on the reverse direction, a channel that has
-// lost its last caller. That check reads raw text, so a comment quoting the
-// channel satisfies it.
+// lost its last caller. That check counts any double-quoted mention, so a query
+// key spelled as the channel, or a comment quoting it, keeps a dead channel
+// looking alive.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -54,23 +55,25 @@ function handledChannels(): Set<string> {
  *
  * Not exhaustive over forwarders, so a green run does not mean every wrapper
  * was scanned. Names are resolved per file, and the `function` pattern walks
- * from a declaration's `{` to the first `}` looking for `invoke`, which misses:
+ * from a declaration's first `)` to its first `{`, then on to the first `}`,
+ * looking for `invoke`. Shapes that defeat it include these, each probed with
+ * an unwired channel and left green here:
  *  - a forwarder NESTED in another function when no `}` comes between the
  *    outer `{` and the inner `invoke`: the match starts at the outer
  *    `function`, records the outer name and swallows the inner declaration,
  *    so calls through the inner helper are never scanned;
- *  - a forwarder whose own body closes a brace before its `invoke`, or whose
- *    return type holds one (`Promise<{ ok: boolean }>`);
- *  - a forwarder whose type parameters nest a `>`
- *    (`<T extends Record<string, unknown>>`);
+ *  - a `{` between the declaration's first `)` and its body: a return type
+ *    like `Promise<{ ok: boolean }>`, or an options object after a callback
+ *    parameter (`after?: () => void, opts: { quiet?: boolean } = {}`);
+ *  - a `}` in the forwarder's own body before its `invoke`;
+ *  - type parameters that nest a `>` (`<T extends Record<string, unknown>>`);
  *  - a forwarder of a forwarder: useStageSettings's writeTo() reaches invoke
- *    through ipc(), and writeState() through writeTo(); only ipc() is found;
+ *    through ipc, and writeState() through writeTo(); only ipc is found;
  *  - a forwarder declared in one file and called from another;
  *  - an arrow function or a method.
- * Each shape, probed with an unwired channel, left these tests green. The type
- * is what covers them: invoke() takes IpcChannel, so a forwarder whose channel
- * is `string` does not compile, and one whose channel is IpcChannel gets every
- * call site checked by `tsc` (see IpcChannel in api.ts).
+ * The type is what covers them: invoke() takes IpcChannel, so a forwarder whose
+ * channel is `string` does not compile, and one whose channel is IpcChannel
+ * gets every call site checked by `tsc` (see IpcChannel in api.ts).
  */
 function dispatcherNames(src: string): string[] {
   const names = new Set(["invoke"]);
@@ -104,14 +107,14 @@ function invokedChannels(): Map<string, string[]> {
     // missing-case check below never had a reason to complain. `[^()]*?` allows
     // the ternary's own condition to contain quotes (`dir === "next"`) as long as
     // it contains no parens — true of every condition this closes today, but not
-    // a property of ternaries in general. This scan is still blind to: a
-    // three-way ternary (only the first `?`/`:` pair resolves); a parenthesised
-    // condition (`(a || b) ? "x:y" : "x:z"` — the paren exclusion in `[^()]*?`
-    // stops at it); a channel assembled in a variable before the call, however
-    // it got its value (see IpcChannel in api.ts for the typed answer to that
-    // one); and a channel built from a template literal. Widen it again, or
-    // reach for typing, when one of those actually ships unwired — do not
-    // assume this list is exhaustive of what a future call site can do.
+    // a property of ternaries in general. This scan is also blind to, among
+    // others: a three-way ternary (only the first `?`/`:` pair resolves); a
+    // parenthesised condition (`(a || b) ? "x:y" : "x:z"` — the paren exclusion
+    // in `[^()]*?` stops at it); an explicit type argument that nests a `>`
+    // (`invoke<Omit<T, "k">>("x:y")`, the shape of two calls today); a channel
+    // assembled in a variable before the call, however it got its value; and a
+    // channel built from a template literal. `tsc` checks every one of those,
+    // since invoke() takes IpcChannel (see its doc comment in api.ts).
     const re = new RegExp(
       `\\b(?:${callee})\\s*(?:<[^>()]*>)?\\s*\\(\\s*(?:[^()]*?\\?\\s*)?"([\\w-]+:[\\w-]+)"(?:\\s*:\\s*"([\\w-]+:[\\w-]+)")?`,
       "g",

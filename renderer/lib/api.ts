@@ -91,11 +91,12 @@ function del<T>(path: string): Promise<T> {
  * it has to be a member to compile: a literal, a ternary, a typed variable
  * (baptism-operator.tsx's `primaryChannel`), or the parameter of a wrapper
  * however deeply nested. A wrapper whose channel is `string` cannot forward to
- * it at all. The ways past that are a cast, an `any`, and handing `invoke`
- * itself to a METHOD-syntax signature that declares `string`: TypeScript
- * checks method parameters bivariantly, so
- * `{ send(channel: string): Promise<unknown> }` accepts it where the property
- * form `send: (channel: string) => Promise<unknown>` does not. A channel chosen
+ * it at all. The ways past that are a cast, an `any`, and a METHOD-syntax
+ * signature that declares `string`: TypeScript checks method parameters
+ * bivariantly, so anything whose channel is IpcChannel (`invoke`, a typed
+ * wrapper, a class or object-literal method) can stand in for
+ * `{ send(channel: string): Promise<unknown> }`, where the property form
+ * `send: (channel: string) => Promise<unknown>` rejects it. A channel chosen
  * at runtime belongs in an `as const` table instead, as in use-stream-state.ts.
  *
  * What a type cannot say is whether a channel still has a caller. That
