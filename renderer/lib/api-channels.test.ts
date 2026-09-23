@@ -47,6 +47,21 @@ function handledChannels(): Set<string> {
  * Resolved per file rather than by matching any callee: `onNotification` takes a
  * channel-shaped string too, but those are SSE event names with no case in
  * api.ts and never should have one.
+ *
+ * Not exhaustive over forwarders, so a green run does not mean every wrapper
+ * was scanned. The `function` pattern walks from a declaration's `{` to the
+ * first `}` looking for `invoke`, which misses:
+ *  - a forwarder NESTED in another function when no `}` comes between the
+ *    outer `{` and the inner `invoke`: the match starts at the outer
+ *    `function`, records the outer name and swallows the inner declaration,
+ *    so calls through the inner helper are never scanned;
+ *  - a forwarder whose own body closes a brace before its `invoke`;
+ *  - a forwarder of a forwarder: useStageSettings's writeState() and writeTo()
+ *    reach invoke through ipc(), and only ipc() is found;
+ *  - an arrow function or a method.
+ * Each shape, probed with an unwired channel, left these tests green. The type
+ * is what covers them: a forwarder whose channel parameter is IpcChannel gets
+ * every call site checked by `tsc` (see IpcChannel in api.ts).
  */
 function dispatcherNames(src: string): string[] {
   const names = new Set(["invoke"]);
