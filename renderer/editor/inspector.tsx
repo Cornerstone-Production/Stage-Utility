@@ -38,6 +38,7 @@ import {
   InfoHint,
   ChipToggle,
   ChipToggleRow,
+  ErrorNote,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
@@ -55,7 +56,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
-import { useStageState } from "../main/use-stage-state";
+import { pcoConnected, useStageState } from "../main/use-stage-state";
 import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
@@ -73,6 +74,8 @@ import {
 } from "../main/layout-objects";
 import { DEFAULT_READOUT_ALIGN, READOUT_ALIGNED_TYPES } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
+import { useFailedReads } from "../lib/use-failed-reads";
+import { useResyncOn } from "../lib/use-resync-on";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
@@ -212,9 +215,9 @@ type RossTalkCommandDTO = { id: string; label: string; family: string; params: R
  * It reads the target list and command catalogue itself, so they are fetched
  * only when a RossTalk button is the object being edited. The Inspector used to
  * read them for every object; it remounts per selection, so that was once per
- * object selected, whatever its type.
+ * object selected, whatever its type. Exported for inspector-reads.test.tsx.
  */
-function RossTalkButtonConfig({
+export function RossTalkButtonConfig({
   c,
   onConfig,
 }: {
@@ -223,14 +226,32 @@ function RossTalkButtonConfig({
 }) {
   const [targets, setTargets] = useState<RossTalkTarget[]>([]);
   const [catalogue, setCatalogue] = useState<RossTalkCommandDTO[]>([]);
+  // A failed read is not "no targets". Both lists start empty, so a configured
+  // button labelled its own target and command "not found".
+  const { failed, fail } = useFailedReads<"targets" | "commands">("layout-editor");
   useEffect(() => {
     void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
       .then((r) => setTargets(r.targets))
-      .catch(() => {});
+      .catch((err: unknown) => fail("targets", "the RossTalk targets", err));
     void invoke<RossTalkCommandDTO[]>("rosstalk:commands")
       .then(setCatalogue)
-      .catch(() => {});
-  }, []);
+      .catch((err: unknown) => fail("commands", "the RossTalk commands", err));
+  }, [fail]);
+  if (failed.size > 0) {
+    return (
+      <>
+        {/* In the pickers' place: with no lists, choosing from them could only
+            clear the button's real target. */}
+        <Row label="Target">
+          <ErrorNote>
+            Couldn't load the RossTalk {failed.size > 1 ? "targets and commands" : failed.has("targets") ? "targets" : "commands"}, so
+            this button can't be changed right now.
+          </ErrorNote>
+        </Row>
+        <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+      </>
+    );
+  }
   const target = targets.find((t) => t.id === c.targetId) ?? null;
   const family = target?.config.family ?? "carbonite";
   // Only ever offer commands for THIS target's family — a Carbonite XPT sent
@@ -297,14 +318,22 @@ function RossTalkButtonConfig({
 }
 
 /** Inspector controls for the people-graph object: live vs. a recorded service,
- *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
-function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
+ *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle.
+ *  Exported for inspector-reads.test.tsx. */
+export function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
   const source = c.source ?? "live";
   const [services, setServices] = useState<{ value: string; label: string }[]>([]);
+  // A failed read is not "no recorded services". Drawn as one, the picker
+  // offered only Most recent and labelled a chosen service "not found".
+  const { failed, fail, clear } = useFailedReads<"services">("layout-editor");
   useEffect(() => {
     if (source !== "recorded") return;
+    // Cancelled on a source change: Recorded, Live and Recorded again must not
+    // let the first read's late failure replace a picker the second one filled.
+    let cancelled = false;
     invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((list) =>
+      .then((list) => {
+        if (cancelled) return;
         setServices(
           (list ?? [])
             .filter((s) => s.endedAt)
@@ -314,10 +343,16 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
               const when = `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${formatClock(d)}`;
               return { value: s.serviceKey, label: s.serviceTypeName ? `${when} — ${s.serviceTypeName}` : when };
             }),
-        ),
-      )
-      .catch(() => setServices([]));
-  }, [source]);
+        );
+        clear("services");
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) fail("services", "the recorded services for a people graph", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, fail, clear]);
 
   return (
     <>
@@ -337,15 +372,22 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
         options={[{ value: "live", label: "Live" }, { value: "recorded", label: "Recorded" }]}
         onChange={(v) => onConfig({ ...c, source: v as "live" | "recorded" })}
       />
-      {source === "recorded" && (
-        <RowSelect
-          label="Service"
-          hint="Which past service's curve to show. 'Most recent' auto-follows the latest finished service."
-          value={c.recordedServiceKey || RECORDED_LATEST}
-          options={[{ value: RECORDED_LATEST, label: "Most recent" }, ...services]}
-          onChange={(v) => onConfig({ ...c, recordedServiceKey: v === RECORDED_LATEST ? null : v })}
-        />
-      )}
+      {source === "recorded" &&
+        (failed.has("services") ? (
+          // In the picker's place: with no list it could only offer Most recent,
+          // and picking that by accident would drop the chosen service.
+          <Row label="Service">
+            <ErrorNote>Couldn't load the recorded services, so the service can't be changed right now.</ErrorNote>
+          </Row>
+        ) : (
+          <RowSelect
+            label="Service"
+            hint="Which past service's curve to show. 'Most recent' auto-follows the latest finished service."
+            value={c.recordedServiceKey || RECORDED_LATEST}
+            options={[{ value: RECORDED_LATEST, label: "Most recent" }, ...services]}
+            onChange={(v) => onConfig({ ...c, recordedServiceKey: v === RECORDED_LATEST ? null : v })}
+          />
+        ))}
       <RowSwitch label="Plan-item markers" hint="Overlay a dashed line + time where each PCO item started." checked={c.showMarkers ?? true} onChange={(v) => onConfig({ ...c, showMarkers: v })} />
       <RowSwitch label="Hover tooltip" hint="Show the value + time at the pointer." checked={c.showTooltip ?? true} onChange={(v) => onConfig({ ...c, showTooltip: v })} />
       <RowSwitch label="Kiosk live/recorded toggle" hint="Show an on-screen pill so a viewer can flip between live and the last recorded service." checked={c.kioskToggle ?? false} onChange={(v) => onConfig({ ...c, kioskToggle: v })} />
@@ -359,9 +401,9 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
  * tracks the stage plot week to week), a picker of the current plan's files, the
  * PDF page, plus crop / trim / background recolor of the rendered image and a
  * "fit box to file" action. All framing acts on the rendered image, not the source
- * file in Planning Center.
+ * file in Planning Center. Exported for inspector-reads.test.tsx.
  */
-function PlanAttachmentConfig({
+export function PlanAttachmentConfig({
   c,
   onConfig,
   o,
@@ -376,24 +418,45 @@ function PlanAttachmentConfig({
 }) {
   const [files, setFiles] = useState<PcoAttachmentDTO[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // A read that failed, as opposed to a plan with no documents. The server
+  // answers 200 [] for "no plan", so a non-ok status is only ever a failure;
+  // both it and a thrown fetch used to read "No documents on the current plan".
+  const { failed, fail, clear } = useFailedReads<"files">("layout-editor");
   const [fitting, setFitting] = useState(false);
+  // The files are the current plan's, from Planning Center, so they are asked
+  // for only once it is connected, and until then the picker says to connect
+  // it rather than that the plan has none (see pcoConnected).
+  const stage = useStageState();
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  useResyncOn([pcoConfigured], () => {
+    if (pcoConfigured === false) clear("files");
+  });
   useEffect(() => {
+    if (!pcoConfigured) return;
     let cancelled = false;
     fetch("/api/pco/attachments")
-      .then((r) => (r.ok ? r.json() : []))
+      .then(async (r) => {
+        if (r.ok) return r.json();
+        // The route's own reason (a 502 carries Planning Center's), for the log.
+        const body = (await r.json().catch(() => null)) as { error?: unknown } | null;
+        throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${r.status}`);
+      })
       .then((list: PcoAttachmentDTO[]) => {
         if (!cancelled) {
           setFiles(Array.isArray(list) ? list : []);
           setLoaded(true);
+          clear("files");
         }
       })
-      .catch(() => {
-        if (!cancelled) setLoaded(true);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoaded(true);
+        fail("files", "the current plan's files", err);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pcoConfigured, fail, clear]);
 
   // Hide audio stems / raw media — a stage plot is a document (PDF/image).
   const pickable = files.filter((f) => {
@@ -436,7 +499,7 @@ function PlanAttachmentConfig({
           className="text-fg"
         />
       </Row>
-      {pickable.length > 0 && (
+      {pcoConfigured !== false && pickable.length > 0 && (
         <Row label="Current plan">
           <Select value="" onValueChange={(v: string) => onConfig({ ...c, match: v })}>
             <SelectTrigger><SelectValue placeholder="Pick a file…" /></SelectTrigger>
@@ -450,12 +513,19 @@ function PlanAttachmentConfig({
           </Select>
         </Row>
       )}
-      {loaded && pickable.length === 0 && (
+      {pcoConfigured === false ? (
         <p className="text-caption2 text-fg-muted leading-snug">
-          No documents on the current plan (or PCO isn’t connected). The match still
-          applies whenever a plan with a matching file goes live.
+          Connect Planning Center to pick from the current plan’s files. The match
+          still applies whenever a plan with a matching file goes live.
         </p>
-      )}
+      ) : failed.has("files") ? (
+        <ErrorNote>Couldn't load the current plan's files. The match still applies.</ErrorNote>
+      ) : loaded && pickable.length === 0 ? (
+        <p className="text-caption2 text-fg-muted leading-snug">
+          No documents on the current plan. The match still applies whenever a plan
+          with a matching file goes live.
+        </p>
+      ) : null}
       <Row label="PDF page">
         <NumberInput value={c.page ?? 1} step={1} min={1} max={99} onChange={(v) => onConfig({ ...c, page: Math.round(v) })} />
       </Row>

@@ -9,10 +9,13 @@ import { useCallback, useEffect, useState } from "react";
 import { DownloadIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
-import { Button } from "../components/ui";
+import { useFailedReads } from "../lib/use-failed-reads";
+import { Button, ErrorNote } from "../components/ui";
 
 export interface SavedGroups {
   groups: LayoutGroup[];
+  /** The library could not be read, which is not the same as having none. */
+  loadFailed: boolean;
   /** A save or a delete answers with the whole new list; take it as read. */
   replace: (list: LayoutGroup[]) => void;
 }
@@ -20,11 +23,20 @@ export interface SavedGroups {
 /** The library, read once when the editor opens. */
 export function useSavedGroups(): SavedGroups {
   const [groups, setGroups] = useState<LayoutGroup[]>([]);
+  const { failed, fail, clear } = useFailedReads<"groups">("layout-editor");
   useEffect(() => {
-    invoke<LayoutGroup[]>("layoutGroups:list").then(setGroups).catch(() => setGroups([]));
-  }, []);
-  const replace = useCallback((list: LayoutGroup[]) => setGroups(list), []);
-  return { groups, replace };
+    invoke<LayoutGroup[]>("layoutGroups:list")
+      .then(setGroups)
+      .catch((err: unknown) => fail("groups", "the saved groups", err));
+  }, [fail]);
+  const replace = useCallback(
+    (list: LayoutGroup[]) => {
+      setGroups(list);
+      clear("groups");
+    },
+    [clear],
+  );
+  return { groups, loadFailed: failed.has("groups"), replace };
 }
 
 /** The "Saved groups" block of the editor's sidebar. Takes the hook's whole
@@ -42,7 +54,9 @@ export function SavedGroupsLibrary({
   return (
     <div className="flex flex-col gap-1">
       <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Saved groups</span>
-      {saved.groups.length === 0 ? (
+      {saved.loadFailed ? (
+        <ErrorNote>Couldn't load the saved groups.</ErrorNote>
+      ) : saved.groups.length === 0 ? (
         <span className="text-caption2 text-fg-muted">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
       ) : (
         saved.groups.map((g) => (
