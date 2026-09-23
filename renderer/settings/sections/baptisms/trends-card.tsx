@@ -39,7 +39,7 @@ import { baptismStats } from "../../../lib/link-baptisms";
 import { fmtClock } from "../../../main/use-baptism-state";
 import { Sparkline } from "../history-trends/sparkline";
 import { TREND_WINDOW } from "../history-trends/trends";
-import { pctChange, pctLabel } from "../history-trends/trends-card";
+import { pctChange, pctLabel, noPriorCaption } from "../history-trends/trends-card";
 import { baptismTrends, type BaptismTrendPoint, type BaptismTrendTile } from "./trends";
 
 /** "+4s" · "−3s" · "+5:02" · "0s" — a duration CHANGE, signed and compact
@@ -156,10 +156,14 @@ export function TrendsCard({ sessions, loadError = false }: TrendsCardProps) {
  * - a full prior window exists but averaged (rounds to) zero, so a percentage
  *   change has no basis to divide by (see pctChange) — reachable today only
  *   by "Baptized per service", the one tile that IS a percentage.
+ *
+ * The prior-vs-zero decision itself is noPriorCaption, shared with
+ * history-trends/trends-card.tsx's own tiles, which have the identical
+ * ambiguity behind a different "no latest value at all" fallback.
  */
 function noChangeCaption(tile: BaptismTrendTile): string {
   if (tile.latest == null) return "—";
-  return tile.prior != null ? "prior window averaged 0" : "no prior window yet";
+  return noPriorCaption(tile.prior != null);
 }
 
 function Tile({
