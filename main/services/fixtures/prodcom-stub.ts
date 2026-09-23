@@ -151,6 +151,10 @@ export type StubOptions = {
    * is which.
    */
   delayTranscriptMs?: (url: URL) => number;
+  /** Bind to this exact port rather than an ephemeral one — so a test can close
+   *  one stub and start another on the same port, simulating a box that dropped
+   *  off the network and came back rather than one that changed address. */
+  port?: number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -166,8 +170,12 @@ export type ProdComStub = {
   /** How many of those sockets are still open. A client that stops reading a
    *  socket without closing it leaves this above zero. */
   openWebSockets: number;
-  /** How many SSE streams have been opened. */
+  /** How many SSE streams have been opened, total — never decrements. */
   sseOpens: number;
+  /** How many SSE streams are open RIGHT NOW. A client that drops one on
+   *  purpose (promotion) without destroying the request leaves this above
+   *  zero even though sseOpens stopped moving. */
+  openSseStreams: number;
   /** Start or stop failing the keyword endpoints AFTER the stub is running, so a
    *  test can drive "the list loaded, then a later read failed" — which is the
    *  only path on which the previously-loaded keywords can be wrongly dropped. */
@@ -512,7 +520,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     notify();
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
 
@@ -548,6 +556,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     get sseOpens() {
       return state.sseOpens;
+    },
+    get openSseStreams() {
+      return sseStreams.size;
     },
     wsSend,
     setFailKeywords: (fail: boolean) => {

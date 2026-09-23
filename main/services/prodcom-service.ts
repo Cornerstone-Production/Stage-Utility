@@ -1557,8 +1557,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.connectWebSocket(host, port);
   }
 
-  /** Drop partials nothing has updated for PARTIAL_TTL_MS. Returns whether any went. */
-  private pruneStalePartials(): boolean {
+  /** Drop partials nothing has updated for PARTIAL_TTL_MS. Returns whether any
+   *  went. Protected, not private: a test seam so the TTL rule can be checked
+   *  without waiting on PARTIAL_SWEEP_MS's real setInterval. */
+  protected pruneStalePartials(): boolean {
     const cutoff = this.now() - PARTIAL_TTL_MS;
     let dropped = false;
     for (const [ch, entry] of this.partials) {
