@@ -284,7 +284,7 @@ describe("the History service page", () => {
     // The dead-end sentence PR 2 already removed must never come back once
     // this card has something real to show instead.
     assert.doesNotMatch(text(bap), /Per-person splits are in the Baptisms tab/);
-    // The per-person splits (Ruling 49) are INLINE, not a link elsewhere.
+    // The per-person splits are INLINE now, not a link elsewhere.
     assert.match(text(bap), /Person 1/, "the per-person split table");
     assert.match(text(bap), /Testimony/);
     // The chart itself: an SVG carrying the same "Baptism session timeline"

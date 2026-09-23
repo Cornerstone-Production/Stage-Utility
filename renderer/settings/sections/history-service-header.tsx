@@ -477,9 +477,9 @@ export interface ServiceHeaderProps {
   /** Live only — items before now stop counting toward the pacing readout. */
   onResetPacing: () => void;
   /** The nav's own list — SERVICE_SECTIONS by default. The caller passes a
-   *  longer one for a service the Baptisms card applies to (Task 18): the
-   *  header must not hold a second, competing const of its own, since the two
-   *  could drift on which sections exist at all. */
+   *  longer one for a service the Baptisms card applies to: the header must
+   *  not hold a second, competing const of its own, since the two could
+   *  drift on which sections exist at all. */
   sections?: readonly { id: string; label: string }[];
 }
 

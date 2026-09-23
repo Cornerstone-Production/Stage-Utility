@@ -145,7 +145,7 @@ function installFetch(opts: { extra?: ServiceTimeline[]; baptisms?: BaptismSessi
     if (url.startsWith("/api/baptism/lane")) return ok({ spans: [] });
     // Opening a row's detail page reads its own record back by key — the
     // same [NINE, ELEVEN] the list itself was built from, so the detail
-    // page's own Baptisms card (Task 18) can be checked against the SAME
+    // page's own Baptisms card can be checked against the SAME
     // fixture the list row's count came from.
     if (url === `/api/service-timeline/${encodeURIComponent(NINE.serviceKey)}`) return ok(NINE);
     if (url === `/api/service-timeline/${encodeURIComponent(ELEVEN.serviceKey)}`) return ok(ELEVEN);
@@ -387,7 +387,7 @@ describe("the All services day list", () => {
       assert.doesNotMatch(elevenText, /\b2 baptized\b/, "must count real baptisms, never testimonies");
 
       // Open the SAME service's own History page and read ITS OWN count off
-      // the Task 18 Baptisms card's stat strip — one fixture, both surfaces.
+      // the Baptisms card's stat strip — one fixture, both surfaces.
       await act(async () => {
         (view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`) as HTMLButtonElement).click();
         for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));

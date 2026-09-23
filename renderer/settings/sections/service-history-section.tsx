@@ -1735,8 +1735,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // every ordinary Sunday. Joins the subtitle instead, and a
             // service with none gains nothing at all: no marker, no dash.
             // The SAME linkBaptisms + baptismStats pair the open service's
-            // own Baptisms card uses (Task 18), so a row's count and that
-            // service's page can never disagree about the same service.
+            // own Baptisms card uses, so a row's count and that service's
+            // page can never disagree about the same service.
             const bapCount = baptismStats(linkBaptisms(baptisms, s)).people;
             const under = [s.seriesTitle, itemCount, bapCount > 0 ? `${bapCount} baptized` : null]
               .filter(Boolean)

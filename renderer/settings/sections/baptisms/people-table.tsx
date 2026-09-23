@@ -4,8 +4,8 @@
 //
 // PeopleTable is the reusable half: any BaptismPerson[], live or archived.
 // PeopleCard wraps it for the Baptisms tab's own card, reading the CURRENT
-// (or just-finished) session's state.people. Task 18's read-only History
-// card (service-history-section.tsx, via baptisms/session-chart.tsx's
+// (or just-finished) session's state.people. The read-only History card
+// (service-history-section.tsx, via baptisms/session-chart.tsx's
 // HistorySessionChart) renders PeopleTable directly, once per linked
 // session, for exactly the per-person splits PR 2 removed from that page —
 // the same figures, the same row, never a forked copy of either.

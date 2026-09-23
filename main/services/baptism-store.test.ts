@@ -217,8 +217,9 @@ describe("mergeRebuilt never evicts, even at the cap", () => {
     }
   });
 
-  // task 17b clears a save-failure entry by id, only for a session mergeRebuilt
-  // ACTUALLY wrote — never one merely planned. A bare added COUNT cannot say
+  // The save-failure note's own Rebuild offer clears an entry by id, only
+  // for a session mergeRebuilt ACTUALLY wrote — never one merely planned. A
+  // bare added COUNT cannot say
   // which of several candidates landed, so this proves addedIds names exactly
   // the one the cap let through, in the order offered, and never the update
   // (which was never "added" at all) or the one the cap turned away.

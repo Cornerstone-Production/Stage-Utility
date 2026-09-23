@@ -245,7 +245,7 @@ export interface HistorySessionChartProps {
 }
 
 /**
- * The read-only, PAST-service entry point onto the Session chart — Task 18's
+ * The read-only, PAST-service entry point onto the Session chart, for the
  * Baptisms card on a service's History page.
  *
  * Shares useSessionLane and usePastPlanItems outright with the live

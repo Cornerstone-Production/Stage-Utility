@@ -1,4 +1,4 @@
-// history-session-chart.test.tsx — Task 18's read-only entry point onto the
+// history-session-chart.test.tsx — the read-only entry point onto the
 // Session chart: HistorySessionChart, on a PAST service's own serviceKey plus
 // its linked sessions, never the live BaptismState SessionChart takes.
 //

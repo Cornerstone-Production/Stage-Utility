@@ -188,7 +188,7 @@ test("two failed sessions both show their own line, naming their own reason", as
   assert.match(text!, /2 sessions did not save/, "the note counts both, not just the latest");
 });
 
-// ── task 17b: each failed session offers its own Rebuild from raw ──────────
+// ── each failed session offers its own Rebuild from raw ────────────────────
 //
 // The clearing itself — that a real rebuild through the real route restores
 // the session and removes exactly its own entry, on the server, whichever

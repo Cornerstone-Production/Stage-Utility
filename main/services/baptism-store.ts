@@ -127,10 +127,10 @@ class BaptismStore {
    * entry, not merely planned to — alongside `full`, both counted here, at
    * write time, from the same batch the write itself just applied. `added`
    * is `addedIds.size`, never a separate count: a caller that needs to know
-   * WHICH sessions were restored (task 17b's save-failure note, clearing an
-   * entry only for an id that genuinely landed) cannot get that from a bare
-   * number, and a caller must not re-derive either from its own plan-time
-   * count of how many rows it expected to add — the store can change
+   * WHICH sessions were restored (the save-failure note's own Rebuild offer
+   * clears an entry only for an id that genuinely landed) cannot get that
+   * from a bare number, and a caller must not re-derive either from its own
+   * plan-time count of how many rows it expected to add — the store can change
    * between planning a rebuild and applying it (an operator deleting a
    * session this rebuild had matched, another save landing), and
    * subtracting a stale plan-time count from a fresh write-time one can

@@ -22,11 +22,11 @@
 // not layout, and IS unit-tested in header.test.tsx.
 //
 // useServiceLive, baptismRebuildDisabledReason, rebuildTargetLabel and
-// runBaptismRebuild are exported for timer-card.tsx's save-failure note
-// (task 17b): each failed session gets its own Rebuild action for its own
-// serviceKey, never state.serviceKey, and has to confirm, recheck and report
-// a rebuild exactly the way this header does — reusing these rather than
-// writing a second copy is the whole point.
+// runBaptismRebuild are exported for timer-card.tsx's save-failure note:
+// each failed session gets its own Rebuild action for its own serviceKey,
+// never state.serviceKey, and has to confirm, recheck and report a rebuild
+// exactly the way this header does — reusing these rather than writing a
+// second copy is the whole point.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
@@ -316,9 +316,9 @@ export function baptismRebuildDisabledReason(args: {
  * How Rebuild from raw names its target in a confirm dialog: title and date
  * together when both exist, whichever one exists alone, or a neutral
  * fallback when neither does. Shared so the header's own action and each
- * save-failure entry's own (task 17b, which has a date from its session id
- * but never a title) describe "this service" the same way rather than two
- * slightly different sentences drifting apart.
+ * save-failure entry's own (which has a date from its session id but never
+ * a title) describe "this service" the same way rather than two slightly
+ * different sentences drifting apart.
  */
 export function rebuildTargetLabel(title: string | null, date: string | null): string {
   return title && date ? `${title} (${fmtDate(date)})` : (title ?? (date ? fmtDate(date) : "this service"));
@@ -326,8 +326,8 @@ export function rebuildTargetLabel(title: string | null, date: string | null): s
 
 /**
  * Confirm before writing, naming the service — the exact dialog this header
- * has always shown, pulled out so task 17b's per-entry Rebuild action reuses
- * the same wording rather than a second copy of it.
+ * has always shown, pulled out so the save-failure note's per-entry Rebuild
+ * action reuses the same wording rather than a second copy of it.
  */
 async function confirmBaptismRebuild(targetLabel: string): Promise<boolean> {
   return confirm({
@@ -344,8 +344,8 @@ async function confirmBaptismRebuild(targetLabel: string): Promise<boolean> {
 /**
  * Confirm, recheck liveness right before the write, POST, and report — the
  * one place this repo posts to POST /api/baptism/rebuild, so the header's
- * own action and the save-failure note's per-entry one (task 17b) cannot
- * refuse, confirm or report a rebuild differently. `liveCheck` is always the
+ * own action and the save-failure note's per-entry one cannot refuse,
+ * confirm or report a rebuild differently. `liveCheck` is always the
  * CALLER's own `useServiceLive()`: the header's targetServiceKey and a
  * failed entry's own serviceKey are never the same question, and each needs
  * its own answer rather than sharing one hook instance.

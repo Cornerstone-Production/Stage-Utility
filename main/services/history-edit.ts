@@ -1114,7 +1114,7 @@ async function planBaptismRebuild(serviceKey: string, serviceDate: string): Prom
  * Also the one place that tells the live baptism timer which sessions this
  * rebuild actually restored (see baptismTimerService.clearRestoredSaveErrors)
  * — being shared by both callers is exactly why: a save-failure entry's own
- * per-session Rebuild button (task 17b) posts through rebuildServiceBaptisms,
+ * per-session Rebuild button posts through rebuildServiceBaptisms,
  * but an operator can just as easily restore the same session through
  * History's whole-service rebuild, and the note must clear either way.
  */
