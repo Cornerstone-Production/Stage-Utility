@@ -510,7 +510,7 @@ describe("baptismLaneSpans: session boundaries", () => {
   });
 });
 
-describe("baptismLaneSpans: the clock a direct next() starts while armed", () => {
+describe("baptismLaneSpans: a clock started from armed with no row of its own", () => {
   it("opens it on the baptisms-start that next() writes, at the person that row names", () => {
     // The file as the emitter writes it: no row for person 1 (nobody's clock
     // ran), and baptisms-start for person 2's — the row advance() writes for
@@ -562,6 +562,72 @@ describe("baptismLaneSpans: the clock a direct next() starts while armed", () =>
       ["testimony", 2, 20, 40],
       ["baptism", 2, 50, 70],
       ["baptism", 2, 90, 100],
+    ]);
+  });
+
+  it("an old file's silent clock at person 2, undone: a step back that re-times person 1", () => {
+    // The undo lands one index before the silent clock, so it is the step back
+    // it looks like: person 1 re-timed from the undo, person 2's silent run
+    // thrown away with it and never drawn.
+    const rows = [
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(20, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "20000" }),
+      row(40, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "20000" }),
+      // next() while armed at 45: person 2's clock starts, no row
+      row(55, { event: "undo", phase: "baptism", personNumber: "2", baptismIndex: "0", detail: "from baptism" }),
+      row(75, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "0", segmentMs: "20000" }),
+      row(95, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "20000" }),
+      row(95, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1" }),
+    ];
+    // Right after the undo person 1's clock is running, so it is drawn open —
+    // read as a re-arm, nothing would run until the next row placed it.
+    assert.deepEqual(lane(rows.slice(0, 4)), [
+      ["testimony", 1, 0, 20],
+      ["testimony", 2, 20, 40],
+      ["baptism", 1, 55, null],
+    ]);
+    assert.deepEqual(lane(rows), [
+      ["testimony", 1, 0, 20],
+      ["testimony", 2, 20, 40],
+      ["baptism", 1, 55, 75],
+      ["baptism", 2, 75, 95],
+    ]);
+  });
+
+  // PR 1's Undo after a Finish pressed while armed reopened the LAST person's
+  // baptism with a clock running and no baptisms-start. The lane reads that
+  // undo as the re-arm the timer does now, so the clock is silent.
+  it("an old file's reopened armed Finish: the last person's silent clock is placed from the person-complete that ends it", () => {
+    assert.deepEqual(lane([
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(20, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "20000" }),
+      row(40, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "20000" }),
+      row(45, { event: "finish", phase: "idle", personNumber: "2", detail: "people=2" }),
+      row(50, { event: "undo", phase: "baptism", personNumber: "2", baptismIndex: "1", detail: "from idle" }),
+      row(80, { event: "person-complete", phase: "baptism", personNumber: "2", baptismIndex: "1", segmentMs: "30000" }),
+      row(80, { event: "finish", phase: "idle", personNumber: "2", baptismIndex: "1", detail: "people=2" }),
+    ]), [
+      ["testimony", 1, 0, 20],
+      ["testimony", 2, 20, 40],
+      ["baptism", 2, 50, 80],
+    ]);
+  });
+
+  it("an old file's reopened armed Finish on the only person, undone again: re-armed, nothing drawn until the next start", () => {
+    // PR 1's second Undo lands on the silent clock's own index, 0, and re-arms
+    // as it does after "First person in", throwing that clock's time away.
+    assert.deepEqual(lane([
+      row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
+      row(40, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "40000" }),
+      row(45, { event: "finish", phase: "idle", personNumber: "1", detail: "people=1" }),
+      row(50, { event: "undo", phase: "baptism", personNumber: "1", baptismIndex: "0", detail: "from idle" }),
+      row(60, { event: "undo", phase: "baptism", personNumber: "1", baptismIndex: "0", detail: "from baptism" }),
+      row(70, { event: "baptisms-start", phase: "baptism", personNumber: "1" }),
+      row(90, { event: "person-complete", phase: "baptism", personNumber: "1", baptismIndex: "0", segmentMs: "20000" }),
+      row(90, { event: "finish", phase: "idle", personNumber: "1", detail: "people=1" }),
+    ]), [
+      ["testimony", 1, 0, 40],
+      ["baptism", 1, 70, 90],
     ]);
   });
 
