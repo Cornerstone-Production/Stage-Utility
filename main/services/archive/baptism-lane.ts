@@ -344,6 +344,10 @@ export function baptismLaneSpans(rows: BaptismRow[], serviceKey = ""): BaptismSp
           // armed before finishedFrom existed. The undo re-arms on it as on
           // "First person in". None of that clock was drawn, so nothing drops.
           // See the header.
+          // `!reopens` changes nothing today: a finish leaves armedAt as it
+          // was, so an armed reopen is taken by the first rule above and any
+          // other reopen arrives with armedAt null. It stays so that a finish
+          // which ever stops preserving armedAt cannot route a reopen here.
           session.armedAt = at;
           break;
         }
