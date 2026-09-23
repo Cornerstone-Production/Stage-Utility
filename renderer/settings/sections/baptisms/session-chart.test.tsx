@@ -121,6 +121,88 @@ test("a session with recorded spans draws the lane and its legend", async () => 
   assert.equal(!!screen.queryByText("Plan item"), true, "expected the legend's Plan item entry");
 });
 
+// Final review, Important 1: the window used to be the WHOLE SERVICE's plan
+// and spans, not the session's. Seeded with a realistic running order — a
+// countdown before the session, a sermon and closing after it — and driven
+// for real, the axis read 0m to 85m for a session that ran about 25m to 47m,
+// with a "not counted" block covering the sermon and closing. Reproduced here
+// structurally (element counts, not pixels — jsdom lays nothing out): the
+// session-lane.test.ts unit tests (sessionWindow/clipToSession/sessionSpans)
+// are what this shape's arithmetic is actually proven against.
+test("plan items before and after the session are left off the chart, not just squeezed", async () => {
+  const timeline: ServiceTimeline = {
+    serviceKey: "st1:plan1:realistic",
+    serviceTypeId: null,
+    serviceTypeName: null,
+    planId: null,
+    planTitle: null,
+    seriesTitle: null,
+    serviceDate: "2026-09-20",
+    serviceTimeId: null,
+    serviceTimeStartsAt: null,
+    startedAt: "2026-09-20T14:55:00.000Z",
+    endedAt: "2026-09-20T16:31:00.000Z",
+    items: [
+      // Before the session (15:20-15:47) entirely — must not draw.
+      { itemId: "i0", title: "Countdown", sequence: 0, plannedLengthSec: 1200, startedAt: "2026-09-20T14:55:00.000Z", endedAt: "2026-09-20T15:15:00.000Z", actualDurationSec: 1200, preService: false },
+      // Overlapping the session — must draw, clipped where they straddle it.
+      { itemId: "i1", title: "Baptism Stories", sequence: 1, plannedLengthSec: 720, startedAt: "2026-09-20T15:20:00.000Z", endedAt: "2026-09-20T15:32:00.000Z", actualDurationSec: 720, preService: false },
+      { itemId: "i2", title: "Great Are You Lord", sequence: 2, plannedLengthSec: 480, startedAt: "2026-09-20T15:32:00.000Z", endedAt: "2026-09-20T15:40:00.000Z", actualDurationSec: 480, preService: false },
+      { itemId: "i3", title: "O Praise The Name", sequence: 3, plannedLengthSec: 480, startedAt: "2026-09-20T15:40:00.000Z", endedAt: "2026-09-20T15:48:00.000Z", actualDurationSec: 480, preService: false },
+      // After the session entirely — must not draw, and must not stretch the
+      // axis or the trailing "not counted" gap out to cover them.
+      { itemId: "i4", title: "Sermon", sequence: 4, plannedLengthSec: 2280, startedAt: "2026-09-20T15:48:00.000Z", endedAt: "2026-09-20T16:26:00.000Z", actualDurationSec: 2280, preService: false },
+      { itemId: "i5", title: "Closing", sequence: 5, plannedLengthSec: 300, startedAt: "2026-09-20T16:26:00.000Z", endedAt: "2026-09-20T16:31:00.000Z", actualDurationSec: 300, preService: false },
+    ],
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
+    if (url.includes("/api/baptism/lane")) {
+      return ok({
+        spans: [
+          { kind: "testimony", person: 1, startedAt: "2026-09-20T15:20:00.000Z", endedAt: "2026-09-20T15:26:00.000Z" },
+          { kind: "testimony", person: 2, startedAt: "2026-09-20T15:26:00.000Z", endedAt: "2026-09-20T15:32:00.000Z" },
+          { kind: "baptism", person: 1, startedAt: "2026-09-20T15:35:00.000Z", endedAt: "2026-09-20T15:40:00.000Z" },
+          { kind: "baptism", person: 2, startedAt: "2026-09-20T15:40:00.000Z", endedAt: "2026-09-20T15:47:00.000Z" },
+        ],
+      });
+    }
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(timeline);
+    return ok({});
+  }) as unknown as typeof fetch;
+
+  try {
+    render(
+      React.createElement(SessionChart, {
+        state: {
+          ...BASE,
+          serviceKey: "st1:plan1:realistic",
+          sessionStartedAt: "2026-09-20T15:20:00.000Z",
+          finishedAt: "2026-09-20T15:47:00.000Z",
+        },
+      }),
+    );
+    await settle();
+    await settle();
+
+    assert.equal(
+      document.querySelectorAll("[data-plan-segment]").length,
+      3,
+      "only the 3 plan items overlapping the session should draw — Countdown, Sermon and Closing must not",
+    );
+    assert.equal(
+      document.querySelectorAll("[data-gap]").length,
+      1,
+      "exactly the one real internal gap (15:32-15:35) — no trailing gap out to the sermon/closing",
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 // Fix round 1 (from drive 2), the CUSTOMIZE finding: the mockup's Session
 // card has a Customize control and the plan built this tab on History's own
 // CustomizePopover/prefs mechanism, but the shipped card had neither — the

@@ -53,10 +53,12 @@ import {
 import { LANE_LABEL_PADDING } from "../history-chart/lane";
 import { makeTextMeasurer } from "../history-chart/measure-text";
 import {
+  clipToSession,
   gapSpans,
   planLaneItems,
   sessionAxisLabel,
   sessionAxisTicks,
+  sessionSpans,
   sessionWindow,
   timerHoverFigures,
   timerLaneItems,
@@ -233,14 +235,17 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   }, []);
 
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
+  // The window is THIS session's own start/finish, never derived from spans
+  // or plan items — see sessionWindow's own comment for the bug that was.
+  const win = sessionWindow(state.sessionStartedAt, state.finishedAt, { live, nowMs: now });
   // Plain calls, not useMemo: both are a single small array map (a session
   // has tens of spans and items at most), so memoizing them buys nothing and
   // `rawPlanItems`, computed fresh above from two hook results, would just
   // move the "changes every render" problem into a dependency array instead
   // of removing it.
-  const timerItems = timerLaneItems(spans);
-  const planItems = planLaneItems(rawPlanItems);
-  const win = sessionWindow(spans, planItems, { live, nowMs: now });
+  const sessionOnlySpans = win ? sessionSpans(spans, win.startMs, win.endMs) : [];
+  const timerItems = timerLaneItems(sessionOnlySpans);
+  const planItems = win ? clipToSession(planLaneItems(rawPlanItems), win.startMs, win.endMs) : [];
 
   const [hoverX, setHoverX] = useState<number | null>(null);
 
@@ -288,7 +293,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
                 : "Couldn't load the timing lane. Reload the page to try again."
             }
           />
-        ) : !win || spans.length === 0 ? (
+        ) : !win || sessionOnlySpans.length === 0 ? (
           <EmptyNote text="No timing detail was recorded for this session." />
         ) : (
           <SessionSvg
@@ -300,7 +305,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
             now={now}
             reduced={reduced}
             measure={measure}
-            spans={spans}
+            spans={sessionOnlySpans}
             timerItems={timerItems}
             planItems={planItems}
             showPlanLane={showPlanLane}

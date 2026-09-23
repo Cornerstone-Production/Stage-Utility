@@ -119,50 +119,118 @@ export function gapSpans(
 }
 
 /**
- * The chart's x domain: the earliest a span or plan item starts, to the
- * latest either reaches.
+ * The chart's x domain: THIS session's own start to its own finish (or "now"
+ * while it is still running) — never derived from spans or plan items at all.
  *
- * `live` decides how the open end behaves, and it is the one thing this
- * function cannot get from the arrays alone. LIVE, the domain reaches at least
+ * Built from `sessionStartedAt`/`finishedAt` (BaptismState's own fields, read
+ * by SessionChart) because those name the session's real boundary, immune to
+ * whatever else the service's plan or the raw file's other sessions happen to
+ * cover. This used to take every span and plan item and widen the domain to
+ * whatever ANY of them spanned (Important 1 of the final review): seeded with
+ * a realistic service — a countdown 25 minutes before the session, the
+ * session itself, then a 38-minute sermon and a closing — and driven for
+ * real, a session that actually ran about 25m to 47m read as an 0m–85m axis,
+ * with the sermon and closing drawn as one wide "not counted" block and the
+ * session's own segments squeezed down to bare numbers. See clipToSession and
+ * sessionSpans below for how plan items and spans from elsewhere in the same
+ * service are kept off the chart now that this no longer widens for them.
+ *
+ * `live` decides how the open end behaves: LIVE, the domain reaches at least
  * `nowMs` — an armed session with no baptism span yet still needs an axis to
- * draw the gap on. NOT live (a finished session, or later a genuinely past one
- * off History), the domain stops at the recorded ends: a session left running
- * across a crash must not be drawn as if it were still happening minutes, or
- * days, later. Returns null for nothing to draw at all — no spans and no plan
- * items — which is the "no service open" empty state's cue.
+ * draw the gap on. NOT live, the domain stops at `finishedAt` — a session left
+ * running across a crash must not be drawn as if it were still happening
+ * minutes, or days, later once it does finish. Returns null only when there
+ * is no session at all (`sessionStartedAt` null or unparseable) — in
+ * practice SessionChart never reaches this with such a state, since a null
+ * `sessionStartedAt` also means a null `serviceKey` (see idleState), which
+ * shows its own "no session" empty note first; handled here anyway so this
+ * function stays correct on its own terms, not merely correct for its one
+ * caller today.
  */
 export function sessionWindow(
-  spans: readonly BaptismSpan[],
-  items: readonly LaneItem[],
+  sessionStartedAt: string | null,
+  finishedAt: string | null,
   opts: { live: boolean; nowMs: number },
 ): { startMs: number; endMs: number } | null {
-  const starts: number[] = [];
-  const ends: number[] = [];
-  const take = (startedAt: string, endedAt: string | null) => {
-    const s = Date.parse(startedAt);
-    if (Number.isFinite(s)) starts.push(s);
-    // An open span/item's only CERTAIN instant is its own start. "now" is
-    // introduced ONLY by the `opts.live` check below, never here — that is
-    // the fix for Fix round 1's I1: this used to substitute `opts.nowMs` for
-    // any open span regardless of `live`, so a session left running across a
-    // crash (baptism-lane.ts's own header documents the shape) read back two
-    // days later drew as still growing, two days wide.
-    const e = endedAt === null ? s : Date.parse(endedAt);
-    if (Number.isFinite(e)) ends.push(e);
-  };
-  for (const s of spans) take(s.startedAt, s.endedAt);
-  for (const it of items) take(it.startedAt, it.endedAt);
-  if (!starts.length) return null;
-  const startMs = Math.min(...starts);
-  const rawEnd = Math.max(...ends);
-  const endMs = opts.live ? Math.max(opts.nowMs, rawEnd) : rawEnd;
-  // A domain of zero width (a single instantaneous mark) divides by zero
-  // downstream in laneSegments' own scale. LIVE it never actually happens
-  // (bounded by nowMs > its own start); NOT live it is the ordinary shape
-  // for a session whose only span is the one still open when read back — its
-  // own start is both `startMs` and its contribution to `ends` — so this
-  // floor is load-bearing there, not just a defensive fallback.
-  return { startMs, endMs: Math.max(startMs + 1, endMs) };
+  const startMs = sessionStartedAt ? Date.parse(sessionStartedAt) : NaN;
+  if (!Number.isFinite(startMs)) return null;
+  if (opts.live) return { startMs, endMs: Math.max(startMs + 1, opts.nowMs) };
+  const finishMs = finishedAt ? Date.parse(finishedAt) : NaN;
+  // Not live with no readable finish — a shape this function's one caller
+  // never actually produces — draws as a single instant rather than reaching
+  // for "now": that is the one thing "not live" must never do.
+  return { startMs, endMs: Math.max(startMs + 1, Number.isFinite(finishMs) ? finishMs : startMs) };
+}
+
+/**
+ * `items`, clipped to `[startMs, endMs]`, with anything entirely outside it
+ * dropped — the other half of sessionWindow's own fix (Important 1). The
+ * domain no longer widens for a plan item outside the session, but left
+ * unclipped such an item would still measure its own length against the
+ * window's edge and could still be mistaken, by anything reading its
+ * startedAt/endedAt later, for something that happened during the session.
+ *
+ * `laneSegments` already clips PIXELS to the plot and hides anything with no
+ * overlap at all, so the visible result is the same either way — this exists
+ * so that guarantee is this file's own, asserted as arithmetic, rather than a
+ * side effect of a shared geometry function every History chart also uses.
+ *
+ * A boundary touching exactly at either edge is kept, not dropped — matching
+ * laneSegments' own inclusive `e >= domainStartMs && s <= domainEndMs`, so
+ * the two never disagree about the same instant.
+ *
+ * An item with an unreadable timestamp is left alone rather than dropped:
+ * planLaneItems already excludes anything with no startedAt at all, so
+ * anything still unparseable here is a shape neither function anticipated,
+ * and drawing it — laneSegments' own `if (!Number.isFinite(s)) continue`
+ * already skips it safely — is better than silently discarding a plan item
+ * that, in fact, happened.
+ */
+export function clipToSession(items: readonly LaneItem[], startMs: number, endMs: number): LaneItem[] {
+  const out: LaneItem[] = [];
+  for (const it of items) {
+    const s = Date.parse(it.startedAt);
+    const e = it.endedAt === null ? endMs : Date.parse(it.endedAt);
+    if (!Number.isFinite(s) || !Number.isFinite(e)) {
+      out.push(it);
+      continue;
+    }
+    if (e < startMs || s > endMs) continue; // no overlap with the session at all
+    out.push({
+      ...it,
+      startedAt: new Date(Math.max(s, startMs)).toISOString(),
+      endedAt: new Date(Math.min(e, endMs)).toISOString(),
+    });
+  }
+  return out;
+}
+
+/**
+ * Only the spans that belong to THIS session, by real time — never every
+ * span the service's raw file happens to hold.
+ *
+ * GET /api/baptism/lane replays the WHOLE service's baptism.csv and returns
+ * every session's spans concatenated (baptism-lane.ts's own header: a
+ * finished session's spans are pushed to the output when the NEXT session's
+ * `start` row is read) — right for a future whole-service view, wrong for a
+ * chart whose axis is one session (Important 1, the same finding
+ * sessionWindow's own fix answers).
+ *
+ * Selected by START time landing in `[startMs, endMs]`, never by identity: a
+ * span carries no session id of its own, but sessions never overlap in real
+ * time (one clock runs at a time — see baptism-lane.ts's own header), so a
+ * span starting inside this session's own window cannot belong to any other
+ * session, finished or still live.
+ */
+export function sessionSpans(
+  spans: readonly BaptismSpan[],
+  startMs: number,
+  endMs: number,
+): BaptismSpan[] {
+  return spans.filter((s) => {
+    const at = Date.parse(s.startedAt);
+    return Number.isFinite(at) && at >= startMs && at <= endMs;
+  });
 }
 
 /**

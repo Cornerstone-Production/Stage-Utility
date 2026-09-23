@@ -10,11 +10,14 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import { formatClock as formatClockFixture } from "../../../lib/clock-format.js";
+import type { LaneItem } from "../history-chart/lane.js";
 import {
+  clipToSession,
   gapSpans,
   planLaneItems,
   sessionAxisLabel,
   sessionAxisTicks,
+  sessionSpans,
   sessionWindow,
   timerHoverFigures,
   timerLaneItems,
@@ -87,82 +90,128 @@ describe("gapSpans", () => {
 });
 
 describe("sessionWindow", () => {
-  test("no spans and no items — nothing to draw", () => {
-    assert.equal(sessionWindow([], [], { live: true, nowMs: T0 }), null);
+  // Important 1 (final review): this used to take every span and plan item
+  // the WHOLE SERVICE ever had and widen the domain to whatever any of them
+  // covered. Seeded with a realistic service and driven for real, a session
+  // that actually ran about 25m to 47m read as an 0m-85m axis, because a
+  // countdown 25 minutes before it and a 38-minute sermon after it were still
+  // feeding the same min/max. Rebuilt to read ONLY the session's own recorded
+  // boundary (sessionStartedAt/finishedAt) — this function no longer has a
+  // parameter a plan item or a stray span COULD widen it with. See
+  // clipToSession and sessionSpans below for how those are kept off the chart
+  // now that this no longer reaches for them.
+  //
+  // The whole "a dangling open span from a crash, read back two days later"
+  // test family Fix round 1 added here is gone, not just renamed: that class
+  // of bug lived in treating an OPEN SPAN's absence of an end as "maybe now,
+  // maybe not" (see the old take()). This function no longer looks at a span
+  // at all, so a dangling one — from this session or any other in the same
+  // file — cannot reach it.
+  test("no session started at all — nothing to draw", () => {
+    assert.equal(sessionWindow(null, null, { live: true, nowMs: T0 }), null);
   });
 
-  test("live extends to nowMs even past every recorded end — the armed wait keeps growing", () => {
-    const spans = [span({ startedAt: iso(T0), endedAt: iso(T0 + 60_000) })];
-    const win = sessionWindow(spans, [], { live: true, nowMs: T0 + 300_000 });
+  test("an unparseable start is the same as no session", () => {
+    assert.equal(sessionWindow("not-a-date", null, { live: false, nowMs: T0 }), null);
+  });
+
+  test("live reaches nowMs regardless of finishedAt — a running session has none yet", () => {
+    const win = sessionWindow(iso(T0), null, { live: true, nowMs: T0 + 300_000 });
     assert.deepEqual(win, { startMs: T0, endMs: T0 + 300_000 });
   });
 
-  test("not live stops at the recorded end, however much later nowMs is", () => {
-    const spans = [span({ startedAt: iso(T0), endedAt: iso(T0 + 60_000) })];
-    const win = sessionWindow(spans, [], { live: false, nowMs: T0 + 300_000 });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 60_000 });
+  test("not live stops at the session's own finish, however much later nowMs is", () => {
+    const win = sessionWindow(iso(T0), iso(T0 + 27 * 60_000), { live: false, nowMs: T0 + 999_999_999 });
+    assert.deepEqual(win, { startMs: T0, endMs: T0 + 27 * 60_000 });
   });
 
-  test("a plan item's own window can push the domain wider than the spans alone", () => {
-    const spans = [span({ startedAt: iso(T0 + 60_000), endedAt: iso(T0 + 120_000) })];
-    const items = [
-      { itemId: "i1", title: "Great Are You Lord", sequence: 0, startedAt: iso(T0), endedAt: iso(T0 + 240_000), preService: false, plannedSec: null, actualSec: null },
-    ];
-    const win = sessionWindow(spans, items, { live: false, nowMs: T0 + 999_999 });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 240_000 });
-  });
-
-  test("an open plan item (endedAt null), LIVE, reaches nowMs", () => {
-    const items = [
-      { itemId: "i1", title: "Song", sequence: 0, startedAt: iso(T0), endedAt: null, preService: false, plannedSec: null, actualSec: null },
-    ];
-    const win = sessionWindow([], items, { live: true, nowMs: T0 + 60_000 });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 60_000 });
-  });
-
-  // Fix round 1, finding I1: this file's own previous version of this test
-  // asserted the BUG — "reaches nowMs, live or not" — because `take()`
-  // substituted `nowMs` for ANY open span regardless of `live`. A live=false
-  // read (a crash left the timer's last span open; baptism-lane.ts's own
-  // header documents the shape) evaluated two days later produced a window
-  // ending two days later instead of at the last real timestamp.
-  test("an open plan item (endedAt null), NOT live, does not reach nowMs — only its own start is real", () => {
-    const items = [
-      { itemId: "i1", title: "Song", sequence: 0, startedAt: iso(T0), endedAt: null, preService: false, plannedSec: null, actualSec: null },
-    ];
-    const win = sessionWindow([], items, { live: false, nowMs: T0 + 60_000 });
+  test("not live with no finishedAt — a shape this function's one caller never actually produces — draws as an instant, never reaching for now", () => {
+    const win = sessionWindow(iso(T0), null, { live: false, nowMs: T0 + 999_999 });
     assert.deepEqual(win, { startMs: T0, endMs: T0 + 1 });
   });
+});
 
-  test("not live, a dangling open SPAN from a crash ends at the last real timestamp, never at nowMs days later", () => {
-    // The exact shape the review reproduced: a testimony closes normally, the
-    // baptism after it opens and never closes (the timer crashed mid-press),
-    // and this is read back two days later — a past-service read, not a live
-    // one. The window must stop at the baptism's own start, the last real
-    // instant in the data, not grow to whatever instant this function
-    // happens to run at.
+describe("clipToSession", () => {
+  const item = (a: number, b: number | null, over: Partial<LaneItem> = {}): LaneItem => ({
+    itemId: "i1",
+    title: "X",
+    sequence: 0,
+    startedAt: iso(a),
+    endedAt: b === null ? null : iso(b),
+    preService: false,
+    plannedSec: null,
+    actualSec: null,
+    ...over,
+  });
+
+  test("fully inside the window is unchanged", () => {
+    const [out] = clipToSession([item(T0 + 60_000, T0 + 120_000)], T0, T0 + 300_000);
+    assert.equal(out!.startedAt, iso(T0 + 60_000));
+    assert.equal(out!.endedAt, iso(T0 + 120_000));
+  });
+
+  test("straddling the start is clamped to the window's own start", () => {
+    const [out] = clipToSession([item(T0 - 60_000, T0 + 60_000)], T0, T0 + 300_000);
+    assert.equal(out!.startedAt, iso(T0));
+    assert.equal(out!.endedAt, iso(T0 + 60_000));
+  });
+
+  test("straddling the end is clamped to the window's own end", () => {
+    const [out] = clipToSession([item(T0 + 240_000, T0 + 600_000)], T0, T0 + 300_000);
+    assert.equal(out!.startedAt, iso(T0 + 240_000));
+    assert.equal(out!.endedAt, iso(T0 + 300_000));
+  });
+
+  test("still open (endedAt null) is clamped to the window's own end, like a live item", () => {
+    const [out] = clipToSession([item(T0 + 60_000, null)], T0, T0 + 300_000);
+    assert.equal(out!.endedAt, iso(T0 + 300_000));
+  });
+
+  // This is Important 1's own bug, at the arithmetic level: before this fix,
+  // an item entirely outside the session (the sermon, the closing) still fed
+  // sessionWindow's min/max and drew as a wide "not counted" block covering
+  // it, or a bare-number label once the whole domain widened around it.
+  test("entirely before the window is dropped", () => {
+    assert.deepEqual(clipToSession([item(T0 - 600_000, T0 - 300_000)], T0, T0 + 300_000), []);
+  });
+
+  test("entirely after the window is dropped", () => {
+    assert.deepEqual(clipToSession([item(T0 + 400_000, T0 + 700_000)], T0, T0 + 300_000), []);
+  });
+
+  test("touching exactly at either edge is kept, matching laneSegments' own inclusive boundary", () => {
+    const out = clipToSession([item(T0 - 60_000, T0), item(T0 + 300_000, T0 + 360_000)], T0, T0 + 300_000);
+    assert.equal(out.length, 2);
+  });
+
+  test("an unreadable timestamp is left alone rather than dropped", () => {
+    const [out] = clipToSession([item(T0, T0 + 60_000, { startedAt: "not-a-date" })], T0, T0 + 300_000);
+    assert.equal(out!.startedAt, "not-a-date");
+  });
+});
+
+describe("sessionSpans", () => {
+  test("keeps only spans starting inside [startMs, endMs] — an earlier, unrelated session's own is dropped", () => {
+    // The lane route returns every session in the service's baptism.csv
+    // concatenated (baptism-lane.ts's own header) — Important 1's other half.
     const spans = [
-      span({ kind: "testimony", startedAt: iso(T0), endedAt: iso(T0 + 108_000) }),
-      span({ kind: "baptism", person: 1, startedAt: iso(T0 + 200_000), endedAt: null }),
+      span({ person: 1, startedAt: iso(T0 - 3_600_000), endedAt: iso(T0 - 3_500_000) }),
+      span({ person: 1, startedAt: iso(T0), endedAt: iso(T0 + 60_000) }),
+      span({ person: 2, kind: "baptism", startedAt: iso(T0 + 90_000), endedAt: iso(T0 + 150_000) }),
     ];
-    const twoDaysLater = T0 + 45 * 60 * 60_000;
-    const win = sessionWindow(spans, [], { live: false, nowMs: twoDaysLater });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 200_000 });
+    const out = sessionSpans(spans, T0, T0 + 300_000);
+    assert.equal(out.length, 2);
+    assert.equal(out[0]!.startedAt, iso(T0));
+    assert.equal(out[1]!.startedAt, iso(T0 + 90_000));
   });
 
-  test("live, the same dangling span still grows to now — only a NOT-live read is capped", () => {
-    const spans = [span({ kind: "baptism", startedAt: iso(T0), endedAt: null })];
-    const win = sessionWindow(spans, [], { live: true, nowMs: T0 + 40_000 });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 40_000 });
+  test("a still-open last span is kept when its start is inside the window", () => {
+    const spans = [span({ startedAt: iso(T0 + 60_000), endedAt: null })];
+    assert.deepEqual(sessionSpans(spans, T0, T0 + 120_000), spans);
   });
 
-  test("a real later timestamp elsewhere in the data (a plan item that DID close) still wins over the dangling span's own start", () => {
-    const spans = [span({ kind: "baptism", startedAt: iso(T0 + 50_000), endedAt: null })];
-    const items = [
-      { itemId: "i1", title: "Great Are You Lord", sequence: 0, startedAt: iso(T0), endedAt: iso(T0 + 90_000), preService: false, plannedSec: null, actualSec: null },
-    ];
-    const win = sessionWindow(spans, items, { live: false, nowMs: T0 + 999_999 });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 90_000 });
+  test("an unparseable startedAt is dropped, not kept by default", () => {
+    assert.deepEqual(sessionSpans([span({ startedAt: "not-a-date" })], T0, T0 + 300_000), []);
   });
 });
 
