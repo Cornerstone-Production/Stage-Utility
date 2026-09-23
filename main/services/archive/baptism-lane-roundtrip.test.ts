@@ -48,7 +48,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { BaptismPerson, BaptismState } from "../../types/stage.js";
+import type { BaptismPerson } from "../../types/stage.js";
 import type { BaptismSpan } from "./baptism-lane.js";
 import type { BaptismRow } from "./rebuild-baptism.js";
 
@@ -777,7 +777,7 @@ describe("the clock undo()'s fallback starts for a record saved before finishedF
   async function restoreAsSavedBeforeFinishedFrom(): Promise<void> {
     const { finishedFrom: _notYetInvented, ...legacy } = timer.getState();
     void _notYetInvented;
-    await baptismStore.saveCurrent(legacy as BaptismState);
+    await baptismStore.saveCurrent(legacy);
     await timer.init();
     assert.equal(timer.getState().finishedFrom ?? null, null, "sanity: restored with no finishedFrom");
   }
