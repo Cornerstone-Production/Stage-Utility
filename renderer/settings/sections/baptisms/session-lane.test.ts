@@ -110,12 +110,57 @@ describe("sessionWindow", () => {
     assert.deepEqual(win, { startMs: T0, endMs: T0 + 240_000 });
   });
 
-  test("an open plan item (endedAt null) reaches nowMs, live or not — its own window said so", () => {
+  test("an open plan item (endedAt null), LIVE, reaches nowMs", () => {
+    const items = [
+      { itemId: "i1", title: "Song", sequence: 0, startedAt: iso(T0), endedAt: null, preService: false, plannedSec: null, actualSec: null },
+    ];
+    const win = sessionWindow([], items, { live: true, nowMs: T0 + 60_000 });
+    assert.deepEqual(win, { startMs: T0, endMs: T0 + 60_000 });
+  });
+
+  // Fix round 1, finding I1: this file's own previous version of this test
+  // asserted the BUG — "reaches nowMs, live or not" — because `take()`
+  // substituted `nowMs` for ANY open span regardless of `live`. A live=false
+  // read (a crash left the timer's last span open; baptism-lane.ts's own
+  // header documents the shape) evaluated two days later produced a window
+  // ending two days later instead of at the last real timestamp.
+  test("an open plan item (endedAt null), NOT live, does not reach nowMs — only its own start is real", () => {
     const items = [
       { itemId: "i1", title: "Song", sequence: 0, startedAt: iso(T0), endedAt: null, preService: false, plannedSec: null, actualSec: null },
     ];
     const win = sessionWindow([], items, { live: false, nowMs: T0 + 60_000 });
-    assert.deepEqual(win, { startMs: T0, endMs: T0 + 60_000 });
+    assert.deepEqual(win, { startMs: T0, endMs: T0 + 1 });
+  });
+
+  test("not live, a dangling open SPAN from a crash ends at the last real timestamp, never at nowMs days later", () => {
+    // The exact shape the review reproduced: a testimony closes normally, the
+    // baptism after it opens and never closes (the timer crashed mid-press),
+    // and this is read back two days later — a past-service read, not a live
+    // one. The window must stop at the baptism's own start, the last real
+    // instant in the data, not grow to whatever instant this function
+    // happens to run at.
+    const spans = [
+      span({ kind: "testimony", startedAt: iso(T0), endedAt: iso(T0 + 108_000) }),
+      span({ kind: "baptism", person: 1, startedAt: iso(T0 + 200_000), endedAt: null }),
+    ];
+    const twoDaysLater = T0 + 45 * 60 * 60_000;
+    const win = sessionWindow(spans, [], { live: false, nowMs: twoDaysLater });
+    assert.deepEqual(win, { startMs: T0, endMs: T0 + 200_000 });
+  });
+
+  test("live, the same dangling span still grows to now — only a NOT-live read is capped", () => {
+    const spans = [span({ kind: "baptism", startedAt: iso(T0), endedAt: null })];
+    const win = sessionWindow(spans, [], { live: true, nowMs: T0 + 40_000 });
+    assert.deepEqual(win, { startMs: T0, endMs: T0 + 40_000 });
+  });
+
+  test("a real later timestamp elsewhere in the data (a plan item that DID close) still wins over the dangling span's own start", () => {
+    const spans = [span({ kind: "baptism", startedAt: iso(T0 + 50_000), endedAt: null })];
+    const items = [
+      { itemId: "i1", title: "Great Are You Lord", sequence: 0, startedAt: iso(T0), endedAt: iso(T0 + 90_000), preService: false, plannedSec: null, actualSec: null },
+    ];
+    const win = sessionWindow(spans, items, { live: false, nowMs: T0 + 999_999 });
+    assert.deepEqual(win, { startMs: T0, endMs: T0 + 90_000 });
   });
 });
 

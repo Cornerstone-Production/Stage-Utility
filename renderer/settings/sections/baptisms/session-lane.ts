@@ -141,7 +141,13 @@ export function sessionWindow(
   const take = (startedAt: string, endedAt: string | null) => {
     const s = Date.parse(startedAt);
     if (Number.isFinite(s)) starts.push(s);
-    const e = endedAt === null ? opts.nowMs : Date.parse(endedAt);
+    // An open span/item's only CERTAIN instant is its own start. "now" is
+    // introduced ONLY by the `opts.live` check below, never here — that is
+    // the fix for Fix round 1's I1: this used to substitute `opts.nowMs` for
+    // any open span regardless of `live`, so a session left running across a
+    // crash (baptism-lane.ts's own header documents the shape) read back two
+    // days later drew as still growing, two days wide.
+    const e = endedAt === null ? s : Date.parse(endedAt);
     if (Number.isFinite(e)) ends.push(e);
   };
   for (const s of spans) take(s.startedAt, s.endedAt);
@@ -151,9 +157,11 @@ export function sessionWindow(
   const rawEnd = Math.max(...ends);
   const endMs = opts.live ? Math.max(opts.nowMs, rawEnd) : rawEnd;
   // A domain of zero width (a single instantaneous mark) divides by zero
-  // downstream in laneSegments' own scale — never actually zero in practice
-  // (a span always has duration once it has an end, and a running one is
-  // bounded by nowMs > its own start), but guarded rather than assumed.
+  // downstream in laneSegments' own scale. LIVE it never actually happens
+  // (bounded by nowMs > its own start); NOT live it is the ordinary shape
+  // for a session whose only span is the one still open when read back — its
+  // own start is both `startMs` and its contribution to `ends` — so this
+  // floor is load-bearing there, not just a defensive fallback.
   return { startMs, endMs: Math.max(startMs + 1, endMs) };
 }
 
