@@ -15,25 +15,23 @@ const teardown = installDom();
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { fmtClockDelta, baptismTrendPoint, TrendsCard } = await import("./trends-card.js");
+const { baptismSessionFixture } = await import("./baptism-session-fixture.js");
 
 afterEach(cleanup);
 after(() => unmountAndTeardown(cleanup, teardown));
 
+/** This file's own default: BOTH people baptized — proves an average divides
+ *  by the right count. See baptism-session-fixture.ts for the fields shared
+ *  with past-sessions.test.tsx's own session(), whose default differs on
+ *  purpose (one person there is still mid-testimony). */
 function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
-  return {
-    id: "bap-1",
-    startedAt: "2026-09-20T15:00:00.000Z",
-    finishedAt: "2026-09-20T15:17:23.000Z",
+  return baptismSessionFixture({
     people: [
       { testimonyMs: 108_000, baptizeMs: 42_000 },
       { testimonyMs: 96_000, baptizeMs: 38_000 },
     ],
-    title: "Sunday Gathering",
-    serviceTypeId: null,
-    planId: null,
-    serviceKey: "weekend:plan-1:1100",
     ...overrides,
-  };
+  });
 }
 
 describe("fmtClockDelta", () => {

@@ -30,6 +30,7 @@ const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterC
   await import("@tanstack/react-router");
 const { PastSessionsCard } = await import("./past-sessions.js");
 const { historyServiceHref } = await import("../service-history-section.js");
+const { baptismSessionFixture } = await import("./baptism-session-fixture.js");
 
 afterEach(cleanup);
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -48,21 +49,18 @@ function figureValue(root: ParentNode, label: string): string | null {
   return labelSpan?.nextElementSibling ? text(labelSpan.nextElementSibling) : null;
 }
 
+/** This file's own default: one person baptized, one still mid-testimony
+ *  (baptizeMs 0) — proves the card's figures count real baptisms, never
+ *  people.length. See baptism-session-fixture.ts for the fields shared with
+ *  trends-card.test.tsx's own session(), whose default differs on purpose. */
 function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
-  return {
-    id: "bap-1",
-    startedAt: "2026-09-20T15:00:00.000Z",
-    finishedAt: "2026-09-20T15:17:23.000Z",
+  return baptismSessionFixture({
     people: [
       { testimonyMs: 108_000, baptizeMs: 42_000 },
       { testimonyMs: 96_000, baptizeMs: 0 }, // mid-testimony, never baptized
     ],
-    title: "Sunday Gathering",
-    serviceTypeId: null,
-    planId: null,
-    serviceKey: "weekend:plan-1:1100",
     ...overrides,
-  };
+  });
 }
 
 /** Mounts the card under a real (memory-history) router plus the tooltip and
