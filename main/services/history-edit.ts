@@ -1182,11 +1182,13 @@ export interface BaptismRebuildOutcome {
   rows: number;
   /** Rebuilt sessions that correspond to a session now in the store: updated
    *  + added + unchanged + newer + disagreeing — everything except
-   *  `invalid`. An invalid rebuilt row is never itself credited with a
-   *  session: unmatched, it is discarded and produces nothing; matched, the
-   *  stored session it landed on is left exactly as it was, same as if
-   *  nothing had matched at all — so its continued existence counts toward
-   *  `kept`, not toward a row this rebuild actually confirmed. */
+   *  `invalid`. A matched-but-invalid row's stored session is left exactly
+   *  as it was, but it does NOT fall through to `kept` either: both match
+   *  passes add a stored session to `consumed` as soon as they match it,
+   *  before this categorisation runs, so a matched-invalid session is
+   *  excluded from `kept` (which only counts UNconsumed stored sessions) the
+   *  same way it is excluded from `sessions` — it is counted once, under
+   *  `invalid`, and nowhere else. */
   sessions: number;
   /** Matched an existing stored session; its people/finishedAt were brought
    *  up to date (a genuinely later Finish the store had not saved). */
