@@ -15,6 +15,7 @@ const teardown = installDom();
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { fmtClockDelta, baptismTrendPoint, TrendsCard } = await import("./trends-card.js");
+const { baptismTrends } = await import("./trends.js");
 const { baptismSessionFixture } = await import("./baptism-session-fixture.js");
 
 afterEach(cleanup);
@@ -60,15 +61,58 @@ describe("baptismTrendPoint", () => {
     assert.equal(p!.wholeSegmentSec, 17 * 60 + 23, "finishedAt - startedAt, wall clock");
   });
 
-  test("a mid-testimony person (baptizeMs 0) does not count as baptized", () => {
+  // Final review, Important 3: a mid-testimony person's baptizeMs 0 used to
+  // still produce a point ({ baptized: 0, ... }), which fed a real 0 into
+  // every trend average — an ordinary grouped Finish during the testimonies,
+  // a Finish while armed, or a test run finished instead of reset, skewing
+  // Avg baptism and Whole segment right along with Baptized per service.
+  test("nobody baptized yields no point at all, not one at baptized: 0", () => {
     const p = baptismTrendPoint(
       session({ people: [{ testimonyMs: 50_000, baptizeMs: 0 }] }),
     );
-    assert.equal(p!.baptized, 0, "never people.length — nobody has been baptized yet");
+    assert.equal(p, null, "never a point that would feed a real 0 into every tile's average");
+  });
+
+  test("nobody baptized across several people (all mid-testimony) is the same — never people.length", () => {
+    const p = baptismTrendPoint(
+      session({ people: [{ testimonyMs: 50_000, baptizeMs: 0 }, { testimonyMs: 40_000, baptizeMs: 0 }] }),
+    );
+    assert.equal(p, null);
   });
 
   test("an unparseable startedAt yields no point rather than one at NaN", () => {
     assert.equal(baptismTrendPoint(session({ startedAt: "not-a-date" })), null);
+  });
+});
+
+// Final review, Important 3, the review's own reproduction: three real
+// sessions plus ONE nobody-baptized session mixed into the same window. Before
+// this fix the fourth session's own real numbers (the review's table): Avg
+// baptism 45s -> 33.75s, Whole segment 25min -> 19.25min, Baptized per service
+// 5 -> 3.75. This asserts the fix directly, at the arithmetic level, the way
+// the reviewer's own probe did — TrendsCard's own render tests above cover the
+// same fix through the component.
+describe("a nobody-baptized session mixed into an otherwise-real window", () => {
+  const five = Array.from({ length: 5 }, () => ({ testimonyMs: 90_000, baptizeMs: 45_000 }));
+  const real = [
+    session({ id: "r1", startedAt: "2026-09-06T16:20:00.000Z", finishedAt: "2026-09-06T16:45:00.000Z", people: five }),
+    session({ id: "r2", startedAt: "2026-09-13T16:20:00.000Z", finishedAt: "2026-09-13T16:45:00.000Z", people: five }),
+    session({ id: "r3", startedAt: "2026-09-20T16:20:00.000Z", finishedAt: "2026-09-20T16:45:00.000Z", people: five }),
+  ];
+  const nobodyBaptized = session({
+    id: "aborted",
+    startedAt: "2026-09-27T16:20:00.000Z",
+    finishedAt: "2026-09-27T16:22:00.000Z",
+    people: [{ testimonyMs: 60_000, baptizeMs: 0 }, { testimonyMs: 50_000, baptizeMs: 0 }],
+  });
+
+  test("is left out entirely — the three real sessions' own averages are untouched", () => {
+    const points = [...real, nobodyBaptized].map(baptismTrendPoint).filter((p) => p != null);
+    assert.equal(points.length, 3, "the nobody-baptized session must not become a fourth point");
+    const t = baptismTrends(points);
+    assert.equal(t.baptized.latest, 5, "still 5 baptized per service, not 3.75");
+    assert.equal(t.avgBaptismSec.latest, 45, "still 45s avg baptism, not 33.75s");
+    assert.equal(t.wholeSegmentSec.latest, 25 * 60, "still a 25-minute whole segment, not 19.25");
   });
 });
 
@@ -94,12 +138,15 @@ describe("TrendsCard", () => {
     assert.equal(tile!.querySelector("[data-trend-change]")?.textContent, "no prior window yet");
   });
 
-  test("a full prior window that averaged 0 baptized says so, distinct from no prior window at all", () => {
-    // Same shape as the fabricated-change guard above, but with a FULL prior
-    // window (8, not below MIN_PRIOR_DAYS) where nobody was baptized —
-    // testimonies only, baptizeMs 0 throughout — so tile.prior is 0, not
-    // null, and pctChange refuses to divide by a basis at or below zero.
-    // Before this fix, that read identically to "no prior window yet".
+  // Final review, Important 3: this used to construct "a full prior window
+  // that averaged 0 baptized" from 8 nobody-baptized sessions, and asserted
+  // the tile said so, distinct from no prior window at all. That scenario can
+  // no longer happen: a nobody-baptized session now contributes NO point at
+  // all (see baptismTrendPoint's own fix), so a window built entirely from
+  // them has zero points, not eight points averaging zero — "no prior window
+  // yet" is now the correct, honest read for it, not the wrong one this test
+  // used to guard against.
+  test("a window of sessions with nobody baptized contributes no points at all", () => {
     const prior = Array.from({ length: 8 }, (_, i) =>
       session({
         id: `p${i}`,
@@ -116,12 +163,19 @@ describe("TrendsCard", () => {
     );
     const view = render(React.createElement(TrendsCard, { sessions: [...prior, ...recent] }));
     const tile = view.container.querySelector('[data-trend-tile="Baptized per service"]')!;
-    assert.equal(tile.querySelector("[data-trend-value]")?.textContent, "1.0", "sanity: a real latest average");
+    assert.equal(tile.querySelector("[data-trend-value]")?.textContent, "1.0", "sanity: only the real sessions score");
     assert.equal(
       tile.querySelector("[data-trend-change]")?.textContent,
-      "prior window averaged 0",
-      "must not read as 'no prior window yet' — a full window of 8 fed it",
+      "no prior window yet",
+      "the 8 nobody-baptized sessions fed zero points, not a fabricated 0 average",
     );
+
+    // The other three tiles must be just as honest about the same sessions —
+    // this was never only a "Baptized per service" problem (avgTestimonySec
+    // moved too, on the real review's own probe).
+    const testimonyTile = view.container.querySelector('[data-trend-tile="Avg testimony"]')!;
+    assert.equal(testimonyTile.querySelector("[data-trend-value]")?.textContent, "1:00", "sanity: the real sessions' own avg testimony");
+    assert.equal(testimonyTile.querySelector("[data-trend-change]")?.textContent, "no prior window yet");
   });
 
   test("Baptized per service colours an increase ok and a decrease danger; duration tiles never claim a direction", () => {

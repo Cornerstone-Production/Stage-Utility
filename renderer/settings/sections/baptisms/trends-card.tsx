@@ -53,15 +53,30 @@ export function fmtClockDelta(ms: number): string {
   return abs < 60_000 ? `${sign}${Math.round(abs / 1000)}s` : `${sign}${fmtClock(abs)}`;
 }
 
-/** A finished session, reduced to one BaptismTrendPoint — or null when its
- *  start time will not parse, the same defensiveness trendClock's own callers
- *  apply rather than plotting a point at NaN. Exported for its own test: the
- *  arithmetic in trends.ts is only as honest as what feeds it. */
+/**
+ * A finished session, reduced to one BaptismTrendPoint — or null when its
+ * start time will not parse, the same defensiveness trendClock's own callers
+ * apply rather than plotting a point at NaN. Exported for its own test: the
+ * arithmetic in trends.ts is only as honest as what feeds it.
+ *
+ * Also null when NOBODY was baptized (final review, Important 3): an ordinary
+ * Finish during the testimonies, a Finish while armed, or a test run finished
+ * instead of reset all log a real session with a real wall clock and nothing
+ * baptized. Counted in, each fed `avgBaptismSec: 0` and its own short wall
+ * clock into every tile's average — measured against three real sessions plus
+ * one such session, "Avg baptism" moved from 45s to 33.75s and "Whole
+ * segment" from 25 to 19.25 minutes. A session that baptized nobody is left
+ * out of the trend entirely, not folded in at zero: TrendsCard's four tiles
+ * all read off this ONE point per session, so excluding it here is what keeps
+ * every tile — not just "Baptized per service" — honest about the same set
+ * of real sessions.
+ */
 export function baptismTrendPoint(s: BaptismSession): BaptismTrendPoint | null {
   const t = Date.parse(s.startedAt);
   if (!Number.isFinite(t)) return null;
   const finish = Date.parse(s.finishedAt);
   const stats = baptismStats([s]);
+  if (stats.people === 0) return null;
   return {
     t,
     baptized: stats.people,
