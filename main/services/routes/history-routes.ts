@@ -138,9 +138,11 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // Baptisms header's own Rebuild button asks this before enabling itself,
     // rather than guessing from a record it happens to already have (a guess
     // that read a just-ended service as still live until the next tick, or a
-    // live one as safe the moment an unrelated broadcast arrived). Shares
-    // isServiceLive with assertNotLive, so the two can never disagree about
-    // the same key.
+    // live one as safe the moment an unrelated broadcast arrived). This route
+    // and assertNotLive share isServiceLive, so THIS SERVER cannot disagree
+    // with its own refusal — a CLIENT's cached copy of the answer can still be
+    // stale for as long as it takes to ask again, which is a different problem
+    // the header solves with its own re-ask schedule, not this route.
     if (method === "GET" && pathname === "/api/history/live") {
       const serviceKey = c.url.searchParams.get("serviceKey");
       if (!serviceKey) {

@@ -21,14 +21,14 @@
 // is disabled and why, and that it confirms before posting — is behaviour,
 // not layout, and IS unit-tested in header.test.tsx.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import type { BaptismRebuildOutcome } from "@main/services/history-edit";
 
 import { cn } from "../../../lib/cn";
-import { invoke, onNotification } from "../../../lib/api";
+import { invoke, onNotification, type ApiError } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
 import { Button, confirm, toast } from "../../../components/ui";
 import { copyText } from "../../../lib/clipboard";
@@ -117,79 +117,152 @@ export function baptismReportText(state: BaptismState, figures: readonly StatFig
 export function describeBaptismRebuild(out: BaptismRebuildOutcome): string {
   const parts = [`${out.updated} updated`, `${out.added} added`];
   if (out.newer > 0) parts.push(`${out.newer} newer than their rows`);
+  if (out.disagreeing > 0) parts.push(`${out.disagreeing} disagreeing with the rows`);
+  if (out.invalid > 0) parts.push(`${out.invalid} could not be read`);
   if (out.kept > 0) parts.push(`${out.kept} left alone`);
   return `Rebuilt from raw: ${parts.join(", ")}`;
 }
 
+/** How often to re-ask while blocked and nothing has told us to — see
+ *  useServiceLive's own comment for what this backstops. */
+const LIVE_RECHECK_MS = 30_000;
+
+/** The server's own answer to "is this service live", from this page's point
+ *  of view: `checking` while a target's first answer for this render is still
+ *  in flight (including right after a target change, before its own answer
+ *  has arrived — see useServiceLive), `failed` when the ask itself could not
+ *  be answered, and `live`/`not-live` otherwise. All but `not-live` disable
+ *  the button; baptismRebuildDisabledReason gives each its own reason. */
+export type LiveStatus = "checking" | "live" | "not-live" | "failed";
+
+interface LiveCheck {
+  status: LiveStatus;
+  /** Ask again right now and update `status` to match, returning the fresh
+   *  answer — called immediately before posting, so a confirm dialog left
+   *  open across the target starting to record again cannot walk a stale
+   *  "not live" into the very 409 this exists to avoid. */
+  recheck: () => Promise<LiveStatus>;
+  /** The POST route refused with 409 despite the recheck above having just
+   *  said otherwise — the write itself is the one true answer; reflect it
+   *  without a further round trip. */
+  markLive: () => void;
+}
+
 /**
- * Whether `serviceKey` is being recorded right now, per the SERVER — the
- * exact question `POST /api/baptism/rebuild`'s own 409 answers, asked before
- * the click rather than after. `GET /api/history/live` shares
- * `assertNotLive`'s own expression, so this can never disagree with the
- * server's actual refusal the way a client-side guess once could: reading a
- * just-ended service as still live until the next unrelated tick, or a live
- * one as safe the moment any OTHER service's record happened to broadcast.
+ * Whether `serviceKey` is being recorded right now, answered by the SERVER —
+ * `GET /api/history/live`, which shares `assertNotLive`'s own expression, so
+ * the ROUTE and the refusal can never disagree with each other. This hook's
+ * OWN cached copy of that answer can still be stale for as long as it takes
+ * to ask again: a network round trip has latency, and a push is only ever a
+ * HINT that something changed, not an answer about this one key.
  *
  * Re-asked on mount, on every `serviceKey` change, and on every
- * "service-timeline:history" push — a push is a HINT that something changed
- * somewhere, never an answer about this one key. Defaults to `true` (assume
- * live) until the first answer lands, so a click cannot race a still-loading
- * "no" into a 409 the operator did not expect; `null` serviceKey always
- * reads as not-live, since there is nothing to be live.
+ * "service-timeline:history" push. Two things narrow the remaining gap
+ * rather than close it outright, because nothing client-side can:
+ *
+ *   - a slow backstop interval, while the answer is anything but "not live",
+ *     for the two ways a service can stop recording with no push ever
+ *     following it (the live-poller's attendance tick still busy on the exact
+ *     closing instant, or no ticks at all for a while — a dropped PCO poll,
+ *     or the plan deselected);
+ *   - `recheck`/`markLive`, above, for the moment right before and right at
+ *     the POST itself.
+ *
+ * A target CHANGE reads as `checking` in the SAME render it happens, never
+ * the previous key's answer for even one extra render: derived below rather
+ * than set synchronously in the effect, because a target change inheriting
+ * the old key's "not live" long enough for a click to land is exactly the
+ * race this hook exists to close. A null key always reads as `not-live`,
+ * since there is nothing to be live.
  */
-function useServiceLive(serviceKey: string | null): boolean {
-  const [live, setLive] = useState(true);
+function useServiceLive(serviceKey: string | null): LiveCheck {
+  const [answer, setAnswer] = useState<{ key: string | null; status: LiveStatus }>({ key: null, status: "not-live" });
+
+  const ask = useCallback(async (key: string): Promise<LiveStatus> => {
+    try {
+      const res = await invoke<{ live: boolean }>("history:live", { serviceKey: key });
+      return res.live ? "live" : "not-live";
+    } catch (err) {
+      logToServer("baptism", `could not check whether ${key} is live: ${errorMessage(err)}`);
+      return "failed";
+    }
+  }, []);
+
+  const status: LiveStatus = serviceKey == null ? "not-live" : answer.key === serviceKey ? answer.status : "checking";
 
   useEffect(() => {
-    // No effect to run at all for a null key — its "not live" answer is
-    // derived below, without a setState-in-effect that would otherwise fire
-    // on every render this component mounts with no target.
     if (!serviceKey) return;
     let cancelled = false;
-    const ask = () => {
-      invoke<{ live: boolean }>("history:live", { serviceKey })
-        .then((res) => {
-          if (!cancelled) setLive(res.live);
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          logToServer("baptism", `could not check whether ${serviceKey} is live: ${errorMessage(err)}`);
-          // Left as whatever it last was — see useStatusChannel's own
-          // reasoning for why a failed read does not overwrite a good value.
-        });
+    const run = () => {
+      ask(serviceKey).then((next) => {
+        if (!cancelled) setAnswer({ key: serviceKey, status: next });
+      });
     };
-    ask();
-    const off = onNotification("service-timeline:history", () => ask());
+    run();
+    const off = onNotification("service-timeline:history", () => {
+      if (!cancelled) run();
+    });
     return () => {
       cancelled = true;
       off();
     };
-  }, [serviceKey]);
+  }, [serviceKey, ask]);
 
-  return serviceKey != null && live;
+  // The slow backstop — see this hook's own comment. Cleared (not merely a
+  // no-op) the moment the answer is "not live": a service that ended does
+  // not spend the rest of the visit polling a question it already has the
+  // answer to, on a page that stays open far longer than any one service.
+  useEffect(() => {
+    if (!serviceKey || status === "not-live" || status === "checking") return;
+    const id = setInterval(() => {
+      ask(serviceKey).then((next) => setAnswer({ key: serviceKey, status: next }));
+    }, LIVE_RECHECK_MS);
+    return () => clearInterval(id);
+  }, [serviceKey, status, ask]);
+
+  return {
+    status,
+    recheck: async () => {
+      if (!serviceKey) return "not-live";
+      const next = await ask(serviceKey);
+      setAnswer({ key: serviceKey, status: next });
+      return next;
+    },
+    markLive: () => setAnswer({ key: serviceKey, status: "live" }),
+  };
 }
 
 /**
  * Why Rebuild from raw is disabled, or `null` when it is not.
  *
- * Pure and exported so each of the three "nothing to target" reasons is
- * provable directly in header.test.tsx: the rendered TOOLTIP text needs
- * Radix's hover machinery to ever reach the DOM (jsdom mounts nothing while a
- * Tooltip is closed), so a test could otherwise only see one shared
- * `disabled=true` and never tell the three states apart. Conflating them
+ * Pure and exported so each reason is provable directly in header.test.tsx
+ * without needing Radix's hover machinery to reach a rendered tooltip (jsdom
+ * mounts a Tooltip's content only while it is open — see this file's own
+ * comment; a few of the tests below drive that open with a real focus event
+ * where the exact rendered text matters, but the exhaustive "every reason is
+ * distinct" check calls this function directly). Conflating any of these
  * would send an operator to reload a page that was actually fine (a load
- * failure), or to look for a "missing" recording that a session simply
- * predates the serviceKey field on (the third case) — neither is "nothing has
- * ever been recorded here", the fourth and only truly empty case.
+ * failure), to look for a "missing" recording that a session simply predates
+ * the serviceKey field on, or to wait out a recording that already ended
+ * because the last check of it happened to fail.
  */
 export function baptismRebuildDisabledReason(args: {
   targetServiceKey: string | null;
-  live: boolean;
+  liveStatus: LiveStatus;
   sessionsLoadFailed: boolean;
   mostRecentSession: { serviceKey?: string | null } | null;
 }): string | null {
   if (args.targetServiceKey != null) {
-    return args.live ? "This service is still recording — rebuild once it ends" : null;
+    switch (args.liveStatus) {
+      case "live":
+        return "This service is still recording — rebuild once it ends";
+      case "checking":
+        return "Checking whether this service is still recording…";
+      case "failed":
+        return "Could not check whether this service is still recording — try again shortly";
+      case "not-live":
+        return null;
+    }
   }
   if (args.sessionsLoadFailed) return "Past sessions could not be loaded — reload the page and try again";
   if (args.mostRecentSession) return "The most recent session has no linked service to rebuild from";
@@ -268,11 +341,11 @@ export function BaptismHeader({
   // Whether the SERVICE (not the baptism timer — a finished session's service
   // can still be recording) is live, asked of the server directly — see
   // useServiceLive's own comment for why a client-side guess is not this.
-  const rebuildLive = useServiceLive(targetServiceKey);
+  const liveCheck = useServiceLive(targetServiceKey);
 
   const disabledReason = baptismRebuildDisabledReason({
     targetServiceKey,
-    live: rebuildLive,
+    liveStatus: liveCheck.status,
     sessionsLoadFailed,
     mostRecentSession,
   });
@@ -292,14 +365,30 @@ export function BaptismHeader({
     }))) {
       return;
     }
+    // Asked again, right now: the confirm dialog can sit open long enough for
+    // the target to start recording, and posting into that would be a race
+    // the operator did not cause. Only an outright "live" answer refuses here
+    // — "failed" or a slow "not live" are not reasons to hold back a POST the
+    // server will refuse on its own if it has to.
+    if ((await liveCheck.recheck()) === "live") {
+      toast.error("This service started recording again — rebuild once it ends");
+      return;
+    }
     try {
       const out = await invoke<BaptismRebuildOutcome>("baptism:rebuild", { serviceKey: targetServiceKey });
       onRebuilt();
       toast.success(describeBaptismRebuild(out));
     } catch (e) {
-      // Say why. The most likely refusal — the service is still recording —
-      // is one the operator can act on, the same reasoning History's own
-      // rebuildFromRaw gives for its identical catch.
+      // The recheck above narrows the race but cannot close it: the service
+      // can still start recording in the moment between that check and this
+      // POST landing. When that is what happened, say so — and reflect it
+      // without waiting for yet another round trip — rather than the generic
+      // failure message every other rejection gets.
+      if ((e as ApiError)?.status === 409) {
+        liveCheck.markLive();
+        toast.error("This service started recording again — rebuild once it ends");
+        return;
+      }
       toast.error(`Rebuild failed: ${errorMessage(e)}`);
     }
   }
