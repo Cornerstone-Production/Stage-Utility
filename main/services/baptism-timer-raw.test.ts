@@ -630,12 +630,17 @@ describe("personNumber on a row names the person that action just completed, not
 
 describe("the raw emit never throws back into the timer", () => {
   beforeEach(() => {
+    // Opened before reset(), not after: reset() emits its own row through
+    // whatever service is "current", and openService() only takes effect for
+    // the ctx passed to it. Called in the other order, reset()'s row landed
+    // in whatever ctx the previous describe's last test had left current —
+    // silently, since that test's own assertions had already run by then.
+    openService(freshCtx());
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
   });
 
   it("survives the archive throwing on write", () => {
-    openService(freshCtx());
     const original = sampleArchive.recordBaptism;
     (sampleArchive as unknown as { recordBaptism: typeof sampleArchive.recordBaptism }).recordBaptism = () => {
       throw new Error("disk full");
