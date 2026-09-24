@@ -257,6 +257,13 @@ The `/log` page has the evidence when something looks wrong:
   from row N on its next interval rather than re-reading the same rows forever
   — and this line fires once per connection, the first time it happens, so a
   chatty comms channel does not repeat it every check
+- a read that lands after the integration has been reconfigured or stopped is
+  dropped rather than applied to the new connection: `[prodcom] dropped a
+  backfill (…) that arrived after this connection was replaced`, `… dropped a
+  channel list read …`, `… dropped a keyword read …`, and `… dropped a
+  baseline read that arrived after this websocket attempt was replaced`. All
+  four are `console.debug` — the old box's answer simply never lands, so there
+  is nothing for an operator to act on and nothing on `/log`
 - `[prodcom] the promoted websocket delivered no transcript in 1 min while ProdCom
   has at least N spoken line(s) it never carried — falling back to the SSE
   stream, which backfills the gap, and re-testing the websocket every 30 min

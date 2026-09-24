@@ -2824,7 +2824,17 @@ export class ProdComService extends ConnectionLifecycle {
     // A read that outlived its socket is answered after that socket closed.
     // ProdCom's transcript only grows, so applying it would inflate the next
     // attempt's baseline and hide lines spoken since that attempt opened.
-    if (this.ws === ws) this.wsBaselineRows = rows;
+    //
+    // Identity, not connectionEpoch: an ORDINARY reconnect (this socket drops
+    // and a new one opens to the SAME box) never bumps the epoch — only
+    // teardown() does — but it does replace `this.ws`, and this baseline has
+    // to belong to the attempt that asked for it, not whichever one happens to
+    // be open when the answer lands. See prodcom-stale-baseline.test.ts.
+    if (this.ws === ws) {
+      this.wsBaselineRows = rows;
+    } else {
+      console.debug("[prodcom] dropped a baseline read that arrived after this websocket attempt was replaced");
+    }
   }
 
   /**
@@ -2872,6 +2882,7 @@ export class ProdComService extends ConnectionLifecycle {
     host: string,
     port: number,
   ): Promise<{ error?: string; embedded?: Map<string, unknown[]> }> {
+    const epoch = this.connectionEpoch;
     let body: string;
     try {
       body = await this.getJson(host, port, "/api/v1/channels");
@@ -2879,6 +2890,13 @@ export class ProdComService extends ConnectionLifecycle {
       // Returned, not logged here: both callers reach this, and the one that
       // matters to an operator is the connect-time read.
       return { error: errorMessage(e) };
+    }
+    if (epoch !== this.connectionEpoch) {
+      // A reconfigure or a stop() landed while this was in flight — this
+      // answer is about a box this service has already let go, and applying
+      // it would put the OLD box's channels on the NEW connection.
+      console.debug("[prodcom] dropped a channel list read that arrived after this connection was replaced");
+      return {};
     }
     const rows = asRecord(safeJson(body))?.["data"];
     if (!Array.isArray(rows)) return { error: "response had no data array" };
@@ -2955,6 +2973,7 @@ export class ProdComService extends ConnectionLifecycle {
       return data;
     };
 
+    const epoch = this.connectionEpoch;
     const ids = [...this.channels.keys()];
     let globalRows: unknown[];
     let scoped: { id: string; rows: unknown[] }[];
@@ -2980,6 +2999,14 @@ export class ProdComService extends ConnectionLifecycle {
       // here silently un-redacts every display on a transient 500 mid-service,
       // which is the exact failure this file exists to prevent.
       return { error: errorMessage(e) };
+    }
+    if (epoch !== this.connectionEpoch) {
+      // Same race as fetchChannels: a reconfigure or a stop() landed while
+      // both reads were out, and applying them now would hide the OLD box's
+      // sensitive words behind the NEW box's redaction state — or the other
+      // way round.
+      console.debug("[prodcom] dropped a keyword read that arrived after this connection was replaced");
+      return {};
     }
 
     this.globalSensitive = sensitivePatterns(globalRows);
@@ -3056,6 +3083,7 @@ export class ProdComService extends ConnectionLifecycle {
    * every page `hasMore` reports rather than assuming one is enough.
    */
   private async backfill(host: string, port: number): Promise<BackfillResult> {
+    const epoch = this.connectionEpoch;
     const since = sinceParam(this.now() - LINE_MAX_AGE_MS);
     const rows: unknown[] = [];
     let pages = 0;
@@ -3090,6 +3118,13 @@ export class ProdComService extends ConnectionLifecycle {
       }
     }
 
+    if (epoch !== this.connectionEpoch) {
+      // A reconfigure or a stop() landed while these pages were in flight —
+      // this is the OLD box's history, and applying it would put its lines on
+      // a buffer that now belongs to a different connection.
+      console.debug(`[prodcom] dropped a backfill (${rows.length} row(s)) that arrived after this connection was replaced`);
+      return { added: 0, skipped: 0, pages, error };
+    }
     const applied = this.applyBackfillRows(rows);
     return { added: applied.added, skipped: applied.skipped, pages, error };
   }

@@ -151,6 +151,15 @@ export type StubOptions = {
    * is which.
    */
   delayTranscriptMs?: (url: URL) => number;
+  /**
+   * Like `delayTranscriptMs`, but applied to EVERY request before its own
+   * handler runs — channels, keywords, transcript, alike. Independent of
+   * `delayTranscriptMs`, which only ever covers `/api/v1/transcript`, so no
+   * existing test that sets one is affected by the other. Exists for the same
+   * reason: opening a window where a connection can be reconfigured or
+   * stopped while a REST read that is not the transcript is still in flight.
+   */
+  delayRequestMs?: (url: URL) => number;
   /** Bind to this exact port rather than an ephemeral one — so a test can close
    *  one stub and start another on the same port, simulating a box that dropped
    *  off the network and came back rather than one that changed address. */
@@ -331,14 +340,25 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     !options.requireBearer || headers["authorization"] === `Bearer ${options.requireBearer}`;
 
   const server = http.createServer((req, res) => {
-    // On arrival, and only once: a held answer (see delayTranscriptMs) re-enters
-    // this handler, and counting it twice would tell a test two reads happened
-    // where one did.
-    if (!held.has(res)) {
+    // On arrival, and only once: a held answer (see delayTranscriptMs and
+    // delayRequestMs) re-enters this handler, and counting it twice would tell
+    // a test two reads happened where one did.
+    const alreadyHeld = held.has(res);
+    if (!alreadyHeld) {
       requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
       notify();
     }
     const url = new URL(req.url ?? "/", "http://stub");
+
+    if (!alreadyHeld && options.delayRequestMs) {
+      const delay = options.delayRequestMs(url);
+      if (delay > 0) {
+        held.add(res);
+        const timer = setTimeout(() => server.emit("request", req, res), delay);
+        timer.unref?.();
+        return;
+      }
+    }
 
     if (!authorized(req.headers)) {
       res.writeHead(401, { "content-type": "application/json" });
