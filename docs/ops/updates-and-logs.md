@@ -36,6 +36,11 @@ only way forward is an explicit override. `POST /api/update/apply` and
 unless the body carries `override: true`; the two restart controls are guarded by
 the dialog alone.
 
+For that reason a lock that could not be read counts as held for the two restart
+controls: Advanced says it couldn't read the lock, both take the guarded look, and
+pressing one asks first. **Update now** and the track switch keep the server's
+`409` as their check. The failed read is logged on the `[updater]` tag.
+
 What the lock changes is how the controls read: an amber lock in place of the
 action's own icon, a label saying that pressing it now is an override, and — for
 the two that are normally the accent primary — a drop to the secondary weight.
