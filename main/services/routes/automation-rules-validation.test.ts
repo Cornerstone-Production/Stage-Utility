@@ -90,6 +90,23 @@ describe("POST /api/automation/rules", () => {
     assert.equal(automationEngine.listRules().find((r) => r.id === body.id)?.enabled, false);
   });
 
+  // Every other case in this file sends `enabled: false` (or `true`)
+  // explicitly, so deleting the route's `const toSave = issues.length > 0 ?
+  // { ...body, enabled: false } : body` line leaves every one of them green —
+  // the coerce only matters when the caller never mentions `enabled` at all,
+  // which nothing else here tests.
+  test("issues never block a create even when the body omits `enabled` entirely — still saves turned off", async () => {
+    const { enabled: _omitted, ...bodyWithoutEnabled } = badRule();
+    const res = await callRoute(automationRoutes, "/api/automation/rules", {
+      method: "POST",
+      body: bodyWithoutEnabled,
+    });
+    assert.equal(res.status, 201);
+    const body = res.json as { id: string; enabled: boolean; issues: { key: string }[] };
+    assert.equal(body.enabled, false, "a create with issues must save turned off even when `enabled` was never sent");
+    assert.equal(automationEngine.listRules().find((r) => r.id === body.id)?.enabled, false);
+  });
+
   test("an explicit ask to create it ENABLED with issues is refused, and creates nothing", async () => {
     const before = automationEngine.listRules().length;
     const res = await callRoute(automationRoutes, "/api/automation/rules", {
