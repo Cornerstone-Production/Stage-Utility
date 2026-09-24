@@ -204,6 +204,31 @@ export function handlerErrorStatus(err: unknown): number {
   return declared === 413 || declared === 409 || declared === 400 ? declared : 500;
 }
 
+/**
+ * The machine-readable `code` a thrown error's response carries, alongside
+ * its human sentence — ServiceIsLiveError and NoRawRowsError both declare
+ * one, and a caller cannot tell one 409 refusal from a different one by
+ * status code alone (the Baptisms header's own live-vs-no-raw-rows handling
+ * depends on this exact line: forwarding a 500's own errno by mistake there
+ * would read a plain filesystem failure as "this service is live").
+ *
+ * Only forwarded for a status this server actually recognises (see
+ * handlerErrorStatus): an arbitrary failure that maps to the generic 500 can
+ * carry a Node errno of its own (`err.code === "EACCES"`, say) that must
+ * never reach the wire — a caller has no business branching on a code this
+ * server never promised to mean anything.
+ *
+ * EXPORTED beside handlerErrorStatus for the same reason: a route test can
+ * assert what a throw's own `code` becomes without writing a second copy of
+ * this rule, and callRoute stops at the route, so the only alternative is a
+ * test that restates the mapping and then agrees with itself.
+ */
+export function handlerErrorCode(err: unknown, status: number): string | undefined {
+  if (status === 500) return undefined;
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 // Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
@@ -726,19 +751,12 @@ export class RemoteServer {
       } catch (err) {
         const msg = errorMessage(err);
         const status = handlerErrorStatus(err);
-        // A thrown error's own `code`, when it declares one (ServiceIsLiveError
-        // and NoRawRowsError both do) — a caller cannot tell one 409 refusal
-        // from a different one by status code alone, and a machine-readable
-        // reason belongs on the response, not just in the human sentence. Only
-        // forwarded for a status we actually recognise: an arbitrary failure
-        // that maps to the generic 500 can carry a Node errno of its own
-        // (`err.code === "EACCES"`, say) that must never reach the wire.
-        const code = status === 500 ? undefined : (err as { code?: unknown } | null)?.code;
+        const code = handlerErrorCode(err, status);
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
         // The reader paused an over-limit body rather than destroying the socket,
         // so the response reaches the client; closing after it releases the rest.
         if (status === 413) res.setHeader("Connection", "close");
-        error(res, msg, status, typeof code === "string" ? code : undefined);
+        error(res, msg, status, code);
       }
     };
 
