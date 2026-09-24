@@ -355,6 +355,16 @@ export async function runBaptismRebuild(args: {
   targetLabel: string;
   liveCheck: LiveCheck;
   onRebuilt: () => void;
+  /**
+   * Set only by a save-failure entry's own Rebuild — never by the header's,
+   * which rebuilds a whole service and has no ONE session to answer for.
+   * When set, a 200 that did not actually restore THIS session (its id is
+   * missing from the response's own `restoredIds`) reports that plainly
+   * instead of the generic success toast: a full or read-only disk can drop
+   * the `finish` row itself, not just the JSON save, leaving the raw rows
+   * with no finished copy of this session for a rebuild to find at all.
+   */
+  sessionId?: string;
 }): Promise<void> {
   if (!(await confirmBaptismRebuild(args.targetLabel))) return;
   // Asked again, right now: the confirm dialog can sit open long enough for
@@ -369,6 +379,10 @@ export async function runBaptismRebuild(args: {
   try {
     const out = await invoke<BaptismRebuildOutcome>("baptism:rebuild", { serviceKey: args.serviceKey });
     args.onRebuilt();
+    if (args.sessionId && !out.restoredIds.includes(args.sessionId)) {
+      toast.error("The raw rows hold no finished copy of this session — copy the report now");
+      return;
+    }
     toast.success(describeBaptismRebuild(out));
   } catch (e) {
     // A 409 is a DECISION, not one failure — the route answers it for two

@@ -90,6 +90,7 @@ function SaveErrorRebuild({ entry, onRebuilt }: { entry: BaptismSaveError; onReb
       targetLabel: rebuildTargetLabel(null, sessionIdStartedAt(entry.sessionId)),
       liveCheck,
       onRebuilt,
+      sessionId: entry.sessionId,
     });
   }
 
@@ -278,7 +279,9 @@ export function TimerCard({ state, onFinished, onRebuilt }: TimerCardProps) {
                   })}
                 </ul>
                 <p className="mt-1">
-                  Its presses are still in the service&rsquo;s raw archive, baptism.csv, if a service was open while it ran.
+                  Its presses are usually still in the service&rsquo;s raw archive, baptism.csv, if a service was
+                  open while it ran — Rebuild from raw says so if the row that would close the session is
+                  missing too.
                 </p>
               </div>
               <Button

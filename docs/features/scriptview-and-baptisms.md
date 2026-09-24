@@ -339,9 +339,10 @@ History's whole-service Rebuild — clears the line. A rebuild that leaves the
 session exactly as the store already had it — unchanged, or the store's own
 copy is already newer, or the rows and the store disagree — never clears the
 line, because nothing about the store's own record actually changed. A
-rebuild that does not find it — the rows never reached a finish, a row could
-not be read, or the store is already
-full — reports why, and the line stays.
+rebuild that does not find it — the rows never reached a finish (a full or
+read-only disk drops that row too, not only the store's own save), a row
+could not be read, or the store is already full — says so plainly instead of
+the ordinary success message, and the line stays.
 
 ## Logging
 

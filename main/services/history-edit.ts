@@ -1121,7 +1121,7 @@ async function planBaptismRebuild(serviceKey: string, serviceDate: string): Prom
 async function applyBaptismRebuild(
   serviceKey: string,
   plan: BaptismRebuildPlan,
-): Promise<{ updated: number; added: number; full: number }> {
+): Promise<{ updated: number; added: number; full: number; restoredIds: ReadonlySet<string> }> {
   const rowCount = (plan.rows ?? []).length;
   for (const note of plan.invalidNotes) console.warn(`[baptism] rebuild of ${scrub(serviceKey)}: ${scrub(note)}`);
   for (const note of plan.disagreementNotes) console.warn(`[baptism] rebuild of ${scrub(serviceKey)}: ${scrub(note)}`);
@@ -1144,7 +1144,7 @@ async function applyBaptismRebuild(
       `[baptism] rebuild: ${scrub(correspond(0, 0))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
         `0 updated, 0 added, ${scrub(tail)}`,
     );
-    return { updated: 0, added: 0, full: 0 };
+    return { updated: 0, added: 0, full: 0, restoredIds: new Set() };
   }
 
   let added: number, addedIds: ReadonlySet<string>, updated: number, updatedIds: ReadonlySet<string>, full: number;
@@ -1171,8 +1171,14 @@ async function applyBaptismRebuild(
   // (its own earlier, successful Finish), so its rebuild can only ever
   // UPDATE that counterpart to match the raw rows — never add a second one.
   // Both are "restored" in exactly the sense the note is waiting for. The id
-  // the cap left in `full` instead is neither, and stays.
-  baptismTimerService.clearRestoredSaveErrors(new Set([...addedIds, ...updatedIds]));
+  // the cap left in `full` instead is neither, and stays. Returned to BOTH
+  // callers, not just used here: a save-failure entry's own Rebuild needs to
+  // know whether ITS OWN sessionId is among these, not merely that something
+  // was written for the service — a full or read-only disk can drop the
+  // `finish` row itself (see rebuildBaptismSessions' own `neverFinished`
+  // counter), leaving the raw rows with nothing to restore at all.
+  const restoredIds = new Set([...addedIds, ...updatedIds]);
+  baptismTimerService.clearRestoredSaveErrors(restoredIds);
 
   // Every update lands unconditionally — replacing a session's own fields
   // never changes how many sessions the store holds, so an update is never
@@ -1191,7 +1197,7 @@ async function applyBaptismRebuild(
     `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
       `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail)}`,
   );
-  return { updated, added, full };
+  return { updated, added, full, restoredIds };
 }
 
 /** What a baptism-only rebuild did. */
@@ -1236,6 +1242,15 @@ export interface BaptismRebuildOutcome {
    *  added; zero on any realistic install. An operator who wants them in has
    *  one option: delete some old sessions and rebuild again. */
   full: number;
+  /** The ids this rebuild actually wrote — added or updated, at write time,
+   *  never a plan-time count (see baptismStore.mergeRebuilt's own doc
+   *  comment). A save-failure entry's own Rebuild checks its OWN sessionId
+   *  against this list rather than trusting a 200 status alone: the raw rows
+   *  can hold presses for a session with no `finish` row to close them (a
+   *  full or read-only disk drops that append too), in which case this
+   *  rebuild writes nothing for it at all and the entry must say so, not
+   *  report success. */
+  restoredIds: string[];
 }
 
 /**
@@ -1274,9 +1289,9 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
     throw new NoRawRowsError();
   }
 
-  let updated: number, added: number, full: number;
+  let updated: number, added: number, full: number, restoredIds: ReadonlySet<string>;
   try {
-    ({ updated, added, full } = await applyBaptismRebuild(serviceKey, plan));
+    ({ updated, added, full, restoredIds } = await applyBaptismRebuild(serviceKey, plan));
   } catch (err) {
     // applyBaptismRebuild already logged the real reason under [baptism];
     // this route's own response must not carry it past RebuildFailedError's
@@ -1298,6 +1313,7 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
     invalid: plan.invalid,
     kept: plan.kept,
     full,
+    restoredIds: [...restoredIds],
   };
 }
 

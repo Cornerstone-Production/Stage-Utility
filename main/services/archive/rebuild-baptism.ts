@@ -132,6 +132,15 @@ interface Skips {
   noSession: number;
   missingIndex: number;
   unknownMode: number;
+  /** A session with at least one press recorded (armed, a testimony, a
+   *  baptism) whose rows simply stop — no `finish` and no `reset` ever
+   *  closed it. A full or read-only disk drops a failed CSV append
+   *  silently (csv-appender logs and discards it), so the one row that
+   *  would have turned these presses into a session can go missing even
+   *  though everything before it wrote fine. Distinct from a session with
+   *  no presses at all: `finish` itself logs nothing for one of those, so
+   *  its own missing row would have changed nothing either way. */
+  neverFinished: number;
 }
 
 /**
@@ -154,7 +163,7 @@ interface Skips {
  */
 export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIdentity): BaptismSession[] {
   const out: BaptismSession[] = [];
-  const skips: Skips = { unreadableStart: 0, noSession: 0, missingIndex: 0, unknownMode: 0 };
+  const skips: Skips = { unreadableStart: 0, noSession: 0, missingIndex: 0, unknownMode: 0, neverFinished: 0 };
   let open: OpenSession | null = null;
 
   for (const r of rowsByTime(rows)) {
@@ -299,11 +308,18 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
     }
   }
 
+  // A session still open when the rows run out, with something in it a
+  // `finish` row would have logged: the row that would have closed it is
+  // simply not there, not a session the operator is still mid-way through
+  // (that only exists live, never in a closed archive file being replayed).
+  if (open && open.logged === null && open.people.length > 0) skips.neverFinished += 1;
+
   const notes: string[] = [];
   if (skips.unreadableStart) notes.push(`${skips.unreadableStart} session(s) whose start row had an unreadable timestamp`);
   if (skips.noSession) notes.push(`${skips.noSession} row(s) belonging to no started session`);
   if (skips.missingIndex) notes.push(`${skips.missingIndex} row(s) naming a baptismIndex with nobody at it`);
   if (skips.unknownMode) notes.push(`${skips.unknownMode} start row(s) with an unreadable mode, replayed as grouped`);
+  if (skips.neverFinished) notes.push(`${skips.neverFinished} session(s) with presses recorded but no finish row to close them`);
   if (notes.length > 0) {
     // The serviceKey arrives verbatim in an HTTP body wherever a rebuild is
     // triggered, the same way history-edit.ts's does — scrubbed, or a newline

@@ -364,6 +364,47 @@ test("clicking an entry's Rebuild confirms, then posts for THAT entry's serviceK
   }
 });
 
+test("a rebuild that restored nothing for THIS session warns plainly instead of reporting success", async () => {
+  // A full or read-only disk drops the finish row itself, not only the JSON
+  // save (see rebuildBaptismSessions' own neverFinished counter) — a 200 from
+  // POST /api/baptism/rebuild is not proof THIS session came back, only that
+  // the request succeeded. restoredIds is the write-time truth; an entry
+  // whose own id is missing from it must say so, not echo the generic
+  // "N updated, M added" success toast meant for the service as a whole.
+  const entryStartedAt = "2026-09-13T15:00:00.000Z";
+  const sessionId = baptismSessionId(entryStartedAt);
+  const { root, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      saveErrors: [{ sessionId, serviceKey: "svc-never-finished", reason: DISK }],
+    },
+    {
+      live: false,
+      rebuildAnswer: {
+        rows: 3, sessions: 0, updated: 0, added: 0, unchanged: 0, newer: 0,
+        disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: [],
+      },
+    },
+  );
+  try {
+    const [btn] = rebuildButtonsIn(root);
+    fireEvent.click(btn!);
+    await settle();
+    fireEvent.click(findInBody("Rebuild")!);
+    await settle();
+    await settle();
+    const body = document.body.textContent ?? "";
+    assert.match(
+      body,
+      /The raw rows hold no finished copy of this session — copy the report now/,
+      `expected the plain warning, got: ${body}`,
+    );
+    assert.doesNotMatch(body, /0 updated, 0 added/i, "must not also show the generic success toast");
+  } finally {
+    restore();
+  }
+});
+
 test("cancelling the confirm reaches neither the server nor onRebuilt", async () => {
   const { root, calls, rebuiltCount, restore } = await mountWithRebuild(
     {

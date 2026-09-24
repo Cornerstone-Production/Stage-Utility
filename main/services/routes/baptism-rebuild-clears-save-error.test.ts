@@ -24,6 +24,7 @@ const { serviceTimelineStore } = await import("../service-timeline-store.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { baptismStore } = await import("../baptism-store.js");
 const { baptismTimerService: timer } = await import("../baptism-timer-service.js");
+const { sampleArchive } = await import("../archive/sample-archive.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 const { baptismSessionId } = await import("../../types/stage.js");
 
@@ -177,6 +178,58 @@ async function realFailedReFinish(serviceKey: string): Promise<{ id: string; fir
   return { id, firstFinishedAt, secondFinishedAt };
 }
 
+type RecordBaptism = typeof sampleArchive.recordBaptism;
+
+/**
+ * Drive a grouped session through Start → armed → the first person in, then
+ * Finish with BOTH addSession stubbed to reject AND the finish row's own CSV
+ * append suppressed — the shape a full or read-only disk actually produces,
+ * not merely the shape this file's other helpers exercise. `csv-appender`
+ * logs and discards a failed append the same way finalize()'s own failed
+ * save is caught (see baptism-timer-service.ts's persist/session-save
+ * catches): a disk that is out of room when Finish fires drops BOTH writes
+ * at once, so the raw rows can hold every press up to Finish and nothing
+ * that closes it — start, baptisms-armed, baptisms-start, no finish.
+ * Returns the session's own id.
+ */
+async function realNeverFinishedSave(serviceKey: string): Promise<string> {
+  timer.setMode("grouped"); // startBaptisms() below is a no-op outside grouped mode
+  rec().current = { serviceKey, serviceDate: DATE, endedAt: null };
+  const restoreSave = stubAddSession(rejecting);
+  const archive = sampleArchive as unknown as { recordBaptism: RecordBaptism };
+  const originalRecord = archive.recordBaptism.bind(sampleArchive);
+  archive.recordBaptism = (ctx, fields, at) => {
+    if (fields.event === "finish") return; // the row a full/read-only disk drops too
+    originalRecord(ctx, fields, at);
+  };
+  let sessionId!: string;
+  try {
+    const mark = pushes.length;
+    const started = timer.start();
+    assert.equal(started.phase, "testimony", `sanity: start() actually started a session for ${serviceKey}`);
+    await sleep(5);
+    const armed = timer.startBaptisms();
+    assert.equal(armed.armed, true, "sanity: startBaptisms armed the grouped baptism section");
+    await sleep(5);
+    const running = timer.advance();
+    assert.equal(running.armed, false, "sanity: advance() started the first person's own clock");
+    await sleep(5);
+    const finished = timer.finish();
+    assert.equal(finished.phase, "idle", "sanity: Finish still closes the session, whatever its own writes did");
+    sessionId = baptismSessionId(timer.getState().sessionStartedAt!);
+    await pushWhere(mark, (s) => !!s.saveErrors?.length, `carrying a saveErrors entry for ${serviceKey}`);
+  } finally {
+    archive.recordBaptism = originalRecord;
+    restoreSave();
+  }
+  // sampleArchive's own CSV appends are fire-and-forget too — flush before a
+  // caller reads baptism.csv back, the same reason rebuild-baptism-
+  // roundtrip.test.ts's own realistic-clock tests flush before asserting.
+  await sampleArchive.flush();
+  rec().current = null;
+  return sessionId;
+}
+
 after(async () => {
   await fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
 });
@@ -293,6 +346,38 @@ describe("a rebuild that restores a save-failed session clears its note entry", 
       timer.getState().saveErrors?.some((e) => e.sessionId === id),
       false,
       "the entry must clear once the rebuild's UPDATE lands, not only for an ADD",
+    );
+  });
+
+  // A full or read-only disk drops the finish row too, not only the JSON
+  // save — the raw rows hold every press up to Finish and nothing that
+  // closes it, so a rebuild has no finished copy of this session to
+  // restore. It must say so rather than reporting success having written
+  // nothing, and the note must stay up rather than reading as resolved.
+  it("a rebuild reports it restored nothing when the raw rows themselves never reached a finish, and the entry stays", async () => {
+    const KEY_E = "st1:plan-1:bap-clears-e4";
+    await prepare(KEY_E);
+    await sleep(2100); // stay outside BAPTISM_SKEW_MS of any earlier test's session
+    const idE = await realNeverFinishedSave(KEY_E);
+    assert.ok(timer.getState().saveErrors?.some((e) => e.sessionId === idE), "sanity: E's note is up");
+
+    const out = await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY_E } });
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    const json = out.json as { added: number; updated: number; restoredIds: unknown };
+    assert.equal(json.added, 0, "there is no finished copy in the raw rows at all — nothing to add");
+    assert.equal(json.updated, 0, "nor anything to update");
+    assert.ok(Array.isArray(json.restoredIds), `expected the response to carry restoredIds, got ${JSON.stringify(json)}`);
+    assert.ok(
+      !(json.restoredIds as string[]).includes(idE),
+      `expected restoredIds to exclude the never-finished session, got ${JSON.stringify(json.restoredIds)}`,
+    );
+
+    // Never cleared: nothing was actually restored for this id.
+    await sleep(200);
+    assert.equal(
+      timer.getState().saveErrors?.some((e) => e.sessionId === idE),
+      true,
+      "a rebuild that restored nothing for this session must leave its own note exactly as it was",
     );
   });
 });
