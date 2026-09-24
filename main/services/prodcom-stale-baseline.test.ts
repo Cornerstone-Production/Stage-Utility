@@ -1,11 +1,11 @@
-// A websocket attempt's row-count baseline belongs to that attempt alone.
+// A websocket attempt's entry-id baseline belongs to that attempt alone.
 //
-// The silence check measures a socket against how many transcript rows ProdCom
-// held when it opened. The read that fetches that count is async, and an attempt
-// can close before it returns. ProdCom answers with the count at the moment it
-// serves the request, and its transcript only grows, so a late answer for a
-// closed attempt is inflated: applied to the attempt that replaced it, the check
-// would page from past rows spoken since, and miss a socket that carries none.
+// The silence check measures a socket against the ids on ProdCom's newest
+// transcript page when it opened. The read that fetches that page is async, and
+// an attempt can close before it returns. A late answer for a closed attempt
+// reflects rows added after the attempt that asked for it already died: applied
+// to the attempt that replaced it, the check would treat those rows as already
+// accounted for and miss a socket that carries none of them.
 //
 // Driven against the real client and fixtures/prodcom-stub.ts.
 
@@ -30,7 +30,8 @@ class TestProdCom extends ProdComService {
     return 30;
   }
   public get baselineRows(): number | null {
-    return this.wsBaseline;
+    const baseline = this.wsBaseline;
+    return baseline === null ? null : baseline.size;
   }
   public get wsOpenNow(): boolean {
     return this.wsAttemptOpen;
@@ -63,9 +64,11 @@ describe("a websocket attempt's baseline", () => {
     let baselineReads = 0;
     const stub = await startProdComStub({
       channels: CHANNELS,
-      // The baseline read is the only limit=1 request. Hold the first one (the
-      // first attempt's) for 800ms; answer every later one at once.
-      delayTranscriptMs: (url) => (url.searchParams.get("limit") === "1" && baselineReads++ === 0 ? 800 : 0),
+      // The baseline read is the only limit=100 request while the box holds
+      // fewer rows than that (readNewestPage's single-request fast path — see
+      // its own doc comment). Hold the first one (the first attempt's) for
+      // 800ms; answer every later one at once.
+      delayTranscriptMs: (url) => (url.searchParams.get("limit") === "100" && baselineReads++ === 0 ? 800 : 0),
     });
     const svc = new TestProdCom();
     t.after(async () => {

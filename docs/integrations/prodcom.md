@@ -77,8 +77,9 @@ ProdCom's own history still holds it.
 
 A WebSocket attempt does not repeat any of this priming — the SSE stream already
 owns keeping channels, keywords and the buffer current for as long as any
-WebSocket attempt is unproven, so a re-test costs exactly one REST call (the
-silence check's row-count baseline below), not a fresh channel read and backfill.
+WebSocket attempt is unproven, so a re-test costs only the silence check's own
+newest-page baseline below (one REST call, or two on a box holding more than a
+page), not a fresh channel read and backfill.
 
 Only entries whose `source` is `audio` become captions. A message an operator
 typed into a comms channel (`typed`) and a line ProdCom's own automations
@@ -107,22 +108,31 @@ the worst this can do is delay how soon the WebSocket takes over.
 
 While a WebSocket attempt is open and has delivered **no** transcript entry, the
 app asks REST one question at the one-minute mark: has ProdCom recorded any
-`source: audio` entries beyond the ones it already held when this socket opened?
-Typed and automation entries do not count — they never become captions, so a
-socket that did not deliver one has missed nothing.
+`source: audio` entries this socket has not itself accounted for? Typed and
+automation entries do not count — they never become captions, so a socket that
+did not deliver one has missed nothing.
 
-The question is asked as a **row count**, not as a time. On open the app reads
-`meta.totalCount` from `GET /api/v1/transcript`, and the check then reads the
-rows past that offset. No timestamp is compared on either side, because a ProdCom
-is an appliance whose clock is its own: a box running fast would answer "yes" for
-lines spoken before the socket ever opened and get a working attempt condemned,
-and a box running slow would answer "no" for ever and hide the very failure this
-check exists to catch. A row count has neither failure — ProdCom's transcript is
-append-only and ascending from the oldest entry, so rows beyond the baseline are
-exactly the rows added since.
+The question is asked by comparing **entry ids on ProdCom's newest page**, not a
+row count or a time. ProdCom's transcript is a **rolling window**: past a
+certain size, adding a new row drops the oldest one, so the total row count stops
+growing even while rows keep arriving — measured on the live box (24 Sep,
+21:08–21:10Z), `meta.totalCount` sat at 3001 across a two-minute capture while
+newer rows kept landing and older ones dropped off. A design that asked "is the
+count bigger than it was when this socket opened" answered "no" forever once a
+box reached that state, trusting a socket that had delivered nothing for good and
+never demoting a promoted one that went quiet.
 
-If the count cannot be read the check does nothing at all for that attempt, and
-says so when it opens.
+So on open, and after every check, the app reads `GET /api/v1/transcript`'s
+newest page (the last 100 rows; two requests unless the whole box already fits on
+one) and records the entry ids on it, plus every id the socket has itself
+delivered since it opened. A spoken row on a later newest page that is in neither
+set is one the socket missed. No timestamp is compared on either side, for the
+reason a row count also avoided one: a ProdCom is an appliance whose clock is its
+own, and a box running fast or slow would either condemn a healthy socket or hide
+the very failure this check exists to catch.
+
+If the newest page cannot be read the check does nothing at all for that attempt,
+and says so when it opens.
 
 - **Nothing spoken** — nothing was missed. The question is asked again a minute
   later.
@@ -242,7 +252,7 @@ The `/log` page has the evidence when something looks wrong:
   when it does not. `[prodcom] the websocket has carried no transcript in 1 min and
   this box has failed that test before …` is a later re-test being dropped, and
   `[prodcom] the websocket is carrying the transcript again …` is one that came
-  good. `[prodcom] could not read the transcript row count (…)` on open means
+  good. `[prodcom] could not read the transcript's newest page (…)` on open means
   this attempt has no baseline and the check will not run at all for it.
   `[prodcom] could not check whether the websocket is missing transcript
   lines (…)` means REST did not answer and nothing was changed — once per outage
@@ -250,13 +260,6 @@ The `/log` page has the evidence when something looks wrong:
   `[prodcom] the silent-socket check can reach ProdCom again` when it recovers.
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
-- `[prodcom] the silence check scanned 5 pages of non-speech rows without
-  finding the end of them — continuing from row N next time` means a run of
-  `typed`/`automation` rows since the socket opened was longer than one check
-  can page through in a single pass. The check has not given up — it resumes
-  from row N on its next interval rather than re-reading the same rows forever
-  — and this line fires once per connection, the first time it happens, so a
-  chatty comms channel does not repeat it every check
 - a read that lands after the integration has been reconfigured or stopped is
   dropped rather than applied to the new connection: `[prodcom] dropped a
   backfill (…) that arrived after this connection was replaced`, `… dropped a

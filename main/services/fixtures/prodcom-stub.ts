@@ -164,6 +164,18 @@ export type StubOptions = {
    *  one stub and start another on the same port, simulating a box that dropped
    *  off the network and came back rather than one that changed address. */
   port?: number;
+  /**
+   * Cap `GET /api/v1/transcript`'s history at this many rows: once it holds
+   * this many, appending one more drops the oldest, and `meta.totalCount`
+   * reports the capped size rather than growing — what the real box does.
+   *
+   * Measured on ProdCom 2.3.2 (24 Sep, 21:08–21:10Z): `totalCount` sat at 3001
+   * across a two-minute capture while new rows kept arriving at the top of the
+   * range and old ones dropped off the bottom. Off by default, so every
+   * existing case (an unbounded history) is unaffected. Applied to the seeded
+   * `entries` too, so a test can start a box already full.
+   */
+  rollingWindowCap?: number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -309,6 +321,15 @@ function clientFrameType(text: string): string | null {
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
   // Mutable: addEntry() appends to it while the stub is running.
   const entries = [...(options.entries ?? [])];
+  const rollingWindowCap = options.rollingWindowCap;
+  /** Drop the oldest rows past the cap — what ProdCom itself does once its
+   *  rolling window is full. A no-op when no cap is set. */
+  const applyRollingWindowCap = (): void => {
+    if (rollingWindowCap !== undefined && entries.length > rollingWindowCap) {
+      entries.splice(0, entries.length - rollingWindowCap);
+    }
+  };
+  applyRollingWindowCap(); // a test can seed `entries` already past the cap
   const channels = options.channels ?? [];
   const channelKeywords = options.channelKeywords ?? {};
   /** ProdCom's clock, which is not this process's — see StubOptions.now. */
@@ -593,6 +614,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     addEntry: (entry: StubEntry) => {
       entries.push(entry);
+      applyRollingWindowCap();
       notify();
     },
     setFailTranscript: (fail: boolean) => {

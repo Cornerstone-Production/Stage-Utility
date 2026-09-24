@@ -70,8 +70,7 @@ async function eventually(
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** Run `fn` with console.log/warn/debug captured — the drop notes this file
- *  checks for are debug-level, unlike the cap-hit line in
- *  prodcom-silence-check-cap.test.ts, so this one also captures console.debug. */
+ *  checks for are debug-level, so this one also captures console.debug. */
 async function withLogs(fn: () => Promise<void>): Promise<string[]> {
   const lines: string[] = [];
   const log = console.log;

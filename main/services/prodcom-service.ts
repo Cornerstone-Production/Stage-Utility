@@ -178,26 +178,23 @@ const WS_SILENT_RETRY_INTERVAL_MS = 30 * 60_000;
 const WS_SILENCE_CHECK_MS = 60_000;
 
 /**
- * Page size for that question.
+ * How many rows the silence check reads at once: `GET /api/v1/transcript`'s
+ * NEWEST page, and the id set every socket's baseline is built from.
  *
- * It is not a count, it is a yes/no: did anybody speak since this socket opened?
- * One page of twenty answers it for any real service. A page that is entirely
- * `typed` or `automation` rows reads as "no" and the question is simply asked
- * again — the wrong answer in that direction costs nothing, where the wrong
- * answer in the other tears down a transport that is working.
+ * ProdCom clamps `limit` at 200 regardless of what is asked (see
+ * BACKFILL_PAGE_SIZE below), so 100 sits comfortably under the box's own
+ * ceiling while staying visibly distinct from a backfill read in `/log` and in
+ * the test fixtures. The one real measurement on record (24 Sep, 21:08–21:10Z)
+ * put throughput at roughly four rows added over ninety seconds — a room would
+ * have to be twenty-five times busier than that, sustained for a full minute,
+ * before this page failed to cover it. And a page too small is not a silent
+ * failure either: if more new rows land in one window than fit on it, every
+ * row on the newest page is still new relative to the baseline (see
+ * wsBaselineIds) — the check still finds a spoken one to act on, it just
+ * cannot name every row that was missed, only that some were, which is all
+ * the verdict needs.
  */
-const WS_SILENCE_CHECK_PAGE_SIZE = 20;
-
-/**
- * How far the question may page forward before giving up on it.
- *
- * Only reached while every row so far has been `typed` or `automation`, which on
- * a box whose channels all transcribe their own audio is never — so the normal
- * cost of the whole check stays one request. A hundred rows of nothing but typed
- * comms traffic since the socket opened is where it stops, and that answers as
- * "nobody spoke", which is the safe direction: the check simply asks again.
- */
-const WS_SILENCE_CHECK_MAX_PAGES = 5;
+const WS_SILENCE_CHECK_PAGE_SIZE = 100;
 
 /** What the integration card says once a box's WebSocket is known to carry
  *  nothing, between re-tests. `report()` dedupes on the message as well as the
@@ -584,6 +581,10 @@ export type BackfillResult = {
  *  transcript entry has never carried one. */
 type ChannelMeta = { name: string | null; color: string | null };
 
+/** One row off `GET /api/v1/transcript`, reduced to what the silence check
+ *  needs — see readNewestPage. */
+type PageRow = { id: string; spoken: boolean };
+
 export class ProdComService extends ConnectionLifecycle {
   /** Wall clock, overridable so a test can age a partial without waiting 30s. */
   protected now(): number {
@@ -629,32 +630,45 @@ export class ProdComService extends ConnectionLifecycle {
    *  arrives. */
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   /**
-   * How many rows `GET /api/v1/transcript` held when the current socket opened.
+   * The entry ids on ProdCom's NEWEST transcript page when the current socket
+   * opened — the silence check's baseline.
    *
-   * The silence check's baseline, and deliberately a COUNT rather than a time.
+   * ProdCom's transcript is a ROLLING WINDOW, not append-only. Measured on the
+   * live box (24 Sep, 21:08–21:10Z): `GET /api/v1/transcript?limit=1&offset=0`
+   * reported `meta.totalCount: 3001` at 21:08:18, at 21:09:39 and again at
+   * 21:09:54, while rows dated 21:09:20 and 21:09:46/47 kept landing at the top
+   * of the range — new rows were arriving and old ones dropping off in lockstep,
+   * so once a box holds a full window the count stops moving altogether. A
+   * design that asked "is the count bigger than it was when this socket opened"
+   * therefore answers "no" for ever on a full box: every row past that baseline
+   * reads as empty, because the baseline itself is a number that never grows.
    *
-   * A ProdCom is an appliance and its clock is its own — the Ultritouch panel on
-   * this network runs about seven hours fast, with no NTP. "Are there rows dated
-   * after <a time from OUR clock>" is therefore not a question about whether
-   * anybody spoke; it is a question about the difference between two clocks, and
-   * it fails in both directions. A box stamping fast answers yes for lines
-   * spoken before the socket ever opened, so a healthy socket is condemned,
-   * `wsSilentBox` latches, and `/log` accuses the vendor of a bug that is not
-   * there. A box stamping slow answers no for ever, so the bug this check exists
-   * for goes undetected with the suite green.
+   * Comparing ids has no such failure: a row on the newest page that is in
+   * neither this baseline nor what the socket has itself delivered (see
+   * wsDeliveredIds) is unambiguously new, whether or not `totalCount` ever
+   * moves. And, like the row-count design this replaced, no timestamp is read
+   * on either side — a ProdCom is an appliance whose clock is its own (the
+   * Ultritouch panel on this network runs about seven hours fast, with no
+   * NTP), so "is there a row dated after <a time from OUR clock>" fails in
+   * both directions: a fast box condemns a healthy socket, a slow one hides
+   * the very bug this check exists to catch.
    *
-   * The row count has no such failure: ProdCom's transcript is append-only and
-   * ascending from the oldest row, so "rows beyond the count we saw at open" is
-   * exactly "rows added since we opened", decided without reading a timestamp on
-   * either side. applyBackfillRows's four-hour horizon is the same hazard
-   * handled differently, and it works there only because four hours absorbs the
-   * skew; a sixty-second window absorbs none of it.
-   *
-   * Null when no WebSocket attempt is open, or when the count could not be
-   * read — and the check does nothing at all without it, because not knowing is
-   * not the same as knowing nothing was missed.
+   * Null when no WebSocket attempt is open, or when the newest page could not
+   * be read — and the check does nothing at all without it, because not
+   * knowing is not the same as knowing nothing was missed.
    */
-  private wsBaselineRows: number | null = null;
+  private wsBaselineIds: Set<string> | null = null;
+  /**
+   * Every entry id THIS socket has itself delivered, since it opened.
+   *
+   * The check's other half of "already accounted for": a spoken row on
+   * ProdCom's newest page that is neither in wsBaselineIds above nor in here
+   * is what the socket missed. Reset only when a socket OPENS — including the
+   * unsubscribed reopen — never per check window, so a delivery from several
+   * windows back still excuses a row that has not yet scrolled off the newest
+   * page.
+   */
+  private wsDeliveredIds = new Set<string>();
   /** Whether the current socket has ever delivered a transcript entry — once
    *  true, PROMOTED. Does not mean the silence check is done for good: it
    *  keeps running post-promotion too (see wsDeliveredThisWindow), because
@@ -672,11 +686,6 @@ export class ProdComService extends ConnectionLifecycle {
    * ProdCom whether anything was actually said.
    */
   private wsDeliveredThisWindow = false;
-  /** Per-connection: whether the "continuing from row N" line has already
-   *  fired once for a check that ran out of pages without finding either a
-   *  spoken row or the end of ProdCom's history. See
-   *  advanceSilenceCheckBaseline(). */
-  private silenceCheckCapLogged = false;
 
   /**
    * Whether `{"type":"subscribe","events":["transcript"]}` is suspected of being
@@ -848,9 +857,10 @@ export class ProdComService extends ConnectionLifecycle {
     return this.sseUp;
   }
 
-  /** Test seam: the row count the silence check measures this socket against. */
-  protected get wsBaseline(): number | null {
-    return this.wsBaselineRows;
+  /** Test seam: the entry-id baseline the silence check measures this socket
+   *  against. */
+  protected get wsBaseline(): ReadonlySet<string> | null {
+    return this.wsBaselineIds;
   }
 
   /**
@@ -911,7 +921,7 @@ export class ProdComService extends ConnectionLifecycle {
    *  so a test can await the same work instead of polling. */
   protected priming: Promise<void> = Promise.resolve();
   /** Test seam: the WebSocket attempt's own priming — just the silence check's
-   *  row-count baseline, read fresh on every attempt. Deliberately separate from
+   *  entry-id baseline, read fresh on every attempt. Deliberately separate from
    *  `priming` above: the two attempts open independently, and whichever
    *  transport's onopen runs second must not overwrite the other's promise out
    *  from under a test awaiting it. */
@@ -970,10 +980,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.duplicateFinalLogged = false;
     // Per-CONNECTION, unlike wsSubscribeFilterSuspect and wsSilentBox above,
     // which describe the BOX and are cleared by configure() alone.
-    this.wsBaselineRows = null;
+    this.wsBaselineIds = null;
+    this.wsDeliveredIds.clear();
     this.wsDelivered = false;
     this.wsDeliveredThisWindow = false;
-    this.silenceCheckCapLogged = false;
     this.skippedSources.clear();
     // A new connection re-reads the keyword list and says so again. The list
     // itself is deliberately KEPT across the teardown: if the re-read fails,
@@ -1268,136 +1278,94 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   /**
-   * How many rows ProdCom's transcript holds in total, right now.
+   * One GET to `/api/v1/transcript`, decoded into the silence check's shape:
+   * the rows on that page reduced to id and whether they are somebody speaking
+   * (see isSpokenAudio), plus the total row count ProdCom reported alongside
+   * them.
    *
-   * Deliberately NO `?since=`. The number has to mean the same thing when it is
-   * compared against a later one, and any window pinned to this server's clock
-   * moves between the two reads while any window pinned to ProdCom's needs
-   * ProdCom's clock — which is exactly what wsBaselineRows exists to avoid
-   * reading. `limit=1` because only `meta.totalCount` is wanted; the row itself
-   * is discarded.
+   * Deliberately no `?since=` and no timestamp read from either side — see
+   * wsBaselineIds for why a ProdCom's own clock cannot be trusted for this.
    *
-   * Returns null rather than throwing: a baseline that could not be read is not
-   * a baseline of zero, and the caller must be able to tell those apart.
+   * Returns the failure rather than logging it — see readNewestPage, the only
+   * caller.
    */
-  private async readTranscriptRowCount(host: string, port: number): Promise<number | null> {
-    let body: string;
-    try {
-      body = await this.getJson(host, port, "/api/v1/transcript?limit=1&offset=0");
-    } catch (e) {
-      console.warn(
-        `[prodcom] could not read the transcript row count (${scrub(errorMessage(e))}) — ` +
-          `this connection has no baseline, so a websocket that delivers nothing will not be noticed`,
-      );
-      return null;
-    }
-    const total = asRecord(asRecord(safeJson(body))?.["meta"])?.["totalCount"];
-    if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
-      console.warn(
-        `[prodcom] the transcript row count was missing from ProdCom's response — ` +
-          `this connection has no baseline, so a websocket that delivers nothing will not be noticed`,
-      );
-      return null;
-    }
-    return Math.floor(total);
-  }
-
-  /**
-   * Has anything been SAID that this socket never delivered?
-   *
-   * Asked as "are there spoken rows beyond the row count we saw when the socket
-   * opened", which is a question about ProdCom's own append-only ordering and
-   * reads no timestamp on either side. See wsBaselineRows for why a timestamp
-   * cannot answer it: the two clocks are independent, and the error in either
-   * direction is worse than the bug being looked for.
-   *
-   * Pages forward only while the answer is still "no", which on any real box is
-   * one request: the first page beyond the baseline either holds speech or holds
-   * fewer than a full page. It has to page at all because the endpoint is
-   * ascending from the OLDEST row, so that page is the FIRST twenty rows added
-   * since the socket opened, not the most recent — and a run of `typed` or
-   * `automation` rows longer than a page would otherwise read as "nobody spoke"
-   * on every check for the life of the connection, the baseline being fixed.
-   *
-   * Returns the failure rather than logging it, because the two answers this can
-   * give — "nothing was missed" and "I could not ask" — must not be confused,
-   * and only the caller knows that acting on the second is what breaks a working
-   * transport.
-   *
-   * Also returns `scannedRows` — exactly how many rows this call read, whether
-   * or not any were speech — and `hitCap`: whether the loop ran out of pages
-   * before reaching either a spoken row or the end of ProdCom's current
-   * history. Both exist so the caller can move `wsBaselineRows` forward past
-   * whatever it just confirmed is non-speech. Without that, a run of
-   * `typed`/`automation` rows longer than the cap pins the baseline for good:
-   * every later check re-reads this same window and answers "nothing missed"
-   * even once real speech lands past it.
-   */
-  private async spokenLinesBeyond(
+  private async fetchTranscriptSlice(
     host: string,
     port: number,
-    baselineRows: number,
-  ): Promise<
-    { ok: true; spoken: number; scannedRows: number; hitCap: boolean } | { ok: false; error: string }
-  > {
-    let spoken = 0;
-    let scannedRows = 0;
-    let hitCap = true;
-    for (let page = 0; page < WS_SILENCE_CHECK_MAX_PAGES; page++) {
-      const offset = baselineRows + page * WS_SILENCE_CHECK_PAGE_SIZE;
-      const path = `/api/v1/transcript?limit=${WS_SILENCE_CHECK_PAGE_SIZE}&offset=${offset}`;
-      let body: string;
-      try {
-        body = await this.getJson(host, port, path);
-      } catch (e) {
-        // Returned, not logged: the caller is the only place that knows "could
-        // not ask" must not be acted on like "nothing was said".
-        return { ok: false, error: errorMessage(e) };
-      }
-      const parsed = asRecord(safeJson(body));
-      const data = parsed?.["data"];
-      if (!Array.isArray(data)) return { ok: false, error: "response had no data array" };
-      scannedRows += data.length;
-      for (const row of data) {
-        const entry = asRecord(row);
-        if (entry && isSpokenAudio(entry)) spoken++;
-      }
-      if (spoken > 0 || data.length === 0) {
-        hitCap = false;
-        break;
-      }
-      if (asRecord(parsed?.["meta"])?.["hasMore"] !== true) {
-        hitCap = false;
-        break;
-      }
+    offset: number,
+    limit: number,
+  ): Promise<{ ok: true; rows: PageRow[]; total: number } | { ok: false; error: string }> {
+    let body: string;
+    try {
+      body = await this.getJson(host, port, `/api/v1/transcript?limit=${limit}&offset=${offset}`);
+    } catch (e) {
+      return { ok: false, error: errorMessage(e) };
     }
-    return { ok: true, spoken, scannedRows, hitCap };
+    const parsed = asRecord(safeJson(body));
+    const data = parsed?.["data"];
+    if (!Array.isArray(data)) return { ok: false, error: "response had no data array" };
+    const total = asRecord(parsed?.["meta"])?.["totalCount"];
+    if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
+      return { ok: false, error: "the transcript row count was missing from ProdCom's response" };
+    }
+    const rows: PageRow[] = [];
+    for (const row of data) {
+      const entry = asRecord(row);
+      const id = entry && str(entry, "id");
+      if (entry && id) rows.push({ id, spoken: isSpokenAudio(entry) });
+    }
+    return { ok: true, rows, total: Math.floor(total) };
   }
 
   /**
-   * After a check finds nothing (`answer.spoken === 0`), move the baseline past
-   * every row that check actually confirmed non-speech — never past a row it
-   * has not yet read, since `scannedRows` only ever counts rows this call
-   * fetched.
+   * The newest page of ProdCom's transcript — what every socket's baseline and
+   * every check are measured against.
    *
-   * `hitCap` names the one shape worth an operator's attention: the loop ran
-   * out of pages before finding either a spoken row or the end of ProdCom's
-   * history, which is exactly the run of typed/automation rows that used to
-   * pin this check for good. Logged once per connection — a chatty comms
-   * channel would otherwise repeat the line every check interval and bury the
-   * rest of the log, the way the REST-outage line once did before it moved to
-   * OutageLog.
+   * Two requests, except when the whole box already fits on one page: the
+   * first read is always `offset=0`, and its own `meta.totalCount` says
+   * whether that page IS the newest one already, or whether a second read at
+   * `max(0, total - PAGE)` is needed to reach the tail. `totalCount` can only
+   * grow between the two reads, never shrink — a box still filling its rolling
+   * window only adds rows, and one that has already filled it stays at its
+   * cap — so the second offset is always in range; on a box that is still
+   * growing it can only be a little stale, never past the end of it.
+   *
+   * This is what replaced paging forward from a fixed offset. Measured on the
+   * live box (24 Sep, 21:08–21:10Z): `GET /api/v1/transcript?limit=1&offset=0`
+   * reported `meta.totalCount: 3001` at 21:08:18, at 21:09:39 and again at
+   * 21:09:54 — unmoving — while rows dated 21:09:20 and 21:09:46/47 kept
+   * landing at `offset=2997`. ProdCom's transcript is a ROLLING WINDOW: the
+   * oldest rows drop off as fast as new ones arrive, so a design that asked "is
+   * the count bigger than it was when the socket opened" answered "no" for
+   * ever once a box reached that state. Reading the actual newest page and
+   * comparing ids has no such failure: a row neither this socket's baseline
+   * nor its own deliveries have seen is new whether or not the total ever
+   * moves.
+   *
+   * Returns the failure rather than logging it: one caller (priming a fresh
+   * socket) logs it once as "no baseline yet"; the check itself must tell
+   * "nothing missed" and "could not ask" apart and never act on the second —
+   * only the caller knows which this is.
    */
-  private advanceSilenceCheckBaseline(baseline: number, scannedRows: number, hitCap: boolean): void {
-    if (scannedRows <= 0) return;
-    const next = baseline + scannedRows;
-    this.wsBaselineRows = next;
-    if (!hitCap || this.silenceCheckCapLogged) return;
-    this.silenceCheckCapLogged = true;
-    console.warn(
-      `[prodcom] the silence check scanned ${WS_SILENCE_CHECK_MAX_PAGES} pages of non-speech rows without ` +
-        `finding the end of them — continuing from row ${next} next time`,
-    );
+  private async readNewestPage(
+    host: string,
+    port: number,
+  ): Promise<{ ok: true; rows: PageRow[] } | { ok: false; error: string }> {
+    const first = await this.fetchTranscriptSlice(host, port, 0, WS_SILENCE_CHECK_PAGE_SIZE);
+    if (!first.ok) return first;
+    if (first.total <= WS_SILENCE_CHECK_PAGE_SIZE) return { ok: true, rows: first.rows };
+    const offset = Math.max(0, first.total - WS_SILENCE_CHECK_PAGE_SIZE);
+    return this.fetchTranscriptSlice(host, port, offset, WS_SILENCE_CHECK_PAGE_SIZE);
+  }
+
+  /**
+   * Which of `rows` is a spoken line this socket has not already accounted
+   * for — not in the `baseline` it opened with, and not among what it has
+   * itself delivered since (wsDeliveredIds). Shared by both silence-check
+   * modes below, which differ only in what happens once this is non-empty.
+   */
+  private missedSpokenRows(rows: PageRow[], baseline: ReadonlySet<string>): PageRow[] {
+    return rows.filter((r) => r.spoken && !baseline.has(r.id) && !this.wsDeliveredIds.has(r.id));
   }
 
   /**
@@ -1440,11 +1408,11 @@ export class ProdComService extends ConnectionLifecycle {
       return;
     }
 
-    // Without a baseline there is no question to ask. readTranscriptRowCount has
+    // Without a baseline there is no question to ask. primeWsBaseline has
     // already said so once, at connect, on the line that explains the
     // consequence; repeating it every minute for the life of the connection
     // would bury the rest of the log.
-    const baseline = this.wsBaselineRows;
+    const baseline = this.wsBaselineIds;
     if (baseline === null) {
       console.debug(`[prodcom] websocket quiet for ${quiet}, but this connection has no transcript baseline`);
       this.armSilenceCheck();
@@ -1455,10 +1423,10 @@ export class ProdComService extends ConnectionLifecycle {
     // or a configure() landing while REST is out means this answer is about a
     // box this service has already let go.
     const epoch = this.connectionEpoch;
-    const answer = await this.spokenLinesBeyond(host, port, baseline);
+    const page = await this.readNewestPage(host, port);
     if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
 
-    if (!answer.ok) {
+    if (!page.ok) {
       // "No lines" and "could not ask" are indistinguishable from here, and
       // acting on the second is how a transport that is working gets torn down.
       //
@@ -1467,11 +1435,11 @@ export class ProdComService extends ConnectionLifecycle {
       // socket that is up wrote this line 1440 times a day into a 10,000-line
       // ring. First failure, a reminder every fifteen minutes carrying the
       // count, and one line when it comes back.
-      const out = this.wsOutages.fail("silence-check", answer.error, this.now());
+      const out = this.wsOutages.fail("silence-check", page.error, this.now());
       if (out.log) {
         console.warn(
           `[prodcom] could not check whether the websocket is missing transcript lines ` +
-            `(${scrub(answer.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+            `(${scrub(page.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
         );
       }
       this.armSilenceCheck();
@@ -1479,11 +1447,15 @@ export class ProdComService extends ConnectionLifecycle {
     }
     const askable = this.wsOutages.ok("silence-check", this.now());
     if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
-    if (answer.spoken === 0) {
-      // Nothing was said in what this check actually scanned — advance past it.
-      // debug, not log: a quiet room is not an event, and this repeats for as
-      // long as the room stays quiet.
-      this.advanceSilenceCheckBaseline(baseline, answer.scannedRows, answer.hitCap);
+
+    const missed = this.missedSpokenRows(page.rows, baseline);
+    // Move past whatever this check just read, whether or not it found
+    // anything — a check must never re-judge a row it has already seen.
+    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+
+    if (missed.length === 0) {
+      // Nothing was said on the newest page. debug, not log: a quiet room is
+      // not an event, and this repeats for as long as the room stays quiet.
       console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
       this.armSilenceCheck();
       return;
@@ -1497,7 +1469,7 @@ export class ProdComService extends ConnectionLifecycle {
       this.wsSubscribeFilterSuspect = true;
       console.warn(
         `[prodcom] websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
-          `${answer.spoken} spoken line(s) since it opened — reopening it without the subscribe frame`,
+          `${missed.length} spoken line(s) since it opened — reopening it without the subscribe frame`,
       );
       this.reopenWebSocketUnsubscribed(host, port);
       return;
@@ -1506,7 +1478,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsSilentBox = true;
     console.warn(
       `[prodcom] websocket delivered no transcript with or without the subscribe frame, while ProdCom has ` +
-        `at least ${answer.spoken} spoken line(s) since it opened — captions stay on the SSE fallback, ` +
+        `at least ${missed.length} spoken line(s) since it opened — captions stay on the SSE fallback, ` +
         `the websocket is re-tested every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
         `${everyMs(this.wsRetryIntervalMs)}, and every ${WS_SILENT_RETRY_EVERY} reconnect(s) ` +
         `instead of every ${WS_RETRY_EVERY}, starting ${this.alternateSubscribeMode()}`,
@@ -1524,9 +1496,8 @@ export class ProdComService extends ConnectionLifecycle {
    * A window the socket delivered anything in costs no REST call — same
    * principle as probation, just re-checked every window instead of asked
    * once — but the baseline still has to move forward on that window, or the
-   * NEXT silent window's REST read would find every already-delivered line
-   * sitting past a baseline that never advanced and misread routine silence
-   * as a miss.
+   * NEXT silent window's read would find every already-delivered line sitting
+   * past a baseline that never advanced and misread routine silence as a miss.
    */
   private async runPromotedSilenceCheck(
     host: string,
@@ -1539,14 +1510,14 @@ export class ProdComService extends ConnectionLifecycle {
 
     if (deliveredThisWindow) {
       const epoch = this.connectionEpoch;
-      const fresh = await this.readTranscriptRowCount(host, port);
+      const page = await this.readNewestPage(host, port);
       if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
-      if (fresh !== null) this.wsBaselineRows = fresh;
+      if (page.ok) this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
       this.armSilenceCheck();
       return;
     }
 
-    const baseline = this.wsBaselineRows;
+    const baseline = this.wsBaselineIds;
     if (baseline === null) {
       console.debug(`[prodcom] promoted websocket quiet for ${quiet}, but this connection has no transcript baseline`);
       this.armSilenceCheck();
@@ -1554,7 +1525,7 @@ export class ProdComService extends ConnectionLifecycle {
     }
 
     const epoch = this.connectionEpoch;
-    const answer = await this.spokenLinesBeyond(host, port, baseline);
+    const page = await this.readNewestPage(host, port);
     if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
     if (this.wsDeliveredThisWindow) {
       // A frame landed while REST was out — this window is accounted for
@@ -1564,15 +1535,15 @@ export class ProdComService extends ConnectionLifecycle {
       return;
     }
 
-    if (!answer.ok) {
+    if (!page.ok) {
       // Exactly probation's tolerance: "no lines" and "could not ask" must
       // not be confused, or an unreachable REST endpoint under a socket that
       // is genuinely still working tears down a transport that was fine.
-      const out = this.wsOutages.fail("silence-check", answer.error, this.now());
+      const out = this.wsOutages.fail("silence-check", page.error, this.now());
       if (out.log) {
         console.warn(
           `[prodcom] could not check whether the promoted websocket is missing transcript lines ` +
-            `(${scrub(answer.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+            `(${scrub(page.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
         );
       }
       this.armSilenceCheck();
@@ -1581,10 +1552,11 @@ export class ProdComService extends ConnectionLifecycle {
     const askable = this.wsOutages.ok("silence-check", this.now());
     if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
 
-    if (answer.spoken === 0) {
-      // Quiet room, not a silent socket. Same rule as probation: advance past
-      // what this check actually scanned, never past a row it has not read.
-      this.advanceSilenceCheckBaseline(baseline, answer.scannedRows, answer.hitCap);
+    const missed = this.missedSpokenRows(page.rows, baseline);
+    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+
+    if (missed.length === 0) {
+      // Quiet room, not a silent socket.
       console.debug(`[prodcom] promoted websocket quiet for ${quiet}, and ProdCom has no spoken lines since`);
       this.armSilenceCheck();
       return;
@@ -1597,7 +1569,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsLastGiveUpWasSilence = true;
     console.warn(
       `[prodcom] the promoted websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
-        `${answer.spoken} spoken line(s) it never carried — falling back to the SSE stream, which backfills ` +
+        `${missed.length} spoken line(s) it never carried — falling back to the SSE stream, which backfills ` +
         `the gap, and re-testing the websocket every ${everyMs(this.wsSilentRetryIntervalMs)} instead of every ` +
         `${everyMs(this.wsRetryIntervalMs)} from here`,
     );
@@ -2012,7 +1984,9 @@ export class ProdComService extends ConnectionLifecycle {
       this.sseReconnects = 0;
       // Null until primeWsBaseline reads it below, so a baseline belonging to
       // the socket this one replaced can never be used to judge this one.
-      this.wsBaselineRows = null;
+      this.wsBaselineIds = null;
+      // Per-socket, per the plan: what THIS socket delivers, from THIS open.
+      this.wsDeliveredIds.clear();
       this.wsDelivered = false;
       this.wsDeliveredThisWindow = false;
       this.noteWebSocketHealthy();
@@ -2043,8 +2017,8 @@ export class ProdComService extends ConnectionLifecycle {
       this.armSilenceCheck();
       // Skipped for a box already known to carry nothing: this re-test either
       // gets dropped again without runSilenceCheck's wsSilentBox branch ever
-      // reading wsBaselineRows, or it delivers and gets promoted — and
-      // runPromotedSilenceCheck's first window re-reads the row count fresh
+      // reading wsBaselineIds, or it delivers and gets promoted — and
+      // runPromotedSilenceCheck's first window re-reads the newest page fresh
       // regardless, overwriting whatever this call would have found. Either
       // way the read is wasted; a box not yet known silent still needs it.
       if (!this.wsSilentBox) this.wsBaselinePriming = this.primeWsBaseline(host, port, ws);
@@ -2416,6 +2390,13 @@ export class ProdComService extends ConnectionLifecycle {
     // caption. A `typed` entry is dropped by shouldCaption() and is still proof
     // the subscription works. acceptEntry is also the SSE fallback's path, where
     // there is no socket to prove.
+    //
+    // The id is recorded regardless of whether it is speech: the silence check
+    // only needs to know this socket already accounted for it, and a `typed`
+    // entry's id sitting on a later REST page must not read as something the
+    // socket missed.
+    const id = str(found.entry, "id");
+    if (id) this.wsDeliveredIds.add(id);
     this.noteWebSocketDelivered();
     this.acceptEntry(found.entry);
   }
@@ -2817,7 +2798,7 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   /**
-   * A WebSocket attempt's own priming: just the silence check's row-count
+   * A WebSocket attempt's own priming: just the silence check's entry-id
    * baseline, read fresh every time a socket opens.
    *
    * Deliberately NOT channels, keywords or backfill — the SSE stream owns
@@ -2827,23 +2808,36 @@ export class ProdComService extends ConnectionLifecycle {
    * backfill every re-test for no benefit (the buffer is already caught up) and
    * would print a `backfill: N line(s)` log on a connection that received no new
    * lines at all.
+   *
+   * Logs a failure here, unlike a later check's own REST failures: a fresh
+   * attempt that cannot read a baseline at all is worth an operator seeing the
+   * moment it happens, where a check that later fails to reach the same
+   * endpoint is repeated and goes through OutageLog instead.
    */
   private async primeWsBaseline(host: string, port: number, ws: WebSocket): Promise<void> {
-    const rows = await this.readTranscriptRowCount(host, port);
+    const page = await this.readNewestPage(host, port);
     // A read that outlived its socket is answered after that socket closed.
-    // ProdCom's transcript only grows, so applying it would inflate the next
-    // attempt's baseline and hide lines spoken since that attempt opened.
+    // ProdCom's transcript can shrink from the front now (the rolling window),
+    // but never from the tail this reads, so applying a stale answer to the
+    // WRONG attempt would still mean judging it against rows that predate it.
     //
     // Identity, not connectionEpoch: an ORDINARY reconnect (this socket drops
     // and a new one opens to the SAME box) never bumps the epoch — only
     // teardown() does — but it does replace `this.ws`, and this baseline has
     // to belong to the attempt that asked for it, not whichever one happens to
     // be open when the answer lands. See prodcom-stale-baseline.test.ts.
-    if (this.ws === ws) {
-      this.wsBaselineRows = rows;
-    } else {
+    if (this.ws !== ws) {
       console.debug("[prodcom] dropped a baseline read that arrived after this websocket attempt was replaced");
+      return;
     }
+    if (!page.ok) {
+      console.warn(
+        `[prodcom] could not read the transcript's newest page (${scrub(page.error)}) — ` +
+          `this connection has no baseline, so a websocket that delivers nothing will not be noticed`,
+      );
+      return;
+    }
+    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
   }
 
   /**
