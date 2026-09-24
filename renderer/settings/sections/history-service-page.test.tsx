@@ -19,12 +19,27 @@ import { fmtTime } from "./overview-data.js";
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** api.ts opens an SSE stream on first use; nothing here pushes on it. */
+/** api.ts opens an SSE stream on first use — most tests here never push on
+ *  it, but a few drive a live channel through `FakeEventSource.last`. */
 class FakeEventSource {
+  static last: FakeEventSource | null = null;
   readyState = 1;
-  addEventListener(): void {}
-  removeEventListener(): void {}
+  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
+  constructor() {
+    FakeEventSource.last = this;
+  }
+  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
+    let set = this.listeners.get(name);
+    if (!set) this.listeners.set(name, (set = new Set()));
+    set.add(fn);
+  }
+  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
+    this.listeners.get(name)?.delete(fn);
+  }
   close(): void {}
+  push(channel: string, payload: unknown): void {
+    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
+  }
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
@@ -469,6 +484,40 @@ describe("the History service page", () => {
       ["Rundown", "Baptisms", "Attendance", "Sound"],
       "the just-finished session's own card must show without a page reload",
     );
+  });
+
+  test("a live baptism:state push for the OPEN service refetches its sessions", async (t) => {
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") {
+        calls += 1;
+        return ok(baptisms());
+      }
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
+      if (url === "/api/service-timeline") return ok([timeline()]);
+      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+    const before = calls;
+
+    FakeEventSource.last!.push("baptism:state", { finishedAt: iso("20:52:00"), saveErrors: null });
+    await settle();
+    await settle();
+
+    assert.ok(calls > before, `expected a live baptism:state push to refetch this page's own sessions; calls stayed at ${calls}`);
   });
 
   test("the arriving page speaks the same vocabulary as a service's page", async (t) => {
