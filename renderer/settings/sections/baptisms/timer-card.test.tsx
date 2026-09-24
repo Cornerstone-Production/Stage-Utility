@@ -321,8 +321,12 @@ test("a failed entry with a serviceKey offers its own Rebuild from raw; one with
 });
 
 test("the offer is disabled while THAT entry's own service is live", async () => {
+  // A real serviceKey, not failedSave()'s own null: a null serviceKey is
+  // already, on its own, disabled by the no-service branch — { live: true }
+  // is never even consulted for it, so hard-coding "not-live" in the real
+  // useServiceLive check would stay green here for the wrong reason.
   const { root, restore } = await mountWithRebuild(
-    { ...FINISHED, saveErrors: failedSave(DISK, "2026-09-13T15:00:00.000Z") },
+    { ...FINISHED, saveErrors: [{ sessionId: baptismSessionId("2026-09-13T15:00:00.000Z"), serviceKey: "svc-live", reason: DISK }] },
     { live: true },
   );
   try {
