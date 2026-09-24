@@ -310,6 +310,44 @@ describe("the History service page", () => {
     assert.deepEqual(nav, ["Rundown", "Attendance", "Sound"], "no Baptisms entry when the service has none");
   });
 
+  test("a session finished after the page mounted still shows once its own service is opened", async (t) => {
+    // The page's baptisms list is fetched once, for the whole page, on mount —
+    // stale the moment a session finishes anywhere on this page's own life:
+    // answering [] on mount and only a real session afterward, the same shape
+    // a page left open through a live baptism session actually sees.
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") {
+        calls += 1;
+        return ok(calls === 1 ? [] : baptisms());
+      }
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
+      if (url === "/api/service-timeline") return ok([timeline()]);
+      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    assert.ok(calls >= 2, `expected selecting the service to refetch baptisms (only [] on mount otherwise); saw ${calls} call(s)`);
+    assert.deepEqual(
+      [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")),
+      ["Rundown", "Baptisms", "Attendance", "Sound"],
+      "the just-finished session's own card must show without a page reload",
+    );
+  });
+
   test("the arriving page speaks the same vocabulary as a service's page", async (t) => {
     // Attendance is recording, the first plan item has not gone live, so there
     // is no timeline record — no rundown, no KPIs, no report. This page kept a

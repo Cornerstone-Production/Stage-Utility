@@ -849,13 +849,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     };
   }, [selectedKey, reloadKey]);
 
-  // Baptism sessions — loaded ONCE for the whole page, not per selection: the
-  // All-services LIST needs them too, to say how many were baptized per row
-  // (linkBaptisms + baptismStats, the SAME pair the open service's own
-  // Baptisms card uses, so a row's count and that service's page can never
-  // disagree — see linkBaptisms.ts). Refetched on reloadKey so a Rebuild
-  // from raw (which can restore or update a session) is reflected without a
-  // full reload, whether or not a service happens to be open at the time.
+  // Baptism sessions — loaded for the whole page, not scoped to one
+  // selection: the All-services LIST needs them too, to say how many were
+  // baptized per row (linkBaptisms + baptismStats, the SAME pair the open
+  // service's own Baptisms card uses, so a row's count and that service's
+  // page can never disagree — see linkBaptisms.ts).
+  //
+  // Refetched on reloadKey (a Rebuild from raw done ON THIS PAGE), on
+  // selectedKey changing (opening a service is exactly the moment its own
+  // just-finished session needs to be current — a page left open through a
+  // live baptism session used to show it only after a full reload, since the
+  // fetch ran once and never again), and on a live, non-replayed
+  // "baptism:state" push whose own finishedAt or saveErrors actually changed
+  // (a session finishing, or a save-failure clearing via a Rebuild done
+  // somewhere ELSE — the Baptisms tab's own header or note — while this page
+  // stays open with no selection change at all). A REPLAYED push is the
+  // connect-time cache of whatever is already true, never a new event; the
+  // signature check on top of that means an unrelated push (a tick, a
+  // workflow toggle) does not refetch the whole session list for nothing.
   //
   // A failure is not a baptism-free month. This used to `.catch(() =>
   // setBaptisms([]))`, the exact lie the OTHER three loads on this page were
@@ -866,22 +877,35 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // spl already use, so the list can say so once rather than nowhere.
   useEffect(() => {
     let cancelled = false;
-    invoke<BaptismSession[]>("baptism:sessions")
-      .then((b) => {
-        if (cancelled) return;
-        setBaptisms(b);
-        noteLoaded("baptisms");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setBaptisms([]);
-        logToServer("baptism", `could not load past sessions: ${errorMessage(err)}`);
-        setLoadFailed((prev) => (prev.has("baptisms") ? prev : new Set(prev).add("baptisms")));
-      });
+    function fetchBaptisms() {
+      invoke<BaptismSession[]>("baptism:sessions")
+        .then((b) => {
+          if (cancelled) return;
+          setBaptisms(b);
+          noteLoaded("baptisms");
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setBaptisms([]);
+          logToServer("baptism", `could not load past sessions: ${errorMessage(err)}`);
+          setLoadFailed((prev) => (prev.has("baptisms") ? prev : new Set(prev).add("baptisms")));
+        });
+    }
+    fetchBaptisms();
+    let lastSignature: string | null = null;
+    const offState = onNotification("baptism:state", (payload, replayed) => {
+      if (replayed) return;
+      const state = payload as BaptismState;
+      const signature = JSON.stringify([state.finishedAt, state.saveErrors ?? null]);
+      if (signature === lastSignature) return;
+      lastSignature = signature;
+      fetchBaptisms();
+    });
     return () => {
       cancelled = true;
+      offState();
     };
-  }, [reloadKey, noteLoaded]);
+  }, [reloadKey, selectedKey, noteLoaded]);
 
   // The calendar and the day list are GLOBAL — every service type, so you can
   // navigate to any of them. Nothing on this page scopes to one type any more:
