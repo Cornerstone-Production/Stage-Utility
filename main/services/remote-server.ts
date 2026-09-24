@@ -1080,7 +1080,11 @@ export class RemoteServer {
       // the whole year and one of a single Sunday used to be indistinguishable.
       const from = _url.searchParams.get("from");
       const to = _url.searchParams.get("to");
-      const buf = await buildHistoryWorkbook({ from, to, include });
+      // Whichever hostname/port the browser used to reach this server — the
+      // Baptisms sheet's History column builds its links from this, never from
+      // this box's own idea of its address, so the file works for whoever opens
+      // it.
+      const buf = await buildHistoryWorkbook({ from, to, include, host: req.headers.host ?? null });
       const fname = historyFileName(from, to);
       res.writeHead(200, {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
