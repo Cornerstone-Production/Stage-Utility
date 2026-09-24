@@ -35,6 +35,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, OctagonXIcon, PlusIcon, SearchIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
+import { automationRegistryQuery } from "../../lib/automation-registry";
 import { Button, Collapsible, Input, Separator, Switch } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
@@ -394,10 +395,7 @@ function ListSection({
 export function AutomationSection() {
   const qc = useQueryClient();
   const [importing, setImporting] = useState(false);
-  const { data: registry } = useQuery({
-    queryKey: ["automation:registry"],
-    queryFn: () => invoke<Registry>("automation:registry"),
-  });
+  const { data: registry } = useQuery(automationRegistryQuery);
   const { data } = useQuery({
     queryKey: ["automation:rules"],
     queryFn: () => invoke<{ rules: Rule[]; settings: { simulate: boolean; disarmed: boolean } }>("automation:rules"),
