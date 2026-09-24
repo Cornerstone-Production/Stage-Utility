@@ -28,6 +28,24 @@ const session = (n: number): BaptismSession =>
     people: [],
   }) as unknown as BaptismSession;
 
+/** Capture console.log lines starting with `prefix`, the same technique
+ *  baptism-legacy-restore.test.ts uses — a guard on a log line has to watch
+ *  the real call, not trust that the code makes it. Restore with release()
+ *  even on assertion failure. */
+function captureLog(prefix: string): { lines: string[]; release: () => void } {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && args[0].startsWith(prefix)) lines.push(args[0]);
+  };
+  return {
+    lines,
+    release: () => {
+      console.log = original;
+    },
+  };
+}
+
 describe("baptism sessions", () => {
   beforeEach(async () => {
     await baptismStore.addSessions([]); // ensure the store is loaded
@@ -50,10 +68,74 @@ describe("baptism sessions", () => {
     );
   });
 
-  it("still bounds growth, so the file cannot grow without limit", async () => {
+  it("a restore is never capped, even long past MAX_SESSIONS", async () => {
+    // The bug this branch fixes: addSessions ended in `.slice(0, MAX_SESSIONS)`,
+    // contradicting its own doc comment ("without a cap") — a restore is the
+    // one write an operator would never forgive being silently trimmed.
     await baptismStore.addSessions(Array.from({ length: 2100 }, (_, i) => session(10_000 + i)));
     const n = (await baptismStore.listSessions()).length;
-    assert.ok(n <= 2000, `expected a ceiling, got ${n}`);
+    assert.equal(n, 2100, `a restore evicted sessions instead of keeping every one of them (got ${n})`);
+  });
+
+  it("a restore into a store already near the cap keeps every session, old and new", async () => {
+    const existing = Array.from({ length: MAX_SESSIONS - 10 }, (_, i) => session(20_000 + i));
+    await baptismStore.addSessions(existing);
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS - 10, "precondition: near the cap");
+
+    const incoming = Array.from({ length: 50 }, (_, i) => session(90_000 + i)); // crosses the cap by 40
+    const added = await baptismStore.addSessions(incoming);
+    const after = await baptismStore.listSessions();
+
+    assert.equal(added, 50);
+    assert.equal(
+      after.length,
+      MAX_SESSIONS + 40,
+      "a restore that crossed the cap evicted the excess instead of keeping it",
+    );
+    for (const s of existing) {
+      assert.ok(after.some((a) => a.id === s.id), `lost an existing session (${s.id}) once the cap was crossed`);
+    }
+    for (const s of incoming) {
+      assert.ok(after.some((a) => a.id === s.id), `lost a restored session (${s.id})`);
+    }
+  });
+
+  it("a live append at the cap evicts exactly one session, and logs it", async () => {
+    await baptismStore.addSessions(Array.from({ length: MAX_SESSIONS }, (_, i) => session(30_000 + i)));
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS, "precondition: exactly at the cap");
+
+    const cap = captureLog("[baptism] a live append evicted");
+    try {
+      await baptismStore.addSession(session(39_999));
+    } finally {
+      cap.release();
+    }
+
+    const after = await baptismStore.listSessions();
+    assert.equal(after.length, MAX_SESSIONS, "an append at the cap must still hold growth at MAX_SESSIONS");
+    assert.ok(after.some((s) => s.id === "bap-39999"), "the new session must be in the store");
+    assert.deepEqual(cap.lines, ["[baptism] a live append evicted 1 session(s) to stay at the cap"]);
+  });
+
+  it("a live append after an over-cap restore evicts one session, not the whole excess", async () => {
+    // The failure this whole fix exists to prevent: a restore that legitimately
+    // left the store over the cap must not have its excess mass-deleted by the
+    // very next live Finish.
+    const over = MAX_SESSIONS + 50;
+    await baptismStore.addSessions(Array.from({ length: over }, (_, i) => session(40_000 + i)));
+    assert.equal((await baptismStore.listSessions()).length, over, "precondition: over the cap after a restore");
+
+    await baptismStore.addSession(session(49_999));
+
+    const after = await baptismStore.listSessions();
+    // One evicted, one added — the over-cap size holds, rather than being
+    // sliced straight down to MAX_SESSIONS.
+    assert.equal(
+      after.length,
+      over,
+      `a single live append evicted more than one session from an over-cap store (now ${after.length}, was ${over})`,
+    );
+    assert.ok(after.some((s) => s.id === "bap-49999"), "the new session must be in the store");
   });
 
   it("does NOT evict existing sessions on a restore", async () => {

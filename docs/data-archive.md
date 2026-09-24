@@ -82,6 +82,14 @@ figures can be recomputed properly.
 Importing the same archive twice changes nothing. Every file is read and validated
 before anything is written, so a corrupt archive cannot leave a half-imported year.
 
+Baptism sessions (`baptism.json`) restore separately from the per-service choice
+above: every session in the archive merges into the local list by id, whatever is
+picked for its service, and none of the operator's existing sessions are evicted
+to make room — an import can legitimately leave the store holding more than its
+normal cap. A live Finish afterward pares the store back toward that cap one
+session at a time rather than dropping the whole excess at once, and logs how
+many it evicted.
+
 ## Editing a recording in History
 
 Correcting a recording — trimming its window, recalculating attendance, merging

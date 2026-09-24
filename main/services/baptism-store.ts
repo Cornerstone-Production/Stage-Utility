@@ -57,6 +57,15 @@ class BaptismStore {
    * The replacement keeps its position rather than jumping to the head: the list
    * is read newest-first by `startedAt`, and a corrected session did not start
    * again.
+   *
+   * A genuinely new session is capped at `max(MAX_SESSIONS, the store's size
+   * before this append)`, not at a bare `MAX_SESSIONS`. A restore
+   * (`addSessions`) never evicts, so it can legitimately leave the store
+   * holding more than the cap — a plain `.slice(0, MAX_SESSIONS)` here would
+   * then let the very next live Finish silently delete every session over the
+   * cap in one shot. This still evicts exactly one once the store is AT the
+   * cap, the same as before; it only refuses to evict MORE than the one
+   * session this append would otherwise add past an already-over-cap store.
    */
   async addSession(session: BaptismSession): Promise<void> {
     await this.store.update((file) => {
@@ -66,7 +75,14 @@ class BaptismStore {
         sessions[at] = session;
         return { ...file, sessions };
       }
-      return { ...file, sessions: [session, ...file.sessions].slice(0, MAX_SESSIONS) };
+      const merged = [session, ...file.sessions];
+      const cap = Math.max(MAX_SESSIONS, file.sessions.length);
+      const sessions = merged.slice(0, cap);
+      const evicted = merged.length - sessions.length;
+      if (evicted > 0) {
+        console.log(`[baptism] a live append evicted ${evicted} session(s) to stay at the cap`);
+      }
+      return { ...file, sessions };
     });
   }
 
@@ -84,6 +100,12 @@ class BaptismStore {
    * situation: the operator is deliberately putting history back, and silently
    * dropping the oldest of it is the one thing they would not forgive. Existing
    * ids win, so a re-import is idempotent.
+   *
+   * Genuinely uncapped: this can leave the store holding more than
+   * MAX_SESSIONS. `addSession` (the live-append path) knows about that —
+   * see its own doc comment — so the very next Finish does not silently
+   * delete the excess in one shot; it pares the store back toward the cap one
+   * session at a time instead.
    */
   async addSessions(sessions: BaptismSession[]): Promise<number> {
     if (sessions.length === 0) return 0;
@@ -95,7 +117,7 @@ class BaptismStore {
       const merged = [...fresh, ...file.sessions].sort((a, b) =>
         (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
       );
-      return { ...file, sessions: merged.slice(0, MAX_SESSIONS) };
+      return { ...file, sessions: merged };
     });
     return added;
   }

@@ -85,6 +85,18 @@ async function readStoreFile(): Promise<string> {
   return fs.readFile(BAPTISM_JSON, "utf8");
 }
 
+/** Drain every session out of the shared store. The three "at the cap" tests
+ *  below need the store at EXACTLY MAX_SESSIONS before they start — they used
+ *  to get that for free from addSessions' own (buggy) cap, which silently
+ *  trimmed whatever else this file's earlier tests had left behind down to
+ *  2000 regardless. Now that a restore never evicts, leftover sessions from
+ *  earlier tests just add on top instead, so these three drain the store
+ *  themselves rather than depending on a bug this file exists to prove fixed
+ *  elsewhere (baptism-store.test.ts). */
+async function clearAllSessions(): Promise<void> {
+  for (const s of await baptismStore.listSessions()) await baptismStore.deleteSession(s.id);
+}
+
 describe("rebuildServiceBaptisms — an intact store", () => {
   it("changes nothing, byte for byte", async () => {
     const ctx = freshCtx("merge-intact");
@@ -489,6 +501,7 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     const KEY = "cap-drops-its-own-svc";
     const DATE = "2026-09-23";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    await clearAllSessions();
 
     // 2000 sessions dated well into the future — newer than literally
     // everything else this shared store could hold from any other test in
@@ -564,6 +577,7 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
     const KEY = "cap-never-evicts-svc";
     const DATE = "2026-09-23";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    await clearAllSessions();
 
     // 1998 filler sessions, dated well into the future so nothing else in
     // this shared store can ever outrank them, plus this service's own two
@@ -665,6 +679,7 @@ describe("rebuildServiceBaptisms — the store changes between planning and writ
     const KEY = "race-added-svc";
     const DATE = "2026-09-23";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
+    await clearAllSessions();
 
     // 1999 filler sessions for other services, dated well into the future,
     // plus this service's own single session below, for exactly 2000: the
