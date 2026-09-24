@@ -67,8 +67,11 @@ const final = (id: string, text: string): StubEntry => ({
 
 const partial = (id: string, text: string): StubEntry => ({ ...final(id, text), inProgress: true });
 
-async function connected(t: TestContext): Promise<{ stub: Awaited<ReturnType<typeof startProdComStub>>; svc: TestProdCom }> {
-  const stub = await startProdComStub({ channels: CHANNELS });
+async function connected(
+  t: TestContext,
+  opts: { refuseWebSocket?: boolean } = {},
+): Promise<{ stub: Awaited<ReturnType<typeof startProdComStub>>; svc: TestProdCom }> {
+  const stub = await startProdComStub({ channels: CHANNELS, ...opts });
   const svc = new TestProdCom();
   t.after(async () => {
     svc.stop();
@@ -170,10 +173,11 @@ describe("a partial never runs backwards on screen", () => {
     // Both transports can be open at once, and they do not share a clock: a
     // slower copy of the SAME utterance can land after a faster one that is
     // already further along. Modelled here as two SSE sends racing out of
-    // order, which is the same shape ingest() sees regardless of which
-    // transport either one came in on.
+    // order while the websocket is open, which is the same shape ingest()
+    // sees regardless of which transport either one came in on.
     const { stub, svc } = await connected(t);
     await stub.waitForSse(1);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
     await svc.settled();
 
     stub.sseSend(partial("grows-then-shrinks", "the quick brown fox jum"));
@@ -183,11 +187,28 @@ describe("a partial never runs backwards on screen", () => {
     // late.
     stub.sseSend(partial("grows-then-shrinks", "the quick"));
     await new Promise((r) => setTimeout(r, 60));
+    assert.equal(svc.wsOpenNow, true, "the websocket must still be open for this case to mean anything");
 
     assert.deepEqual(
       svc.texts(),
       ["the quick brown fox jum"],
       "a shorter, stale partial rewound a caption that was already further along",
     );
+  });
+
+  it("applies a shorter revision when SSE is the only transport", async (t: TestContext) => {
+    // One ordered stream cannot deliver a straggler, so a shortened partial is
+    // the recogniser revising itself and must reach the screen.
+    const { stub, svc } = await connected(t, { refuseWebSocket: true });
+    await stub.waitForSse(1);
+    await svc.settled();
+
+    stub.sseSend(partial("revised-down", "we are going to the see"));
+    await eventually(() => svc.texts().includes("we are going to the see"), "the first revision to land");
+
+    stub.sseSend(partial("revised-down", "we're going to sea"));
+    await eventually(() => svc.texts().includes("we're going to sea"), "the shortened revision to land");
+    assert.equal(svc.wsOpenNow, false, "no websocket may be open for this case to mean anything");
+    assert.deepEqual(svc.texts(), ["we're going to sea"]);
   });
 });

@@ -2631,14 +2631,16 @@ export class ProdComService extends ConnectionLifecycle {
       // under too — it re-arrives as an unchanged re-send and is coalesced by
       // scheduleTranscript()'s throttle below rather than broadcast twice.
       const existing = this.partials.get(ch);
-      // Both transports can be open at once (an unproven WebSocket beside SSE,
-      // or a straggler still in flight the instant one is promoted), and they
-      // do not share a clock: a slower copy of the SAME utterance can arrive
-      // after a faster one that is already further along. A genuine ASR
-      // revision only ever grows the committed text; a same-id partial that is
-      // SHORTER than what is already on screen is that straggler, not
-      // progress, and applying it would visibly rewind the caption.
-      if (existing && existing.line.id === line.id && line.text.length < existing.line.text.length) return;
+      // A same-id partial SHORTER than what is on screen is a straggler while a
+      // WebSocket attempt is open (`wsOpen`, the duplicate-final rule's window
+      // above): the two transports do not share a clock, so a slower copy of
+      // the same utterance can land after a faster one that is further along,
+      // and applying it would visibly rewind the caption. On SSE alone
+      // partials arrive in order, so every revision applies, including one the
+      // recogniser shortened.
+      if (this.wsOpen && existing && existing.line.id === line.id && line.text.length < existing.line.text.length) {
+        return;
+      }
       const unchanged = !!existing && existing.line.id === line.id && existing.line.text === line.text;
       const now = this.now();
       this.partials.set(ch, {
