@@ -88,10 +88,20 @@ const AXIS_H = 18;
 
 /**
  * The session's timer lane, fetched once and refetched on every LIVE
- * "baptism:state" push — never on a timer, and never twice for one push (a
- * REPLAYED frame is the connect-time cache a late subscriber is handed, which
- * this component's own mount fetch already accounts for; refetching on it too
- * would be a second read of the same truth, not a new one).
+ * "baptism:state" push FOR THIS `serviceKey` — never on a timer, and never
+ * twice for one push (a REPLAYED frame is the connect-time cache a late
+ * subscriber is handed, which this component's own mount fetch already
+ * accounts for; refetching on it too would be a second read of the same
+ * truth, not a new one).
+ *
+ * "For this serviceKey" matters because this hook also backs
+ * HistorySessionChart, the read-only PAST-service entry point on a service's
+ * History page: `baptism:state` broadcasts on every press of WHATEVER
+ * service is live right now, which is almost never the past one History is
+ * showing. Refetching on every push regardless of whose it was meant a
+ * History page left open during an unrelated live baptism elsewhere re-read
+ * a lane that could not have changed, once per press, for as long as the
+ * page stayed open.
  *
  * `error` is its OWN field, never folded into an empty `spans: []` — a fetch
  * that failed (a network blip, a server restart mid-service) is not a session
@@ -115,8 +125,13 @@ export function useSessionLane(
 
   useEffect(() => {
     if (!serviceKey) return;
-    return onNotification("baptism:state", (_payload, replayed) => {
-      if (!replayed) setRev((n) => n + 1);
+    return onNotification("baptism:state", (payload, replayed) => {
+      if (replayed) return;
+      // Only a push naming THIS service's key can mean this hook's own lane
+      // changed — every other live service's own presses broadcast the same
+      // channel, and are no business of a chart showing a different one.
+      if ((payload as BaptismState).serviceKey !== serviceKey) return;
+      setRev((n) => n + 1);
     });
   }, [serviceKey]);
 
