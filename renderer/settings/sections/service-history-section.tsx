@@ -1559,10 +1559,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           <SectionCard
             id="history-baptisms"
             title="Baptisms"
+            // Never on the shared, read-only page: docs/display-urls.md's own
+            // contract for that link is "shows nothing else of the app," and
+            // this is real navigation INTO the operator app — the live
+            // timer's Start testimonies, Undo, Reset, Rebuild from raw and
+            // the Workflow toggle, not a read-only view of anything.
             headerRight={
-              <AppLink to="/baptism" className="text-caption1 text-accent hover:underline">
-                Open in Baptisms →
-              </AppLink>
+              readOnly ? undefined : (
+                <AppLink to="/baptism" className="text-caption1 text-accent hover:underline">
+                  Open in Baptisms →
+                </AppLink>
+              )
             }
           >
             <StatStrip figures={baptismCardFigures(bapStats)} hover={null} live={null} announce={false} />

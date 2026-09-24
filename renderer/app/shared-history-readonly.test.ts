@@ -208,4 +208,88 @@ describe("the shared /history link", () => {
       await unmountAndTeardown(cleanup, teardown);
     }
   });
+
+  it("a service's Baptisms card offers no way into the operator app, read-only or not", async () => {
+    // docs/display-urls.md's own contract for this link: handed to people
+    // outside Production, and "shows nothing else of the app". The card's own
+    // "Open in Baptisms" link is real navigation INTO the operator app — the
+    // live timer's Start testimonies, Undo, Reset, Rebuild from raw and the
+    // Workflow toggle — which the shared page must never offer a way to.
+    const { installDom } = await import("../test-dom.js");
+    const teardown = installDom();
+    const { render, cleanup } = await import("@testing-library/react");
+    try {
+      (globalThis as unknown as { EventSource: unknown }).EventSource = class {
+        readyState = 1;
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        close(): void {}
+      };
+      const day = "2026-09-17";
+      const rec = {
+        serviceKey: "salt:plan-1:evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        planTitle: "Evening",
+        seriesTitle: null,
+        serviceDate: day,
+        serviceTimeId: "evening",
+        serviceTimeStartsAt: `${day}T20:15:00.000Z`,
+        startedAt: `${day}T20:15:00.000Z`,
+        endedAt: `${day}T21:45:00.000Z`,
+        items: [],
+      };
+      const session = {
+        id: "b1",
+        startedAt: `${day}T20:45:00.000Z`,
+        finishedAt: `${day}T20:52:00.000Z`,
+        title: "Evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        serviceKey: rec.serviceKey,
+        people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
+      };
+      (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+        const url = String(input);
+        const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
+        if (url === "/api/service-timeline") return ok([rec]);
+        if (url === "/api/attendance/history") return ok([]);
+        if (url === "/api/spl/summary") return ok([]);
+        if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+        if (url === "/api/baptism/sessions") return ok([session]);
+        if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
+        if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(rec);
+        if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(null);
+        if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(null);
+        return ok(null);
+      };
+      const React = (await import("react")).default;
+      const { TooltipProvider } = await import("../components/ui/index.js");
+      const { ServiceHistorySection } = await import("../settings/sections/service-history-section.js");
+
+      const view = render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly: true }),
+        ),
+      );
+      for (let i = 0; i < 4; i++) await settle();
+      const row = [...view.container.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Evening"));
+      assert.ok(row, "the service row never rendered");
+      row!.click();
+      for (let i = 0; i < 4; i++) await settle();
+
+      const card = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms");
+      assert.ok(card, "expected the Baptisms card to render for a linked session even read-only");
+      assert.equal(
+        view.container.querySelector('a[href="/baptism"]'),
+        null,
+        "the shared read-only page must not link into the operator app",
+      );
+      cleanup();
+    } finally {
+      await unmountAndTeardown(cleanup, teardown);
+    }
+  });
 });
