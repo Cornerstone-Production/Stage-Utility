@@ -168,6 +168,47 @@ describe("PATCH /api/automation/rules/:id", () => {
   });
 });
 
+describe("the [automation] log line an operator reads on /log", () => {
+  async function captureLog(fn: () => Promise<void>): Promise<string[]> {
+    const lines: string[] = [];
+    const realLog = console.log;
+    const realWarn = console.warn;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    console.warn = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    try {
+      await fn();
+    } finally {
+      console.log = realLog;
+      console.warn = realWarn;
+    }
+    return lines;
+  }
+
+  test("saving a rule with issues logs it, turned off, with the count", async () => {
+    const lines = await captureLog(async () => {
+      await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: badRule() });
+    });
+    assert.ok(
+      lines.some((l) => l.includes("[automation]") && l.includes("saved turned off") && l.includes("2 fields")),
+      `expected a [automation] log line about the save, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  test("refusing to enable a rule with issues logs it", async () => {
+    const id = await (async () => {
+      const res = await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: badRule() });
+      return (res.json as { rule: { id: string } }).rule.id;
+    })();
+    const lines = await captureLog(async () => {
+      await callRoute(automationRoutes, `/api/automation/rules/${id}`, { method: "PATCH", body: { enabled: true } });
+    });
+    assert.ok(
+      lines.some((l) => l.includes("[automation]") && l.includes("refused to enable")),
+      `expected a [automation] log line about the refusal, got ${JSON.stringify(lines)}`,
+    );
+  });
+});
+
 describe("GET /api/automation/rules reports issues the list and the editor both read", () => {
   test("issues come back per rule, computed fresh — not stored on it", async () => {
     const id = await (async () => {

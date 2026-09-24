@@ -185,6 +185,9 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     const toSave = issues.length > 0 ? { ...body, enabled: false } : body;
     try {
       const rule = await automationEngine.addRule(toSave as never);
+      if (issues.length > 0) {
+        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${fieldsNeedAttention(issues.length)}`);
+      }
       json(res, { rule, issues }, 201);
     } catch (err) {
       // A duplicate or malformed cue name is the caller's problem, not a 500.
@@ -219,6 +222,9 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     // "enforced when next saved or enabled", not a regression on upgrade.
     const onlyAsksToEnable = body.enabled === true && Object.keys(body).length === 1;
     if (issues.length > 0 && onlyAsksToEnable) {
+      console.warn(
+        `[automation] refused to enable "${scrub(existing.name)}": ${fieldsNeedAttention(issues.length)}`,
+      );
       json(
         res,
         {
@@ -234,6 +240,9 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     try {
       await automationEngine.updateRule(idMatch[1], patch as never);
       const rule = automationEngine.listRules().find((r) => r.id === idMatch[1])!;
+      if (issues.length > 0) {
+        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${fieldsNeedAttention(issues.length)}`);
+      }
       json(res, { rule, issues: issuesFor(rule) });
     } catch (err) {
       error(res, errorMessage(err), 400);
