@@ -436,9 +436,11 @@ splits with a plain line in place of the chart rather than one reading as an
 empty session. A **Open in Baptisms →** link beside the card's title returns
 to the live tab.
 
-Two or more sessions recorded in one occurrence — a reset and restarted
-session, or two people baptized in separate sessions the same weekend — each
-draw their own chart and their own splits, never merged into one.
+Two or more sessions recorded in one occurrence — an operator finishing,
+resetting and running the whole thing again, or two people baptized in
+genuinely separate sessions the same weekend — each draw their own chart and
+their own splits, never merged into one. A reset on its own never stores
+anything; it is the Finish on each side of it that does.
 
 ### The service chart
 
@@ -620,10 +622,13 @@ The result says what was **rebuilt** — a count per leg, baptisms as "N added"
 and "M updated" when the merge actually wrote something — then, separately,
 what was **left alone** and why: for the other three legs, a leg the raw
 layer had nothing for; for baptisms, sessions the merge matched but found
-unchanged, newer in the store already, disagreeing with the rows, or
-unreadable. If the store was already at its cap when new sessions were found,
-a closing clause says how many could not be added. A leg that failed to save
-says so by name rather than being folded into either list.
+newer in the store already, disagreeing with the rows, unreadable, or not in
+the raw rows at all. A session the rows reproduced exactly needed nothing
+said about it, so **unchanged** is the one category never named in this
+sentence — it counts toward neither what was rebuilt nor what was left alone.
+If the store was already at its cap when new sessions were found, a closing
+clause says how many could not be added. A leg that failed to save says so by
+name rather than being folded into either list.
 
 Rebuilding here also clears a save-failure line on the **Baptisms** tab, and
 the Timer card's own note beside it, for any session the merge just added or
