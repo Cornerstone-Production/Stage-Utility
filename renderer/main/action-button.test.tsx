@@ -168,6 +168,69 @@ describe("action-button — the registry itself could not be loaded", () => {
   });
 });
 
+// The Needs setup badge — Button.dc.html's board. `editing` is the layout
+// editor's own flag (LayoutRenderCtx, set only by layout-editor.tsx's
+// fullCtx); this file drives it directly rather than through the editor, the
+// way every other case above drives `interactive` directly.
+describe("action-button — the Needs setup badge (editor only)", () => {
+  const WITH_PARAMS = [
+    {
+      id: "rosstalk.command",
+      label: "Send a RossTalk command",
+      params: [{ key: "targetId", label: "Target", type: "enum", optionsFrom: "rosstalk-targets" }],
+    },
+  ];
+
+  function renderWithCtx(
+    config: { type: "action-button"; actionId: string; params?: Record<string, unknown> },
+    ctxOverrides: { interactive?: boolean; editing?: boolean },
+  ) {
+    const obj = { id: "o1", x: 0, y: 0, w: 0.3, h: 0.2, z: 1, config, style: {} } as never;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const ctx = makeRenderCtx(ctxOverrides);
+    return render(
+      React.createElement(
+        QueryClientProvider as never,
+        { client: qc },
+        React.createElement(ObjectContent as never, { o: obj, ctx }),
+      ),
+    );
+  }
+
+  test("editing + a required param unset: shows the badge", async () => {
+    registryActions = WITH_PARAMS;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "rosstalk.command", params: {} },
+      { interactive: false, editing: true },
+    );
+    await waitFor(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
+  });
+
+  test("editing + every required param set: no badge", async () => {
+    registryActions = WITH_PARAMS;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "rosstalk.command", params: { targetId: "t1" } },
+      { interactive: false, editing: true },
+    );
+    await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    assert.equal(container.querySelector('[data-needs-setup="true"]'), null);
+  });
+
+  test("NOT editing (a live display or console): never shows the badge, issues or not", async () => {
+    registryActions = WITH_PARAMS;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "rosstalk.command", params: {} },
+      { interactive: true, editing: false },
+    );
+    await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    assert.equal(
+      container.querySelector('[data-needs-setup="true"]'),
+      null,
+      "a live display must never show the editor-only marker",
+    );
+  });
+});
+
 describe("action-button — sharing the registry request", () => {
   test("a panel of several buttons fetches the registry once, not once per button", async () => {
     // One client for the whole panel, the way renderer/main/index.tsx provides

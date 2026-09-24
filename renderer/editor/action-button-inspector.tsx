@@ -18,7 +18,7 @@ import { Row, RowText } from "./inspector-rows";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { ActionParamsFields, type Registry } from "../settings/sections/rule-editor-dialog";
 import { useOptionSources } from "../settings/sections/automation-option-sources";
-import { seedNumberDefaults } from "@main/services/automation-param-validation";
+import { seedNumberDefaults, validateParams } from "@main/services/automation-param-validation";
 
 export function ActionButtonInspector({
   c,
@@ -39,7 +39,12 @@ export function ActionButtonInspector({
   const optionSources = useOptionSources();
   const actions = registry?.actions ?? null;
   const action = actions?.find((a) => a.id === c.actionId) ?? null;
-  const params = c.params ?? {};
+  const params = (c.params ?? {}) as Record<string, string | number>;
+  // No "Save" step here — the layout editor writes on every change — so
+  // there is no "first press" to gate on the way the rule editor's `attempted`
+  // does. A field that needs setup says so as soon as it is looked at.
+  const issues = action ? validateParams(action.params, params) : [];
+  const issueMap = Object.fromEntries(issues.map((i) => [i.key, i.message]));
 
   return (
     <>
@@ -59,9 +64,11 @@ export function ActionButtonInspector({
       <ActionParamsFields
         actionId={c.actionId}
         action={action}
-        params={params as Record<string, string | number>}
+        params={params}
         optionSources={optionSources}
         onChange={(next) => onConfig({ ...c, params: next })}
+        issues={issueMap}
+        attempted
       />
       <RowText
         label="Label"
