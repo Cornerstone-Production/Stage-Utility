@@ -60,6 +60,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * lines are scrubbed.
  */
 const REQUEST_FACING = [
+  // Its refusal line names the actionId, which arrives verbatim in the body of
+  // POST /api/action/invoke, and the detail can carry whatever a provider or an
+  // action's own guard said back. It logged nothing at all until a refused
+  // press started being surfaced on /log, which is when it acquired the
+  // exposure.
+  "action-invoke.ts",
   // Its one warning names the serviceKey GET /api/baptism/lane was asked for,
   // verbatim off the query string.
   "archive/baptism-lane.ts",
@@ -256,6 +262,12 @@ function requestFacingFiles(): string[] {
   // directly above the file it explains, so two branches adding different
   // files touch different lines and merge cleanly.
   const files = [
+    // Its refusal line names the actionId, which arrives verbatim in the body
+    // of POST /api/action/invoke, and the detail can carry whatever a provider
+    // or an action's own guard said back — both scrubbed at the logger. It
+    // logged nothing at all until a refused press started being surfaced on
+    // /log, which is when it acquired the exposure.
+    path.join(HERE, "action-invoke.ts"),
     // Rule names are typed into an HTTP body and action detail carries whatever a
     // provider or device said back, so the engine is request-facing in exactly the
     // sense this scan means. It logged nothing at all until a failed rule started

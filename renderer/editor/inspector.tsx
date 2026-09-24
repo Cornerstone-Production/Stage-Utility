@@ -82,6 +82,7 @@ import {
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { CuePicker } from "./cue-picker";
+import { ActionButtonInspector } from "./action-button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -1419,6 +1420,7 @@ export function Inspector({
           </>
         );
       })()}
+      {c.type === "action-button" && <ActionButtonInspector c={c} onConfig={onConfig} />}
       {c.type === "cue-button" && (() => {
         return (
           <>
@@ -1526,6 +1528,10 @@ export function Inspector({
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="live">Live (running clock)</SelectItem>
+                <SelectItem value="testimony">Testimony (this person's, once banked)</SelectItem>
+                <SelectItem value="session">Session (wall clock)</SelectItem>
+                <SelectItem value="phase">Phase (the word)</SelectItem>
+                <SelectItem value="person">Person (number, or N of M)</SelectItem>
                 <SelectItem value="count">Count baptized</SelectItem>
                 <SelectItem value="total">Total time</SelectItem>
                 <SelectItem value="average">Average per person</SelectItem>

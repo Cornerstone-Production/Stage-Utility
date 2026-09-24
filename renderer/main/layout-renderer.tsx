@@ -2069,6 +2069,59 @@ function BaptismTimer({
     const last = baptized[baptized.length - 1];
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
+  } else if (field === "testimony") {
+    // This person's own testimony, once banked — NOT the live segment clock,
+    // which is `live`'s job. While their testimony is still running there is
+    // nothing banked yet, so this ticks the same running value `live` shows;
+    // once the phase moves on to baptizing them it holds at what was banked,
+    // independent of however long the baptism itself then runs.
+    if (!state || state.phase === "idle") {
+      value = "—";
+    } else if (state.phase === "testimony") {
+      value = fmtClock(segmentElapsedMs(state, now));
+    } else {
+      const bankedMs =
+        state.mode === "per-person" ? (state.pendingTestimonyMs ?? 0) : (state.people[state.baptismIndex]?.testimonyMs ?? 0);
+      value = fmtClock(bankedMs);
+    }
+    fallback = "testimony";
+  } else if (field === "session") {
+    // Wall clock since the session started — never paused, unlike the segment:
+    // a session that pauses through a long prayer still reads that time as part
+    // of the session. Freezes at the finished length once the session ends,
+    // rather than continuing to climb while idle before the next one starts.
+    if (!state?.sessionStartedAt) {
+      value = "—";
+    } else {
+      const started = Date.parse(state.sessionStartedAt);
+      const endedMs = state.finishedAt ? Date.parse(state.finishedAt) : now;
+      value = Number.isFinite(started) ? fmtClock(Math.max(0, endedMs - started)) : "—";
+    }
+    fallback = "session";
+  } else if (field === "phase") {
+    // The word, for a stage readout — armed reads as its own word rather than
+    // "baptism", the same distinction `live`'s fallback already draws: armed
+    // has no clock running, and saying "baptism" here would claim one does.
+    value = !state ? "—" : state.armed ? "armed" : state.phase;
+    fallback = "phase";
+  } else if (field === "person") {
+    // In grouped mode `personNumber` is the TESTIMONY counter and freezes once
+    // the baptism section arms — it is not who is being baptized. The person
+    // being baptized is `baptismIndex` (0-based) of `people.length`, which is
+    // only known once the testimony pass has filled `people`. Per-person mode
+    // never has a total, so it is always "Person N". Armed says so rather than
+    // "1 of 7" — indistinguishable from person 1 already being baptized, the
+    // same ambiguity `live`'s armed case already guards against.
+    if (!state || state.phase === "idle") {
+      value = "—";
+    } else if (state.armed) {
+      value = "armed";
+    } else if (state.phase === "testimony" || state.mode === "per-person") {
+      value = `Person ${state.personNumber}`;
+    } else {
+      value = `${state.baptismIndex + 1} of ${state.people.length}`;
+    }
+    fallback = "person";
   }
   // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
   // measured sweep, because the label rode on the end of the value and the pair

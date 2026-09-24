@@ -904,7 +904,7 @@ export type LayoutObjectConfig =
   | {
       type: "baptism-timer";
       caption?: string | null;
-      field?: "live" | "count" | "total" | "average" | "last";
+      field?: "live" | "count" | "total" | "average" | "last" | "testimony" | "session" | "phase" | "person";
       label?: string;
       showLabel?: boolean;
     }

@@ -180,6 +180,11 @@ for "idle", because before it runs we do not know that it is idle.
 | Hide / unhide a ProVideoPlayer layer | the layer's hidden flag |
 | Mute / unmute a ProVideoPlayer layer | the layer's mute flag |
 | Set a ProVideoPlayer layer's opacity | 0 is invisible, 100 is fully opaque |
+| Start a baptism session | begins a session at person 1's testimony; does nothing while one is already running |
+| Advance the baptism timer | the phase-aware primary press — see below |
+| Step the baptism timer back | undoes the last press without losing the session |
+| Pause or resume the baptism timer | toggles the running clock; says so when nothing is running to pause |
+| Finish the baptism session | closes the in-progress person, freezes the session, and logs it |
 
 > ProVideoPlayer answers every command with "OK" whether or not it acted on it, so
 > every ProVideoPlayer action above reads PVP's state back to confirm what it did.
@@ -229,6 +234,13 @@ for "idle", because before it runs we do not know that it is idle.
 >
 > A rule whose ProPresenter is **switched off** triggers nothing and says so —
 > `MA is switched off` — rather than dialling the last address the card held.
+
+> **Advance the baptism timer** is one action, not four. It does whatever the
+> [baptism timer's](features/scriptview-and-baptisms.md) own operator panel
+> would do right now — start a session, begin person 1 once a grouped session
+> arms, close a testimony or a baptism, move to the next person — so a single
+> [action button](reference/widgets.md#control) or Companion key runs the whole
+> service and nobody has to know which press is legal in which phase.
 
 ## Cues
 
