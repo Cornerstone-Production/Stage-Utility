@@ -62,6 +62,7 @@ const { render, cleanup, fireEvent, act } = await import("@testing-library/react
 const React = await import("react");
 const { TooltipProvider, ConfirmHost, Toaster } = await import("../../../components/ui/index.js");
 const { BaptismHeader, describeBaptismRebuild, baptismRebuildDisabledReason } = await import("./header.js");
+const { rebuildButtonsIn, tooltipTextOf } = await import("./rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -195,9 +196,9 @@ async function mount(
 }
 
 function rebuildButton(root: ParentNode): HTMLButtonElement {
-  const btn = [...root.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Rebuild from raw"));
+  const btn = rebuildButtonsIn(root)[0];
   assert.ok(btn, "expected a Rebuild from raw button in the header's action group");
-  return btn as HTMLButtonElement;
+  return btn;
 }
 
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -226,25 +227,6 @@ async function flush(): Promise<void> {
       await new Promise((r) => setImmediate(r));
     });
   }
-}
-
-/** Opens the button's own tooltip via keyboard focus (Radix's Tooltip opens
- *  on hover AND focus) and reads its rendered text, then closes it again —
- *  see this file's own header comment for why this works even on a disabled
- *  button in jsdom. */
-async function tooltipTextOf(btn: HTMLElement): Promise<string> {
-  fireEvent.focus(btn);
-  await act(async () => {
-    await settle();
-    await settle();
-  });
-  const content = document.querySelector('[role="tooltip"]');
-  const shown = text(content);
-  fireEvent.blur(btn);
-  await act(async () => {
-    await settle();
-  });
-  return shown;
 }
 
 test("nothing recorded yet disables the action, with no server round trip needed to know that", async () => {

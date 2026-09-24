@@ -62,6 +62,7 @@ const { render, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider, ConfirmHost } = await import("../../../components/ui/index.js");
 const { BaptismHeader } = await import("./header.js");
+const { rebuildButtonsIn } = await import("./rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -143,7 +144,7 @@ async function mountHeader(serviceKey: string, wait: () => Promise<void> = settl
   await wait();
   return { view, restore: () => { globalThis.fetch = realFetch; } };
 }
-const btn = (root: ParentNode) => [...root.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Rebuild from raw")) as HTMLButtonElement;
+const btn = (root: ParentNode) => rebuildButtonsIn(root)[0] as HTMLButtonElement;
 
 test("live on the real recorders disables the button; PCO reporting mode 'none' enables it", async () => {
   freshPlan();

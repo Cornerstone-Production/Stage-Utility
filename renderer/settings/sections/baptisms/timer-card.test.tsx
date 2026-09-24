@@ -26,6 +26,7 @@ const React = await import("react");
 const { TimerCard } = await import("./timer-card.js");
 const { TooltipProvider, ConfirmHost, Toaster } = await import("../../../components/ui/index.js");
 const { baptismSessionId } = await import("@main/types/stage");
+const { rebuildButtonsIn: rebuildButtonsMatching, tooltipTextOf } = await import("./rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -270,29 +271,12 @@ async function mountWithRebuild(
 const findInBody = (label: string) =>
   [...document.body.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label) as HTMLElement | undefined;
 
-const rebuildButtonsIn = (root: ParentNode) =>
-  [...root.querySelectorAll('[role="alert"] button')].filter((b) => (b.textContent ?? "").includes("Rebuild from raw")) as HTMLButtonElement[];
-
-const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
-
-/** Opens the button's own tooltip via keyboard focus (Radix's Tooltip opens
- *  on hover AND focus) and reads its rendered text, then closes it again —
- *  same technique as header.test.tsx's own tooltipTextOf, and the same reason
- *  it works even on a disabled button: jsdom does not enforce a real
- *  browser's "a disabled element cannot receive focus." */
-async function tooltipTextOf(btn: HTMLElement): Promise<string> {
-  fireEvent.focus(btn);
-  await act(async () => {
-    await settle();
-    await settle();
-  });
-  const shown = text(document.querySelector('[role="tooltip"]'));
-  fireEvent.blur(btn);
-  await act(async () => {
-    await settle();
-  });
-  return shown;
-}
+/** The save-failure note's own per-entry buttons — each inside its own
+ *  `[role="alert"]`, and a service can fail more than one session at once,
+ *  so this needs every match, not just the first (see the shared helper's
+ *  own doc comment on why the header's single action-group button and this
+ *  note's per-entry ones need different scopes). */
+const rebuildButtonsIn = (root: ParentNode) => rebuildButtonsMatching(root, '[role="alert"] button');
 
 test("a failed entry with a serviceKey offers its own Rebuild from raw; one with none is disabled and says why", async () => {
   const { root, restore } = await mountWithRebuild(

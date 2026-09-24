@@ -52,6 +52,7 @@ const { TooltipProvider, ConfirmHost } = await import("../components/ui/index.js
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
   await import("@tanstack/react-router");
 const { BaptismOperator } = await import("./baptism-operator.js");
+const { rebuildButtonsIn, tooltipTextOf } = await import("../settings/sections/baptisms/rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -86,24 +87,9 @@ async function mount(sessionsOk: boolean) {
 }
 
 function rebuildButton(root: ParentNode): HTMLButtonElement {
-  const btn = [...root.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Rebuild from raw"));
+  const btn = rebuildButtonsIn(root)[0];
   assert.ok(btn, "expected a Rebuild from raw button");
-  return btn as HTMLButtonElement;
-}
-
-async function tooltipTextOf(btn: HTMLElement): Promise<string> {
-  fireEvent.focus(btn);
-  await act(async () => {
-    await settle();
-    await settle();
-  });
-  const content = document.querySelector('[role="tooltip"]');
-  const shown = (content?.textContent ?? "").replace(/\s+/g, " ").trim();
-  fireEvent.blur(btn);
-  await act(async () => {
-    await settle();
-  });
-  return shown;
+  return btn;
 }
 
 test("a genuinely empty history (sessions load OK, nothing recorded) gets its own reason", async () => {
