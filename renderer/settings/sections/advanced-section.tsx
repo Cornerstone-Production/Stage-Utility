@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
 import { useServerNow } from "../../lib/server-clock";
+import { useFailedReads } from "../../lib/use-failed-reads";
 import {
   FieldSet,
   FieldGroup,
@@ -19,6 +20,7 @@ import {
   Button,
   ButtonGroup,
   type ButtonProps,
+  ErrorNote,
   Select,
   SelectTrigger,
   SelectContent,
@@ -220,12 +222,28 @@ export function UpdatesPanel({
   // restart the process) unless overridden. Re-checked whenever a service goes
   // live/idle or a recorder opens/closes so the indicator stays fresh.
   const [lock, setLock] = useState<{ active: boolean; reasons: string[] } | null>(null);
+  // A lock that could not be READ is not an unlocked server. It starts null,
+  // which reads as "not locked", so a failed read used to draw a plain Restart
+  // in the middle of a service.
+  const { failed: lockReads, fail: failLock, clear: clearLock } = useFailedReads<"lock">("updater");
   useEffect(() => {
     let cancelled = false;
-    const refresh = () =>
+    // Refreshes overlap — a service going live and a recorder opening arrive
+    // together — and answer in any order. Only the newest counts, so an older
+    // read cannot put back a lock state, or a failure, that a newer one replaced.
+    let latest = 0;
+    const refresh = () => {
+      const mine = ++latest;
       invoke<{ active: boolean; reasons: string[] }>("update:lock")
-        .then((l) => !cancelled && setLock(l))
-        .catch(() => {});
+        .then((l) => {
+          if (cancelled || mine !== latest) return;
+          setLock(l);
+          clearLock("lock");
+        })
+        .catch((err: unknown) => {
+          if (!cancelled && mine === latest) failLock("lock", "the update lock", err);
+        });
+    };
     refresh();
     const offs = ["pco:live", "spl:history", "attendance:history", "service-timeline:history"].map((ch) =>
       onNotification(ch, refresh),
@@ -234,11 +252,17 @@ export function UpdatesPanel({
       cancelled = true;
       offs.forEach((off) => off());
     };
-  }, []);
+  }, [failLock, clearLock]);
   // Presentation only — the same fact the three handlers below read. Passed as
   // the reasons or null, rather than a flag plus a list, so a control cannot
   // render "locked" with nothing to name.
   const guard = lock?.active ? lock.reasons : null;
+  // Restart is the one action here the server does not refuse on its own during
+  // a service — an update and a track switch answer 409 — so a lock that could
+  // not be read guards Restart as though it were active, and says why. The other
+  // two keep the server's own answer.
+  const lockUnread = lockReads.has("lock");
+  const restartGuard = guard ?? (lockUnread ? ["the service state could not be checked"] : null);
 
   async function onUpdateNow() {
     if (lock?.active) {
@@ -272,6 +296,19 @@ export function UpdatesPanel({
           title: "Service in progress",
           message: `Restarting the server would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
           confirmLabel: "Override & restart anyway",
+          destructive: true,
+        })
+      ) {
+        doRestart();
+      }
+      return;
+    }
+    if (lockUnread) {
+      if (
+        await confirm({
+          title: "Couldn't check for a service",
+          message: "The update lock could not be read, so there is no telling whether a service is running. Restarting the server interrupts one if it is.",
+          confirmLabel: "Restart anyway",
           destructive: true,
         })
       ) {
@@ -459,6 +496,8 @@ export function UpdatesPanel({
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
                 <LockIcon className="size-3.5" /> Update &amp; restart locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
               </p>
+            ) : lockUnread && !updating ? (
+              <ErrorNote className="mt-1">Couldn't read the update lock, so Restart can't tell whether a service is running and asks first.</ErrorNote>
             ) : null}
           </FieldContent>
 
@@ -478,7 +517,7 @@ export function UpdatesPanel({
               lockedLabel="Update anyway"
             />
             <GuardedButton
-              guard={guard}
+              guard={restartGuard}
               variant="filled"
               size="small"
               onClick={onRestart}
@@ -541,7 +580,7 @@ export function UpdatesPanel({
                 live service or an active recording — a deferred update must not be
                 the thing that finally interrupts one. */}
             <GuardedButton
-              guard={guard}
+              guard={restartGuard}
               variant="accent"
               size="small"
               onClick={() => void onRestart()}

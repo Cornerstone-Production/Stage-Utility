@@ -292,6 +292,11 @@ If the milestone list cannot be read at all, the card says *milestones
 unavailable* and the reason is logged. The derived series-change marks still
 draw.
 
+The Settings list says the same rather than *No milestones yet*, and a save
+shows the list the server answers with. When the service type names cannot be
+read, it says so and offers only *Every service type*. Both are logged on
+`[history]`.
+
 The **calendar** shades a day **green** by how many services were recorded on it,
 in four steps, with everything at four or more on the darkest. There is no dot
 and no count in the cell: the day number sits alone and the shade carries the
@@ -341,6 +346,14 @@ When any of these cannot be loaded at all, the page says so — "the recorded
 history could not be read", or *sound unavailable* on the Trends card — rather
 than showing the copy for a history that is genuinely empty. The reason is on a
 `[history]` line on the server log, one per thing that failed.
+
+A service's own page does the same card by card. An attendance, sound or
+baptism record that cannot be read says so on its card, and the header's level
+reads *sound unavailable*, never *no sound recorded*. The Baptisms card appears
+for a failed read even on a service without baptisms, because the page cannot
+tell the two apart. A service whose record cannot be read opens to a note and a
+way back, not to nothing. Home's **Recent services** card, which stays hidden
+until something is recorded, shows the same note instead of hiding.
 
 **Export** is a button in the Recorded services header. It opens a date range —
 blank for all dates — and a list of sheets, and downloads them as one `.xlsx`.
@@ -591,7 +604,9 @@ read that one figure.
 Available on dashboards and custom layouts: in-room now, peak, low, per-service,
 day total, percent of capacity, and versus average. The layout objects are a
 people counter, a people summary with individually toggleable metrics, and a
-people graph that shows either a live rolling window or a recorded service.
+people graph that shows either a live rolling window or a recorded service. A
+recorded service whose samples cannot be read shows *couldn't load the recorded
+service*, not *no recorded data*, with the reason on a `[history]` line.
 
 A gap of more than three minutes in the samples renders as a break in the curve
 rather than a straight line, since missing samples mean the counter was

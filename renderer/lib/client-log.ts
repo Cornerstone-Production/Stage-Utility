@@ -7,6 +7,8 @@
 // For FAILURES, not for tracing. Every call site should be something an operator
 // would want to find while wondering why a figure is missing.
 
+import { errorMessage } from "@main/services/errors";
+
 /** One line, on the server's log, tagged the way the server's own lines are.
  *
  *  Fire and forget: it is a diagnostic, and a page must not change behaviour
@@ -33,4 +35,11 @@ export function logToServer(tag: string, message: string): void {
   } catch {
     // `fetch` itself missing, or a synchronous throw from a hostile profile.
   }
+}
+
+/** A read that failed, in the one wording every such line uses:
+ *  "could not read {what}: {reason}". A component that tracks which of its
+ *  reads failed wants useFailedReads, which calls this. */
+export function logReadFailure(tag: string, what: string, err: unknown): void {
+  logToServer(tag, `could not read ${what}: ${errorMessage(err)}`);
 }

@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { invoke } from "../../lib/api";
-import { Collapsible, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { useFailedReads } from "../../lib/use-failed-reads";
+import { useResyncOn } from "../../lib/use-resync-on";
+import { pcoConnected, useStageState } from "../../main/use-stage-state";
+import { Collapsible, ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 
 /**
  * Weekly assignment — pick a standing variant per PCO service type. The resolved
@@ -19,19 +22,46 @@ export function PatchWeekly({
   plan: { serviceTypeId: string | null; planId: string | null; planTitle: string | null } | null;
   onChange: (a: PatchAssignments) => void;
 }) {
-  const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
+  // Null until read, so "none" is never drawn for a list still on its way.
+  const [types, setTypes] = useState<ServiceTypeDTO[] | null>(null);
+  const stage = useStageState();
   // Only offer the service types enabled on the Plan tab (allowedServiceTypeIds).
   // Empty list = "all active", matching the Plan section's own filter.
-  const [allowed, setAllowed] = useState<string[]>([]);
+  const allowed = stage.state?.allowedServiceTypeIds ?? [];
+  // The service types come from Planning Center, so they are asked for only
+  // once it is connected, and until then the panel says to connect it (see
+  // pcoConnected).
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  // Which read FAILED, as opposed to came back empty: a failed filter read is
+  // not "the Plan tab enables every type", and a failed service-type read on a
+  // connected server is not "connect Planning Center".
+  const { failed, fail, clear } = useFailedReads<"types" | "allowed">("patch");
+  // The filter is the stage state's. One that could not be read is said here,
+  // on this panel's tag, and taken back when a state arrives.
   useEffect(() => {
+    if (stage.state) clear("allowed");
+    else if (stage.error) fail("allowed", "which service types the Plan tab enables", stage.error);
+  }, [stage.state, stage.error, fail, clear]);
+  // A read tried while the state was unknown may have failed only because
+  // Planning Center is not connected; once the state says so, that is the panel.
+  useResyncOn([pcoConfigured], () => {
+    if (pcoConfigured === false) clear("types");
+  });
+  useEffect(() => {
+    if (!pcoConfigured) return;
+    let cancelled = false;
     invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
-      .then(setTypes)
-      .catch(() => setTypes([]));
-    invoke<StageState>("stage:getState")
-      .then((s) => setAllowed(s.allowedServiceTypeIds ?? []))
-      .catch(() => setAllowed([]));
-  }, []);
-  const visibleTypes = allowed.length === 0 ? types : types.filter((t) => allowed.includes(t.id));
+      .then((t) => {
+        if (cancelled) return;
+        setTypes(t);
+        clear("types");
+      })
+      .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
+    return () => {
+      cancelled = true;
+    };
+  }, [pcoConfigured, fail, clear]);
+  const visibleTypes = !types ? [] : allowed.length === 0 ? types : types.filter((t) => allowed.includes(t.id));
 
   function setStanding(stId: string, variantId: string) {
     const byServiceType = { ...assignments.byServiceType };
@@ -60,8 +90,20 @@ export function PatchWeekly({
     <div className="rounded-xl border border-line bg-surface">
       <Collapsible label="Weekly assignment" summary={`${setCount} set`} headerClassName="px-4 py-2.5">
         <div className="flex flex-col gap-2 px-3 pb-3">
-          {visibleTypes.length === 0 ? (
+          {failed.has("allowed") && types && types.length > 0 && (
+            // The unfiltered list is still the useful thing to show: every
+            // assignment in it is real, there are just more rows than the Plan
+            // tab would offer.
+            <ErrorNote>Couldn't load which service types the Plan tab enables, so all of them are listed.</ErrorNote>
+          )}
+          {pcoConfigured === false ? (
             <p className="text-footnote text-fg-subtle">Connect Planning Center to assign a standing patch per service type.</p>
+          ) : failed.has("types") ? (
+            <ErrorNote>Couldn't load the service types.</ErrorNote>
+          ) : !types ? (
+            <p className="text-footnote text-fg-subtle">Loading service types…</p>
+          ) : visibleTypes.length === 0 ? (
+            <p className="text-footnote text-fg-subtle">No service types to assign.</p>
           ) : (
             visibleTypes.map((t) => (
               <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
