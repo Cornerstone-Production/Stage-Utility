@@ -315,6 +315,13 @@ and the pill's dot on its own beside the start time. The dot is the one that
 survives a narrow window — the Service column is the only one that can shrink,
 and the pill goes with the plan title when it does.
 
+A service a baptism session links to carries a small droplet beside the plan
+title, with the count itself next to it — *2* beside the droplet, never a bare
+icon — and an accessible name spelling out *2 baptized*. The subtitle under the
+title never repeats the count in words: the badge is what survives when the
+Service column has no room left, so the series title and item count keep
+theirs instead. A service with no linked session carries neither.
+
 | | |
 |---|---|
 | In room | the most people in the room at once, captioned *peak in room*. Named for the figure rather than for the reduction, because the app also tracks the cumulative door count and "peak" alone names either |
@@ -353,6 +360,14 @@ to, where it means something specific rather than something all-time.
 
 A row is a summary that opens the service page; Delete lives on that page's
 header, not on the row. The shared `/history` link shows the same figures.
+
+Opening a service writes its key to the URL as `?service=`, so the address bar
+names exactly which occurrence is open — reload, bookmark or share it and the
+same one opens again, rather than landing back on the whole month. This is the
+one URL that opens a specific service, and the only way in from outside the
+page itself: a baptism session's own **Past sessions** card, on the Baptisms
+tab, links each row with a known service through this same address, so
+opening one from there lands here rather than on a copy of this page.
 
 ### The service page
 
@@ -393,8 +408,25 @@ On a phone the header stacks and the six figures scroll sideways in their own
 row; the page itself never scrolls sideways.
 
 On a weekend a baptism session links to, a fourth **Baptisms** card appears
-between Rundown and Attendance. It is not in the nav — an entry that came and
-went by the week would read as a fault.
+between Rundown and Attendance, and the nav gains an entry for it in the same
+position. Neither shows on an ordinary Sunday.
+
+The card carries: a stat strip — Baptized, Total time, Testimony total,
+Baptism total, Avg testimony, Avg baptism, the same six figures the Baptisms
+tab itself shows, over every session linked to this service; a read-only
+two-lane chart per linked session — the same timer-over-plan chart the live
+Baptisms tab draws, showing that session's own testimonies and baptisms
+against the plan items running at the time; and, under each chart, that
+session's own per-person splits (testimony, baptism and total time per
+person). A session with nothing in the shared timing rows for it — recorded
+before that raw layer existed, or matched to this service only by its start
+time rather than by a service key of its own — shows its splits with a plain
+line in place of the chart rather than one reading as an empty session. A
+**Open in Baptisms →** link beside the card's title returns to the live tab.
+
+Two or more sessions recorded in one occurrence — a reset and restarted
+session, or two people baptized in separate sessions the same weekend — each
+draw their own chart and their own splits, never merged into one.
 
 ### The service chart
 
@@ -565,8 +597,27 @@ raw rows are append-only and keep the evening as it happened. Item time
 corrections survive it: they are an overlay over the rebuilt run, not a change
 to it. Baptisms are the one exception to "rebuild replaces": the sessions it
 reconstructs are merged into what is already stored rather than replacing it,
-so a session the rows cannot reproduce is left alone rather than deleted — see
-[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
+so a session the rows cannot reproduce is left alone rather than deleted, and
+one already stored that the rows have nothing to say about is kept exactly as
+it is — a rebuild never deletes or evicts a baptism session to make room for
+another. See
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for the full rule.
+
+The result says what was **rebuilt** — a count per leg, baptisms as "N added"
+and "M updated" when the merge actually wrote something — then, separately,
+what was **left alone** and why: for the other three legs, a leg the raw
+layer had nothing for; for baptisms, sessions the merge matched but found
+unchanged, newer in the store already, disagreeing with the rows, or
+unreadable. If the store was already at its cap when new sessions were found,
+a closing clause says how many could not be added. A leg that failed to save
+says so by name rather than being folded into either list.
+
+Rebuilding here also clears a save-failure line on the **Baptisms** tab, and
+the Timer card's own note beside it, for any session the merge just added or
+updated — the same clearing a rebuild started from either of those two places
+already does. See [Recovery](scriptview-and-baptisms.md#recovery) for what
+that note shows and exactly when a line clears.
 
 While a service is recording, **Reset pacing** (in the live service's detail
 here, and beside the Previous/Next controls wherever the console offers them)
