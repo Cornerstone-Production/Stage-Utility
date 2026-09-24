@@ -69,12 +69,36 @@ function invokedChannels(): Map<string, string[]> {
     // The colon is required: every one of api.ts's 174 cases is namespaced
     // `area:action`, and demanding it keeps an over-eager wrapper match from
     // dragging in ordinary string arguments like useState<Target>("app").
-    const re = new RegExp(`\\b(?:${callee})\\s*(?:<[^>()]*>)?\\s*\\(\\s*"([\\w-]+:[\\w-]+)"`, "g");
+    //
+    // The optional `(?:[^()]*?\?\s*)?` before the literal, and the optional
+    // `(?:\s*:\s*"...")?` after it, resolve a two-way ternary as the call's
+    // first argument — `act(paused ? "baptism:resume" : "baptism:pause")` and
+    // `invoke(dir === "next" ? "pco:liveNext" : "pco:livePrevious")` both shipped
+    // with exactly this shape, and a scan that only accepted a literal
+    // IMMEDIATELY after `(` could not see either channel as invoked at all — not
+    // "invoked with no case", just invisible to this function, so the
+    // missing-case check below never had a reason to complain. `[^()]*?` allows
+    // the ternary's own condition to contain quotes (`dir === "next"`) as long as
+    // it contains no parens — true of every condition this closes today, but not
+    // a property of ternaries in general. This scan is still blind to: a
+    // three-way ternary (only the first `?`/`:` pair resolves); a parenthesised
+    // condition (`(a || b) ? "x:y" : "x:z"` — the paren exclusion in `[^()]*?`
+    // stops at it); a channel assembled in a variable before the call, however
+    // it got its value (see IpcChannel in api.ts for the typed answer to that
+    // one); and a channel built from a template literal. Widen it again, or
+    // reach for typing, when one of those actually ships unwired — do not
+    // assume this list is exhaustive of what a future call site can do.
+    const re = new RegExp(
+      `\\b(?:${callee})\\s*(?:<[^>()]*>)?\\s*\\(\\s*(?:[^()]*?\\?\\s*)?"([\\w-]+:[\\w-]+)"(?:\\s*:\\s*"([\\w-]+:[\\w-]+)")?`,
+      "g",
+    );
     for (const m of src.matchAll(re)) {
-      const chan = m[1]!;
-      const where = path.relative(RENDERER, file);
-      const list = found.get(chan);
-      if (list) { if (!list.includes(where)) list.push(where); } else found.set(chan, [where]);
+      for (const chan of [m[1], m[2]]) {
+        if (!chan) continue;
+        const where = path.relative(RENDERER, file);
+        const list = found.get(chan);
+        if (list) { if (!list.includes(where)) list.push(where); } else found.set(chan, [where]);
+      }
     }
   }
   return found;
@@ -165,5 +189,37 @@ describe("IPC channel wiring", () => {
       files.some((f) => f.endsWith("wireless-connections-panel.tsx")),
     );
     assert.ok(viaWrapper.length > 0, "found no channels in wireless-connections-panel.tsx");
+  });
+
+  it("sees a channel dispatched through a ternary", () => {
+    // The other specific blind spot, closed alongside the wrapper one above:
+    // baptism-operator.tsx's Pause button is `act(paused ? "baptism:resume" :
+    // "baptism:pause")`, and shipped with no case for either channel in api.ts
+    // for a full round — this test finding both is what would have caught it.
+    // Named for real channels rather than a synthetic fixture, so a rewrite of
+    // invokedChannels() that quietly drops ternary support fails on the actual
+    // shape that bit, not on a string nobody's code contains.
+    const invoked = invokedChannels();
+    assert.ok(invoked.has("baptism:pause"), "expected the ternary in baptism-operator.tsx's Pause button to be found");
+    assert.ok(invoked.has("baptism:resume"), "expected the other branch of that same ternary to be found");
+  });
+
+  it("a channel with no case is reported unknown AT RUNTIME, not just absent from a string scan", async () => {
+    // I5: a guard that matches error PROSE (`err.message.includes("Unknown IPC
+    // channel")`) is one rewording away from vacuous — a reviewer deleted two
+    // cases and reworded that exact throw, and a guard built that way stayed
+    // green. This does not read the message at all: it proves invoke() still
+    // rejects something with no case, which is the fact the missing-case test
+    // above depends on `handledChannels()`/`invokedChannels()` correctly
+    // reflecting. If a future rewrite makes invoke() swallow an unknown channel
+    // instead of throwing, this fails regardless of what the throw says.
+    const { invoke } = await import("./api.js");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({}) })) as unknown as typeof fetch;
+    try {
+      await assert.rejects(() => invoke("baptism:not-a-real-channel"));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

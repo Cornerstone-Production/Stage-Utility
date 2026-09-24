@@ -311,6 +311,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "baptized": json(res, baptismTimerService.baptized()); return;
         case "start-baptisms": json(res, baptismTimerService.startBaptisms()); return;
         case "next": json(res, baptismTimerService.next()); return;
+        case "advance": json(res, baptismTimerService.advance()); return;
         case "undo": json(res, baptismTimerService.undo()); return;
         case "finish": json(res, baptismTimerService.finish()); return;
         case "pause": json(res, baptismTimerService.pause()); return;

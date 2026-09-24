@@ -4,7 +4,7 @@ import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon, PauseIcon, PlayIcon } from "lucide-react";
 
-import { invoke } from "../lib/api";
+import { invoke, type IpcChannel } from "../lib/api";
 import { Button, confirm, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
@@ -41,15 +41,18 @@ export function BaptismOperator() {
 
   // Tick the live segment clock while a segment is running.
   const segStart = state?.segmentStartedAt ?? null;
-  // Paused = a phase is running but its clock is not. The readout keeps showing what
-  // was banked, so a paused timer looks stopped rather than looking broken.
-  const paused = !!state && state.phase !== "idle" && !state.segmentStartedAt;
+  // Paused = a phase is running but its clock is not, AND there is banked time to
+  // resume from. Armed (grouped baptisms, before the first press) looks the same —
+  // no clock, nothing banked — but is not paused: there is nothing to resume, so it
+  // must not offer a "Resume" button. The readout keeps showing what was banked, so
+  // a paused timer looks stopped rather than looking broken.
+  const paused = !!state && state.phase !== "idle" && !state.armed && !state.segmentStartedAt;
   // The SERVER's clock. `segmentStartedAt` is stamped by the server, so a
   // console whose own clock has drifted would report the drift as elapsed time —
   // and the same segment reads differently here and on the display object.
   const now = useServerNow(250, !!segStart);
 
-  async function act(channel: string, after?: () => void, payload?: Record<string, unknown>) {
+  async function act(channel: IpcChannel, after?: () => void, payload?: Record<string, unknown>) {
     setBusy(true);
     try {
       await invoke(channel, payload);
@@ -75,12 +78,26 @@ export function BaptismOperator() {
 
   const grouped = state.mode === "grouped";
   const lastBaptism = grouped && phase === "baptism" && state.baptismIndex >= state.people.length - 1;
-  const phaseColor = phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
+  // Armed gets its own quiet, muted treatment — not the active green baptism
+  // color (nothing is running yet) and deliberately not any color a paused
+  // clock would use either: armed has nothing banked to resume, so it must
+  // not read as "stopped mid-segment."
+  const phaseColor = state.armed ? "text-gray-9" : phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
 
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
-  let primaryChannel: string;
-  if (phase === "idle") {
+  // Typed against the full IpcChannel union, not `string` — an unwired or
+  // misspelled channel assigned below fails `tsc`, rather than depending on
+  // the text scans in api-channels.test.ts (which cannot see a channel behind
+  // a variable at all; see IpcChannel's own doc comment).
+  let primaryChannel: IpcChannel;
+  if (state.armed) {
+    // Grouped only: the song is live but nobody's clock has started. This press is
+    // exactly what advance() exists for — starting person 1 without banking the
+    // stretch the band's intro took. See BaptismState.armed.
+    primaryLabel = "First person in";
+    primaryChannel = "baptism:advance";
+  } else if (phase === "idle") {
     primaryLabel = grouped ? "Start testimonies" : "Start";
     primaryChannel = "baptism:start";
   } else if (phase === "testimony") {
@@ -89,7 +106,10 @@ export function BaptismOperator() {
   } else {
     // baptism
     if (grouped) {
-      primaryLabel = lastBaptism ? "Finish baptisms" : "Next baptism";
+      // Each press marks a boundary, not a "baptize" command — "Next person in"
+      // ends the current person's segment and starts the next; "Last person
+      // out" ends the final one and is the one that also finishes the session.
+      primaryLabel = lastBaptism ? "Last person out" : "Next person in";
       primaryChannel = lastBaptism ? "baptism:finish" : "baptism:next";
     } else {
       primaryLabel = "Next person";
@@ -97,9 +117,11 @@ export function BaptismOperator() {
     }
   }
 
-  // Readout heading.
+  // Readout heading. Armed overrides every other label — the one thing the
+  // operator must not mistake it for is a baptism already under way.
   let readoutLabel: string;
-  if (phase === "idle") readoutLabel = justFinished ? "Finished" : "Ready";
+  if (state.armed) readoutLabel = "Baptisms · armed";
+  else if (phase === "idle") readoutLabel = justFinished ? "Finished" : "Ready";
   else if (grouped && phase === "testimony") readoutLabel = `Testimony · Person ${state.personNumber}`;
   else if (grouped && phase === "baptism") readoutLabel = `Baptism · Person ${state.baptismIndex + 1} of ${state.people.length}`;
   else readoutLabel = `Person ${state.personNumber} · ${phase === "testimony" ? "Testimony" : "Baptism"}`;
@@ -160,7 +182,13 @@ export function BaptismOperator() {
           {phase === "idle" ? (justFinished ? fmtClock(sum.totalMs) : "0:00") : fmtClock(liveMs)}
         </span>
         <span className="text-caption2 text-gray-9">
-          {phase === "baptism" && state.pendingTestimonyMs != null ? `testimony ${fmtClock(state.pendingTestimonyMs)}` : justFinished ? `${sum.count} baptized · total time` : " "}
+          {state.armed
+            ? "waiting for the first person to step in"
+            : phase === "baptism" && state.pendingTestimonyMs != null
+              ? `testimony ${fmtClock(state.pendingTestimonyMs)}`
+              : justFinished
+                ? `${sum.count} baptized · total time`
+                : " "}
         </span>
       </div>
 
@@ -175,7 +203,7 @@ export function BaptismOperator() {
         <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel, primaryChannel === "baptism:finish" ? reloadSessions : undefined)} className="px-6 py-2 text-body">
           {primaryLabel}
         </Button>
-        {phase !== "idle" && (
+        {phase !== "idle" && !state.armed && (
           <Button
             variant="filled"
             disabled={busy}

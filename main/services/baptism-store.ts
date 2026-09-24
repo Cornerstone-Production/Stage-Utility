@@ -41,9 +41,29 @@ class BaptismStore {
     await this.store.update((file) => ({ ...file, current: state }));
   }
 
-  /** Append a finished session. */
+  /**
+   * Append a finished session, or replace one already carrying this id.
+   *
+   * Not a plain prepend. `finalize()` derives the id from `sessionStartedAt`,
+   * and `undo()` from the finished state clears `finishedAt` and re-enters the
+   * baptism phase without touching that stamp — so finish -> undo -> finish
+   * re-finalizes the SAME session. Prepended, that left two rows sharing an id,
+   * and `linkBaptisms` counted the service's people twice.
+   *
+   * The replacement keeps its position rather than jumping to the head: the list
+   * is read newest-first by `startedAt`, and a corrected session did not start
+   * again.
+   */
   async addSession(session: BaptismSession): Promise<void> {
-    await this.store.update((file) => ({ ...file, sessions: [session, ...file.sessions].slice(0, MAX_SESSIONS) }));
+    await this.store.update((file) => {
+      const at = file.sessions.findIndex((s) => s.id === session.id);
+      if (at >= 0) {
+        const sessions = file.sessions.slice();
+        sessions[at] = session;
+        return { ...file, sessions };
+      }
+      return { ...file, sessions: [session, ...file.sessions].slice(0, MAX_SESSIONS) };
+    });
   }
 
   /**

@@ -62,6 +62,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REQUEST_FACING = [
   // Its title-fallback warning names a plan item TITLE read back out of the raw
   // archive, and POST /api/history/rebuild is what runs it.
+  // Its one summary line names the serviceKey the replay was given, which
+  // arrives verbatim in an HTTP body wherever a rebuild is triggered.
+  "archive/rebuild-baptism.ts",
   "archive/rebuild.ts",
   "automation-engine.ts",
   // Its suppression line names the STORED rule that owns a built-in's cue name
@@ -313,6 +316,10 @@ function requestFacingFiles(): string[] {
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
+    // Its one summary line names the serviceKey the replay was handed, which
+    // arrives verbatim in an HTTP body wherever a baptism rebuild is triggered
+    // — the same exposure history-edit.ts carries.
+    path.join(HERE, "archive/rebuild-baptism.ts"),
     // The same exposure as the two recorders, from the other end: its
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.
