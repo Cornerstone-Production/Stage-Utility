@@ -672,6 +672,11 @@ export class ProdComService extends ConnectionLifecycle {
    * ProdCom whether anything was actually said.
    */
   private wsDeliveredThisWindow = false;
+  /** Per-connection: whether the "continuing from row N" line has already
+   *  fired once for a check that ran out of pages without finding either a
+   *  spoken row or the end of ProdCom's history. See
+   *  advanceSilenceCheckBaseline(). */
+  private silenceCheckCapLogged = false;
 
   /**
    * Whether `{"type":"subscribe","events":["transcript"]}` is suspected of being
@@ -968,6 +973,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsBaselineRows = null;
     this.wsDelivered = false;
     this.wsDeliveredThisWindow = false;
+    this.silenceCheckCapLogged = false;
     this.skippedSources.clear();
     // A new connection re-reads the keyword list and says so again. The list
     // itself is deliberately KEPT across the teardown: if the re-read fails,
@@ -1317,13 +1323,26 @@ export class ProdComService extends ConnectionLifecycle {
    * give — "nothing was missed" and "I could not ask" — must not be confused,
    * and only the caller knows that acting on the second is what breaks a working
    * transport.
+   *
+   * Also returns `scannedRows` — exactly how many rows this call read, whether
+   * or not any were speech — and `hitCap`: whether the loop ran out of pages
+   * before reaching either a spoken row or the end of ProdCom's current
+   * history. Both exist so the caller can move `wsBaselineRows` forward past
+   * whatever it just confirmed is non-speech. Without that, a run of
+   * `typed`/`automation` rows longer than the cap pins the baseline for good:
+   * every later check re-reads this same window and answers "nothing missed"
+   * even once real speech lands past it.
    */
   private async spokenLinesBeyond(
     host: string,
     port: number,
     baselineRows: number,
-  ): Promise<{ ok: true; spoken: number } | { ok: false; error: string }> {
+  ): Promise<
+    { ok: true; spoken: number; scannedRows: number; hitCap: boolean } | { ok: false; error: string }
+  > {
     let spoken = 0;
+    let scannedRows = 0;
+    let hitCap = true;
     for (let page = 0; page < WS_SILENCE_CHECK_MAX_PAGES; page++) {
       const offset = baselineRows + page * WS_SILENCE_CHECK_PAGE_SIZE;
       const path = `/api/v1/transcript?limit=${WS_SILENCE_CHECK_PAGE_SIZE}&offset=${offset}`;
@@ -1338,14 +1357,47 @@ export class ProdComService extends ConnectionLifecycle {
       const parsed = asRecord(safeJson(body));
       const data = parsed?.["data"];
       if (!Array.isArray(data)) return { ok: false, error: "response had no data array" };
+      scannedRows += data.length;
       for (const row of data) {
         const entry = asRecord(row);
         if (entry && isSpokenAudio(entry)) spoken++;
       }
-      if (spoken > 0 || data.length === 0) break;
-      if (asRecord(parsed?.["meta"])?.["hasMore"] !== true) break;
+      if (spoken > 0 || data.length === 0) {
+        hitCap = false;
+        break;
+      }
+      if (asRecord(parsed?.["meta"])?.["hasMore"] !== true) {
+        hitCap = false;
+        break;
+      }
     }
-    return { ok: true, spoken };
+    return { ok: true, spoken, scannedRows, hitCap };
+  }
+
+  /**
+   * After a check finds nothing (`answer.spoken === 0`), move the baseline past
+   * every row that check actually confirmed non-speech — never past a row it
+   * has not yet read, since `scannedRows` only ever counts rows this call
+   * fetched.
+   *
+   * `hitCap` names the one shape worth an operator's attention: the loop ran
+   * out of pages before finding either a spoken row or the end of ProdCom's
+   * history, which is exactly the run of typed/automation rows that used to
+   * pin this check for good. Logged once per connection — a chatty comms
+   * channel would otherwise repeat the line every check interval and bury the
+   * rest of the log, the way the REST-outage line once did before it moved to
+   * OutageLog.
+   */
+  private advanceSilenceCheckBaseline(baseline: number, scannedRows: number, hitCap: boolean): void {
+    if (scannedRows <= 0) return;
+    const next = baseline + scannedRows;
+    this.wsBaselineRows = next;
+    if (!hitCap || this.silenceCheckCapLogged) return;
+    this.silenceCheckCapLogged = true;
+    console.warn(
+      `[prodcom] the silence check scanned ${WS_SILENCE_CHECK_MAX_PAGES} pages of non-speech rows without ` +
+        `finding the end of them — continuing from row ${next} next time`,
+    );
   }
 
   /**
@@ -1428,8 +1480,10 @@ export class ProdComService extends ConnectionLifecycle {
     const askable = this.wsOutages.ok("silence-check", this.now());
     if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
     if (answer.spoken === 0) {
-      // Nothing was said, so nothing was missed. debug, not log: a quiet room is
-      // not an event, and this repeats for as long as the room stays quiet.
+      // Nothing was said in what this check actually scanned — advance past it.
+      // debug, not log: a quiet room is not an event, and this repeats for as
+      // long as the room stays quiet.
+      this.advanceSilenceCheckBaseline(baseline, answer.scannedRows, answer.hitCap);
       console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
       this.armSilenceCheck();
       return;
@@ -1528,7 +1582,9 @@ export class ProdComService extends ConnectionLifecycle {
     if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
 
     if (answer.spoken === 0) {
-      // Quiet room, not a silent socket.
+      // Quiet room, not a silent socket. Same rule as probation: advance past
+      // what this check actually scanned, never past a row it has not read.
+      this.advanceSilenceCheckBaseline(baseline, answer.scannedRows, answer.hitCap);
       console.debug(`[prodcom] promoted websocket quiet for ${quiet}, and ProdCom has no spoken lines since`);
       this.armSilenceCheck();
       return;

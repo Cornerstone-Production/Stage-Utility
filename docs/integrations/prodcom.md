@@ -250,6 +250,13 @@ The `/log` page has the evidence when something looks wrong:
   `[prodcom] the silent-socket check can reach ProdCom again` when it recovers.
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
+- `[prodcom] the silence check scanned 5 pages of non-speech rows without
+  finding the end of them — continuing from row N next time` means a run of
+  `typed`/`automation` rows since the socket opened was longer than one check
+  can page through in a single pass. The check has not given up — it resumes
+  from row N on its next interval rather than re-reading the same rows forever
+  — and this line fires once per connection, the first time it happens, so a
+  chatty comms channel does not repeat it every check
 - `[prodcom] the promoted websocket delivered no transcript in 1 min while ProdCom
   has at least N spoken line(s) it never carried — falling back to the SSE
   stream, which backfills the gap, and re-testing the websocket every 30 min
