@@ -60,15 +60,44 @@ describe("what the operator set is still there after a restart", () => {
     const unread = keys.filter((k) => !new RegExp(String.raw`\.${k}\b`).test(readableSource()));
     assert.deepEqual(unread, [], "written to settings.json but never read back");
 
-    // Then the guard on the guard, EXACT. A floor is how a scan in this repo
-    // found 22 of 23 stores and was green by luck; an extraction that broke and
-    // returned nothing would make the check above pass on an empty list. A new
-    // setting moving either number is the moment to check that boot reads it.
-    assert.equal(
-      keys.length,
-      28,
-      `expected 28 keys patched into settings.json, found ${keys.length}: ${keys.join(", ")}`,
-    );
+    // Then the guard on the guard, EXACT — a sorted list, one per line, not a
+    // bare count. A floor is how a scan in this repo found 22 of 23 stores and
+    // was green by luck; an extraction that broke and returned nothing would
+    // make the check above pass on an empty list. A bare number is how two
+    // branches each adding a different key can merge without conflict and
+    // never notice the other's key went unverified: a list conflicts, a count
+    // that happens to still add up does not. A new setting moving this list is
+    // the moment to check that boot reads it.
+    assert.deepEqual(keys, [
+      "allowedServiceTypeIds",
+      "autoUpdate",
+      "baptismAutoStart",
+      "captionChannelColors",
+      "checklistNoteCategories",
+      "checklistNoteTeams",
+      "followProdcomColors",
+      "hourCycle",
+      "iconColors",
+      "iconGlyphs",
+      "kioskDiscovery",
+      "layoutDefaultsCleaned",
+      "ndiEnabled",
+      "onboardingDismissed",
+      "outputs",
+      "planDates",
+      "planId",
+      "planMode",
+      "planSeriesTitle",
+      "planSwitcherMode",
+      "planTitle",
+      "publicUrl",
+      "reconnectSchedule",
+      "serviceTypeId",
+      "serviceTypeName",
+      "showQr",
+      "taperWindow",
+      "timezone",
+    ]);
     assert.equal(
       dynamic,
       2,
