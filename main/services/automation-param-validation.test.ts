@@ -314,3 +314,33 @@ describe("ruleIssues", () => {
     assert.deepEqual(ruleIssues(r, lookup), []);
   });
 });
+
+// The validator side of the companion.press seeding bug: validateParams itself
+// was always correct — page/row/col unset is "Required" like any other
+// missing required number. The bug was that the RENDERER seeded page to 1
+// before a button was ever chosen, so validateParams was never asked about an
+// empty page at all. See rule-editor-dialog.tsx's hasCustomParamsPicker.
+describe("validateParams — companion.press's real shape, unpicked", () => {
+  const specs: ParamDef[] = [
+    { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+    { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+    { key: "col", label: "Column", type: "number", min: 0, max: 99 },
+  ];
+
+  test("no button chosen (params: {}) is three issues, not zero", () => {
+    assert.deepEqual(validateParams(specs, {}), [
+      { key: "page", message: "Required" },
+      { key: "row", message: "Required" },
+      { key: "col", message: "Required" },
+    ]);
+  });
+
+  test("seeded to the min of each (the bug's exact symptom) reads as fully valid", () => {
+    // This is the point of hasCustomParamsPicker: validateParams cannot tell
+    // "1/0/0 because nothing is chosen yet" from "1/0/0, a real button" — the
+    // two look identical to it, on purpose (a real p1 r0 c0 must validate
+    // clean). The fix is that companion.press is never handed these values
+    // until an operator actually picks a button, not a change here.
+    assert.deepEqual(validateParams(specs, { page: 1, row: 0, col: 0 }), []);
+  });
+});

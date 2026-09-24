@@ -236,6 +236,33 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       "a live display must never show the editor-only marker",
     );
   });
+
+  // companion.press's real shape, truly unpicked (params: {} — never seeded,
+  // see hasCustomParamsPicker in rule-editor-dialog.tsx). The bug this guards:
+  // seedNumberDefaults used to run for every action including this one, so a
+  // freshly-picked companion.press button never actually reached this state —
+  // it landed on {page: 1, row: 0, col: 0} instead, which validateParams (and
+  // this badge) reads as complete. This proves the OTHER half: once nothing
+  // is seeded, an unpicked button still reports its three missing params and
+  // still shows the badge, the same as any other action with unset params.
+  test("companion.press with no button chosen: shows the badge, same as any other unset action", async () => {
+    registryActions = [
+      {
+        id: "companion.press",
+        label: "Press a Companion button",
+        params: [
+          { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+          { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+          { key: "col", label: "Column", type: "number", min: 0, max: 99 },
+        ],
+      },
+    ] as never;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "companion.press", params: {} },
+      { interactive: false, editing: true },
+    );
+    await waitFor(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
+  });
 });
 
 describe("action-button — sharing the registry request", () => {

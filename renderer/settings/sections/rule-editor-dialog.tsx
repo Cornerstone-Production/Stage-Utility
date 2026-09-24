@@ -449,6 +449,35 @@ export function ParamField({
 }
 
 /**
+ * Does this trigger/condition/action render its params through its OWN
+ * picker instead of the generic ParamField loop? Exported and used at every
+ * place that seeds a number default on pick, as well as by ActionParamsFields'
+ * own render switch below, so the two can never drift the way they just did:
+ * seedNumberDefaults ran unconditionally, including for companion.press,
+ * whose picker (CompanionPressFields) reads `page > 0` as "a button is
+ * chosen" — seeding `page` to its min of 1 before anything was picked made an
+ * unconfigured button look configured to both the picker and validateParams
+ * at once, so no "Needs setup" ever appeared and the rule would have pressed
+ * whatever real button happened to sit at p1 r0 c0.
+ *
+ * companion.press is the only one today. A future custom picker for a
+ * trigger or a condition goes here too, not into a second copy of this check.
+ */
+export function hasCustomParamsPicker(kind: "trigger" | "condition" | "action", id: string): boolean {
+  return kind === "action" && id === "companion.press";
+}
+
+/** What to seed a step's params to the moment it is picked: every number
+ *  default, or nothing at all for an id with its own picker (see
+ *  hasCustomParamsPicker) — never both computed separately, which is how the
+ *  two drifted apart the first time. Exported for the same reason
+ *  hasCustomParamsPicker is: the layout editor's action-button inspector
+ *  seeds an action pick too, and must not grow its own copy of this check. */
+export function seededParams(kind: "trigger" | "condition" | "action", id: string, specs: ParamDef[]): Record<string, string | number> {
+  return hasCustomParamsPicker(kind, id) ? {} : seedNumberDefaults(specs);
+}
+
+/**
  * What an action's params look like below its Select: the companion.press
  * coordinate picker for that one action, or one ParamField per param
  * otherwise. Exported for the same reason ParamField is — the layout editor's
@@ -473,13 +502,15 @@ export function ActionParamsFields({
   onChange: (params: Record<string, string | number>) => void;
   /** Keyed by param key. companion.press's picker does not read this — its own
    *  "button missing" pill already covers an unchosen button (see
-   *  companion-cues.tsx), and page/row/col below 1/0/0 is exactly what an
-   *  unchosen button looks like to validateParams too, so nothing here is
-   *  silently unchecked. */
+   *  companion-cues.tsx), and an unchosen button's page/row/col are genuinely
+   *  absent (see hasCustomParamsPicker: this id is never number-seeded), which
+   *  is exactly what validateParams reads as "nothing picked" too. Seeding
+   *  page to its min of 1 here — before this was excluded from seeding — made
+   *  "p1 r0 c0" look chosen to both this picker and the validator at once. */
   issues?: Record<string, string>;
   attempted?: boolean;
 }) {
-  if (actionId === "companion.press") {
+  if (hasCustomParamsPicker("action", actionId)) {
     return <CompanionPressFields params={params} onChange={(patch) => onChange({ ...params, ...patch })} />;
   }
   return (
@@ -1035,7 +1066,7 @@ export function RuleEditorBody({
           onValueChange={(id) =>
             setDraft({
               ...draft,
-              trigger: { id, params: seedNumberDefaults(registry.triggers.find((t) => t.id === id)?.params ?? []) },
+              trigger: { id, params: seededParams("trigger", id, registry.triggers.find((t) => t.id === id)?.params ?? []) },
             })
           }
         >
@@ -1167,7 +1198,7 @@ export function RuleEditorBody({
           onChange={(e) => {
             if (!e.target.value) return;
             const id = e.target.value;
-            const params = seedNumberDefaults(registry.conditions.find((c) => c.id === id)?.params ?? []);
+            const params = seededParams("condition", id, registry.conditions.find((c) => c.id === id)?.params ?? []);
             setDraft({ ...draft, conditions: [...draft.conditions, { id, params }] });
           }}
         >
@@ -1189,7 +1220,7 @@ export function RuleEditorBody({
           onChange={(id) =>
             setDraft({
               ...draft,
-              action: { id, params: seedNumberDefaults(registry.actions.find((a) => a.id === id)?.params ?? []) },
+              action: { id, params: seededParams("action", id, registry.actions.find((a) => a.id === id)?.params ?? []) },
             })
           }
         />

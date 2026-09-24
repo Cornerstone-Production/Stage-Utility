@@ -87,7 +87,18 @@ const REGISTRY = {
     },
   ],
   actions: [
-    { id: "companion.press", label: "Press a Companion button", params: [] },
+    {
+      id: "companion.press",
+      label: "Press a Companion button",
+      // Real shape, not an empty array: page/row/col with real minimums —
+      // the exact params that get wrongly seeded if companion.press is ever
+      // treated like an ordinary action (see the "no button chosen" test).
+      params: [
+        { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+        { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+        { key: "col", label: "Column", type: "number", min: 0, max: 99 },
+      ],
+    },
     { id: "log.message", label: "Write a log message", params: [] },
     {
       id: "osc.send",
@@ -849,6 +860,42 @@ describe("picking a trigger, condition or action seeds its number params at once
       added?.params?.threshold,
       0,
       `adding a condition with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+});
+
+// The bug this guards: seedNumberDefaults ran unconditionally, including for
+// companion.press, whose page (min 1) then seeded to 1 the instant the action
+// was picked — before any button was ever chosen. CompanionPressFields reads
+// page > 0 as "a button is chosen", so the picker showed "p1 r0 c0" instead of
+// "Choose Companion button…", the saved rule carried real-looking coordinates,
+// and validateParams saw three in-range numbers and reported nothing. Reverting
+// hasCustomParamsPicker to always return false turns this red.
+describe("companion.press has its own picker, and is never number-seeded", () => {
+  test("picking it shows 'Choose Companion button…', not a fake coordinate, and saves no params", async () => {
+    // Starts on a DIFFERENT action (not companion.press already), so the
+    // Action select's change actually exercises picking it fresh.
+    RULES = [
+      { ...cue("take_screens"), action: { id: "log.message", params: { message: "x" } } },
+    ];
+    await mount();
+    await openRow("Rule take_screens");
+    await act(async () => {
+      fireEvent.change(selectField("Action")!, { target: { value: "companion.press" } });
+    });
+    await settle();
+    assert.ok(
+      button("Choose Companion button…"),
+      "an unpicked companion.press button must read 'Choose Companion button…', not a seeded coordinate",
+    );
+    assert.equal(button("p1 r0 c0"), null, "page must not have been seeded to its min the instant the action was picked");
+
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { action?: { params?: Record<string, unknown> } };
+    assert.deepEqual(
+      patch.action?.params ?? {},
+      {},
+      `companion.press must never be number-seeded, got ${JSON.stringify(patch.action?.params)}`,
     );
   });
 });

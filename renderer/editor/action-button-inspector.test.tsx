@@ -7,6 +7,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import type { ParamDef } from "@main/types/automation.js";
 
 const teardown = installDom();
 
@@ -15,6 +16,7 @@ const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ActionButtonInspector } = await import("./action-button-inspector.js");
 const { DEFAULT_STAGE_STATE } = await import("../main/test-render-ctx.js");
+const { validateParams } = await import("@main/services/automation-param-validation.js");
 
 after(() => {
   cleanup();
@@ -22,7 +24,7 @@ after(() => {
 });
 afterEach(() => cleanup());
 
-const REGISTRY_ACTIONS = [
+const REGISTRY_ACTIONS: { id: string; label: string; params: ParamDef[]; help?: string }[] = [
   { id: "baptism.advance", label: "Advance the baptism timer", params: [], help: "Whatever the panel's own button would do." },
   {
     id: "companion.signal-from-roster",
@@ -38,7 +40,13 @@ const REGISTRY_ACTIONS = [
     params: [
       { key: "page", label: "Page", type: "number", min: 1, max: 999 },
       { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+      { key: "col", label: "Column", type: "number", min: 0, max: 99 },
     ],
+  },
+  {
+    id: "osc.send",
+    label: "Send an OSC message",
+    params: [{ key: "argument", label: "Argument", type: "number", min: 0, max: 7 }],
   },
 ];
 
@@ -70,6 +78,31 @@ function mount(c: { type: "action-button"; actionId: string; params?: Record<str
   return { ...utils, configs };
 }
 
+/**
+ * The inspector, actually driven — `onConfig` feeds a real `useState`, so a
+ * picked action re-renders with what it seeded rather than only recording it
+ * in an array. `mount()` above is enough for "what did onConfig receive", but
+ * this bug (companion.press's OWN picker misreading a seeded `page: 1` as "a
+ * button is chosen") only shows up in what the SCREEN says after the pick —
+ * `configs.at(-1)` alone would not have caught it.
+ */
+function mountStateful(initial: { type: "action-button"; actionId: string; params?: Record<string, unknown>; label?: string }) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const configs: (typeof initial)[] = [];
+  function Wrapper() {
+    const [c, setC] = React.useState(initial);
+    return React.createElement(ActionButtonInspector as never, {
+      c,
+      onConfig: (next: typeof initial) => {
+        configs.push(next);
+        setC(next);
+      },
+    });
+  }
+  const utils = render(React.createElement(QueryClientProvider as never, { client: qc }, React.createElement(Wrapper)));
+  return { ...utils, configs };
+}
+
 describe("the action-button inspector", () => {
   test("picking an action writes its id into config.actionId, clearing old params", async () => {
     const { container, configs } = mount({ type: "action-button", actionId: "", params: { stale: "x" } });
@@ -95,16 +128,17 @@ describe("the action-button inspector", () => {
 
   // The bug this guards: a number field DISPLAYS Number(value ?? spec.min ?? 0)
   // while the stored value stays unset until the operator touches it. Reverting
-  // action-button-inspector.tsx's seedNumberDefaults call back to `params: {}`
-  // turns this red.
+  // action-button-inspector.tsx's seededParams call back to `params: {}`
+  // turns this red. osc.send, not companion.press: companion.press renders
+  // through its OWN picker and must never be seeded — see the describe below.
   test("picking an action with number params seeds them into config.params at once", async () => {
     const { container, configs } = mount({ type: "action-button", actionId: "", params: {} });
     await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
-    fireEvent.change(container.querySelector("select")!, { target: { value: "companion.press" } });
+    fireEvent.change(container.querySelector("select")!, { target: { value: "osc.send" } });
     assert.deepEqual(
       configs.at(-1)?.params,
-      { page: 1, row: 0 },
-      `picking companion.press must seed its number params, got ${JSON.stringify(configs.at(-1)?.params)}`,
+      { argument: 0 },
+      `picking osc.send must seed its number params, got ${JSON.stringify(configs.at(-1)?.params)}`,
     );
   });
 
@@ -112,6 +146,47 @@ describe("the action-button inspector", () => {
     const { container } = mount({ type: "action-button", actionId: "baptism.advance", params: {} });
     await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     assert.equal(container.querySelectorAll("input").length, 1);
+  });
+
+  // The bug this guards: seedNumberDefaults ran unconditionally, including for
+  // companion.press, whose `page` (min 1) then seeded to 1 the instant the
+  // action was picked. CompanionPressFields reads page > 0 as "a button is
+  // chosen", so the button read "p1 r0 c0" instead of "Choose Companion
+  // button…" — with no button ever actually picked, and no way to tell from
+  // the screen. Reverting hasCustomParamsPicker to always return false turns
+  // this red. Driven with mountStateful, not mount(): the earlier seeding
+  // test used mount() and only checked configs.at(-1), which is exactly why
+  // this shipped — the SCREEN, not the recorded config, is what was wrong.
+  test("picking companion.press shows 'Choose Companion button…', never a seeded coordinate", async () => {
+    const { container } = mountStateful({ type: "action-button", actionId: "", params: {} });
+    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    fireEvent.change(container.querySelector("select")!, { target: { value: "companion.press" } });
+    await waitFor(() => assert.ok(container.textContent?.includes("Choose Companion button")));
+    assert.doesNotMatch(
+      container.textContent ?? "",
+      /p1 r0 c0/,
+      "an unpicked button must never read as a real coordinate",
+    );
+  });
+
+  // Ties the pick straight to action-button.tsx's own Needs-setup formula
+  // (`editing && validateParams(action.params, config.params).length > 0`),
+  // rather than just the screen text above. Reverting hasCustomParamsPicker
+  // to always return false turns this red: companion.press would have been
+  // seeded to {page: 1, row: 0, col: 0}, which validateParams reads as
+  // complete, so the layout canvas badge would never have shown on a button
+  // whose action nobody had actually chosen yet.
+  test("the params a fresh companion.press pick leaves behind still fail validateParams, so the badge would show", async () => {
+    const { container, configs } = mountStateful({ type: "action-button", actionId: "", params: {} });
+    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    fireEvent.change(container.querySelector("select")!, { target: { value: "companion.press" } });
+    await waitFor(() => assert.ok(container.textContent?.includes("Choose Companion button")));
+    const companionPress = REGISTRY_ACTIONS.find((a) => a.id === "companion.press")!;
+    const issues = validateParams(companionPress.params, (configs.at(-1)?.params ?? {}) as Record<string, unknown>);
+    assert.ok(
+      issues.length > 0,
+      `expected the freshly-picked, still-unchosen button to fail validation, got zero issues for params ${JSON.stringify(configs.at(-1)?.params)}`,
+    );
   });
 
   test("typing a label writes it into config.label", async () => {

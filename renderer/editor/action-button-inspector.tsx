@@ -16,9 +16,9 @@ import { invoke } from "../lib/api";
 import { ActionPicker } from "./action-picker";
 import { Row, RowText } from "./inspector-rows";
 import type { LayoutObjectConfig } from "@main/types/views";
-import { ActionParamsFields, type Registry } from "../settings/sections/rule-editor-dialog";
+import { ActionParamsFields, seededParams, type Registry } from "../settings/sections/rule-editor-dialog";
 import { useOptionSources } from "../settings/sections/automation-option-sources";
-import { seedNumberDefaults, validateParams } from "@main/services/automation-param-validation";
+import { validateParams } from "@main/services/automation-param-validation";
 
 export function ActionButtonInspector({
   c,
@@ -56,7 +56,7 @@ export function ActionButtonInspector({
           actions={actions}
           value={c.actionId}
           onChange={(id) =>
-            onConfig({ ...c, actionId: id, params: seedNumberDefaults(actions?.find((a) => a.id === id)?.params ?? []) })
+            onConfig({ ...c, actionId: id, params: seededParams("action", id, actions?.find((a) => a.id === id)?.params ?? []) })
           }
         />
       </Row>
