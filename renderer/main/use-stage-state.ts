@@ -249,3 +249,19 @@ export function useStageState(): UseStageStateResult {
 
   return { state, isLoading, error };
 }
+
+/**
+ * Whether Planning Center is connected, for a screen that reads what it backs:
+ * true, false, or null while the stage state is on its way.
+ *
+ * Not connected is a state, not a failure, so while this is false those reads
+ * are not made and the screen says to connect it: without credentials the
+ * service types answer 502 and the rest answer empty (STYLE_GUIDE, "Not
+ * connected is a state"). A stage state that could not be read counts as
+ * connected — the reads are tried and say for themselves whether they fail,
+ * rather than the screen waiting for ever on a state that is not coming.
+ */
+export function pcoConnected(state: StageState | null, error: string | null): boolean | null {
+  if (state) return !!state.pcoConfigured;
+  return error ? true : null;
+}

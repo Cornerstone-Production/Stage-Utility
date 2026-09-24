@@ -1,14 +1,19 @@
 // Every channel the UI invokes must have a case in api.ts.
 //
-// `invoke()` takes `channel: string`, so a channel with no case is not a compile
-// error — it throws at runtime, in the click handler, in front of an operator.
-// The baptism trigger panel shipped that way and nobody noticed for months: its
-// load path swallowed the throw, so saved triggers simply read as "none set",
-// and only pressing Save surfaced `Unknown IPC channel`. The panel rendered,
-// accepted input, and could not persist a thing.
+// A channel with no case throws at runtime, in the click handler, in front of an
+// operator. The baptism trigger panel shipped that way and nobody noticed for
+// months: its load path swallowed the throw, so saved triggers simply read as
+// "none set", and only pressing Save surfaced `Unknown IPC channel`. The panel
+// rendered, accepted input, and could not persist a thing.
 //
-// This is the cheap structural guard until `invoke` takes a channel union: scan
-// what the UI actually calls and check every one is wired.
+// `invoke()` takes the IpcChannel union, so `tsc` is the first guard: a channel
+// with no case does not compile, called directly or through a wrapper
+// (IpcChannel's doc comment in api.ts names the ways around it). These scans are
+// the second: a backstop for a literal cast past the type, at a call they
+// recognise, and the only check on the reverse direction, a channel that has
+// lost its last caller. That check counts any double-quoted mention, so a query
+// key spelled as the channel, or a comment quoting it, keeps a dead channel
+// looking alive.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -38,30 +43,43 @@ function handledChannels(): Set<string> {
 /**
  * The names that dispatch an IPC channel in this file.
  *
- * Scanning for `invoke("...")` alone missed roughly ninety call sites: four
- * panels define a local `ipc()` that forwards to invoke, and one aliases the
- * import. Between them they cover the whole wireless, integrations and settings
- * surface — exactly where the failure this test exists for lives. A guard blind
- * to the code it guards is worse than none, because it reads as covered.
+ * Scanning for `invoke("...")` alone missed roughly ninety call sites: the
+ * panels that call it as `ipc`. Between them they cover the whole wireless,
+ * integrations and settings surface — exactly where the failure this test
+ * exists for lives. A guard blind to the code it guards is worse than none,
+ * because it reads as covered.
  *
  * Resolved per file rather than by matching any callee: `onNotification` takes a
  * channel-shaped string too, but those are SSE event names with no case in
  * api.ts and never should have one.
  *
- * KNOWN BLIND SPOT: this walks text forward to the first `}`, not a parser. A
- * dispatcher declared NESTED inside another function is attributed to that
- * enclosing function instead of itself, whenever nothing between the two
- * closes a brace first — so the nested one is never added to this list, and a
- * channel it dispatches with no case in api.ts passes this file silently. The
- * only real protection for a wrapper shaped like that is typing its channel
- * parameter as `IpcChannel` rather than `string`, so `tsc` catches an unwired
- * channel this scan cannot see.
+ * Not exhaustive over forwarders, so a green run does not mean every wrapper
+ * was scanned. Names are resolved per file, and the `function` pattern walks
+ * from a declaration's first `)` to its first `{`, then on to the first `}`,
+ * looking for `invoke`. Shapes that defeat it include these, each probed with
+ * an unwired channel and left green here:
+ *  - a forwarder NESTED in another function when no `}` comes between the
+ *    outer `{` and the inner `invoke`: the match starts at the outer
+ *    `function`, records the outer name and swallows the inner declaration,
+ *    so calls through the inner helper are never scanned;
+ *  - a `{` between the declaration's first `)` and its body: a return type
+ *    like `Promise<{ ok: boolean }>`, or an options object after a callback
+ *    parameter (`after?: () => void, opts: { quiet?: boolean } = {}`);
+ *  - a `}` in the forwarder's own body before its `invoke`;
+ *  - type parameters that nest a `>` (`<T extends Record<string, unknown>>`);
+ *  - a forwarder of a forwarder: useStageSettings's writeTo() reaches invoke
+ *    through ipc, and writeState() through writeTo(); only ipc is found;
+ *  - a forwarder declared in one file and called from another;
+ *  - an arrow function or a method.
+ * The type is what covers them: invoke() takes IpcChannel, so a forwarder whose
+ * channel is `string` does not compile, and one whose channel is IpcChannel
+ * gets every call site checked by `tsc` (see IpcChannel in api.ts).
  */
 function dispatcherNames(src: string): string[] {
   const names = new Set(["invoke"]);
   for (const m of src.matchAll(/\bimport\s*\{[^}]*\binvoke\s+as\s+([\w$]+)/g)) names.add(m[1]!);
   for (const m of src.matchAll(/\bconst\s+([\w$]+)\s*=\s*invoke\b/g)) names.add(m[1]!);
-  // A local forwarder: `function ipc<T>(channel, ...) { return invoke<T>(...) }`.
+  // A local forwarder: `function run(channel) { ... invoke(channel) ... }`.
   for (const m of src.matchAll(/\bfunction\s+([\w$]+)\s*(?:<[^>]*>)?\s*\([^)]*\)[^{]*\{[^}]*\binvoke\b/g)) {
     names.add(m[1]!);
   }
@@ -75,7 +93,7 @@ function invokedChannels(): Map<string, string[]> {
     if (path.resolve(file) === API_TS) continue;
     const src = fs.readFileSync(file, "utf8");
     const callee = dispatcherNames(src).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    // The colon is required: every one of api.ts's 174 cases is namespaced
+    // The colon is required: every one of api.ts's cases is namespaced
     // `area:action`, and demanding it keeps an over-eager wrapper match from
     // dragging in ordinary string arguments like useState<Target>("app").
     //
@@ -89,14 +107,14 @@ function invokedChannels(): Map<string, string[]> {
     // missing-case check below never had a reason to complain. `[^()]*?` allows
     // the ternary's own condition to contain quotes (`dir === "next"`) as long as
     // it contains no parens — true of every condition this closes today, but not
-    // a property of ternaries in general. This scan is still blind to: a
-    // three-way ternary (only the first `?`/`:` pair resolves); a parenthesised
-    // condition (`(a || b) ? "x:y" : "x:z"` — the paren exclusion in `[^()]*?`
-    // stops at it); a channel assembled in a variable before the call, however
-    // it got its value (see IpcChannel in api.ts for the typed answer to that
-    // one); and a channel built from a template literal. Widen it again, or
-    // reach for typing, when one of those actually ships unwired — do not
-    // assume this list is exhaustive of what a future call site can do.
+    // a property of ternaries in general. This scan is also blind to, among
+    // others: a three-way ternary (only the first `?`/`:` pair resolves); a
+    // parenthesised condition (`(a || b) ? "x:y" : "x:z"` — the paren exclusion
+    // in `[^()]*?` stops at it); an explicit type argument that nests a `>`
+    // (`invoke<Omit<T, "k">>("x:y")`, the shape of two calls today); a channel
+    // assembled in a variable before the call, however it got its value; and a
+    // channel built from a template literal. `tsc` checks every one of those,
+    // since invoke() takes IpcChannel (see its doc comment in api.ts).
     const re = new RegExp(
       `\\b(?:${callee})\\s*(?:<[^>()]*>)?\\s*\\(\\s*(?:[^()]*?\\?\\s*)?"([\\w-]+:[\\w-]+)"(?:\\s*:\\s*"([\\w-]+:[\\w-]+)")?`,
       "g",
@@ -189,10 +207,10 @@ describe("IPC channel wiring", () => {
     assert.deepEqual(revived, [], `these are dispatched again — drop them from the list: ${revived}`);
   });
 
-  it("sees channels dispatched through a local ipc() wrapper", () => {
-    // The specific blind spot: four panels forward through a local `ipc()` and one
-    // aliases the import, covering the entire wireless, integrations and settings
-    // surface. Naming one here means a future scan cannot lose them silently.
+  it("sees channels dispatched through an ipc alias of invoke", () => {
+    // The specific blind spot: these panels import invoke as `ipc`, covering the
+    // entire wireless, integrations and settings surface. Naming one here means
+    // a future scan cannot lose them silently.
     const invoked = invokedChannels();
     const viaWrapper = [...invoked].filter(([, files]) =>
       files.some((f) => f.endsWith("wireless-connections-panel.tsx")),
@@ -226,6 +244,9 @@ describe("IPC channel wiring", () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({}) })) as unknown as typeof fetch;
     try {
+      // @ts-expect-error not an IpcChannel, on purpose: this is the runtime throw
+      // a caller cast past the type would hit. The directive also pins the type:
+      // loosen invoke() back to `string` and tsc reports the directive unused.
       await assert.rejects(() => invoke("baptism:not-a-real-channel"));
     } finally {
       globalThis.fetch = realFetch;

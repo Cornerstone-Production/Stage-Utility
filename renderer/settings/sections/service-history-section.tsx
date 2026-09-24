@@ -13,17 +13,18 @@ import { ClockIcon, ChevronRightIcon, DownloadIcon, DropletIcon } from "lucide-r
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
+import { useFailedReads } from "../../lib/use-failed-reads";
 import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
-import { confirm, EmptyState, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { confirm, EmptyState, ErrorNote, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, overrunStats, serviceRowFigures } from "./history-service-header";
+import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
@@ -382,6 +383,10 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
  *  selection, but it is the same kind of failure the other three are. */
 type HistoryLoad = "timeline" | "attendance" | "spl" | "baptisms";
 
+/** The four reads behind one service's own page — HistoryLoad's distinction one
+ *  level down: a read that failed is not a record that says nothing happened. */
+type DetailRead = "record" | "attendance" | "spl";
+
 interface HistoryRow {
   serviceKey: string;
   serviceDate: string;
@@ -566,25 +571,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    *
    *   timeline / attendance   the empty state says the history could not be read
    *   spl                     the Trends card says the sound summary is missing
+   *
+   * `noteLoaded` is the other half: a load that came back clears its own
+   * failure, so a retry that works stops the page saying otherwise. Both are
+   * stable, which matters — `reload` closes over them and the mount effect
+   * closes over `reload`, so anything rebuilt per render would reload the whole
+   * history on every one.
    */
-  const [loadFailed, setLoadFailed] = useState<ReadonlySet<HistoryLoad>>(new Set());
-  // Stable, all three of them: `reload` closes over these and the mount effect
-  // closes over `reload`, so anything rebuilt per render would make the effect
-  // a dependency of every render and reload the whole history on each one.
-  // Functional setState throughout, so none of them needs the current value.
-  const noteFailure = useCallback((which: HistoryLoad, what: string, err: unknown) => {
-    logToServer("history", `could not read ${what}: ${errorMessage(err)}`);
-    setLoadFailed((prev) => (prev.has(which) ? prev : new Set(prev).add(which)));
-  }, []);
-  /** A load that came back clears its own failure, so a retry that works stops
-   *  the page saying otherwise. */
-  const noteLoaded = useCallback((which: HistoryLoad) =>
-    setLoadFailed((prev) => {
-      if (!prev.has(which)) return prev;
-      const next = new Set(prev);
-      next.delete(which);
-      return next;
-    }), []);
+  const { failed: loadFailed, fail: noteFailure, clear: noteLoaded } = useFailedReads<HistoryLoad>("history");
 
   const reload = useCallback(() => {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -654,12 +648,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         next[i] = rec;
         return next;
       });
-      setAttendance((a) => (a && a.serviceKey === rec.serviceKey ? rec : a));
+      // As the record's handler above does: a push for the OPEN service is its
+      // record even when nothing is loaded yet — including when the read
+      // failed, so a live service's note gives way to the data streaming in.
+      setAttendance((a) => (a ? (a.serviceKey === rec.serviceKey ? rec : a) : selectedKeyRef.current === rec.serviceKey ? rec : a));
     });
     const offSpl = onNotification("spl:history", (p) => {
       const rec = p as ServiceSplHistory | null;
       if (!rec) return;
-      setSpl((s) => (s && s.serviceKey === rec.serviceKey ? rec : s));
+      setSpl((s) => (s ? (s.serviceKey === rec.serviceKey ? rec : s) : selectedKeyRef.current === rec.serviceKey ? rec : s));
     });
     return () => { offTl(); offAtt(); offSpl(); };
   }, []);
@@ -829,6 +826,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     [nowTick, zone, planTimes],
   );
 
+  /** Which of the selected service's own reads FAILED. Cleared with every new
+   *  selection or reload; the effect's `cancelled` stops a read for the
+   *  previous service from landing its failure on this one. */
+  const { failed: detailFailed, fail: failDetail, clear: clearDetail } = useFailedReads<DetailRead>("history");
+  useResyncOn([selectedKey, reloadKey], () => clearDetail());
+
   // Synchronous, so the panel clears in the same render the selection does —
   // it never shows the previous service's numbers under an empty selection.
   useResyncOn([selectedKey], () => {
@@ -842,20 +845,28 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   useEffect(() => {
     if (!selectedKey) return;
     let cancelled = false;
+    // A failed read is not a service with nothing recorded. Each one is still
+    // emptied, so the previous service's data never shows under this one, and
+    // is named: on a [history] line, and on the card it starved.
+    const failed = (read: DetailRead, what: string, empty: () => void) => (err: unknown) => {
+      if (cancelled) return;
+      empty();
+      failDetail(read, `${what} for ${selectedKey}`, err);
+    };
     invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
-      .catch(() => !cancelled && setDetail(null));
+      .catch(failed("record", "the service record", () => setDetail(null)));
     // Best-effort: pull the matching attendance + SPL records for the full report.
     invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
       .then((a) => !cancelled && setAttendance(a))
-      .catch(() => !cancelled && setAttendance(null));
+      .catch(failed("attendance", "the attendance", () => setAttendance(null)));
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((s) => !cancelled && setSpl(s))
-      .catch(() => !cancelled && setSpl(null));
+      .catch(failed("spl", "the sound", () => setSpl(null)));
     return () => {
       cancelled = true;
     };
-  }, [selectedKey, reloadKey]);
+  }, [selectedKey, reloadKey, failDetail]);
 
   // Baptism sessions — loaded for the whole page, not scoped to one
   // selection: the All-services LIST needs them too, to say how many were
@@ -879,10 +890,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // A failure is not a baptism-free month. This used to `.catch(() =>
   // setBaptisms([]))`, the exact lie the OTHER three loads on this page were
   // already fixed not to tell — a down fetch and a genuine zero read
-  // identically, silently, on every row. Logged the same way
-  // baptism-operator.tsx's own reloadSessions() logs this exact fetch, and
-  // flagged through the same loadFailed/noteLoaded pair timeline/attendance/
-  // spl already use, so the list can say so once rather than nowhere.
+  // identically, silently, on every row. Failed through the same
+  // useFailedReads pair the page's other loads use, so the list says so
+  // once, and a service's own Baptisms card says its read failed.
   useEffect(() => {
     let cancelled = false;
     function fetchBaptisms() {
@@ -895,8 +905,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         .catch((err: unknown) => {
           if (cancelled) return;
           setBaptisms([]);
-          logToServer("baptism", `could not load past sessions: ${errorMessage(err)}`);
-          setLoadFailed((prev) => (prev.has("baptisms") ? prev : new Set(prev).add("baptisms")));
+          noteFailure("baptisms", "the baptism sessions", err);
         });
     }
     fetchBaptisms();
@@ -922,7 +931,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       offState();
       offRebuilt();
     };
-  }, [reloadKey, selectedKey, noteLoaded]);
+  }, [reloadKey, selectedKey, noteFailure, noteLoaded]);
 
   // The calendar and the day list are GLOBAL — every service type, so you can
   // navigate to any of them. Nothing on this page scopes to one type any more:
@@ -1376,6 +1385,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           timeline={detail}
           attendance={attendance}
           spl={spl}
+          soundUnavailable={detailFailed.has("spl")}
           now={nowTick}
           readOnly={readOnly}
           meta={metaLine}
@@ -1564,14 +1574,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             they are timing data, and on a baptism weekend they explain the overrun
             in the table right above them. Only rendered when a session links, so a
             normal service is unchanged — which is also why the nav entry above
-            comes and goes with it, rather than sitting empty most weeks.
+            comes and goes with it, rather than sitting empty most weeks. The
+            one exception is a read that failed: nothing here can tell a weekend
+            without baptisms from one whose sessions did not load, so the card
+            stays and says which.
             What was six flat tiles and a dead-end sentence pointing at the
             Baptisms tab is now the same stat strip, the same two-lane chart
             (read-only, HistorySessionChart in baptisms/session-chart.tsx —
             never a second copy of SessionSvg), and the per-person splits
             themselves, inline — restoring what an earlier pass through this
             page had removed, until this card existed to show it. */}
-        {linkedBap.length > 0 && (
+        {linkedBap.length > 0 ? (
           <SectionCard
             id="history-baptisms"
             title="Baptisms"
@@ -1591,7 +1604,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <StatStrip figures={historyBaptismFigures(linkedBap, det.items)} hover={null} live={null} announce={false} />
             <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} />
           </SectionCard>
-        )}
+        ) : loadFailed.has("baptisms") ? (
+          <SectionCard title="Baptisms">
+            <ErrorNote>Couldn't load the baptism sessions, so any baptism timings for this service are missing.</ErrorNote>
+          </SectionCard>
+        ) : null}
 
         {/* Full attendance + sound detail for the same service occurrence — one
             place for everything about this service. Each is the shared chart
@@ -1599,11 +1616,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           {attendance ? (
             <AttendanceDetail detail={attendance} timeline={detail} />
+          ) : detailFailed.has("attendance") ? (
+            <ErrorNote>Couldn't load the attendance for this service.</ErrorNote>
           ) : (
             <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
         </SectionCard>
-        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} failed={detailFailed.has("spl")} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1647,7 +1666,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
         </SectionCard>
-        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} failed={detailFailed.has("spl")} timeline={detail} attendance={attendance} />
+      </div>
+    );
+  }
+
+  // ── Detail: a service whose own record could not be read — or, for one
+  // still arriving, whose attendance could not, which is all it has. Without
+  // this the click fell through to the list below and nothing seemed to happen.
+  if (
+    !detail &&
+    selectedKey &&
+    (detailFailed.has("record") || (detailFailed.has("attendance") && !!selectedRow && !selectedRow.timeline))
+  ) {
+    return (
+      <div className="flex flex-col gap-4">
+        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
+          ← All services
+        </button>
+        <ErrorNote>Couldn't load this service's record. Nothing has been changed; reload the page to try again.</ErrorNote>
       </div>
     );
   }
@@ -1801,12 +1838,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             );
             // A read that FAILED says so, rather than borrowing the sentence
             // for a service that genuinely recorded no sound.
-            const shownFigures =
-              splRow === "error"
-                ? figures.map((f) =>
-                  f.key === "level" ? { ...f, value: "—", sub: "sound unavailable" } : f,
-                )
-                : figures;
+            const shownFigures = splRow === "error" ? markSoundUnavailable(figures) : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
             // Not a new ROW_COLUMNS figure \u2014 that grid dashes out anything a
             // row has nothing for, which would put a dash under "Baptized" on
@@ -2067,10 +2099,13 @@ function ExportPopover({
  */
 function SoundSection({
   spl,
+  failed,
   timeline,
   attendance,
 }: {
   spl: ServiceSplHistory | null;
+  /** The record could not be read, which is not a service with no sound. */
+  failed: boolean;
   timeline: ServiceTimeline | null;
   attendance: ServiceAttendance | null;
 }) {
@@ -2087,6 +2122,8 @@ function SoundSection({
           timeline={timeline}
           attendance={attendance}
         />
+      ) : failed ? (
+        <ErrorNote>Couldn't load the sound for this service.</ErrorNote>
       ) : (
         <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
       )}

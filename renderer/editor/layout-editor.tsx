@@ -103,6 +103,7 @@ const ALIGN_TOLERANCE_PX = 8;
 
 import { uid, dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
 import { Inspector } from "./inspector";
+import { SavedGroupsLibrary, useSavedGroups } from "./saved-groups";
 import {
   NumberField, 
 } from "./inspector-rows";
@@ -1379,12 +1380,9 @@ export function LayoutEditor({
     withResolver: true,
   });
   // Reusable object/container groups (loaded from the global library).
-  const [groups, setGroups] = useState<LayoutGroup[]>([]);
+  const savedGroups = useSavedGroups();
   const [groupDlgOpen, setGroupDlgOpen] = useState(false);
   const [groupName, setGroupName] = useState("");
-  useEffect(() => {
-    invoke<LayoutGroup[]>("layoutGroups:list").then(setGroups).catch(() => setGroups([]));
-  }, []);
 
   // Which integrations are set up — drives the add-object palette's setup-aware
   // dimming. Reflects "configured" (creds/config saved), NOT the live connection,
@@ -1594,7 +1592,7 @@ export function LayoutEditor({
     if (!sel) return;
     try {
       const list = await invoke<LayoutGroup[]>("layoutGroups:save", { name: groupName.trim() || "Group", object: sel });
-      setGroups(list);
+      savedGroups.replace(list);
     } catch { /* ignore */ }
     setGroupDlgOpen(false);
     setGroupName("");
@@ -1602,7 +1600,7 @@ export function LayoutEditor({
   async function deleteGroup(id: string) {
     try {
       const list = await invoke<LayoutGroup[]>("layoutGroups:delete", { id });
-      setGroups(list);
+      savedGroups.replace(list);
     } catch { /* ignore */ }
   }
   function insertGroup(g: LayoutGroup) {
@@ -2623,24 +2621,7 @@ export function LayoutEditor({
 
           {/* Saved groups library (reusable containers) */}
           <Separator />
-          <div className="flex flex-col gap-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Saved groups</span>
-            {groups.length === 0 ? (
-              <span className="text-caption2 text-fg-muted">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
-            ) : (
-              groups.map((g) => (
-                <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
-                  <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{g.name}</span>
-                  <Button variant="transparent" size="small" iconOnly onClick={() => insertGroup(g)} aria-label="Insert group" tooltip="Insert into this view">
-                    <DownloadIcon className="size-3.5 text-fg-muted" />
-                  </Button>
-                  <Button variant="transparent" size="small" iconOnly onClick={() => deleteGroup(g.id)} aria-label="Delete group">
-                    <Trash2Icon className="size-3.5 text-red-10" />
-                  </Button>
-                </div>
-              ))
-            )}
-          </div>
+          <SavedGroupsLibrary saved={savedGroups} onInsert={insertGroup} onDelete={(id) => void deleteGroup(id)} />
         </div>
         </div>
         )}

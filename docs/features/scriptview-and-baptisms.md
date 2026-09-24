@@ -15,7 +15,12 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ScriptView**, with a live preview.
+Configure it under **Settings → ScriptView**, with a live preview. The layouts
+and category roles are this app's own and can be edited before Planning Center
+is connected; the preview, which reads a plan, says to connect it. So do the
+landing page, a ScriptView page and a Script display, which ask Planning Center
+for nothing until it is connected. A Script display with no service type
+selected says that instead.
 
 ## Where the rundown can appear
 
@@ -63,6 +68,14 @@ global: define one and it works across every service type.
 
 Each has per-element toggles for the clock, item time, song key, BPM,
 arrangement, item notes and total time.
+
+A rundown whose layouts or category roles cannot be read says so above the
+table: without the layouts it shows all columns, and without the roles it shows
+no note columns, until they load. A display keeps the last layouts it read
+through a later failure and says nothing, since what it shows is still right.
+The plan works the same way: one that cannot be read says so while there is
+nothing to show yet, and a later failure keeps the last plan on screen. Each
+failure is on a `[scriptview]` line on the server log.
 
 ## Category roles
 

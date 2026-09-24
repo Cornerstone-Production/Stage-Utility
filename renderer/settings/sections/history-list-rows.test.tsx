@@ -616,8 +616,8 @@ describe("a history load that failed, rather than came back empty", () => {
     );
     assert.equal(notes.length, 1, `expected exactly one note, found ${notes.length}`);
     assert.ok(
-      warned.some((l) => l.startsWith("[baptism] could not load past sessions") && l.includes("socket hang up")),
-      `no tagged [baptism] line naming the reason: ${warned.join(" | ")}`,
+      warned.some((l) => l.startsWith("[history] could not read the baptism sessions") && l.includes("socket hang up")),
+      `no tagged [history] line naming the reason: ${warned.join(" | ")}`,
     );
     // Neither row claims a real "0 baptized" — a failure must not manufacture
     // a false figure any more than it may hide behind a true one.

@@ -115,6 +115,18 @@ const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
 };
 
 /**
+ * Figures for a service whose sound record could not be READ.
+ *
+ * The level says "sound unavailable", the Trends card's words for the same case,
+ * never "no sound recorded": that is a claim about the service, and a server
+ * that did not answer has made none. The header and the All services row both
+ * say it through here.
+ */
+export function markSoundUnavailable<F extends StatFigure & { sub?: string }>(figures: F[]): F[] {
+  return figures.map((f) => (f.key === "level" ? { ...f, sub: "sound unavailable" } : f));
+}
+
+/**
  * Everything derived from one recording that a figure about it can be built
  * from — the header's six KPIs and the All services row's four alike.
  *
@@ -462,6 +474,9 @@ export interface ServiceHeaderProps {
   timeline: ServiceTimeline;
   attendance: ServiceAttendance | null;
   spl: ServiceSplHistory | null;
+  /** The sound record could not be read. Its absence then means nothing about
+   *  the service, so the level figure must not say "no sound recorded". */
+  soundUnavailable?: boolean;
   /** Ticks every second while the record is open, so Actual counts up. */
   now?: number;
   readOnly?: boolean;
@@ -487,6 +502,7 @@ export function ServiceHeader({
   timeline,
   attendance,
   spl,
+  soundUnavailable = false,
   now,
   readOnly = false,
   meta,
@@ -511,9 +527,10 @@ export function ServiceHeader({
       // Read so the dependency is a real one and not "unnecessary" to the
       // linter: the value is never used, the CHANGE is the whole point.
       void metricsVersion;
-      return serviceKpis(timeline, attendance, spl, live ? now : undefined);
+      const figures = serviceKpis(timeline, attendance, spl, live ? now : undefined);
+      return soundUnavailable && !spl ? markSoundUnavailable(figures) : figures;
     },
-    [timeline, attendance, spl, live, now, metricsVersion],
+    [timeline, attendance, spl, soundUnavailable, live, now, metricsVersion],
   );
 
   // Geometry: see useHeaderInset's own doc comment — 184px tall at 1280 and
