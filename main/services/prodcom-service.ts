@@ -843,6 +843,11 @@ export class ProdComService extends ConnectionLifecycle {
     return this.sseUp;
   }
 
+  /** Test seam: the row count the silence check measures this socket against. */
+  protected get wsBaseline(): number | null {
+    return this.wsBaselineRows;
+  }
+
   /**
    * Test seams for the two real-time constants.
    *
@@ -1986,7 +1991,7 @@ export class ProdComService extends ConnectionLifecycle {
       // runPromotedSilenceCheck's first window re-reads the row count fresh
       // regardless, overwriting whatever this call would have found. Either
       // way the read is wasted; a box not yet known silent still needs it.
-      if (!this.wsSilentBox) this.wsBaselinePriming = this.primeWsBaseline(host, port);
+      if (!this.wsSilentBox) this.wsBaselinePriming = this.primeWsBaseline(host, port, ws);
     };
 
     ws.onmessage = (ev: MessageEvent) => {
@@ -2758,8 +2763,12 @@ export class ProdComService extends ConnectionLifecycle {
    * would print a `backfill: N line(s)` log on a connection that received no new
    * lines at all.
    */
-  private async primeWsBaseline(host: string, port: number): Promise<void> {
-    this.wsBaselineRows = await this.readTranscriptRowCount(host, port);
+  private async primeWsBaseline(host: string, port: number, ws: WebSocket): Promise<void> {
+    const rows = await this.readTranscriptRowCount(host, port);
+    // A read that outlived its socket is answered after that socket closed.
+    // ProdCom's transcript only grows, so applying it would inflate the next
+    // attempt's baseline and hide lines spoken since that attempt opened.
+    if (this.ws === ws) this.wsBaselineRows = rows;
   }
 
   /**
