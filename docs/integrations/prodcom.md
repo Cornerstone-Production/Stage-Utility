@@ -143,12 +143,27 @@ says so when it opens.
   a socket that opens and says nothing.
 
 The first transcript entry over a socket **promotes** it: the SSE stream that had
-been carrying captions closes, the WebSocket becomes the live transport, and the
-check that got it there is never asked again for that connection. A promoted
-WebSocket that later dies falls straight back to the SSE stream (reopened
-immediately, with backfill covering the gap); it is not "known silent" — it just
-proved itself — so a fresh attempt after it earns its way back to promotion the
-same as any other.
+been carrying captions closes and the WebSocket becomes the live transport — but
+the check that got it there does not stop asking. It keeps running on the same
+one-minute clock, now asking about a socket that has already proven itself
+rather than one still on probation: a window it delivers anything in costs no
+REST call; a
+window it stays quiet in asks the same question probation does — has ProdCom
+recorded anything since this socket last delivered that this socket did not
+carry. ProdCom 2.3.2 is known to deliver once and then go quiet while still
+answering heartbeats, which is the reason this keeps running rather than
+trusting the one frame that got it promoted.
+
+A promoted socket ProdCom shows spoken lines for that it never delivered falls
+straight back to the SSE stream (reopened immediately, with backfill covering
+the gap) and is latched **known silent** — having proven it can accept a socket
+and go quiet on it even after working, it gets the same widened re-test cadence
+as a box that never delivered at all, and the card reads `Fallback stream — the
+websocket carried no transcript`, same as a box that failed probation. A
+promoted socket that instead dies outright (closes, or misses three
+heartbeats) falls back the same way but is **not** latched silent — it just
+proved itself, so a fresh attempt earns its way back to promotion like any
+other.
 
 ### Retrying the WebSocket while it stays unproven
 
@@ -235,11 +250,19 @@ The `/log` page has the evidence when something looks wrong:
   `[prodcom] the silent-socket check can reach ProdCom again` when it recovers.
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
+- `[prodcom] the promoted websocket delivered no transcript in 60s while ProdCom
+  has at least N spoken line(s) it never carried — falling back to the SSE
+  stream, which backfills the gap, and re-testing the websocket every 30 min
+  instead of every 5 min from here` — the post-promotion check demoting a socket
+  that stopped delivering after having proven itself, immediately followed by
+  the ordinary `websocket unavailable (…) — falling back to the transcript SSE
+  stream` line below
 - `[prodcom] websocket unavailable (…) — captions stay on the transcript SSE
   fallback` when an unproven attempt gives up (the SSE stream was never touched
   to reach this point), or `[prodcom] websocket unavailable (…) — falling back to
-  the transcript SSE stream` when a **promoted** WebSocket dies and the SSE
-  stream is being reopened. Either way it is once per outage, not once per retry,
+  the transcript SSE stream` when a **promoted** WebSocket dies (whether it closed
+  outright or the post-promotion check demoted it) and the SSE stream is being
+  reopened. Either way it is once per outage, not once per retry,
   with a reminder carrying the attempt count every 15 minutes while it lasts, and
   `[prodcom] websocket is back …` when it recovers. The per-retry "retrying the
   websocket after N SSE reconnect(s)" is `console.debug`, so it is in the
@@ -281,10 +304,13 @@ The `/log` page has the evidence when something looks wrong:
   final lands on a channel that has no partial while others do (the renamed
   channel case), and `[prodcom] transcript cleared by operator` naming every live
   partial and its age when the clear button is pressed
-- `[prodcom] a finished line arrived on both the websocket and the SSE
-  fallback — duplicate suppressed`, once per connection, the first time a line
-  delivered by both transports while the WebSocket is unproven is applied once
-  rather than broadcast twice
+- `[prodcom] a finished line repeated while a second transport was open —
+  duplicate suppressed`, once per connection, the first time an unchanged
+  repeat of a finished line is applied once rather than broadcast twice. Worded
+  without naming which transport: this fires whenever a WebSocket attempt was
+  open at the time, and there is no way to tell a line genuinely delivered by
+  both transports from SSE alone re-sending something while an unrelated
+  WebSocket attempt happened to be open beside it
 
 Text is never logged, only its length, and neither is any keyword — only counts.
 `PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how
