@@ -414,8 +414,9 @@ position. Neither shows on an ordinary Sunday.
 The card carries: a stat strip of its own six figures — Baptized; Segment,
 the linked session's own wall-clock span with the clock time it ran, start to
 finish; Testimony and Baptism total, each with its own per-person average;
-Longest, the single longest baptism and who it was; and Vs plan, that same
-segment against the *planned* length of whichever plan items it spans — the
+Longest, the person whose testimony and baptism together ran longest, and who
+it was; and Vs plan, that same segment against the *planned* length of
+whichever plan items it spans — the
 same items the chart below clips its own plan lane to, so the two can never
 name a different plan. A plan recorded with no lengths at all has nothing for
 Vs plan to compare against, and it says so rather than reporting a false

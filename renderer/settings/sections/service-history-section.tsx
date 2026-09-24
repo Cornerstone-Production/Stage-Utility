@@ -2187,19 +2187,19 @@ function historyBaptismFigures(sessions: readonly BaptismSession[], items: reado
     }
     : { key: "vsPlan", label: "Vs plan", value: "—", sub: "the plan has no lengths to compare against" };
 
-  // Longest: the single longest BAPTISM, never a testimony — with who, from
-  // whichever session it happened in. Person numbers are per-session, the
-  // same numbering the People table and the chart both already use for that
-  // session, never renumbered across sessions. Only someone actually
-  // baptized (baptizeMs > 0) counts, matching baptismStats' own "people"
-  // rule — a testimony-only session must not name person 1's own zero as
-  // the "longest" baptism nobody had yet.
+  // Longest: the person whose testimony and baptism together ran longest, as
+  // the mockup defines it, with who, from whichever session it happened in.
+  // Person numbers are per-session, the same numbering the People table and
+  // the chart both already use for that session, never renumbered across
+  // sessions. Only someone actually baptized (baptizeMs > 0) counts, matching
+  // baptismStats' own "people" rule, so a testimony-only session names nobody.
   let longestMs = 0;
   let longestPerson: number | null = null;
   for (const s of sessions) {
     s.people.forEach((p, i) => {
-      if (p.baptizeMs > longestMs) {
-        longestMs = p.baptizeMs;
+      const totalMs = p.testimonyMs + p.baptizeMs;
+      if (p.baptizeMs > 0 && totalMs > longestMs) {
+        longestMs = totalMs;
         longestPerson = i + 1;
       }
     });

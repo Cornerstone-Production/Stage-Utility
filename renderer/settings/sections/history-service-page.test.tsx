@@ -305,8 +305,10 @@ describe("the History service page", () => {
     // nothing to compare against and prove nothing about the happy path.
     //
     //   Session: 20:41:00–20:49:00 (8:00 wall clock)
-    //   Person 1: testimony 1:30 (90s), baptism 1:00 (60s)
+    //   Person 1: testimony 2:00 (120s), baptism 1:00 (60s) — the longest
+    //             person, 3:00 in all
     //   Person 2: testimony 1:00 (60s), baptism 1:30 (90s) — the longest
+    //             baptism, which Longest must NOT pick
     //   Plan items the session's own window overlaps (clipToSession keeps
     //   anything with ANY overlap, at its own full planned length):
     //     Baptism Stories   20:40–20:44   planned 5:00 (300s)
@@ -326,7 +328,7 @@ describe("the History service page", () => {
       planId: "plan-1",
       serviceKey: KEY,
       people: [
-        { testimonyMs: 90_000, baptizeMs: 60_000 },
+        { testimonyMs: 120_000, baptizeMs: 60_000 },
         { testimonyMs: 60_000, baptizeMs: 90_000 },
       ],
     };
@@ -365,12 +367,12 @@ describe("the History service page", () => {
     assert.equal(figure("Baptized").value, "2");
     assert.equal(figure("Segment").value, "8:00");
     assert.equal(figure("Segment").sub, `${fmtTime(session.startedAt)}–${fmtTime(session.finishedAt)}`);
-    assert.equal(figure("Testimony").value, "2:30", "90s + 60s");
-    assert.equal(figure("Testimony").sub, "avg 1:15", "150s over 2 people");
+    assert.equal(figure("Testimony").value, "3:00", "120s + 60s");
+    assert.equal(figure("Testimony").sub, "avg 1:30", "180s over 2 people");
     assert.equal(figure("Baptism total").value, "2:30", "60s + 90s");
     assert.equal(figure("Baptism total").sub, "avg 1:15", "150s over 2 baptized");
-    assert.equal(figure("Longest").value, "1:30");
-    assert.equal(figure("Longest").sub, "person 2");
+    assert.equal(figure("Longest").value, "3:00", "testimony plus baptism, not the longest baptism alone");
+    assert.equal(figure("Longest").sub, "person 1");
     assert.equal(figure("Vs plan").value, "−1:00", "480s segment vs 540s planned");
     assert.equal(figure("Vs plan").sub, "9:00 planned");
   });
