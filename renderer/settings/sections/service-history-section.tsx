@@ -1,5 +1,7 @@
 import { errorMessage } from "@main/services/errors";
+import type { RebuildOutcome } from "@main/services/history-edit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -7,21 +9,25 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { hostTimeZone } from "@main/services/app-timezone";
 import { useStageState } from "../../main/use-stage-state";
-import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
+import { ClockIcon, ChevronRightIcon, DownloadIcon, DropletIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
+import { useFailedReads } from "../../lib/use-failed-reads";
 import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
-import { confirm, EmptyState, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { confirm, EmptyState, ErrorNote, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
+import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingDot, RecordingPill, ServiceHeader, overrunStats, serviceRowFigures } from "./history-service-header";
-import { useStoredKeysVersion } from "./history-chart";
+import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
+import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
+import { HistorySessionChart } from "./baptisms/session-chart";
+import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
 import { TrendsCard } from "./history-trends/trends-card";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
@@ -205,26 +211,48 @@ export function editedTooltip(it: ServiceTimelineItem): string {
   return `recorded ${span(was.startedAt, was.endedAt)}, edited to ${span(it.startedAt, it.endedAt)}`;
 }
 
-/** One record's share of a Rebuild from raw — mirrors RebuiltRecord in
- *  main/services/history-edit.ts. */
-interface RebuiltRecord {
-  rebuilt: boolean;
-  items: number;
-  missing: boolean;
-}
-interface RebuildOutcome {
-  timeline: RebuiltRecord;
-  spl: RebuiltRecord;
-  attendance: RebuiltRecord;
-  failed: string[];
-}
+/** The keys of RebuildOutcome that are REPLACE-style legs (each a
+ *  RebuiltRecord, reported by the generic done/left split below) —
+ *  `failed` is a list, not a leg; `baptismDetail` is baptism's own extra
+ *  detail, not a fifth leg; and `baptism` itself is reported SEPARATELY (see
+ *  describeRebuild), because unlike the other three it is a MERGE, never a
+ *  replace, with its own six-way split of what happened to each session. */
+type RebuildLegName = Exclude<keyof RebuildOutcome, "failed" | "baptismDetail" | "baptism">;
 
-/** The three legs and the noun each one counts, in the order they are reported. */
-const REBUILD_LEGS = [
-  ["timeline", "item timings"],
-  ["spl", "SPL items"],
-  ["attendance", "attendance samples"],
-] as const;
+/**
+ * The noun each REPLACE-style leg counts, in the order they are reported.
+ *
+ * Keyed by the REAL RebuildOutcome (imported from history-edit.ts, not
+ * hand-mirrored — a second copy of this shape is exactly how it drifted
+ * before: this file kept its own RebuiltRecord/RebuildOutcome interfaces with
+ * a comment saying they mirrored the server's, and nothing enforced that they
+ * still did). A `Record` over every leg means one added on the server and not
+ * given a noun here is a missing-property error, not a runtime gap;
+ * `Object.entries` preserves the object's own insertion order, so the order
+ * below is also the order describeRebuild reports them in.
+ */
+const REBUILD_LEG_NOUNS: Record<RebuildLegName, string> = {
+  timeline: "item timings",
+  spl: "SPL items",
+  attendance: "attendance samples",
+};
+const REBUILD_LEGS = Object.entries(REBUILD_LEG_NOUNS) as [RebuildLegName, string][];
+
+/** The parenthetical naming WHY each of baptism's own left-alone sessions is
+ *  left alone — a session left alone can be left alone for four different
+ *  reasons (never matched, a store correction newer than the rows, a
+ *  disagreement with the rows, or an unreadable finish time), and the
+ *  operator needs to be able to tell them apart, not just see a bare "left
+ *  alone: baptism sessions". Empty when nothing about baptism was left
+ *  alone at all. */
+function baptismLeftAloneBreakdown(d: NonNullable<RebuildOutcome["baptismDetail"]>): { total: number; text: string } {
+  const parts: string[] = [];
+  if (d.newer > 0) parts.push(`${d.newer} newer in the store`);
+  if (d.disagreeing > 0) parts.push(`${d.disagreeing} disagreeing with the rows`);
+  if (d.invalid > 0) parts.push(`${d.invalid} unreadable`);
+  if (d.kept > 0) parts.push(`${d.kept} not in the raw rows`);
+  return { total: d.newer + d.disagreeing + d.invalid + d.kept, text: parts.join(", ") };
+}
 
 /**
  * What a rebuild actually did, in a sentence.
@@ -232,12 +260,54 @@ const REBUILD_LEGS = [
  * Says what was LEFT ALONE, not only what was derived. A bare count read as an
  * achievement even for a record the raw layer had nothing for — which is how a
  * rebuild that changed nothing once reported "Rebuilt: 12 items".
+ *
+ * Baptism is never folded into the generic done/left split above — it is a
+ * MERGE, not a replace, with its own split of what happened to each session
+ * — but its own leftovers (unlike the other three legs, which are only ever
+ * ENTIRELY rebuilt or ENTIRELY left alone) can exist ALONGSIDE something it
+ * DID write, in the same rebuild. Both halves still go through the SAME two
+ * lists the other legs use — written sessions into `done`, left-alone ones
+ * into the SAME outer `left` array normal legs push their own bare noun
+ * into — so the sentence's own "left alone: ..." clause is built once, not
+ * assembled from two different mechanisms that can each produce their own.
+ * A second, NESTED "left alone:" clause welded onto baptism's own `done`
+ * entry used to read "left alone: 1 baptism sessions; left alone: 1 (1
+ * newer in the store)" whenever another leg was ALSO left alone in the same
+ * rebuild — this is what stopped that. `full` is neither written nor left
+ * alone — those new sessions were never added at all, so it gets its own
+ * clause, mentioned only when it is nonzero.
  */
 export function describeRebuild(out: RebuildOutcome): string {
   const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
   const left = REBUILD_LEGS.filter(([k]) => !out[k].rebuilt && !out[k].missing).map(([, noun]) => noun);
+  if (!out.baptism.missing && out.baptismDetail) {
+    const d = out.baptismDetail;
+    const { total: leftTotal, text: leftText } = baptismLeftAloneBreakdown(d);
+    if (out.baptism.rebuilt) {
+      const written: string[] = [];
+      if (d.added > 0) written.push(`${d.added} added`);
+      if (d.updated > 0) written.push(`${d.updated} updated`);
+      done.push(`${out.baptism.items} baptism sessions` + (written.length ? `: ${written.join(", ")}` : ""));
+      // Whatever this same leg did NOT write goes into the outer left-alone
+      // list too, numbered (unlike its bare-noun siblings) since this is a
+      // PARTIAL leftover alongside something the same rebuild DID write, not
+      // the whole leg sitting untouched.
+      if (leftTotal > 0) left.push(`${leftTotal} baptism sessions (${leftText})`);
+    } else {
+      // Nothing was written at all — the whole leg is left alone, the same
+      // shape every other leg's own left-alone entry already has.
+      left.push(leftTotal > 0 ? `baptism sessions (${leftText})` : "baptism sessions");
+    }
+  }
   const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
   if (left.length) parts.push(`left alone: ${left.join(", ")}`);
+  // A rebuild never evicts an existing session to make room (see
+  // baptismStore.mergeRebuilt) — at the MAX_SESSIONS cap it simply stops
+  // adding new baptism sessions, and says so, rather than silently
+  // discarding them.
+  if (out.baptismDetail && out.baptismDetail.full > 0) {
+    parts.push(`the store is full, so ${out.baptismDetail.full} baptism sessions were not added`);
+  }
   if (out.failed.length) parts.push(`could not save: ${out.failed.join(", ")}`);
   return parts.join(" · ");
 }
@@ -307,9 +377,15 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
  * service that hasn't gone live yet has attendance but no timeline. Union'd on
  * `serviceKey` so that service is still one row, not a missing one.
  */
-/** The three loads the page opens with. Named so a failure can be attributed to
- *  one of them rather than to "history". */
-type HistoryLoad = "timeline" | "attendance" | "spl";
+/** The loads the page opens with. Named so a failure can be attributed to one
+ *  of them rather than to "history". `baptisms` is loaded for the whole page
+ *  (the All-services list needs it too — see the effect below), not per
+ *  selection, but it is the same kind of failure the other three are. */
+type HistoryLoad = "timeline" | "attendance" | "spl" | "baptisms";
+
+/** The four reads behind one service's own page — HistoryLoad's distinction one
+ *  level down: a read that failed is not a record that says nothing happened. */
+type DetailRead = "record" | "attendance" | "spl";
 
 interface HistoryRow {
   serviceKey: string;
@@ -330,15 +406,109 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
   { id: "baptisms", label: "Baptisms", hint: "testimony + baptism splits, per person" },
 ];
 
+/**
+ * The operator's History page — see destinations.tsx. Not the shared
+ * read-only `/history`: that page renders this same section (with
+ * `readOnly`) and honors the same param, because the selection state below
+ * keys off whichever path is actually mounted, but a cross-link (the
+ * Baptisms tab's past sessions) hands the operator the full page.
+ */
+const HISTORY_MANAGE_PATH = "/history/manage";
+/** The search param holding the open service. A search param, not a path
+ *  segment: a service key looks like "st1:plan123:time456" — colons — which
+ *  a path segment would need escaped either way it's spelled. */
+const HISTORY_SERVICE_PARAM = "service";
+
+/**
+ * The URL that opens one service's History page. The one place this is
+ * built, so a cross-link (the Baptisms tab's past sessions) never constructs
+ * it by hand and cannot drift from what this page actually reads.
+ */
+export function historyServiceHref(serviceKey: string): string {
+  return `${HISTORY_MANAGE_PATH}?${HISTORY_SERVICE_PARAM}=${encodeURIComponent(serviceKey)}`;
+}
+
+/**
+ * The slice of a TanStack router this file actually touches — not the
+ * router's own types, which are keyed to a route tree this file does not own
+ * (see the "no Register augmentation" note on integrations-section.tsx).
+ * Typing only these three members keeps the cast below honest about what is
+ * really being relied on.
+ */
+interface HistoryRouterHandle {
+  state: { location: { pathname: string; search: Record<string, unknown> } };
+  navigate: (opts: { to: string; search: Record<string, unknown>; replace: boolean }) => unknown;
+  subscribe: (event: "onResolved", fn: () => void) => () => void;
+}
+
+function serviceParamOf(router: HistoryRouterHandle | null): string | null {
+  const v = router?.state.location.search[HISTORY_SERVICE_PARAM];
+  return typeof v === "string" ? v : null;
+}
+
+/**
+ * `selectedKey`, backed by the URL instead of plain component state.
+ *
+ * Selecting a service also becomes a navigation: a reload or a copied link
+ * lands on the same service, and Back returns to the list. The push/replace
+ * split mirrors `?integration=` on integrations-section.tsx — opening pushes
+ * a new entry, closing replaces so closing twice cannot stack two Back
+ * presses.
+ *
+ * A click sets `local` DIRECTLY rather than waiting for the navigation to
+ * resolve and echo back through the subscription below — this page must open
+ * the instant a row is clicked, exactly as it did before this change, not
+ * after a round trip through the router's own transition. The subscription
+ * exists for the direction a click can't cover: Back, Forward, or a link
+ * landing on this page from elsewhere.
+ *
+ * `useRouter({ warn: false })` returns null with no ancestor
+ * `<RouterProvider>` rather than throwing — TanStack's own context default is
+ * `null!`, which is what `useSearch()`/`useNavigate()` dereference and throw
+ * on. Every existing test in this file renders the section with no router at
+ * all, so this falls back to plain state there, exactly what a bare
+ * `useState<string | null>(null)` already did before this change.
+ */
+function useSelectedServiceKey(): [string | null, (key: string | null) => void] {
+  const router = useRouter({ warn: false }) as unknown as HistoryRouterHandle | null;
+  const [local, setLocal] = useState<string | null>(() => serviceParamOf(router));
+
+  useEffect(() => {
+    // Subscribe only — the useState initializer above already reads the
+    // router's CURRENT location, and this router instance does not change
+    // out from under a mounted component, so there is nothing to resync here.
+    if (!router) return;
+    return router.subscribe("onResolved", () => setLocal(serviceParamOf(router)));
+  }, [router]);
+
+  const setSelectedKey = useCallback(
+    (key: string | null) => {
+      setLocal(key);
+      if (!router) return;
+      const nextSearch = { ...router.state.location.search };
+      if (key) nextSearch[HISTORY_SERVICE_PARAM] = key;
+      else delete nextSearch[HISTORY_SERVICE_PARAM];
+      void router.navigate({ to: router.state.location.pathname, search: nextSearch, replace: key === null });
+    },
+    [router],
+  );
+
+  return [local, setSelectedKey];
+}
+
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useSelectedServiceKey();
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
   const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
-  // Baptism sessions (cross-linked to a service by time overlap).
-  const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
+  // Baptism sessions (cross-linked to a service by time overlap). `null`
+  // until the first fetch resolves — a failure resets it to `[]`, same as a
+  // genuinely baptism-free month, but `loadFailed.has("baptisms")` is what
+  // tells the two apart; nothing here may treat "not answered yet" or "the
+  // read failed" as "there is nothing to report".
+  const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
   // Attendance records for all services — the day rows and the Trends card are
   // both built from these.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
@@ -401,25 +571,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    *
    *   timeline / attendance   the empty state says the history could not be read
    *   spl                     the Trends card says the sound summary is missing
+   *
+   * `noteLoaded` is the other half: a load that came back clears its own
+   * failure, so a retry that works stops the page saying otherwise. Both are
+   * stable, which matters — `reload` closes over them and the mount effect
+   * closes over `reload`, so anything rebuilt per render would reload the whole
+   * history on every one.
    */
-  const [loadFailed, setLoadFailed] = useState<ReadonlySet<HistoryLoad>>(new Set());
-  // Stable, all three of them: `reload` closes over these and the mount effect
-  // closes over `reload`, so anything rebuilt per render would make the effect
-  // a dependency of every render and reload the whole history on each one.
-  // Functional setState throughout, so none of them needs the current value.
-  const noteFailure = useCallback((which: HistoryLoad, what: string, err: unknown) => {
-    logToServer("history", `could not read ${what}: ${errorMessage(err)}`);
-    setLoadFailed((prev) => (prev.has(which) ? prev : new Set(prev).add(which)));
-  }, []);
-  /** A load that came back clears its own failure, so a retry that works stops
-   *  the page saying otherwise. */
-  const noteLoaded = useCallback((which: HistoryLoad) =>
-    setLoadFailed((prev) => {
-      if (!prev.has(which)) return prev;
-      const next = new Set(prev);
-      next.delete(which);
-      return next;
-    }), []);
+  const { failed: loadFailed, fail: noteFailure, clear: noteLoaded } = useFailedReads<HistoryLoad>("history");
 
   const reload = useCallback(() => {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -489,12 +648,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         next[i] = rec;
         return next;
       });
-      setAttendance((a) => (a && a.serviceKey === rec.serviceKey ? rec : a));
+      // As the record's handler above does: a push for the OPEN service is its
+      // record even when nothing is loaded yet — including when the read
+      // failed, so a live service's note gives way to the data streaming in.
+      setAttendance((a) => (a ? (a.serviceKey === rec.serviceKey ? rec : a) : selectedKeyRef.current === rec.serviceKey ? rec : a));
     });
     const offSpl = onNotification("spl:history", (p) => {
       const rec = p as ServiceSplHistory | null;
       if (!rec) return;
-      setSpl((s) => (s && s.serviceKey === rec.serviceKey ? rec : s));
+      setSpl((s) => (s ? (s.serviceKey === rec.serviceKey ? rec : s) : selectedKeyRef.current === rec.serviceKey ? rec : s));
     });
     return () => { offTl(); offAtt(); offSpl(); };
   }, []);
@@ -664,6 +826,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     [nowTick, zone, planTimes],
   );
 
+  /** Which of the selected service's own reads FAILED. Cleared with every new
+   *  selection or reload; the effect's `cancelled` stops a read for the
+   *  previous service from landing its failure on this one. */
+  const { failed: detailFailed, fail: failDetail, clear: clearDetail } = useFailedReads<DetailRead>("history");
+  useResyncOn([selectedKey, reloadKey], () => clearDetail());
+
   // Synchronous, so the panel clears in the same render the selection does —
   // it never shows the previous service's numbers under an empty selection.
   useResyncOn([selectedKey], () => {
@@ -677,24 +845,93 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   useEffect(() => {
     if (!selectedKey) return;
     let cancelled = false;
+    // A failed read is not a service with nothing recorded. Each one is still
+    // emptied, so the previous service's data never shows under this one, and
+    // is named: on a [history] line, and on the card it starved.
+    const failed = (read: DetailRead, what: string, empty: () => void) => (err: unknown) => {
+      if (cancelled) return;
+      empty();
+      failDetail(read, `${what} for ${selectedKey}`, err);
+    };
     invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
-      .catch(() => !cancelled && setDetail(null));
+      .catch(failed("record", "the service record", () => setDetail(null)));
     // Best-effort: pull the matching attendance + SPL records for the full report.
     invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
       .then((a) => !cancelled && setAttendance(a))
-      .catch(() => !cancelled && setAttendance(null));
+      .catch(failed("attendance", "the attendance", () => setAttendance(null)));
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((s) => !cancelled && setSpl(s))
-      .catch(() => !cancelled && setSpl(null));
-    // Baptism sessions are cross-linked to the service by time overlap.
-    invoke<BaptismSession[]>("baptism:sessions")
-      .then((b) => !cancelled && setBaptisms(b))
-      .catch(() => !cancelled && setBaptisms([]));
+      .catch(failed("spl", "the sound", () => setSpl(null)));
     return () => {
       cancelled = true;
     };
-  }, [selectedKey, reloadKey]);
+  }, [selectedKey, reloadKey, failDetail]);
+
+  // Baptism sessions — loaded for the whole page, not scoped to one
+  // selection: the All-services LIST needs them too, to say how many were
+  // baptized per row (linkBaptisms + baptismStats, the SAME pair the open
+  // service's own Baptisms card uses, so a row's count and that service's
+  // page can never disagree — see linkBaptisms.ts).
+  //
+  // Refetched on reloadKey (a Rebuild from raw done ON THIS PAGE), on
+  // selectedKey changing (opening a service is exactly the moment its own
+  // just-finished session needs to be current — a page left open through a
+  // live baptism session used to show it only after a full reload, since the
+  // fetch ran once and never again), and on a live, non-replayed
+  // "baptism:state" push whose own finishedAt or saveErrors actually changed
+  // (a session finishing, or a save-failure clearing via a Rebuild done
+  // somewhere ELSE — the Baptisms tab's own header or note — while this page
+  // stays open with no selection change at all). A REPLAYED push is the
+  // connect-time cache of whatever is already true, never a new event; the
+  // signature check on top of that means an unrelated push (a tick, a
+  // workflow toggle) does not refetch the whole session list for nothing.
+  //
+  // A failure is not a baptism-free month. This used to `.catch(() =>
+  // setBaptisms([]))`, the exact lie the OTHER three loads on this page were
+  // already fixed not to tell — a down fetch and a genuine zero read
+  // identically, silently, on every row. Failed through the same
+  // useFailedReads pair the page's other loads use, so the list says so
+  // once, and a service's own Baptisms card says its read failed.
+  useEffect(() => {
+    let cancelled = false;
+    function fetchBaptisms() {
+      invoke<BaptismSession[]>("baptism:sessions")
+        .then((b) => {
+          if (cancelled) return;
+          setBaptisms(b);
+          noteLoaded("baptisms");
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setBaptisms([]);
+          noteFailure("baptisms", "the baptism sessions", err);
+        });
+    }
+    fetchBaptisms();
+    let lastSignature: string | null = null;
+    const offState = onNotification("baptism:state", (payload, replayed) => {
+      if (replayed) return;
+      const state = payload as BaptismState;
+      const signature = JSON.stringify([state.finishedAt, state.saveErrors ?? null]);
+      if (signature === lastSignature) return;
+      lastSignature = signature;
+      fetchBaptisms();
+    });
+    // A rebuild that adds or updates a session with no save-failure entry to
+    // clear (an operator picking up an older correction, say) never touches
+    // baptism:state at all — this is the store itself changing, from any of
+    // the three routes into applyBaptismRebuild, not a live timer event.
+    const offRebuilt = onNotification("baptism:rebuilt", (_payload, replayed) => {
+      if (replayed) return;
+      fetchBaptisms();
+    });
+    return () => {
+      cancelled = true;
+      offState();
+      offRebuilt();
+    };
+  }, [reloadKey, selectedKey, noteFailure, noteLoaded]);
 
   // The calendar and the day list are GLOBAL — every service type, so you can
   // navigate to any of them. Nothing on this page scopes to one type any more:
@@ -896,8 +1133,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     // them. Leaving the tiles in place beside the header put Started, Planned,
     // Actual and Avg overrun on screen twice.
     const det = detail; // narrow for the async handler
-    const linkedBap = linkBaptisms(baptisms, detail);
-    const bapStats = baptismStats(linkedBap);
+    const linkedBap = linkBaptisms(baptisms ?? [], detail);
+    // The Baptisms entry rides alongside SERVICE_SECTIONS's own three, in the
+    // same order the cards actually sit in the page — the header takes this
+    // list rather than holding a second const of its own, so the two can
+    // never disagree about which sections exist for THIS service. Only when
+    // the service has a linked session: a nav entry that comes and goes read
+    // as a fault before this card had anything real to show, and it still
+    // would if it appeared for every ordinary Sunday.
+    const sections = linkedBap.length > 0
+      ? [SERVICE_SECTIONS[0], { id: "history-baptisms", label: "Baptisms" }, ...SERVICE_SECTIONS.slice(1)]
+      : SERVICE_SECTIONS;
     async function copyReport() {
       const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
       if (ok) toast.success("Report copied to clipboard");
@@ -936,7 +1182,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (!(await confirm({
         title: "Rebuild from raw?",
         message:
-          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. The raw rows themselves are not touched.",
+          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Your per-item time corrections are kept — they sit over the rebuilt run. Baptism sessions are merged instead of replaced: updated or added, never deleted — a session removed from Past sessions can come back. The raw rows themselves are not touched.",
         confirmLabel: "Rebuild",
         destructive: true,
       }))) return;
@@ -1139,9 +1385,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           timeline={detail}
           attendance={attendance}
           spl={spl}
+          soundUnavailable={detailFailed.has("spl")}
           now={nowTick}
           readOnly={readOnly}
           meta={metaLine}
+          sections={sections}
           onBack={() => setSelectedKey(null)}
           onEditTimes={startEditTimes}
           onCopyReport={copyReport}
@@ -1189,7 +1437,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
             <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored timing/sound/attendance summaries and derives them again from the archived rows, keeping your item corrections — and merges this service's baptism sessions in from their own raw rows, updating or adding but never deleting.
             </span>
           </div>
         )}
@@ -1325,34 +1573,56 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         {/* Baptism timings sit with the rundown above rather than after the audio:
             they are timing data, and on a baptism weekend they explain the overrun
             in the table right above them. Only rendered when a session links, so a
-            normal service is unchanged — which is also why it is not in the
-            section nav: a nav entry that is there most weeks and gone the rest
-            reads as a bug. */}
-        {linkedBap.length > 0 && (
-          <SectionCard title="Baptisms">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Baptized" value={String(bapStats.people)} accent="text-fg" />
-              <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
-              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-fg" />
-              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-fg" />
-              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
-              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
-            </div>
-            <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
+            normal service is unchanged — which is also why the nav entry above
+            comes and goes with it, rather than sitting empty most weeks. The
+            one exception is a read that failed: nothing here can tell a weekend
+            without baptisms from one whose sessions did not load, so the card
+            stays and says which.
+            What was six flat tiles and a dead-end sentence pointing at the
+            Baptisms tab is now the same stat strip, the same two-lane chart
+            (read-only, HistorySessionChart in baptisms/session-chart.tsx —
+            never a second copy of SessionSvg), and the per-person splits
+            themselves, inline — restoring what an earlier pass through this
+            page had removed, until this card existed to show it. */}
+        {linkedBap.length > 0 ? (
+          <SectionCard
+            id="history-baptisms"
+            title="Baptisms"
+            // Never on the shared, read-only page: docs/display-urls.md's own
+            // contract for that link is "shows nothing else of the app," and
+            // this is real navigation INTO the operator app — the live
+            // timer's Start testimonies, Undo, Reset, Rebuild from raw and
+            // the Workflow toggle, not a read-only view of anything.
+            headerRight={
+              readOnly ? undefined : (
+                <AppLink to="/baptism" className="text-caption1 text-accent hover:underline">
+                  Open in Baptisms →
+                </AppLink>
+              )
+            }
+          >
+            <StatStrip figures={historyBaptismFigures(linkedBap, det.items)} hover={null} live={null} announce={false} />
+            <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} />
           </SectionCard>
-        )}
+        ) : loadFailed.has("baptisms") ? (
+          <SectionCard title="Baptisms">
+            <ErrorNote>Couldn't load the baptism sessions, so any baptism timings for this service are missing.</ErrorNote>
+          </SectionCard>
+        ) : null}
 
         {/* Full attendance + sound detail for the same service occurrence — one
-            place for everything about this service. Each is PR 1's chart module
-            with its own strip and Customize; nothing here restyles them. */}
+            place for everything about this service. Each is the shared chart
+            module with its own strip and Customize; nothing here restyles them. */}
         <SectionCard id="history-attendance" title="Attendance">
           {attendance ? (
             <AttendanceDetail detail={attendance} timeline={detail} />
+          ) : detailFailed.has("attendance") ? (
+            <ErrorNote>Couldn't load the attendance for this service.</ErrorNote>
           ) : (
             <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
         </SectionCard>
-        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} failed={detailFailed.has("spl")} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1396,7 +1666,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
         </SectionCard>
-        <SoundSection spl={spl} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} failed={detailFailed.has("spl")} timeline={detail} attendance={attendance} />
+      </div>
+    );
+  }
+
+  // ── Detail: a service whose own record could not be read — or, for one
+  // still arriving, whose attendance could not, which is all it has. Without
+  // this the click fell through to the list below and nothing seemed to happen.
+  if (
+    !detail &&
+    selectedKey &&
+    (detailFailed.has("record") || (detailFailed.has("attendance") && !!selectedRow && !selectedRow.timeline))
+  ) {
+    return (
+      <div className="flex flex-col gap-4">
+        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
+          ← All services
+        </button>
+        <ErrorNote>Couldn't load this service's record. Nothing has been changed; reload the page to try again.</ErrorNote>
       </div>
     );
   }
@@ -1463,6 +1751,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               />
             </div>
           </div>
+          {/* Once for the whole list, never per row: a row that failed to
+              learn its own baptism count looks IDENTICAL to one with a real
+              zero, and there is no per-row way to spell "unknown" without a
+              dash ROW_COLUMNS deliberately never puts under this figure. */}
+          {loadFailed.has("baptisms") && (
+            <p role="alert" className="text-caption2 text-danger-11">
+              Baptism counts could not be loaded; the log has the details.
+            </p>
+          )}
           {monthGroups.map((group, gi) => (
             <div
               key={group.date}
@@ -1541,18 +1838,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             );
             // A read that FAILED says so, rather than borrowing the sentence
             // for a service that genuinely recorded no sound.
-            const shownFigures =
-              splRow === "error"
-                ? figures.map((f) =>
-                  f.key === "level" ? { ...f, value: "—", sub: "sound unavailable" } : f,
-                )
-                : figures;
+            const shownFigures = splRow === "error" ? markSoundUnavailable(figures) : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
-            // The item count whether or not it is recording. The subtitle used
-            // to read "recording\u2026" instead while a record was open, which is
-            // the one thing on the row the pill beside the title already says \u2014
-            // and it cost the reader the only place the row says how many items
-            // have run so far.
+            // Not a new ROW_COLUMNS figure \u2014 that grid dashes out anything a
+            // row has nothing for, which would put a dash under "Baptized" on
+            // every ordinary Sunday. A service with none gains nothing at
+            // all: no marker, no dash. The SAME linkBaptisms + baptismStats
+            // pair the open service's own Baptisms card uses, so a row's
+            // count and that service's page can never disagree about the
+            // same service.
+            //
+            // The count itself lives on the droplet badge beside the title,
+            // not in this joined subtitle: SERVICE is the row's only
+            // flexible track, and a trailing "N baptized" here was the first
+            // thing a narrow width truncated away \u2014 down to a bare,
+            // numberless droplet at the widths where the calendar sits
+            // beside the list. Leaving it off also gives seriesTitle and
+            // itemCount more room before THEY are what gets clipped.
+            const bapCount = baptismStats(linkBaptisms(baptisms ?? [], s)).people;
             const under = [s.seriesTitle, itemCount].filter(Boolean).join(" \u00b7 ");
             // FIXED columns, so the header above the group lines up with every
             // row under it. The figures are picked by key rather than taken in
@@ -1611,6 +1914,26 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                         being clipped with the title beside it. */}
                     <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
                       <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
+                      {bapCount > 0 && (
+                        // The badge, not the subtitle, is what a narrow width
+                        // or the calendar-beside-list layout cannot truncate
+                        // away — it sits beside the title itself. The digit is
+                        // real text so it survives on its own; `role="img"`
+                        // plus the full aria-label is the same pattern
+                        // RecordingDot uses for a labelled glyph, so a screen
+                        // reader hears "1 baptized" once rather than "droplet
+                        // icon" and a bare "1" apart from each other.
+                        <span
+                          data-row-baptized
+                          role="img"
+                          aria-label={`${bapCount} baptized`}
+                          title={`${bapCount} baptized`}
+                          className="inline-flex shrink-0 items-center gap-0.5 self-center text-fg-subtle"
+                        >
+                          <DropletIcon aria-hidden className="size-3 shrink-0" />
+                          <span aria-hidden className="text-[10px] font-medium tabular-nums">{bapCount}</span>
+                        </span>
+                      )}
                       {live && <RecordingPill />}
                     </span>
                     {under && <span className="truncate text-[11px] text-fg-subtle">{under}</span>}
@@ -1776,10 +2099,13 @@ function ExportPopover({
  */
 function SoundSection({
   spl,
+  failed,
   timeline,
   attendance,
 }: {
   spl: ServiceSplHistory | null;
+  /** The record could not be read, which is not a service with no sound. */
+  failed: boolean;
   timeline: ServiceTimeline | null;
   attendance: ServiceAttendance | null;
 }) {
@@ -1796,6 +2122,8 @@ function SoundSection({
           timeline={timeline}
           attendance={attendance}
         />
+      ) : failed ? (
+        <ErrorNote>Couldn't load the sound for this service.</ErrorNote>
       ) : (
         <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
       )}
@@ -1816,25 +2144,110 @@ function SoundSection({
  * inside this card, a find-in-page hit. Carrying both would add up and land
  * every jump a header's height too low.
  */
-function SectionCard({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+function SectionCard({
+  id,
+  title,
+  headerRight,
+  children,
+}: {
+  id?: string;
+  title: string;
+  /** A control beside the title, on the same row — the Baptisms card's own
+   *  "Open in Baptisms" link. Absent for every other card today. */
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section
       id={id}
       aria-label={title}
       className="su-card flex flex-col gap-3 px-4 py-4 max-sm:px-3"
     >
-      <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+      <div className="flex items-center gap-3">
+        <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+        {headerRight && <span className="ml-auto">{headerRight}</span>}
+      </div>
       {children}
     </section>
   );
 }
 
-function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
-  return (
-    <div className="rounded-lg border border-line bg-fill/40 px-3 py-2">
-      <div className="text-caption2 uppercase tracking-wider text-fg-subtle">{label}</div>
-      <div className={`font-mono text-title3 font-medium tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="text-caption2 text-fg-subtle">{sub}</div>}
-    </div>
-  );
+/**
+ * The Baptisms card's own stat strip — the approved mockup's own six
+ * figures, never the Baptisms tab's (Timed, Wall clock, Not counted and the
+ * two averages): this card is about one recorded segment of a FINISHED
+ * service, not a running session, and the two answer different questions.
+ *
+ * `items` is the service's own plan items — the exact ones HistorySessionChart
+ * clips each session's own plan lane to (sessionWindow + clipToSession +
+ * planLaneItems, session-lane.ts), so Vs plan can never name a different plan
+ * than the chart draws right underneath it.
+ */
+function historyBaptismFigures(sessions: readonly BaptismSession[], items: readonly ServiceTimelineItem[]): StatFigure[] {
+  const stats = baptismStats(sessions);
+
+  // Segment: each session's own WALL-CLOCK span (finishedAt − startedAt),
+  // summed — never the sum of testimony+baptism time, which leaves out the
+  // armed wait, the walk to the water and every pause (baptismStats' own
+  // totalSec). A single session's own real start and end reads as a clock
+  // range; more than one has no single range to show, so the sub names how
+  // many sessions instead.
+  const withWindows = sessions
+    .map((s) => ({ s, w: sessionWindow(s.startedAt, s.finishedAt, { live: false, nowMs: 0 }) }))
+    .filter((x): x is { s: BaptismSession; w: { startMs: number; endMs: number } } => x.w !== null);
+  const segmentSec = withWindows.reduce((sum, { w }) => sum + (w.endMs - w.startMs) / 1000, 0);
+  const segmentSub = withWindows.length === 1
+    ? `${fmtTime(withWindows[0]!.s.startedAt)}–${fmtTime(withWindows[0]!.s.finishedAt)}`
+    : withWindows.length > 1 ? `${withWindows.length} sessions` : undefined;
+
+  // Vs plan: that same segment against the PLANNED length of the plan items
+  // it spans, clipped the same way the chart's own plan lane is. A plan
+  // recorded with no lengths at all (plannedLengthSec never set on any
+  // spanned item) has nothing to compare against — a dash says so, rather
+  // than treating the missing lengths as zero and reporting a huge, false
+  // overrun.
+  const laneItems = planLaneItems(items);
+  const clipped = withWindows.flatMap(({ w }) => clipToSession(laneItems, w.startMs, w.endMs));
+  const anyPlanned = clipped.some((it) => it.plannedSec != null);
+  const plannedSec = clipped.reduce((sum, it) => sum + (it.plannedSec ?? 0), 0);
+  const vsPlan: StatFigure = anyPlanned
+    ? {
+      key: "vsPlan",
+      label: "Vs plan",
+      value: fmtDelta(segmentSec - plannedSec),
+      // Matches this page's own convention for an overrun figure (see
+      // serviceKpis' Avg overrun) — coloured only when it actually ran over,
+      // not for every signed value the way the mockup's own static example
+      // happens to show one.
+      color: segmentSec > plannedSec ? "var(--color-warn-11)" : undefined,
+      sub: `${fmtDur(plannedSec)} planned`,
+    }
+    : { key: "vsPlan", label: "Vs plan", value: "—", sub: "the plan has no lengths to compare against" };
+
+  // Longest: the person whose testimony and baptism together ran longest, as
+  // the mockup defines it, with who, from whichever session it happened in.
+  // Person numbers are per-session, the same numbering the People table and
+  // the chart both already use for that session, never renumbered across
+  // sessions. Only someone actually baptized (baptizeMs > 0) counts, matching
+  // baptismStats' own "people" rule, so a testimony-only session names nobody.
+  let longestMs = 0;
+  let longestPerson: number | null = null;
+  for (const s of sessions) {
+    s.people.forEach((p, i) => {
+      const totalMs = p.testimonyMs + p.baptizeMs;
+      if (p.baptizeMs > 0 && totalMs > longestMs) {
+        longestMs = totalMs;
+        longestPerson = i + 1;
+      }
+    });
+  }
+
+  return [
+    { key: "people", label: "Baptized", value: String(stats.people) },
+    { key: "segment", label: "Segment", value: fmtDur(segmentSec), sub: segmentSub },
+    { key: "testimony", label: "Testimony", value: fmtDur(stats.testimonySec), color: "var(--color-accent)", sub: `avg ${fmtDur(stats.avgTestimonySec)}` },
+    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec), color: "var(--color-live-11)", sub: `avg ${fmtDur(stats.avgBaptismSec)}` },
+    { key: "longest", label: "Longest", value: longestPerson ? fmtDur(longestMs / 1000) : "—", sub: longestPerson ? `person ${longestPerson}` : undefined },
+    vsPlan,
+  ];
 }

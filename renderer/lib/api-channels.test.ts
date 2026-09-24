@@ -529,11 +529,11 @@ describe("IPC channel wiring", () => {
       ["wireless:listProviders", "components/wireless-connections-panel.tsx", "an `ipc` alias of the import"],
       ["pco:liveNext", "main/live-controls.tsx", "the true branch of a ternary"],
       ["pco:livePrevious", "main/live-controls.tsx", "the false branch of the same ternary"],
-      ["baptism:resume", "main/baptism-operator.tsx", "the true branch of a ternary passed to a forwarder, act()"],
-      ["baptism:pause", "main/baptism-operator.tsx", "the false branch of that ternary"],
+      ["baptism:resume", "settings/sections/baptisms/timer-card.tsx", "the true branch of a ternary passed to a forwarder, act()"],
+      ["baptism:pause", "settings/sections/baptisms/timer-card.tsx", "the false branch of that ternary"],
       ["youtube:connectCancel", "components/youtube-connect-row.tsx", "a forwarder nested in a component, run()"],
       ["stage:setPlan", "app/use-stage-settings.ts", "a forwarder of a forwarder, writeState() to writeTo() to ipc"],
-      ["baptism:advance", "main/baptism-operator.tsx", "a local assigned in branches and read in a closure"],
+      ["baptism:advance", "settings/sections/baptisms/timer-card.tsx", "a local assigned in branches and read in a closure"],
       ["devices:list", "app/screens/use-devices.ts", "a type argument that nests a `>`"],
     ];
     const { dispatched } = walk();

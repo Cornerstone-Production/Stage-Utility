@@ -41,6 +41,14 @@ class TestProdCom extends ProdComService {
   public wsHealthy(): void {
     this.noteWebSocketHealthy();
   }
+
+  /** Promotes the WebSocket — the first delivered transcript entry, in the
+   *  real client. Safe to call directly in this synthetic suite: connect() is
+   *  a no-op here, so there is no fallback stream or real socket for
+   *  promoteWebSocket()'s teardown calls to touch. */
+  public promote(): void {
+    this.noteWebSocketDelivered();
+  }
 }
 
 const realWarn = console.warn;
@@ -86,16 +94,38 @@ describe("reconnect back-off", () => {
     );
   });
 
-  it("a transport that comes up clears the ramp, so the next outage starts fast again", () => {
+  it("a promoted transport coming up clears the ramp, so the next outage starts fast again", () => {
     const svc = started();
     svc.retry();
     svc.retry();
     svc.delays = [];
+    svc.promote();
     svc.wsHealthy();
     svc.retry();
     svc.stop();
 
-    assert.equal(svc.delays[0], 4000, "resetBackoff() did not run when the transport came up");
+    assert.equal(svc.delays[0], 4000, "resetBackoff() did not run when the PROMOTED transport came up");
+  });
+
+  it("an UNPROVEN websocket's heartbeat does not clear the SSE ramp", () => {
+    // A box whose REST/SSE stack is broken but whose WebSocket still answers
+    // heartbeats must not get its fallback ramp reset by that heartbeat — or
+    // the fallback keeps retrying at the fastest interval forever, hammering
+    // whatever is actually broken instead of backing off from it. Only SSE's
+    // own success, or a PROMOTED socket's health, may reset it (see the case
+    // above).
+    const svc = started();
+    svc.retry();
+    svc.retry();
+    svc.delays = [];
+    svc.wsHealthy(); // unpromoted
+    svc.retry();
+    svc.stop();
+
+    assert.ok(
+      svc.delays[0]! > 4000,
+      `an unproven websocket's heartbeat reset the SSE ramp: scheduled ${svc.delays[0]}ms, expected it to keep climbing`,
+    );
   });
 
   it("the idle watchdog's reconnect still gets scheduled", () => {

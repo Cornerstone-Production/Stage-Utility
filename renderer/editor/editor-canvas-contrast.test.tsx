@@ -94,6 +94,7 @@ const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("../main/test-render
 
 const { contrastRatio, parseColor, formatColor } = await import("../components/ui/color-math.js");
 const { RouterContextProvider, createRootRoute, createRouter, createMemoryHistory } = await import("@tanstack/react-router");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
 // Some of the cards fetch on mount — the shared stage state, service history.
 // There is no server here, and an unanswered request settles after the DOM is
@@ -216,12 +217,21 @@ const router = createRouter({
 // unloaded router cannot do.
 await router.load();
 
+// One of the 48 probe objects is an action-button, which reads the automation
+// registry through react-query — the same client the real app provides at
+// renderer/main/index.tsx, needed here only so that one object mounts at all.
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+
 function mount() {
   // RouterContextProvider, not RouterProvider: this needs the router IN CONTEXT
   // so the links render, not the router's own route tree rendered in place of
   // the canvas.
   return render(
-    React.createElement(RouterContextProvider as never, { router }, canvasElement()),
+    React.createElement(
+      QueryClientProvider as never,
+      { client: queryClient },
+      React.createElement(RouterContextProvider as never, { router }, canvasElement()),
+    ),
   );
 }
 

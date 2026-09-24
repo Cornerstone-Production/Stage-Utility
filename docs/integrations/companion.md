@@ -873,18 +873,32 @@ timer and nothing is read. The log says which:
 
 **Actions** — PCO Live next/previous, refresh lineup, jump to next plan, set plan,
 set service type, set plan mode, route a view to an output, blackout an output,
-refresh displays, apply a preset, show/hide the QR code.
+refresh displays, apply a preset, show/hide the QR code, and ten actions for the
+baptism timer: Start, Advance, Mark baptized, Start baptisms, Next, Pause/resume,
+Undo, Finish, Reset, Set workflow.
 
 **Feedbacks** — countdown overtime, mic battery low, mic offline, ProPresenter
 disconnected, plan in manual mode, output showing a given view, output blacked
-out, occupancy over a threshold, captions idle, and a people-count text feedback
-that writes the count onto a button.
+out, occupancy over a threshold, captions idle, a people-count text feedback
+that writes the count onto a button, and three for the baptism timer: phase
+colour (always on), paused, running.
 
 **Variables** — plan and series title, service type, plan mode, ProPresenter
 current/next item and slide position, PCO countdown label and seconds, mics
 online and total, lowest battery and its channel, last caption text and speaker,
 people attendance and occupancy (with per-zone variables), last sync time. Plus
 one pair per automation signal — see below.
+
+**Baptism timer** — `baptism_phase` (`idle`/`armed`/`testimony`/`baptism`),
+`baptism_segment` (the running testimony or baptism clock), `baptism_testimony`
+(this person's own testimony, once banked), `baptism_session` (wall clock since
+the session started), `baptism_person` (`Person 3`, or `3 of 7` in grouped mode
+once the testimony pass has run), `baptism_count`, `baptism_paused`,
+`baptism_avg_testimony`, `baptism_avg_baptism`, `baptism_mode`. All the clocks
+tick live between updates, off the same delivery-compensated clock as the PCO
+countdown. **Advance** is the one action to bind to a physical key — it does
+whatever the [operator panel's](../features/scriptview-and-baptisms.md) own
+main button would do right now, in whichever phase the timer is in.
 
 ## Signals
 

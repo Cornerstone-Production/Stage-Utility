@@ -36,6 +36,7 @@ export {
 export { toast, Toaster } from "./toast";
 export { confirm, ConfirmHost, type ConfirmOptions } from "./confirm-dialog";
 export { EmptyState } from "./empty-state";
+export { ErrorNote } from "./error-note";
 export { Skeleton, SkeletonRows } from "./skeleton";
 export { InfoHint } from "./info-hint";
 export { UnsavedBanner } from "./unsaved-banner";

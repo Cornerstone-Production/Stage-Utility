@@ -145,14 +145,22 @@ class SampleArchive {
    * `item` names the plan item live at the time. Without it the file knows a
    * baptism happened at 11:31:40 but not that the room was singing O Praise The
    * Name, and the plan lane cannot be redrawn from raw.
+   *
+   * `at` defaults to this call's own clock read, like every other recorder
+   * here — but a caller that already stamped this exact moment elsewhere may
+   * pass it in, so the row carries that SAME string rather than a moment-later
+   * read of the clock. The baptism timer's `start` and `finish` rows do this,
+   * so a rebuilt session's id/startedAt/finishedAt match what the store holds
+   * instead of drifting a millisecond apart from it (see baptism-timer-
+   * service.ts's emitRaw and rebuild-baptism.ts's header).
    */
-  recordBaptism(ctx: ServiceCtx, fields: BaptismRawFields): void {
+  recordBaptism(ctx: ServiceCtx, fields: BaptismRawFields, at: string = new Date().toISOString()): void {
     const e = this.entry(ctx);
     if (!e) return;
     void this.appender(e, "baptism").append(
       ["at", "event", "mode", "phase", "personNumber", "baptismIndex", "segmentMs", "itemId", "item", "detail"],
       [
-        new Date().toISOString(),
+        at,
         fields.event,
         fields.mode,
         fields.phase,
@@ -166,7 +174,17 @@ class SampleArchive {
     );
   }
 
-  /** Settle every queued write. Tests await this; the live path does not need to. */
+  /**
+   * Settle every queued write.
+   *
+   * The recorders never await this, since the live tick must not block on disk.
+   * A READER of these files must, before it reads: every record method queues its
+   * append without awaiting it. GET /api/baptism/lane is one — the Baptisms tab
+   * fetches it on the very `baptism:state` push a press broadcasts, and without
+   * this every read made on that push came back a row short
+   * (baptism-lane-route.test.ts fails on it). writeManifest below awaits it for
+   * the same reason. Do not remove a reader's call to it.
+   */
   async flush(): Promise<void> {
     const waits: Promise<void>[] = [];
     for (const e of this.services.values()) for (const a of e.appenders.values()) waits.push(a.settled());

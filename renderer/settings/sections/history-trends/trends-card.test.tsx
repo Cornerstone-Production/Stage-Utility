@@ -32,7 +32,7 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Sparkline } = await import("./sparkline.js");
-const { TrendsCard, pctChange, pctLabel, basisLabel } = await import("./trends-card.js");
+const { TrendsCard, pctChange, pctLabel, basisLabel, noPriorCaption } = await import("./trends-card.js");
 type TrendClock = import("./trends.js").TrendClock;
 const { TooltipProvider } = await import("../../../components/ui/index.js");
 type TrendRecording = import("./trends.js").TrendRecording;
@@ -177,6 +177,16 @@ describe("how a change reads", () => {
     assert.ok(upClass.includes("text-ok-11"), `a rise is not green: ${upClass}`);
     assert.ok(downText.startsWith("−"), `the fixture did not fall: ${downText}`);
     assert.ok(downClass.includes("text-danger-11"), `a fall is not red: ${downClass}`);
+  });
+
+  test("noPriorCaption tells a real zero apart from no prior window at all", () => {
+    // Unreachable through this card's own tiles today (every basis that
+    // reaches one already cleared COMPARABLE_ABOVE > 0), and reachable
+    // through baptisms/trends-card.tsx's "Baptized per service" tile, which
+    // shares this exact function. Unit-tested here regardless, since the
+    // render path that would prove it cannot be driven with real data.
+    assert.equal(noPriorCaption(true), "prior window averaged 0");
+    assert.equal(noPriorCaption(false), "no prior window yet");
   });
 });
 

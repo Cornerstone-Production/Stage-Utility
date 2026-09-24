@@ -182,4 +182,15 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // Whether a channel with no custom pick above follows ProdCom's own color.
+    if (method === "POST" && pathname === "/api/caption-colors/follow-prodcom") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.on !== "boolean") {
+        error(res, "body.on (boolean) required");
+        return;
+      }
+      json(res, await stageController.setFollowProdcomColors(body.on));
+      return;
+    }
+
 }

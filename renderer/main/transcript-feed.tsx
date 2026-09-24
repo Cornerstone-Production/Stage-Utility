@@ -14,6 +14,9 @@ interface TranscriptFeedProps {
   showLabels?: boolean;
   /** User-assigned colors keyed by channel label; overrides the auto color. */
   colorOverrides?: Record<string, string> | null;
+  /** Use ProdCom's own per-channel color when a channel has no custom pick.
+   *  Default false — see resolveChannelColor() in channel-color.ts. */
+  followProdcom?: boolean;
   /** Base text style applied to the container so font size/family/align cascade
    *  to every line (used by the layout object, sized to its box). */
   textStyle?: CSSProperties;
@@ -37,6 +40,7 @@ export function TranscriptFeed({
   scrollable = false,
   showLabels,
   colorOverrides,
+  followProdcom = false,
   textStyle,
   lineClassName,
   gapClassName = "gap-3",
@@ -92,7 +96,7 @@ export function TranscriptFeed({
             <p
               key={l.id}
               className={cn("leading-snug", lineClassName)}
-              style={{ color: lineColor(l, colorOverrides), opacity: l.isFinal ? 1 : 0.55 }}
+              style={{ color: lineColor(l, colorOverrides, followProdcom), opacity: l.isFinal ? 1 : 0.55 }}
             >
               {labels && (l.channelName || l.channel) && (
                 <span className="text-[0.5em] font-medium uppercase tracking-wider text-fg-subtle mr-[0.6em] align-middle">

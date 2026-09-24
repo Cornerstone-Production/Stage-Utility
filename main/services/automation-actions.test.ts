@@ -4,11 +4,23 @@
 
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
-import type { PcoLiveDTO } from "../types/stage.js";
+// baptism.* mutates the real baptismTimerService singleton, which debounces a
+// persist through baptismStore 800ms after every commit(). Unset, that write
+// lands in the real ~/.stage-utility — the default data dir a dev/prod
+// instance on this machine actually uses. Set before anything below can reach
+// getUserDataPath()'s lazy, memoized resolution (see app-paths.ts).
+process.env.STAGE_UTILITY_DATA ??= await fs.mkdtemp(path.join(os.tmpdir(), "stage-automation-actions-"));
+
+import type { BaptismState, PcoLiveDTO } from "../types/stage.js";
 import { AUTOMATION_ACTIONS, liveDeps } from "./automation-actions.js";
 import { advanceGuard } from "./automation-pco-items.js";
 import { reaperDeps } from "./reaper-service.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
+import { baptismStore } from "./baptism-store.js";
 
 describe("advanceGuard", () => {
   it("allows the step when the next item matches", () => {
@@ -145,5 +157,244 @@ describe("reaper.transport", () => {
     const r = await action.run({ command: "stop" }, { simulate: false });
     assert.equal(r.ok, false);
     assert.match(r.detail, /not configured/);
+  });
+});
+
+/** Grouped, phase baptism, baptismIndex 0, armed false, people EMPTY — the
+ *  exact restored-record shape baptism-timer-service.ts guards in three
+ *  places. advance() falls through to next(), whose grouped/baptism branch
+ *  is a documented no-op for this shape. */
+function corruptedGroupedBaptismRecord(): BaptismState {
+  return {
+    mode: "grouped",
+    phase: "baptism",
+    personNumber: 1,
+    baptismIndex: 0,
+    armed: false,
+    segmentStartedAt: null,
+    segmentAccumMs: 0,
+    sessionStartedAt: "2026-09-20T12:00:00.000Z",
+    finishedAt: null,
+    people: [],
+    pendingTestimonyMs: null,
+    serviceTitle: null,
+    serviceTypeId: null,
+    planId: null,
+  };
+}
+
+describe("baptism actions", () => {
+  afterEach(() => {
+    baptismTimerService.reset();
+  });
+
+  // EXACT, sorted, one entry per line — never a bare count. See
+  // routes/baptism-actions.test.ts for why: a count cannot tell an id added in
+  // one branch and removed in another from no change at all.
+  it("registers exactly this sorted list of ids", () => {
+    const ids = Object.keys(AUTOMATION_ACTIONS).filter((id) => id.startsWith("baptism."));
+    assert.deepEqual(ids.sort(), [
+      "baptism.advance",
+      "baptism.back",
+      "baptism.finish",
+      "baptism.pause",
+      "baptism.start",
+    ]);
+  });
+
+  describe("baptism.start", () => {
+    it("begins person 1's testimony from idle", async () => {
+      baptismTimerService.reset();
+      const r = await AUTOMATION_ACTIONS["baptism.start"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState().phase, "testimony");
+      assert.equal(baptismTimerService.getState().personNumber, 1);
+    });
+
+    it("refuses when a session is already running", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.start();
+      const r = await AUTOMATION_ACTIONS["baptism.start"]!.run({}, { simulate: false });
+      assert.equal(r.ok, false);
+      assert.match(r.detail, /already running/);
+    });
+
+    it("issues no state change in simulate mode", async () => {
+      baptismTimerService.reset();
+      const before = baptismTimerService.getState();
+      const r = await AUTOMATION_ACTIONS["baptism.start"]!.run({}, { simulate: true });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState(), before, "simulate must not call the real service");
+    });
+  });
+
+  describe("baptism.advance", () => {
+    it("from idle, starts a session", async () => {
+      baptismTimerService.reset();
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.match(r.detail, /started/);
+      assert.equal(baptismTimerService.getState().phase, "testimony");
+      assert.equal(baptismTimerService.getState().personNumber, 1);
+    });
+
+    it("from armed, begins person 1 without banking the wait", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.setMode("grouped");
+      baptismTimerService.start();
+      baptismTimerService.next(); // bank person 1's testimony
+      baptismTimerService.startBaptisms(); // arms — no clock runs yet
+      assert.equal(baptismTimerService.getState().armed, true);
+
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState().armed, false);
+      assert.ok(baptismTimerService.getState().segmentStartedAt, "person 1's clock must now be running");
+    });
+
+    it("from a per-person testimony, marks baptized", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.setMode("per-person");
+      baptismTimerService.start();
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState().phase, "baptism");
+    });
+
+    it("never contacts the service in simulate mode", async () => {
+      baptismTimerService.reset();
+      const before = baptismTimerService.getState();
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: true });
+      assert.equal(r.ok, true);
+      assert.match(r.detail, /would/);
+      assert.equal(baptismTimerService.getState(), before, "simulate must not call the real service");
+    });
+
+    it("reports failure rather than false success against a restored, corrupted record", async () => {
+      // Loaded through baptismStore + init(), the way a real restored record
+      // arrives, not by reaching into the service's private state.
+      await baptismStore.saveCurrent(corruptedGroupedBaptismRecord());
+      await baptismTimerService.init();
+      const before = baptismTimerService.getState();
+
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: false });
+
+      assert.equal(r.ok, false, "advance must not report success when the timer did not move");
+      assert.match(r.detail, /did not move/);
+      assert.equal(baptismTimerService.getState(), before, "the state must be exactly unchanged");
+      await baptismStore.saveCurrent(null);
+    });
+
+    it("simulate against a refusing state reports the SAME refusal a real press would, not a blanket 'would advance'", async () => {
+      await baptismStore.saveCurrent(corruptedGroupedBaptismRecord());
+      await baptismTimerService.init();
+      const before = baptismTimerService.getState();
+
+      const r = await AUTOMATION_ACTIONS["baptism.advance"]!.run({}, { simulate: true });
+
+      assert.equal(r.ok, false, "a dry run over a refusing state must report the refusal, not false success");
+      assert.match(r.detail, /did not move/);
+      assert.equal(baptismTimerService.getState(), before, "simulate must never touch the real service");
+      await baptismStore.saveCurrent(null);
+    });
+  });
+
+  describe("baptism.back", () => {
+    it("undoes the last press", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.setMode("per-person");
+      baptismTimerService.start();
+      baptismTimerService.baptized(); // testimony -> baptism
+      assert.equal(baptismTimerService.getState().phase, "baptism");
+
+      const r = await AUTOMATION_ACTIONS["baptism.back"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState().phase, "testimony");
+    });
+
+    it("says there is nothing to undo from a fresh idle state", async () => {
+      baptismTimerService.reset();
+      const r = await AUTOMATION_ACTIONS["baptism.back"]!.run({}, { simulate: false });
+      assert.equal(r.ok, false);
+      assert.match(r.detail, /nothing to undo/);
+    });
+
+    it("simulate from idle reports the SAME refusal a real press would, not 'would step the baptism timer back'", async () => {
+      baptismTimerService.reset();
+      const before = baptismTimerService.getState();
+
+      const r = await AUTOMATION_ACTIONS["baptism.back"]!.run({}, { simulate: true });
+
+      assert.equal(r.ok, false, "a dry run over idle must report the refusal, not false success");
+      assert.match(r.detail, /nothing to undo/);
+      assert.equal(baptismTimerService.getState(), before, "simulate must never touch the real service");
+    });
+  });
+
+  describe("baptism.pause", () => {
+    it("pauses a running clock", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.start();
+      const r = await AUTOMATION_ACTIONS["baptism.pause"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.match(r.detail, /paused/);
+      assert.equal(baptismTimerService.getState().segmentStartedAt, null);
+    });
+
+    it("resumes a paused clock", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.start();
+      baptismTimerService.pause();
+      const r = await AUTOMATION_ACTIONS["baptism.pause"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.match(r.detail, /resumed/);
+      assert.ok(baptismTimerService.getState().segmentStartedAt, "the clock must be running again");
+    });
+
+    it("says there is nothing running to pause when idle", async () => {
+      baptismTimerService.reset();
+      const r = await AUTOMATION_ACTIONS["baptism.pause"]!.run({}, { simulate: false });
+      assert.equal(r.ok, false);
+      assert.match(r.detail, /no baptism session/);
+    });
+
+    it("says there is nothing running to pause while armed", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.setMode("grouped");
+      baptismTimerService.start();
+      baptismTimerService.next();
+      baptismTimerService.startBaptisms();
+      assert.equal(baptismTimerService.getState().armed, true);
+
+      const r = await AUTOMATION_ACTIONS["baptism.pause"]!.run({}, { simulate: false });
+      assert.equal(r.ok, false);
+      assert.match(r.detail, /armed/);
+    });
+
+    it("issues no state change in simulate mode", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.start();
+      const before = baptismTimerService.getState();
+      const r = await AUTOMATION_ACTIONS["baptism.pause"]!.run({}, { simulate: true });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState(), before, "simulate must not call the real service");
+    });
+  });
+
+  describe("baptism.finish", () => {
+    it("closes the in-progress session", async () => {
+      baptismTimerService.reset();
+      baptismTimerService.start();
+      const r = await AUTOMATION_ACTIONS["baptism.finish"]!.run({}, { simulate: false });
+      assert.equal(r.ok, true);
+      assert.equal(baptismTimerService.getState().phase, "idle");
+    });
+
+    it("refuses when idle, rather than logging a no-op finish", async () => {
+      baptismTimerService.reset();
+      const r = await AUTOMATION_ACTIONS["baptism.finish"]!.run({}, { simulate: false });
+      assert.equal(r.ok, false);
+      assert.match(r.detail, /no baptism session/);
+    });
   });
 });

@@ -11,8 +11,10 @@
 // resumes the running clock — segmentStartedAt is an absolute timestamp). Finished
 // sessions are logged for review. Running elapsed is derived client-side.
 
+import { getSystemErrorMessage, getSystemErrorName } from "node:util";
+
 import { baptismSessionId } from "../types/stage.js";
-import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSession, BaptismState } from "../types/stage.js";
+import type { BaptismMode, BaptismPerson, BaptismRawEvent, BaptismSaveError, BaptismSession, BaptismState } from "../types/stage.js";
 import { settingsStore } from "./settings-store.js";
 import { baptismTriggersStore } from "./baptism-triggers-store.js";
 import { autoStartAction } from "./baptism-autostart.js";
@@ -34,12 +36,55 @@ function idleState(mode: BaptismMode): BaptismState {
     segmentStartedAt: null,
     sessionStartedAt: null,
     finishedAt: null,
+    finishedFrom: null,
     people: [],
     pendingTestimonyMs: null,
     serviceTitle: null,
     serviceTypeId: null,
     planId: null,
+    saveErrors: [],
   };
+}
+
+/** `list` with `entry` appended, or substituted in place for an entry that
+ *  already names the same session — a session that fails to save twice (a
+ *  retry that fails again) updates its own reason rather than appending a
+ *  second entry for itself. */
+function upsertSaveError(list: readonly BaptismSaveError[], entry: BaptismSaveError): BaptismSaveError[] {
+  const i = list.findIndex((e) => e.sessionId === entry.sessionId);
+  if (i === -1) return [...list, entry];
+  const next = [...list];
+  next[i] = entry;
+  return next;
+}
+
+/**
+ * What a failed save may say on the operator's screen: why, never where.
+ *
+ * BaptismState goes to every screen on the LAN, and a filesystem path must never
+ * be readable there (see port-holder.ts) — while a failed write's own message
+ * names the absolute path of the file it was writing, data directory and all. A
+ * Finish driven against a read-only data directory carried exactly that in the
+ * pushed state. The log line keeps the whole error.
+ *
+ * Path-free by construction, not by filtering: the only input read is the
+ * errno NUMBER, and both halves of the reason come from Node's own table for
+ * it. No string the error carries — message, code, path — reaches the screen,
+ * so an error that is not a system error gets a fixed sentence rather than its
+ * message. Both lookups throw ERR_OUT_OF_RANGE on anything but a negative safe
+ * integer — an integer below Number.MIN_SAFE_INTEGER included — and this runs
+ * inside a rejection handler, where a throw is an unhandled rejection that
+ * lands before the failure is ever added to saveErrors — hence the guard.
+ */
+function saveFailureReason(err: unknown): string {
+  const errno = (err as { errno?: unknown } | null | undefined)?.errno;
+  if (typeof errno === "number" && Number.isSafeInteger(errno) && errno < 0) {
+    const name = getSystemErrorName(errno);
+    const description = getSystemErrorMessage(errno);
+    // An errno Node does not know reads "Unknown system error <n>" for both.
+    return name === description ? description : `${name}: ${description}`;
+  }
+  return "an unexpected error; the log has the details";
 }
 
 class BaptismTimerService {
@@ -237,8 +282,16 @@ class BaptismTimerService {
    * row is worse than losing one. This is a deliberate exception to this repo's
    * catch-rethrows-or-returns rule, matching the convention sampleArchive's own
    * record methods already document (see recordBaptism).
+   *
+   * `at` threads straight through to recordBaptism's own optional stamp.
+   * start() passes its `now` and finalize() its `finishedAt`, so the `start`
+   * and `finish` rows carry the SAME string already stamped into
+   * sessionStartedAt/finishedAt rather than a separate, moment-later read of
+   * the clock — which is what a rebuilt session's id is derived from
+   * (baptismSessionId). Every other call site omits it: nothing else derives
+   * an id from these rows, so recordBaptism's own clock read is fine.
    */
-  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = ""): void {
+  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = "", at?: string): void {
     try {
       const record = serviceTimelineRecorder.getCurrent();
       if (!record || record.endedAt != null) {
@@ -261,17 +314,23 @@ class BaptismTimerService {
           item: this.liveItem?.title ?? null,
           detail,
         },
+        at,
       );
     } catch (err) {
       console.error("[baptism] raw: emit failed:", event, err);
     }
   }
 
-  /** Switch workflow — only allowed while idle (preserves nothing else). */
+  /** Switch workflow — only allowed while idle. Preserves nothing else but
+   *  failed saves, which only that session's own successful save, Reset, or
+   *  the operator's Dismiss may clear (see BaptismState.saveErrors). */
   setMode(mode: BaptismMode): BaptismState {
     if (mode !== "per-person" && mode !== "grouped") return this.state;
     if (this.state.phase !== "idle") return this.state;
-    this.state = idleState(mode);
+    this.state = {
+      ...idleState(mode),
+      saveErrors: this.state.saveErrors ?? [],
+    };
     return this.commit();
   }
 
@@ -297,6 +356,10 @@ class BaptismTimerService {
       // with the timing and attendance recorded alongside it, including when an
       // overrunning service rolls PCO's current service time forward.
       serviceKey: currentServiceKey(),
+      // Any earlier sessions' failed saves, not yet resolved. A plan item
+      // going live calls this with nobody at the screen; see
+      // BaptismState.saveErrors.
+      saveErrors: this.state.saveErrors ?? [],
     };
     // No manual/auto provenance here: at this point in start(), this.state.
     // autoStartedFrom is always whatever idleState() left it as (unset) —
@@ -305,7 +368,7 @@ class BaptismTimerService {
     // button press and a PCO auto-start, every time. That is worse than no
     // value: the whole point of this row is to report only what happened. The
     // `[baptism] auto-start:` log line already records which one it was.
-    this.emitRaw("start", 0, "");
+    this.emitRaw("start", 0, "", now);
     return this.commit();
   }
 
@@ -341,9 +404,13 @@ class BaptismTimerService {
   }
 
   /**
-   * The phase-aware primary press — whatever the operator panel's main button
-   * does right now. ONE entry point, so a Companion key, a layout button and the
-   * panel cannot disagree about which action is legal in which phase.
+   * The phase-aware primary press — dispatches to whichever action is legal
+   * for the CURRENT phase, so a caller that does not track phase (Companion,
+   * an automation) has one action that is always safe to press. The operator
+   * panel itself routes through this only while armed ("First person in");
+   * once a phase is running the panel already knows which specific action
+   * applies (start/next/baptized/finish) and calls that one directly — see
+   * timer-card.tsx's primaryChannel.
    */
   advance(): BaptismState {
     if (this.state.phase === "idle") return this.start();
@@ -357,6 +424,28 @@ class BaptismTimerService {
       return this.state.mode === "grouped" ? this.next() : this.baptized();
     }
     return this.next();
+  }
+
+  /** Side-effect-free mirror of advance()'s branches, for automation's simulate
+   *  mode. Every branch above always succeeds except the final next() call in
+   *  grouped/baptism, which no-ops against the same restored-record shape
+   *  hasGroupedBaptismTarget() below guards — reusing that one predicate here
+   *  (rather than re-deriving "would this succeed") is what keeps a dry run
+   *  agreeing with what a real press would do. */
+  advanceWouldChange(): boolean {
+    const s = this.state;
+    if (s.phase === "idle") return true;
+    if (s.armed) return true;
+    if (s.phase === "testimony") return true;
+    if (s.mode === "per-person") return true;
+    return this.hasGroupedBaptismTarget();
+  }
+
+  /** grouped/baptism has somewhere to step forward to only if someone is
+   *  actually waiting at baptismIndex — see next()'s grouped-baptism branch
+   *  below, the one place this used to be written out inline. */
+  private hasGroupedBaptismTarget(): boolean {
+    return this.state.phase === "baptism" && this.state.people.length > 0;
   }
 
   /** Step forward one action — meaning depends on mode + phase:
@@ -385,10 +474,10 @@ class BaptismTimerService {
       this.state = { ...this.state, people: [...this.state.people, person], personNumber: this.state.personNumber + 1, ...this.startSegment(0) };
       return this.commit();
     }
-    if (this.state.phase === "baptism" && this.state.people.length > 0) {
-      // `people.length > 0` guards the same restored-record shape undo()'s
-      // baptismIndex===0 branch guards against: a pre-mode record restores as
-      // grouped/baptism/baptismIndex 0 with an empty people list (see
+    if (this.hasGroupedBaptismTarget()) {
+      // `hasGroupedBaptismTarget()` guards the same restored-record shape
+      // undo()'s baptismIndex===0 branch guards against: a pre-mode record
+      // restores as grouped/baptism/baptismIndex 0 with an empty people list (see
       // baptism-armed.test.ts), and this branch used to index into that empty
       // array unconditionally — a TypeError out of next(), a 500 from
       // POST /api/baptism/next AND /api/baptism/advance (advance() is the
@@ -431,7 +520,14 @@ class BaptismTimerService {
         );
       }
       if (this.state.baptismIndex + 1 < people.length) {
+        const fromArmed = this.state.armed === true; // read before startSegment() clears it
         this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment(0) };
+        // A clock started from armed writes the row advance()'s armed branch
+        // writes, and at the same point: after the state moves, so it names the
+        // person whose clock this is. Without it this was the one clock start
+        // the raw log never recorded — the person-complete above is suppressed
+        // while armed, rightly, and nothing else stood in for it.
+        if (fromArmed) this.emitRaw("baptisms-start", 0);
         return this.commit();
       }
       // last person baptized → close the session.
@@ -517,33 +613,118 @@ class BaptismTimerService {
     // the last person) while armed used to persist `{ phase: "idle", armed: true }`
     // to disk, and init() restored it — the panel checks `armed` before
     // `phase === "idle"`, so a finished session read as "Baptize person 1."
-    this.state = { ...this.state, phase: "idle", armed: false, segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
-    this.emitRaw("finish", 0, `people=${people.length}`);
+    this.state = {
+      ...this.state,
+      phase: "idle",
+      armed: false,
+      segmentStartedAt: null,
+      pendingTestimonyMs: null,
+      finishedAt,
+      people,
+      // What this reset throws away that Undo needs back: whether a clock was
+      // running, and in which section. See BaptismState.finishedFrom.
+      finishedFrom: this.state.armed ? "armed" : this.state.phase === "testimony" ? "testimony" : "baptism",
+    };
+    this.emitRaw("finish", 0, `people=${people.length}`, finishedAt);
     if (people.length > 0 && this.state.sessionStartedAt) {
-      void baptismStore.addSession({
-        id: baptismSessionId(this.state.sessionStartedAt),
-        startedAt: this.state.sessionStartedAt,
-        finishedAt,
-        people,
-        title: this.state.serviceTitle,
-        serviceTypeId: this.state.serviceTypeId,
-        planId: this.state.planId,
-        serviceKey: this.state.serviceKey ?? null,
-      }).catch((err) => console.error("[baptism-timer] session save failed:", err));
+      // Captured now, not read again inside the callbacks below: this write
+      // settles after Finish has returned, and by then this.state may already
+      // belong to a different session the operator started in the meantime.
+      const savedId = baptismSessionId(this.state.sessionStartedAt);
+      const savedServiceKey = this.state.serviceKey ?? null;
+      void baptismStore
+        .addSession({
+          id: savedId,
+          startedAt: this.state.sessionStartedAt,
+          finishedAt,
+          people,
+          title: this.state.serviceTitle,
+          serviceTypeId: this.state.serviceTypeId,
+          planId: this.state.planId,
+          serviceKey: savedServiceKey,
+        })
+        .then(
+          () => {
+            // A save that lands clears an earlier failure — but ONLY that
+            // session's own entry: an unrelated session's clean save must not
+            // erase a different session's failure, which was never written.
+            // A session re-finished after an Undo keeps its id
+            // (sessionStartedAt is untouched by undo), so that case still
+            // clears its own entry here.
+            const before = this.state.saveErrors ?? [];
+            const after = before.filter((e) => e.sessionId !== savedId);
+            if (after.length === before.length) return; // nothing of this session's was showing
+            this.state = { ...this.state, saveErrors: after };
+            this.commit();
+          },
+          (err: unknown) => {
+            // This was a catch that only logged, so a failed write read to the
+            // operator as a clean finish. The log line stays for /log; the state
+            // carries the failure to the screen. It settles after Finish has
+            // already returned and pushed, so it needs a commit of its own.
+            console.error("[baptism-timer] session save failed:", err);
+            this.state = {
+              ...this.state,
+              saveErrors: upsertSaveError(this.state.saveErrors ?? [], {
+                sessionId: savedId,
+                serviceKey: savedServiceKey,
+                reason: saveFailureReason(err),
+              }),
+            };
+            this.commit();
+          },
+        );
     }
     return this.commit();
   }
 
+  /** Per-mode, per-branch predicates behind undo()'s if/else-if chain below,
+   *  pulled out so undoWouldChange() (automation's simulate mode) asks the
+   *  exact question undo() itself asks, rather than a hand-copied mirror that
+   *  could quietly stop matching it. */
+  private canUndoPerPersonBaptism(): boolean {
+    return this.state.mode === "per-person" && this.state.phase === "baptism";
+  }
+
+  /** Shared by both modes — undo() checks this identically in the per-person
+   *  and grouped chains below. */
+  private hasTestimonyToUndo(): boolean {
+    return this.state.phase === "testimony" && this.state.people.length > 0;
+  }
+
+  /** Shared by both modes — same reasoning as hasTestimonyToUndo() above. */
+  private hasFinishedSessionToUndo(): boolean {
+    return this.state.phase === "idle" && !!this.state.finishedAt && this.state.people.length > 0;
+  }
+
+  private canUndoGroupedMidBaptism(): boolean {
+    return this.state.mode === "grouped" && this.state.phase === "baptism" && this.state.baptismIndex > 0;
+  }
+
+  /** The complement of canUndoGroupedMidBaptism() at baptismIndex 0 — only has
+   *  somewhere to go if someone is actually in `people` (see the corrupted-
+   *  record comment inside undo() below). */
+  private canUndoGroupedFirstBaptism(): boolean {
+    return (
+      this.state.mode === "grouped" &&
+      this.state.phase === "baptism" &&
+      this.state.baptismIndex === 0 &&
+      this.state.people.length > 0
+    );
+  }
+
   /** Step back one action — fixes a mis-tap without losing the session. Every
-   *  branch but one resumes a real clock (startSegment()). The exception is
-   *  taking back "First person in": the press before it armed the section, so
-   *  undoing it returns to armed with no clock running — a clock restored there
-   *  would time person 1 from the Undo press, the one thing armed exists to
-   *  prevent. */
+   *  branch but two resumes a real clock (startSegment()). The exceptions both
+   *  return to armed with no clock running: taking back "First person in",
+   *  since the press before it armed the section, and undoing a Finish pressed
+   *  while armed, since nobody had stepped in. A clock restored there would
+   *  time person 1 from the Undo press, the one thing armed exists to prevent.
+   *  Undoing any Finish returns to where Finish was pressed; see
+   *  BaptismState.finishedFrom. */
   undo(): BaptismState {
     const s = this.state;
     if (s.mode === "per-person") {
-      if (s.phase === "baptism") {
+      if (this.canUndoPerPersonBaptism()) {
         // Back into the testimony we just closed. `pendingTestimonyMs` is where
         // baptized() parked it, and it does not apply in the testimony phase —
         // but clearing it without resuming FROM it throws the whole testimony
@@ -551,18 +732,28 @@ class BaptismTimerService {
         // undone, then finished fifty seconds later, recorded as fifty seconds.
         // Third site of this shape; see the two grouped branches below.
         this.state = { ...s, phase: "testimony", pendingTestimonyMs: null, ...this.startSegment(s.pendingTestimonyMs ?? 0) };
-      } else if (s.phase === "testimony" && s.people.length > 0) {
+      } else if (this.hasTestimonyToUndo()) {
         const people = [...s.people];
         const last = people.pop()!;
         this.state = { ...s, phase: "baptism", people, personNumber: Math.max(1, s.personNumber - 1), pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0) };
-      } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
+      } else if (this.hasFinishedSessionToUndo()) {
+        // finish() pushed the person it closed either way; finishedFrom says
+        // which segment that was, so this reopens it rather than assuming a
+        // baptism. Assumed, a Finish pressed mid-testimony came back with the
+        // testimony frozen and a baptism clock running over the rest of it.
         const people = [...s.people];
         const last = people.pop()!;
-        this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0), finishedAt: null };
+        if (s.finishedFrom === "testimony") {
+          // Never reached its baptism: the testimony resumes from what it
+          // banked, like every return into a testimony.
+          this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, pendingTestimonyMs: null, ...this.startSegment(last.testimonyMs), finishedAt: null, finishedFrom: null };
+        } else {
+          this.state = { ...s, phase: "baptism", people, personNumber: people.length + 1, pendingTestimonyMs: last.testimonyMs, ...this.startSegment(0), finishedAt: null, finishedFrom: null };
+        }
       } else return s;
     } else {
       // grouped
-      if (s.phase === "testimony" && s.people.length > 0) {
+      if (this.hasTestimonyToUndo()) {
         // Resume the popped person's testimony from the time it had already
         // banked, NOT from zero: next() was pressed a beat early, and the
         // minutes they had already spoken live nowhere but this entry. Same
@@ -570,11 +761,11 @@ class BaptismTimerService {
         const people = [...s.people];
         const last = people.pop()!;
         this.state = { ...s, people, personNumber: Math.max(1, s.personNumber - 1), ...this.startSegment(last.testimonyMs) };
-      } else if (s.phase === "baptism" && s.baptismIndex > 0) {
+      } else if (this.canUndoGroupedMidBaptism()) {
         const idx = s.baptismIndex - 1;
         const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
         this.state = { ...s, people, baptismIndex: idx, ...this.startSegment(0) };
-      } else if (s.phase === "baptism" && s.baptismIndex === 0 && s.people.length > 0) {
+      } else if (this.canUndoGroupedFirstBaptism()) {
         // `people.length > 0` is load-bearing, matching the sibling branches
         // that pop: init() restores a record saved before `mode` existed onto
         // the grouped default, and a per-person session saved mid-baptism has
@@ -615,10 +806,33 @@ class BaptismTimerService {
           const folded = people.pop()!;
           this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(folded.testimonyMs) };
         }
-      } else if (s.phase === "idle" && s.finishedAt && s.people.length > 0) {
-        const idx = s.people.length - 1;
-        const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
-        this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(0), finishedAt: null };
+      } else if (this.hasFinishedSessionToUndo()) {
+        // Back to where Finish was pressed, which is not always the last
+        // person. This assumed it was, and was right only for "Last person out":
+        // Finish while baptizing person 1 of 3 came back on person 3, skipping
+        // person 2, and Finish while armed came back baptizing person 2 with
+        // person 1 skipped.
+        if (s.finishedFrom === "armed") {
+          // Nobody had stepped in: back to waiting for the first press, with
+          // every clock stopped. The shape startBaptisms() arms into.
+          this.state = { ...s, phase: "baptism", baptismIndex: 0, armed: true, segmentStartedAt: null, segmentAccumMs: 0, finishedAt: null, finishedFrom: null };
+        } else if (s.finishedFrom === "testimony") {
+          // Finish closed the testimony section: pop the testimony it pushed and
+          // resume it from what it banked, as the testimony branch above does.
+          const people = [...s.people];
+          const last = people.pop()!;
+          this.state = { ...s, phase: "testimony", people, personNumber: people.length + 1, ...this.startSegment(last.testimonyMs), finishedAt: null, finishedFrom: null };
+        } else {
+          // A baptism, re-timed from zero like every return into one, at the
+          // index finalize() left: the person Finish closed, and for next()'s
+          // auto-finish the last person. A record finished before finishedFrom
+          // existed lands here too — never worse than the last person, which is
+          // what this assumed before. Clamped so a damaged record cannot point
+          // next() past the end of `people`.
+          const idx = Math.min(Math.max(0, s.baptismIndex), s.people.length - 1);
+          const people = s.people.map((p, i) => (i === idx ? { ...p, baptizeMs: 0 } : p));
+          this.state = { ...s, phase: "baptism", people, baptismIndex: idx, ...this.startSegment(0), finishedAt: null, finishedFrom: null };
+        }
       } else if (s.phase === "baptism" && s.baptismIndex === 0) {
         // The complement of the guarded branch above: baptismIndex === 0 with
         // an EMPTY people list — the same restored-record shape, caught here
@@ -632,6 +846,67 @@ class BaptismTimerService {
     }
     this.emitRaw("undo", 0, `from ${s.phase}`);
     return this.commit();
+  }
+
+  /** Side-effect-free mirror of undo()'s success conditions above, built from
+   *  the same private predicates undo() branches on — never a hand-copied
+   *  expression that could drift out of step with what a real press does. */
+  undoWouldChange(): boolean {
+    return (
+      this.canUndoPerPersonBaptism() ||
+      this.hasTestimonyToUndo() ||
+      this.hasFinishedSessionToUndo() ||
+      this.canUndoGroupedMidBaptism() ||
+      this.canUndoGroupedFirstBaptism()
+    );
+  }
+
+  /** The operator has read the failed-save note and dismissed it — the one way
+   *  to clear EVERY entry besides its own session saving or Reset, and the
+   *  only one after the workflow toggle has carried it into a state with
+   *  nobody in it, where the Timer card offers neither Reset nor Undo.
+   *  Touches nothing else, and writes no raw row: it is not a press on the
+   *  timer.
+   *
+   *  The log line names every entry's own reason, joined with "; ", so a
+   *  Sunday-morning read of the log can tell "two sessions failed for two
+   *  different reasons" from "one session, dismissed twice" — with exactly
+   *  one entry (the common case) the joined string is just that entry's own
+   *  reason, unchanged from before this was a list. */
+  dismissSaveError(): BaptismState {
+    if (!this.state.saveErrors?.length) return this.state;
+    console.log(
+      `[baptism-timer] save failure dismissed: ${this.state.saveErrors.map((e) => e.reason).join("; ")}`,
+    );
+    this.state = { ...this.state, saveErrors: [] };
+    return this.commit();
+  }
+
+  /**
+   * A rebuild — the header's own, History's whole-service one, or a
+   * save-failure entry's own per-session button, whichever path actually
+   * wrote it — put these ids into the store for the first time. Any of them
+   * naming a saveErrors entry is exactly what that entry was waiting for:
+   * the session it said never saved is now the one Past sessions shows, so
+   * the note clears here too, and the push carries it to every screen. See
+   * applyBaptismRebuild in history-edit.ts, the one place that calls this,
+   * for why `restoredIds` is `mergeRebuilt`'s own write-time `addedIds`
+   * UNION `updatedIds` — a re-Finish's failed save already has a stored
+   * counterpart, so its own rebuild only ever updates it — rather than a
+   * rebuild's merely-planned ones. An id the store's cap turned away was
+   * never restored either way, and its entry stays, with the rebuild's own
+   * result saying why.
+   */
+  clearRestoredSaveErrors(restoredIds: ReadonlySet<string>): void {
+    const before = this.state.saveErrors ?? [];
+    if (!before.length || restoredIds.size === 0) return;
+    const cleared = before.filter((e) => restoredIds.has(e.sessionId));
+    if (!cleared.length) return;
+    console.log(
+      `[baptism] rebuild restored ${cleared.map((e) => e.sessionId).join(", ")} — save-failure note cleared`,
+    );
+    this.state = { ...this.state, saveErrors: before.filter((e) => !restoredIds.has(e.sessionId)) };
+    this.commit();
   }
 
   /** Clear everything back to idle (keeps the chosen mode). */

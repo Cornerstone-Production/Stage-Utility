@@ -10,6 +10,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useServerClock } from "@renderer/lib/server-clock";
 import { invoke } from "../lib/api";
+import { logReadFailure } from "../lib/client-log";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
@@ -1069,6 +1070,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             maxLines={c.maxLines}
             showLabels
             colorOverrides={ctx.state.captionChannelColors}
+            followProdcom={ctx.state.followProdcomColors}
             textStyle={{ ...ts, textAlign: "left" }}
             gapClassName="gap-[0.3em]"
             className="w-full h-full"
@@ -1078,7 +1080,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const last = lines[lines.length - 1];
       const speaker = channelLabel(last);
       return (
-        <span style={{ ...ts, color: lineColor(last, ctx.state.captionChannelColors), opacity: last.isFinal ? 1 : 0.55 }}>
+        <span
+          style={{
+            ...ts,
+            color: lineColor(last, ctx.state.captionChannelColors, ctx.state.followProdcomColors),
+            opacity: last.isFinal ? 1 : 0.55,
+          }}
+        >
           {speaker ? `${speaker}: ${last.text}` : last.text}
         </span>
       );
@@ -1572,7 +1580,7 @@ function niceStepInt(target: number): number {
 /** Fetch a recorded service's per-service curve + PCO markers for the people-graph
  *  "recorded" mode. serviceKey null → most recent finished service. */
 function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
-  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null } | null>(null);
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null; failed: boolean } | null>(null);
   useResyncOn([enabled], () => {
     if (!enabled) setData(null);
   });
@@ -1580,21 +1588,32 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
     if (!enabled) return;
     let cancelled = false;
     void (async () => {
+      // A read that fails is not a service with no curve, which is what an
+      // empty answer drew: "no recorded data". `failed` puts it on the display
+      // instead. The markers read is the exception, on purpose: without it the
+      // curve still draws and says nothing false, so its failure is logged and
+      // then taken as no markers.
+      let failed = false;
+      const unread = (what: string, starvesCurve: boolean) => (err: unknown): null => {
+        if (starvesCurve) failed = true;
+        if (!cancelled) logReadFailure("history", `the people graph's ${what}`, err);
+        return null;
+      };
       let key = serviceKey ?? null;
       if (!key) {
-        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
+        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(unread("the recorded services", true));
         key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
       }
-      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null }); return; }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null, failed }); return; }
       const [att, tl] = await Promise.all([
-        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
-        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
+        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(unread(`the attendance for ${key}`, true)),
+        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(unread(`the plan items for ${key}`, false)),
       ]);
       if (cancelled) return;
       const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
       const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
       const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
-      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null });
+      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null, failed });
     })();
     return () => { cancelled = true; };
   }, [enabled, serviceKey]);
@@ -1622,6 +1641,7 @@ function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: 
       H={ctx.H}
       serviceStartedAt={mode === "recorded" ? (recorded?.serviceStartedAt ?? null) : null}
       serviceEndedAt={mode === "recorded" ? (recorded?.serviceEndedAt ?? null) : null}
+      unread={mode === "recorded" && !!recorded?.failed}
       toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
     />
   );
@@ -1638,6 +1658,7 @@ function PeopleGraph({
   H,
   serviceStartedAt = null,
   serviceEndedAt = null,
+  unread = false,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
@@ -1650,6 +1671,8 @@ function PeopleGraph({
   /** Service-proper window (recorded mode) — dims the arrival ramp / emptying-room taper. */
   serviceStartedAt?: string | null;
   serviceEndedAt?: string | null;
+  /** The recorded curve could not be read, which is not a service with none. */
+  unread?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -1657,7 +1680,13 @@ function PeopleGraph({
   if (vals.length < 2) {
     return (
       <div style={{ position: "relative", width: "100%", height: "100%" }}>
-        <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        {unread ? (
+          // In the object's own type rather than an ErrorNote banner: this is
+          // drawn on a wall, sized to the box it was given.
+          <span role="alert" style={{ ...ts, opacity: 0.6 }}>couldn't load the recorded service</span>
+        ) : (
+          <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        )}
         {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={ts.color ?? "#fff"} H={H} />}
       </div>
     );
@@ -2047,6 +2076,59 @@ function BaptismTimer({
     const last = baptized[baptized.length - 1];
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
+  } else if (field === "testimony") {
+    // This person's own testimony, once banked — NOT the live segment clock,
+    // which is `live`'s job. While their testimony is still running there is
+    // nothing banked yet, so this ticks the same running value `live` shows;
+    // once the phase moves on to baptizing them it holds at what was banked,
+    // independent of however long the baptism itself then runs.
+    if (!state || state.phase === "idle") {
+      value = "—";
+    } else if (state.phase === "testimony") {
+      value = fmtClock(segmentElapsedMs(state, now));
+    } else {
+      const bankedMs =
+        state.mode === "per-person" ? (state.pendingTestimonyMs ?? 0) : (state.people[state.baptismIndex]?.testimonyMs ?? 0);
+      value = fmtClock(bankedMs);
+    }
+    fallback = "testimony";
+  } else if (field === "session") {
+    // Wall clock since the session started — never paused, unlike the segment:
+    // a session that pauses through a long prayer still reads that time as part
+    // of the session. Freezes at the finished length once the session ends,
+    // rather than continuing to climb while idle before the next one starts.
+    if (!state?.sessionStartedAt) {
+      value = "—";
+    } else {
+      const started = Date.parse(state.sessionStartedAt);
+      const endedMs = state.finishedAt ? Date.parse(state.finishedAt) : now;
+      value = Number.isFinite(started) ? fmtClock(Math.max(0, endedMs - started)) : "—";
+    }
+    fallback = "session";
+  } else if (field === "phase") {
+    // The word, for a stage readout — armed reads as its own word rather than
+    // "baptism", the same distinction `live`'s fallback already draws: armed
+    // has no clock running, and saying "baptism" here would claim one does.
+    value = !state ? "—" : state.armed ? "armed" : state.phase;
+    fallback = "phase";
+  } else if (field === "person") {
+    // In grouped mode `personNumber` is the TESTIMONY counter and freezes once
+    // the baptism section arms — it is not who is being baptized. The person
+    // being baptized is `baptismIndex` (0-based) of `people.length`, which is
+    // only known once the testimony pass has filled `people`. Per-person mode
+    // never has a total, so it is always "Person N". Armed says so rather than
+    // "1 of 7" — indistinguishable from person 1 already being baptized, the
+    // same ambiguity `live`'s armed case already guards against.
+    if (!state || state.phase === "idle") {
+      value = "—";
+    } else if (state.armed) {
+      value = "armed";
+    } else if (state.phase === "testimony" || state.mode === "per-person") {
+      value = `Person ${state.personNumber}`;
+    } else {
+      value = `${state.baptismIndex + 1} of ${state.people.length}`;
+    }
+    fallback = "person";
   }
   // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
   // measured sweep, because the label rode on the end of the value and the pair

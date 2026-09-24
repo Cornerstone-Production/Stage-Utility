@@ -15,7 +15,12 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ScriptView**, with a live preview.
+Configure it under **Settings → ScriptView**, with a live preview. The layouts
+and category roles are this app's own and can be edited before Planning Center
+is connected; the preview, which reads a plan, says to connect it. So do the
+landing page, a ScriptView page and a Script display, which ask Planning Center
+for nothing until it is connected. A Script display with no service type
+selected says that instead.
 
 ## Where the rundown can appear
 
@@ -63,6 +68,14 @@ global: define one and it works across every service type.
 
 Each has per-element toggles for the clock, item time, song key, BPM,
 arrangement, item notes and total time.
+
+A rundown whose layouts or category roles cannot be read says so above the
+table: without the layouts it shows all columns, and without the roles it shows
+no note columns, until they load. A display keeps the last layouts it read
+through a later failure and says nothing, since what it shows is still right.
+The plan works the same way: one that cannot be read says so while there is
+nothing to show yet, and a later failure keeps the last plan on screen. Each
+failure is on a `[scriptview]` line on the server log.
 
 ## Category roles
 
@@ -131,7 +144,7 @@ than centring a fixed column:
 
 # Baptisms
 
-An operator page at `/baptism`, also available as a Settings tab. It opens in
+An operator page at `/baptism`. It opens in
 **grouped** mode — every testimony first, then everyone baptized in turn across
 the songs that follow — because that is how a baptism service runs here: the
 testimonies happen inside one plan item (typically "Baptism Stories"), then
@@ -139,12 +152,83 @@ people are baptized one at a time while the room sings. **Per-person** (a
 testimony immediately followed by that person's baptism, repeated for each
 person) is still there, picked with the Workflow toggle on the page; the toggle
 only responds while the session is idle, so a mode can't be changed out from
-under a session already running. Which one it opens in is a persisted setting,
-`baptismDefaultMode`.
+under a session already running — and the choice persists: it is part of the
+idle state saved to disk, so the next launch reopens in whatever mode was last
+left. Only a data directory with nothing saved yet — or a saved state old
+enough to predate the mode field at all — has no such state to read, and opens
+in **grouped**; that fallback (`baptismDefaultMode`) has no setting screen of
+its own, so it changes only if someone edits the settings file directly.
 
 Sessions are named by service and cross-linked into Service History with
 per-person splits and averages. A **Baptism timer** layout object puts the live
 count and timer on a display.
+
+## Header and figures
+
+The header stays visible while the page scrolls: the title **Baptisms**, a
+green **recording** pill whenever the session isn't idle — running, paused, or
+armed and waiting for the first person — and a line naming the service and
+date, or "No session running" before a first session, or "Session finished"
+once one has closed. **Copy report** copies a plain-text summary of the
+current or just-finished session to the clipboard; **Export** downloads every
+baptism ever recorded as an `.xlsx` workbook (the same multi-sheet export
+History uses, scoped to the baptisms sheet).
+
+Six figures sit under the title — **Baptized**, **Timed**, **Wall clock**,
+**Not counted**, **Avg testimony**, **Avg baptism** — customizable like every
+figure strip in the app, all six shown by default. Hovering a segment on the
+Session chart below replaces them with that segment's own person, phase,
+duration and boundary times until the pointer moves on.
+
+A nav under the strip jumps to **Timer**, **Session**, **People**, **Past
+sessions** and **Trends**, highlighting whichever one is on screen.
+
+## The Session chart
+
+Beneath the timer, a **Session** card draws the whole session as two lanes on
+one time axis: the timer lane (every testimony and baptism, oldest first) over
+the plan lane (the plan items live while it ran). Stretches the timer lane does
+not cover — the armed wait for the first person, an explicit pause, the walk to
+the water — are drawn as gaps reading "not counted", never hidden. Putting the
+plan on the same axis is what answers *how much of the song set did the
+baptisms take*: the dunks spread across several songs, and no single lane can
+say that on its own. Hover a segment for its person, phase, duration and
+boundary times on the header's stat strip.
+
+The chart is live while a session is running, refetching only on the timer's
+own presses rather than on a timer; a finished session's own recorded window
+stands in for "now" at the right edge. Before a first session it says so
+rather than drawing nothing unexplained; if the timer is running with no PCO
+service open, it says that instead — this session's presses are not being
+archived, so there is nothing for the chart to ever draw for it. One with no
+raw rows recorded for it (an older session, or one the archive never saw)
+says that instead of drawing an empty lane.
+
+## People, Past sessions and Trends
+
+Below the Session chart, a **People** card lists everyone timed in the current
+(or just-finished) session — a number, testimony, baptism and total, plus a
+split bar showing how much of each person's time was testimony versus baptism.
+In grouped mode, someone who has testified but has not yet been baptized shows
+a dash under Baptism rather than `0:00`, which would otherwise claim a baptism
+that has not happened yet took no time.
+
+A **Past sessions** card lists every finished session, newest first: the
+service and date, then how many were baptized, the average testimony and
+baptism length, and the total. Each row with a known service links to that
+service's page in Service History; a session recorded before that link
+existed has no service key to link with, and renders without one rather than
+a broken link. Delete removes a session after confirming — its raw rows in
+`baptism.csv` are untouched, so **Rebuild from raw** can bring it back (see
+Recovery, below).
+
+A **Trends** card averages the last eight sessions against the eight before
+them, across four figures: baptized per service, average testimony, average
+baptism, and the whole segment's wall-clock length — what a planner budgets
+for next week, since it includes the walk to the water and every gap the
+timer lane draws as "not counted". Below three prior sessions to compare
+against, a tile shows its figure with no change against it, rather than a
+percentage or a delta computed from too little history to mean anything.
 
 ## Starting from the plan
 
@@ -213,17 +297,65 @@ anyone. A segment is time already banked plus time since it last resumed, and bo
 the operator page and the display object read the same fields, so a paused clock
 shows the same everywhere.
 
+## Undo
+
+Undo takes back the last press. It never leaves the session broken — there is
+always somewhere it can resume from — but the two phases differ in what
+survives: a press that lands back in a testimony resumes it from the time
+already banked, so it costs nothing; a press that lands back in a baptism, or
+in the armed wait before one, discards whatever that segment had counted and
+starts it clean — from the Undo press if a clock is now running, from a frozen
+`0:00` if it lands in armed. After Finish it reopens the session where Finish
+was pressed: the testimony that was running, the person mid-baptism (the same
+clean restart), or — in a grouped baptism section nobody had stepped into yet
+— the wait for the first person, with no clock running.
+
 ## Recovery
 
 Every press on the timer appends a row to `baptism.csv`, the same append-only
 file the rest of the archive uses. A session that `baptism.json` loses — a
 corrupt file, or a crash between the debounced save and the next write — is not
-gone: it can be replayed from those rows. The derived record is a cache of what
-the presses already said, not the only copy of it — but unlike an item's
-recorded timing, there is no **Rebuild from raw** entry for it yet, so that
-replay is not something an operator can trigger from the app. See
-[Data archive](../data-archive.md) for the column list, which presses are
-recorded, and what the append-only rule buys the rest of the archive.
+gone: **Rebuild from raw**, in this tab's own header or in History's, replays
+it from those rows. The header targets the session it is showing, or the most
+recent past one if none is; it is disabled, with a reason, while that service
+is still recording. The derived record is a cache of what the presses already
+said, not the only copy of it. Unlike an item's recorded timing, a baptism
+rebuild never replaces what is already stored — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for why. See [Data archive](../data-archive.md) for the column list, which
+presses are recorded, and what the append-only rule buys the rest of the
+archive.
+
+A save that fails says so. If Finish cannot write a session to
+`baptism.json`, the Timer card shows a line for it under the readout — that
+session's own start time and why — and keeps showing it, through the next
+Start and the Workflow toggle too, until that same session saves
+successfully. A second session that also fails to save gets its own line
+beside the first; a different session saving cleanly clears only its own
+line, never another's. **Dismiss** on the note, or **Reset**, clears every
+line at once. Past sessions does not list an unsaved session; its rows in
+`baptism.csv` still hold it, if a service was open while it ran.
+
+Each line also has its own **Rebuild from raw**, for that session's own
+service — never whichever session the tab is showing next, which by then may
+be a different one. It is disabled, with a reason, while that service is
+still recording, and when the session ran with no service open at all (no
+raw rows exist to rebuild it from). A rebuild clears that line the moment it
+actually writes that session, either by **adding** it — the ordinary case,
+since Finish's own failure means the store never had a copy at all — or by
+**updating** an existing one, which only happens when a LATER re-Finish (an
+Undo followed by another Finish) is the one that failed to save: the store
+already holds that session's earlier, now-stale Finish, so the rebuild can
+only bring it up to date, never add a second copy. Either way, whichever
+route actually wrote it — the note's own button, this tab's header, or
+History's whole-service Rebuild — clears the line. A rebuild that leaves the
+session exactly as the store already had it — unchanged, or the store's own
+copy is already newer, or the rows and the store disagree — never clears the
+line, because nothing about the store's own record actually changed. A
+rebuild that does not find it — the rows never reached a finish (a full or
+read-only disk drops that row too, not only the store's own save), a row
+could not be read, or the store is already full — says so plainly instead of
+the ordinary success message, and the line stays.
 
 ## Logging
 
@@ -243,9 +375,28 @@ timer:
   not survive a restart.
 - `raw: emit failed: <event> …` — the timer's own state updated, but writing its
   row failed; only the row is missing, not the action.
+- `[baptism-timer] persist failed: …` — the debounced save of the in-progress
+  state to `baptism.json` failed; nothing reaches the screen for it, since the
+  state in memory is still correct — only a restart before a later save
+  succeeds would resume from an older point than the last press.
+- `[baptism-timer] session save failed: …` — Finish could not write the session
+  to `baptism.json`. The Timer card says so as well (see Recovery, above).
+- `[baptism-timer] save failure dismissed: …` — the operator dismissed that
+  note, so it is no longer on screen.
 - `next: ignored, the restored session has nobody at baptismIndex …` /
   `undo: ignored, the restored session has nobody at baptismIndex 0` /
   `finish: closing with nobody at baptismIndex … — no person-complete row
   recorded` — a press landed on a session that was restored into a shape it
   should never be in; the press did nothing (Finish still closes the session,
   just without a row for whoever was mid-baptism).
+- `could not load past sessions: …` — the Past sessions and Trends cards'
+  fetch failed; both say so on screen rather than reading as no history.
+- `session lane fetch failed for <serviceKey>: …` — the Session chart's timer
+  lane could not be fetched; the chart shows its own note rather than reading
+  as a session that recorded nothing.
+- `plan timeline fetch failed for <serviceKey>: …` — the Session chart's plan
+  lane could not be fetched; the chart shows its own note rather than drawing
+  an empty plan lane with no explanation.
+- `delete session <id> failed: …` — a delete did not reach the server; the row
+  is restored and the operator sees a toast rather than a change with no
+  explanation.

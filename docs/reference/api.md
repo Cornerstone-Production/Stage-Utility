@@ -221,6 +221,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display). Text that matched a ProdCom keyword marked sensitive is already replaced with asterisks; such a line carries `redactions`, the number of hidden runs. Never gated — a display carries no token |
 | GET | `/api/prodcom/transcript/raw` | The same buffer with nothing hidden, for reviewing what a keyword covered up. Token-gated by `STAGE_UTILITY_LOG_TOKEN`, exactly like `/api/log`: unset means open, set means `?token=…` or a `401` |
 | POST | `/api/prodcom/transcript/clear` | Empty the buffer everywhere at once |
+| GET | `/api/prodcom/channels` | ProdCom's own channel list (id, name, color) — every channel it has, whether or not it has spoken. Backs the Transcription colors panel |
 
 **SPL (Smaart) & rundown**
 | Method | Path | Purpose |
@@ -254,6 +255,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET \| POST | `/api/scores/favourites` | Read / replace the followed teams |
 | GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
+| GET | `/api/baptism/lane?serviceKey=<key>` | One service's session lane: each testimony and baptism in real time, from its raw rows |
 
 **The SPL series**
 
@@ -299,9 +301,10 @@ thing.
 | Method | Path | Purpose |
 |--------|------|---------|
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
+| GET | `/api/history/live?serviceKey=<key>` | Read-only: `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
-| POST | `/api/history/rebuild` | Recompute all three summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timelineItems, splItems, attendanceSamples }`; `500` with the reason if it cannot |
+| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
@@ -349,13 +352,44 @@ Two things to know:
 
 **Baptisms** — the timer's actions are one `POST` each under `/api/baptism/`,
 and each returns the new timer state: `start`, `baptized`, `start-baptisms`,
-`next`, `advance`, `undo`, `finish`, `pause`, `resume`, `reset`, and `mode`
-(`{mode: "grouped"|"per-person"}`). `advance` is the phase-aware primary press —
-what the operator's main button does, whatever phase the timer is in — meant for
-callers (automations, Companion) that should not have to know the current phase
-to drive the timer forward. `GET` and `POST /api/baptism/triggers` read
+`next`, `advance`, `undo`, `finish`, `pause`, `resume`, `reset`,
+`dismiss-save-error` (clears the note a failed session save leaves), and `mode`
+(`{mode: "grouped"|"per-person"}`). `advance` dispatches to whichever action is
+legal for the timer's current phase — meant for a caller (an automation,
+Companion) that should not have to track phase to drive the timer forward. The
+operator panel itself calls it only while armed ("First person in"); once a
+phase is running the panel already knows which specific action applies and
+calls that one directly. `GET` and `POST /api/baptism/triggers` read
 and set which plan items start each phase, and
 `DELETE /api/baptism/sessions/:id` removes one saved session.
+
+`GET /api/baptism/lane?serviceKey=<key>` answers `{ spans }`, each
+`{ kind: "testimony"|"baptism", person, startedAt, endedAt }`, oldest first,
+derived from the service's `baptism.csv`. A span is one run of one clock: a pause
+splits a testimony in two, and the stretches between spans — the armed wait, a
+pause, a press that was undone — are time nobody was timed for. The last span's
+`endedAt` is `null` while its clock is still running. A session reset before it
+finished is not in the lane, because it was never recorded. `{ spans: [] }` for a
+service with no baptism archive; a `500` when the archive exists and cannot be
+read.
+
+`POST /api/baptism/rebuild` takes `{ serviceKey }` rather than acting on the
+live timer: it replays that service's `baptism.csv` and MERGES the result into
+the stored sessions, never replacing them — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
+Answers `{ rows, sessions, updated, added, unchanged, newer, disagreeing,
+invalid, kept, full }` — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for what each of the eight outcome categories means. `400` for a body
+with no `serviceKey`; `409` while that service is recording, and a DIFFERENT
+`409` when it has no `baptism.csv` at all (a session recorded before the raw
+layer existed has a timeline record but none) — both carry a body of
+`{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"`
+for the second, since a client cannot tell two 409s apart by status alone;
+`500` for any other failure, with no detail in the body. `/api/history/rebuild`
+runs the same merge as its own baptism leg, and its 409s carry the same
+`code` (see below), since both routes throw the same two errors through the
+same dispatcher.
 
 **Updates, backup and the archive** — see
 [Updates and logs](../ops/updates-and-logs.md) and
@@ -403,7 +437,7 @@ recorder is running. Pass `{override: true}` to go anyway.
 `/api/taper-window`, `/api/checklist-sources`, `/api/kiosk-discovery`,
 `/api/baptism-auto-start`, `/api/ndi-enabled`, `/api/onboarding-dismissed`,
 `/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
-`/api/caption-colors`.
+`/api/caption-colors`, `/api/caption-colors/follow-prodcom`.
 
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a
@@ -507,7 +541,7 @@ something to change:
 
 **Pushed only when something happens:**
 
-`prodcom:transcript` · `slots:devices` · `integrations:state-changed` ·
+`prodcom:transcript` · `prodcom:channels` · `slots:devices` · `integrations:state-changed` ·
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·

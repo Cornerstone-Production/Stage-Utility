@@ -61,6 +61,19 @@ export interface BaptismState {
   sessionStartedAt: string | null;
   /** ISO when the session was finished (totals frozen); null while active. */
   finishedAt: string | null;
+  /**
+   * Where the session was when Finish closed it: the segment it closed, or
+   * "armed" for a grouped baptism section nobody had stepped into. Null while a
+   * session runs.
+   *
+   * finalize() resets phase and armed, and what is left cannot say whether
+   * anybody had started: armed and a Finish during the testimonies both finish
+   * as baptismIndex 0 with every baptizeMs at 0. Undo reads this to reopen the
+   * session where Finish found it, rather than on the last person's baptism.
+   * Absent on records finished before it existed; Undo then reopens a baptism
+   * at the baptismIndex Finish left.
+   */
+  finishedFrom?: "testimony" | "baptism" | "armed" | null;
   /** People whose testimony has closed. In grouped mode this fills during the
    *  testimony pass, before anyone is baptized — `baptizeMs` sits at 0 until a
    *  baptism actually closes that entry. A person is "baptized" (see
@@ -74,6 +87,42 @@ export interface BaptismState {
   serviceTitle: string | null;
   serviceTypeId: string | null;
   planId: string | null;
+  /**
+   * Sessions Finish could not write to the saved sessions, oldest first — or
+   * absent/empty when nothing has failed. Never a path, only a reason: this
+   * state goes to every screen on the LAN. Each write settles after Finish has
+   * already returned, so a failure arrives on a push of its own rather than on
+   * Finish's response.
+   *
+   * A LIST, not a single failure: a single field let session A fail, session
+   * B ALSO fail, and B's retry (Undo + Finish) landing clear the note
+   * entirely — A was never written, but the field had already been
+   * overwritten to name B, so B's own success matched it. Here, a failed
+   * save appends an entry (or replaces the entry with the same
+   * sessionId, for a session that fails again); a session's OWN successful
+   * save removes only that session's entry; Reset and the operator
+   * dismissing (dismissSaveError) clear every entry. Carried across Start and
+   * the workflow toggle: a plan item going live starts the next session with
+   * nobody at the screen, and that must not erase a failure nobody has seen.
+   *
+   * Optional like every field added after this shape first shipped: a record
+   * persisted before it existed restores with none.
+   */
+  saveErrors?: BaptismSaveError[];
+}
+
+/** One session Finish could not write, as `BaptismState.saveErrors` keeps it. */
+export interface BaptismSaveError {
+  /** `baptismSessionId(startedAt)` of the session that failed to save — what a
+   *  later successful save of the SAME session matches on to remove this
+   *  entry, and never any other session's. */
+  sessionId: string;
+  /** The serviceKey of the session that failed, for PR 3's Rebuild offer —
+   *  not necessarily this state's OWN serviceKey, which may have moved on to
+   *  a later session by the time the operator reads this. */
+  serviceKey: string | null;
+  /** Why, never where — see saveFailureReason in baptism-timer-service.ts. */
+  reason: string;
 }
 
 /** A finished baptism session, kept for later review. */
@@ -121,6 +170,23 @@ export interface BaptismSession {
  */
 export function baptismSessionId(startedAt: string): string {
   return `bap-${Date.parse(startedAt)}`;
+}
+
+/**
+ * The reverse of baptismSessionId: the session's own `startedAt`, as an ISO
+ * string, or null for anything that is not one of this function's own ids —
+ * an id from a future shape this version does not recognize, say.
+ *
+ * Exists so BaptismState.saveErrors, which keeps only `{ sessionId,
+ * serviceKey, reason }` (never the session's own record — the session that
+ * failed to save is, by definition, not sitting in the store), can still name
+ * WHEN the failed session ran without carrying a fourth, redundant field that
+ * would only ever restate what the id already encodes.
+ */
+export function sessionIdStartedAt(sessionId: string): string | null {
+  if (!sessionId.startsWith("bap-")) return null;
+  const ms = Number(sessionId.slice("bap-".length));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 /** One operator action, as the raw layer records it. Never a derived total:

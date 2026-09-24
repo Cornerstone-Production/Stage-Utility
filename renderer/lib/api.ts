@@ -138,11 +138,14 @@ export type IpcChannel =
   | "baptism:advance"
   | "baptism:baptized"
   | "baptism:deleteSession"
+  | "baptism:dismissSaveError"
   | "baptism:finish"
   | "baptism:get"
   | "baptism:getTriggers"
+  | "baptism:lane"
   | "baptism:next"
   | "baptism:pause"
+  | "baptism:rebuild"
   | "baptism:reset"
   | "baptism:resume"
   | "baptism:sessions"
@@ -155,6 +158,7 @@ export type IpcChannel =
   | "calendar:getGrid"
   | "calendar:sources"
   | "captions:setChannelColor"
+  | "captions:setFollowProdcomColors"
   | "checklist:clear"
   | "checklist:get"
   | "checklist:sources"
@@ -182,6 +186,7 @@ export type IpcChannel =
   | "displays:refresh"
   | "history:deleteMilestone"
   | "history:editWindow"
+  | "history:live"
   | "history:listMilestones"
   | "history:merge"
   | "history:rebuild"
@@ -244,6 +249,7 @@ export type IpcChannel =
   | "presets:reorder"
   | "presets:save"
   | "prodcom:clearTranscript"
+  | "prodcom:getChannels"
   | "prodcom:getTranscript"
   | "propresenter:getInstances"
   | "propresenter:getStatus"
@@ -371,6 +377,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/prodcom/transcript");
     case "prodcom:clearTranscript":
       return post<T>("/api/prodcom/transcript/clear");
+    case "prodcom:getChannels":
+      return apiFetch<T>("/api/prodcom/channels");
 
     case "stage:listServiceTypes":
       return apiFetch<T>("/api/service-types");
@@ -578,6 +586,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
 
+    case "history:live":
+      return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
+
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
     case "history:saveMilestone":
@@ -589,6 +600,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":
       return apiFetch<T>("/api/baptism/sessions");
+    case "baptism:lane":
+      return apiFetch<T>(`/api/baptism/lane?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
     case "baptism:start":
       return post<T>("/api/baptism/start");
     case "baptism:baptized":
@@ -611,6 +624,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/baptism/finish");
     case "baptism:reset":
       return post<T>("/api/baptism/reset");
+    case "baptism:dismissSaveError":
+      return post<T>("/api/baptism/dismiss-save-error");
     case "baptism:deleteSession": {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
@@ -623,6 +638,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
         testimonyItemId: p.testimonyItemId,
         baptismItemId: p.baptismItemId,
       });
+    case "baptism:rebuild":
+      return post<T>("/api/baptism/rebuild", { serviceKey: p.serviceKey });
 
     case "spl:series":
       return apiFetch<T>(
@@ -660,6 +677,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "captions:setChannelColor":
       return post<T>("/api/caption-colors", p);
+    case "captions:setFollowProdcomColors":
+      return post<T>("/api/caption-colors/follow-prodcom", p);
 
     // ── In-app self-update ───────────────────────────────────────────────
     case "update:status":

@@ -51,6 +51,7 @@ const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { sampleArchive } = await import("./archive/sample-archive.js");
 const { parseRows } = await import("./csv.js");
+const { BAPTISM_RAW_EVENTS } = await import("../types/stage.js");
 
 type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
 const rec = () => serviceTimelineRecorder as unknown as Held;
@@ -401,8 +402,8 @@ describe("closing a person while still armed writes no person-complete row for t
     const c = cols(rows);
     assert.deepEqual(
       c.events(),
-      ["reset", "start", "testimony-end", "baptisms-armed", "person-complete", "finish"],
-      "exactly one person-complete row — for the person who actually ran a clock",
+      ["reset", "start", "testimony-end", "baptisms-armed", "baptisms-start", "person-complete", "finish"],
+      "exactly one person-complete row — for the person who actually ran a clock, after the baptisms-start that started it",
     );
     const personCompleteRows = c.filter("person-complete");
     assert.equal(
@@ -411,6 +412,59 @@ describe("closing a person while still armed writes no person-complete row for t
       "the row names index 1 (the real baptism), never index 0 (the skipped one)",
     );
     assert.equal(Number(personCompleteRows[0]![c.idx("segmentMs")]), Math.round(finished.people[1]!.baptizeMs));
+  });
+});
+
+// Grouped next() while ARMED starts the next person's clock through
+// startSegment(), and wrote no row for it: the one clock start the raw log
+// never recorded, so the lane had to infer that span backwards from the next
+// row's segmentMs. advance()'s armed branch has always written baptisms-start;
+// this is the same kind of press, reached through the documented
+// POST /api/baptism/next.
+describe("a clock that starts writes a row, whichever route starts it", () => {
+  it("next() while armed writes baptisms-start for the person whose clock it starts", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.next(); // person 1 testimony done, person 2 testimony starts
+    await sleep(2);
+    baptismTimerService.startBaptisms(); // folds person 2's testimony, arms
+    const running = baptismTimerService.next(); // DIRECTLY: index 0 skipped, index 1's clock starts
+    assert.equal(running.baptismIndex, 1, "sanity: the clock that started is index 1's");
+    assert.notEqual(running.segmentStartedAt, null, "sanity: a clock is running");
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(c.events(), ["reset", "start", "testimony-end", "baptisms-armed", "baptisms-start"]);
+    const startRow = c.filter("baptisms-start")[0]!;
+    assert.equal(startRow[c.idx("baptismIndex")], "1", "the row names the person whose clock started, not the one skipped");
+    assert.equal(startRow[c.idx("phase")], "baptism");
+    assert.equal(startRow[c.idx("segmentMs")], "0", "the clock starts from zero, as advance()'s own row says");
+  });
+
+  it("next() while armed on the only person starts no clock, and writes no baptisms-start", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.startBaptisms(); // folds the only person, arms
+    const finished = baptismTimerService.next(); // nobody left to start: auto-finishes instead
+    assert.equal(finished.phase, "idle", "sanity: next() past the last person finishes the session");
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    assert.deepEqual(
+      c.events(),
+      ["reset", "start", "baptisms-armed", "finish"],
+      "no clock started, so no row may claim one did",
+    );
   });
 });
 
@@ -436,12 +490,7 @@ describe("undoing and redoing a baptism writes a second person-complete row, and
     await sleep(5);
     baptismTimerService.next(); // person 1 (index 0) baptized — a mis-tap, too early
     baptismTimerService.undo(); // back to index 0, clock restarted
-    // 40ms, not 9: the assertion below requires the two attempts to have
-    // genuinely different durations, and measured runs under load closed a 5ms
-    // vs 9ms gap to 1ms twice. It fails red rather than passing wrongly, so
-    // this is a flake risk and not a vacuous guard — but it is nearly free to
-    // remove.
-    await sleep(40); // the REAL baptism runs longer
+    await sleep(80); // the REAL baptism, far longer than the undone ~5ms attempt
     baptismTimerService.next(); // person 1 (index 0) baptized again — the real one
     await sleep(5);
     const finished = baptismTimerService.next(); // person 2 (index 1) baptized — auto-finishes
@@ -472,10 +521,15 @@ describe("undoing and redoing a baptism writes a second person-complete row, and
       Math.round(finished.people[0]!.baptizeMs),
       "the LAST index-0 row is the authoritative one, not the first (too-early) attempt",
     );
-    assert.notEqual(
-      personCompleteRows[0]![c.idx("segmentMs")],
-      personCompleteRows[1]![c.idx("segmentMs")],
-      "the two attempts must have genuinely different durations, or last-wins is unproven",
+    // A threshold between the two attempts, not a comparison between two live
+    // measurements: an 80ms sleep measures at least ~79ms and the undone
+    // attempt ~5ms, so 50 sits with a wide margin on both sides. Comparing the
+    // two measured values directly (assert.notEqual) is what closed to a 1ms
+    // gap twice under load — a fixed floor does not narrow the way two live
+    // timings can.
+    assert.ok(
+      Number(personCompleteRows[1]![c.idx("segmentMs")]) >= 50,
+      `the second (real) attempt's time must survive as the authoritative row (got ${personCompleteRows[1]![c.idx("segmentMs")]}ms)`,
     );
   });
 });
@@ -577,12 +631,17 @@ describe("personNumber on a row names the person that action just completed, not
 
 describe("the raw emit never throws back into the timer", () => {
   beforeEach(() => {
+    // Opened before reset(), not after: reset() emits its own row through
+    // whatever service is "current", and openService() only takes effect for
+    // the ctx passed to it. Called in the other order, reset()'s row landed
+    // in whatever ctx the previous describe's last test had left current —
+    // silently, since that test's own assertions had already run by then.
+    openService(freshCtx());
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
   });
 
   it("survives the archive throwing on write", () => {
-    openService(freshCtx());
     const original = sampleArchive.recordBaptism;
     (sampleArchive as unknown as { recordBaptism: typeof sampleArchive.recordBaptism }).recordBaptism = () => {
       throw new Error("disk full");
@@ -651,6 +710,12 @@ describe("the no-service warning logs once per session, not once per press", () 
 // the undo, 40ms after) so a loaded machine cannot close the gap — with the
 // bug the value is bounded ABOVE by roughly the second sleep, and the
 // assertion's floor is the first.
+//
+// Bounded above as well as below: measured 188-196ms across repeated runs,
+// idle and under artificial CPU load, for a nominal 150+40. A floor alone
+// would also pass a double-count (the banked segment added in twice, or
+// added to itself) — that lands north of 300ms, so a 250ms ceiling sits with
+// ~55ms of headroom over every real run and excludes it by a wide margin.
 describe("undo() resumes a popped person's testimony from its banked time, not from zero", () => {
   it("grouped/armed: armed on the wrong song, undone, re-armed — the whole testimony survives", async () => {
     const ctx = freshCtx();
@@ -671,6 +736,11 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
       finished.people[0]!.testimonyMs >= 150,
       `the whole testimony survives the undo — got ${finished.people[0]!.testimonyMs}ms, ` +
         "which means the resumed segment restarted at zero and kept only the gap after the undo",
+    );
+    assert.ok(
+      finished.people[0]!.testimonyMs <= 250,
+      `got ${finished.people[0]!.testimonyMs}ms, well above the ~190ms a correct resume produces — ` +
+        "the banked segment may be getting counted twice",
     );
 
     const rows = await baptismRows(ctx);
@@ -711,6 +781,11 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
       `person 1's testimony resumed from what pendingTestimonyMs held — got ${finished.people[0]!.testimonyMs}ms, ` +
         "which means the undo dropped the banked testimony and restarted their clock at zero",
     );
+    assert.ok(
+      finished.people[0]!.testimonyMs <= 250,
+      `got ${finished.people[0]!.testimonyMs}ms, well above the ~190ms a correct resume produces — ` +
+        "the banked segment may be getting counted twice",
+    );
 
     const rows = await baptismRows(ctx);
     const c = cols(rows);
@@ -749,6 +824,11 @@ describe("undo() resumes a popped person's testimony from its banked time, not f
       finished.people[0]!.testimonyMs >= 150,
       `person 1's testimony resumed from what it had banked — got ${finished.people[0]!.testimonyMs}ms, ` +
         "which means the undo restarted their clock at zero",
+    );
+    assert.ok(
+      finished.people[0]!.testimonyMs <= 250,
+      `got ${finished.people[0]!.testimonyMs}ms, well above the ~190ms a correct resume produces — ` +
+        "the banked segment may be getting counted twice",
     );
 
     const rows = await baptismRows(ctx);
@@ -807,6 +887,65 @@ describe("pausing and resuming land in the raw layer", () => {
       Number(c.filter("resume")[0]![c.idx("segmentMs")]),
       Math.round(banked),
       "the resume row carries the same banked total it resumed from",
+    );
+  });
+});
+
+// Every test above drives one method or one bug at a time, so full coverage of
+// BAPTISM_RAW_EVENTS is an accident of how many of those add up — nothing
+// asserts the sum is complete, and nothing stops it shrinking silently if a
+// describe above is trimmed or reworked. This drives one real session per
+// mode through pause, resume, undo (a different branch in each mode), the
+// armed start, and a natural finish, then checks the SET of events actually
+// written against the full type, not a count: a count cannot tell a dropped
+// event from a renamed one.
+describe("every BAPTISM_RAW_EVENT the type declares is reachable from a real session", () => {
+  it("driving both modes through pause, resume, undo, arming and finish writes every declared event", async () => {
+    const ctx = freshCtx();
+    openService(ctx);
+
+    // per-person: reset, start, testimony-end, pause, resume, person-complete,
+    // undo (testimony-phase branch), finish.
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.baptized();
+    await sleep(2);
+    baptismTimerService.pause();
+    baptismTimerService.resume();
+    await sleep(2);
+    baptismTimerService.next(); // person 1 complete, person 2's testimony begins
+    await sleep(2);
+    baptismTimerService.undo(); // mis-tap: back into person 1's baptism
+    await sleep(2);
+    baptismTimerService.finish(); // closes the session
+
+    // grouped: start, testimony-end, baptisms-armed, baptisms-start,
+    // person-complete, undo (baptism-phase branch), finish.
+    baptismTimerService.setMode("grouped");
+    baptismTimerService.start();
+    await sleep(2);
+    baptismTimerService.next(); // person 1's testimony banked, person 2's begins
+    await sleep(2);
+    baptismTimerService.startBaptisms(); // person 2's testimony folds in, section arms
+    baptismTimerService.advance(); // "First person in" — armed ends, clock starts
+    await sleep(2);
+    baptismTimerService.next(); // person 1 baptized, person 2's clock starts
+    await sleep(2);
+    baptismTimerService.undo(); // mis-tap: re-time person 1
+    await sleep(2);
+    baptismTimerService.next(); // person 1 baptized again, person 2's clock starts
+    await sleep(2);
+    baptismTimerService.next(); // person 2 (LAST) baptized — auto-finishes
+
+    const rows = await baptismRows(ctx);
+    const c = cols(rows);
+    const written = [...new Set(c.events())].sort();
+    assert.deepEqual(
+      written,
+      [...BAPTISM_RAW_EVENTS].sort(),
+      "every event BaptismRawEvent declares must be reachable from a real session",
     );
   });
 });
