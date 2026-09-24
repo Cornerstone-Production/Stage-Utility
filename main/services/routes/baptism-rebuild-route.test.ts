@@ -279,4 +279,74 @@ describe("POST /api/baptism/rebuild", () => {
       `the log line's own count must agree with the response's sessions:${json.sessions}, not read "0 sessions": ${line}`,
     );
   });
+
+  // The write-path's own copy of this same formula — a plain `updated +
+  // added`, dropping unchanged/newer/disagreeing, stayed green across every
+  // existing test: every fixture that reaches the write path only ever had
+  // an add or an update alone, with nothing ELSE left alone in the same
+  // rebuild. Two sessions in one baptism.csv — one with no stored
+  // counterpart (added), one the store already has a newer correction for
+  // (left alone) — forces both terms to matter in the SAME response.
+  it("an add alongside a newer-in-store session logs the combined count the response reports, not just the added one", async () => {
+    const dir = serviceDirPath(KEY, DATE);
+    await fs.mkdir(dir, { recursive: true });
+    const addStart = "2026-09-20T09:50:00.000Z";
+    const addFinish = "2026-09-20T09:51:00.000Z";
+    const newerStart = "2026-09-20T10:10:00.000Z";
+    const newerRowFinish = "2026-09-20T10:11:00.000Z";
+    await fs.writeFile(
+      path.join(dir, "baptism.csv"),
+      [
+        "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+        `${addStart},start,per-person,testimony,1,0,0,,,`,
+        `${addFinish},testimony-end,per-person,testimony,1,0,60000,,,`,
+        `${addFinish},finish,per-person,testimony,1,0,60000,,,`,
+        `${newerStart},start,per-person,testimony,1,0,0,,,`,
+        `${newerRowFinish},testimony-end,per-person,testimony,1,0,60000,,,`,
+        `${newerRowFinish},finish,per-person,testimony,1,0,60000,,,`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    // This one's own stored finish is 200ms LATER than its row's — a
+    // correction the rows cannot show, well past the 100ms tie band — so it
+    // is left alone as "newer," never touched by the write this triggers.
+    const newerStoredFinish = "2026-09-20T10:11:00.200Z";
+    await baptismStore.addSession({
+      id: baptismSessionId(newerStart),
+      startedAt: newerStart,
+      finishedAt: newerStoredFinish,
+      people: [{ testimonyMs: 60_200, baptizeMs: 0 }],
+      title: "Sunday Gathering",
+      serviceTypeId: "st1",
+      planId: "plan-1",
+      serviceKey: KEY,
+    } as never);
+
+    const logs: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    let out: Awaited<ReturnType<typeof callRoute>>;
+    try {
+      out = await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY } });
+    } finally {
+      console.log = realLog;
+    }
+
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    const json = out.json as { sessions: number; added: number; newer: number };
+    assert.equal(json.added, 1, "precondition: the never-stored session must be added");
+    assert.equal(json.newer, 1, "precondition: the other session's own correction must read as newer");
+    assert.equal(json.sessions, 2, "precondition: the response counts BOTH as corresponding to a session in the store");
+
+    const line = logs.find((l) => l.includes("[baptism] rebuild:") && l.includes(KEY));
+    assert.ok(line, `expected a [baptism] rebuild summary line; got: ${JSON.stringify(logs)}`);
+    assert.match(
+      line!,
+      /rebuild: 2 sessions from/,
+      `the log line's own count must agree with the response's sessions:${json.sessions}, not just the 1 added: ${line}`,
+    );
+  });
 });

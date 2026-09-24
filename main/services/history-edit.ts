@@ -1139,29 +1139,49 @@ async function applyBaptismRebuild(
   // rather than "0 sessions" while the response it produced says `sessions:1`.
   const correspond = (u: number, a: number) => u + a + plan.unchanged + plan.newer + plan.disagreeing;
 
-  if (plan.toWrite.length === 0) {
-    console.log(
-      `[baptism] rebuild: ${scrub(correspond(0, 0))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
-        `0 updated, 0 added, ${scrub(tail)}`,
-    );
-    return { updated: 0, added: 0, full: 0, restoredIds: new Set() };
-  }
+  // Computed once, then logged and returned in ONE place at the foot of this
+  // function — regardless of which branch below produced them — so the log
+  // line's own count can never drift from what the response reports the way
+  // two separately written copies of the same format string already did
+  // once (the early-return branch's own copy was the only one any test
+  // exercised; the "something was written" copy silently used a different,
+  // wrong formula for months).
+  let added = 0;
+  let addedIds: ReadonlySet<string> = new Set();
+  let updated = 0;
+  let updatedIds: ReadonlySet<string> = new Set();
+  let full = 0;
 
-  let added: number, addedIds: ReadonlySet<string>, updated: number, updatedIds: ReadonlySet<string>, full: number;
-  try {
-    ({ added, addedIds, updated, updatedIds, full } = await baptismStore.mergeRebuilt(plan.toWrite));
-  } catch (err) {
-    // Logged here, with the real reason, for BOTH callers — but re-thrown
-    // RAW, not wrapped in RebuildFailedError: this function is shared by
-    // rebuildServiceBaptisms (whose own caller must sanitize it before it
-    // can reach a response) and rebuildServiceRecords's write loop (which
-    // already sanitizes ITS OWN leg failures with the exact same fixed
-    // sentence, one layer up). Wrapping here too meant the write loop's own
-    // [history] log line reported "That recording could not be rebuilt, and
-    // nothing was changed" — RebuildFailedError's OWN sentence — instead of
-    // the real reason, since errorMessage() reads `.message`, never `.cause`.
-    console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
-    throw err;
+  if (plan.toWrite.length > 0) {
+    try {
+      ({ added, addedIds, updated, updatedIds, full } = await baptismStore.mergeRebuilt(plan.toWrite));
+    } catch (err) {
+      // Logged here, with the real reason, for BOTH callers — but re-thrown
+      // RAW, not wrapped in RebuildFailedError: this function is shared by
+      // rebuildServiceBaptisms (whose own caller must sanitize it before it
+      // can reach a response) and rebuildServiceRecords's write loop (which
+      // already sanitizes ITS OWN leg failures with the exact same fixed
+      // sentence, one layer up). Wrapping here too meant the write loop's own
+      // [history] log line reported "That recording could not be rebuilt, and
+      // nothing was changed" — RebuildFailedError's OWN sentence — instead of
+      // the real reason, since errorMessage() reads `.message`, never `.cause`.
+      console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
+      throw err;
+    }
+
+    // Every update lands unconditionally — replacing a session's own fields
+    // never changes how many sessions the store holds, so an update is
+    // never capacity-limited. `added`, `updated` and `full` all come
+    // straight from mergeRebuilt's own write-time count, never derived here
+    // from plan.addedIds.size/plan.updatedIds.size: the store can change
+    // between planning this rebuild and applying it, and a plan-time count
+    // can drift from what actually happened, even go negative.
+    if (full > 0) {
+      console.warn(
+        `[baptism] rebuild: the store is full at ${scrub(MAX_BAPTISM_SESSIONS)} sessions — ` +
+          `${scrub(full)} new session(s) for ${scrub(serviceKey)} could not be added`,
+      );
+    }
   }
 
   // A saveErrors entry describes a session Finish never got into the store
@@ -1176,23 +1196,12 @@ async function applyBaptismRebuild(
   // know whether ITS OWN sessionId is among these, not merely that something
   // was written for the service — a full or read-only disk can drop the
   // `finish` row itself (see rebuildBaptismSessions' own `neverFinished`
-  // counter), leaving the raw rows with nothing to restore at all.
+  // counter), leaving the raw rows with nothing to restore at all. Called
+  // even when nothing was written (an empty set) — a no-op, since
+  // clearRestoredSaveErrors only ever removes ids actually present.
   const restoredIds = new Set([...addedIds, ...updatedIds]);
   baptismTimerService.clearRestoredSaveErrors(restoredIds);
 
-  // Every update lands unconditionally — replacing a session's own fields
-  // never changes how many sessions the store holds, so an update is never
-  // capacity-limited. `added`, `updated` and `full` all come straight from
-  // mergeRebuilt's own write-time count, never derived here from
-  // plan.addedIds.size/plan.updatedIds.size: the store can change between
-  // planning this rebuild and applying it, and a plan-time count can drift
-  // from what actually happened, even go negative.
-  if (full > 0) {
-    console.warn(
-      `[baptism] rebuild: the store is full at ${scrub(MAX_BAPTISM_SESSIONS)} sessions — ` +
-        `${scrub(full)} new session(s) for ${scrub(serviceKey)} could not be added`,
-    );
-  }
   console.log(
     `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
       `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail)}`,
