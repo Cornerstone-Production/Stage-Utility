@@ -266,13 +266,31 @@ describe("the shared /history link", () => {
       const React = (await import("react")).default;
       const { TooltipProvider } = await import("../components/ui/index.js");
       const { ServiceHistorySection } = await import("../settings/sections/service-history-section.js");
+      const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
+        await import("@tanstack/react-router");
+
+      // A real router, the way history-service-page.test.tsx's own
+      // routerWithBaptismDestination does: without one, a dropped readOnly
+      // gate crashes rendering the real "Open in Baptisms" link
+      // (useLinkProps reading buildLocation off a null router context)
+      // rather than actually rendering it for the assertion below to catch.
+      const rootRoute = createRootRoute({});
+      const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history", component: () => null });
+      const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
+      const router = createRouter({
+        routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
+        history: createMemoryHistory({ initialEntries: ["/history"] }),
+      });
 
       const view = render(
-        React.createElement(
-          TooltipProvider,
-          null,
-          React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly: true }),
-        ),
+        React.createElement(RouterContextProvider, {
+          router,
+          children: React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly: true }),
+          ),
+        }),
       );
       for (let i = 0; i < 4; i++) await settle();
       const row = [...view.container.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Evening"));
@@ -282,9 +300,12 @@ describe("the shared /history link", () => {
 
       const card = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms");
       assert.ok(card, "expected the Baptisms card to render for a linked session even read-only");
+      // Never a DOM node as an assert operand — see timer-card.test.tsx's own
+      // note: node:assert inspecting a live jsdom element to build a failure
+      // message does not finish in any useful time.
       assert.equal(
-        view.container.querySelector('a[href="/baptism"]'),
-        null,
+        !!view.container.querySelector('a[href="/baptism"]'),
+        false,
         "the shared read-only page must not link into the operator app",
       );
       cleanup();
