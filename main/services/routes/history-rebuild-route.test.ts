@@ -28,6 +28,8 @@ const { splHistoryStore } = await import("../spl-history-store.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { serviceDirPath } = await import("../archive/archive-paths.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
+const { baptismStore } = await import("../baptism-store.js");
+const { baptismSessionId } = await import("../../types/stage.js");
 
 const KEY = "st1:plan-1:t-1";
 const DATE = "2026-09-17";
@@ -701,6 +703,81 @@ describe("POST /api/history/rebuild", () => {
       assert.equal(json.baptism.rebuilt, false, "nothing was actually derived");
 
       await fs.rm(dir, { recursive: true, force: true });
+    });
+  });
+
+  // Every service recorded before the raw layer existed has a stored
+  // baptism session with no baptism.csv behind it at all — genuinely no raw
+  // rows, unlike the group above. That must not read as "nothing to say
+  // about baptisms here": the session is being left alone, the exact
+  // meaning `kept` already carries for a leg with no raw rows to derive
+  // from, not silently omitted from the result and the log both.
+  describe("a service recorded before the raw layer existed has a stored session but no baptism.csv", () => {
+    const KEY3 = "st1:plan-3:pre-raw-layer";
+    const DATE3 = "2026-09-12";
+
+    it("reports the stored session as left alone, not missing", async () => {
+      await serviceTimelineStore.upsert({
+        serviceKey: KEY3,
+        serviceTypeId: "st1",
+        serviceTypeName: "Weekend",
+        planId: "plan-3",
+        planTitle: "Pre-Raw-Layer Service",
+        seriesTitle: null,
+        serviceDate: DATE3,
+        serviceTimeId: "pre-raw-layer",
+        serviceTimeStartsAt: null,
+        startedAt: "2026-09-12T09:00:00.000Z",
+        endedAt: "2026-09-12T10:30:00.000Z",
+        items: [], // no events.csv — nothing for the OTHER legs to derive from either
+      } as never);
+      // Real samples, not deleted — this rebuild must have SOMETHING to
+      // derive, or the whole request refuses 409 with "No raw rows exist"
+      // before baptism's own leg-level handling is even reached.
+      await attendanceStore.upsert({
+        serviceKey: KEY3,
+        serviceTypeId: "st1",
+        serviceTypeName: "Weekend",
+        planId: "plan-3",
+        planTitle: "Pre-Raw-Layer Service",
+        seriesTitle: null,
+        serviceDate: DATE3,
+        serviceTimeId: "pre-raw-layer",
+        serviceTimeStartsAt: null,
+        startedAt: "2026-09-12T09:00:00.000Z",
+        endedAt: "2026-09-12T10:30:00.000Z",
+        samples: [
+          { t: "2026-09-12T09:05:00.000Z", attendance: 0, occupancy: 40 },
+          { t: "2026-09-12T09:35:00.000Z", attendance: 60, occupancy: 100 },
+        ],
+        attendanceBaseline: 0,
+        totalAttendance: 60,
+        peakAttendance: 0,
+        peakOccupancy: 0,
+        minOccupancy: 0,
+        lastAttendance: 0,
+        lastOccupancy: 0,
+      } as never);
+      await splHistoryStore.delete(KEY3);
+      // No baptism.csv written at all — this service predates the raw layer.
+      await fs.rm(serviceDirPath(KEY3, DATE3), { recursive: true, force: true });
+      await baptismStore.addSession({
+        id: baptismSessionId("2026-09-12T09:20:00.000Z"),
+        startedAt: "2026-09-12T09:20:00.000Z",
+        finishedAt: "2026-09-12T09:25:00.000Z",
+        people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+        title: "Pre-Raw-Layer Service",
+        serviceTypeId: "st1",
+        planId: "plan-3",
+        serviceKey: KEY3,
+      } as never);
+
+      const out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY3 } });
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { baptism: { rebuilt: boolean; items: number; missing: boolean } };
+      assert.equal(json.baptism.missing, false, "a stored session exists — this is not the same as nothing to say about baptisms");
+      assert.equal(json.baptism.rebuilt, false, "there are no raw rows to derive anything from");
+      assert.equal(json.baptism.items, 1, "the one stored session must still be counted");
     });
   });
 });

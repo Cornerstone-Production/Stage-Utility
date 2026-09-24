@@ -740,7 +740,29 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
         },
       });
     } else {
-      outcome.baptism = { rebuilt: false, items: bapPlan.kept, missing: true };
+      // No baptism.csv at all — every service recorded before the raw layer
+      // existed has stored sessions with nothing to rebuild them FROM, which
+      // is not the same as this service having no baptisms to report on:
+      // `missing` names the latter, so a rebuild's own result and log both
+      // said nothing about baptisms at all for a service whose sessions
+      // were simply left alone, the same as `kept` already means for every
+      // OTHER leg missing its own raw rows. Only truly missing (nothing
+      // stored either) when there is nothing to say either way — and only
+      // then is baptismDetail left unset too, matching the shape a service
+      // with genuinely nothing baptism-related already had.
+      if (bapPlan.existingCount > 0) {
+        outcome.baptismDetail = {
+          updated: 0,
+          added: 0,
+          unchanged: 0,
+          newer: 0,
+          disagreeing: 0,
+          invalid: 0,
+          kept: bapPlan.kept,
+          full: 0,
+        };
+      }
+      outcome.baptism = { rebuilt: false, items: bapPlan.kept, missing: bapPlan.existingCount === 0 };
     }
   } catch (err) {
     // Nothing has been written, so this costs the operator nothing but the
