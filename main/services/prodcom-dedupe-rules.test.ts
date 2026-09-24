@@ -164,3 +164,30 @@ describe("rule 3: a corrected final always broadcasts", () => {
     );
   });
 });
+
+describe("a partial never runs backwards on screen", () => {
+  it("keeps the longer revision when a shorter, same-id partial arrives after it", async (t: TestContext) => {
+    // Both transports can be open at once, and they do not share a clock: a
+    // slower copy of the SAME utterance can land after a faster one that is
+    // already further along. Modelled here as two SSE sends racing out of
+    // order, which is the same shape ingest() sees regardless of which
+    // transport either one came in on.
+    const { stub, svc } = await connected(t);
+    await stub.waitForSse(1);
+    await svc.settled();
+
+    stub.sseSend(partial("grows-then-shrinks", "the quick brown fox jum"));
+    await eventually(() => svc.texts().includes("the quick brown fox jum"), "the further-along partial to land");
+
+    // A straggler: the same utterance's EARLIER, shorter revision, arriving
+    // late.
+    stub.sseSend(partial("grows-then-shrinks", "the quick"));
+    await new Promise((r) => setTimeout(r, 60));
+
+    assert.deepEqual(
+      svc.texts(),
+      ["the quick brown fox jum"],
+      "a shorter, stale partial rewound a caption that was already further along",
+    );
+  });
+});

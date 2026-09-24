@@ -867,6 +867,51 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     );
   });
 
+  it("SSE's own reconnect message also stops blaming silence once a re-test is refused", async (t) => {
+    // The other half of the case above: giveUpOnUnprovenWebSocket's own report
+    // was already keyed on THIS attempt's reason, not on wsSilentBox — but
+    // connectSse's OWN card message, printed on every SSE (re)connect, read
+    // wsSilentBox directly, which the refusal does not clear. With SSE
+    // cycling constantly (sseCloseImmediately), its message is the one that
+    // keeps overwriting the card, and a refusal must not have it revert to
+    // blaming the box's earlier silence.
+    const schedule = { ...DEFAULT_RECONNECT_SCHEDULE, enabled: false };
+    serviceWindow.setSchedule(schedule);
+    t.after(() => serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE }));
+
+    const { stub, svc } = await silenced(t, { sseCloseImmediately: true });
+    stub.setRefuseWebSocket(true);
+
+    // A socket that opened moments before setRefuseWebSocket(true) can still
+    // be mid-probation, and correctly concludes silent for that ALREADY-OPEN
+    // attempt — that is not the bug, it is truthful about an attempt that
+    // really did open before the box started refusing. Once THAT settles, it
+    // arms the box's own widened silent-retry cadence (1_500 ms here) before
+    // trying again, so the fresh, definitely-refused attempt this test is
+    // actually about is not guaranteed to exist for a while. Wait past that
+    // cadence, then require the fallback message to be gone AND stay gone —
+    // catching a version that still flips back to it on some later SSE cycle,
+    // not just one that is slow to leave it the first time.
+    await eventually(
+      () => cardMessages(svc).at(-1) !== FALLBACK_CARD_MESSAGE,
+      () => `the refusal to stop the card blaming silence — it says ${JSON.stringify(cardMessages(svc).at(-1))}`,
+      15_000,
+    );
+    await new Promise((r) => setTimeout(r, 2_000));
+    await eventually(
+      () => cardMessages(svc).at(-1) !== FALLBACK_CARD_MESSAGE,
+      () => `the refusal to stop the card blaming silence, past the widened retry cadence too — it says ${JSON.stringify(cardMessages(svc).at(-1))}`,
+    );
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 30));
+      assert.notEqual(
+        cardMessages(svc).at(-1),
+        FALLBACK_CARD_MESSAGE,
+        "SSE's own reconnect message reverted to blaming silence after the box started refusing the upgrade outright",
+      );
+    }
+  });
+
   it("alternates the subscription on consecutive re-tests", async (t) => {
     // The mode used to latch: once a filtered socket had been shown silent,
     // every re-test for the life of the process connected unsubscribed. A

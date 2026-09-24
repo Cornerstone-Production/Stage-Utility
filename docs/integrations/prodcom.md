@@ -28,15 +28,18 @@ Either way, each entry is normalised into a `TranscriptLineDTO`, kept in a
 rolling buffer (up to 100 lines from the last four hours), and re-broadcast on
 the `prodcom:transcript` channel. Entries carry ProdCom's own `id`; a line is
 revised in place under that id until `inProgress` is false, so a line that
-arrives on both transports while the WebSocket is unproven is applied and
+arrives on both transports while the WebSocket attempt is open is applied and
 broadcast once, not twice.
 
 The SSE connection reconnects 4 s after it drops, then doubles that for each
 further failure in a row, clamped by the service window the way every other
 integration is — so a box that is off all week is not dialled every four
-seconds all week. Any connection that comes up resets the ramp, so a drop
-mid-service is always retried in about four seconds. A **promoted** WebSocket
-that later dies falls straight back to the SSE stream immediately, with
+seconds all week. Only SSE's own successful connect, or a **promoted**
+WebSocket's own health, resets the ramp — an unproven WebSocket's heartbeat
+does not, or a box whose REST/SSE stack is broken but whose WebSocket still
+answers pings would keep the fallback retrying at the fastest interval
+forever instead of backing off from whatever is actually wrong. A promoted
+WebSocket that later dies falls straight back to the SSE stream immediately, with
 backfill (below) covering whatever gap that leaves; an **unproven** WebSocket
 attempt that fails never touches the SSE stream at all, and is retried on its
 own, slower cadence — see [The WebSocket
@@ -154,17 +157,21 @@ opening, or shown silent above — never touches the SSE stream: nothing about t
 fallback changes, because it was never the thing being tested. Only the retry
 cadence and the card's message change.
 
-The app keeps offering the WebSocket again: every third SSE reconnect, and every
-five minutes whether or not the SSE stream reconnects at all. Both rules are
-needed. The counter handles a box that is dropping the SSE connection anyway; the
-timer handles an SSE stream that is up and quiet, which never reconnects and so
-never counts — a ProdCom that has been restarted and would now upgrade is picked
-up within five minutes rather than at the next restart of this server. Every
-attempt this cadence makes is opened **beside** the SSE stream, exactly like the
-very first one — nothing about a periodic re-test is special-cased, which is what
-keeps it from costing a fresh SSE stream, a channel read, a keyword read or a
-200-line backfill: a box that genuinely has no WebSocket costs one refused
-upgrade every five minutes and nothing more.
+The app keeps offering the WebSocket again: every third SSE reconnect, and on a
+five-minute timer that every SSE reconnect also re-arms. Both rules are needed,
+and for different SSE shapes. The counter handles a box that is dropping the SSE
+connection anyway — three drops earn a re-test sooner than the timer would.
+The timer handles an SSE stream that is up and quiet, which never reconnects and
+so never counts and never re-arms it either — a ProdCom that has been restarted
+and would now upgrade is picked up within five minutes of a STABLE SSE stream,
+rather than at the next restart of this server. (A stream that keeps flapping
+never lets the timer run its course at all; the counter rule is what still
+reaches it in that case.) Every attempt this cadence makes is opened **beside**
+the SSE stream, exactly like the very first one — nothing about a periodic
+re-test is special-cased, which is what keeps it from costing a fresh SSE
+stream, a channel read, a keyword read or a 200-line backfill: a box that
+genuinely has no WebSocket costs one refused upgrade, plus the one HTTP probe
+that names why, every five minutes.
 
 Both rules widen — to every 20 reconnects and every 30 minutes — once a box has
 been shown to [carry nothing on its

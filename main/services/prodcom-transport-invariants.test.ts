@@ -48,6 +48,14 @@ class TestProdCom extends ProdComService {
   public get sseUpNow(): boolean {
     return this.sseStreamUp;
   }
+  public texts(): string[] {
+    return this.getBuffer().map((l) => l.text);
+  }
+  /** Whatever priming is currently running — SSE's own on connect, or the
+   *  backfill promoteWebSocket() kicks off once it takes over. */
+  public settled(): Promise<void> {
+    return this.priming;
+  }
   /** A reconnect, exactly as scheduleReconnect() would run it. */
   public reconnectNow(): Promise<void> {
     return this.connect();
@@ -214,5 +222,33 @@ describe("SSE recovers from both kinds of failure", () => {
       await stub.close();
     });
     await eventually(() => svc.sseUpNow, "SSE to come back once the box answers again on the same port", 6000);
+  });
+});
+
+describe("promotion backfills whatever SSE had no chance to deliver", () => {
+  it("catches a line ProdCom already has the instant the fallback is torn down for the websocket", async (t: TestContext) => {
+    // Modelled as a line that only ever exists in ProdCom's REST history and
+    // was never sent over the SSE stream at all — standing in for a final
+    // still in flight the instant dropFallbackStream() destroys it, which
+    // looks the same from the client's side: a line REST has that this
+    // connection never received over either transport.
+    const stub = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.sseUpNow, "the first SSE stream to come up");
+
+    stub.addEntry(spoken("never-sent-over-sse"));
+    stub.wsTranscript(spoken("promote-me"));
+    await eventually(() => svc.onWebSocketNow, "promotion");
+
+    await svc.settled();
+    assert.ok(
+      svc.texts().includes("never-sent-over-sse"),
+      `expected promotion's backfill to catch the line SSE never delivered, got ${JSON.stringify(svc.texts())}`,
+    );
   });
 });

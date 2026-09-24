@@ -703,6 +703,21 @@ export class ProdComService extends ConnectionLifecycle {
    * configure().
    */
   private wsSilentBox = false;
+  /**
+   * Whether the MOST RECENT attempt to end (give up, or drop after promotion)
+   * did so because the box carried nothing, as opposed to any other reason —
+   * refused, dropped, timed out.
+   *
+   * `wsSilentBox` alone is not this: it says the box has EVER been shown
+   * silent, and stays true across a later attempt that was refused outright, a
+   * different and fresher problem. connectSse's own card message used to read
+   * `wsSilentBox` directly, so an SSE reconnect after a known-silent box
+   * started refusing the upgrade kept blaming the old silence instead of
+   * matching what giveUpOnUnprovenWebSocket had just reported about THIS
+   * attempt. Reset by configure(); not read while promoted, since SSE is not
+   * running then.
+   */
+  private wsLastGiveUpWasSilence = false;
 
   /** Whether a WebSocket attempt is due right now — true after configure() and
    *  the moment a socket proves delivery, false the moment an attempt gives up
@@ -916,6 +931,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsOutages.forget();
     this.wsSubscribeFilterSuspect = false;
     this.wsSilentBox = false;
+    this.wsLastGiveUpWasSilence = false;
     this.resetReport();
     this.restart();
   }
@@ -1081,9 +1097,10 @@ export class ProdComService extends ConnectionLifecycle {
    * Come back to the WebSocket on a clock while no attempt is currently open.
    *
    * Armed only once a WebSocket attempt has given up without proving itself —
-   * see the `useWebSocket` guard below — and it costs ONE refused upgrade every
-   * five minutes against a box that has no WebSocket, nothing else. The attempt
-   * is made BESIDE the live SSE stream, exactly like every other WebSocket
+   * see the `useWebSocket` guard below — and, against a box that has no
+   * WebSocket, it costs one refused upgrade plus the one HTTP probe that
+   * diagnoses it (see probeThenGiveUp), every five minutes, nothing more. The
+   * attempt is made BESIDE the live SSE stream, exactly like every other WebSocket
    * attempt in this file: nothing about a periodic re-test is different from the
    * first one, which is what stops a re-test costing a fresh SSE stream, a
    * channel read, a keyword read or a 200-line backfill, and stops it feeding
@@ -1176,8 +1193,12 @@ export class ProdComService extends ConnectionLifecycle {
    * "silent" until a socket delivers, not until a socket opens. noteWebSocketHealthy
    * already fires on every frame INCLUDING the heartbeat, which is exactly why it
    * could not be used for this.
+   *
+   * Protected, not private: prodcom-backoff.test.ts's synthetic suite (no real
+   * socket, connect() a no-op) uses it as the seam for "the transport is
+   * promoted", the one precondition its ramp-reset tests need.
    */
-  private noteWebSocketDelivered(): void {
+  protected noteWebSocketDelivered(): void {
     // Unconditional, unlike everything below: a promoted socket calls this on
     // every delivered frame, not just its first.
     this.wsDeliveredThisWindow = true;
@@ -1186,10 +1207,11 @@ export class ProdComService extends ConnectionLifecycle {
     // Housekeeping, not the guard: this just saves the wake-up for a check
     // that is about to be re-armed in promoteWebSocket() anyway.
     this.clearSilenceCheck();
-    // A box that has proven itself is preferred from here on — the same as a
-    // fresh configure(), so the next SSE reconnect does not wait out the retry
-    // cadence to try this box's WebSocket again.
-    this.useWebSocket = true;
+    // useWebSocket is NOT set here: connect() only opens a WebSocket attempt
+    // when it is already true, so reaching a delivered frame on a still-open
+    // socket proves it was true already — nothing between this attempt's own
+    // open and this frame could have cleared it without also closing this
+    // exact socket, which would have stopped any further frame arriving.
     if (this.wsSilentBox) {
       this.wsSilentBox = false;
       console.log(
@@ -1229,6 +1251,9 @@ export class ProdComService extends ConnectionLifecycle {
     );
     this.report("connected", `Streaming from ${this.host}:${this.port}`);
     this.armSilenceCheck();
+    // A final still in flight on SSE the instant its stream is destroyed here
+    // is not lost — one backfill catches whatever the teardown cut off.
+    if (this.host && this.port) this.priming = this.backfillNow(this.host, this.port);
   }
 
   /**
@@ -1508,6 +1533,7 @@ export class ProdComService extends ConnectionLifecycle {
     // promoted it. demoteToSse() reopens SSE, whose own connect primes REST
     // (channels, keywords, backfill) and so covers the gap this leaves.
     this.wsSilentBox = true;
+    this.wsLastGiveUpWasSilence = true;
     console.warn(
       `[prodcom] the promoted websocket delivered no transcript in ${quiet} while ProdCom has at least ` +
         `${answer.spoken} spoken line(s) it never carried — falling back to the SSE stream, which backfills ` +
@@ -1890,9 +1916,10 @@ export class ProdComService extends ConnectionLifecycle {
    * and promoteWebSocket) closes the fallback; opening, subscribing and even a
    * healthy heartbeat prove nothing about the SUBSCRIPTION, which is exactly the
    * gap ProdCom 2.3.2 sits in. Giving up on an attempt that never proves itself
-   * is symmetrically cheap: no fallback to reopen, no refusal probe wasted, no
-   * SSE reconnect counted, and no back-off advanced, because the SSE stream was
-   * never touched to make the attempt.
+   * costs no fallback to reopen, no SSE reconnect counted, and no back-off
+   * advanced, because the SSE stream was never touched to make the attempt —
+   * it does still cost the one HTTP probe a refusal always triggers (see
+   * probeThenGiveUp), which is deliberate diagnosis, not waste.
    */
   private connectWebSocket(host: string, port: number): void {
     // Never assign over a live socket: that puts it beyond closeSocket()'s reach
@@ -1953,7 +1980,13 @@ export class ProdComService extends ConnectionLifecycle {
       // A heartbeat proves the peer; only a transcript entry proves the
       // subscription. Until one arrives, this is what notices.
       this.armSilenceCheck();
-      this.wsBaselinePriming = this.primeWsBaseline(host, port);
+      // Skipped for a box already known to carry nothing: this re-test either
+      // gets dropped again without runSilenceCheck's wsSilentBox branch ever
+      // reading wsBaselineRows, or it delivers and gets promoted — and
+      // runPromotedSilenceCheck's first window re-reads the row count fresh
+      // regardless, overwriting whatever this call would have found. Either
+      // way the read is wasted; a box not yet known silent still needs it.
+      if (!this.wsSilentBox) this.wsBaselinePriming = this.primeWsBaseline(host, port);
     };
 
     ws.onmessage = (ev: MessageEvent) => {
@@ -2173,6 +2206,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.closeSocket();
     this.useWebSocket = false;
     this.noteWebSocketDown(reason, detail, true);
+    // Recorded regardless of the early returns below: connectSse's own card
+    // message reads this on its NEXT (re)connect, whether or not this attempt
+    // is the one that gets to report anything itself right now.
+    this.wsLastGiveUpWasSilence = reason === SILENT_SOCKET_REASON;
     if (!this.running || !this.host || !this.port) return;
     // Keyed on THIS attempt's reason, not on wsSilentBox: a known-silent box that
     // starts refusing the upgrade outright is a different, fresher problem, and
@@ -2182,7 +2219,7 @@ export class ProdComService extends ConnectionLifecycle {
     if (this.sseUp) {
       this.report(
         "connected",
-        reason === SILENT_SOCKET_REASON ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${this.host}:${this.port}`,
+        this.wsLastGiveUpWasSilence ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${this.host}:${this.port}`,
       );
     }
     this.armWebSocketRetry();
@@ -2242,7 +2279,13 @@ export class ProdComService extends ConnectionLifecycle {
    * "websocket is back" per flap.
    */
   protected noteWebSocketHealthy(): void {
-    this.resetBackoff();
+    // Only a PROMOTED socket's health says anything about whether captions are
+    // flowing — an unproven socket's heartbeat is the peer answering pings, not
+    // evidence the box (or the network to it) is otherwise healthy. Resetting
+    // the SSE ramp from it would let a box whose SSE/REST stack is broken but
+    // whose WebSocket still heartbeats keep the fallback retrying at the
+    // fastest interval forever, defeating the backoff entirely.
+    if (this.onWebSocket) this.resetBackoff();
     // On a box already known to open a socket and carry nothing on it, opening
     // one again is not recovery — noteWebSocketDelivered decides that, and until
     // it does this socket is a minute from being dropped. The settle window
@@ -2350,13 +2393,18 @@ export class ProdComService extends ConnectionLifecycle {
         // retries in 4s rather than wherever the back-off had climbed to.
         this.resetBackoff();
         this.sseUp = true;
-        // A box already known to carry nothing on its WebSocket says so on the
-        // card, whatever prompted THIS particular (re)connect — an unproven
-        // attempt's own give-up never touches this stream, so by the time this
-        // runs the only question is whether the box is still known-silent. It
-        // is still "connected", because captions ARE flowing: what is in
+        // A box whose LAST attempt ended because it carried nothing says so on
+        // the card, whatever prompted THIS particular (re)connect. Keyed on
+        // wsLastGiveUpWasSilence, not wsSilentBox: the box can go on to REFUSE
+        // the upgrade outright on a later attempt, which is a different,
+        // fresher problem than silence, and this must not keep blaming the
+        // older one just because the box was once shown silent. It is still
+        // "connected" either way, because captions ARE flowing: what is in
         // question is only the WebSocket, and that is what the message names.
-        this.report("connected", this.wsSilentBox ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${host}:${port}`);
+        this.report(
+          "connected",
+          this.wsLastGiveUpWasSilence ? SILENT_SOCKET_CARD_MESSAGE : `Streaming from ${host}:${port}`,
+        );
         this.priming = this.primeFromRest(host, port);
         res.setEncoding("utf8");
         this.armSseIdleWatchdog();
@@ -2582,6 +2630,14 @@ export class ProdComService extends ConnectionLifecycle {
       // under too — it re-arrives as an unchanged re-send and is coalesced by
       // scheduleTranscript()'s throttle below rather than broadcast twice.
       const existing = this.partials.get(ch);
+      // Both transports can be open at once (an unproven WebSocket beside SSE,
+      // or a straggler still in flight the instant one is promoted), and they
+      // do not share a clock: a slower copy of the SAME utterance can arrive
+      // after a faster one that is already further along. A genuine ASR
+      // revision only ever grows the committed text; a same-id partial that is
+      // SHORTER than what is already on screen is that straggler, not
+      // progress, and applying it would visibly rewind the caption.
+      if (existing && existing.line.id === line.id && line.text.length < existing.line.text.length) return;
       const unchanged = !!existing && existing.line.id === line.id && existing.line.text === line.text;
       const now = this.now();
       this.partials.set(ch, {
@@ -2597,14 +2653,18 @@ export class ProdComService extends ConnectionLifecycle {
     }
   }
 
-  /** One line per connection, the first time a line delivered on both
-   *  transports is suppressed as a duplicate rather than broadcast twice. */
+  /** One line per connection, the first time an unchanged repeat of a finished
+   *  line is suppressed rather than broadcast twice.
+   *
+   * Worded without naming which transport: this fires whenever a second
+   * transport was open (wsOpen), but ingest() has no record of which of the
+   * two calls that produced the repeat came from which — an unproven
+   * WebSocket open beside SSE while SSE itself repeats a keepalive looks
+   * identical from here to the same line genuinely arriving on both. */
   private noteDuplicateFinalSuppressed(): void {
     if (this.duplicateFinalLogged) return;
     this.duplicateFinalLogged = true;
-    console.log(
-      `[prodcom] a finished line arrived on both the websocket and the SSE fallback — duplicate suppressed`,
-    );
+    console.log(`[prodcom] a finished line repeated while a second transport was open — duplicate suppressed`);
   }
 
   private flushTranscript(): void {
@@ -2665,6 +2725,14 @@ export class ProdComService extends ConnectionLifecycle {
    */
   private async primeFromRest(host: string, port: number): Promise<void> {
     await this.refreshChannelMetadata(host, port);
+    await this.backfillNow(host, port);
+  }
+
+  /** Run one backfill and log what it did — shared by primeFromRest (every
+   *  fresh SSE connection) and promoteWebSocket (below), which needs it for a
+   *  different reason: a final still in flight on SSE the instant it is torn
+   *  down for the websocket is not lost, it is caught on the next read. */
+  private async backfillNow(host: string, port: number): Promise<void> {
     const result = await this.backfill(host, port);
     if (result.error) {
       console.warn(
