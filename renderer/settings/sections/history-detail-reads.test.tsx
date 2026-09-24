@@ -235,7 +235,12 @@ test("a failed baptism read keeps a Baptisms card that says so, rather than drop
       true,
       "the card stays, so the failure is on the page where the timings would be",
     );
-    assert.ok(loggedFor(f.logs, "the baptism sessions"), `got ${JSON.stringify(f.logs)}`);
+    // The sessions read is page-wide rather than per service, so its line names
+    // no service.
+    assert.ok(
+      historyLines(f.logs).some((l) => l.message.startsWith("could not read the baptism sessions:")),
+      `got ${JSON.stringify(f.logs)}`,
+    );
   } finally {
     f.restore();
   }

@@ -28,6 +28,8 @@ const { splHistoryStore } = await import("../spl-history-store.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { serviceDirPath } = await import("../archive/archive-paths.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
+const { baptismStore } = await import("../baptism-store.js");
+const { baptismSessionId } = await import("../../types/stage.js");
 
 const KEY = "st1:plan-1:t-1";
 const DATE = "2026-09-17";
@@ -187,6 +189,9 @@ describe("POST /api/history/rebuild", () => {
       timeline: { rebuilt: true, items: 3, missing: false },
       spl: { rebuilt: false, items: 0, missing: true },
       attendance: { rebuilt: true, items: 3, missing: false },
+      // No baptism.csv for this fixture at all — see baptism-rebuild-route.test.ts
+      // and rebuild-baptism-merge.test.ts for the baptism leg itself.
+      baptism: { rebuilt: false, items: 0, missing: true },
       failed: [],
     });
 
@@ -216,6 +221,10 @@ describe("POST /api/history/rebuild", () => {
 
     assert.ok(broadcasts.includes("service-timeline:history"), `no timeline broadcast: ${broadcasts.join(",")}`);
     assert.ok(broadcasts.includes("attendance:history"), `no attendance broadcast: ${broadcasts.join(",")}`);
+    assert.ok(
+      !broadcasts.includes("baptism:rebuilt"),
+      `no baptism session was written (no baptism.csv at all), so baptism:rebuilt must not fire: ${broadcasts.join(",")}`,
+    );
   });
 
   // The SPL leg was unguarded: deleting it from rebuildServiceRecords left the
@@ -348,6 +357,10 @@ describe("POST /api/history/rebuild", () => {
     assert.ok(thrown, "a recording with no raw rows answered as though it had rebuilt something");
     assert.equal(handlerErrorStatus(thrown), 409);
     assert.match((thrown as Error).message, /No raw rows exist for this recording/);
+    // This route throws the same NoRawRowsError as /api/baptism/rebuild,
+    // through the same generic dispatcher — its 409 must carry the same
+    // machine-readable code, documented at api.md's /api/history/rebuild row.
+    assert.equal((thrown as { code?: string }).code, "no-raw-rows");
     assert.equal(broadcasts.length, 0, "nothing was derived, so nothing may be broadcast");
     const tl = await serviceTimelineStore.get(KEY);
     assert.equal(tl?.items.length, 1, "the untouched record was rewritten anyway");
@@ -368,6 +381,7 @@ describe("POST /api/history/rebuild", () => {
       timeline: { rebuilt: false, items: 1, missing: false },
       spl: { rebuilt: false, items: 0, missing: true },
       attendance: { rebuilt: true, items: 3, missing: false },
+      baptism: { rebuilt: false, items: 0, missing: true },
       failed: [],
     });
     // `items: 1` is the corrupted record, unchanged — and `rebuilt: false` is
@@ -474,6 +488,309 @@ describe("POST /api/history/rebuild", () => {
       const att = await attendanceStore.get(KEY);
       assert.equal(att?.peakOccupancy, 0, "the cached record was recomputed despite the write failing");
       assert.equal(att?.minOccupancy, null, "the cached record was recomputed despite the write failing");
+    });
+  });
+
+  // The whole-service rebuild's own baptism leg — the merge rule itself
+  // (matched/added/kept, the skew tolerance, never a delete) is
+  // rebuild-baptism-merge.test.ts's job; this proves History's own
+  // /api/history/rebuild actually reaches it and reports it as one of the
+  // legs, alongside item timings, SPL and attendance.
+  describe("the baptism leg", () => {
+    const BAPTISM_CSV = [
+      "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+      "2026-09-17T23:50:00.000Z,start,per-person,testimony,1,0,0,,,",
+      "2026-09-17T23:52:00.000Z,testimony-end,per-person,testimony,1,0,120000,,,",
+      "2026-09-17T23:52:00.000Z,finish,per-person,testimony,1,0,0,,,",
+      "",
+    ].join("\n");
+
+    beforeEach(async () => {
+      const { baptismStore } = await import("../baptism-store.js");
+      for (const s of (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY)) {
+        await baptismStore.deleteSession(s.id);
+      }
+    });
+
+    it("merges a session from baptism.csv alongside the other three legs", async () => {
+      await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
+
+      const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+        method: "POST",
+        body: { serviceKey: KEY },
+      });
+
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { baptism: { rebuilt: boolean; items: number; missing: boolean } };
+      assert.deepEqual(json.baptism, { rebuilt: true, items: 1, missing: false });
+
+      const { baptismStore } = await import("../baptism-store.js");
+      const sessions = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
+      assert.equal(sessions.length, 1, "the session merged by the whole-service rebuild did not land");
+      assert.equal(sessions[0]!.people[0]!.testimonyMs, 120_000);
+      assert.ok(
+        broadcasts.includes("baptism:rebuilt"),
+        `the baptism leg wrote a session but baptism:rebuilt never fired: ${broadcasts.join(",")}`,
+      );
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
+
+    // A count read as an achievement even when nothing was derived is
+    // exactly the failure RebuiltRecord's own doc comment exists to prevent.
+    it("reports rebuilt: false when the rows reconstruct zero sessions", async () => {
+      await fs.writeFile(
+        path.join(serviceDirPath(KEY, DATE), "baptism.csv"),
+        [
+          "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+          "2026-09-17T23:50:00.000Z,start,per-person,testimony,1,0,0,,,",
+          "2026-09-17T23:50:05.000Z,reset,per-person,idle,0,0,0,,,",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+        method: "POST",
+        body: { serviceKey: KEY },
+      });
+
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { baptism: { rebuilt: boolean; items: number; missing: boolean } };
+      assert.equal(json.baptism.rebuilt, false, "a start immediately reset derived nothing — must not read as rebuilt");
+      assert.equal(json.baptism.missing, false, "the archive exists — this is not the same as no baptism.csv at all");
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
+
+    // "Updated" has to mean the content actually changed. A second rebuild
+    // over rows that already produced exactly what is stored must report
+    // the session as unchanged, not updated — and must not touch the
+    // underlying file at all, the same no-op guarantee baptism-store.test.ts
+    // already proves for the standalone route.
+    it("a second rebuild over the same rows reports the session unchanged, with zero writes to baptism.json", async () => {
+      await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
+
+      const first = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      assert.equal(first.status, 200, `expected 200, got ${first.status}: ${first.body}`);
+
+      const { baptismStore } = await import("../baptism-store.js");
+      const internals = (baptismStore as unknown as { store: { writeRaw: (d: unknown) => Promise<void> } }).store;
+      const original = internals.writeRaw.bind(internals);
+      let writes = 0;
+      internals.writeRaw = async (d: unknown) => {
+        writes += 1;
+        return original(d);
+      };
+      broadcasts.length = 0;
+      let second: Awaited<ReturnType<typeof callRoute>>;
+      try {
+        second = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      } finally {
+        internals.writeRaw = original;
+      }
+
+      assert.equal(second.status, 200, `expected 200, got ${second.status}: ${second.body}`);
+      const json = second.json as {
+        baptism: { rebuilt: boolean; items: number; missing: boolean };
+        baptismDetail: { updated: number; added: number; unchanged: number };
+      };
+      assert.equal(json.baptism.rebuilt, false, "reproducing the same session exactly is not a rebuild — nothing was written");
+      assert.equal(json.baptismDetail.updated, 0, "nothing about the session differs, so it must not count as updated");
+      assert.equal(json.baptismDetail.added, 0);
+      assert.ok(
+        !broadcasts.includes("baptism:rebuilt"),
+        `a rebuild that wrote nothing new still fired baptism:rebuilt: ${broadcasts.join(",")}`,
+      );
+      assert.equal(json.baptismDetail.unchanged, 1, "the one session that matched exactly must be counted as unchanged");
+      assert.equal(writes, 0, "an intact session must never reach the underlying write, even through the whole-service route");
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
+
+    // The response must say what the write ACTUALLY did, never what the plan
+    // was merely hoping to do — the timeline leg lands first (so this is a
+    // partial failure, 200 with `failed: ["baptism"]`, not a 500), and the
+    // baptism leg's own counts must reflect that its own write never landed.
+    it("reports no updated/added for the baptism leg when its write fails, even after another leg lands", async () => {
+      await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
+
+      const { baptismStore } = await import("../baptism-store.js");
+      const original = baptismStore.mergeRebuilt.bind(baptismStore);
+      baptismStore.mergeRebuilt = async () => {
+        throw new Error("EACCES (test double)");
+      };
+      const warnings: string[] = [];
+      const realWarn = console.warn;
+      console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+      let out: Awaited<ReturnType<typeof callRoute>>;
+      try {
+        out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      } finally {
+        baptismStore.mergeRebuilt = original;
+        console.warn = realWarn;
+      }
+
+      assert.equal(out.status, 200, `a partial failure (an earlier leg already landed) must still answer 200, got ${out.status}: ${out.body}`);
+      const json = out.json as {
+        timeline: { rebuilt: boolean };
+        baptism: { rebuilt: boolean; items: number; missing: boolean };
+        baptismDetail: { updated: number; added: number; full: number };
+        failed: string[];
+      };
+      assert.equal(json.timeline.rebuilt, true, "precondition: the timeline leg must land first for this to be a PARTIAL failure");
+      assert.ok(json.failed.includes("baptism"), `expected "baptism" in failed, got: ${JSON.stringify(json.failed)}`);
+      assert.equal(json.baptism.rebuilt, false, "a failed write must not read as rebuilt");
+      assert.equal(json.baptismDetail.added, 0, "the write failed — the plan's own optimistic added count must not leak into the response");
+      assert.equal(json.baptismDetail.updated, 0, "the write failed — the plan's own optimistic updated count must not leak into the response");
+      assert.equal(json.baptismDetail.full, 0, "the write failed outright — nothing was turned away for being full, so full must not claim otherwise");
+
+      // The [history] line for THIS leg must name the real reason, not
+      // RebuildFailedError's own fixed sentence — that sentence belongs on
+      // the RESPONSE this route answers with, never on the server's own log,
+      // where an operator debugging this at 9am on a Sunday needs the actual
+      // reason, not a second copy of what the UI already told them.
+      const legLine = warnings.find((w) => w.includes("[history]") && w.includes("could not write the baptism record"));
+      assert.ok(legLine, `expected a [history] line naming the baptism leg's own failure; got: ${JSON.stringify(warnings)}`);
+      assert.match(legLine!, /EACCES \(test double\)/, `the leg's own log line must name the real reason, not a generic sentence: ${legLine}`);
+      assert.doesNotMatch(
+        legLine!,
+        /nothing was changed\. The log says why/,
+        `the leg's own log line must not embed the standalone wrapper's sentence: ${legLine}`,
+      );
+
+      await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
+    });
+  });
+
+  // A service whose ONLY raw material is a baptism.csv that reconstructs
+  // nothing must not be told "No raw rows exist" — that archive plainly has
+  // rows, even though none of them assemble into a session.
+  describe("baptism.csv exists but reconstructs nothing, and nothing else can be derived either", () => {
+    const KEY2 = "st1:plan-2:reconstructs-nothing";
+    const DATE2 = "2026-09-19";
+
+    it("answers normally rather than refusing 'No raw rows exist'", async () => {
+      await serviceTimelineStore.upsert({
+        serviceKey: KEY2,
+        serviceTypeId: "st1",
+        serviceTypeName: "Weekend",
+        planId: "plan-2",
+        planTitle: "Nothing Reconstructs Service",
+        seriesTitle: null,
+        serviceDate: DATE2,
+        serviceTimeId: "reconstructs-nothing",
+        serviceTimeStartsAt: null,
+        startedAt: "2026-09-19T09:00:00.000Z",
+        endedAt: "2026-09-19T10:30:00.000Z",
+        items: [], // no events.csv at all — timeline has nothing to derive from
+      } as never);
+      await attendanceStore.delete(KEY2);
+      await splHistoryStore.delete(KEY2);
+
+      const dir = serviceDirPath(KEY2, DATE2);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, "baptism.csv"),
+        [
+          "at,event,mode,phase,personNumber,baptismIndex,segmentMs,itemId,item,detail",
+          "2026-09-19T09:40:00.000Z,start,per-person,testimony,1,0,0,,,",
+          "2026-09-19T09:40:05.000Z,reset,per-person,idle,0,0,0,,,",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      let thrown: unknown;
+      let out: Awaited<ReturnType<typeof callRoute>> | undefined;
+      try {
+        out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY2 } });
+      } catch (err) {
+        thrown = err;
+      }
+
+      assert.equal(thrown, undefined, `must not refuse — baptism.csv has rows: ${String(thrown)}`);
+      assert.equal(out!.status, 200, `expected 200, got ${out!.status}: ${out!.body}`);
+      const json = out!.json as { baptism: { rebuilt: boolean; missing: boolean } };
+      assert.equal(json.baptism.missing, false, "baptism.csv exists — this service is not missing raw baptism data");
+      assert.equal(json.baptism.rebuilt, false, "nothing was actually derived");
+
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+  });
+
+  // Every service recorded before the raw layer existed has a stored
+  // baptism session with no baptism.csv behind it at all — genuinely no raw
+  // rows, unlike the group above. That must not read as "nothing to say
+  // about baptisms here": the session is being left alone, the exact
+  // meaning `kept` already carries for a leg with no raw rows to derive
+  // from, not silently omitted from the result and the log both.
+  describe("a service recorded before the raw layer existed has a stored session but no baptism.csv", () => {
+    const KEY3 = "st1:plan-3:pre-raw-layer";
+    const DATE3 = "2026-09-12";
+
+    it("reports the stored session as left alone, not missing", async () => {
+      await serviceTimelineStore.upsert({
+        serviceKey: KEY3,
+        serviceTypeId: "st1",
+        serviceTypeName: "Weekend",
+        planId: "plan-3",
+        planTitle: "Pre-Raw-Layer Service",
+        seriesTitle: null,
+        serviceDate: DATE3,
+        serviceTimeId: "pre-raw-layer",
+        serviceTimeStartsAt: null,
+        startedAt: "2026-09-12T09:00:00.000Z",
+        endedAt: "2026-09-12T10:30:00.000Z",
+        items: [], // no events.csv — nothing for the OTHER legs to derive from either
+      } as never);
+      // Real samples, not deleted — this rebuild must have SOMETHING to
+      // derive, or the whole request refuses 409 with "No raw rows exist"
+      // before baptism's own leg-level handling is even reached.
+      await attendanceStore.upsert({
+        serviceKey: KEY3,
+        serviceTypeId: "st1",
+        serviceTypeName: "Weekend",
+        planId: "plan-3",
+        planTitle: "Pre-Raw-Layer Service",
+        seriesTitle: null,
+        serviceDate: DATE3,
+        serviceTimeId: "pre-raw-layer",
+        serviceTimeStartsAt: null,
+        startedAt: "2026-09-12T09:00:00.000Z",
+        endedAt: "2026-09-12T10:30:00.000Z",
+        samples: [
+          { t: "2026-09-12T09:05:00.000Z", attendance: 0, occupancy: 40 },
+          { t: "2026-09-12T09:35:00.000Z", attendance: 60, occupancy: 100 },
+        ],
+        attendanceBaseline: 0,
+        totalAttendance: 60,
+        peakAttendance: 0,
+        peakOccupancy: 0,
+        minOccupancy: 0,
+        lastAttendance: 0,
+        lastOccupancy: 0,
+      } as never);
+      await splHistoryStore.delete(KEY3);
+      // No baptism.csv written at all — this service predates the raw layer.
+      await fs.rm(serviceDirPath(KEY3, DATE3), { recursive: true, force: true });
+      await baptismStore.addSession({
+        id: baptismSessionId("2026-09-12T09:20:00.000Z"),
+        startedAt: "2026-09-12T09:20:00.000Z",
+        finishedAt: "2026-09-12T09:25:00.000Z",
+        people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+        title: "Pre-Raw-Layer Service",
+        serviceTypeId: "st1",
+        planId: "plan-3",
+        serviceKey: KEY3,
+      } as never);
+
+      const out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY3 } });
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { baptism: { rebuilt: boolean; items: number; missing: boolean } };
+      assert.equal(json.baptism.missing, false, "a stored session exists — this is not the same as nothing to say about baptisms");
+      assert.equal(json.baptism.rebuilt, false, "there are no raw rows to derive anything from");
+      assert.equal(json.baptism.items, 1, "the one stored session must still be counted");
     });
   });
 });

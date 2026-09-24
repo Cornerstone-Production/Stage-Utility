@@ -6,16 +6,19 @@
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
 import type { AttendanceSample } from "../types/history.js";
-import type { ServiceAttendance, ServiceItemTimeEdit, ServiceTimeline } from "../types/stage.js";
+import type { BaptismSession, ServiceAttendance, ServiceItemTimeEdit, ServiceTimeline } from "../types/stage.js";
 import { serviceDirPath } from "./archive/archive-paths.js";
 import { readArchiveRows } from "./archive/archive-rows.js";
 import { mergeItemRuns } from "./archive/merge-records.js";
 import { rebuildSplRecord, rebuildTimelineRecord } from "./archive/rebuild.js";
+import { rebuildBaptismSessions, readBaptismRows, type BaptismRow } from "./archive/rebuild-baptism.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
+import { baptismStore, MAX_SESSIONS as MAX_BAPTISM_SESSIONS } from "./baptism-store.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
@@ -40,10 +43,38 @@ const RECORDERS = [serviceTimelineRecorder, attendanceRecorder, splRecorder];
 /** Thrown past the route handlers so remote-server can answer 409. */
 export class ServiceIsLiveError extends Error {
   readonly status = 409;
+  /** Machine-readable, alongside the human sentence in `message` — a 409
+   *  is a decision, not a failure, and a caller that needs to tell THIS
+   *  decision from NoRawRowsError's own 409 (both refuse to rebuild, for
+   *  opposite reasons) cannot do that from the status code alone. See
+   *  `error()` in routes/context.ts, which is what actually puts this on
+   *  the wire. */
+  readonly code = "live";
   constructor(action: string) {
     super(`That service is recording right now — it cannot be ${action} until it ends.`);
     this.name = "ServiceIsLiveError";
   }
+}
+
+/**
+ * Whether any recorder is actively writing this serviceKey right now — the
+ * ONE definition of "live" for a service. `assertNotLive` refuses on it, and
+ * `GET /api/history/live` (history-routes.ts) answers it directly, so the
+ * route and the refusal are always asking the identical question at the
+ * instant either one runs — the server cannot disagree with itself the way a
+ * client-side approximation once could (reading a just-ended service as still
+ * live until the next unrelated tick, or a live one as safe the moment any
+ * OTHER service's record happened to broadcast).
+ *
+ * A CLIENT that asks this over HTTP can still hold a stale answer for as long
+ * as it takes to ask again — the network round trip and the time between asks
+ * are real. That is what the header's own re-ask schedule (on mount, on a
+ * target change, on every relevant push, and a slow backstop interval) is
+ * for, and why it re-asks once more immediately before posting rather than
+ * trusting whatever it last heard.
+ */
+export function isServiceLive(serviceKey: string): boolean {
+  return RECORDERS.some((r) => r.isRecording(serviceKey));
 }
 
 /**
@@ -63,7 +94,7 @@ export class ServiceIsLiveError extends Error {
  * ending is minutes away.
  */
 export function assertNotLive(serviceKey: string, action: string): void {
-  if (RECORDERS.some((r) => r.isRecording(serviceKey))) throw new ServiceIsLiveError(action);
+  if (isServiceLive(serviceKey)) throw new ServiceIsLiveError(action);
 }
 
 /** Release every recorder's copy of these keys. Called BEFORE the first awaited
@@ -460,6 +491,35 @@ export interface RebuildOutcome {
   timeline: RebuiltRecord;
   spl: RebuiltRecord;
   attendance: RebuiltRecord;
+  /** Unlike the other three, this is a MERGE, never a replace — see
+   *  rebuildServiceBaptisms. `items` is this service's own baptism sessions
+   *  once the merge lands: whatever the store already held for this service,
+   *  plus whatever this rebuild genuinely added. A rebuild removes nothing,
+   *  ever — see baptismStore.mergeRebuilt — so unlike the other three legs'
+   *  own cap handling, the MAX_SESSIONS cap can only ever refuse to ADD a
+   *  new session here (see `baptismDetail.full`), never evict one this
+   *  rebuild, or anything else, already had. */
+  baptism: RebuiltRecord;
+  /** Baptism's own split — RebuiltRecord's shape is shared by all four legs
+   *  and has no room for it, and a bare session count once hid that a
+   *  rebuild had quietly undone a Delete: "1 baptism sessions" said nothing
+   *  about whether that one was matched or brand new. Present exactly when
+   *  `baptism.missing` is false, and reflects what the write actually did —
+   *  zeroed for updated/added/full if the write itself failed, never the
+   *  plan's own optimistic pre-write count. */
+  baptismDetail?: {
+    updated: number;
+    added: number;
+    unchanged: number;
+    newer: number;
+    disagreeing: number;
+    invalid: number;
+    kept: number;
+    /** New sessions the MAX_SESSIONS cap would not let the store accept —
+     *  never evicted to make room; simply not added. See
+     *  BaptismRebuildOutcome.full. */
+    full: number;
+  };
   /** Records that were derived but whose write failed AFTER another record's
    *  write had already landed — see rebuildServiceRecords. Empty is the normal
    *  case; a non-empty list means the operator is looking at a half-rebuilt
@@ -475,6 +535,11 @@ const NO_RECORD: RebuiltRecord = { rebuilt: false, items: 0, missing: true };
  *  replaced. 409, like the live-service refusal. */
 export class NoRawRowsError extends Error {
   readonly status = 409;
+  /** See ServiceIsLiveError's own comment on `code` — this 409 means the
+   *  opposite thing (nothing to rebuild FROM, not something already
+   *  running), and a caller deciding what to do next has to be able to
+   *  tell the two apart. */
+  readonly code = "no-raw-rows";
   constructor() {
     super("No raw rows exist for this recording — there is nothing to rebuild it from.");
     this.name = "NoRawRowsError";
@@ -529,6 +594,7 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
     timeline: { ...NO_RECORD },
     spl: { ...NO_RECORD },
     attendance: { ...NO_RECORD },
+    baptism: { ...NO_RECORD },
     failed: [],
   };
 
@@ -612,6 +678,92 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
         },
       });
     }
+
+    // Baptisms, from baptism.csv — merged into the stored sessions, never
+    // replaced. Shares its derivation with rebuildServiceBaptisms, the
+    // baptism-only action the Baptisms tab calls on its own: one derivation,
+    // two callers, so the merge rule cannot drift between them.
+    const bapPlan = await planBaptismRebuild(serviceKey, serviceDate);
+    if (bapPlan.rows !== null) {
+      // Pushed whenever baptism.csv exists, even with nothing to WRITE: a
+      // service whose rows exist but reconstruct nothing is not the same as
+      // one with no raw rows at all, and leaving this leg out of `pending`
+      // when every OTHER leg is also empty made the whole rebuild answer "No
+      // raw rows exist" while baptism.csv plainly had some.
+      //
+      // outcome.baptism/baptismDetail are set INSIDE this closure, not here,
+      // and on both its success and failure paths: the plan's own counts are
+      // only ever optimistic (the write can still drop a session at the
+      // MAX_SESSIONS cap, or fail outright), and the response must say what
+      // the write actually did, never what it was merely asked to do.
+      pending.push({
+        name: "baptism",
+        write: async () => {
+          try {
+            const { updated, added, full } = await applyBaptismRebuild(serviceKey, bapPlan);
+            // A rebuild never evicts (see baptismStore.mergeRebuilt), so
+            // bapPlan.kept — counted before the write ran — is still exactly
+            // right afterward.
+            outcome.baptismDetail = {
+              updated,
+              added,
+              unchanged: bapPlan.unchanged,
+              newer: bapPlan.newer,
+              disagreeing: bapPlan.disagreeing,
+              invalid: bapPlan.invalid,
+              kept: bapPlan.kept,
+              full,
+            };
+            // This service's post-merge count is exactly what it already
+            // held plus whatever this write genuinely added — the only way
+            // this leg's total can ever move, since a rebuild removes
+            // nothing, ever (see `baptism`'s own doc comment above).
+            outcome.baptism = {
+              rebuilt: updated + added > 0,
+              items: bapPlan.existingCount + added,
+              missing: false,
+            };
+          } catch (err) {
+            outcome.baptismDetail = {
+              updated: 0,
+              added: 0,
+              unchanged: bapPlan.unchanged,
+              newer: bapPlan.newer,
+              disagreeing: bapPlan.disagreeing,
+              invalid: bapPlan.invalid,
+              kept: bapPlan.kept,
+              full: 0,
+            };
+            outcome.baptism = { rebuilt: false, items: bapPlan.existingCount, missing: false };
+            throw err; // applyBaptismRebuild already logged the reason; let the loop below decide failed vs. thrown
+          }
+        },
+      });
+    } else {
+      // No baptism.csv at all — every service recorded before the raw layer
+      // existed has stored sessions with nothing to rebuild them FROM, which
+      // is not the same as this service having no baptisms to report on:
+      // `missing` names the latter, so a rebuild's own result and log both
+      // said nothing about baptisms at all for a service whose sessions
+      // were simply left alone, the same as `kept` already means for every
+      // OTHER leg missing its own raw rows. Only truly missing (nothing
+      // stored either) when there is nothing to say either way — and only
+      // then is baptismDetail left unset too, matching the shape a service
+      // with genuinely nothing baptism-related already had.
+      if (bapPlan.existingCount > 0) {
+        outcome.baptismDetail = {
+          updated: 0,
+          added: 0,
+          unchanged: 0,
+          newer: 0,
+          disagreeing: 0,
+          invalid: 0,
+          kept: bapPlan.kept,
+          full: 0,
+        };
+      }
+      outcome.baptism = { rebuilt: false, items: bapPlan.kept, missing: bapPlan.existingCount === 0 };
+    }
   } catch (err) {
     // Nothing has been written, so this costs the operator nothing but the
     // answer. The REASON is logged, never returned: a raw filesystem error
@@ -664,6 +816,7 @@ const LEGS = [
   ["timeline", "timeline items"],
   ["spl", "SPL items"],
   ["attendance", "attendance samples"],
+  ["baptism", "baptism sessions"],
 ] as const;
 
 type LegName = (typeof LEGS)[number][0];
@@ -693,6 +846,514 @@ async function serviceDateOf(serviceKey: string): Promise<string | null> {
     splHistoryStore.get(serviceKey),
   ]);
   return tl?.serviceDate ?? att?.serviceDate ?? spl?.serviceDate ?? null;
+}
+
+/**
+ * Milliseconds of clock skew a rebuilt session's id/startedAt may carry
+ * against the store's own, and still count as the SAME session.
+ *
+ * Sessions recorded before the timer threaded its own stamp straight through
+ * to the row have their `start`/`finish` rows stamped a moment after the
+ * timer's own `sessionStartedAt`/`finishedAt` — two separate reads of the
+ * clock rather than one value carried through both — so their rebuilt id
+ * (derived from the row's stamp) differs from the store's about 4% of the
+ * time. Matching by id ALONE would read that 4% as a brand new session and
+ * duplicate it forever.
+ */
+const BAPTISM_SKEW_MS = 2000;
+
+/**
+ * How much later a rebuilt session's finishedAt must be than the matched
+ * stored session's before it counts as a genuinely later Finish the store
+ * never saved, rather than the SAME Finish read twice.
+ *
+ * Real clock skew between the timer's own stamp and the row it writes is at
+ * most a few milliseconds either way; a human undoing a Finish and pressing
+ * it again takes far longer than that. 100ms sits comfortably between the
+ * two, so it separates "this is measurement noise" from "this is a different
+ * Finish" without needing to guess at a human reaction time.
+ */
+const BAPTISM_FINISH_TIE_MS = 100;
+
+/**
+ * What one baptism-rebuild attempt found, and what applying it would do — the
+ * derive half of a rebuild, kept separate from the write so
+ * rebuildServiceRecords's derive-everything-first pass can run this
+ * alongside its other three legs without writing anything until all of them
+ * have succeeded.
+ */
+interface BaptismRebuildPlan {
+  /** Raw rows read from baptism.csv, or null when the service has no baptism
+   *  archive at all — readBaptismRows' own null/[] contract: null means never
+   *  recorded, matching NoRawRowsError; [] means recorded a header and
+   *  nothing else, which is a normal (if usually pointless) merge. */
+  rows: BaptismRow[] | null;
+  /** Sessions to hand to baptismStore.mergeRebuilt: a matched-and-updated
+   *  session keeps the stored one's id/startedAt/title/serviceTypeId/planId/
+   *  serviceKey and takes people/finishedAt from the rebuild; an UNMATCHED
+   *  one is the rebuilt session verbatim. Every other outcome (unchanged,
+   *  newer, disagreeing, invalid) leaves the stored session alone and so is
+   *  never in this list at all. */
+  toWrite: BaptismSession[];
+  /** The ids (as they appear in `toWrite`) of sessions with no stored
+   *  counterpart at all. */
+  addedIds: Set<string>;
+  /** The STORED ids of matched sessions whose people/finishedAt the rebuild's
+   *  rows actually updated — a genuinely later Finish, more than
+   *  BAPTISM_FINISH_TIE_MS ahead of the stored one's. */
+  updatedIds: Set<string>;
+  /** Matched, within BAPTISM_FINISH_TIE_MS of the stored finishedAt, with
+   *  IDENTICAL people — the rows reproduced this session exactly. Left as
+   *  stored (there is nothing to write) but distinct from `kept`: this one
+   *  WAS reproduced, it just needed no change. */
+  unchanged: number;
+  /** Matched, but the store's own finishedAt was LATER than the rebuilt one's
+   *  by more than BAPTISM_FINISH_TIE_MS — left exactly as stored. Presses
+   *  made after the service closed, or after a serviceKey roll, never reach
+   *  that service's rows (emitRaw needs an open service — see
+   *  currentServiceKey), so the store can know a correction the rows do not:
+   *  a Finish, the service ending, then an Undo and a longer re-Finish.
+   *  Overwriting that with what the (now stale) rows say is the bug an
+   *  operator would have no way to notice until the number was already
+   *  wrong. */
+  newer: number;
+  /** Matched, within BAPTISM_FINISH_TIE_MS of the stored finishedAt — the
+   *  SAME Finish — but with DIFFERENT people. The store is authoritative for
+   *  the same Finish, so this is left exactly as stored; logged rather than
+   *  silently kept, since it can only mean a lost row (`csv-appender.ts`
+   *  logs and continues past a failed append) or a replay defect, either of
+   *  which an operator should be told about even though nothing was
+   *  overwritten. */
+  disagreeing: number;
+  /** A rebuilt session's own finishedAt did not parse (never added or used
+   *  to overwrite a match), or a matched STORED session's finishedAt did not
+   *  parse (the match is left exactly as stored, since there is no reliable
+   *  answer to compare against). Logged; effectively unreachable other than
+   *  through data written before finishedAt was validated on the way in. */
+  invalid: number;
+  /** Stored sessions naming this serviceKey that no rebuilt session matched —
+   *  left exactly as they are, never removed. A session split across a
+   *  mid-session serviceKey roll, or one recorded before the raw layer
+   *  existed, lands here: replacing this service's whole set instead of
+   *  merging into it would delete sessions exactly like these. */
+  kept: number;
+  /** This service's own stored session count BEFORE this rebuild writes
+   *  anything — what `RebuiltRecord.items` starts from, since nothing already
+   *  stored is ever removed by a rebuild (see its own doc comment). */
+  existingCount: number;
+  /** One line per `invalid` session, ready to log — kept off the summary
+   *  line itself since a count says nothing about WHICH session. */
+  invalidNotes: string[];
+  /** One line per `disagreeing` session, ready to log — same reasoning. */
+  disagreementNotes: string[];
+}
+
+/**
+ * Derive this service's baptism sessions from `baptism.csv` and work out what
+ * merging them into the store would do.
+ *
+ * Two passes, not one, and the order is load-bearing:
+ *
+ *   1. Match every rebuilt session against a stored one by `id`, for the
+ *      WHOLE batch, before any session moves on to the fallback below. One
+ *      rebuilt session's id match must never be pre-empted by a DIFFERENT
+ *      rebuilt session's 2-second fallback grabbing the same stored session
+ *      first — that is exactly how two sessions 1.5 seconds apart once had
+ *      their `people` swapped: the fallback ran per-session, so the first
+ *      rebuilt session (not itself id-matched) claimed the SECOND session's
+ *      exact id-match by proximity before the second session's own turn to
+ *      look for its id ever came.
+ *   2. Whatever id matching left unmatched forms every (rebuilt, stored) pair
+ *      within BAPTISM_SKEW_MS, sorted by elapsed time ascending, and assigns
+ *      them off that sorted list, skipping either side once it is taken.
+ *      Nearest-first over the WHOLE remaining set, never per rebuilt session
+ *      in array order: a rebuilt session considered first can otherwise steal
+ *      a LATER rebuilt session's own closer match merely for being looked at
+ *      first, which duplicated one of two sessions 1.5 seconds apart while
+ *      leaving the other unrestored.
+ *
+ * Matched against EVERY stored session, not only this service's, so a
+ * rebuild can never add a second copy of a session the store already has
+ * under a different key (see mergeServiceRecords, which can re-key a
+ * record's identity onto a different serviceKey; baptism sessions are not
+ * touched by that today, but the rebuild must not assume they never will be).
+ *
+ * Never a replace. Pure with respect to the store: reads
+ * baptismStore.listSessions() but writes nothing, so both callers below can
+ * derive first and decide afterward whether there is anything to write.
+ */
+async function planBaptismRebuild(serviceKey: string, serviceDate: string): Promise<BaptismRebuildPlan> {
+  const rows = await readBaptismRows(serviceKey, serviceDate);
+  const allStored = await baptismStore.listSessions();
+  const storedForService = () => allStored.filter((s) => s.serviceKey === serviceKey);
+  const existingCount = storedForService().length;
+
+  if (rows === null) {
+    return {
+      rows: null,
+      toWrite: [],
+      addedIds: new Set(),
+      updatedIds: new Set(),
+      unchanged: 0,
+      newer: 0,
+      disagreeing: 0,
+      invalid: 0,
+      kept: existingCount,
+      existingCount,
+      invalidNotes: [],
+      disagreementNotes: [],
+    };
+  }
+
+  const tl = await serviceTimelineStore.get(serviceKey);
+  const rebuilt = rebuildBaptismSessions(rows, {
+    serviceKey,
+    title: tl?.planTitle ?? null,
+    serviceTypeId: tl?.serviceTypeId ?? null,
+    planId: tl?.planId ?? null,
+  });
+
+  // Pass 1: id matches, decided for the whole batch first.
+  const consumed = new Set<string>();
+  const idMatch = new Map<BaptismSession, BaptismSession>();
+  for (const r of rebuilt) {
+    const m = allStored.find((s) => !consumed.has(s.id) && s.id === r.id);
+    if (m) {
+      consumed.add(m.id);
+      idMatch.set(r, m);
+    }
+  }
+
+  // Pass 2: every (still-unmatched rebuilt, unconsumed stored) pair within
+  // BAPTISM_SKEW_MS, closest first, each side taken at most once. Built and
+  // sorted as candidates BEFORE any assignment is made — see this function's
+  // own doc comment for the bug a per-rebuilt-session loop reproduced.
+  const stillUnmatched = rebuilt.filter((r) => !idMatch.has(r));
+  const unconsumedStored = allStored.filter((s) => !consumed.has(s.id));
+  const candidates: { r: BaptismSession; s: BaptismSession; delta: number }[] = [];
+  for (const r of stillUnmatched) {
+    for (const s of unconsumedStored) {
+      const delta = Math.abs(Date.parse(s.startedAt) - Date.parse(r.startedAt));
+      if (delta <= BAPTISM_SKEW_MS) candidates.push({ r, s, delta });
+    }
+  }
+  candidates.sort((a, b) => a.delta - b.delta);
+  const fallbackMatch = new Map<BaptismSession, BaptismSession>();
+  const takenStored = new Set<string>();
+  for (const c of candidates) {
+    if (fallbackMatch.has(c.r) || takenStored.has(c.s.id)) continue;
+    fallbackMatch.set(c.r, c.s);
+    takenStored.add(c.s.id);
+    consumed.add(c.s.id);
+  }
+
+  const toWrite: BaptismSession[] = [];
+  const addedIds = new Set<string>();
+  const updatedIds = new Set<string>();
+  let unchanged = 0;
+  let newer = 0;
+  let disagreeing = 0;
+  let invalid = 0;
+  const invalidNotes: string[] = [];
+  const disagreementNotes: string[] = [];
+
+  for (const r of rebuilt) {
+    const match = idMatch.get(r) ?? fallbackMatch.get(r) ?? null;
+    const rMs = Date.parse(r.finishedAt);
+
+    if (!match) {
+      if (!Number.isFinite(rMs)) {
+        invalid += 1;
+        invalidNotes.push(`a session starting ${r.startedAt} has no readable finish time in the rows — not added`);
+        continue;
+      }
+      addedIds.add(r.id);
+      toWrite.push(r);
+      continue;
+    }
+
+    const mMs = Date.parse(match.finishedAt);
+    if (!Number.isFinite(rMs) || !Number.isFinite(mMs)) {
+      invalid += 1;
+      invalidNotes.push(`session ${match.id}'s finish time could not be compared to the rows (unreadable on one side) — keeping the store`);
+      continue;
+    }
+
+    // A rebuild only ever REPLACES a matched session
+    // when its rows show a genuinely later Finish. Within the tie band it is
+    // the same Finish, and the store is authoritative for it either way.
+    const delta = rMs - mMs;
+    if (delta > BAPTISM_FINISH_TIE_MS) {
+      updatedIds.add(match.id);
+      // The stored session's own identity; only what the rows know and the
+      // store might not otherwise have (a re-finish whose earlier save
+      // failed) comes from the rebuild.
+      toWrite.push({ ...match, people: r.people, finishedAt: r.finishedAt });
+    } else if (delta < -BAPTISM_FINISH_TIE_MS) {
+      newer += 1; // the store's own correction is newer than what these rows can show
+    } else if (JSON.stringify(r.people) === JSON.stringify(match.people)) {
+      unchanged += 1; // the same Finish, reproduced exactly — nothing to write
+    } else {
+      disagreeing += 1;
+      disagreementNotes.push(
+        `session ${match.id}: the rows and the store agree on when it finished but not who it was for — keeping the store`,
+      );
+    }
+  }
+
+  const kept = storedForService().filter((s) => !consumed.has(s.id)).length;
+  return {
+    rows,
+    toWrite,
+    addedIds,
+    updatedIds,
+    unchanged,
+    newer,
+    disagreeing,
+    invalid,
+    kept,
+    existingCount,
+    invalidNotes,
+    disagreementNotes,
+  };
+}
+
+/**
+ * Write a baptism-rebuild plan and log the merge — the one place that calls
+ * baptismStore.mergeRebuilt, shared by rebuildServiceBaptisms and
+ * rebuildServiceRecords's baptism leg so the two cannot log this differently.
+ *
+ * Logs even when there is nothing to WRITE: a service whose rows produce no
+ * change still has something worth saying (how many were newer than their
+ * own rows, how many were left alone entirely), and a silent no-op here is
+ * exactly the gap that made `kept` invisible in the log for a service whose
+ * merge changed nothing.
+ *
+ * The write itself is wrapped: a filesystem failure here must reach the log,
+ * scrubbed, and never the response or the toast — the same discipline
+ * rebuildServiceRecords already applies to its other three legs.
+ *
+ * Also the one place that tells the live baptism timer which sessions this
+ * rebuild actually restored (see baptismTimerService.clearRestoredSaveErrors)
+ * — being shared by both callers is exactly why: a save-failure entry's own
+ * per-session Rebuild button posts through rebuildServiceBaptisms,
+ * but an operator can just as easily restore the same session through
+ * History's whole-service rebuild, and the note must clear either way.
+ */
+async function applyBaptismRebuild(
+  serviceKey: string,
+  plan: BaptismRebuildPlan,
+): Promise<{ updated: number; added: number; full: number; restoredIds: ReadonlySet<string> }> {
+  const rowCount = (plan.rows ?? []).length;
+  for (const note of plan.invalidNotes) console.warn(`[baptism] rebuild of ${scrub(serviceKey)}: ${scrub(note)}`);
+  for (const note of plan.disagreementNotes) console.warn(`[baptism] rebuild of ${scrub(serviceKey)}: ${scrub(note)}`);
+
+  // A rebuild never evicts (see baptismStore.mergeRebuilt), so `plan.kept` —
+  // computed before the write ran — is still accurate after it: nothing
+  // this write does can make a session that was not matched disappear.
+  const tail =
+    `${scrub(plan.unchanged)} unchanged, ${scrub(plan.newer)} newer in the store, ` +
+    `${scrub(plan.disagreeing)} disagreeing with the rows, ${scrub(plan.kept)} not in the raw rows` +
+    (plan.invalid > 0 ? `, ${scrub(plan.invalid)} unreadable` : "");
+  // The leading count matches BaptismRebuildOutcome.sessions exactly — every
+  // rebuilt row that corresponds to a session now in the store, not only the
+  // ones this call actually wrote — so a newer-only run logs "1 sessions"
+  // rather than "0 sessions" while the response it produced says `sessions:1`.
+  const correspond = (u: number, a: number) => u + a + plan.unchanged + plan.newer + plan.disagreeing;
+
+  // Computed once, then logged and returned in ONE place at the foot of this
+  // function — regardless of which branch below produced them — so the log
+  // line's own count can never drift from what the response reports the way
+  // two separately written copies of the same format string already did
+  // once (the early-return branch's own copy was the only one any test
+  // exercised; the "something was written" copy silently used a different,
+  // wrong formula for months).
+  let added = 0;
+  let addedIds: ReadonlySet<string> = new Set();
+  let updated = 0;
+  let updatedIds: ReadonlySet<string> = new Set();
+  let full = 0;
+
+  if (plan.toWrite.length > 0) {
+    try {
+      ({ added, addedIds, updated, updatedIds, full } = await baptismStore.mergeRebuilt(plan.toWrite));
+    } catch (err) {
+      // Logged here, with the real reason, for BOTH callers — but re-thrown
+      // RAW, not wrapped in RebuildFailedError: this function is shared by
+      // rebuildServiceBaptisms (whose own caller must sanitize it before it
+      // can reach a response) and rebuildServiceRecords's write loop (which
+      // already sanitizes ITS OWN leg failures with the exact same fixed
+      // sentence, one layer up). Wrapping here too meant the write loop's own
+      // [history] log line reported "That recording could not be rebuilt, and
+      // nothing was changed" — RebuildFailedError's OWN sentence — instead of
+      // the real reason, since errorMessage() reads `.message`, never `.cause`.
+      console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
+      throw err;
+    }
+
+    // Every update lands unconditionally — replacing a session's own fields
+    // never changes how many sessions the store holds, so an update is
+    // never capacity-limited. `added`, `updated` and `full` all come
+    // straight from mergeRebuilt's own write-time count, never derived here
+    // from plan.addedIds.size/plan.updatedIds.size: the store can change
+    // between planning this rebuild and applying it, and a plan-time count
+    // can drift from what actually happened, even go negative.
+    if (full > 0) {
+      console.warn(
+        `[baptism] rebuild: the store is full at ${scrub(MAX_BAPTISM_SESSIONS)} sessions — ` +
+          `${scrub(full)} new session(s) for ${scrub(serviceKey)} could not be added`,
+      );
+    }
+  }
+
+  // A saveErrors entry describes a session Finish never got into the store
+  // AS IT STANDS — which covers two different write-time outcomes, not one.
+  // No stored counterpart at all (an ADD) is the common case; a session
+  // whose LATER re-Finish is what failed already has a stale counterpart
+  // (its own earlier, successful Finish), so its rebuild can only ever
+  // UPDATE that counterpart to match the raw rows — never add a second one.
+  // Both are "restored" in exactly the sense the note is waiting for. The id
+  // the cap left in `full` instead is neither, and stays. Returned to BOTH
+  // callers, not just used here: a save-failure entry's own Rebuild needs to
+  // know whether ITS OWN sessionId is among these, not merely that something
+  // was written for the service — a full or read-only disk can drop the
+  // `finish` row itself (see rebuildBaptismSessions' own `neverFinished`
+  // counter), leaving the raw rows with nothing to restore at all. Called
+  // even when nothing was written (an empty set) — a no-op, since
+  // clearRestoredSaveErrors only ever removes ids actually present.
+  const restoredIds = new Set([...addedIds, ...updatedIds]);
+  baptismTimerService.clearRestoredSaveErrors(restoredIds);
+  // clearRestoredSaveErrors only pushes when a save-failure ENTRY actually
+  // cleared — a rebuild that adds or updates a session with no failed save
+  // to clear (an operator picking up an older correction, say) changes the
+  // store just as really, and the Baptisms tab's own Past sessions/Trends
+  // and History's own list/card (both read the store, not this function's
+  // return value) would otherwise stay stale until a full reload, whichever
+  // of the three routes into this function did the writing.
+  if (restoredIds.size > 0) broadcast("baptism:rebuilt", { serviceKey, ids: [...restoredIds] });
+
+  console.log(
+    `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
+      `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail)}`,
+  );
+  return { updated, added, full, restoredIds };
+}
+
+/** What a baptism-only rebuild did. */
+export interface BaptismRebuildOutcome {
+  /** Raw rows read from baptism.csv. */
+  rows: number;
+  /** Rebuilt sessions that correspond to a session now in the store: updated
+   *  + added + unchanged + newer + disagreeing — everything except
+   *  `invalid`. A matched-but-invalid row's stored session is left exactly
+   *  as it was, but it does NOT fall through to `kept` either: both match
+   *  passes add a stored session to `consumed` as soon as they match it,
+   *  before this categorisation runs, so a matched-invalid session is
+   *  excluded from `kept` (which only counts UNconsumed stored sessions) the
+   *  same way it is excluded from `sessions` — it is counted once, under
+   *  `invalid`, and nowhere else. */
+  sessions: number;
+  /** Matched an existing stored session; its people/finishedAt were brought
+   *  up to date (a genuinely later Finish the store had not saved). */
+  updated: number;
+  /** No match in the store at all; added as a new session. */
+  added: number;
+  /** Matched, the same Finish (within BAPTISM_FINISH_TIE_MS), identical
+   *  people — reproduced exactly, nothing written. */
+  unchanged: number;
+  /** Matched, but the store's own finishedAt was LATER than the rebuilt
+   *  one's by more than BAPTISM_FINISH_TIE_MS — left exactly as stored
+   *  rather than reverted. */
+  newer: number;
+  /** Matched, the same Finish, but the rows and the store disagree on the
+   *  people — left exactly as stored; logged as a probable lost row or
+   *  replay defect. */
+  disagreeing: number;
+  /** A rebuilt or matched stored finishedAt could not be read, so the match
+   *  (if any) was left exactly as stored rather than compared. */
+  invalid: number;
+  /** Stored sessions for this service the rebuild found no counterpart for —
+   *  left untouched. */
+  kept: number;
+  /** New sessions this rebuild found no stored counterpart for, but which
+   *  the MAX_SESSIONS cap would not let the store accept. Never evicted to
+   *  make room for these — see baptismStore.mergeRebuilt — simply not
+   *  added; zero on any realistic install. An operator who wants them in has
+   *  one option: delete some old sessions and rebuild again. */
+  full: number;
+  /** The ids this rebuild actually wrote — added or updated, at write time,
+   *  never a plan-time count (see baptismStore.mergeRebuilt's own doc
+   *  comment). A save-failure entry's own Rebuild checks its OWN sessionId
+   *  against this list rather than trusting a 200 status alone: the raw rows
+   *  can hold presses for a session with no `finish` row to close them (a
+   *  full or read-only disk drops that append too), in which case this
+   *  rebuild writes nothing for it at all and the entry must say so, not
+   *  report success. */
+  restoredIds: string[];
+}
+
+/**
+ * Rebuild one service's baptism sessions from `baptism.csv` alone.
+ *
+ * The baptism-only half of Rebuild from raw: callable on its own from the
+ * Baptisms tab without touching the timing/SPL/attendance records
+ * rebuildServiceRecords also covers, and reused BY rebuildServiceRecords for
+ * its own baptism leg (see planBaptismRebuild/applyBaptismRebuild) so the two
+ * cannot merge sessions differently.
+ *
+ * A MERGE, never a replace — see planBaptismRebuild. Refuses a live service
+ * the same way rebuildServiceRecords does, and a service with no baptism.csv
+ * at all the same way it refuses a recording with no raw rows. It can also
+ * re-add a session an operator deleted from Past sessions: the raw rows do
+ * not know a session was deleted any more than they know one was corrected,
+ * and that is the one way an older service's lost session can come back at
+ * all — the caller's own confirm text says so.
+ */
+export async function rebuildServiceBaptisms(serviceKey: string): Promise<BaptismRebuildOutcome> {
+  assertNotLive(serviceKey, "rebuilt");
+
+  const serviceDate = await serviceDateOf(serviceKey);
+  if (!serviceDate) {
+    // Same distinction rebuildServiceRecords draws: this key names no
+    // recording at all, which is the caller's mistake, not a recording with
+    // nothing behind it — so this stays a 500 rather than the 409 below.
+    const reason = `no record for "${serviceKey}" names a service date, so its raw rows cannot be located`;
+    console.warn(`[baptism] rebuild of ${scrub(serviceKey)} failed: ${scrub(reason)}`);
+    throw new RebuildFailedError(reason);
+  }
+
+  const plan = await planBaptismRebuild(serviceKey, serviceDate);
+  if (plan.rows === null) {
+    console.log(`[baptism] rebuild of ${scrub(serviceKey)}: no raw rows, nothing changed`);
+    throw new NoRawRowsError();
+  }
+
+  let updated: number, added: number, full: number, restoredIds: ReadonlySet<string>;
+  try {
+    ({ updated, added, full, restoredIds } = await applyBaptismRebuild(serviceKey, plan));
+  } catch (err) {
+    // applyBaptismRebuild already logged the real reason under [baptism];
+    // this route's own response must not carry it past RebuildFailedError's
+    // fixed sentence — the same discipline rebuildServiceRecords applies to
+    // its other three legs, and the reason THIS function does not also log
+    // is that applyBaptismRebuild already did, once, for both its callers.
+    throw new RebuildFailedError(errorMessage(err));
+  }
+  // A rebuild never evicts (see baptismStore.mergeRebuilt), so plan.kept —
+  // counted before the write ran — is still exactly right afterward.
+  return {
+    rows: plan.rows.length,
+    sessions: updated + added + plan.unchanged + plan.newer + plan.disagreeing,
+    updated,
+    added,
+    unchanged: plan.unchanged,
+    newer: plan.newer,
+    disagreeing: plan.disagreeing,
+    invalid: plan.invalid,
+    kept: plan.kept,
+    full,
+    restoredIds: [...restoredIds],
+  };
 }
 
 /**

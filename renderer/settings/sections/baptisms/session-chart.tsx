@@ -33,11 +33,13 @@ import type { BaptismSpan } from "@main/services/archive/baptism-lane";
 import { errorMessage } from "@main/services/errors";
 
 import { invoke, onNotification } from "../../../lib/api";
+import { formatClock } from "../../../lib/clock-format";
 import { logToServer } from "../../../lib/client-log";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { useServerNow } from "../../../lib/server-clock";
 import { useServiceTimeline } from "../../../main/use-service-timeline";
 import { toast } from "../../../components/ui";
+import { PeopleTable } from "./people-table";
 import {
   CustomizePopover,
   keepAxisLabels,
@@ -86,10 +88,20 @@ const AXIS_H = 18;
 
 /**
  * The session's timer lane, fetched once and refetched on every LIVE
- * "baptism:state" push — never on a timer, and never twice for one push (a
- * REPLAYED frame is the connect-time cache a late subscriber is handed, which
- * this component's own mount fetch already accounts for; refetching on it too
- * would be a second read of the same truth, not a new one).
+ * "baptism:state" push FOR THIS `serviceKey` — never on a timer, and never
+ * twice for one push (a REPLAYED frame is the connect-time cache a late
+ * subscriber is handed, which this component's own mount fetch already
+ * accounts for; refetching on it too would be a second read of the same
+ * truth, not a new one).
+ *
+ * "For this serviceKey" matters because this hook also backs
+ * HistorySessionChart, the read-only PAST-service entry point on a service's
+ * History page: `baptism:state` broadcasts on every press of WHATEVER
+ * service is live right now, which is almost never the past one History is
+ * showing. Refetching on every push regardless of whose it was meant a
+ * History page left open during an unrelated live baptism elsewhere re-read
+ * a lane that could not have changed, once per press, for as long as the
+ * page stayed open.
  *
  * `error` is its OWN field, never folded into an empty `spans: []` — a fetch
  * that failed (a network blip, a server restart mid-service) is not a session
@@ -113,8 +125,13 @@ export function useSessionLane(
 
   useEffect(() => {
     if (!serviceKey) return;
-    return onNotification("baptism:state", (_payload, replayed) => {
-      if (!replayed) setRev((n) => n + 1);
+    return onNotification("baptism:state", (payload, replayed) => {
+      if (replayed) return;
+      // Only a push naming THIS service's key can mean this hook's own lane
+      // changed — every other live service's own presses broadcast the same
+      // channel, and are no business of a chart showing a different one.
+      if ((payload as BaptismState).serviceKey !== serviceKey) return;
+      setRev((n) => n + 1);
     });
   }, [serviceKey]);
 
@@ -181,6 +198,173 @@ function usePastPlanItems(
   if (!active || !serviceKey) return { items: [], error: false };
   if (fetched?.key !== serviceKey) return { items: [], error: false };
   return { items: fetched.items, error: fetched.error };
+}
+
+/**
+ * One PAST session's own chart, on that session's own window — the stateless
+ * half of HistorySessionChart below. Kept separate so several of these can
+ * sit under ONE shared width measurement and ONE shared pair of fetches
+ * (HistorySessionChart's own), each still owning its own hover position: a
+ * pointer over session 1's lane must not highlight a segment in session 2's.
+ */
+function PastSessionChart({
+  width,
+  win,
+  spans,
+  planItems,
+  reduced,
+  measure,
+}: {
+  width: number;
+  win: { startMs: number; endMs: number };
+  spans: BaptismSpan[];
+  planItems: LaneItem[];
+  reduced: boolean;
+  measure: (s: string) => number;
+}) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hoverX, setHoverX] = useState<number | null>(null);
+  function onMove(e: React.PointerEvent<SVGSVGElement>) {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const r = svg.getBoundingClientRect();
+    if (r.width === 0) return;
+    setHoverX(((e.clientX - r.left) / r.width) * width);
+  }
+  return (
+    <SessionSvg
+      svgRef={svgRef}
+      width={width}
+      win={win}
+      live={false}
+      now={win.endMs}
+      reduced={reduced}
+      measure={measure}
+      spans={spans}
+      timerItems={timerLaneItems(spans)}
+      planItems={planItems}
+      showPlanLane
+      hoverX={hoverX}
+      onMove={onMove}
+      onLeave={() => setHoverX(null)}
+    />
+  );
+}
+
+export interface HistorySessionChartProps {
+  serviceKey: string;
+  /** Every baptism session History linked to this service (linkBaptisms) —
+   *  usually one; a reset-and-restart, or two sessions genuinely recorded in
+   *  one service, means more, and each gets its own chart-or-note and its
+   *  own per-person splits, in the order given. */
+  sessions: readonly BaptismSession[];
+}
+
+/**
+ * The read-only, PAST-service entry point onto the Session chart, for the
+ * Baptisms card on a service's History page.
+ *
+ * Shares useSessionLane and usePastPlanItems outright with the live
+ * SessionChart above — one fetch of each, for the WHOLE service, exactly as
+ * they already work — and slices per session with the same
+ * sessionWindow/sessionSpans/clipToSession arithmetic every live chart uses
+ * (see sessionSpans' own comment: the lane endpoint already returns every
+ * session's spans concatenated, which is what makes drawing more than one
+ * session here possible without a second route). SessionSvg itself is never
+ * copied, only called again. Nothing here is imported by
+ * baptism-operator.tsx, so the live Baptisms page renders exactly as before.
+ *
+ * A session matched to this service by exact serviceKey but whose own window
+ * has no spans in the shared lane (recorded before the raw layer existed, or
+ * the merge otherwise never captured it) — and a session matched only by
+ * time overlap, which by construction can never have raw rows filed under
+ * THIS service's key — both get their splits and one plain line saying no
+ * timeline was recorded, never an empty chart that reads as nothing
+ * happened.
+ */
+export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChartProps) {
+  const { spans, loaded, error } = useSessionLane(serviceKey);
+  const { items: planItemsAll, error: planError } = usePastPlanItems(serviceKey, true);
+  const reduced = prefersReducedMotion();
+  const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
+
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(640);
+  // THE REF GOES ON CONTENT THAT IS ALWAYS RENDERED — see history-chart.tsx's
+  // own "THE REF GOES ON BOTH BRANCHES" note for the identical bug. This
+  // effect runs ONCE, on mount, before useSessionLane's fetch — which never
+  // resolves synchronously — has any chance to flip `loaded` true. An early
+  // `return null` above this div meant the FIRST render had no element for
+  // the ref to find at all: the effect fired once against
+  // `hostRef.current === null`, attached to nothing, and (deps `[]`) never
+  // ran again once the real content finally existed — the chart was stuck at
+  // its 640px default for the rest of the page's life, regardless of the
+  // card's own real width. The `!loaded` gate now lives INSIDE the div,
+  // around the children alone, so this div — and the ref on it — exists from
+  // the very first render.
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el || typeof ResizeObserver !== "function") return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (w > 0) setWidth(Math.max(320, Math.round(w)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const multiple = sessions.length > 1;
+
+  return (
+    <div ref={hostRef} className="flex flex-col gap-5">
+      {!loaded ? null : sessions.map((session) => {
+        // Only a session KEYED to this exact service can have raw rows in
+        // its shared lane at all — one matched by time overlap (a keyless,
+        // older session) never ran under this key, so there is nothing in
+        // these rows that could be its. See linkBaptisms' own doc comment.
+        const win = session.serviceKey === serviceKey
+          ? sessionWindow(session.startedAt, session.finishedAt, { live: false, nowMs: 0 })
+          : null;
+        const sessionOnlySpans = win ? sessionSpans(spans, win.startMs, win.endMs) : [];
+        const hasChart = !error && win && sessionOnlySpans.length > 0;
+        return (
+          <div key={session.id} className="flex flex-col gap-3">
+            {multiple && (
+              <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle">
+                Session · {formatClock(session.startedAt)}
+              </span>
+            )}
+            {hasChart ? (
+              <>
+                <PastSessionChart
+                  width={width}
+                  win={win}
+                  spans={sessionOnlySpans}
+                  planItems={clipToSession(planLaneItems(planItemsAll), win.startMs, win.endMs)}
+                  reduced={reduced}
+                  measure={measure}
+                />
+                <Legend />
+              </>
+            ) : error ? (
+              <ErrorNote text="Couldn't load the timing lane. Reload the page to try again." />
+            ) : (
+              <EmptyNote text="No timing detail was recorded for this session." />
+            )}
+            <PeopleTable people={session.people} />
+          </div>
+        );
+      })}
+      {/* One plan-fetch note for the whole card, not per session: it is the
+          same fetch (usePastPlanItems is keyed on serviceKey alone) and the
+          same failure either way. */}
+      {planError && (
+        <p role="alert" className="text-caption2 text-danger-11">
+          Plan items could not be loaded; the log has the details.
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The deepest lane index in use, or -1 for no segments — see laneSegments. */

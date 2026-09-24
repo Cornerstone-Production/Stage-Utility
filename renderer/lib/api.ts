@@ -137,6 +137,7 @@ export type IpcChannel =
   | "baptism:lane"
   | "baptism:next"
   | "baptism:pause"
+  | "baptism:rebuild"
   | "baptism:reset"
   | "baptism:resume"
   | "baptism:sessions"
@@ -176,6 +177,7 @@ export type IpcChannel =
   | "displays:refresh"
   | "history:deleteMilestone"
   | "history:editWindow"
+  | "history:live"
   | "history:listMilestones"
   | "history:merge"
   | "history:rebuild"
@@ -572,6 +574,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
 
+    case "history:live":
+      return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
+
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
     case "history:saveMilestone":
@@ -621,6 +626,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
         testimonyItemId: p.testimonyItemId,
         baptismItemId: p.baptismItemId,
       });
+    case "baptism:rebuild":
+      return post<T>("/api/baptism/rebuild", { serviceKey: p.serviceKey });
 
     case "spl:series":
       return apiFetch<T>(

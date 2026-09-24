@@ -282,8 +282,16 @@ class BaptismTimerService {
    * row is worse than losing one. This is a deliberate exception to this repo's
    * catch-rethrows-or-returns rule, matching the convention sampleArchive's own
    * record methods already document (see recordBaptism).
+   *
+   * `at` threads straight through to recordBaptism's own optional stamp.
+   * start() passes its `now` and finalize() its `finishedAt`, so the `start`
+   * and `finish` rows carry the SAME string already stamped into
+   * sessionStartedAt/finishedAt rather than a separate, moment-later read of
+   * the clock — which is what a rebuilt session's id is derived from
+   * (baptismSessionId). Every other call site omits it: nothing else derives
+   * an id from these rows, so recordBaptism's own clock read is fine.
    */
-  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = ""): void {
+  private emitRaw(event: BaptismRawEvent, segmentMs: number, detail = "", at?: string): void {
     try {
       const record = serviceTimelineRecorder.getCurrent();
       if (!record || record.endedAt != null) {
@@ -306,6 +314,7 @@ class BaptismTimerService {
           item: this.liveItem?.title ?? null,
           detail,
         },
+        at,
       );
     } catch (err) {
       console.error("[baptism] raw: emit failed:", event, err);
@@ -359,7 +368,7 @@ class BaptismTimerService {
     // button press and a PCO auto-start, every time. That is worse than no
     // value: the whole point of this row is to report only what happened. The
     // `[baptism] auto-start:` log line already records which one it was.
-    this.emitRaw("start", 0, "");
+    this.emitRaw("start", 0, "", now);
     return this.commit();
   }
 
@@ -594,7 +603,7 @@ class BaptismTimerService {
       // running, and in which section. See BaptismState.finishedFrom.
       finishedFrom: this.state.armed ? "armed" : this.state.phase === "testimony" ? "testimony" : "baptism",
     };
-    this.emitRaw("finish", 0, `people=${people.length}`);
+    this.emitRaw("finish", 0, `people=${people.length}`, finishedAt);
     if (people.length > 0 && this.state.sessionStartedAt) {
       // Captured now, not read again inside the callbacks below: this write
       // settles after Finish has returned, and by then this.state may already
@@ -801,6 +810,33 @@ class BaptismTimerService {
     );
     this.state = { ...this.state, saveErrors: [] };
     return this.commit();
+  }
+
+  /**
+   * A rebuild — the header's own, History's whole-service one, or a
+   * save-failure entry's own per-session button, whichever path actually
+   * wrote it — put these ids into the store for the first time. Any of them
+   * naming a saveErrors entry is exactly what that entry was waiting for:
+   * the session it said never saved is now the one Past sessions shows, so
+   * the note clears here too, and the push carries it to every screen. See
+   * applyBaptismRebuild in history-edit.ts, the one place that calls this,
+   * for why `restoredIds` is `mergeRebuilt`'s own write-time `addedIds`
+   * UNION `updatedIds` — a re-Finish's failed save already has a stored
+   * counterpart, so its own rebuild only ever updates it — rather than a
+   * rebuild's merely-planned ones. An id the store's cap turned away was
+   * never restored either way, and its entry stays, with the rebuild's own
+   * result saying why.
+   */
+  clearRestoredSaveErrors(restoredIds: ReadonlySet<string>): void {
+    const before = this.state.saveErrors ?? [];
+    if (!before.length || restoredIds.size === 0) return;
+    const cleared = before.filter((e) => restoredIds.has(e.sessionId));
+    if (!cleared.length) return;
+    console.log(
+      `[baptism] rebuild restored ${cleared.map((e) => e.sessionId).join(", ")} — save-failure note cleared`,
+    );
+    this.state = { ...this.state, saveErrors: before.filter((e) => !restoredIds.has(e.sessionId)) };
+    this.commit();
   }
 
   /** Clear everything back to idle (keeps the chosen mode). */

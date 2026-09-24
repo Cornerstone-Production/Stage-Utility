@@ -167,6 +167,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: true, items: 12, missing: false },
         spl: { rebuilt: true, items: 11, missing: false },
         attendance: { rebuilt: true, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: [],
       },
     }));
@@ -189,6 +190,12 @@ describe("History: Rebuild from raw", () => {
     const dialog = text(document.body as HTMLElement);
     assert.match(dialog, /Rebuild from raw\?/);
     assert.match(dialog, /per-item time corrections are kept/i);
+    // The confirm names the baptism merge alongside the three legs it
+    // already described, and says plainly that a deleted session can come
+    // back — a rebuild that quietly restores something the operator removed
+    // is not something the confirm may leave unsaid.
+    assert.match(dialog, /baptism sessions are merged/i, `the confirm does not mention the baptism merge: ${dialog}`);
+    assert.match(dialog, /never deleted|can come back/i, `the confirm does not warn that a deleted session can return: ${dialog}`);
 
     const go = button(document.body as HTMLElement, "Rebuild");
     assert.ok(go, `the confirm dialog offered no Rebuild button: ${dialog}`);
@@ -208,6 +215,183 @@ describe("History: Rebuild from raw", () => {
     assert.doesNotMatch(shown, /left alone/, `nothing was left alone, so the toast must not say so: ${shown}`);
   });
 
+  // Hiding the baptism leg from the result must go red — this is exactly
+  // that guard, not just a happy-path render.
+  test("shows the baptism leg, including how many were added, in the result", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: false, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: true, items: 2, missing: false },
+        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /baptism sessions/, `the baptism leg is missing from the result entirely: ${shown}`);
+    assert.match(shown, /1 added/, `the result does not say how many sessions were added: ${shown}`);
+  });
+
+  // The result must name EVERY category a baptism rebuild can produce, not
+  // just the total and the added count: a session left alone can be left
+  // alone for four different reasons (never matched, a store correction
+  // newer than the rows, a disagreement with the rows, or an unreadable
+  // finish time), and an operator cannot tell those apart from a bare count.
+  test("names every baptism category the result carries, not just the total and the added count", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: true, items: 4, missing: false },
+        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 1, full: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /1 added/, `missing the added count: ${shown}`);
+    assert.match(shown, /1 updated/, `missing the updated count: ${shown}`);
+    assert.match(shown, /newer in the store/, `missing the 'newer' reason: ${shown}`);
+    assert.match(shown, /not in the raw rows/, `missing the 'kept' reason: ${shown}`);
+    // This fixture is ALSO the mixed shape that used to say "left alone"
+    // twice: baptism partly rebuilt (1 added, 1 updated) WITH its own
+    // leftovers (1 newer, 1 kept), in the same rebuild as spl/attendance
+    // being entirely left alone — a nested "left alone: N (...)" welded onto
+    // baptism's own done entry, beside the outer list's own "left alone:
+    // SPL items, attendance samples", used to produce the phrase twice in
+    // one sentence.
+    const occurrences = (shown.match(/left alone/g) ?? []).length;
+    assert.equal(
+      occurrences,
+      1,
+      `expected "left alone" exactly once even with baptism partly rebuilt AND another leg fully left alone, got ${occurrences}: ${shown}`,
+    );
+  });
+
+  // A leg that wrote nothing at all must not get its own "left alone:"
+  // phrase nested a second time inside the sentence's own "left alone: ..."
+  // list — the whole leg IS the left-alone content here, and the outer list
+  // already says so once.
+  test("a newer-only baptism result says 'left alone' exactly once", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 1, missing: false },
+        baptismDetail: { updated: 0, added: 0, unchanged: 0, newer: 1, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    const occurrences = (shown.match(/left alone/g) ?? []).length;
+    assert.equal(occurrences, 1, `expected "left alone" exactly once, got ${occurrences}: ${shown}`);
+    assert.match(shown, /newer in the store/, `missing the 'newer' reason: ${shown}`);
+  });
+
+  // A rebuild never evicts an existing session to make room — at the
+  // MAX_SESSIONS cap it simply stops adding new baptism sessions, and
+  // History's own result must say so in plain words, only when it happened.
+  test("names a full store only when it turned any baptism session away", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 1, missing: false },
+        baptismDetail: { updated: 0, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 1, full: 3 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /the store is full, so 3 baptism sessions were not added/, `missing the full-store clause: ${shown}`);
+  });
+
+  test("says nothing about the store being full when nothing was turned away", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: false, items: 11, missing: false },
+        attendance: { rebuilt: false, items: 143, missing: false },
+        baptism: { rebuilt: true, items: 2, missing: false },
+        baptismDetail: { updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openRecording(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    assert.doesNotMatch(lastToast(), /\bfull\b/, "full:0 must not mention the store being full at all");
+  });
+
   // The defect the per-record shape exists for: a count alone read as an
   // achievement even for a record the raw layer held nothing for, so a rebuild
   // that changed nothing reported "Rebuilt: 12 items".
@@ -219,6 +403,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: false, items: 12, missing: false },
         spl: { rebuilt: false, items: 9, missing: false },
         attendance: { rebuilt: true, items: 143, missing: false },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: [],
       },
     }));
@@ -248,6 +433,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: true, items: 24, missing: false },
         spl: { rebuilt: true, items: 24, missing: false },
         attendance: { rebuilt: true, items: 571, missing: false },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: ["spl"],
       },
     }));
@@ -275,6 +461,7 @@ describe("History: Rebuild from raw", () => {
         timeline: { rebuilt: true, items: 0, missing: false },
         spl: { rebuilt: false, items: 0, missing: true },
         attendance: { rebuilt: false, items: 0, missing: true },
+        baptism: { rebuilt: false, items: 0, missing: true },
         failed: [],
       },
     }));

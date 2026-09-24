@@ -20,7 +20,9 @@ import { scrub } from "../scrub.js";
 import {
   deleteServiceRecords,
   editServiceWindow,
+  isServiceLive,
   mergeServiceRecords,
+  rebuildServiceBaptisms,
   rebuildServiceRecords,
   recalcAttendance,
   setItemCounted,
@@ -120,6 +122,7 @@ export const BAPTISM_ACTIONS = [
   "mode",
   "next",
   "pause",
+  "rebuild",
   "reset",
   "resume",
   "start",
@@ -130,6 +133,25 @@ export type BaptismAction = (typeof BAPTISM_ACTIONS)[number];
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
+    // Read-only: whether a service is live right now, for a CLIENT to decide
+    // whether to offer an action the server would otherwise refuse — the
+    // Baptisms header's own Rebuild button asks this before enabling itself,
+    // rather than guessing from a record it happens to already have (a guess
+    // that read a just-ended service as still live until the next tick, or a
+    // live one as safe the moment an unrelated broadcast arrived). This route
+    // and assertNotLive share isServiceLive, so THIS SERVER cannot disagree
+    // with its own refusal — a CLIENT's cached copy of the answer can still be
+    // stale for as long as it takes to ask again, which is a different problem
+    // the header solves with its own re-ask schedule, not this route.
+    if (method === "GET" && pathname === "/api/history/live") {
+      const serviceKey = c.url.searchParams.get("serviceKey");
+      if (!serviceKey) {
+        error(res, "serviceKey query parameter required");
+        return;
+      }
+      json(res, { live: isServiceLive(serviceKey) });
+      return;
+    }
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
     if (method === "POST" && pathname === "/api/history/window") {
       const body = await readBodyOrEmpty(req);
@@ -408,6 +430,22 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "mode": {
           const body = (await readBody(req)) as Record<string, unknown>;
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
+          return;
+        }
+        // Merges this service's baptism sessions from baptism.csv into the
+        // stored ones — the Baptisms tab's own Rebuild from raw, independent
+        // of the timing/SPL/attendance rebuild at /api/history/rebuild (which
+        // gains the same merge as its own baptism leg). Throws rather than
+        // reporting a partial success: 409 while the service is still
+        // recording or when it has no baptism.csv at all, 500 with the reason
+        // for an unknown serviceKey. See rebuildServiceBaptisms.
+        case "rebuild": {
+          const body = await readBodyOrEmpty(req);
+          if (typeof body.serviceKey !== "string") {
+            error(res, "body.serviceKey (string) required");
+            return;
+          }
+          json(res, await rebuildServiceBaptisms(body.serviceKey));
           return;
         }
         default: {

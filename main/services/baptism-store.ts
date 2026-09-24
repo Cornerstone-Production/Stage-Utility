@@ -20,8 +20,12 @@ interface BaptismFile {
  * number small enough to reach in normal use is a data-loss mechanism wearing a
  * cap's clothing. At a few hundred bytes each, 2000 sessions is well under a
  * megabyte and no church reaches it.
+ *
+ * Exported so a rebuild's own log line (history-edit.ts) can name the same
+ * number this file enforces, rather than a second copy of "2000" the two
+ * could drift on.
  */
-const MAX_SESSIONS = 2000;
+export const MAX_SESSIONS = 2000;
 
 class BaptismStore {
   private store = new DataStore<BaptismFile>("baptism.json", { current: null, sessions: [] }, "runtime");
@@ -94,6 +98,120 @@ class BaptismStore {
       return { ...file, sessions: merged.slice(0, MAX_SESSIONS) };
     });
     return added;
+  }
+
+  /**
+   * Apply a rebuild's reconciled sessions in ONE write, so a crash mid-merge
+   * cannot leave the store half updated.
+   *
+   * Each session either REPLACES the stored entry with the same id (one the
+   * rebuild matched and brought up to date) or is APPENDED (one it found no
+   * stored counterpart for). Everything else already in the file — every
+   * session this rebuild did not touch, whichever service it names — is left
+   * exactly as it was.
+   *
+   * NEVER evicts an existing session, unlike addSession/addSessions. A
+   * rebuild's job is to reconstruct data the operator already has, not to
+   * delete some of it to make room for the rest — quietly evicting the
+   * oldest session to fit a rebuild in is exactly the "delete an operator's
+   * data to tidy something up" this repo forbids. If adding every session
+   * this batch wants to APPEND would push the store past MAX_SESSIONS, only
+   * as many as fit are added (in the order handed in); the rest are
+   * reported back as `full` rather than silently dropped or evicted to make
+   * room. An operator who wants those in has one option: delete some old
+   * sessions and rebuild again. Every REPLACEMENT lands unconditionally —
+   * overwriting an existing session's own fields never changes how many
+   * sessions the store holds, so it is never capacity-limited.
+   *
+   * Returns `addedIds` and `updatedIds` — the ids of `sessions` that actually
+   * landed as a NEW entry or as a REPLACEMENT of an existing one, not merely
+   * planned to — alongside `full`, all counted here, at write time, from the
+   * same batch the write itself just applied. `added`/`updated` are
+   * `addedIds.size`/`updatedIds.size`, never separate counts: a caller that
+   * needs to know WHICH sessions were restored (the save-failure note's own
+   * Rebuild offer clears an entry only for an id that genuinely landed,
+   * whether that landing was an add or an update — a session whose LATER
+   * re-Finish failed to save already has a stored counterpart, so its own
+   * rebuild can only ever update it) cannot get that from a bare number, and
+   * a caller must not re-derive either from its own plan-time count of how
+   * many rows it expected to add or update — the store can change between
+   * planning a rebuild and applying it (an operator deleting a session this
+   * rebuild had matched, another save landing), and subtracting a stale
+   * plan-time count from a fresh write-time one can drift, even go negative.
+   * `added + full` is exactly `sessions.length` minus however many were
+   * REPLACEMENTS (`updated`), by construction.
+   *
+   * See rebuildServiceBaptisms in history-edit.ts, which is the only caller
+   * and decides what belongs in `sessions`, and already refuses to let two
+   * rebuilt sessions claim the same stored one. This is the second line of
+   * defence: two sessions sharing an id here can only mean the caller's own
+   * matching has a bug, and a `Map` built from `sessions` would silently
+   * keep the LAST of them and drop the other's data — the exact
+   * silent-collapse shape this refuses instead.
+   *
+   * A session identical, field for field, to what is already stored leaves
+   * that entry as that SAME object rather than a new one carrying equal
+   * values, so an already-intact store's file is untouched byte for byte —
+   * verified by `baptism-store.test.ts`'s spy on the underlying write, not
+   * merely claimed: DataStore.update() skips the write entirely when the
+   * mutator hands back the object it was given.
+   */
+  async mergeRebuilt(
+    sessions: BaptismSession[],
+  ): Promise<{ added: number; addedIds: ReadonlySet<string>; updated: number; updatedIds: ReadonlySet<string>; full: number }> {
+    if (sessions.length === 0) return { added: 0, addedIds: new Set(), updated: 0, updatedIds: new Set(), full: 0 };
+    const seen = new Set<string>();
+    for (const s of sessions) {
+      if (seen.has(s.id)) {
+        throw new Error(`mergeRebuilt received two sessions sharing id "${s.id}" — refusing rather than silently keeping one`);
+      }
+      seen.add(s.id);
+    }
+
+    let addedIds = new Set<string>();
+    let updatedIds = new Set<string>();
+    let full = 0;
+    await this.store.update((file) => {
+      let changed = false;
+      const incoming = new Map(sessions.map((s) => [s.id, s]));
+      const updated = new Set<string>();
+      const next = file.sessions.map((existing) => {
+        const repl = incoming.get(existing.id);
+        if (!repl) return existing;
+        incoming.delete(existing.id);
+        if (repl.finishedAt === existing.finishedAt && JSON.stringify(repl.people) === JSON.stringify(existing.people)) {
+          return existing; // matched, but nothing about it actually differs — no write needed for this one
+        }
+        changed = true;
+        updated.add(existing.id);
+        return repl;
+      });
+      updatedIds = updated;
+      // Whatever is left in `incoming` after every replacement is consumed
+      // are genuinely new sessions. `next.length` here still equals the
+      // store's own current size — every existing session was either kept
+      // or replaced in place, never added or removed — so this is exactly
+      // how much room is left under the cap, with no eviction involved.
+      const toAdd = [...incoming.values()];
+      const room = Math.max(0, MAX_SESSIONS - next.length);
+      // `addedIds`, `updatedIds` and `full` all come from the SAME
+      // toAdd/room/updated right here, at write time, rather than being
+      // derived by the caller from a plan-time count — the store can change
+      // between planning a rebuild and applying it (an operator deleting a
+      // matched session, another save landing), and a caller subtracting a
+      // stale plan-time count could go negative. Returning the real ids the
+      // write itself just produced cannot.
+      const writable = toAdd.slice(0, room);
+      addedIds = new Set(writable.map((s) => s.id));
+      full = toAdd.length - writable.length;
+      for (const s of writable) {
+        changed = true;
+        next.push(s);
+      }
+      if (!changed) return file;
+      return { ...file, sessions: next };
+    });
+    return { added: addedIds.size, addedIds, updated: updatedIds.size, updatedIds, full };
   }
 
   async deleteSession(id: string): Promise<boolean> {
