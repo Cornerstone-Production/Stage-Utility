@@ -1750,7 +1750,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.finals = [];
     this.partials.clear();
     this.syncPartialSweep();
-    broadcast("prodcom:transcript", this.getBuffer());
+    this.pushTranscript();
     console.log("[prodcom] transcript cleared");
   }
 
@@ -1850,7 +1850,7 @@ export class ProdComService extends ConnectionLifecycle {
         ? "[prodcom] sensitive keywords will be hidden on displays"
         : "[prodcom] sensitive-keyword redaction turned OFF — displays show the transcript in full",
     );
-    broadcast("prodcom:transcript", this.getBuffer());
+    this.pushTranscript();
   }
 
   /**
@@ -2736,12 +2736,21 @@ export class ProdComService extends ConnectionLifecycle {
       this.transcriptTimer = null;
     }
     this.transcriptDirty = false;
-    // Skip the full-buffer spread + push when nothing consumes the transcript.
-    //
-    // channelInDemand, not channelHasSubscribers: the prodcom.phrase-said trigger
-    // reads this channel from inside the process, so a browser-only check meant a
-    // phrase rule never fired unless somebody happened to have a transcription
-    // display open — which on an unattended box is never.
+    this.pushTranscript();
+  }
+
+  /**
+   * Every transcript push goes through here, so each skips the full-buffer
+   * spread when nothing consumes the channel. Skipping is safe: a display reads
+   * the buffer fresh when it mounts (`prodcom:getTranscript`), and the hello
+   * burst does not replay this channel.
+   *
+   * channelInDemand, not channelHasSubscribers: the prodcom.phrase-said trigger
+   * reads this channel from inside the process, so a browser-only check meant a
+   * phrase rule never fired unless somebody happened to have a transcription
+   * display open — which on an unattended box is never.
+   */
+  private pushTranscript(): void {
     if (channelInDemand("prodcom:transcript")) broadcast("prodcom:transcript", this.getBuffer());
   }
 
@@ -3187,7 +3196,7 @@ export class ProdComService extends ConnectionLifecycle {
     if (skipped > 0) {
       console.log(`[prodcom] backfill skipped ${skipped} line(s) older than 4h`);
     }
-    if (added > 0) broadcast("prodcom:transcript", this.getBuffer());
+    if (added > 0) this.pushTranscript();
     return { added, skipped };
   }
 }
