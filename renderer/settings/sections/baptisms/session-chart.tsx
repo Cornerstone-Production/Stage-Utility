@@ -33,6 +33,7 @@ import type { BaptismSpan } from "@main/services/archive/baptism-lane";
 import { errorMessage } from "@main/services/errors";
 
 import { invoke, onNotification } from "../../../lib/api";
+import { formatClock } from "../../../lib/clock-format";
 import { logToServer } from "../../../lib/client-log";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { useServerNow } from "../../../lib/server-clock";
@@ -315,7 +316,7 @@ export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChar
           <div key={session.id} className="flex flex-col gap-3">
             {multiple && (
               <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle">
-                Session · {new Date(session.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                Session · {formatClock(session.startedAt)}
               </span>
             )}
             {hasChart ? (
