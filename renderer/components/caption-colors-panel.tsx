@@ -3,53 +3,12 @@ import { invoke } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useTranscript } from "../main/use-transcript";
 import { useProdcomChannels } from "../main/use-prodcom-channels";
-import { resolveChannelColor } from "../main/channel-color";
+import { resolveChannelColor, mergeChannels } from "../main/channel-color";
 import { Button, InfoHint, toast } from "./ui";
 import { ColorField } from "./ui/color-field";
 import { Switch } from "./ui/switch";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
-
-/** One row of the panel: a channel label, the ProdCom id behind it (for the
- *  deterministic auto color and for re-resolving its own color), and ProdCom's
- *  own color for it, if known. */
-interface ChannelRow {
-  label: string;
-  channelId: string | null;
-  prodcomColor: string | null;
-}
-
-/**
- * Every channel worth showing: every channel ProdCom's own list has, plus any
- * channel that has SPOKEN but is missing from that list (seen before this
- * connection's channel list loaded), plus any channel with a SAVED custom
- * color that is in neither (e.g. renamed or removed in ProdCom since).
- *
- * ProdCom's list is the base specifically so a channel that has never spoken —
- * most of a 17-channel box on any given Sunday — still gets a row. Keyed by
- * LABEL, matching how captionChannelColors itself is keyed, so a rename in
- * ProdCom does not silently orphan a saved pick's row from the channel it was
- * ever meant to color.
- */
-function mergeChannels(
-  channels: ProdcomChannelDTO[],
-  lines: TranscriptLineDTO[],
-  saved: Record<string, string>,
-): ChannelRow[] {
-  const rows = new Map<string, ChannelRow>();
-  for (const c of channels) {
-    const label = c.name ?? c.id;
-    if (label) rows.set(label, { label, channelId: c.id, prodcomColor: c.color });
-  }
-  for (const l of lines) {
-    const label = l.channelName ?? l.channel;
-    if (label && !rows.has(label)) rows.set(label, { label, channelId: l.channel, prodcomColor: l.color ?? null });
-  }
-  for (const label of Object.keys(saved)) {
-    if (!rows.has(label)) rows.set(label, { label, channelId: null, prodcomColor: null });
-  }
-  return [...rows.values()].sort((a, b) => a.label.localeCompare(b.label));
-}
 
 // Collapsible "Transcription colors" disclosure shown under the ProdCom integration.
 // Lists every channel ProdCom has, whether or not it has spoken, and lets the

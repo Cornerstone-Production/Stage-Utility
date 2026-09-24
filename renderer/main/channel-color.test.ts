@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { channelColor, lineColor, resolveChannelColor } from "./channel-color.js";
+import { channelColor, lineColor, mergeChannels, resolveChannelColor } from "./channel-color.js";
 
 describe("resolveChannelColor — the one shared decision", () => {
   it("a custom pick wins with following OFF", () => {
@@ -110,5 +110,53 @@ describe("lineColor — resolveChannelColor applied to a transcript line", () =>
 
   it("a custom override still wins over ProdCom's color", () => {
     assert.equal(lineColor(line, { "Lead TB": "#123456" }, true), "#123456");
+  });
+});
+
+describe("mergeChannels — every channel worth showing", () => {
+  // The exact shape the layout editor's hideChannels picker needs: before this
+  // fix it sourced channel names only from Object.keys(captionChannelColors),
+  // so a channel with no custom color AND no spoken lines never appeared and
+  // could not be hidden — most of a 17-channel box on any given Sunday.
+  it("lists a ProdCom channel that has neither spoken nor been given a color", () => {
+    const channels: ProdcomChannelDTO[] = [{ id: "CH-A", name: "Lead TB", color: "#00F900" }];
+    const rows = mergeChannels(channels, [], {});
+    assert.deepEqual(
+      rows.map((r) => r.label),
+      ["Lead TB"],
+      "a channel with no color and no spoken lines was dropped",
+    );
+  });
+
+  it("also lists a channel that has only spoken, and one that has only a saved color", () => {
+    const spokenOnly: TranscriptLineDTO = {
+      id: "l1",
+      channel: "CH-B",
+      channelName: "FOH TB",
+      color: null,
+      text: "hi",
+      isFinal: true,
+      at: new Date().toISOString(),
+    };
+    const rows = mergeChannels([], [spokenOnly], { "Renamed Channel": "#123456" });
+    assert.deepEqual(
+      rows.map((r) => r.label).sort(),
+      ["FOH TB", "Renamed Channel"],
+    );
+  });
+
+  it("does not list the same channel twice when it appears in more than one source", () => {
+    const channels: ProdcomChannelDTO[] = [{ id: "CH-A", name: "Lead TB", color: "#00F900" }];
+    const spoken: TranscriptLineDTO = {
+      id: "l1",
+      channel: "CH-A",
+      channelName: "Lead TB",
+      color: "#00F900",
+      text: "hi",
+      isFinal: true,
+      at: new Date().toISOString(),
+    };
+    const rows = mergeChannels(channels, [spoken], { "Lead TB": "#123456" });
+    assert.equal(rows.length, 1, `expected one row for "Lead TB", got ${rows.length}`);
   });
 });

@@ -74,3 +74,49 @@ export function lineColor(
 export function channelLabel(line: { channelName: string | null; channel: string | null }): string | null {
   return line.channelName ?? line.channel ?? null;
 }
+
+/** One channel worth showing: a label, the ProdCom id behind it (for the
+ *  deterministic auto color and for re-resolving its own color), and
+ *  ProdCom's own color for it, if known. */
+export interface ChannelRow {
+  label: string;
+  channelId: string | null;
+  prodcomColor: string | null;
+}
+
+/**
+ * Every channel worth showing: every channel ProdCom's own list has, plus any
+ * channel that has SPOKEN but is missing from that list (seen before this
+ * connection's channel list loaded), plus any channel with a SAVED custom
+ * color that is in neither (e.g. renamed or removed in ProdCom since).
+ *
+ * ProdCom's list is the base specifically so a channel that has never spoken —
+ * most of a 17-channel box on any given Sunday — still gets a row. Keyed by
+ * LABEL, matching how captionChannelColors itself is keyed, so a rename in
+ * ProdCom does not silently orphan a saved pick's row from the channel it was
+ * ever meant to color.
+ *
+ * Shared by the Transcription colors panel and the layout editor's
+ * transcript-strip channel picker — both need "every channel that could ever
+ * need a decision made about it", not just the ones ProdCom happens to be
+ * reporting live right now.
+ */
+export function mergeChannels(
+  channels: ProdcomChannelDTO[],
+  lines: TranscriptLineDTO[],
+  saved: Record<string, string>,
+): ChannelRow[] {
+  const rows = new Map<string, ChannelRow>();
+  for (const c of channels) {
+    const label = c.name ?? c.id;
+    if (label) rows.set(label, { label, channelId: c.id, prodcomColor: c.color });
+  }
+  for (const l of lines) {
+    const label = l.channelName ?? l.channel;
+    if (label && !rows.has(label)) rows.set(label, { label, channelId: l.channel, prodcomColor: l.color ?? null });
+  }
+  for (const label of Object.keys(saved)) {
+    if (!rows.has(label)) rows.set(label, { label, channelId: null, prodcomColor: null });
+  }
+  return [...rows.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
