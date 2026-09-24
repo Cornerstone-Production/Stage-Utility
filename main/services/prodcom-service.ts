@@ -2606,9 +2606,8 @@ export class ProdComService extends ConnectionLifecycle {
       // subscribed between two otherwise-identical deliveries (a freshly
       // enabled automation rule, a display that just mounted) has seen NEITHER
       // of them, and "the content matches what was already stored" says
-      // nothing about what THAT listener has seen. demand-gating.test.ts pins
-      // this — a rule enabled between two identical single-transport
-      // deliveries must still see the second.
+      // nothing about what THAT listener has seen. The single-transport case
+      // in prodcom-duplicate-broadcast.test.ts pins this.
       if (changed || !this.wsOpen) {
         this.flushTranscript(); // finals land immediately
       } else {

@@ -1,16 +1,16 @@
 // A line that arrives on both transports, while the WebSocket is open beside
 // SSE and still unproven, must be applied and broadcast once — not twice.
 //
-// The trap this guards against, found while adding the dedupe: suppressing
-// every broadcast of a final whose content is UNCHANGED from what is already
-// stored is too broad. It also silences an ordinary re-send on a SINGLE live
-// transport, which is exactly the shape a freshly-enabled automation rule
-// needs to see (demand-gating.test.ts drives prodcomService.handleEvent() with
-// the identical payload twice and expects a rule enabled in between to see the
-// second one) — suppressing that second send left the rule believing nothing
-// had happened. So the dedupe is scoped to the one window where "identical to
-// what's stored" really does mean "the other transport just delivered this":
-// while a WebSocket attempt is open beside SSE.
+// The trap this guards against: suppressing every broadcast of a final whose
+// content is UNCHANGED from what is already stored is too broad. It also
+// silences an ordinary re-send on a SINGLE live transport, which a consumer
+// that subscribed between the two sends (a freshly enabled automation rule, a
+// display that just mounted) needs to see. The single-transport case below is
+// the guard for that; demand-gating.test.ts is not, because its ProdCom
+// payload carries no date, so its two sends differ once normalised. The dedupe
+// is scoped to the one window where "identical to what's stored" really does
+// mean "the other transport just delivered this": while a WebSocket attempt is
+// open beside SSE.
 
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
