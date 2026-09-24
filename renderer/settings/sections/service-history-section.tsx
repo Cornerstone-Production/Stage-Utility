@@ -262,13 +262,19 @@ function baptismLeftAloneBreakdown(d: NonNullable<RebuildOutcome["baptismDetail"
  *
  * Baptism is never folded into the generic done/left split above — it is a
  * MERGE, not a replace, with its own split of what happened to each session
- * — but it still contributes to exactly ONE of `done` or `left`, never
- * both: a leg that wrote nothing must not ALSO get its own "left alone:"
- * phrase nested inside the sentence's own "left alone: ..." list, which
- * read as "left alone: 1 baptism sessions; left alone: 1 (1 newer in the
- * store)" before this said which reasons applied only once. `full` is
- * neither written nor left alone — those new sessions were never added at
- * all, so it gets its own clause, mentioned only when it is nonzero.
+ * — but its own leftovers (unlike the other three legs, which are only ever
+ * ENTIRELY rebuilt or ENTIRELY left alone) can exist ALONGSIDE something it
+ * DID write, in the same rebuild. Both halves still go through the SAME two
+ * lists the other legs use — written sessions into `done`, left-alone ones
+ * into the SAME outer `left` array normal legs push their own bare noun
+ * into — so the sentence's own "left alone: ..." clause is built once, not
+ * assembled from two different mechanisms that can each produce their own.
+ * A second, NESTED "left alone:" clause welded onto baptism's own `done`
+ * entry used to read "left alone: 1 baptism sessions; left alone: 1 (1
+ * newer in the store)" whenever another leg was ALSO left alone in the same
+ * rebuild — this is what stopped that. `full` is neither written nor left
+ * alone — those new sessions were never added at all, so it gets its own
+ * clause, mentioned only when it is nonzero.
  */
 export function describeRebuild(out: RebuildOutcome): string {
   const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
@@ -277,17 +283,18 @@ export function describeRebuild(out: RebuildOutcome): string {
     const d = out.baptismDetail;
     const { total: leftTotal, text: leftText } = baptismLeftAloneBreakdown(d);
     if (out.baptism.rebuilt) {
-      // Something was written — this goes in `done`, so its OWN "left
-      // alone: N (...)" sub-clause (for whatever this same leg did NOT
-      // write) is the only place that phrase appears for it.
       const written: string[] = [];
       if (d.added > 0) written.push(`${d.added} added`);
       if (d.updated > 0) written.push(`${d.updated} updated`);
-      const head = `${out.baptism.items} baptism sessions` + (written.length ? `: ${written.join(", ")}` : "");
-      done.push(leftTotal > 0 ? `${head}; left alone: ${leftTotal} (${leftText})` : head);
+      done.push(`${out.baptism.items} baptism sessions` + (written.length ? `: ${written.join(", ")}` : ""));
+      // Whatever this same leg did NOT write goes into the outer left-alone
+      // list too, numbered (unlike its bare-noun siblings) since this is a
+      // PARTIAL leftover alongside something the same rebuild DID write, not
+      // the whole leg sitting untouched.
+      if (leftTotal > 0) left.push(`${leftTotal} baptism sessions (${leftText})`);
     } else {
-      // Nothing was written at all — the WHOLE leg is left alone, and the
-      // outer "left alone: ..." list this joins already says so once.
+      // Nothing was written at all — the whole leg is left alone, the same
+      // shape every other leg's own left-alone entry already has.
       left.push(leftTotal > 0 ? `baptism sessions (${leftText})` : "baptism sessions");
     }
   }

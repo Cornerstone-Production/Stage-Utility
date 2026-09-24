@@ -282,6 +282,19 @@ describe("History: Rebuild from raw", () => {
     assert.match(shown, /1 updated/, `missing the updated count: ${shown}`);
     assert.match(shown, /newer in the store/, `missing the 'newer' reason: ${shown}`);
     assert.match(shown, /not in the raw rows/, `missing the 'kept' reason: ${shown}`);
+    // This fixture is ALSO the mixed shape that used to say "left alone"
+    // twice: baptism partly rebuilt (1 added, 1 updated) WITH its own
+    // leftovers (1 newer, 1 kept), in the same rebuild as spl/attendance
+    // being entirely left alone — a nested "left alone: N (...)" welded onto
+    // baptism's own done entry, beside the outer list's own "left alone:
+    // SPL items, attendance samples", used to produce the phrase twice in
+    // one sentence.
+    const occurrences = (shown.match(/left alone/g) ?? []).length;
+    assert.equal(
+      occurrences,
+      1,
+      `expected "left alone" exactly once even with baptism partly rebuilt AND another leg fully left alone, got ${occurrences}: ${shown}`,
+    );
   });
 
   // A leg that wrote nothing at all must not get its own "left alone:"
