@@ -1000,6 +1000,12 @@ describe("rebuildServiceBaptisms — an unreadable stored finish time is never t
     const s = (await baptismStore.listSessions()).find((x) => x.serviceKey === KEY)!;
 
     assert.equal(outcome.invalid, 1, "the stored finish time could not be read, so the match could not be compared");
+    // A matched-but-invalid session is consumed at MATCH time (before this
+    // categorisation even runs) — it must count under invalid alone, never
+    // ALSO under kept, which only counts stored sessions no rebuilt row
+    // matched at all. Double-counting it would mean one session inflates the
+    // "left alone" total the log and the UI both report.
+    assert.equal(outcome.kept, 0, "the matched session must not also be counted as kept");
     assert.equal(s.finishedAt, "not-a-date", "the garbled value must survive — the rows do not get to replace it");
     assert.deepEqual(s.people, originalPeople, "nothing about the stored session was overwritten");
   });
