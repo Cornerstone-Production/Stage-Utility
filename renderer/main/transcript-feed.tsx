@@ -143,7 +143,11 @@ export function TranscriptFeed({
     atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
   }
   useEffect(() => {
-    if (scrollable && atBottomRef.current) endRef.current?.scrollIntoView({ block: "end" });
+    // Guarded the way service-history-section.tsx is: jsdom has no
+    // scrollIntoView at all, and neither does every embedded/kiosk browser this
+    // codebase already treats specially (see docs/integrations/ultritouch.md) —
+    // unguarded, every live caption push would throw inside this effect there.
+    if (scrollable && atBottomRef.current) endRef.current?.scrollIntoView?.({ block: "end" });
   }, [lines, scrollable]);
 
   return (

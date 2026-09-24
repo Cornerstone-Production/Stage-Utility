@@ -162,3 +162,18 @@ describe("TranscriptFeed re-renders only the lines that changed", () => {
 // the custom comparator is never invoked for that case at all, with or
 // without `id` in it. Keeping the field is defensive, not load-bearing, and a
 // test asserting it is load-bearing would be asserting something false.
+
+describe("the scrollable feed's auto-scroll does not assume scrollIntoView exists", () => {
+  test("renders and updates without throwing when the element has no scrollIntoView", () => {
+    // jsdom ships no scrollIntoView at all (confirmed: typeof is "undefined",
+    // not a no-op stub) — the same gap flagged in service-history-section.tsx
+    // and worked around in flash.ts. No stub is installed here on purpose: an
+    // unguarded `endRef.current.scrollIntoView(...)` throws inside the
+    // passive effect the moment this renders, which is the point of the test.
+    const lines = buildBuffer(3);
+    assert.doesNotThrow(() => {
+      const { rerender } = render(<TranscriptFeed lines={lines} scrollable />);
+      rerender(<TranscriptFeed lines={[...lines, makeLine("L3", "a new line")]} scrollable />);
+    });
+  });
+});
