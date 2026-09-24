@@ -878,7 +878,7 @@ export function AutomationSection() {
                 // anybody wanted — it is the start of one, and an operator left
                 // looking at it in a list of two hundred has to find it again
                 // to say what it does.
-                const { rule: created } = await invoke<{ rule: Rule; issues: RuleIssue[] }>("automation:addRule", {
+                const created = await invoke<RuleWithIssues>("automation:addRule", {
                   name: `Rule ${rules.length + 1}`,
                   enabled: false,
                   trigger: { id: registry.triggers[0]?.id ?? "", params: {} },

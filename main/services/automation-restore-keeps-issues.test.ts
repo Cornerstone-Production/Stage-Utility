@@ -83,7 +83,7 @@ describe("a legacy rule already enabled with issues", () => {
       body: { name: "Legacy alarm (edited)" },
     });
     assert.equal(res.status, 200);
-    const body = res.json as { rule: { enabled: boolean } };
-    assert.equal(body.rule.enabled, false, "the next save through the route must enforce it");
+    const body = res.json as { enabled: boolean };
+    assert.equal(body.enabled, false, "the next save through the route must enforce it");
   });
 });

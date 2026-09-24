@@ -134,17 +134,19 @@ let REFUSE: { id: string; error: string } | null = null;
     if (method === "PATCH") {
       const patch = JSON.parse(String(init?.body)) as Partial<StubRule>;
       RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
-      // The real route's shape: { rule, issues }. Every stub rule here already
-      // carries every param its own action/trigger needs, so issues is always
-      // empty — the seeding and validation tests read the PATCH's SENT body,
-      // not this response.
+      // The real route's shape: the rule's own fields, flat, plus `issues` —
+      // the SAME shape GET's list items carry, not a { rule, issues } wrapper.
+      // Every stub rule here already carries every param its own action/
+      // trigger needs, so issues is always empty — the seeding and validation
+      // tests read the PATCH's SENT body, not this response.
       const rule = RULES.find((r) => r.id === id);
-      return { ok: true, status: 200, json: async () => ({ rule, issues: [] }), text: async () => JSON.stringify({ rule, issues: [] }) };
+      const answered = { ...rule, issues: [] };
+      return { ok: true, status: 200, json: async () => answered, text: async () => JSON.stringify(answered) };
     }
     if (method === "DELETE") RULES = RULES.filter((r) => r.id !== id);
     if (method === "POST" && url.endsWith("/api/automation/rules") && CREATED) {
       RULES = [...RULES, CREATED];
-      const created = { rule: CREATED, issues: [] };
+      const created = { ...CREATED, issues: [] };
       return { ok: true, status: 201, json: async () => created, text: async () => JSON.stringify(created) };
     }
   }

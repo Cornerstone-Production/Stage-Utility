@@ -188,7 +188,11 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       if (issues.length > 0) {
         console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
       }
-      json(res, { rule, issues }, 201);
+      // The SAME shape GET's list items already carry (Rule & { issues }), not
+      // a wrapper — a script reading `.id` or `.enabled` off what POST/PATCH
+      // answer with must not break the moment this feature ships. The 409
+      // refusal below is a different response entirely and keeps its own body.
+      json(res, { ...rule, issues }, 201);
     } catch (err) {
       // A duplicate or malformed cue name is the caller's problem, not a 500.
       error(res, errorMessage(err), 400);
@@ -243,7 +247,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       if (issues.length > 0) {
         console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
       }
-      json(res, { rule, issues: issuesFor(rule) });
+      json(res, { ...rule, issues: issuesFor(rule) });
     } catch (err) {
       error(res, errorMessage(err), 400);
     }

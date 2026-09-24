@@ -78,13 +78,16 @@ describe("POST /api/automation/rules", () => {
   test("issues never block a create — the rule saves, reported turned off", async () => {
     const res = await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: badRule() });
     assert.equal(res.status, 201);
-    const body = res.json as { rule: { id: string; enabled: boolean }; issues: { key: string }[] };
-    assert.equal(body.rule.enabled, false);
+    // The SAME shape GET's list items carry: the rule's own fields, flat, plus
+    // `issues` — not a { rule, issues } wrapper. A script reading `.id` or
+    // `.enabled` off this response must not break because this feature shipped.
+    const body = res.json as { id: string; enabled: boolean; issues: { key: string }[] };
+    assert.equal(body.enabled, false);
     assert.deepEqual(
       body.issues.map((i) => i.key).sort(),
       ["meter", "targetId"],
     );
-    assert.equal(automationEngine.listRules().find((r) => r.id === body.rule.id)?.enabled, false);
+    assert.equal(automationEngine.listRules().find((r) => r.id === body.id)?.enabled, false);
   });
 
   test("an explicit ask to create it ENABLED with issues is refused, and creates nothing", async () => {
@@ -101,8 +104,8 @@ describe("POST /api/automation/rules", () => {
   test("a clean rule saves exactly as asked, with an empty issues list", async () => {
     const res = await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: goodRule() });
     assert.equal(res.status, 201);
-    const body = res.json as { rule: { enabled: boolean }; issues: unknown[] };
-    assert.equal(body.rule.enabled, true);
+    const body = res.json as { enabled: boolean; issues: unknown[] };
+    assert.equal(body.enabled, true);
     assert.deepEqual(body.issues, []);
   });
 });
@@ -110,7 +113,7 @@ describe("POST /api/automation/rules", () => {
 describe("PATCH /api/automation/rules/:id", () => {
   async function createBad(): Promise<string> {
     const res = await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: badRule() });
-    return (res.json as { rule: { id: string } }).rule.id;
+    return (res.json as { id: string }).id;
   }
 
   test("fixing three of four... a patch that still leaves issues saves turned off, even from enabled:true", async () => {
@@ -123,8 +126,8 @@ describe("PATCH /api/automation/rules/:id", () => {
       body: { action: { id: "rosstalk.command", params: { targetId: "t1", commandId: "cut" } }, enabled: true },
     });
     assert.equal(res.status, 200);
-    const body = res.json as { rule: { enabled: boolean }; issues: { key: string }[] };
-    assert.equal(body.rule.enabled, false, "one issue remains, so the save must not have turned it on");
+    const body = res.json as { enabled: boolean; issues: { key: string }[] };
+    assert.equal(body.enabled, false, "one issue remains, so the save must not have turned it on");
     assert.deepEqual(body.issues.map((i) => i.key), ["meter"]);
     assert.equal(automationEngine.listRules().find((r) => r.id === id)?.enabled, false);
   });
@@ -140,8 +143,8 @@ describe("PATCH /api/automation/rules/:id", () => {
       },
     });
     assert.equal(res.status, 200);
-    const body = res.json as { rule: { enabled: boolean }; issues: unknown[] };
-    assert.equal(body.rule.enabled, true);
+    const body = res.json as { enabled: boolean; issues: unknown[] };
+    assert.equal(body.enabled, true);
     assert.deepEqual(body.issues, []);
   });
 
@@ -152,6 +155,8 @@ describe("PATCH /api/automation/rules/:id", () => {
       body: { enabled: true },
     });
     assert.equal(res.status, 409);
+    // The 409 refusal body is unchanged: { error, code, issues }, never the
+    // rule — nothing was written, so there is no rule shape to carry.
     const body = res.json as { error: string; code?: string };
     assert.equal(body.code, "invalid-params");
     assert.match(body.error, /Can't turn on "SPL alarm cue": 2 fields need attention\. Open it to fix them\./);
@@ -197,7 +202,7 @@ describe("the [automation] log line an operator reads on /log", () => {
   test("refusing to enable a rule with issues logs it", async () => {
     const id = await (async () => {
       const res = await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: badRule() });
-      return (res.json as { rule: { id: string } }).rule.id;
+      return (res.json as { id: string }).id;
     })();
     const lines = await captureLog(async () => {
       await callRoute(automationRoutes, `/api/automation/rules/${id}`, { method: "PATCH", body: { enabled: true } });
@@ -213,7 +218,7 @@ describe("GET /api/automation/rules reports issues the list and the editor both 
   test("issues come back per rule, computed fresh — not stored on it", async () => {
     const id = await (async () => {
       const res = await callRoute(automationRoutes, "/api/automation/rules", { method: "POST", body: badRule() });
-      return (res.json as { rule: { id: string } }).rule.id;
+      return (res.json as { id: string }).id;
     })();
     const res = await callRoute(automationRoutes, "/api/automation/rules");
     const body = res.json as { rules: { id: string; issues: { key: string }[] }[] };

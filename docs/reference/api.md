@@ -200,8 +200,10 @@ step; `key` and `label` name the param; `message` is the reason, worded for
 display. GET computes them fresh against the current build's registry on every
 read — never stored on the rule.
 
-POST and PATCH validate the same way and answer `{rule, issues}` (POST is
-`201`). A save with issues never fails: it writes the rule with `enabled: false`
+POST and PATCH validate the same way and answer the rule itself with `issues`
+attached — the same shape GET's list items carry, not a wrapper — so a script
+reading the rule off the response is unaffected (POST is `201`). A save with
+issues never fails: it writes the rule with `enabled: false`
 regardless of what was asked, and reports why. The one refusal is a request
 whose *entire* content is turning a rule with issues ON — `patch: {enabled:
 true}` and nothing else, which is what the rules list's switch sends — refused

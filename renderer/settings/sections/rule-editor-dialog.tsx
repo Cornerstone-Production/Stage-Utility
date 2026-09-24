@@ -1553,7 +1553,10 @@ export function RuleEditorDialog({
       // the broken field — and the rule would stay off forever, "fixed" and
       // silent, which is the one outcome docs/automation.md rules out.
       if (forcedOff && onIssues.length === 0) onPatch.enabled = true;
-      const onResult = await invoke<{ rule: Rule; issues: RuleIssue[] }>("automation:updateRule", {
+      // The SAME shape GET's list items carry — Rule & { issues } — not a
+      // wrapper, so a script (or a future caller) reading the rule straight
+      // off this response is not broken by this feature. See automation-routes.ts.
+      const onResult = await invoke<Rule & { issues: RuleIssue[] }>("automation:updateRule", {
         id: onDraft.id,
         patch: onPatch,
       });
@@ -1563,7 +1566,7 @@ export function RuleEditorDialog({
         const liveOff = isPair ? target.pair.off : seed.current.off;
         const offPatch = changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff);
         if (forcedOff && offIssues.length === 0) offPatch.enabled = true;
-        const offResult = await invoke<{ rule: Rule; issues: RuleIssue[] }>("automation:updateRule", {
+        const offResult = await invoke<Rule & { issues: RuleIssue[] }>("automation:updateRule", {
           id: offDraft.id,
           patch: offPatch,
         });
