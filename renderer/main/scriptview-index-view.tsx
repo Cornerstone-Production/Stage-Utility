@@ -1,10 +1,12 @@
-import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
+import { ErrorNote } from "../components/ui/error-note";
 import { Loader2Icon, ListChecksIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
 
-import { useStageState } from "./use-stage-state";
+import { pcoConnected, useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
+import { useFailedReads } from "../lib/use-failed-reads";
+import { useResyncOn } from "../lib/use-resync-on";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -31,24 +33,42 @@ export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: s
  * operator's `/scriptview/manage` renders inside the shell, which titles it.
  */
 export function ScriptViewIndex({ standalone = false }: { standalone?: boolean } = {}) {
-  const { isLoading: stateLoading } = useStageState();
+  const stage = useStageState();
+  const stateLoading = stage.isLoading;
   const [types, setTypes] = useState<ServiceTypeDTO[] | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { failed, fail, clear } = useFailedReads<"load">("scriptview");
   const [sel, setSel] = useState<Record<string, string>>({});
+  // A launcher for Planning Center's service types, so nothing is read until it
+  // is connected (see pcoConnected).
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  // A read tried while the state was unknown may have failed only because
+  // Planning Center is not connected; once the state says so, that is the page.
+  useResyncOn([pcoConfigured], () => {
+    if (pcoConfigured === false) clear("load");
+  });
 
   useEffect(() => { document.title = "ScriptView"; }, []);
 
   useEffect(() => {
+    if (!pcoConfigured) return;
+    let cancelled = false;
     Promise.all([
       invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),
       invoke<ScriptViewLayout[]>("scriptview:listLayouts"),
       invoke<ScriptViewConfig>("scriptview:getConfig"),
     ])
-      .then(([t, l, c]) => { setTypes(t); setLayouts(l); setShownIds(c.serviceTypeIds ?? []); })
-      .catch((e) => setError(errorMessage(e)));
-  }, []);
+      .then(([t, l, c]) => {
+        if (cancelled) return;
+        setTypes(t);
+        setLayouts(l);
+        setShownIds(c.serviceTypeIds ?? []);
+        clear("load");
+      })
+      .catch((err: unknown) => { if (!cancelled) fail("load", "the ScriptView service types and layouts", err); });
+    return () => { cancelled = true; };
+  }, [pcoConfigured, fail, clear]);
 
   // Layouts are global — every service type offers the same set.
   const globalLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
@@ -96,8 +116,10 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
         <div className="flex min-h-full py-8 max-sm:py-4">
         <div className="m-auto flex flex-col gap-2 w-full max-w-md">
 
-          {error ? (
-            <p className="text-body text-red-10 text-center px-4">{error}</p>
+          {pcoConfigured === false ? (
+            <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ScriptView.</p>
+          ) : failed.has("load") ? (
+            <ErrorNote>Couldn't load ScriptView's service types and layouts.</ErrorNote>
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (

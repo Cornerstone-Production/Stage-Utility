@@ -1,7 +1,7 @@
 // Persists non-secret settings: service type/plan selection, planMode,
 // integration configs (non-secret fields), display options.
 
-import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
+import type { BaptismAutoStart, BaptismMode, DisplayInfo, Output } from "../types/stage.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
@@ -10,6 +10,10 @@ import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
 export interface SettingsData {
   /** Whether and how the baptism timer starts itself from the plan. */
   baptismAutoStart?: BaptismAutoStart;
+  /** Workflow the baptism timer opens in. Grouped is how a baptism actually
+   *  runs here: every testimony inside one plan item, then the baptisms spread
+   *  across the song set. Per-person is the minority case. */
+  baptismDefaultMode?: BaptismMode;
   serviceTypeId: string | null;
   serviceTypeName: string | null;
   planMode: "auto" | "manual";
@@ -169,6 +173,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   // Off until someone turns it on: a timer that starts itself unasked during a
   // service is worse than one that has to be started.
   baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
+  baptismDefaultMode: "grouped",
   serviceTypeId: null,
   serviceTypeName: null,
   planMode: "auto",

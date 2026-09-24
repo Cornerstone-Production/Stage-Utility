@@ -13,6 +13,7 @@ While a service is live, append-only CSVs are written under
 | `spl.csv` | 1 Hz reading, every metric on the row | `at`, `itemId`, `item`, then one per metric |
 | `attendance.csv` | people-counter poll | `at`, then one per counter field |
 | `events.csv` | plan-item change, automation rule firing | `at`, `source`, `kind`, `detail`, `itemId`, `plannedLengthSec`, `preService` |
+| `baptism.csv` | press on the baptism timer | `at`, `event`, `mode`, `phase`, `personNumber`, `baptismIndex`, `segmentMs`, `itemId`, `item`, `detail` |
 | `manifest.json` | — schema version and the files present | — |
 
 An event row's last three columns describe the plan item on a `kind=item` row and
@@ -21,6 +22,18 @@ rebuilt from the raw rows rather than only from the title: a title is not an
 identity, and a planned length appears nowhere else in the raw layer. Rows written
 before those columns shipped keep their narrower file and still read back — the
 rebuild matches them to the stored record by title instead.
+
+A baptism row is one press, never a total: Start, each testimony ending, the
+baptisms arming, the first person stepping up, each person baptized, pause,
+resume, Undo, Finish and Reset. The
+finished session in `baptism.json` is derived from them, so a session lost to a
+corrupt file, or to a crash between the debounced save and the next write, is
+derivable from the presses instead of being gone — though, unlike item timings
+and sound levels, there is no operator action wired up to do it yet; see
+[Rebuild from raw](#rebuild-from-raw). `undo` is recorded as its own
+row rather than the row it cancels being removed — the file is append-only, so
+what was undone is still in it and only that marker says so. An operator pressing
+Undo does not lose a service; a file that lost the marker would count the mis-tap.
 
 Nothing is written outside a service.
 
@@ -108,6 +121,7 @@ them again from the rows underneath, each from its own file:
 | Item timings | `events.csv` | Every `kind=item` row in time order. An item going live again within ten minutes of its last entry closing is the operator stepping back and reopens that entry; anything later is a re-run with its own. Each entry ends when the next row fires, the last at the recording's end |
 | Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
 | Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
+| Baptism sessions | `baptism.csv` | Not yet reachable from this action. The replay itself exists and is tested, but no operator control calls it — a session lost to `baptism.json` today has nothing on screen to rebuild it with |
 
 It reports what it **derived** and, separately, what it left alone: a record the
 raw layer holds nothing for is untouched and said to be untouched, rather than

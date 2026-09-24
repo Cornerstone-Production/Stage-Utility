@@ -350,8 +350,11 @@ Two things to know:
 
 **Baptisms** — the timer's actions are one `POST` each under `/api/baptism/`,
 and each returns the new timer state: `start`, `baptized`, `start-baptisms`,
-`next`, `undo`, `finish`, `pause`, `resume`, `reset`, and `mode`
-(`{mode: "grouped"|"per-person"}`). `GET` and `POST /api/baptism/triggers` read
+`next`, `advance`, `undo`, `finish`, `pause`, `resume`, `reset`, and `mode`
+(`{mode: "grouped"|"per-person"}`). `advance` is the phase-aware primary press —
+what the operator's main button does, whatever phase the timer is in — meant for
+callers (automations, Companion) that should not have to know the current phase
+to drive the timer forward. `GET` and `POST /api/baptism/triggers` read
 and set which plan items start each phase, and
 `DELETE /api/baptism/sessions/:id` removes one saved session.
 

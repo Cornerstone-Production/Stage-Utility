@@ -15,7 +15,12 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ScriptView**, with a live preview.
+Configure it under **Settings → ScriptView**, with a live preview. The layouts
+and category roles are this app's own and can be edited before Planning Center
+is connected; the preview, which reads a plan, says to connect it. So do the
+landing page, a ScriptView page and a Script display, which ask Planning Center
+for nothing until it is connected. A Script display with no service type
+selected says that instead.
 
 ## Where the rundown can appear
 
@@ -63,6 +68,14 @@ global: define one and it works across every service type.
 
 Each has per-element toggles for the clock, item time, song key, BPM,
 arrangement, item notes and total time.
+
+A rundown whose layouts or category roles cannot be read says so above the
+table: without the layouts it shows all columns, and without the roles it shows
+no note columns, until they load. A display keeps the last layouts it read
+through a later failure and says nothing, since what it shows is still right.
+The plan works the same way: one that cannot be read says so while there is
+nothing to show yet, and a later failure keeps the last plan on screen. Each
+failure is on a `[scriptview]` line on the server log.
 
 ## Category roles
 
@@ -131,8 +144,16 @@ than centring a fixed column:
 
 # Baptisms
 
-An operator page at `/baptism`, also available as a Settings tab. The workflow is
-grouped — all testimonies first, then all baptisms.
+An operator page at `/baptism`, also available as a Settings tab. It opens in
+**grouped** mode — every testimony first, then everyone baptized in turn across
+the songs that follow — because that is how a baptism service runs here: the
+testimonies happen inside one plan item (typically "Baptism Stories"), then
+people are baptized one at a time while the room sings. **Per-person** (a
+testimony immediately followed by that person's baptism, repeated for each
+person) is still there, picked with the Workflow toggle on the page; the toggle
+only responds while the session is idle, so a mode can't be changed out from
+under a session already running. Which one it opens in is a persisted setting,
+`baptismDefaultMode`.
 
 Sessions are named by service and cross-linked into Service History with
 per-person splits and averages. A **Baptism timer** layout object puts the live
@@ -143,9 +164,9 @@ count and timer on a display.
 The timer can start itself, since the two ends of a baptism differ:
 
 - **Testimonies** happen during an item named the same thing every week, so a
-  **keyword** finds it. Set it under Advanced; off by default.
+  **keyword** finds it, matched on this same tab. Off by default.
 - **Baptisms** happen during whichever songs are on that week, so no keyword can
-  find them. Bind that end **to an item on the plan**, on the Baptisms tab.
+  find them. Bind that end **to an item on the plan**, on the same tab.
 
 Binding both ends is also more accurate than a manual button. Between testimonies
 and baptisms there are usually several minutes of vows and prayer; started from the
@@ -156,6 +177,14 @@ and never fires into a phase already running, so a re-fired item or a plan re-sy
 cannot wipe a session underway. The operator page shows which item started it,
 with reset one tap away.
 
+It also reports only a transition that actually happened. Arming the baptisms
+only means something in grouped mode; a baptism item going live while the timer
+is in per-person mode — where there is no grouped baptism section to enter —
+changes nothing, and says why (see Logging, below) rather than doing nothing
+silently. An item whose trigger could not be honored is not treated as settled,
+so a later tick tries it again once the operator switches the mode — PCO can sit
+on one song for minutes, and only a retry lets the fix actually take.
+
 **It leaves itself alone on ordinary weeks.** Neither trigger can fire without
 something to fire on: the keyword only matches an item that exists, and per-plan
 bindings only exist on plans you set them on. So the setting can stay on all year.
@@ -164,9 +193,72 @@ Keep the keyword specific — plain "baptism" would catch a "Baptism class signu
 announcement where "baptism stories" would not. The Baptisms tab states, for the
 plan currently loaded, which item will start each phase or that nothing will.
 
+## Armed, then running
+
+Grouped only. The baptism phase begins either by pressing **Start baptisms**,
+once every testimony is in, or by the bound song going live — and neither one
+starts a clock: the phase becomes `baptism`, but nobody's time is counting yet.
+The band's intro before the first person steps up would otherwise land on
+person 1 alone, every week. While armed, the readout says so directly — the
+heading reads **Baptisms · armed**, the clock holds at `0:00`, and the line
+under it reads "waiting for the first person to step in" — so a frozen clock
+does not read as broken.
+
+The operator's own press ("First person in") starts person 1 without banking
+whatever the intro ran. Every person after that runs the same way, from their
+own press ("Next person in", then "Last person out" for the last one) to the
+next — the walk-up, the words spoken over them, the dunk, and getting out, never
+the moment of submersion by itself. There is nothing to pause while armed, so
+that button is hidden until the first press.
+
+Undo takes back these presses one at a time, latest first. After "First person
+in" it returns to armed: person 1's clock is thrown away and everyone who
+testified is still waiting, so the next press starts person 1 over. While armed,
+it returns to the testimonies, where the last testimony picks up from the time it
+had already banked. Undoing "Next person in" or "Last person out" returns to the
+person who was being baptized, with their clock starting over from the Undo
+press.
+
 ## Pause
 
 The clock can stop for the talking between people without that time landing on
 anyone. A segment is time already banked plus time since it last resumed, and both
 the operator page and the display object read the same fields, so a paused clock
 shows the same everywhere.
+
+## Recovery
+
+Every press on the timer appends a row to `baptism.csv`, the same append-only
+file the rest of the archive uses. A session that `baptism.json` loses — a
+corrupt file, or a crash between the debounced save and the next write — is not
+gone: it can be replayed from those rows. The derived record is a cache of what
+the presses already said, not the only copy of it — but unlike an item's
+recorded timing, there is no **Rebuild from raw** entry for it yet, so that
+replay is not something an operator can trigger from the app. See
+[Data archive](../data-archive.md) for the column list, which presses are
+recorded, and what the append-only rule buys the rest of the archive.
+
+## Logging
+
+Failures and skipped auto-start actions are logged under `[baptism]`, so a
+Sunday-morning check of the log names the actual problem instead of a blank
+timer:
+
+- `auto-start: started testimonies from "…"` / `armed baptisms from "…" — no
+  clock runs until the first press` — a keyword or a bound item moved the timer,
+  and to where.
+- `auto-start: "…" is bound to the testimonies/baptisms but the timer is in
+  <mode> mode and stayed in "…" — ignored` — the trigger fired but the timer's
+  mode couldn't honor it (see Starting from the plan above); it is retried on
+  the next tick rather than being marked done.
+- `raw: no service open, session not archived` — an action ran with no service
+  recording open, so nothing was written to `baptism.csv` and the action will
+  not survive a restart.
+- `raw: emit failed: <event> …` — the timer's own state updated, but writing its
+  row failed; only the row is missing, not the action.
+- `next: ignored, the restored session has nobody at baptismIndex …` /
+  `undo: ignored, the restored session has nobody at baptismIndex 0` /
+  `finish: closing with nobody at baptismIndex … — no person-complete row
+  recorded` — a press landed on a session that was restored into a shape it
+  should never be in; the press did nothing (Finish still closes the session,
+  just without a row for whoever was mid-baptism).

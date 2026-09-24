@@ -1,12 +1,16 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
+import { ErrorNote } from "../components/ui/error-note";
 import { useServerClock } from "@renderer/lib/server-clock";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
 import { useDashboardState } from "./use-dashboard-state";
+import { pcoConnected } from "./use-stage-state";
 import { invoke } from "../lib/api";
+import { useFailedReads } from "../lib/use-failed-reads";
+import { useResyncOn } from "../lib/use-resync-on";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, scriptViewUrl } from "./scriptview-index-view";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
@@ -15,18 +19,49 @@ import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 // raw ids still accepted for backward-compatible bookmarks. Follows the type's
 // live-or-next plan; highlights the live item when this type is running.
 export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeParam: string; layoutParam: string }) {
-  const { state, pcoLive } = useDashboardState();
+  const { state, error: stateError, pcoLive } = useDashboardState();
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [roles, setRoles] = useState<CategoryRole[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Which of the lists FAILED, as opposed to came back empty. Each failure used
+  // to draw a plausible page that was wrong; see where they render.
+  const { failed, fail, clear } = useFailedReads<"types" | "layouts" | "roles" | "rundown">("scriptview");
 
+  // The service types and the plan come from Planning Center, so they are asked
+  // for only once it is connected (see pcoConnected), and until then the body
+  // says why (see notice).
+  const pcoConfigured = pcoConnected(state, stateError);
+  // A read tried while the state was unknown may have failed only because
+  // Planning Center is not connected. Once the state says so, that is the
+  // notice, not an error — and a plan read before it can no longer be followed.
+  useResyncOn([pcoConfigured], () => {
+    if (pcoConfigured !== false) return;
+    clear("types", "rundown");
+    setError(null);
+    setRundown(null);
+  });
   useEffect(() => {
-    invoke<ServiceTypeDTO[]>("stage:listServiceTypes").then(setTypes).catch(() => setTypes([]));
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts").then(setLayouts).catch(() => setLayouts([]));
-    invoke<CategoryRole[]>("scriptview:listRoles").then(setRoles).catch(() => setRoles([]));
-  }, []);
+    if (!pcoConfigured) return;
+    let cancelled = false;
+    invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
+      .then((t) => {
+        if (cancelled) return;
+        setTypes(t);
+        clear("types");
+      })
+      .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
+    return () => { cancelled = true; };
+  }, [pcoConfigured, fail, clear]);
+  useEffect(() => {
+    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+      .then(setLayouts)
+      .catch((err: unknown) => fail("layouts", "the column layouts", err));
+    invoke<CategoryRole[]>("scriptview:listRoles")
+      .then(setRoles)
+      .catch((err: unknown) => fail("roles", "the category roles", err));
+  }, [fail]);
 
   // Resolve the service-type slug (or raw id) to an id.
   const serviceType = useMemo(
@@ -36,20 +71,36 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // Use the resolved id, or the raw param if it's numeric (id URL) so we can fetch
   // before the type list arrives; null while a slug is still unresolved.
   const resolvedTypeId = serviceType?.id ?? (/^\d+$/.test(serviceTypeParam) ? serviceTypeParam : null);
+  // Without the plan the body would spin for ever, so it says why instead:
+  // quietly when Planning Center is simply not connected, as an error when a
+  // read failed. A slug also needs the type list to resolve.
+  const notice = pcoConfigured === false ? "Planning Center isn't connected, so this page can't find its plan." : null;
+  const bodyError =
+    error ?? (!resolvedTypeId && failed.has("types") ? "Couldn't load the service types, so this page can't find its plan." : null);
 
   // Rundown items change rarely; refetch on a slow timer. Live position arrives
-  // separately via the SSE-backed dashboard state (pcoLive).
+  // separately via the SSE-backed dashboard state (pcoLive). A failure keeps the
+  // last good rundown on screen (see ScriptViewBody) and is logged once.
   useEffect(() => {
-    if (!resolvedTypeId) return;
+    if (!resolvedTypeId || !pcoConfigured) return;
     let cancelled = false;
     const load = () =>
       invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: resolvedTypeId })
-        .then((r) => { if (!cancelled) { setRundown(r); setError(null); } })
-        .catch((e) => { if (!cancelled) setError(errorMessage(e)); });
+        .then((r) => {
+          if (cancelled) return;
+          setRundown(r);
+          setError(null);
+          clear("rundown");
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          setError(errorMessage(e));
+          fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
+        });
     load();
     const t = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [resolvedTypeId]);
+  }, [resolvedTypeId, pcoConfigured, fail, clear]);
 
   const now = useServerClock(pcoLive?.serverNow);
 
@@ -112,7 +163,14 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         }
       />
 
-      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={error} />
+      {(failed.has("layouts") || failed.has("roles")) && (
+        <div className="flex flex-col gap-1.5 px-4 pt-2">
+          {failed.has("layouts") && <ErrorNote>Couldn't load the column layouts, so all columns are shown.</ErrorNote>}
+          {failed.has("roles") && <ErrorNote>Couldn't load the category roles, so no note columns are shown.</ErrorNote>}
+        </div>
+      )}
+
+      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} />
     </div>
   );
 }

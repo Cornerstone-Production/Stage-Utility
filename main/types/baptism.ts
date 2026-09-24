@@ -41,6 +41,19 @@ export interface BaptismState {
    *  the time since `segmentStartedAt`; a null start with a non-zero accumulator is
    *  a paused clock. Absent on records made before pausing existed. */
   segmentAccumMs?: number;
+  /**
+   * Grouped only: the baptism phase has begun but nobody's clock runs yet.
+   *
+   * The baptisms happen across the song set, and the phase starts when the first
+   * song goes live -- which is not when the first person steps up. Without this,
+   * person 1 absorbs however much intro the band plays, every week. Armed, every
+   * person's span runs from their own press to the next person's, so they all
+   * carry the same kind of boundary.
+   *
+   * Distinct from paused: a paused segment has banked time to resume from, an
+   * armed one has not started.
+   */
+  armed?: boolean;
   /** The plan item that started this session automatically, if one did — shown so
    *  the operator can see the timer did not start itself out of nowhere. */
   autoStartedFrom?: string | null;
@@ -48,7 +61,11 @@ export interface BaptismState {
   sessionStartedAt: string | null;
   /** ISO when the session was finished (totals frozen); null while active. */
   finishedAt: string | null;
-  /** Completed people (testimony + baptize splits). */
+  /** People whose testimony has closed. In grouped mode this fills during the
+   *  testimony pass, before anyone is baptized — `baptizeMs` sits at 0 until a
+   *  baptism actually closes that entry. A person is "baptized" (see
+   *  summarizeBaptism) only once `baptizeMs > 0`, not merely by being in this
+   *  array. */
   people: BaptismPerson[];
   /** Testimony split captured for the in-progress person (set while in "baptism"). */
   pendingTestimonyMs: number | null;
@@ -91,6 +108,57 @@ export interface BaptismSession {
    *  when the session started. Absent on sessions recorded before it was captured,
    *  which fall back to matching by time overlap. */
   serviceKey?: string | null;
+}
+
+/**
+ * The store's id for a session that began at `startedAt`.
+ *
+ * One function, two callers that must never disagree: the live finalize() and
+ * the replay that re-derives a lost session from `baptism.csv`. The id is what
+ * baptismStore.addSession de-duplicates on — finish, undo, finish again
+ * re-finalizes the SAME session, and two rows sharing a start with different
+ * ids had History counting one service's people twice.
+ */
+export function baptismSessionId(startedAt: string): string {
+  return `bap-${Date.parse(startedAt)}`;
+}
+
+/** One operator action, as the raw layer records it. Never a derived total:
+ *  the file is what happened, and the totals are replayed from it.
+ *
+ *  A runtime array, not a bare `type` union, so a guard can enforce its
+ *  membership exactly rather than parsing this file's source text — see
+ *  baptism-raw-event.test.ts. The replay task switches on these names; one
+ *  added or renamed without that switch learning about it is silent data
+ *  loss the replay cannot detect on its own. */
+export const BAPTISM_RAW_EVENTS = [
+  "start",
+  "testimony-end",
+  "baptisms-armed",
+  "baptisms-start",
+  "person-complete",
+  "pause",
+  "resume",
+  "undo",
+  "finish",
+  "reset",
+] as const;
+
+export type BaptismRawEvent = (typeof BAPTISM_RAW_EVENTS)[number];
+
+/** One `baptism.csv` row. The column set is FIXED — see recordBaptism. */
+export interface BaptismRawFields {
+  event: BaptismRawEvent;
+  mode: BaptismMode;
+  phase: BaptismPhase;
+  personNumber: number;
+  baptismIndex: number;
+  /** The segment's elapsed ms at this moment, or 0 where it means nothing. */
+  segmentMs: number;
+  /** The plan item live when this happened. Null when nothing is live. */
+  itemId: string | null;
+  item: string | null;
+  detail: string;
 }
 
 /** One of PCO's item row colors, from ServiceType.standard_item_types /

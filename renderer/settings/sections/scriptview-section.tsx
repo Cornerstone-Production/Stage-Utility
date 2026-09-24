@@ -2,8 +2,10 @@ import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, Collapsible, confirm } from "../../components/ui";
+import { Button, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, ErrorNote, Collapsible, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { useFailedReads } from "../../lib/use-failed-reads";
+import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import { RundownTable } from "../../main/rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
 import type { CategoryRole } from "../../../main/types/scriptview-roles.js";
@@ -48,24 +50,63 @@ export function ScriptViewSection() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Which reads FAILED, as opposed to came back empty. The settings' failure is
+  // the dangerous one: drawn as "No layouts yet", its Add layout saved a
+  // one-layout list over every real one.
+  const { failed, fail, clear } = useFailedReads<"settings" | "types" | "noteCats" | "rundown">("scriptview");
+  const [settingsRead, setSettingsRead] = useState(false);
+  // Everything Planning Center backs — the service types, and each type's note
+  // categories and plan — is asked for only once it is connected, and until
+  // then the preview says to connect it (see pcoConnected).
+  const stage = useStageState();
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  // A read tried while the state was unknown may have failed only because
+  // Planning Center is not connected. Once the state says so, that is what the
+  // page shows, not an error.
+  useResyncOn([pcoConfigured], () => {
+    if (pcoConfigured === false) clear("types", "noteCats", "rundown");
+  });
 
+  // This app's own settings: the layouts, which types the landing page shows,
+  // and the category roles. Read apart from Planning Center, so one that is not
+  // connected, or is down, costs the previews and never the layouts editor.
   useEffect(() => {
     Promise.all([
-      invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),
       invoke<ScriptViewLayout[]>("scriptview:listLayouts"),
       invoke<ScriptViewConfig>("scriptview:getConfig"),
       invoke<CategoryRole[]>("scriptview:listRoles"),
     ])
-      .then(([t, l, c, r]) => {
-        setTypes(t);
+      .then(([l, c, r]) => {
         setLayouts(l);
         setRoles(r);
         setShownIds(c.serviceTypeIds ?? []);
-        // Preview against the first enabled type, else the first service type.
-        setTypeId((cur) => cur ?? (c.serviceTypeIds ?? [])[0] ?? t[0]?.id ?? null);
+        // Preview against the first enabled type; Planning Center's first is
+        // the fallback, below.
+        setTypeId((cur) => cur ?? (c.serviceTypeIds ?? [])[0] ?? null);
+        setSettingsRead(true);
       })
-      .catch((e) => setError(errorMessage(e)));
-  }, []);
+      .catch((err: unknown) => fail("settings", "the ScriptView layouts and settings", err));
+  }, [fail]);
+
+  // After the settings, so the landing page's own first type stays the
+  // preview's default whichever read answers first.
+  useEffect(() => {
+    if (!pcoConfigured || !settingsRead) return;
+    let cancelled = false;
+    invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
+      .then((t) => {
+        if (cancelled) return;
+        setTypes(t);
+        setTypeId((cur) => cur ?? t[0]?.id ?? null);
+        clear("types");
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) fail("types", "the service types", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pcoConfigured, settingsRead, fail, clear]);
 
   async function setShown(ids: string[]) {
     // Store in PCO listing order regardless of the order they were checked.
@@ -79,14 +120,35 @@ export function ScriptViewSection() {
   // Drop the previous type's rundown in the same render the type changes, so the
   // preview never shows the old plan while the new one is still in flight.
   useResyncOn([typeId], () => {
-    if (typeId) setRundown(null);
+    if (typeId) {
+      setRundown(null);
+      clear("noteCats", "rundown");
+    }
   });
 
   useEffect(() => {
-    if (!typeId) return;
-    invoke<string[]>("scriptview:noteCategories", { serviceTypeId: typeId }).then(setNoteCats).catch(() => setNoteCats([]));
-    invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: typeId }).then(setRundown).catch(() => setRundown(null));
-  }, [typeId]);
+    if (!typeId || !pcoConfigured) return;
+    // Cancelled on a type change, so a slow read for the previous type can
+    // neither land its answer nor its failure under this one.
+    let cancelled = false;
+    invoke<string[]>("scriptview:noteCategories", { serviceTypeId: typeId })
+      .then((c) => { if (!cancelled) setNoteCats(c); })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Emptied as well as flagged, so the previous type's categories are
+        // never offered as this one's.
+        setNoteCats([]);
+        fail("noteCats", `the note categories for service type ${typeId}`, err);
+      });
+    invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: typeId })
+      .then((r) => { if (!cancelled) setRundown(r); })
+      .catch((err: unknown) => {
+        if (!cancelled) fail("rundown", `the plan to preview for service type ${typeId}`, err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [typeId, pcoConfigured, fail]);
 
   // Layouts are global — one set across all service types. `typeId` only chooses
   // which type/plan to preview against (and which note categories are offered).
@@ -170,6 +232,13 @@ export function ScriptViewSection() {
   // (the default, and reachable by toggling the open one shut); a stale id (deleted
   // layout) also collapses rather than forcing the first one open.
   const openId = sortedLayouts.some((l) => l.id === expandedId) ? expandedId : null;
+  // What both service-type pickers say while they have no types to offer.
+  const typesPending =
+    pcoConfigured === false
+      ? "Connect Planning Center to pick"
+      : failed.has("types") || failed.has("settings")
+        ? "Service types unavailable"
+        : "Loading service types…";
 
   return (
     <div className="pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
@@ -186,7 +255,7 @@ export function ScriptViewSection() {
           options={types.map((t) => ({ value: t.id, label: t.name }))}
           selected={shownIds}
           onChange={setShown}
-          placeholder={types.length === 0 ? "Loading service types…" : "Select service types…"}
+          placeholder={types.length > 0 ? "Select service types…" : typesPending}
           disabled={types.length === 0}
         />
         <span className="text-caption2 text-gray-9 basis-full sm:basis-auto">Only these appear on the ScriptView landing page.</span>
@@ -194,16 +263,29 @@ export function ScriptViewSection() {
 
       <div className="flex items-center gap-2 mb-4">
         <span className="text-caption1 text-gray-11">Preview with</span>
-        <Select value={typeId ?? ""} onValueChange={(v) => setTypeId(v)}>
-          <SelectTrigger className="w-64"><SelectValue placeholder="Select a service type" /></SelectTrigger>
+        {/* Held empty until the service types are in. The default comes from
+            the settings, which answer first, and an id the picker cannot name
+            yet would read "not found". */}
+        <Select value={types.length > 0 ? (typeId ?? "") : ""} onValueChange={(v) => setTypeId(v)} disabled={types.length === 0}>
+          <SelectTrigger className="w-64" aria-label="Preview with">
+            <SelectValue placeholder={types.length > 0 ? "Select a service type" : typesPending} />
+          </SelectTrigger>
           <SelectContent>
             {types.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <span className="text-caption2 text-gray-9">the plan + note columns used for the previews below</span>
       </div>
+      {failed.has("types") && (
+        <ErrorNote className="mb-4">Couldn't load the service types from Planning Center, so there may be none to preview with.</ErrorNote>
+      )}
+      {failed.has("noteCats") && (
+        <ErrorNote className="mb-4">Couldn't load this service type's note categories, so the previews and roles below are missing them.</ErrorNote>
+      )}
 
-      {sortedLayouts.length === 0 ? (
+      {failed.has("settings") ? (
+        <ErrorNote>Couldn't load the ScriptView layouts. Nothing has been changed; reload the page to try again.</ErrorNote>
+      ) : sortedLayouts.length === 0 ? (
         <EmptyState
           title="No layouts yet"
           hint="Add a layout to choose which PCO note columns show. Layouts apply across every service type."
@@ -338,7 +420,15 @@ export function ScriptViewSection() {
                     </div>
                     <div className="rounded-xl border border-white/10 overflow-hidden aspect-video w-full kiosk-surface">
                       <div className="h-full overflow-y-auto">
-                        {!rundown ? (
+                        {pcoConfigured === false ? (
+                          <div className="p-6 text-caption1 text-gray-9">Connect Planning Center to preview a plan.</div>
+                        ) : failed.has("rundown") ? (
+                          <div className="p-6">
+                            <ErrorNote>Couldn't load the plan to preview.</ErrorNote>
+                          </div>
+                        ) : !typeId && failed.has("types") ? (
+                          <div className="p-6 text-caption1 text-gray-9">No service type to preview against.</div>
+                        ) : !rundown ? (
                           <div className="p-6 text-caption1 text-gray-9">Loading plan…</div>
                         ) : rundown.items.length === 0 ? (
                           <div className="p-6 text-caption1 text-gray-9">No upcoming plan for this service type.</div>
@@ -370,7 +460,7 @@ export function ScriptViewSection() {
         summary={`${roles.length} role${roles.length === 1 ? "" : "s"}`}
         className="rounded-xl border border-gray-a5 bg-gray-a2 px-3 py-2"
       >
-        <RolesPanel roles={roles} categories={noteCats} onChange={saveRoles} />
+        <RolesPanel roles={roles} categories={noteCats} categoriesFailed={failed.has("noteCats")} onChange={saveRoles} />
       </Collapsible>
         </div>
       )}
@@ -404,10 +494,15 @@ export function ScriptViewSection() {
 function RolesPanel({
   roles,
   categories,
+  categoriesFailed,
   onChange,
 }: {
   roles: CategoryRole[];
   categories: string[];
+  /** The categories could not be read. Said here as well as at the top of the
+   *  page: without it, no "+ Add category" and no "In no role" list read as a
+   *  type whose categories are all assigned. */
+  categoriesFailed: boolean;
   onChange: (next: CategoryRole[]) => void;
 }) {
   const [adding, setAdding] = useState("");
@@ -439,6 +534,7 @@ function RolesPanel({
         columns reference roles, so one layout works across all of them. Member order is
         the priority chain.
       </span>
+      {categoriesFailed && <ErrorNote>Couldn't load this service type's note categories, so none can be added here.</ErrorNote>}
 
       {roles.map((r) => (
         <div key={r.id} className="flex flex-col gap-1.5 rounded-lg border border-gray-a5 p-2">

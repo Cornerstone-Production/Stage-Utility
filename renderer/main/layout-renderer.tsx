@@ -10,6 +10,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useServerClock } from "@renderer/lib/server-clock";
 import { invoke } from "../lib/api";
+import { logReadFailure } from "../lib/client-log";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
@@ -1579,7 +1580,7 @@ function niceStepInt(target: number): number {
 /** Fetch a recorded service's per-service curve + PCO markers for the people-graph
  *  "recorded" mode. serviceKey null → most recent finished service. */
 function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
-  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null } | null>(null);
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null; failed: boolean } | null>(null);
   useResyncOn([enabled], () => {
     if (!enabled) setData(null);
   });
@@ -1587,21 +1588,32 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
     if (!enabled) return;
     let cancelled = false;
     void (async () => {
+      // A read that fails is not a service with no curve, which is what an
+      // empty answer drew: "no recorded data". `failed` puts it on the display
+      // instead. The markers read is the exception, on purpose: without it the
+      // curve still draws and says nothing false, so its failure is logged and
+      // then taken as no markers.
+      let failed = false;
+      const unread = (what: string, starvesCurve: boolean) => (err: unknown): null => {
+        if (starvesCurve) failed = true;
+        if (!cancelled) logReadFailure("history", `the people graph's ${what}`, err);
+        return null;
+      };
       let key = serviceKey ?? null;
       if (!key) {
-        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
+        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(unread("the recorded services", true));
         key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
       }
-      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null }); return; }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null, failed }); return; }
       const [att, tl] = await Promise.all([
-        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
-        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
+        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(unread(`the attendance for ${key}`, true)),
+        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(unread(`the plan items for ${key}`, false)),
       ]);
       if (cancelled) return;
       const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
       const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
       const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
-      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null });
+      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null, failed });
     })();
     return () => { cancelled = true; };
   }, [enabled, serviceKey]);
@@ -1629,6 +1641,7 @@ function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: 
       H={ctx.H}
       serviceStartedAt={mode === "recorded" ? (recorded?.serviceStartedAt ?? null) : null}
       serviceEndedAt={mode === "recorded" ? (recorded?.serviceEndedAt ?? null) : null}
+      unread={mode === "recorded" && !!recorded?.failed}
       toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
     />
   );
@@ -1645,6 +1658,7 @@ function PeopleGraph({
   H,
   serviceStartedAt = null,
   serviceEndedAt = null,
+  unread = false,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
@@ -1657,6 +1671,8 @@ function PeopleGraph({
   /** Service-proper window (recorded mode) — dims the arrival ramp / emptying-room taper. */
   serviceStartedAt?: string | null;
   serviceEndedAt?: string | null;
+  /** The recorded curve could not be read, which is not a service with none. */
+  unread?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -1664,7 +1680,13 @@ function PeopleGraph({
   if (vals.length < 2) {
     return (
       <div style={{ position: "relative", width: "100%", height: "100%" }}>
-        <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        {unread ? (
+          // In the object's own type rather than an ErrorNote banner: this is
+          // drawn on a wall, sized to the box it was given.
+          <span role="alert" style={{ ...ts, opacity: 0.6 }}>couldn't load the recorded service</span>
+        ) : (
+          <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        )}
         {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={ts.color ?? "#fff"} H={H} />}
       </div>
     );
@@ -2025,6 +2047,11 @@ function BaptismTimer({
       // the held value rather than freezing at whatever it last happened to render.
       value = fmtClock(segmentElapsedMs(state, now));
       if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
+      // Armed reads identically to a just-started baptism otherwise — 0:00 over
+      // "Baptism 1" — which is exactly the ambiguity the operator panel's own
+      // "armed" readout exists to rule out. Same word, kept short for a wall
+      // rather than the panel's full sentence.
+      else if (state.armed) fallback = "armed";
       else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
     } else {
       value = "0:00";
@@ -2040,7 +2067,13 @@ function BaptismTimer({
     value = sum.count ? fmtClock(sum.avgPersonMs) : "—";
     fallback = "avg per person";
   } else if (field === "last") {
-    const last = state?.people[state.people.length - 1];
+    // NOT the last entry in `people` — in grouped mode every testimony is
+    // pushed up front with `baptizeMs: 0`, so the last entry is the last person
+    // who TESTIFIED, not the last one baptized (they agree only on the final
+    // baptism of the session). "Last person" on a stage display has to mean
+    // the last one actually baptized, same rule as `count`'s source.
+    const baptized = state?.people.filter((p) => p.baptizeMs > 0) ?? [];
+    const last = baptized[baptized.length - 1];
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
   }

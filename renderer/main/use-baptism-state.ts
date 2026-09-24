@@ -16,21 +16,35 @@ export function useBaptismState(): BaptismState | null {
   return useStatusChannel<BaptismState>(read, "baptism:state");
 }
 
-/** Totals + averages over the completed people in a session. */
+/**
+ * Totals + averages over a session's people.
+ *
+ * `people` fills during the testimony pass in grouped mode, before anyone has
+ * been baptized — an entry there means "testified", not "baptized"; its
+ * `baptizeMs` sits at 0 until a baptism actually closes it (the same is true
+ * of a per-person session finished early, mid-testimony). `count` — the figure
+ * the panel and the layout object label "Baptized" — must not be `people.length`
+ * for that reason, or three testimonies with nobody in the water yet reads as
+ * three baptized. It counts entries with a real `baptizeMs`, and the averages
+ * that describe a baptism (`avgBaptizeMs`, `avgPersonMs`) divide by that same
+ * count, not by everyone who happened to testify.
+ */
 export function summarizeBaptism(s: BaptismState | null) {
   const people = s?.people ?? [];
-  const count = people.length;
+  const baptized = people.filter((p) => p.baptizeMs > 0);
+  const count = baptized.length;
   const totalTestimonyMs = people.reduce((a, p) => a + p.testimonyMs, 0);
-  const totalBaptizeMs = people.reduce((a, p) => a + p.baptizeMs, 0);
+  const totalBaptizeMs = baptized.reduce((a, p) => a + p.baptizeMs, 0);
+  const totalBaptizedPersonMs = baptized.reduce((a, p) => a + p.testimonyMs + p.baptizeMs, 0);
   const totalMs = totalTestimonyMs + totalBaptizeMs;
   return {
     count,
     totalTestimonyMs,
     totalBaptizeMs,
     totalMs,
-    avgTestimonyMs: count ? totalTestimonyMs / count : 0,
+    avgTestimonyMs: people.length ? totalTestimonyMs / people.length : 0,
     avgBaptizeMs: count ? totalBaptizeMs / count : 0,
-    avgPersonMs: count ? totalMs / count : 0,
+    avgPersonMs: count ? totalBaptizedPersonMs / count : 0,
   };
 }
 

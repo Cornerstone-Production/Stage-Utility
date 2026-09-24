@@ -84,3 +84,21 @@ describe("baptism sessions", () => {
     assert.deepEqual(ids, ["bap-10", "bap-5", "bap-1"]);
   });
 });
+
+describe("addSession is idempotent by id", () => {
+  it("replaces a session carrying an id already stored", async () => {
+    // finish -> undo -> finish re-finalizes the SAME session: `id` is derived
+    // from sessionStartedAt, which undo does not change. Prepending a second
+    // row makes linkBaptisms count that service's people twice in History.
+    const first = { ...session(1), people: [{ testimonyMs: 1000, baptizeMs: 500 }] } as BaptismSession;
+    const corrected = { ...session(1), people: [{ testimonyMs: 9000, baptizeMs: 500 }] } as BaptismSession;
+
+    await baptismStore.addSession(first);
+    await baptismStore.addSession(corrected);
+
+    const all = await baptismStore.listSessions();
+    const mine = all.filter((s) => s.id === first.id);
+    assert.equal(mine.length, 1, "the re-finished session must replace, not duplicate");
+    assert.equal(mine[0].people[0].testimonyMs, 9000, "the later write wins");
+  });
+});

@@ -75,7 +75,285 @@ function del<T>(path: string): Promise<T> {
 
 // ── Channel → HTTP mapping ────────────────────────────────────────────────────
 
-export async function invoke<T>(channel: string, params?: Params): Promise<T> {
+/**
+ * Every channel `invoke()` actually dispatches, as a SORTED union — one entry
+ * per line, never a bare count, for the reason this repo's other exact-list
+ * guards give: a count cannot tell an add plus a remove from no change, and a
+ * single line is a guaranteed merge conflict between two branches each adding
+ * a channel.
+ *
+ * Tied to the switch below in both directions, each a `tsc` failure: delete a
+ * `case` and its member reaches `default:`, which is not assignable to
+ * `never`; delete a member and its `case` is no longer comparable to the
+ * union (TS2678). A new channel is a member here AND a case there.
+ *
+ * `invoke()` takes this union rather than `string`, so every channel reaching
+ * it has to be a member to compile: a literal, a ternary, a typed variable
+ * (baptism-operator.tsx's `primaryChannel`), or the parameter of a wrapper
+ * however deeply nested. A wrapper whose channel is `string` cannot forward to
+ * it at all. The ways past that are a cast, an `any`, and a METHOD-syntax
+ * signature that declares `string`: TypeScript checks method parameters
+ * bivariantly, so anything whose channel is IpcChannel (`invoke`, a typed
+ * wrapper, a class or object-literal method) can stand in for
+ * `{ send(channel: string): Promise<unknown> }`, where the property form
+ * `send: (channel: string) => Promise<unknown>` rejects it. A channel chosen
+ * at runtime belongs in an `as const` table instead, as in use-stream-state.ts.
+ *
+ * What a type cannot say is whether a channel still has a caller. That
+ * direction stays with the text scans in api-channels.test.ts, which also
+ * catch a literal cast past this union, but only at a call they recognise.
+ */
+export type IpcChannel =
+  | "action:invoke"
+  | "app:getInfo"
+  | "attendance:deleteHistory"
+  | "attendance:getHistory"
+  | "attendance:getHistoryCurrent"
+  | "attendance:listHistory"
+  | "automation:addRule"
+  | "automation:clearLog"
+  | "automation:importPairs"
+  | "automation:log"
+  | "automation:plan-items"
+  | "automation:propresenter-instances"
+  | "automation:propresenter-macros"
+  | "automation:registry"
+  | "automation:removeRule"
+  | "automation:rules"
+  | "automation:setSettings"
+  | "automation:settings"
+  | "automation:testRule"
+  | "automation:updateRule"
+  | "backup:getSchedule"
+  | "backup:runNow"
+  | "backup:setSchedule"
+  | "baptism:advance"
+  | "baptism:baptized"
+  | "baptism:deleteSession"
+  | "baptism:finish"
+  | "baptism:get"
+  | "baptism:getTriggers"
+  | "baptism:next"
+  | "baptism:pause"
+  | "baptism:reset"
+  | "baptism:resume"
+  | "baptism:sessions"
+  | "baptism:setMode"
+  | "baptism:setTriggers"
+  | "baptism:start"
+  | "baptism:startBaptisms"
+  | "baptism:undo"
+  | "barItems:set"
+  | "calendar:getGrid"
+  | "calendar:sources"
+  | "captions:setChannelColor"
+  | "captions:setFollowProdcomColors"
+  | "checklist:clear"
+  | "checklist:get"
+  | "checklist:sources"
+  | "checklist:tick"
+  | "companion:buttons"
+  | "companion:pairs"
+  | "companion:refreshButtons"
+  | "config:deleteSnapshot"
+  | "config:import"
+  | "config:listSnapshots"
+  | "config:recallSnapshot"
+  | "config:saveSnapshot"
+  | "cues:call"
+  | "cues:homeAssistantYaml"
+  | "cues:manifest"
+  | "cues:mintToken"
+  | "cues:revokeToken"
+  | "cues:states"
+  | "cues:tokens"
+  | "devices:claim"
+  | "devices:list"
+  | "devices:release"
+  | "devices:scan"
+  | "displays:getPresence"
+  | "displays:refresh"
+  | "history:deleteMilestone"
+  | "history:editWindow"
+  | "history:listMilestones"
+  | "history:merge"
+  | "history:rebuild"
+  | "history:recalcAttendance"
+  | "history:saveMilestone"
+  | "history:setItemCounted"
+  | "history:setItemTimes"
+  | "icons:setColor"
+  | "icons:setIcon"
+  | "integrations:list"
+  | "integrations:setConfig"
+  | "integrations:setEnabled"
+  | "integrations:test"
+  | "layout:uploadImage"
+  | "layoutGroups:delete"
+  | "layoutGroups:list"
+  | "layoutGroups:save"
+  | "layoutObjects:setSlots"
+  | "layoutTemplates:delete"
+  | "layoutTemplates:list"
+  | "layoutTemplates:save"
+  | "layoutTemplates:update"
+  | "notes:set"
+  | "obs:getStatus"
+  | "osc:addTarget"
+  | "osc:getFeedback"
+  | "osc:getFeedbackPort"
+  | "osc:listTargets"
+  | "osc:removeTarget"
+  | "osc:send"
+  | "osc:setFeedbackPort"
+  | "osc:testTarget"
+  | "osc:updateTarget"
+  | "outputs:add"
+  | "outputs:openWindow"
+  | "outputs:remove"
+  | "outputs:rename"
+  | "outputs:reorder"
+  | "outputs:setHideTopBar"
+  | "outputs:setLocked"
+  | "outputs:setMode"
+  | "outputs:setSlug"
+  | "outputs:setView"
+  | "patch:get"
+  | "patch:parseXlsx"
+  | "patch:save"
+  | "pco:getLive"
+  | "pco:getPlanItems"
+  | "pco:liveNext"
+  | "pco:livePrevious"
+  | "people:getCount"
+  | "plans:exportPreview"
+  | "plans:upcoming"
+  | "presets:apply"
+  | "presets:delete"
+  | "presets:import"
+  | "presets:list"
+  | "presets:overwrite"
+  | "presets:rename"
+  | "presets:reorder"
+  | "presets:save"
+  | "prodcom:clearTranscript"
+  | "prodcom:getChannels"
+  | "prodcom:getTranscript"
+  | "propresenter:getInstances"
+  | "propresenter:getStatus"
+  | "pvp:getStatus"
+  | "reaper:getStatus"
+  | "resi:getStatus"
+  | "rosstalk:addTarget"
+  | "rosstalk:commands"
+  | "rosstalk:removeTarget"
+  | "rosstalk:send"
+  | "rosstalk:setSimulate"
+  | "rosstalk:targets"
+  | "rosstalk:test"
+  | "rosstalk:updateTarget"
+  | "savedColors:set"
+  | "scores:getFavourites"
+  | "scores:getStatus"
+  | "scores:listTeams"
+  | "scores:setFavourites"
+  | "scriptview:getConfig"
+  | "scriptview:listLayouts"
+  | "scriptview:listRoles"
+  | "scriptview:noteCategories"
+  | "scriptview:rundown"
+  | "scriptview:saveLayouts"
+  | "scriptview:saveRoles"
+  | "scriptview:setConfig"
+  | "sensource:listLocations"
+  | "sensource:listZones"
+  | "serviceTimeline:delete"
+  | "serviceTimeline:get"
+  | "serviceTimeline:getCurrent"
+  | "serviceTimeline:list"
+  | "serviceTimeline:resetPacing"
+  | "settings:setBaptismAutoStart"
+  | "settings:setChecklistSources"
+  | "settings:setHourCycle"
+  | "settings:setReconnectSchedule"
+  | "settings:setTaperWindow"
+  | "settings:setTimezone"
+  | "slots:clearOverride"
+  | "slots:promoteOverride"
+  | "slots:targets"
+  | "spl:deleteHistory"
+  | "spl:getHistory"
+  | "spl:getHistoryCurrent"
+  | "spl:getMetrics"
+  | "spl:getSummary"
+  | "spl:getTrendPrefs"
+  | "spl:getVisibleMetrics"
+  | "spl:listHistory"
+  | "spl:series"
+  | "spl:setTrendPrefs"
+  | "spl:setVisibleMetrics"
+  | "stage:getBrandingSource"
+  | "stage:getRemoteUrl"
+  | "stage:getState"
+  | "stage:listPlans"
+  | "stage:listServiceTypes"
+  | "stage:listTeamPositions"
+  | "stage:refresh"
+  | "stage:selectNextPlan"
+  | "stage:setAllowedServiceTypes"
+  | "stage:setBranding"
+  | "stage:setKioskDiscovery"
+  | "stage:setNdiEnabled"
+  | "stage:setOnboardingDismissed"
+  | "stage:setPlan"
+  | "stage:setPlanMode"
+  | "stage:setPlanSwitcherMode"
+  | "stage:setPublicUrl"
+  | "stage:setServiceType"
+  | "stage:setShowQr"
+  | "update:apply"
+  | "update:check"
+  | "update:dismissNotice"
+  | "update:lock"
+  | "update:notices"
+  | "update:restart"
+  | "update:setAuto"
+  | "update:setTrack"
+  | "update:status"
+  | "views:add"
+  | "views:copySlots"
+  | "views:duplicate"
+  | "views:import"
+  | "views:remove"
+  | "views:rename"
+  | "views:reorder"
+  | "views:resolveSlots"
+  | "views:setCalendarFilters"
+  | "views:setHideChrome"
+  | "views:setKind"
+  | "views:setLayout"
+  | "views:setScriptViewLayout"
+  | "views:setSlots"
+  | "views:setSlotsLayout"
+  | "views:setSurface"
+  | "window:closeSettings"
+  | "wireless:addConnection"
+  | "wireless:channelStatuses"
+  | "wireless:getMeterRate"
+  | "wireless:listChannels"
+  | "wireless:listConnections"
+  | "wireless:listProviders"
+  | "wireless:removeConnection"
+  | "wireless:setMeterRate"
+  | "wireless:testConnection"
+  | "wireless:updateConnection"
+  | "youtube:connectCancel"
+  | "youtube:connectDisconnect"
+  | "youtube:connectStart"
+  | "youtube:connectStatus"
+  | "youtube:getStatus";
+
+export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T> {
   const p = params ?? {};
 
   switch (channel) {
@@ -315,6 +593,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/baptism/start-baptisms");
     case "baptism:next":
       return post<T>("/api/baptism/next");
+    case "baptism:advance":
+      return post<T>("/api/baptism/advance");
+    case "baptism:pause":
+      return post<T>("/api/baptism/pause");
+    case "baptism:resume":
+      return post<T>("/api/baptism/resume");
     case "baptism:setMode":
       return post<T>("/api/baptism/mode", { mode: p.mode });
     case "baptism:undo":
@@ -965,8 +1249,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "app:getInfo":
       return { version: "standalone", name: "Stage Utility" } as unknown as T;
 
-    default:
+    default: {
+      // If this line fails to compile, IpcChannel above lists a channel with
+      // no `case` — add one, or the exhaustiveness check would otherwise be
+      // silently defeated by an `any`-shaped default falling through.
+      const exhaustive: never = channel;
+      void exhaustive;
       throw new Error(`[api] Unknown IPC channel: "${channel}"`);
+    }
   }
 }
 
