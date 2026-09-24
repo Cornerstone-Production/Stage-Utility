@@ -114,6 +114,13 @@ async function realFailedSave(serviceKey: string): Promise<string> {
   } finally {
     restore();
   }
+  // sampleArchive's own CSV appends are fire-and-forget — the saveErrors
+  // push above only proves the JSON save failed, not that the row-driven
+  // rebuild this session feeds into has anything committed to read yet.
+  // Flushed here, not left to the caller, for the same reason
+  // rebuild-baptism-roundtrip.test.ts's own realistic-clock tests do:
+  // measured at 1 failure in 8 concurrent runs without it.
+  await sampleArchive.flush();
   rec().current = null;
   return sessionId;
 }
@@ -174,6 +181,10 @@ async function realFailedReFinish(serviceKey: string): Promise<{ id: string; fir
   } finally {
     restore();
   }
+  // See realFailedSave's own comment: sampleArchive's CSV appends are
+  // fire-and-forget, and the rebuild this session feeds into reads rows,
+  // not the saveErrors push.
+  await sampleArchive.flush();
   rec().current = null;
   return { id, firstFinishedAt, secondFinishedAt };
 }
