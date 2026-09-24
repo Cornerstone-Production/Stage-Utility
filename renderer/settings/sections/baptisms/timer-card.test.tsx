@@ -448,6 +448,12 @@ test("a live 409 the recheck did not catch shows the same refusal the header sho
       await settle();
     });
     assert.ok(calls.some((c) => c.url.includes("/api/baptism/rebuild")), "the POST must still have been attempted");
+    const body = document.body.textContent ?? "";
+    assert.match(
+      body,
+      /This service started recording again — rebuild once it ends/,
+      `expected the same live-refusal toast the header's own Rebuild shows, got: ${body}`,
+    );
     // The entry itself is drawn from `state.saveErrors`, which this refused
     // rebuild never changed — a real clear only ever arrives as a NEW state
     // prop, on the server's own push (see baptism-rebuild-clears-save-error
