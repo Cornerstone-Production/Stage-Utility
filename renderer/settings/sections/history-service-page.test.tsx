@@ -520,6 +520,40 @@ describe("the History service page", () => {
     assert.ok(calls > before, `expected a live baptism:state push to refetch this page's own sessions; calls stayed at ${calls}`);
   });
 
+  test("a live baptism:rebuilt push for the OPEN service refetches its sessions", async (t) => {
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") {
+        calls += 1;
+        return ok(baptisms());
+      }
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
+      if (url === "/api/service-timeline") return ok([timeline()]);
+      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+    const before = calls;
+
+    FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: KEY, ids: ["b1"] });
+    await settle();
+    await settle();
+
+    assert.ok(calls > before, `expected a live baptism:rebuilt push to refetch this page's own sessions; calls stayed at ${calls}`);
+  });
+
   test("the arriving page speaks the same vocabulary as a service's page", async (t) => {
     // Attendance is recording, the first plan item has not gone live, so there
     // is no timeline record — no rundown, no KPIs, no report. This page kept a
