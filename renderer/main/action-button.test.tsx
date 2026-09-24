@@ -213,7 +213,13 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       { interactive: false, editing: true },
     );
     await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
-    assert.equal(container.querySelector('[data-needs-setup="true"]'), null);
+    // A COUNT, never the element itself: node:assert inspects `actual` to build
+    // a failure message, and inspecting a live jsdom element does not
+    // terminate in any useful time — see the header comment on
+    // rule-editor-dialog.test.tsx. `assert.equal(el, null)` looks safe and
+    // hangs the runner for ~30s the moment the assertion is false, which
+    // reads as a stuck render loop rather than the one failing line it is.
+    assert.equal(container.querySelectorAll('[data-needs-setup="true"]').length, 0);
   });
 
   test("NOT editing (a live display or console): never shows the badge, issues or not", async () => {
@@ -223,9 +229,10 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       { interactive: true, editing: false },
     );
     await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    // A count, not the element — see the comment above.
     assert.equal(
-      container.querySelector('[data-needs-setup="true"]'),
-      null,
+      container.querySelectorAll('[data-needs-setup="true"]').length,
+      0,
       "a live display must never show the editor-only marker",
     );
   });
