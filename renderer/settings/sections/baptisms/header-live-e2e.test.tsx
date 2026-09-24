@@ -79,7 +79,7 @@ let planN = 0;
 let planId = "";
 function freshPlan(): void {
   planId = `plan-e2e-${++planN}`;
-  (stageController as unknown as { getState(): unknown }).getState = () => ({
+  (stageController as unknown as { getState: () => unknown }).getState = () => ({
     serviceTypeId: "75953", serviceTypeName: "Weekend", planId, planTitle: "E2E", planSeriesTitle: null,
   });
 }
