@@ -7,13 +7,14 @@
 // cells by looking their heading up rather than by index.
 
 import assert from "node:assert/strict";
-import { test, describe, before } from "node:test";
+import { test, describe, before, afterEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import readXlsxFile from "read-excel-file/node";
 import writeXlsxFile from "write-excel-file/node";
+import { unzipSync } from "fflate";
 import { setAppTimeZone } from "./app-timezone.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-export-"));
@@ -25,6 +26,7 @@ const { parseXlsx } = await import("./patch-xlsx.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
+const { baptismStore } = await import("./baptism-store.js");
 
 const KEY = "st1:plan1:t1";
 
@@ -377,6 +379,34 @@ describe("buildHistoryWorkbook", () => {
     const buf = await buildHistoryWorkbook({ from: "2026-01-01", to: "2026-01-31", include: ["services"] });
     const { rows } = await sheetOf(buf, "Services");
     assert.equal(rows.length, 0);
+  });
+});
+
+describe("buildHistoryWorkbook: the Baptisms sheet is a real Excel table", () => {
+  // Regression: `specs` (the per-sheet header/row-count list `tableFeature`
+  // promotes into a ListObject) used to be computed BEFORE the Baptisms sheet
+  // was pushed, so it was always one entry short whenever Baptisms was
+  // included and that sheet silently never became a table — no filter arrows,
+  // no PivotTable-ready range, despite the docs promising every sheet gets one.
+  afterEach(async () => {
+    for (const s of await baptismStore.listSessions()) await baptismStore.deleteSession(s.id);
+  });
+
+  test("the sheet becomes a real Excel table, same as every other sheet", async () => {
+    await baptismStore.addSession({
+      id: "bap-table",
+      startedAt: "2026-08-02T09:00:00.000Z",
+      finishedAt: "2026-08-02T09:30:00.000Z",
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+      serviceKey: null,
+      people: [{ testimonyMs: 1000, baptizeMs: 2000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    const files = unzipSync(new Uint8Array(buf));
+    const tables = Object.keys(files).filter((n) => n.startsWith("xl/tables/"));
+    assert.equal(tables.length, 1, `expected one table part (About is not tabular), got: ${tables.join(", ") || "(none)"}`);
   });
 });
 

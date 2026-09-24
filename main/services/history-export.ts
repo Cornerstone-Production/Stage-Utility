@@ -316,15 +316,6 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     );
   }
 
-  // Each sheet's shape, in sheet order, so the table parts name their columns
-  // exactly as row 1 does. Derived from what was just built rather than read back
-  // out of the XML, where the header strings are not resolvable yet.
-  const specs: TableSpec[] = sheets.map((s, i) => ({
-    headers: tabular[i]
-      ? (s.data[0] ?? []).map((c) => (c && typeof c === "object" && "value" in c ? String(c.value ?? "") : ""))
-      : [],
-    rowCount: tabular[i] ? Math.max(0, s.data.length - 1) : 0,
-  }));
   if (include.includes("baptisms")) {
     // One row per person, not per session: the timings are per person, and a
     // session is just when the operator started and stopped. Sessions carry the
@@ -357,6 +348,20 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
       ),
     );
   }
+
+  // Each sheet's shape, in sheet order, so the table parts name their columns
+  // exactly as row 1 does. Derived from what was just built rather than read back
+  // out of the XML, where the header strings are not resolvable yet. Computed
+  // LAST, after every conditional sheet (including Baptisms) has been pushed —
+  // this used to run before the Baptisms push, so `specs` was always one short
+  // whenever that sheet was included and it silently never became a real Excel
+  // table (no filter arrows, no PivotTable-ready range).
+  const specs: TableSpec[] = sheets.map((s, i) => ({
+    headers: tabular[i]
+      ? (s.data[0] ?? []).map((c) => (c && typeof c === "object" && "value" in c ? String(c.value ?? "") : ""))
+      : [],
+    rowCount: tabular[i] ? Math.max(0, s.data.length - 1) : 0,
+  }));
 
   return writeXlsxFile(sheets, { features: [tableFeature(specs)] }).toBuffer();
 }
