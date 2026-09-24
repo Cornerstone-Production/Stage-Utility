@@ -22,7 +22,7 @@ const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { serviceTimelineStore } = await import("../service-timeline-store.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
-const { baptismStore } = await import("../baptism-store.js");
+const { baptismStore, MAX_SESSIONS } = await import("../baptism-store.js");
 const { baptismTimerService: timer } = await import("../baptism-timer-service.js");
 const { sampleArchive } = await import("../archive/sample-archive.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
@@ -389,6 +389,69 @@ describe("a rebuild that restores a save-failed session clears its note entry", 
       timer.getState().saveErrors?.some((e) => e.sessionId === idE),
       true,
       "a rebuild that restored nothing for this session must leave its own note exactly as it was",
+    );
+  });
+
+  // The cap is the OTHER way a rebuild can genuinely find a real, finished
+  // session in the raw rows and still restore nothing for it: mergeRebuilt
+  // refuses to ADD past MAX_SESSIONS rather than evict an existing session
+  // to make room (see its own doc comment). addedIds/updatedIds — and so
+  // restoredIds — already come from mergeRebuilt's own write-time result,
+  // never from the plan's pre-cap ids, which is exactly what keeps this
+  // case from clearing a note for a session that was never actually
+  // written; a regression deriving restoredIds from the plan instead would
+  // pass every OTHER test in this file, since none of them ever fill the
+  // store to the cap. Placed last in this describe block deliberately: it
+  // fills the store to MAX_SESSIONS, which every earlier test's own
+  // additions must already have landed for this file's shared store to
+  // still describe truthfully.
+  it("the store's own cap turning a session away leaves its note up too, not read as restored", async () => {
+    const KEY_F = "st1:plan-1:bap-clears-f5";
+    await prepare(KEY_F);
+    await sleep(2100); // stay outside BAPTISM_SKEW_MS of any earlier test's session
+
+    const before = await baptismStore.listSessions();
+    const filler = Array.from({ length: MAX_SESSIONS - before.length }, (_, i) => {
+      const at = new Date(Date.parse("2037-01-01T00:00:00.000Z") + i * 86_400_000).toISOString();
+      return {
+        id: `bap-clears-cap-filler-${i}`,
+        startedAt: at,
+        finishedAt: at,
+        people: [{ testimonyMs: 1, baptizeMs: 1 }],
+        title: null,
+        serviceTypeId: null,
+        planId: null,
+        serviceKey: `bap-clears-cap-filler-svc-${i}`,
+      };
+    });
+    await baptismStore.addSessions(filler as never);
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS, "precondition: the store is at the cap");
+
+    const idF = await realFailedSave(KEY_F);
+    assert.ok(timer.getState().saveErrors?.some((e) => e.sessionId === idF), "sanity: F's note is up");
+
+    const out = await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY_F } });
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    const json = out.json as { added: number; full: number; restoredIds: unknown };
+    assert.equal(json.added, 0, "the store had no room — this must not be reported as added");
+    assert.equal(json.full, 1, "the raw rows held a real, finished session the cap turned away");
+    assert.ok(Array.isArray(json.restoredIds), `expected the response to carry restoredIds, got ${JSON.stringify(json)}`);
+    assert.ok(
+      !(json.restoredIds as string[]).includes(idF),
+      `expected restoredIds to exclude the session the cap turned away, got ${JSON.stringify(json.restoredIds)}`,
+    );
+
+    // Never cleared: nothing was actually restored for this id.
+    await sleep(200);
+    assert.equal(
+      timer.getState().saveErrors?.some((e) => e.sessionId === idF),
+      true,
+      "a session the cap turned away must leave its own note exactly as it was",
+    );
+    assert.equal(
+      (await baptismStore.listSessions()).length,
+      MAX_SESSIONS,
+      "the cap still holds — nothing evicted to make room for the session it turned away",
     );
   });
 });
