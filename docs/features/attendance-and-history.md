@@ -411,18 +411,30 @@ On a weekend a baptism session links to, a fourth **Baptisms** card appears
 between Rundown and Attendance, and the nav gains an entry for it in the same
 position. Neither shows on an ordinary Sunday.
 
-The card carries: a stat strip — Baptized, Total time, Testimony total,
-Baptism total, Avg testimony, Avg baptism, the same six figures the Baptisms
-tab itself shows, over every session linked to this service; a read-only
-two-lane chart per linked session — the same timer-over-plan chart the live
-Baptisms tab draws, showing that session's own testimonies and baptisms
-against the plan items running at the time; and, under each chart, that
-session's own per-person splits (testimony, baptism and total time per
-person). A session with nothing in the shared timing rows for it — recorded
-before that raw layer existed, or matched to this service only by its start
-time rather than by a service key of its own — shows its splits with a plain
-line in place of the chart rather than one reading as an empty session. A
-**Open in Baptisms →** link beside the card's title returns to the live tab.
+The card carries: a stat strip of its own six figures — Baptized; Segment,
+the linked session's own wall-clock span with the clock time it ran, start to
+finish; Testimony and Baptism total, each with its own per-person average;
+Longest, the single longest baptism and who it was; and Vs plan, that same
+segment against the *planned* length of whichever plan items it spans — the
+same items the chart below clips its own plan lane to, so the two can never
+name a different plan. A plan recorded with no lengths at all has nothing for
+Vs plan to compare against, and it says so rather than reporting a false
+overrun. These are not the Baptisms tab's own six (Timed, Wall clock, Not
+counted and the two averages) — this card is about one recorded segment of a
+finished service, not a running session, and the two answer different
+questions. Two or more sessions linked to one occurrence sum into these same
+six figures rather than each getting their own row.
+
+Below the strip: a read-only two-lane chart per linked session — the same
+timer-over-plan chart the live Baptisms tab draws, showing that session's own
+testimonies and baptisms against the plan items running at the time; and,
+under each chart, that session's own per-person splits (testimony, baptism
+and total time per person). A session with nothing in the shared timing rows
+for it — recorded before that raw layer existed, or matched to this service
+only by its start time rather than by a service key of its own — shows its
+splits with a plain line in place of the chart rather than one reading as an
+empty session. A **Open in Baptisms →** link beside the card's title returns
+to the live tab.
 
 Two or more sessions recorded in one occurrence — a reset and restarted
 session, or two people baptized in separate sessions the same weekend — each

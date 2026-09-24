@@ -2,7 +2,7 @@ import { errorMessage } from "@main/services/errors";
 import type { RebuildOutcome } from "@main/services/history-edit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { linkBaptisms, baptismStats, type BaptismStats } from "../../lib/link-baptisms";
+import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
@@ -26,6 +26,7 @@ import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-histo
 import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
+import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
 import { TrendsCard } from "./history-trends/trends-card";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
@@ -1108,7 +1109,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     // Actual and Avg overrun on screen twice.
     const det = detail; // narrow for the async handler
     const linkedBap = linkBaptisms(baptisms ?? [], detail);
-    const bapStats = baptismStats(linkedBap);
     // The Baptisms entry rides alongside SERVICE_SECTIONS's own three, in the
     // same order the cards actually sit in the page — the header takes this
     // list rather than holding a second const of its own, so the two can
@@ -1572,7 +1572,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               )
             }
           >
-            <StatStrip figures={baptismCardFigures(bapStats)} hover={null} live={null} announce={false} />
+            <StatStrip figures={historyBaptismFigures(linkedBap, det.items)} hover={null} live={null} announce={false} />
             <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} />
           </SectionCard>
         )}
@@ -2120,20 +2120,81 @@ function SectionCard({
 }
 
 /**
- * The Baptisms card's own stat strip — the same six figures the tiles it
- * replaces showed (baptismStats, over every session History linked to this
- * service), on StatStrip's shared scale rather than a bespoke tile grid, so
- * this card reads like every other figure row on the page instead of a one-
- * off. `people` never counts a testimony alone — see baptismStats' own doc
- * comment.
+ * The Baptisms card's own stat strip — the approved mockup's own six
+ * figures, never the Baptisms tab's (Timed, Wall clock, Not counted and the
+ * two averages): this card is about one recorded segment of a FINISHED
+ * service, not a running session, and the two answer different questions.
+ *
+ * `items` is the service's own plan items — the exact ones HistorySessionChart
+ * clips each session's own plan lane to (sessionWindow + clipToSession +
+ * planLaneItems, session-lane.ts), so Vs plan can never name a different plan
+ * than the chart draws right underneath it.
  */
-function baptismCardFigures(stats: BaptismStats): StatFigure[] {
+function historyBaptismFigures(sessions: readonly BaptismSession[], items: readonly ServiceTimelineItem[]): StatFigure[] {
+  const stats = baptismStats(sessions);
+
+  // Segment: each session's own WALL-CLOCK span (finishedAt − startedAt),
+  // summed — never the sum of testimony+baptism time, which leaves out the
+  // armed wait, the walk to the water and every pause (baptismStats' own
+  // totalSec). A single session's own real start and end reads as a clock
+  // range; more than one has no single range to show, so the sub names how
+  // many sessions instead.
+  const withWindows = sessions
+    .map((s) => ({ s, w: sessionWindow(s.startedAt, s.finishedAt, { live: false, nowMs: 0 }) }))
+    .filter((x): x is { s: BaptismSession; w: { startMs: number; endMs: number } } => x.w !== null);
+  const segmentSec = withWindows.reduce((sum, { w }) => sum + (w.endMs - w.startMs) / 1000, 0);
+  const segmentSub = withWindows.length === 1
+    ? `${fmtTime(withWindows[0]!.s.startedAt)}–${fmtTime(withWindows[0]!.s.finishedAt)}`
+    : withWindows.length > 1 ? `${withWindows.length} sessions` : undefined;
+
+  // Vs plan: that same segment against the PLANNED length of the plan items
+  // it spans, clipped the same way the chart's own plan lane is. A plan
+  // recorded with no lengths at all (plannedLengthSec never set on any
+  // spanned item) has nothing to compare against — a dash says so, rather
+  // than treating the missing lengths as zero and reporting a huge, false
+  // overrun.
+  const laneItems = planLaneItems(items);
+  const clipped = withWindows.flatMap(({ w }) => clipToSession(laneItems, w.startMs, w.endMs));
+  const anyPlanned = clipped.some((it) => it.plannedSec != null);
+  const plannedSec = clipped.reduce((sum, it) => sum + (it.plannedSec ?? 0), 0);
+  const vsPlan: StatFigure = anyPlanned
+    ? {
+      key: "vsPlan",
+      label: "Vs plan",
+      value: fmtDelta(segmentSec - plannedSec),
+      // Matches this page's own convention for an overrun figure (see
+      // serviceKpis' Avg overrun) — coloured only when it actually ran over,
+      // not for every signed value the way the mockup's own static example
+      // happens to show one.
+      color: segmentSec > plannedSec ? "var(--color-warn-11)" : undefined,
+      sub: `${fmtDur(plannedSec)} planned`,
+    }
+    : { key: "vsPlan", label: "Vs plan", value: "—", sub: "the plan has no lengths to compare against" };
+
+  // Longest: the single longest BAPTISM, never a testimony — with who, from
+  // whichever session it happened in. Person numbers are per-session, the
+  // same numbering the People table and the chart both already use for that
+  // session, never renumbered across sessions. Only someone actually
+  // baptized (baptizeMs > 0) counts, matching baptismStats' own "people"
+  // rule — a testimony-only session must not name person 1's own zero as
+  // the "longest" baptism nobody had yet.
+  let longestMs = 0;
+  let longestPerson: number | null = null;
+  for (const s of sessions) {
+    s.people.forEach((p, i) => {
+      if (p.baptizeMs > longestMs) {
+        longestMs = p.baptizeMs;
+        longestPerson = i + 1;
+      }
+    });
+  }
+
   return [
     { key: "people", label: "Baptized", value: String(stats.people) },
-    { key: "total", label: "Total time", value: fmtDur(stats.totalSec), color: "var(--color-accent)" },
-    { key: "testimony", label: "Testimony total", value: fmtDur(stats.testimonySec) },
-    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec) },
-    { key: "avgTestimony", label: "Avg testimony", value: fmtDur(stats.avgTestimonySec) },
-    { key: "avgBaptism", label: "Avg baptism", value: fmtDur(stats.avgBaptismSec) },
+    { key: "segment", label: "Segment", value: fmtDur(segmentSec), sub: segmentSub },
+    { key: "testimony", label: "Testimony", value: fmtDur(stats.testimonySec), color: "var(--color-accent)", sub: `avg ${fmtDur(stats.avgTestimonySec)}` },
+    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec), color: "var(--color-live-11)", sub: `avg ${fmtDur(stats.avgBaptismSec)}` },
+    { key: "longest", label: "Longest", value: longestPerson ? fmtDur(longestMs / 1000) : "—", sub: longestPerson ? `person ${longestPerson}` : undefined },
+    vsPlan,
   ];
 }

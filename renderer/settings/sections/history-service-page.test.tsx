@@ -14,6 +14,7 @@ import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { fmtTime } from "./overview-data.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -296,6 +297,126 @@ describe("the History service page", () => {
     const openLink = [...bap.querySelectorAll("a")].find((a) => text(a).includes("Open in Baptisms"));
     assert.ok(openLink, "expected an Open in Baptisms link");
     assert.equal(openLink!.getAttribute("href"), "/baptism");
+  });
+
+  test("the Baptisms card's six figures are the approved mockup's, computed for real", async (t) => {
+    // A tailored fixture, not the shared timeline()/baptisms() pair: those
+    // two do not overlap in time at all, which would leave Vs plan with
+    // nothing to compare against and prove nothing about the happy path.
+    //
+    //   Session: 20:41:00–20:49:00 (8:00 wall clock)
+    //   Person 1: testimony 1:30 (90s), baptism 1:00 (60s)
+    //   Person 2: testimony 1:00 (60s), baptism 1:30 (90s) — the longest
+    //   Plan items the session's own window overlaps (clipToSession keeps
+    //   anything with ANY overlap, at its own full planned length):
+    //     Baptism Stories   20:40–20:44   planned 5:00 (300s)
+    //     Great Are You Lord 20:44–20:50  planned 4:00 (240s)
+    //   Planned total 9:00 (540s); segment 8:00 (480s) → Vs plan −1:00.
+    const tlItems = [
+      { itemId: "a", title: "Baptism Stories", sequence: 0, plannedLengthSec: 300, startedAt: iso("20:40:00"), endedAt: iso("20:44:00"), actualDurationSec: 240, counted: true },
+      { itemId: "b", title: "Great Are You Lord", sequence: 1, plannedLengthSec: 240, startedAt: iso("20:44:00"), endedAt: iso("20:50:00"), actualDurationSec: 360, counted: true },
+    ];
+    const tl = { ...timeline(), items: tlItems };
+    const session = {
+      id: "figs-1",
+      startedAt: iso("20:41:00"),
+      finishedAt: iso("20:49:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [
+        { testimonyMs: 90_000, baptizeMs: 60_000 },
+        { testimonyMs: 60_000, baptizeMs: 90_000 },
+      ],
+    };
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([session]);
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
+      if (url === "/api/service-timeline") return ok([tl]);
+      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    assert.ok(bap, "expected the Baptisms card to render");
+    function figure(label: string): { value: string; sub: string | null } {
+      const labelSpan = [...bap.querySelectorAll("span")].find((s) => (s.textContent ?? "").trim() === label);
+      assert.ok(labelSpan, `expected a "${label}" figure`);
+      const valueSpan = labelSpan!.nextElementSibling;
+      const subSpan = valueSpan?.nextElementSibling;
+      const sub = subSpan && subSpan.tagName === "SPAN" ? (subSpan.textContent ?? "").trim() : null;
+      return { value: (valueSpan?.textContent ?? "").trim(), sub };
+    }
+
+    assert.equal(figure("Baptized").value, "2");
+    assert.equal(figure("Segment").value, "8:00");
+    assert.equal(figure("Segment").sub, `${fmtTime(session.startedAt)}–${fmtTime(session.finishedAt)}`);
+    assert.equal(figure("Testimony").value, "2:30", "90s + 60s");
+    assert.equal(figure("Testimony").sub, "avg 1:15", "150s over 2 people");
+    assert.equal(figure("Baptism total").value, "2:30", "60s + 90s");
+    assert.equal(figure("Baptism total").sub, "avg 1:15", "150s over 2 baptized");
+    assert.equal(figure("Longest").value, "1:30");
+    assert.equal(figure("Longest").sub, "person 2");
+    assert.equal(figure("Vs plan").value, "−1:00", "480s segment vs 540s planned");
+    assert.equal(figure("Vs plan").sub, "9:00 planned");
+  });
+
+  test("Vs plan says the plan has no lengths rather than pretending they are zero", async (t) => {
+    const tlItems = [
+      { itemId: "a", title: "Baptism Stories", sequence: 0, plannedLengthSec: null, startedAt: iso("20:40:00"), endedAt: iso("20:50:00"), actualDurationSec: 600, counted: true },
+    ];
+    const tl = { ...timeline(), items: tlItems };
+    const session = {
+      id: "figs-2",
+      startedAt: iso("20:41:00"),
+      finishedAt: iso("20:49:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+    };
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([session]);
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
+      if (url === "/api/service-timeline") return ok([tl]);
+      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    const labelSpan = [...bap.querySelectorAll("span")].find((s) => (s.textContent ?? "").trim() === "Vs plan")!;
+    const valueSpan = labelSpan.nextElementSibling;
+    const subSpan = valueSpan?.nextElementSibling;
+    assert.equal((valueSpan?.textContent ?? "").trim(), "—", "no planned length anywhere the session spans");
+    assert.equal((subSpan?.textContent ?? "").trim(), "the plan has no lengths to compare against");
   });
 
   test("a baptism-free service has no Baptisms card at all, and no nav entry for it", async (t) => {
