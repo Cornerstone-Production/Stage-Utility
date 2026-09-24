@@ -221,6 +221,10 @@ describe("POST /api/history/rebuild", () => {
 
     assert.ok(broadcasts.includes("service-timeline:history"), `no timeline broadcast: ${broadcasts.join(",")}`);
     assert.ok(broadcasts.includes("attendance:history"), `no attendance broadcast: ${broadcasts.join(",")}`);
+    assert.ok(
+      !broadcasts.includes("baptism:rebuilt"),
+      `no baptism session was written (no baptism.csv at all), so baptism:rebuilt must not fire: ${broadcasts.join(",")}`,
+    );
   });
 
   // The SPL leg was unguarded: deleting it from rebuildServiceRecords left the
@@ -524,6 +528,10 @@ describe("POST /api/history/rebuild", () => {
       const sessions = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
       assert.equal(sessions.length, 1, "the session merged by the whole-service rebuild did not land");
       assert.equal(sessions[0]!.people[0]!.testimonyMs, 120_000);
+      assert.ok(
+        broadcasts.includes("baptism:rebuilt"),
+        `the baptism leg wrote a session but baptism:rebuilt never fired: ${broadcasts.join(",")}`,
+      );
 
       await fs.rm(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), { force: true });
     });
@@ -574,6 +582,7 @@ describe("POST /api/history/rebuild", () => {
         writes += 1;
         return original(d);
       };
+      broadcasts.length = 0;
       let second: Awaited<ReturnType<typeof callRoute>>;
       try {
         second = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
@@ -589,6 +598,10 @@ describe("POST /api/history/rebuild", () => {
       assert.equal(json.baptism.rebuilt, false, "reproducing the same session exactly is not a rebuild — nothing was written");
       assert.equal(json.baptismDetail.updated, 0, "nothing about the session differs, so it must not count as updated");
       assert.equal(json.baptismDetail.added, 0);
+      assert.ok(
+        !broadcasts.includes("baptism:rebuilt"),
+        `a rebuild that wrote nothing new still fired baptism:rebuilt: ${broadcasts.join(",")}`,
+      );
       assert.equal(json.baptismDetail.unchanged, 1, "the one session that matched exactly must be counted as unchanged");
       assert.equal(writes, 0, "an intact session must never reach the underlying write, even through the whole-service route");
 
