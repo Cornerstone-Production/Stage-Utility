@@ -80,6 +80,30 @@ describe("grouped: Undo after Finish reopens the baptism Finish closed", () => {
     assert.notEqual(first.segmentStartedAt, null);
   });
 
+  it("undoWouldChange() agrees with undo(): true for a session finished while armed, false for an idle timer with nothing finished", () => {
+    // undoWouldChange() is built from the same predicates undo()'s own
+    // if/else-if chain branches on (see baptism-timer-service.ts) — it must
+    // still say true here now that undo() reopens a finished-while-armed
+    // session instead of assuming the last baptism, per this file's own
+    // "Finish while armed" case above.
+    begin("grouped");
+    timer.start();
+    timer.next();
+    timer.startBaptisms(); // two people, armed
+    timer.finish();
+
+    assert.equal(timer.undoWouldChange(), true, "a session finished while armed has somewhere to reopen");
+    const beforeReopen = timer.getState();
+    const reopened = timer.undo();
+    assert.notEqual(reopened, beforeReopen, "the predicate said it would change, and it did");
+    assert.equal(reopened.armed, true, "reopened waiting for the first person, as the dedicated test above checks in full");
+
+    timer.reset();
+    assert.equal(timer.undoWouldChange(), false, "an idle timer with nothing finished has nothing to undo");
+    const idle = timer.getState();
+    assert.equal(timer.undo(), idle, "the predicate said it would not change anything, and it did not");
+  });
+
   it("Finish during the testimonies: Undo resumes the testimony Finish closed", async () => {
     begin("grouped");
     timer.start();
