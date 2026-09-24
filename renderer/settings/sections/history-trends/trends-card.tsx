@@ -229,6 +229,21 @@ export function pctLabel(pct: number, dp: number): string {
   return `${v > 0 ? "+" : "−"}${body}%`;
 }
 
+/**
+ * "prior window averaged 0" when a real prior value exists but the change
+ * figure still came out null (pctChange's basis rounded to zero or below),
+ * "no prior window yet" when there is no prior value at all — two different
+ * facts a caller's own null-change fallback must not collapse into one
+ * caption. Shared because the SAME shape lives in two Trends cards: this
+ * one's own tiles below, and baptisms/trends-card.tsx's four. Each caller
+ * still decides its own wording for "no LATEST value either" — that part is
+ * not the same shape (this card names which measure is missing; the
+ * Baptisms one has only one measure to be missing).
+ */
+export function noPriorCaption(hasPrior: boolean): string {
+  return hasPrior ? "prior window averaged 0" : "no prior window yet";
+}
+
 export function TrendsCard({
   recordings,
   /**
@@ -698,10 +713,15 @@ export function TrendsCard({
                         {/* A type with nothing under THIS measure keeps its tile
                             and says so, rather than vanishing when you switch —
                             which reads as the service type having disappeared.
-                            The same fallback also covers a basis `pctChange`
-                            refused to divide by — see its own comment. */}
+                            noPriorCaption splits the OTHER reason pct can be
+                            null: a real prior window that pctChange refused to
+                            divide by is not the same fact as no prior window
+                            existing at all — currently unreachable here (every
+                            basis that reaches this tile already cleared
+                            COMPARABLE_ABOVE in trends.ts), landed anyway so
+                            the two Trends cards cannot drift apart. */}
                         {t.latest != null
-                          ? "no prior window yet"
+                          ? noPriorCaption(t.priorAverage != null)
                           // A tile with no level because the SUMMARY would not
                           // load is not a service type that recorded no sound.
                           // Same lie as the empty plot's, one level down.

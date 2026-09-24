@@ -1,5 +1,7 @@
 import type { BaptismSession, ServiceTimeline } from "@main/types/stage.js";
 
+import { reduceBaptismPeople } from "./baptism-people.js";
+
 /**
  * Which baptism sessions belong to a service.
  *
@@ -63,28 +65,15 @@ export interface BaptismStats {
  * than NaN, so an empty set renders as dashes instead of blanks.
  */
 export function baptismStats(sessions: readonly BaptismSession[]): BaptismStats {
-  let testified = 0;
-  let baptized = 0;
-  let testimonyMs = 0;
-  let baptismMs = 0;
-  for (const s of sessions) {
-    for (const p of s.people) {
-      testified += 1;
-      testimonyMs += p.testimonyMs;
-      if (p.baptizeMs > 0) {
-        baptized += 1;
-        baptismMs += p.baptizeMs;
-      }
-    }
-  }
-  const testimonySec = testimonyMs / 1000;
-  const baptismSec = baptismMs / 1000;
+  const r = reduceBaptismPeople(sessions.flatMap((s) => s.people));
+  const testimonySec = r.totalTestimonyMs / 1000;
+  const baptismSec = r.totalBaptizeMs / 1000;
   return {
-    people: baptized,
+    people: r.baptized,
     totalSec: testimonySec + baptismSec,
     testimonySec,
     baptismSec,
-    avgTestimonySec: testified ? testimonySec / testified : 0,
-    avgBaptismSec: baptized ? baptismSec / baptized : 0,
+    avgTestimonySec: r.testified ? testimonySec / r.testified : 0,
+    avgBaptismSec: r.baptized ? baptismSec / r.baptized : 0,
   };
 }

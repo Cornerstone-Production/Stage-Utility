@@ -38,37 +38,12 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { baptismTimerService } = await import("../baptism-timer-service.js");
-const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { stageController } = await import("../stage-controller.js");
 const { sampleArchive } = await import("./sample-archive.js");
 const { rebuildBaptismSessions, readBaptismRows } = await import("./rebuild-baptism.js");
-
-type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
-const rec = () => serviceTimelineRecorder as unknown as Held;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-let ctxCounter = 0;
-function freshCtx() {
-  ctxCounter += 1;
-  return { serviceKey: `st1:plan1:replay${ctxCounter}`, serviceDate: "2026-09-20" };
-}
-
-function openService(ctx: { serviceKey: string; serviceDate: string }): void {
-  rec().current = { ...ctx, endedAt: null };
-}
-
-/** The session the store holds for this service, once the fire-and-forget save
- *  behind finalize() has settled. Polled rather than slept on: the save is a
- *  queued read-modify-write, not a fixed delay. */
-async function storedSession(ctx: { serviceKey: string }) {
-  for (let i = 0; i < 200; i++) {
-    const found = (await baptismTimerService.listSessions()).filter((s) => s.serviceKey === ctx.serviceKey);
-    if (found.length > 0) return found;
-    await sleep(5);
-  }
-  throw new Error(`no stored session for ${ctx.serviceKey} after 1s`);
-}
+// Opening a service, a fresh key per test, and waiting on the store: shared with
+// baptism-lane-roundtrip.test.ts, so the two guards cannot drift apart.
+const { freshCtx, openService, sleep, storedSessions } = await import("./baptism-roundtrip-harness.js");
 
 /**
  * Replay this service's real archived rows and assert they reproduce the
@@ -78,7 +53,7 @@ async function storedSession(ctx: { serviceKey: string }) {
  */
 async function assertRoundTrip(ctx: { serviceKey: string; serviceDate: string }, why: string) {
   await sampleArchive.flush();
-  const stored = await storedSession(ctx);
+  const stored = await storedSessions(ctx);
 
   const rows = await readBaptismRows(ctx.serviceKey, ctx.serviceDate);
   assert.ok(rows, `${why}: readBaptismRows found an archive for this service`);
@@ -126,7 +101,7 @@ async function assertRoundTrip(ctx: { serviceKey: string; serviceDate: string },
 
 describe("a real grouped session replays back into the session the store recorded", () => {
   it("run to its natural end, where the last person auto-finishes", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -151,7 +126,7 @@ describe("a real grouped session replays back into the session the store recorde
   });
 
   it("finished mid-baptism, with the second person never baptized", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -174,7 +149,7 @@ describe("a real grouped session replays back into the session the store recorde
   });
 
   it("finished during the testimony section, the baptisms cancelled", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -193,7 +168,7 @@ describe("a real grouped session replays back into the session the store recorde
   });
 
   it("finished while still armed, before anyone stepped up", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -211,11 +186,37 @@ describe("a real grouped session replays back into the session the store recorde
 
     await assertRoundTrip(ctx, "grouped, finished while armed");
   });
+
+  it("a direct next() while armed: the skipped person replays unbaptized, the next one baptized", async () => {
+    // POST /api/baptism/next while armed skips person 1 — no row, nobody's clock
+    // ran — and starts person 2's, writing a baptisms-start at index 1 that no
+    // advance() ever writes. The replay reads past it: it carries no session
+    // content.
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.startBaptisms();
+    baptismTimerService.next(); // direct, while armed
+    await sleep(8);
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people[0]!.baptizeMs, 0, "sanity: person 1 was skipped");
+    assert.ok(finished.people[1]!.baptizeMs > 0, "sanity: person 2 ran a clock");
+
+    const [replayed] = await assertRoundTrip(ctx, "grouped, direct next() while armed");
+    assert.equal(replayed!.people[0]!.baptizeMs, 0, "the skipped person replays unbaptized, not as a baptism");
+  });
 });
 
 describe("a real per-person session replays back into the session the store recorded", () => {
   it("two people, closed by the Finish press that is its only terminator", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("per-person");
@@ -238,7 +239,7 @@ describe("a real per-person session replays back into the session the store reco
   });
 
   it("one person whose testimony Finish closed before any baptism", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("per-person");
@@ -256,7 +257,7 @@ describe("a real per-person session replays back into the session the store reco
 
 describe("a real session containing an undo replays back into the session the store recorded", () => {
   it("re-baptizing the same person keeps the second attempt, not the first", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -300,7 +301,7 @@ describe("a real session containing an undo replays back into the session the st
     // zeroing person 0's baptism on any service where the operator corrected
     // somebody further down the line — which is the ordinary case, not the edge
     // one.
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -342,7 +343,7 @@ describe("a real session containing an undo replays back into the session the st
   });
 
   it("armed on the wrong song, undone, re-armed — still one person", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -375,7 +376,7 @@ describe("a real session containing an undo replays back into the session the st
     // baptismIndex 0, which the replay reads as un-baptizing index 0 — and
     // person 1 has no completion row yet, so there is nothing to zero. The
     // replay has no rule of its own for this press; this proves it needs none.
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
@@ -427,7 +428,7 @@ describe("a real session containing an undo replays back into the session the st
   });
 
   it("per-person Baptized pressed early, undone, then pressed again", async () => {
-    const ctx = freshCtx();
+    const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
     baptismTimerService.setMode("per-person");
@@ -448,6 +449,151 @@ describe("a real session containing an undo replays back into the session the st
       replayed!.people.length,
       1,
       "the undo pops NOBODY in per-person mode, however much it looks like the grouped row that does",
+    );
+  });
+});
+
+// Undo after Finish reopens the session where Finish was pressed (see
+// baptism-undo-finish.test.ts). Each reopening writes one `undo` row landing in
+// the phase it reopened, and the replay has to make the same people of it the
+// timer did.
+describe("a real session reopened by an Undo after Finish replays back into the session the store recorded", () => {
+  it("Finish while baptizing person 1 of 3, undone, then run to the end", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.startBaptisms(); // three people, armed
+    baptismTimerService.advance(); // person 1 in
+    await sleep(8);
+    baptismTimerService.finish(); // pressed two people early
+    assert.equal(baptismTimerService.undo().baptismIndex, 0, "sanity: reopened on person 1");
+    await sleep(8);
+    baptismTimerService.next(); // person 1 out, person 2 in
+    await sleep(8);
+    baptismTimerService.next(); // person 2 out, person 3 in
+    await sleep(8);
+    const finished = baptismTimerService.next(); // person 3 out — auto-finishes
+
+    assert.equal(finished.people.length, 3);
+    assert.ok(finished.people.every((p) => p.baptizeMs > 0), "sanity: all three were baptized, nobody skipped");
+
+    await assertRoundTrip(ctx, "grouped, early Finish undone");
+  });
+
+  it("Finish while armed, undone, then everyone baptized in order", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.startBaptisms(); // two people, armed
+    baptismTimerService.finish(); // before anyone stepped in
+    assert.equal(baptismTimerService.undo().armed, true, "sanity: armed again");
+    baptismTimerService.advance(); // person 1 in
+    await sleep(8);
+    baptismTimerService.next(); // person 2 in
+    await sleep(8);
+    const finished = baptismTimerService.next(); // auto-finishes
+
+    assert.ok(finished.people.every((p) => p.baptizeMs > 0), "sanity: both baptized, person 1 not skipped");
+
+    await assertRoundTrip(ctx, "grouped, armed Finish undone");
+  });
+
+  it("Finish during the testimonies, undone, then on into the baptisms", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("grouped");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    baptismTimerService.finish(); // closes person 2's testimony, no baptisms
+    assert.equal(baptismTimerService.undo().phase, "testimony", "sanity: person 2's testimony reopened");
+    await sleep(8);
+    baptismTimerService.startBaptisms();
+    baptismTimerService.advance();
+    await sleep(8);
+    baptismTimerService.next();
+    await sleep(8);
+    const finished = baptismTimerService.next(); // auto-finishes
+
+    assert.equal(finished.people.length, 2, "sanity: the reopened testimony is still one person");
+
+    await assertRoundTrip(ctx, "grouped, testimony Finish undone");
+  });
+
+  it("per-person Finish during a testimony, undone, then Baptized taken back later on", async () => {
+    // The pop belongs to the ONE undo that follows the finish. Baptized taken
+    // back later lands in the testimony phase as well; carried forward to it,
+    // the pop removes person 1, who finished long before.
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    baptismTimerService.next(); // person 1 complete, person 2's testimony
+    await sleep(8);
+    baptismTimerService.finish(); // closes person 2's testimony
+    baptismTimerService.undo(); // person 2's testimony reopened
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    assert.equal(baptismTimerService.undo().phase, "testimony", "sanity: Baptized taken back");
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 2, "sanity: person 1 and person 2");
+
+    await assertRoundTrip(ctx, "per-person, testimony Finish undone, then Baptized taken back");
+  });
+
+  it("per-person Finish during a testimony, undone, then baptized", async () => {
+    const ctx = freshCtx("replay");
+    openService(ctx);
+    baptismTimerService.reset();
+    baptismTimerService.setMode("per-person");
+
+    baptismTimerService.start();
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    baptismTimerService.next(); // person 1 complete, person 2's testimony
+    await sleep(8);
+    baptismTimerService.finish(); // closes person 2's testimony, never baptized
+    assert.equal(baptismTimerService.undo().phase, "testimony", "sanity: person 2's testimony reopened");
+    await sleep(8);
+    baptismTimerService.baptized();
+    await sleep(8);
+    const finished = baptismTimerService.finish();
+
+    assert.equal(finished.people.length, 2);
+
+    const [replayed] = await assertRoundTrip(ctx, "per-person, testimony Finish undone");
+    assert.equal(
+      replayed!.people.length,
+      2,
+      "the undo pops the person that Finish pushed, however much it looks like the per-person undo that pops nobody",
     );
   });
 });

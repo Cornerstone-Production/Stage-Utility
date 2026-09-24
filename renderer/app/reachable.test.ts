@@ -23,12 +23,7 @@ const SECTIONS_DIR = path.join(HERE, "..", "settings", "sections");
 const APP_DIR = HERE;
 
 /** Sections deliberately not routed, and why. Adding an entry is a decision. */
-const NOT_ROUTED = new Map([
-  [
-    "BaptismsSection",
-    "a 15-line wrapper around BaptismOperator, which /baptism routes directly — the wrapper is the duplicate, not the feature",
-  ],
-]);
+const NOT_ROUTED = new Map<string, string>([]);
 
 function sectionComponents(): string[] {
   const out: string[] = [];
@@ -81,7 +76,11 @@ describe("every settings section is still reachable", () => {
   test("the scan finds the sections at all, so it cannot pass vacuously", () => {
     // If the export shape changes, the test below would pass by finding nothing.
     const found = sectionComponents();
-    assert.ok(found.length >= 10, `only found ${found.length} section components — scan looks broken`);
+    // Deleting BaptismsSection (the dead wrapper this file's own NOT_ROUTED
+    // entry used to exempt) dropped this from 10 to 9 — a real count change,
+    // not slack: this is a "did the regex break" tripwire, not a membership
+    // guard, so it tracks the current real count rather than a stale one.
+    assert.ok(found.length >= 9, `only found ${found.length} section components — scan looks broken`);
     assert.ok(found.includes("PatchSection"), "expected PatchSection among them");
   });
 

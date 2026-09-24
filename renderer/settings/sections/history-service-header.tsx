@@ -403,6 +403,73 @@ export function useSectionNav(ids: readonly string[], headerBottom = 150): strin
  */
 export const HEADER_INSET_VAR = "--su-history-header-inset";
 
+/**
+ * A sticky header's own geometry, measured against the app's one scroller.
+ *
+ * Two consumers, one measurement: the scrolling pane's `scroll-padding-top`
+ * (published as a custom property, because it has to reach an element this
+ * hook does not render) and a section nav's `rootMargin` (the return value).
+ * Both were fixed numbers first and both were wrong in a real browser — a
+ * header's actual height varies by page, content and width (184px tall at
+ * 1280 and 220px at 600 for History's own), against a 160px margin and a
+ * 150px root inset, so an anchor jump parked a card's heading behind the
+ * header and the nav named the wrong section while a different one filled
+ * the screen.
+ *
+ * The INSET is measured against the pane rather than taken as the header's
+ * height, because a sticky element in this pane pins below the pane's own top
+ * padding. `rootMargin` (this hook's return value) wants the viewport-relative
+ * bottom, which is the same edge read against a different origin.
+ *
+ * A ResizeObserver rather than a one-shot measure: an action group can wrap to
+ * a second line on a narrow window, and other content comes and goes with
+ * what the header is showing, so the height it settles at is not the one it
+ * first renders at.
+ *
+ * Shared by History's own ServiceHeader and the Baptisms tab's BaptismHeader
+ * — the same sticky-header-over-one-scroller problem, so a second,
+ * differently-behaving fix here would only teach an operator that "sections
+ * of a page" work differently on two tabs for no reason.
+ *
+ * jsdom reports every geometry as 0 and could not have caught any of this —
+ * driven in a real browser instead, on both tabs that use it.
+ */
+export function useHeaderInset(ref: React.RefObject<HTMLElement | null>): number {
+  const [bottom, setBottom] = useState(150);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const write = () => {
+      const r = el.getBoundingClientRect();
+      // The app's one scroller, by the name the router knows it by.
+      const pane = el.closest<HTMLElement>("[data-scroll-restoration-id]");
+      const paneTop = pane ? pane.getBoundingClientRect().top : 0;
+      root.style.setProperty(HEADER_INSET_VAR, `${Math.max(0, Math.round(r.bottom - paneTop))}px`);
+      setBottom(Math.round(r.bottom));
+    };
+    write();
+    const drop = () => {
+      // Leaving a stale inset behind would push the NEXT page's scroll targets
+      // down by the height of a header no longer on screen.
+      root.style.removeProperty(HEADER_INSET_VAR);
+    };
+    if (typeof ResizeObserver === "undefined") return drop;
+    const obs = new ResizeObserver(write);
+    obs.observe(el);
+    return () => {
+      obs.disconnect();
+      drop();
+    };
+    // `ref` is a parameter here (unlike the component-local useRef() this
+    // effect used to close over before the extraction), so exhaustive-deps
+    // cannot assume it is stable the way it does a hook's own useRef() — it
+    // is, for both of this hook's callers, so this changes nothing at
+    // runtime, only what the linter can see.
+  }, [ref]);
+  return bottom;
+}
+
 export interface ServiceHeaderProps {
   timeline: ServiceTimeline;
   attendance: ServiceAttendance | null;
@@ -460,56 +527,13 @@ export function ServiceHeader({
     [timeline, attendance, spl, soundUnavailable, live, now, metricsVersion],
   );
 
-  /**
-   * The header's own geometry, measured.
-   *
-   * Two consumers, one measurement: the scrolling pane's `scroll-padding-top`
-   * (published as a custom property, because it has to reach an element this
-   * component does not render) and the section nav's `rootMargin`. Both were
-   * fixed numbers first and both were wrong in a real browser — the header is
-   * 184px tall at 1280 and 220px at 600, against a 160px margin and a 150px
-   * root inset, so an anchor jump parked a card's heading behind the header and
-   * the nav named Attendance while Sound filled the screen.
-   *
-   * The INSET is measured against the pane rather than taken as the header's
-   * height, because a sticky element in this pane pins below the pane's own top
-   * padding — see HEADER_INSET_VAR. `rootMargin` wants the viewport-relative
-   * bottom, which is the same edge read against a different origin.
-   *
-   * A ResizeObserver rather than a one-shot measure: the action group wraps to
-   * a second line on a narrow window, and the KPI sub-lines come and go with
-   * the record, so the height the header settles at is not the one it first
-   * renders at.
-   */
+  // Geometry: see useHeaderInset's own doc comment — 184px tall at 1280 and
+  // 220px at 600 for THIS header specifically, against a fixed 160px margin
+  // and 150px root inset that both shipped first and were both wrong (an
+  // anchor jump parked a card's heading behind the header, and the nav named
+  // Attendance while Sound filled the screen).
   const ref = useRef<HTMLElement | null>(null);
-  const [bottom, setBottom] = useState(150);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const root = document.documentElement;
-    const write = () => {
-      const r = el.getBoundingClientRect();
-      // The app's one scroller, by the name the router knows it by.
-      const pane = el.closest<HTMLElement>("[data-scroll-restoration-id]");
-      const paneTop = pane ? pane.getBoundingClientRect().top : 0;
-      root.style.setProperty(HEADER_INSET_VAR, `${Math.max(0, Math.round(r.bottom - paneTop))}px`);
-      setBottom(Math.round(r.bottom));
-    };
-    write();
-    const drop = () => {
-      // Leaving a stale inset behind would push the NEXT page's scroll targets
-      // down by the height of a header no longer on screen.
-      root.style.removeProperty(HEADER_INSET_VAR);
-    };
-    if (typeof ResizeObserver === "undefined") return drop;
-    const obs = new ResizeObserver(write);
-    obs.observe(el);
-    return () => {
-      obs.disconnect();
-      drop();
-    };
-  }, []);
-
+  const bottom = useHeaderInset(ref);
   const active = useSectionNav(SERVICE_SECTIONS.map((s) => s.id), bottom);
 
   return (

@@ -16,9 +16,13 @@
 // them are counter-intuitive:
 //
 //  • MODE comes from the `start` row, never from the first row of the file.
-//    reset() emits AFTER clearing state, and setMode() emits nothing at all, so
-//    the first row of a per-person session is commonly a `reset` still reading
-//    `mode=grouped` — the mode of the session before it.
+//    setMode() changes it with no row of its own — reset() is not the reason:
+//    it PRESERVES the mode (idleState(this.state.mode)), clearing nothing but
+//    the run in progress. So any row emitted before the next setMode() call —
+//    a `reset` closing out the prior session included — still carries the OLD
+//    mode: the first row of a per-person session is commonly a `reset` still
+//    reading `mode=grouped`, the mode of the session before it, not something
+//    reset erased.
 //
 //  • `person-complete` is NOT unique per person. undo() lets an operator
 //    re-baptise the same `baptismIndex`, and both attempts are in the file. The
@@ -42,12 +46,21 @@
 //    pushed a person. Grouped `testimony-end` always pushes.
 //
 //  • An `undo` row's `phase` is the phase it landed IN; its `detail` names the
-//    phase it came FROM. The people effect follows from (mode, phase) alone —
-//    `detail` is corroborating only, which matters because the same (phase,
-//    detail) pair means opposite things in the two modes: `phase=testimony
-//    detail="from baptism"` pops the folded person in grouped mode and pops
-//    NOBODY in per-person mode. There are seven (mode, phase, from) triples in
-//    the emitter, four grouped and three per-person.
+//    phase it came FROM. The people effect follows from the mode, that phase,
+//    and whether the undo reopens a finish — never from `detail`, which is
+//    corroborating only, because the same (phase, detail) pair means opposite
+//    things in the two modes: `phase=testimony detail="from baptism"` pops the
+//    folded person in grouped mode and pops NOBODY in per-person mode. There
+//    are nine (mode, phase, from) triples in the emitter, five grouped and
+//    four per-person.
+//
+//  • Undo after Finish reopens the session where Finish was pressed, so a
+//    per-person `phase=testimony` undo is one of two things: baptized() taken
+//    back, which pops nobody, or a Finish pressed mid-testimony taken back,
+//    which pops the person finish() pushed. Row order tells them apart.
+//    finish() leaves the timer idle, where no press but Undo, Start or Reset
+//    writes a row, so the undo that reopens a finish is always the row right
+//    after that `finish`.
 //
 //  • A session can carry TWO `finish` rows — finish, undo out of idle, finish
 //    again — and is ONE session. baptismStore.addSession replaces by id rather
@@ -86,7 +99,10 @@ export interface BaptismIdentity {
   planId: string | null;
 }
 
-function num(v: string | undefined): number {
+/** A numeric cell of a baptism row: 0 when blank or unreadable. Exported so the
+ *  lane (baptism-lane.ts) reads every row exactly as this replay does — two
+ *  parses of one column are two answers about which person a row names. */
+export function cellNumber(v: string | undefined): number {
   const n = Number(v ?? "");
   return Number.isFinite(n) ? n : 0;
 }
@@ -102,6 +118,9 @@ interface OpenSession {
   /** Where this session's last `finish` already logged it in the output, so a
    *  second `finish` replaces that entry instead of adding a second session. */
   logged: number | null;
+  /** Whether the row just read was this session's `finish`. An `undo` straight
+   *  after one reopens the finished session; see the header. */
+  justFinished: boolean;
 }
 
 /** Counters for what a damaged file made this skip, reported as one line rather
@@ -166,7 +185,7 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         skips.unknownMode += 1;
         mode = "grouped";
       }
-      open = { mode, startedAt: at, people: [], pendingTestimonyMs: null, logged: null };
+      open = { mode, startedAt: at, people: [], pendingTestimonyMs: null, logged: null, justFinished: false };
       continue;
     }
 
@@ -175,30 +194,33 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
       continue;
     }
 
+    const reopening = open.justFinished;
+    open.justFinished = r.event === "finish";
+
     switch (r.event) {
       case "testimony-end":
         if (open.mode === "per-person" && r.phase === "baptism") {
           // baptized(): the state has already moved into the baptism phase, so
           // this only banks the testimony. The person is completed later, by
           // next() or by finish().
-          open.pendingTestimonyMs = num(r.segmentMs);
+          open.pendingTestimonyMs = cellNumber(r.segmentMs);
         } else {
           // Grouped next()/finish(), and per-person finish() closing a testimony
           // that never reached a baptism — all three had already pushed a person
           // when they emitted, with baptizeMs still 0.
-          open.people.push({ testimonyMs: num(r.segmentMs), baptizeMs: 0 });
+          open.people.push({ testimonyMs: cellNumber(r.segmentMs), baptizeMs: 0 });
         }
         break;
 
       case "baptisms-armed":
         // startBaptisms() folds the running testimony into `people` and carries
         // its duration here. Nowhere else holds it.
-        open.people.push({ testimonyMs: num(r.segmentMs), baptizeMs: 0 });
+        open.people.push({ testimonyMs: cellNumber(r.segmentMs), baptizeMs: 0 });
         break;
 
       case "person-complete":
         if (open.mode === "per-person") {
-          open.people.push({ testimonyMs: open.pendingTestimonyMs ?? 0, baptizeMs: num(r.segmentMs) });
+          open.people.push({ testimonyMs: open.pendingTestimonyMs ?? 0, baptizeMs: cellNumber(r.segmentMs) });
           // Belt and braces, mirroring next()'s own `pendingTestimonyMs: null`.
           // Nothing reads it before the next testimony-end overwrites it, so
           // removing this line changes no result today — it is here so the
@@ -208,21 +230,27 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         } else {
           // ASSIGN, never append: a re-baptised index has two rows and the last
           // one wins.
-          const person = open.people[num(r.baptismIndex)];
-          if (person) person.baptizeMs = num(r.segmentMs);
+          const person = open.people[cellNumber(r.baptismIndex)];
+          if (person) person.baptizeMs = cellNumber(r.segmentMs);
           else skips.missingIndex += 1;
         }
         break;
 
       case "undo":
-        // `phase` is where the undo LANDED. Together with the mode that is the
-        // whole rule; see the header for why `detail` is not consulted.
+        // `phase` is where the undo LANDED. Together with the mode, and whether
+        // it reopens a finish, that is the whole rule; see the header for why
+        // `detail` is not consulted.
         if (open.mode === "per-person") {
           if (r.phase === "testimony") {
-            // Un-baptized: the banked testimony went back into the running
-            // clock and a later testimony-end re-banks the corrected total.
-            // Belt and braces like the clear in person-complete above — the
-            // corrected total always overwrites this before anything reads it.
+            // Reopening a Finish pressed mid-testimony: finish() pushed that
+            // testimony as a person, and the undo takes it back into the
+            // running clock. Otherwise this is baptized() taken back, which
+            // pops nobody.
+            if (reopening) open.people.pop();
+            // Either way the banked testimony went back into the running clock
+            // and a later testimony-end re-banks the corrected total. Belt and
+            // braces like the clear in person-complete above — the corrected
+            // total always overwrites this before anything reads it.
             open.pendingTestimonyMs = null;
           } else {
             // Stepped back into the person just completed (from the next
@@ -239,7 +267,7 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
         } else {
           // Still in the baptism section (or reopening a finished one): the
           // person at the row's index is un-baptized, not removed.
-          const person = open.people[num(r.baptismIndex)];
+          const person = open.people[cellNumber(r.baptismIndex)];
           if (person) person.baptizeMs = 0;
           else skips.missingIndex += 1;
         }

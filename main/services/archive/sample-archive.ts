@@ -166,7 +166,17 @@ class SampleArchive {
     );
   }
 
-  /** Settle every queued write. Tests await this; the live path does not need to. */
+  /**
+   * Settle every queued write.
+   *
+   * The recorders never await this, since the live tick must not block on disk.
+   * A READER of these files must, before it reads: every record method queues its
+   * append without awaiting it. GET /api/baptism/lane is one — the Baptisms tab
+   * fetches it on the very `baptism:state` push a press broadcasts, and without
+   * this every read made on that push came back a row short
+   * (baptism-lane-route.test.ts fails on it). writeManifest below awaits it for
+   * the same reason. Do not remove a reader's call to it.
+   */
   async flush(): Promise<void> {
     const waits: Promise<void>[] = [];
     for (const e of this.services.values()) for (const a of e.appenders.values()) waits.push(a.settled());

@@ -28,6 +28,11 @@ import {
 } from "../history-edit.js";
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 import { historyMilestonesStore } from "../history-milestones-store.js";
+import { sampleArchive } from "../archive/sample-archive.js";
+import { readBaptismRows } from "../archive/rebuild-baptism.js";
+import { baptismLaneSpans, type BaptismSpan } from "../archive/baptism-lane.js";
+import { rolledFiles } from "../archive/archive-rows.js";
+import { serviceDirPath } from "../archive/archive-paths.js";
 
 /**
  * Every service type id that has a SERVICE the Trends chart draws, for
@@ -55,6 +60,73 @@ async function recordedServiceTypeIds(): Promise<string[]> {
   }
   return [...ids];
 }
+
+/**
+ * One service's baptism lane, derived from its own `baptism.csv`.
+ *
+ * Flushed FIRST. emitRaw queues its append without awaiting it, and commit()
+ * broadcasts `baptism:state` in the same call — so the Baptisms tab, which
+ * refetches this on that push, would otherwise read the file a row short and
+ * draw the press it is reacting to as not having happened.
+ *
+ * The directory is named by key AND date, and the date is read off the
+ * service's timeline record, never parsed from the key: a key ends in a date
+ * only when Planning Center had no service-time id for the occurrence, and in
+ * that id otherwise. The record is what emitRaw took the date from when it
+ * wrote the rows. The live one first, because the recorder persists on a
+ * debounce and a service opened seconds ago is not in the store yet.
+ *
+ * `[]` when the service has no baptism archive. An archive that exists and
+ * cannot be read is a failure, not an empty lane — readArchiveRows answers null
+ * for both, so the files are looked for before believing it.
+ */
+async function baptismLaneFor(serviceKey: string): Promise<BaptismSpan[]> {
+  await sampleArchive.flush();
+  const live = serviceTimelineRecorder.getCurrent();
+  const record = live?.serviceKey === serviceKey ? live : await serviceTimelineStore.get(serviceKey);
+  if (!record) return [];
+  const rows = await readBaptismRows(serviceKey, record.serviceDate);
+  if (rows === null) {
+    const present = await rolledFiles(serviceDirPath(serviceKey, record.serviceDate), "baptism");
+    if (present.length > 0) {
+      throw new Error(`${present.length} baptism archive file(s) present for this service, and none could be read`);
+    }
+    return [];
+  }
+  return baptismLaneSpans(rows, serviceKey);
+}
+
+/**
+ * Every action `POST /api/baptism/<action>` actually handles, as a SORTED
+ * runtime array — one entry per line, never a bare count, for the reason
+ * this repo's other exact-list guards give: a count cannot tell an add plus
+ * a remove from no change. `as const` so BaptismAction below is a literal
+ * union, not `string`.
+ *
+ * Ties the switch below to this array through the exhaustiveness check at
+ * its `default:` (see baptism-actions.test.ts's own module comment for why a
+ * text scan of the switch was not enough): a `case` label not in this array
+ * fails at its own line (`tsc` TS2678, not comparable to `BaptismAction`),
+ * and an array member with no `case` fails at `default:` (its literal is not
+ * assignable to `never`). baptism-actions.test.ts checks the third direction
+ * this array cannot check itself — its own table of driven actions against
+ * this array, at runtime — so an entry here with no test row is caught too.
+ */
+export const BAPTISM_ACTIONS = [
+  "advance",
+  "baptized",
+  "dismiss-save-error",
+  "finish",
+  "mode",
+  "next",
+  "pause",
+  "reset",
+  "resume",
+  "start",
+  "start-baptisms",
+  "undo",
+] as const;
+export type BaptismAction = (typeof BAPTISM_ACTIONS)[number];
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -281,6 +353,17 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, await baptismTimerService.listSessions());
       return;
     }
+    // A service's session lane: each testimony and baptism as a span in real
+    // time, the gaps between them uncounted. See baptismLaneFor above.
+    if (method === "GET" && pathname === "/api/baptism/lane") {
+      const serviceKey = c.url.searchParams.get("serviceKey");
+      if (!serviceKey) {
+        error(res, "serviceKey query parameter required");
+        return;
+      }
+      json(res, { spans: await baptismLaneFor(serviceKey) });
+      return;
+    }
     // Which plan items start each phase, for one plan. Kept per plan because the
     // baptisms usually happen during a song, and the songs change every week.
     if (pathname === "/api/baptism/triggers") {
@@ -305,7 +388,11 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       }
     }
     if (method === "POST" && pathname.startsWith("/api/baptism/")) {
-      const action = pathname.slice("/api/baptism/".length);
+      // Cast, not a runtime guard: the switch below is what decides whether
+      // this string is actually one of BAPTISM_ACTIONS. The cast exists so
+      // `tsc` treats `action` as that union for the exhaustiveness check at
+      // `default:` below, not to change what the value actually is.
+      const action = pathname.slice("/api/baptism/".length) as BaptismAction;
       switch (action) {
         case "start": json(res, baptismTimerService.start()); return;
         case "baptized": json(res, baptismTimerService.baptized()); return;
@@ -317,10 +404,20 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "pause": json(res, baptismTimerService.pause()); return;
         case "resume": json(res, baptismTimerService.resume()); return;
         case "reset": json(res, baptismTimerService.reset()); return;
+        case "dismiss-save-error": json(res, baptismTimerService.dismissSaveError()); return;
         case "mode": {
           const body = (await readBody(req)) as Record<string, unknown>;
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
           return;
+        }
+        default: {
+          // If this line fails to compile, BAPTISM_ACTIONS above lists an
+          // action with no `case` — add one. A runtime string that was never
+          // one of BAPTISM_ACTIONS reaches here too (the cast above changes
+          // nothing about what the value actually is) and falls through to
+          // the routes below, same as any other unmatched path.
+          const exhaustive: never = action;
+          void exhaustive;
         }
       }
     }

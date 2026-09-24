@@ -244,6 +244,30 @@ describe("rebuildBaptismSessions: undo", () => {
     assert.deepEqual(session!.people, [{ testimonyMs: 190000, baptizeMs: 10000 }]);
   });
 
+  it("pops the person finish() pushed when the per-person undo right after it reopens a testimony", () => {
+    // The same landing phase as the fixture above, the opposite people effect:
+    // this undo is the row straight after `finish`, so it reopens the testimony
+    // Finish closed and takes back the person finish() pushed for it. Read as
+    // baptized() taken back, person 2 would replay twice.
+    const pp = { mode: "per-person" };
+    const rows: BaptismRow[] = [
+      row(0, { event: "start", phase: "testimony", personNumber: "1", ...pp }),
+      row(60, { event: "testimony-end", phase: "baptism", personNumber: "1", segmentMs: "60000", ...pp }),
+      row(70, { event: "person-complete", phase: "baptism", personNumber: "1", segmentMs: "10000", ...pp }),
+      row(100, { event: "testimony-end", phase: "testimony", personNumber: "2", segmentMs: "30000", ...pp }),
+      row(100, { event: "finish", phase: "idle", personNumber: "2", detail: "people=2", ...pp }),
+      row(101, { event: "undo", phase: "testimony", personNumber: "2", detail: "from idle", ...pp }),
+      row(120, { event: "testimony-end", phase: "baptism", personNumber: "2", segmentMs: "49000", ...pp }),
+      row(135, { event: "person-complete", phase: "baptism", personNumber: "2", segmentMs: "15000", ...pp }),
+      row(135, { event: "finish", phase: "idle", personNumber: "2", detail: "people=2", ...pp }),
+    ];
+    const [session] = rebuildBaptismSessions(rows, ID);
+    assert.deepEqual(session!.people, [
+      { testimonyMs: 60000, baptizeMs: 10000 },
+      { testimonyMs: 49000, baptizeMs: 15000 },
+    ]);
+  });
+
   it("gives a popped per-person person their testimony back as the pending one", () => {
     const pp = { mode: "per-person" };
     const rows: BaptismRow[] = [

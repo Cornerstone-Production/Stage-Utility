@@ -1,5 +1,6 @@
 import { errorMessage } from "@main/services/errors";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -335,9 +336,100 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
   { id: "baptisms", label: "Baptisms", hint: "testimony + baptism splits, per person" },
 ];
 
+/**
+ * The operator's History page — see destinations.tsx. Not the shared
+ * read-only `/history`: that page renders this same section (with
+ * `readOnly`) and honors the same param, because the selection state below
+ * keys off whichever path is actually mounted, but a cross-link (the
+ * Baptisms tab, and PR 3's link back) hands the operator the full page.
+ */
+const HISTORY_MANAGE_PATH = "/history/manage";
+/** The search param holding the open service. A search param, not a path
+ *  segment: a service key looks like "st1:plan123:time456" — colons — which
+ *  a path segment would need escaped either way it's spelled. */
+const HISTORY_SERVICE_PARAM = "service";
+
+/**
+ * The URL that opens one service's History page. The one place this is
+ * built, so a cross-link (the Baptisms tab's past sessions, and PR 3's link
+ * back) never constructs it by hand and cannot drift from what this page
+ * actually reads.
+ */
+export function historyServiceHref(serviceKey: string): string {
+  return `${HISTORY_MANAGE_PATH}?${HISTORY_SERVICE_PARAM}=${encodeURIComponent(serviceKey)}`;
+}
+
+/**
+ * The slice of a TanStack router this file actually touches — not the
+ * router's own types, which are keyed to a route tree this file does not own
+ * (see the "no Register augmentation" note on integrations-section.tsx).
+ * Typing only these three members keeps the cast below honest about what is
+ * really being relied on.
+ */
+interface HistoryRouterHandle {
+  state: { location: { pathname: string; search: Record<string, unknown> } };
+  navigate: (opts: { to: string; search: Record<string, unknown>; replace: boolean }) => unknown;
+  subscribe: (event: "onResolved", fn: () => void) => () => void;
+}
+
+function serviceParamOf(router: HistoryRouterHandle | null): string | null {
+  const v = router?.state.location.search[HISTORY_SERVICE_PARAM];
+  return typeof v === "string" ? v : null;
+}
+
+/**
+ * `selectedKey`, backed by the URL instead of plain component state.
+ *
+ * Selecting a service also becomes a navigation: a reload or a copied link
+ * lands on the same service, and Back returns to the list. The push/replace
+ * split mirrors `?integration=` on integrations-section.tsx — opening pushes
+ * a new entry, closing replaces so closing twice cannot stack two Back
+ * presses.
+ *
+ * A click sets `local` DIRECTLY rather than waiting for the navigation to
+ * resolve and echo back through the subscription below — this page must open
+ * the instant a row is clicked, exactly as it did before this change, not
+ * after a round trip through the router's own transition. The subscription
+ * exists for the direction a click can't cover: Back, Forward, or a link
+ * landing on this page from elsewhere.
+ *
+ * `useRouter({ warn: false })` returns null with no ancestor
+ * `<RouterProvider>` rather than throwing — TanStack's own context default is
+ * `null!`, which is what `useSearch()`/`useNavigate()` dereference and throw
+ * on. Every existing test in this file renders the section with no router at
+ * all, so this falls back to plain state there, exactly what a bare
+ * `useState<string | null>(null)` already did before this change.
+ */
+function useSelectedServiceKey(): [string | null, (key: string | null) => void] {
+  const router = useRouter({ warn: false }) as unknown as HistoryRouterHandle | null;
+  const [local, setLocal] = useState<string | null>(() => serviceParamOf(router));
+
+  useEffect(() => {
+    // Subscribe only — the useState initializer above already reads the
+    // router's CURRENT location, and this router instance does not change
+    // out from under a mounted component, so there is nothing to resync here.
+    if (!router) return;
+    return router.subscribe("onResolved", () => setLocal(serviceParamOf(router)));
+  }, [router]);
+
+  const setSelectedKey = useCallback(
+    (key: string | null) => {
+      setLocal(key);
+      if (!router) return;
+      const nextSearch = { ...router.state.location.search };
+      if (key) nextSearch[HISTORY_SERVICE_PARAM] = key;
+      else delete nextSearch[HISTORY_SERVICE_PARAM];
+      void router.navigate({ to: router.state.location.pathname, search: nextSearch, replace: key === null });
+    },
+    [router],
+  );
+
+  return [local, setSelectedKey];
+}
+
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useSelectedServiceKey();
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
@@ -1352,7 +1444,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
               <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
             </div>
-            <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
           </SectionCard>
         ) : detailFailed.has("baptisms") ? (
           <SectionCard title="Baptisms">

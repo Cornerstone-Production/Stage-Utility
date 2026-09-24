@@ -130,9 +130,11 @@ export type IpcChannel =
   | "baptism:advance"
   | "baptism:baptized"
   | "baptism:deleteSession"
+  | "baptism:dismissSaveError"
   | "baptism:finish"
   | "baptism:get"
   | "baptism:getTriggers"
+  | "baptism:lane"
   | "baptism:next"
   | "baptism:pause"
   | "baptism:reset"
@@ -581,6 +583,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":
       return apiFetch<T>("/api/baptism/sessions");
+    case "baptism:lane":
+      return apiFetch<T>(`/api/baptism/lane?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
     case "baptism:start":
       return post<T>("/api/baptism/start");
     case "baptism:baptized":
@@ -603,6 +607,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/baptism/finish");
     case "baptism:reset":
       return post<T>("/api/baptism/reset");
+    case "baptism:dismissSaveError":
+      return post<T>("/api/baptism/dismiss-save-error");
     case "baptism:deleteSession": {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
