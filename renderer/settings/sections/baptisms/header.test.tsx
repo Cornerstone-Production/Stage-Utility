@@ -61,7 +61,8 @@ class FakeEventSource {
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider, ConfirmHost, Toaster } = await import("../../../components/ui/index.js");
-const { BaptismHeader, describeBaptismRebuild, baptismRebuildDisabledReason } = await import("./header.js");
+const { BaptismHeader } = await import("./header.js");
+const { describeBaptismRebuild, baptismRebuildDisabledReason } = await import("./rebuild.js");
 const { rebuildButtonsIn, tooltipTextOf } = await import("./rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));

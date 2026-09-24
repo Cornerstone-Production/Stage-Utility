@@ -23,7 +23,8 @@ import { cn } from "../../../lib/cn";
 import { summarizeBaptism, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { useServerNow } from "../../../lib/server-clock";
 import { BaptismTriggersPanel } from "../../../main/baptism-triggers-panel";
-import { useServiceLive, baptismRebuildDisabledReason, rebuildTargetLabel, runBaptismRebuild } from "./header";
+import { useServiceLive } from "./use-service-live";
+import { baptismRebuildDisabledReason, rebuildTargetLabel, runBaptismRebuild } from "./rebuild";
 
 /**
  * Invoke a channel, tracking a busy flag around it and surfacing a failure as
@@ -59,8 +60,9 @@ async function act(
  * serviceKey, never `state.serviceKey` (the header's own target, which is
  * the NEXT session's once one has started — see baptismSubline). Reuses the
  * header's live check, disabled-reason table and confirm/POST/report flow
- * outright (useServiceLive, baptismRebuildDisabledReason, rebuildTargetLabel,
- * runBaptismRebuild in ./header) rather than a second copy of any of them.
+ * outright (useServiceLive from ./use-service-live; baptismRebuildDisabledReason,
+ * rebuildTargetLabel, runBaptismRebuild from ./rebuild) rather than a second
+ * copy of any of them.
  *
  * A separate component, not inline in the `saveErrors.map()` below, because
  * each entry's live check is its own `useServiceLive()` call — a Hook can't
