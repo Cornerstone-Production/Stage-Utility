@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
-import { invoke } from "../lib/api";
+import { invoke, onNotification } from "../lib/api";
 import { logToServer } from "../lib/client-log";
 import { toast } from "../components/ui";
 import { useBaptismState } from "./use-baptism-state";
@@ -61,6 +61,15 @@ export function BaptismOperator() {
 
   useEffect(() => {
     reloadSessions();
+    // The header's and the Timer card's own onRebuilt cover a rebuild
+    // started FROM this page; this page can just as easily be open while a
+    // rebuild runs from History instead (the third of the three routes into
+    // applyBaptismRebuild), which never touches either of those props at
+    // all — only the server-side broadcast reaches this tab in that case.
+    return onNotification("baptism:rebuilt", (_payload, replayed) => {
+      if (replayed) return;
+      reloadSessions();
+    });
   }, [reloadSessions]);
 
   async function deleteSession(id: string) {

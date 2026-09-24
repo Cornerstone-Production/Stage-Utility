@@ -1223,6 +1223,14 @@ async function applyBaptismRebuild(
   // clearRestoredSaveErrors only ever removes ids actually present.
   const restoredIds = new Set([...addedIds, ...updatedIds]);
   baptismTimerService.clearRestoredSaveErrors(restoredIds);
+  // clearRestoredSaveErrors only pushes when a save-failure ENTRY actually
+  // cleared — a rebuild that adds or updates a session with no failed save
+  // to clear (an operator picking up an older correction, say) changes the
+  // store just as really, and the Baptisms tab's own Past sessions/Trends
+  // and History's own list/card (both read the store, not this function's
+  // return value) would otherwise stay stale until a full reload, whichever
+  // of the three routes into this function did the writing.
+  if (restoredIds.size > 0) broadcast("baptism:rebuilt", { serviceKey, ids: [...restoredIds] });
 
   console.log(
     `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +

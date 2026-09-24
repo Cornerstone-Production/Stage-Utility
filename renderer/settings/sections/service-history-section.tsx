@@ -909,9 +909,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       lastSignature = signature;
       fetchBaptisms();
     });
+    // A rebuild that adds or updates a session with no save-failure entry to
+    // clear (an operator picking up an older correction, say) never touches
+    // baptism:state at all — this is the store itself changing, from any of
+    // the three routes into applyBaptismRebuild, not a live timer event.
+    const offRebuilt = onNotification("baptism:rebuilt", (_payload, replayed) => {
+      if (replayed) return;
+      fetchBaptisms();
+    });
     return () => {
       cancelled = true;
       offState();
+      offRebuilt();
     };
   }, [reloadKey, selectedKey, noteLoaded]);
 
