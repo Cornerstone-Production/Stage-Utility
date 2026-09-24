@@ -134,18 +134,24 @@ let REFUSE: { id: string; error: string } | null = null;
     if (method === "PATCH") {
       const patch = JSON.parse(String(init?.body)) as Partial<StubRule>;
       RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      // The real route's shape: { rule, issues }. Every stub rule here already
+      // carries every param its own action/trigger needs, so issues is always
+      // empty — the seeding and validation tests read the PATCH's SENT body,
+      // not this response.
+      const rule = RULES.find((r) => r.id === id);
+      return { ok: true, status: 200, json: async () => ({ rule, issues: [] }), text: async () => JSON.stringify({ rule, issues: [] }) };
     }
     if (method === "DELETE") RULES = RULES.filter((r) => r.id !== id);
     if (method === "POST" && url.endsWith("/api/automation/rules") && CREATED) {
       RULES = [...RULES, CREATED];
-      const created = CREATED;
+      const created = { rule: CREATED, issues: [] };
       return { ok: true, status: 201, json: async () => created, text: async () => JSON.stringify(created) };
     }
   }
   let body: unknown = {};
   if (url.includes("/api/automation/registry")) body = REGISTRY;
   else if (url.includes("/api/automation/rules")) {
-    body = { rules: RULES, settings: { simulate: true, disarmed: false } };
+    body = { rules: RULES.map((r) => ({ ...r, issues: [] })), settings: { simulate: true, disarmed: false } };
   } else if (url.includes("/api/automation/log")) body = { entries: [] };
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };

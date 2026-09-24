@@ -108,11 +108,17 @@ let requests: { url: string; body: string | null }[] = [];
     const id = url.split("/").pop() ?? "";
     const patch = JSON.parse(init.body as string) as { trigger?: StubRule["trigger"] };
     RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    if (init.method === "PATCH") {
+      // The real route's shape: { rule, issues }. Every stub rule here already
+      // carries every param its own action/trigger needs.
+      const rule = RULES.find((r) => r.id === id);
+      return { ok: true, status: 200, json: async () => ({ rule, issues: [] }), text: async () => JSON.stringify({ rule, issues: [] }) };
+    }
   }
   let body: unknown = {};
   if (url.includes("/api/automation/registry")) body = REGISTRY;
   else if (url.includes("/api/automation/rules")) {
-    body = { rules: RULES, settings: { simulate: true, disarmed: false } };
+    body = { rules: RULES.map((r) => ({ ...r, issues: [] })), settings: { simulate: true, disarmed: false } };
   } else if (url.includes("/api/automation/log")) body = { entries: [] };
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };

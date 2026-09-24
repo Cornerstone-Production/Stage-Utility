@@ -20,7 +20,13 @@
 
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
-import { seedNumberDefaults } from "@main/services/automation-param-validation";
+import {
+  fieldsNeedAttention,
+  ruleIssues,
+  seedNumberDefaults,
+  type RuleIssue,
+  type StepSpecLookup,
+} from "@main/services/automation-param-validation";
 import {
   APP_STATE_FAMILIES,
   APP_STATE_SOURCES,
@@ -54,7 +60,7 @@ import {
   parseLearning,
 } from "@main/services/companion-state-learn";
 import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
@@ -110,6 +116,18 @@ export interface Registry {
   triggers: (Spec & { channel: string })[];
   conditions: Spec[];
   actions: Spec[];
+}
+
+/** A registry, as a `StepSpecLookup` — the shape ruleIssues needs, over the
+ *  SAME arrays every Select here already reads. Exported so the layout
+ *  editor's action-button inspector (a single action, not a whole rule) can
+ *  build the same lookup without a second copy of this three-way switch. */
+export function specLookupFor(registry: Registry): StepSpecLookup {
+  return (kind, id) => {
+    const list = kind === "trigger" ? registry.triggers : kind === "condition" ? registry.conditions : registry.actions;
+    const spec = list.find((s) => s.id === id);
+    return spec ? { label: spec.label, params: spec.params } : null;
+  };
 }
 
 /**
@@ -173,14 +191,36 @@ function parseRows(value: string | number | undefined): [string, string][] {
  * can generate it and nothing here validates it. The operator reads it off the
  * other system and types it; the point is that they can see what they typed.
  */
+/** The message under a field that needs setup — a shared shape so every
+ *  ParamField variant renders it identically. */
+function FieldIssue({ message }: { message: string }) {
+  return (
+    <span role="alert" className="flex items-start gap-1 pt-0.5 text-caption2 text-danger-11">
+      {message}
+    </span>
+  );
+}
+
 function KeyValueField({
   spec,
   value,
   onChange,
+  issue,
+  attempted,
 }: {
   spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string) => void;
+  /** From validateParams over the COMMITTED value — "Add at least one <row>"
+   *  when there are none at all. Never "every row needs a key": a blank key
+   *  can never reach the committed value (write() below filters one out
+   *  before it calls onChange), so that specific message is computed here,
+   *  live, against the rows still being typed — see the blankKey check. */
+  issue?: string | null;
+  /** Save has been pressed at least once. Nothing here shows red before that —
+   *  a fresh row with a blank key is not a mistake yet, it is the operator
+   *  about to type one. */
+  attempted?: boolean;
 }) {
   // The rows being edited live here rather than being derived from the saved
   // value, because a half-typed row cannot be represented in what gets saved: the
@@ -206,6 +246,11 @@ function KeyValueField({
     onChange(json);
   };
 
+  // LIVE, against the rows still being typed — not against `value`, which
+  // never carries a blank key at all (see the doc comment on `issue` above).
+  const blankKeyRow = attempted && rows.length > 0 && rows.some(([k]) => k.trim() === "");
+  const rowIssue = blankKeyRow ? `Every row needs a ${(spec.keyLabel ?? "key").toLowerCase()} name` : attempted ? (issue ?? null) : null;
+
   return (
     <div className="flex flex-col gap-1.5 py-1">
       <span className="text-caption1 text-fg-muted">
@@ -213,32 +258,36 @@ function KeyValueField({
         {spec.help ? <InfoHint>{spec.help}</InfoHint> : null}
       </span>
       <div className="flex flex-col gap-1">
-        {rows.map(([k, v], i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <Input
-              value={k}
-              onChange={(e) => write(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
-              className="h-7 w-20 text-footnote"
-              aria-label={spec.keyLabel ?? "Key"}
-              placeholder={spec.keyLabel ?? "Key"}
-            />
-            <Input
-              value={v}
-              onChange={(e) => write(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
-              className="h-7 flex-1 text-footnote"
-              aria-label={spec.valueLabel ?? "Value"}
-              placeholder={spec.valueLabel ?? "Value"}
-            />
-            <button
-              type="button"
-              onClick={() => write(rows.filter((_, j) => j !== i))}
-              className="touch-target rounded p-0.5 text-fg-subtle hover:text-warn-11"
-              aria-label="Remove row"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          </div>
-        ))}
+        {rows.map(([k, v], i) => {
+          const keyBad = blankKeyRow && k.trim() === "";
+          return (
+            <div key={i} className="flex items-center gap-1.5">
+              <Input
+                value={k}
+                onChange={(e) => write(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
+                className={keyBad ? "h-7 w-20 border-danger-9 text-footnote" : "h-7 w-20 text-footnote"}
+                aria-label={spec.keyLabel ?? "Key"}
+                aria-invalid={keyBad || undefined}
+                placeholder={spec.keyLabel ?? "Key"}
+              />
+              <Input
+                value={v}
+                onChange={(e) => write(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
+                className="h-7 flex-1 text-footnote"
+                aria-label={spec.valueLabel ?? "Value"}
+                placeholder={spec.valueLabel ?? "Value"}
+              />
+              <button
+                type="button"
+                onClick={() => write(rows.filter((_, j) => j !== i))}
+                className="touch-target rounded p-0.5 text-fg-subtle hover:text-warn-11"
+                aria-label="Remove row"
+              >
+                <Trash2Icon className="size-3.5" />
+              </button>
+            </div>
+          );
+        })}
         <button
           type="button"
           onClick={() => write([...rows, ["", ""]])}
@@ -246,6 +295,7 @@ function KeyValueField({
         >
           <PlusIcon className="size-3" /> row
         </button>
+        {rowIssue && <FieldIssue message={rowIssue} />}
       </div>
     </div>
   );
@@ -260,11 +310,19 @@ export function ParamField({
   value,
   onChange,
   optionSources,
+  issue,
+  attempted,
 }: {
   spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string | number) => void;
   optionSources: OptionSources;
+  /** This field's own message from validateParams, or null/undefined when it
+   *  has none. Shown only once `attempted`. */
+  issue?: string | null;
+  /** Save has been pressed at least once — see RuleEditorDialog. Before that,
+   *  a field left at its default is not a mistake yet. */
+  attempted?: boolean;
 }) {
   // `optionSources` is exhaustive over the closed set `optionsFrom` can name, so
   // a source with no answer is a compile error in automation-option-sources.ts
@@ -287,21 +345,38 @@ export function ParamField({
       {source.notice}
     </span>
   ) : null;
+  // A RUNTIME (optionsFrom) list answering without the stored value is never an
+  // ISSUE (validateParams already knows this — see automation-param-validation.ts),
+  // but it is still worth a word: `notice` above already covers a SHORT list, and
+  // this covers a value that has fallen out of an otherwise-complete one — the
+  // exact case Main.dc.html shows for the Command field. Static lists (no
+  // optionsFrom) never hit this: a value not in a fixed list IS an issue there.
+  const staleValue =
+    spec.optionsFrom && options.length > 0 && String(value ?? "").trim() !== "" &&
+    !options.some((o) => o.value === String(value))
+      ? "No longer offered by the target list: saved as it is. The target may be off."
+      : null;
+  const shown = attempted ? (issue ?? null) : null;
+  const invalid = !!shown;
+  const fieldIssue = shown ? <FieldIssue message={shown} /> : null;
 
   if (spec.type === "key-value") {
-    return <KeyValueField spec={spec} value={value} onChange={onChange} />;
+    return <KeyValueField spec={spec} value={value} onChange={onChange} issue={issue} attempted={attempted} />;
   }
 
   if (spec.type === "number") {
     return (
       <Row label={spec.label} hint={spec.help}>
-        <NumberInput
-          value={Number(value ?? spec.min ?? 0)}
-          min={spec.min}
-          max={spec.max}
-          onChange={(n) => onChange(n)}
-          className="h-7 text-footnote"
-        />
+        <>
+          <NumberInput
+            value={Number(value ?? spec.min ?? 0)}
+            min={spec.min}
+            max={spec.max}
+            onChange={(n) => onChange(n)}
+            className={invalid ? "h-7 border-danger-9 text-footnote" : "h-7 text-footnote"}
+          />
+          {fieldIssue}
+        </>
       </Row>
     );
   }
@@ -316,7 +391,7 @@ export function ParamField({
             rather than rendering blank — see missingValue in select.tsx. */}
         <>
           <Select value={current} onValueChange={onChange}>
-            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectTrigger className={invalid ? "w-full border-danger-9" : "w-full"}><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
               {options.map((o) => (
@@ -324,7 +399,7 @@ export function ParamField({
               ))}
             </SelectContent>
           </Select>
-          {notice}
+          {fieldIssue ?? (staleValue ? <span className="block pt-0.5 text-caption2 text-amber-11">{staleValue}</span> : notice)}
         </>
       </Row>
     );
@@ -344,7 +419,7 @@ export function ParamField({
             value={String(value ?? "")}
             list={hasList ? listId : undefined}
             onChange={(e) => onChange(e.target.value)}
-            className="h-7 text-footnote"
+            className={invalid ? "h-7 border-danger-9 text-footnote" : "h-7 text-footnote"}
           />
           {hasList && (
             <datalist id={listId}>
@@ -353,7 +428,7 @@ export function ParamField({
               ))}
             </datalist>
           )}
-          {notice}
+          {fieldIssue ?? notice}
         </>
       </Row>
     );
@@ -361,11 +436,14 @@ export function ParamField({
 
   return (
     <Row label={spec.label} hint={spec.help}>
-      <Input
-        value={String(value ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-7 text-footnote"
-      />
+      <>
+        <Input
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+          className={invalid ? "h-7 border-danger-9 text-footnote" : "h-7 text-footnote"}
+        />
+        {fieldIssue}
+      </>
     </Row>
   );
 }
@@ -383,6 +461,8 @@ export function ActionParamsFields({
   params,
   optionSources,
   onChange,
+  issues,
+  attempted,
 }: {
   actionId: string;
   /** The registry's own spec for actionId, or null while the registry has not
@@ -391,6 +471,13 @@ export function ActionParamsFields({
   params: Record<string, string | number>;
   optionSources: OptionSources;
   onChange: (params: Record<string, string | number>) => void;
+  /** Keyed by param key. companion.press's picker does not read this — its own
+   *  "button missing" pill already covers an unchosen button (see
+   *  companion-cues.tsx), and page/row/col below 1/0/0 is exactly what an
+   *  unchosen button looks like to validateParams too, so nothing here is
+   *  silently unchecked. */
+  issues?: Record<string, string>;
+  attempted?: boolean;
 }) {
   if (actionId === "companion.press") {
     return <CompanionPressFields params={params} onChange={(patch) => onChange({ ...params, ...patch })} />;
@@ -404,6 +491,8 @@ export function ActionParamsFields({
           value={params[p.key]}
           optionSources={optionSources}
           onChange={(v) => onChange({ ...params, [p.key]: v })}
+          issue={issues?.[p.key]}
+          attempted={attempted}
         />
       ))}
     </>
@@ -876,6 +965,8 @@ export function RuleEditorBody({
   pairBase,
   pairIsToggle,
   pairFieldsElsewhere,
+  issues,
+  attempted,
 }: {
   draft: Rule;
   setDraft: (next: Rule) => void;
@@ -894,10 +985,25 @@ export function RuleEditorBody({
   pairIsToggle: boolean;
   /** This is one half of a pair, whose shared settings are rendered above. */
   pairFieldsElsewhere: boolean;
+  /** This HALF's own issues — validateParams over draft.trigger/conditions/action
+   *  against the current registry. Computed by the dialog, which needs the same
+   *  numbers for its footer. */
+  issues: RuleIssue[];
+  /** Save has been pressed at least once this session. Nothing below marks a
+   *  field before that — see RuleEditorDialog.save. */
+  attempted: boolean;
 }) {
   const trigger = registry.triggers.find((t) => t.id === draft.trigger.id) ?? null;
   const action = registry.actions.find((a) => a.id === draft.action.id) ?? null;
   const isCue = draft.trigger.id === CALL_TRIGGER_ID;
+  const triggerIssues = Object.fromEntries(
+    issues.filter((i) => i.step === "trigger").map((i) => [i.key, i.message]),
+  );
+  const actionIssues = Object.fromEntries(issues.filter((i) => i.step === "action").map((i) => [i.key, i.message]));
+  const conditionIssues = (index: number): Record<string, string> =>
+    Object.fromEntries(
+      issues.filter((i) => i.step === "condition" && i.index === index).map((i) => [i.key, i.message]),
+    );
 
   return (
     <div className="flex flex-col gap-1">
@@ -959,6 +1065,8 @@ export function RuleEditorBody({
             value={draft.trigger.params[p.key]}
             optionSources={optionSources}
             onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
+            issue={triggerIssues[p.key]}
+            attempted={attempted}
           />
         ))}
       {isCue && (
@@ -1040,6 +1148,8 @@ export function RuleEditorBody({
                   next[i] = { ...c, params: { ...c.params, [p.key]: v } };
                   setDraft({ ...draft, conditions: next });
                 }}
+                issue={conditionIssues(i)[p.key]}
+                attempted={attempted}
               />
             ))}
           </div>
@@ -1096,6 +1206,8 @@ export function RuleEditorBody({
         params={draft.action.params}
         optionSources={optionSources}
         onChange={(params) => setDraft({ ...draft, action: { ...draft.action, params } })}
+        issues={actionIssues}
+        attempted={attempted}
       />
 
       <Separator />
@@ -1292,6 +1404,29 @@ export function RuleEditorDialog({
   });
   const [half, setHalf] = useState<"on" | "off">("on");
   const [busy, setBusy] = useState(false);
+  // Save has been pressed at least once this dialog session. Fields stay
+  // unmarked before that — see ParamField/KeyValueField's `attempted` prop.
+  const [attempted, setAttempted] = useState(false);
+  // A PREVIOUS save this session found issues and the server saved this rule
+  // turned off. Cleared only by a later save that finds none — see save()'s
+  // "turn it back on" branch. Never set from anything the server did on its
+  // own (a restore, a maintenance patch): those never touch this dialog.
+  const [forcedOff, setForcedOff] = useState(false);
+
+  const lookup = useMemo(() => specLookupFor(registry), [registry]);
+  // Recomputed on every keystroke, which is what "fields re-check live after
+  // the first press" needs — this is a pure walk of a handful of params, not
+  // a network call.
+  const onIssues = useMemo(() => ruleIssues(onDraft, lookup), [onDraft, lookup]);
+  const offIssues = useMemo(() => (offDraft ? ruleIssues(offDraft, lookup) : []), [offDraft, lookup]);
+  const totalIssues = onIssues.length + offIssues.length;
+  const footer = !attempted
+    ? null
+    : totalIssues > 0
+      ? { text: `${fieldsNeedAttention(totalIssues)}. Saved turned off: it runs once these are fixed.`, danger: true }
+      : forcedOff
+        ? { text: "All set. Save to turn it back on.", danger: false }
+        : null;
 
   const offParams = offDraft?.trigger.params ?? {};
   const onParams = onDraft.trigger.params;
@@ -1396,6 +1531,7 @@ export function RuleEditorDialog({
   }
 
   async function save() {
+    setAttempted(true);
     setBusy(true);
     // Which half is being written, so a refusal says which — the server's
     // message is about a cue name and does not say which of the two it came
@@ -1410,23 +1546,45 @@ export function RuleEditorDialog({
       // nothing in it: the ordering is the guarantee, and an empty patch is a
       // no-op the server already handles.
       const liveOn = isPair ? target.pair.on : target.rule;
-      await invoke("automation:updateRule", {
+      const onPatch = changesOnly(seed.current.on, onHalfPatch(), liveOn);
+      // A PREVIOUS save turned this off over issues that are now fixed: ask
+      // for it back on explicitly. Without this, the patch may carry no
+      // `enabled` key at all — the operator never touched the switch, only
+      // the broken field — and the rule would stay off forever, "fixed" and
+      // silent, which is the one outcome docs/automation.md rules out.
+      if (forcedOff && onIssues.length === 0) onPatch.enabled = true;
+      const onResult = await invoke<{ rule: Rule; issues: RuleIssue[] }>("automation:updateRule", {
         id: onDraft.id,
-        patch: changesOnly(seed.current.on, onHalfPatch(), liveOn),
+        patch: onPatch,
       });
+      let anyIssues = onResult.issues.length > 0;
       if (offDraft && seed.current.off) {
         writing = "Turn off";
         const liveOff = isPair ? target.pair.off : seed.current.off;
-        await invoke("automation:updateRule", {
+        const offPatch = changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff);
+        if (forcedOff && offIssues.length === 0) offPatch.enabled = true;
+        const offResult = await invoke<{ rule: Rule; issues: RuleIssue[] }>("automation:updateRule", {
           id: offDraft.id,
-          patch: changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff),
+          patch: offPatch,
         });
+        anyIssues = anyIssues || offResult.issues.length > 0;
       }
-      onClose();
+      // The server is authoritative on whether this saved clean — see
+      // automation-routes.ts. Issues never refuse a save (the one refusal is a
+      // bare "turn it on", caught below as a 409), so reaching here always
+      // means something was written; the only question is whether it stayed
+      // open, turned off, waiting to be fixed.
+      if (anyIssues) {
+        setForcedOff(true);
+      } else {
+        onClose();
+      }
     } catch (e) {
-      // The server refuses a duplicate or malformed cue name with a 400. The
-      // dialog stays open with both drafts intact — closing here is how a
-      // refused save reads as a save.
+      // Two distinct refusals land here: the server refuses a duplicate or
+      // malformed cue name with a 400, and refuses a bare "turn it on" over a
+      // rule that still has issues with a 409 — both read the same way, the
+      // dialog stays open with both drafts intact rather than closing on
+      // something that did not save.
       toast.error(writing ? `${writing}: ${errorMessage(e)}` : errorMessage(e));
     } finally {
       setBusy(false);
@@ -1601,6 +1759,8 @@ export function RuleEditorDialog({
             pairBase={isPair ? target.pair.base : null}
             pairIsToggle={isPair ? target.toggle : false}
             pairFieldsElsewhere={isPair}
+            issues={editingOff ? offIssues : onIssues}
+            attempted={attempted}
           />
         </div>
 
@@ -1613,6 +1773,19 @@ export function RuleEditorDialog({
               <Trash2Icon className="size-3.5 text-red-10" /> Delete
             </Button>
           </span>
+          {/* The count and its outcome, exactly as Main.dc.html shows: a
+              danger-coloured "N fields need attention. Saved turned off…"
+              after a save with issues, or a plain "All set. Save to turn it
+              back on." once every field is fixed but the rule is still off
+              from the last one. Blank before the first Save press. */}
+          {footer && (
+            <span
+              className={footer.danger ? "flex-1 text-caption1 text-danger-11" : "flex-1 text-caption1 text-fg-muted"}
+              role={footer.danger ? "alert" : undefined}
+            >
+              {footer.text}
+            </span>
+          )}
           <span className="flex shrink-0 items-center gap-2">
             <Button variant="transparent" size="small" onClick={onClose} disabled={busy}>
               Cancel

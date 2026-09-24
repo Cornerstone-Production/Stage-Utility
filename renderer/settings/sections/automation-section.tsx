@@ -15,9 +15,15 @@ import { hasServiceGuard } from "@main/services/service-guard";
 // to the outcome copy by hand, and nothing would have said so if it had not
 // been. Type-only, so nothing these modules reach at runtime is bundled.
 import type { AutomationOutcome, Rule } from "@main/types/automation";
+import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-param-validation";
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useOptionSources } from "./automation-option-sources";
+
+/** A rule as GET /api/automation/rules sends it — its own fields plus the
+ *  issues the server computed against the current registry. See
+ *  automation-routes.ts and docs/automation.md. */
+export type RuleWithIssues = Rule & { issues: RuleIssue[] };
 // The editor itself, and the field shapes it and this list share. The list
 // renders the collapsed rows; the dialog is the only thing that mounts an
 // editor.
@@ -35,7 +41,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, OctagonXIcon, PlusIcon, SearchIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { Button, Collapsible, Input, Separator, Switch } from "../../components/ui";
+import { Button, Collapsible, Input, Separator, Switch, toast } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
 
@@ -48,7 +54,7 @@ import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-c
  */
 type RuleListEntry =
   | { kind: "pair"; key: string; sortBy: string; pair: PairRowData }
-  | { kind: "rule"; key: string; sortBy: string; rule: Rule };
+  | { kind: "rule"; key: string; sortBy: string; rule: RuleWithIssues };
 interface LogEntry {
   at: string;
   ruleName: string;
@@ -167,6 +173,31 @@ function ServiceGuardBadge({ guarded }: { guarded: boolean }) {
     </span>
   );
 }
+
+/** "A, B and C" — never an Oxford comma, matching how the app already reads
+ *  a short list out loud elsewhere (the pair-delete confirm). */
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+/**
+ * "Needs setup: N fields" — a rule whose stored params the current registry
+ * calls invalid. `title` names them, so hovering (or a screen reader) says
+ * which without opening the editor. See List.dc.html: this is that badge, in
+ * the app's own amber pill (ServiceGuardBadge's, not the mockup's raw hex).
+ */
+function NeedsSetupBadge({ issues }: { issues: RuleIssue[] }) {
+  return (
+    <span
+      data-needs-setup={issues.length}
+      title={joinWithAnd(issues.map((i) => i.label))}
+      className="inline-flex shrink-0 items-center rounded-md border border-amber-7 bg-amber-3 px-1.5 py-0.5 text-caption2 font-medium text-amber-11"
+    >
+      Needs setup: {issues.length} field{issues.length === 1 ? "" : "s"}
+    </span>
+  );
+}
 /** One button in the Companion offer, as far as the editor reads it. */
 interface OfferedButton {
   page: number;
@@ -206,7 +237,7 @@ function RuleRow({
   onOpen,
   onChanged,
 }: {
-  rule: Rule;
+  rule: RuleWithIssues;
   registry: Registry;
   onOpen: () => void;
   onChanged: () => void;
@@ -216,6 +247,12 @@ function RuleRow({
   const action = registry.actions.find((a) => a.id === rule.action.id) ?? null;
   const isCue = rule.trigger.id === CALL_TRIGGER_ID;
   const hidden = isHiddenFromHome(rule.trigger.params);
+  // `?? []`: a kiosk tab left open across an update, or a test fixture written
+  // before this field existed, is a server or a stub that never sends `issues`
+  // at all — read as "nothing to report" rather than throwing and blanking the
+  // whole list, the same reasoning ParamField's optionSources fallback uses.
+  const issues = rule.issues ?? [];
+  const needsSetup = issues.length > 0;
 
   const summary = `When ${trigger?.label ?? rule.trigger.id}` +
     (rule.conditions.length ? ` · if ${rule.conditions.length} condition${rule.conditions.length > 1 ? "s" : ""}` : "") +
@@ -225,18 +262,35 @@ function RuleRow({
     <div className="rounded-lg border border-line bg-surface p-3">
       <div className="flex items-center gap-2">
         {/* The one control on the row that is NOT the editor: arming a rule is
-            a thing an operator does down a list, and it writes at once. */}
+            a thing an operator does down a list, and it writes at once — except
+            turning ON a rule that still needs setup, which this refuses without
+            a round trip: the server would refuse it anyway (automation-routes.ts),
+            and the toast says the same thing either way. See List.dc.html. */}
         <Switch
           checked={rule.enabled}
+          aria-label={needsSetup && !rule.enabled ? `${rule.name} needs setup before it can turn on` : "Enable rule"}
           onCheckedChange={async (v) => {
-            await invoke("automation:updateRule", { id: rule.id, patch: { enabled: v } });
+            if (v && needsSetup) {
+              toast.error(
+                `Can't turn on "${rule.name}": ${fieldsNeedAttention(issues.length)}. Open it to fix them.`,
+              );
+              return;
+            }
+            try {
+              await invoke("automation:updateRule", { id: rule.id, patch: { enabled: v } });
+            } catch (e) {
+              // The authoritative backstop for a stale tab: the server refused
+              // the same request this client-side check would have. Same
+              // wording either way.
+              toast.error(errorMessage(e));
+            }
             onChanged();
           }}
-          aria-label="Enable rule"
         />
         <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen}>
           <div className="flex min-w-0 items-baseline gap-2">
             <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
+            {needsSetup && <NeedsSetupBadge issues={issues} />}
             {/* The names this cue used to answer to, quietly. A cue is renamed
                 when its Companion button is relabelled, and the old name stays
                 live — so this is the only place the rules list says that the URL
@@ -400,7 +454,8 @@ export function AutomationSection() {
   });
   const { data } = useQuery({
     queryKey: ["automation:rules"],
-    queryFn: () => invoke<{ rules: Rule[]; settings: { simulate: boolean; disarmed: boolean } }>("automation:rules"),
+    queryFn: () =>
+      invoke<{ rules: RuleWithIssues[]; settings: { simulate: boolean; disarmed: boolean } }>("automation:rules"),
   });
   const refresh = useCallback(() => void qc.invalidateQueries({ queryKey: ["automation:rules"] }), [qc]);
   useEffect(() => onNotification("automation:rules", refresh), [refresh]);
@@ -823,7 +878,7 @@ export function AutomationSection() {
                 // anybody wanted — it is the start of one, and an operator left
                 // looking at it in a list of two hundred has to find it again
                 // to say what it does.
-                const created = await invoke<Rule>("automation:addRule", {
+                const { rule: created } = await invoke<{ rule: Rule; issues: RuleIssue[] }>("automation:addRule", {
                   name: `Rule ${rules.length + 1}`,
                   enabled: false,
                   trigger: { id: registry.triggers[0]?.id ?? "", params: {} },
