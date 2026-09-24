@@ -223,6 +223,32 @@ describe("SSE recovers from both kinds of failure", () => {
     });
     await eventually(() => svc.sseUpNow, "SSE to come back once the box answers again on the same port", 6000);
   });
+
+  it("reopens after a mid-stream body error, and reports it on the card", async (t: TestContext) => {
+    // The third kind: neither a bad status (never gets a 200) nor a clean end
+    // (res.on("end")) — the 200 lands, data may already be flowing, and then
+    // the connection itself breaks (ECONNRESET on the read side). res.on("error")
+    // is the only handler for this, and unlike its res.on("end") sibling it
+    // never called report() at all — an operator watching the Integrations
+    // panel would have seen nothing change while captions silently stopped.
+    const stub = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.sseUpNow, "the first SSE stream to come up");
+
+    stub.sseBreakAll();
+    await eventually(
+      () => svc.reports.some((r) => r.state === "error" && (r.message ?? "").includes("Transcript stream broke")),
+      () => `the mid-stream error to be reported on the card, got ${JSON.stringify(svc.reports)}`,
+    );
+    assert.equal(svc.sseUpNow, false, "sseUp was true right after the stream broke");
+
+    await eventually(() => svc.sseUpNow, "SSE to reopen after the mid-stream error");
+  });
 });
 
 describe("promotion backfills whatever SSE had no chance to deliver", () => {

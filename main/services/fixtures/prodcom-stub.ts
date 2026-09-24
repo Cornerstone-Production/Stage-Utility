@@ -210,6 +210,10 @@ export type ProdComStub = {
   sseSend(entry: StubEntry): void;
   /** Drop every open WebSocket without a close frame. */
   wsDropAll(): void;
+  /** Destroy every open SSE stream's underlying socket, AFTER its 200 and
+   *  whatever has already been sent — a mid-stream body error (client sees
+   *  `res.on("error")`, ECONNRESET), not the clean end `close()` sends. */
+  sseBreakAll(): void;
   /** Resolve once at least `n` WebSocket upgrades have been accepted. */
   waitForUpgrades(n: number, timeoutMs?: number): Promise<void>;
   /** Resolve once at least `n` SSE streams have been opened. */
@@ -597,6 +601,10 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       for (const s of sockets) s.destroy();
       sockets.clear();
       subscribed.clear();
+    },
+    sseBreakAll: () => {
+      for (const s of sseStreams) s.destroy();
+      sseStreams.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),
     waitForSse: (n, timeoutMs = 4000) => until(() => state.sseOpens >= n, `${n} SSE stream(s)`, timeoutMs),

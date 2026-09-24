@@ -2435,11 +2435,12 @@ export class ProdComService extends ConnectionLifecycle {
           this.countSseReconnect();
           this.scheduleReconnect();
         });
-        res.on("error", () => {
+        res.on("error", (e) => {
           if (this.req !== req) return;
           this.req = null;
           this.sseUp = false;
           this.clearSseIdleWatchdog();
+          this.report("error", `Transcript stream broke — ${e.message}`);
           this.countSseReconnect();
           this.scheduleReconnect();
         });
