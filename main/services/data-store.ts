@@ -79,11 +79,19 @@ export class DataStore<T> {
   async load(): Promise<T> {
     if (this.cache !== null) return this.cache;
     const filePath = await this.getFilePath();
-    let raw: string;
+    let raw: string | null = null;
     try {
       raw = await fs.readFile(filePath, "utf-8");
     } catch {
       // File doesn't exist yet (first run) — safe to start from defaults.
+    }
+    // A save that ran while this read was in flight has already set the cache,
+    // and what it set is newer than the bytes just read. writeRaw assigning
+    // first only protects a read that STARTS after it; one already waiting on
+    // the disk used to finish by installing the old bytes over the save, and
+    // the next save — built on that stale cache — erased the first from disk.
+    if (this.cache !== null) return this.cache;
+    if (raw === null) {
       this.cache = this.defaultValue;
       return this.cache;
     }
@@ -95,6 +103,10 @@ export class DataStore<T> {
       // crash). Do NOT silently fall back to defaults and then overwrite it, which
       // would destroy the data permanently. Preserve the bytes for recovery and log
       // loudly before continuing from defaults. (Atomic writes above make this rare.)
+      //
+      // Defaults are installed BEFORE the rename's await, for the reason above:
+      // a save landing during the rename must win, not be overwritten after it.
+      this.cache = this.defaultValue;
       try {
         await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`);
       } catch {
@@ -104,8 +116,9 @@ export class DataStore<T> {
         `[data-store] ${this.filename} could not be parsed (corrupt). Backed up to ${this.filename}.corrupt-* and starting fresh — recover history from that copy.`,
         err,
       );
-      this.cache = this.defaultValue;
-      return this.cache;
+      // reload() empties the cache, and can do it while this waited on the
+      // rename. What this load found is still the defaults, not nothing.
+      return this.cache ?? this.defaultValue;
     }
   }
 
