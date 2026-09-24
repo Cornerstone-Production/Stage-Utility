@@ -234,12 +234,12 @@ The `/log` page has the evidence when something looks wrong:
   the SSE fallback closes` — the promotion, the moment it happens
 - `[prodcom] no websocket frame for 90s — heartbeat missed …` when an open socket
   goes quiet, whether or not it was promoted
-- `[prodcom] websocket delivered no transcript in 60s while ProdCom has at least
+- `[prodcom] websocket delivered no transcript in 1 min while ProdCom has at least
   N spoken line(s) since it opened — reopening it without the subscribe frame`,
   and then either `[prodcom] the websocket delivers the transcript with no
   subscribe frame sent …` when that works, or `[prodcom] websocket delivered no
   transcript with or without the subscribe frame …` naming the new retry cadence
-  when it does not. `[prodcom] the websocket has carried no transcript in 60s and
+  when it does not. `[prodcom] the websocket has carried no transcript in 1 min and
   this box has failed that test before …` is a later re-test being dropped, and
   `[prodcom] the websocket is carrying the transcript again …` is one that came
   good. `[prodcom] could not read the transcript row count (…)` on open means
@@ -250,7 +250,7 @@ The `/log` page has the evidence when something looks wrong:
   `[prodcom] the silent-socket check can reach ProdCom again` when it recovers.
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
-- `[prodcom] the promoted websocket delivered no transcript in 60s while ProdCom
+- `[prodcom] the promoted websocket delivered no transcript in 1 min while ProdCom
   has at least N spoken line(s) it never carried — falling back to the SSE
   stream, which backfills the gap, and re-testing the websocket every 30 min
   instead of every 5 min from here` — the post-promotion check demoting a socket
