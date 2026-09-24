@@ -32,6 +32,14 @@ const REGISTRY_ACTIONS = [
       { key: "position", label: "Only this position", type: "string", optional: true },
     ],
   },
+  {
+    id: "companion.press",
+    label: "Press a Companion button",
+    params: [
+      { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+      { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+    ],
+  },
 ];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
@@ -83,6 +91,21 @@ describe("the action-button inspector", () => {
     assert.equal(inputs.length, 3, `expected one input per parameter plus the label, saw ${inputs.length}`);
     fireEvent.change(inputs[0]!, { target: { value: "dante_tb" } });
     assert.equal(configs.at(-1)?.params?.signal, "dante_tb");
+  });
+
+  // The bug this guards: a number field DISPLAYS Number(value ?? spec.min ?? 0)
+  // while the stored value stays unset until the operator touches it. Reverting
+  // action-button-inspector.tsx's seedNumberDefaults call back to `params: {}`
+  // turns this red.
+  test("picking an action with number params seeds them into config.params at once", async () => {
+    const { container, configs } = mount({ type: "action-button", actionId: "", params: {} });
+    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    fireEvent.change(container.querySelector("select")!, { target: { value: "companion.press" } });
+    assert.deepEqual(
+      configs.at(-1)?.params,
+      { page: 1, row: 0 },
+      `picking companion.press must seed its number params, got ${JSON.stringify(configs.at(-1)?.params)}`,
+    );
   });
 
   test("an action with no parameters renders none — only the Label field", async () => {

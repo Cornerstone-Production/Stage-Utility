@@ -20,6 +20,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
+import { seedNumberDefaults } from "@main/services/automation-param-validation";
 import {
   APP_STATE_FAMILIES,
   APP_STATE_SOURCES,
@@ -923,7 +924,15 @@ export function RuleEditorBody({
             version's registry no longer lists (a type renamed or retired) — the
             Select keeps that id visible rather than silently swapping the rule
             to whichever trigger the browser picks first. */}
-        <Select value={draft.trigger.id} onValueChange={(id) => setDraft({ ...draft, trigger: { id, params: {} } })}>
+        <Select
+          value={draft.trigger.id}
+          onValueChange={(id) =>
+            setDraft({
+              ...draft,
+              trigger: { id, params: seedNumberDefaults(registry.triggers.find((t) => t.id === id)?.params ?? []) },
+            })
+          }
+        >
           <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             {registry.triggers.map((t) => (
@@ -1047,7 +1056,9 @@ export function RuleEditorBody({
           value=""
           onChange={(e) => {
             if (!e.target.value) return;
-            setDraft({ ...draft, conditions: [...draft.conditions, { id: e.target.value, params: {} }] });
+            const id = e.target.value;
+            const params = seedNumberDefaults(registry.conditions.find((c) => c.id === id)?.params ?? []);
+            setDraft({ ...draft, conditions: [...draft.conditions, { id, params }] });
           }}
         >
           <option value="">Add…</option>
@@ -1065,7 +1076,12 @@ export function RuleEditorBody({
         <ActionPicker
           actions={registry.actions}
           value={draft.action.id}
-          onChange={(id) => setDraft({ ...draft, action: { id, params: {} } })}
+          onChange={(id) =>
+            setDraft({
+              ...draft,
+              action: { id, params: seedNumberDefaults(registry.actions.find((a) => a.id === id)?.params ?? []) },
+            })
+          }
         />
       </Row>
       {/* One action renders its own params: three coordinates are not

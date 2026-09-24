@@ -18,6 +18,7 @@ import { Row, RowText } from "./inspector-rows";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { ActionParamsFields, type Registry } from "../settings/sections/rule-editor-dialog";
 import { useOptionSources } from "../settings/sections/automation-option-sources";
+import { seedNumberDefaults } from "@main/services/automation-param-validation";
 
 export function ActionButtonInspector({
   c,
@@ -49,7 +50,9 @@ export function ActionButtonInspector({
         <ActionPicker
           actions={actions}
           value={c.actionId}
-          onChange={(id) => onConfig({ ...c, actionId: id, params: {} })}
+          onChange={(id) =>
+            onConfig({ ...c, actionId: id, params: seedNumberDefaults(actions?.find((a) => a.id === id)?.params ?? []) })
+          }
         />
       </Row>
       {action?.help && <p className="text-caption2 text-fg-muted leading-snug">{action.help}</p>}

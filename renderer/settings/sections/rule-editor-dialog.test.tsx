@@ -72,13 +72,28 @@ const REGISTRY = {
       id: "occupancy.threshold",
       label: "Occupancy crosses a threshold",
       channel: "people:changed",
-      params: [{ key: "metric", label: "Metric", type: "enum", options: [{ value: "attendance", label: "Attendance" }] }],
+      params: [
+        { key: "metric", label: "Metric", type: "enum", options: [{ value: "attendance", label: "Attendance" }] },
+        { key: "threshold", label: "Threshold", type: "number", min: 0, max: 100 },
+      ],
     },
   ],
-  conditions: [{ id: "service.is-not-live", label: "No service is live", params: [] }],
+  conditions: [
+    { id: "service.is-not-live", label: "No service is live", params: [] },
+    {
+      id: "battery.below",
+      label: "Battery falls below",
+      params: [{ key: "threshold", label: "Battery (%)", type: "number", min: 0, max: 100 }],
+    },
+  ],
   actions: [
     { id: "companion.press", label: "Press a Companion button", params: [] },
     { id: "log.message", label: "Write a log message", params: [] },
+    {
+      id: "osc.send",
+      label: "Send an OSC message",
+      params: [{ key: "argument", label: "Argument", type: "number", min: 0, max: 7 }],
+    },
   ],
 };
 
@@ -760,6 +775,72 @@ describe("a rule naming a trigger, action or param value the registry no longer 
     assert.ok(
       metricOpt?.textContent?.includes("not found"),
       `the stored metric value must be labelled as no longer offered, got ${JSON.stringify(metricOpt?.textContent)}`,
+    );
+  });
+});
+
+// The bug this guards: a number field DISPLAYS Number(value ?? spec.min ?? 0)
+// while the stored value stays unset until the operator touches it — a
+// "battery falls below" rule nobody touched shows a threshold but saves none,
+// and never fires. Reverting any of the three seedNumberDefaults calls below
+// back to `params: {}` turns its test red.
+describe("picking a trigger, condition or action seeds its number params at once", () => {
+  test("picking a trigger with a number param stores it, not just displays it", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    await act(async () => {
+      fireEvent.change(selectField("Trigger")!, { target: { value: "occupancy.threshold" } });
+    });
+    await settle();
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { trigger?: { params?: Record<string, unknown> } };
+    assert.equal(
+      patch.trigger?.params?.threshold,
+      0,
+      `switching to a trigger with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+
+  test("picking an action with a number param stores it, not just displays it", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    const actionSelect = () => selectField("Action");
+    await act(async () => {
+      fireEvent.change(actionSelect()!, { target: { value: "osc.send" } });
+    });
+    await settle();
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { action?: { params?: Record<string, unknown> } };
+    assert.equal(
+      patch.action?.params?.argument,
+      0,
+      `switching to an action with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+
+  test("adding a condition with a number param stores it, not just displays it", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    const addCondition = () =>
+      [...document.querySelectorAll("select")].find((s) =>
+        [...s.options].some((o) => o.value === "battery.below"),
+      ) as HTMLSelectElement | undefined;
+    await act(async () => {
+      fireEvent.change(addCondition()!, { target: { value: "battery.below" } });
+    });
+    await settle();
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as {
+      conditions?: { id: string; params?: Record<string, unknown> }[];
+    };
+    const added = patch.conditions?.find((c) => c.id === "battery.below");
+    assert.equal(
+      added?.params?.threshold,
+      0,
+      `adding a condition with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
     );
   });
 });
