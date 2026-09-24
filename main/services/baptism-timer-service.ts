@@ -821,9 +821,11 @@ class BaptismTimerService {
    * the note clears here too, and the push carries it to every screen. See
    * applyBaptismRebuild in history-edit.ts, the one place that calls this,
    * for why `restoredIds` is `mergeRebuilt`'s own write-time `addedIds`
-   * rather than a rebuild's merely-planned ones — an id the store's cap
-   * turned away was never restored, and its entry stays, with the rebuild's
-   * own result saying why.
+   * UNION `updatedIds` — a re-Finish's failed save already has a stored
+   * counterpart, so its own rebuild only ever updates it — rather than a
+   * rebuild's merely-planned ones. An id the store's cap turned away was
+   * never restored either way, and its entry stays, with the rebuild's own
+   * result saying why.
    */
   clearRestoredSaveErrors(restoredIds: ReadonlySet<string>): void {
     const before = this.state.saveErrors ?? [];
