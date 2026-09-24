@@ -186,7 +186,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     try {
       const rule = await automationEngine.addRule(toSave as never);
       if (issues.length > 0) {
-        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${fieldsNeedAttention(issues.length)}`);
+        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
       }
       json(res, { rule, issues }, 201);
     } catch (err) {
@@ -223,7 +223,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     const onlyAsksToEnable = body.enabled === true && Object.keys(body).length === 1;
     if (issues.length > 0 && onlyAsksToEnable) {
       console.warn(
-        `[automation] refused to enable "${scrub(existing.name)}": ${fieldsNeedAttention(issues.length)}`,
+        `[automation] refused to enable "${scrub(existing.name)}": ${scrub(fieldsNeedAttention(issues.length))}`,
       );
       json(
         res,
@@ -241,7 +241,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       await automationEngine.updateRule(idMatch[1], patch as never);
       const rule = automationEngine.listRules().find((r) => r.id === idMatch[1])!;
       if (issues.length > 0) {
-        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${fieldsNeedAttention(issues.length)}`);
+        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
       }
       json(res, { rule, issues: issuesFor(rule) });
     } catch (err) {
