@@ -57,6 +57,9 @@ import { useReaperState } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { pcoConnected, useStageState } from "../main/use-stage-state";
+import { useProdcomChannels } from "../main/use-prodcom-channels";
+import { useTranscript } from "../main/use-transcript";
+import { mergeChannels } from "../main/channel-color";
 import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
@@ -633,7 +636,17 @@ export function Inspector({
   // fetches and subscribes per call, so the two separate calls this replaced
   // were two `stage:getState` requests and two state streams for one panel.
   const stageState = useStageState().state;
-  const captionChannels = Object.keys(stageState?.captionChannelColors ?? {});
+  // The full ProdCom channel list, not just whatever has a saved custom
+  // color — the same merge the Transcription colors panel uses, so every
+  // channel can be hidden whether or not it has spoken or been given a
+  // color. Gated to the one object type that uses it, like useFavourites
+  // below: an inspector open on anything else pays neither subscription.
+  const isTranscriptStrip = c.type === "transcript-strip";
+  const prodcomChannels = useProdcomChannels(isTranscriptStrip);
+  const transcriptLines = useTranscript(isTranscriptStrip);
+  const captionChannels = mergeChannels(prodcomChannels, transcriptLines, stageState?.captionChannelColors ?? {}).map(
+    (row) => row.label,
+  );
   // Home excluded: its stored geometry is meaningless (it is a card list, not a
   // canvas), so embedding it would draw four cards stacked at whatever filler
   // coordinates happen to be in the file.

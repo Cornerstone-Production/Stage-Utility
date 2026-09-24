@@ -108,6 +108,10 @@ export type StubOptions = {
   failKeywords?: boolean;
   /** Reply 500 to `GET /api/v1/transcript`. */
   failTranscript?: boolean;
+  /** Reply 500 to `GET /api/v1/transcript/stream` instead of opening it — a box
+   *  whose SSE fallback itself is unreachable, distinct from sseCloseImmediately
+   *  (which opens the stream and then ends it). */
+  failSseStream?: boolean;
   /** Open the SSE stream and immediately end it, so the client keeps
    *  reconnecting — a box whose transcript stream will not stay up. */
   sseCloseImmediately?: boolean;
@@ -147,6 +151,10 @@ export type StubOptions = {
    * is which.
    */
   delayTranscriptMs?: (url: URL) => number;
+  /** Bind to this exact port rather than an ephemeral one — so a test can close
+   *  one stub and start another on the same port, simulating a box that dropped
+   *  off the network and came back rather than one that changed address. */
+  port?: number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -162,8 +170,12 @@ export type ProdComStub = {
   /** How many of those sockets are still open. A client that stops reading a
    *  socket without closing it leaves this above zero. */
   openWebSockets: number;
-  /** How many SSE streams have been opened. */
+  /** How many SSE streams have been opened, total — never decrements. */
   sseOpens: number;
+  /** How many SSE streams are open RIGHT NOW. A client that drops one on
+   *  purpose (promotion) without destroying the request leaves this above
+   *  zero even though sseOpens stopped moving. */
+  openSseStreams: number;
   /** Start or stop failing the keyword endpoints AFTER the stub is running, so a
    *  test can drive "the list loaded, then a later read failed" — which is the
    *  only path on which the previously-loaded keywords can be wrongly dropped. */
@@ -185,6 +197,9 @@ export type ProdComStub = {
   /** Start or stop failing `GET /api/v1/transcript` AFTER the stub is running,
    *  so a test can let a connection prime and then break the endpoint under it. */
   setFailTranscript(fail: boolean): void;
+  /** Start or stop failing `GET /api/v1/transcript/stream` AFTER the stub is
+   *  running, so a test can drop a healthy SSE stream into a 500 loop. */
+  setFailSseStream(fail: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -195,6 +210,10 @@ export type ProdComStub = {
   sseSend(entry: StubEntry): void;
   /** Drop every open WebSocket without a close frame. */
   wsDropAll(): void;
+  /** Destroy every open SSE stream's underlying socket, AFTER its 200 and
+   *  whatever has already been sent — a mid-stream body error (client sees
+   *  `res.on("error")`, ECONNRESET), not the clean end `close()` sends. */
+  sseBreakAll(): void;
   /** Resolve once at least `n` WebSocket upgrades have been accepted. */
   waitForUpgrades(n: number, timeoutMs?: number): Promise<void>;
   /** Resolve once at least `n` SSE streams have been opened. */
@@ -299,6 +318,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     failKeywords: options.failKeywords === true,
     refuseWebSocket: options.refuseWebSocket === true,
     failTranscript: options.failTranscript === true,
+    failSseStream: options.failSseStream === true,
   };
   /** Responses already held once by `transcriptDelayMs`. */
   const held = new WeakSet<http.ServerResponse>();
@@ -405,6 +425,11 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     }
 
     if (url.pathname === "/api/v1/transcript/stream") {
+      if (state.failSseStream) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
+        return;
+      }
       state.sseOpens++;
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       if (options.sseCloseImmediately) {
@@ -499,7 +524,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     notify();
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
 
@@ -536,6 +561,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     get sseOpens() {
       return state.sseOpens;
     },
+    get openSseStreams() {
+      return sseStreams.size;
+    },
     wsSend,
     setFailKeywords: (fail: boolean) => {
       state.failKeywords = fail;
@@ -549,6 +577,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     setFailTranscript: (fail: boolean) => {
       state.failTranscript = fail;
+    },
+    setFailSseStream: (fail: boolean) => {
+      state.failSseStream = fail;
     },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
     wsTranscript: (entry, wrap = "data") => {
@@ -570,6 +601,10 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       for (const s of sockets) s.destroy();
       sockets.clear();
       subscribed.clear();
+    },
+    sseBreakAll: () => {
+      for (const s of sseStreams) s.destroy();
+      sseStreams.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),
     waitForSse: (n, timeoutMs = 4000) => until(() => state.sseOpens >= n, `${n} SSE stream(s)`, timeoutMs),

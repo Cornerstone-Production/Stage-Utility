@@ -221,6 +221,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display). Text that matched a ProdCom keyword marked sensitive is already replaced with asterisks; such a line carries `redactions`, the number of hidden runs. Never gated — a display carries no token |
 | GET | `/api/prodcom/transcript/raw` | The same buffer with nothing hidden, for reviewing what a keyword covered up. Token-gated by `STAGE_UTILITY_LOG_TOKEN`, exactly like `/api/log`: unset means open, set means `?token=…` or a `401` |
 | POST | `/api/prodcom/transcript/clear` | Empty the buffer everywhere at once |
+| GET | `/api/prodcom/channels` | ProdCom's own channel list (id, name, color) — every channel it has, whether or not it has spoken. Backs the Transcription colors panel |
 
 **SPL (Smaart) & rundown**
 | Method | Path | Purpose |
@@ -436,7 +437,7 @@ recorder is running. Pass `{override: true}` to go anyway.
 `/api/taper-window`, `/api/checklist-sources`, `/api/kiosk-discovery`,
 `/api/baptism-auto-start`, `/api/ndi-enabled`, `/api/onboarding-dismissed`,
 `/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
-`/api/caption-colors`.
+`/api/caption-colors`, `/api/caption-colors/follow-prodcom`.
 
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a
@@ -540,7 +541,7 @@ something to change:
 
 **Pushed only when something happens:**
 
-`prodcom:transcript` · `slots:devices` · `integrations:state-changed` ·
+`prodcom:transcript` · `prodcom:channels` · `slots:devices` · `integrations:state-changed` ·
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·

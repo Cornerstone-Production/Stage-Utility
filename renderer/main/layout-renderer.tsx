@@ -1070,6 +1070,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             maxLines={c.maxLines}
             showLabels
             colorOverrides={ctx.state.captionChannelColors}
+            followProdcom={ctx.state.followProdcomColors}
             textStyle={{ ...ts, textAlign: "left" }}
             gapClassName="gap-[0.3em]"
             className="w-full h-full"
@@ -1079,7 +1080,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const last = lines[lines.length - 1];
       const speaker = channelLabel(last);
       return (
-        <span style={{ ...ts, color: lineColor(last, ctx.state.captionChannelColors), opacity: last.isFinal ? 1 : 0.55 }}>
+        <span
+          style={{
+            ...ts,
+            color: lineColor(last, ctx.state.captionChannelColors, ctx.state.followProdcomColors),
+            opacity: last.isFinal ? 1 : 0.55,
+          }}
+        >
           {speaker ? `${speaker}: ${last.text}` : last.text}
         </span>
       );

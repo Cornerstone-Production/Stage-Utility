@@ -106,6 +106,27 @@ export interface TranscriptLineDTO {
   redactions?: number;
 }
 
+/**
+ * One entry from ProdCom's own channel list (`GET /api/v1/channels`), pushed on
+ * "prodcom:channels" whenever it changes.
+ *
+ * Every channel ProdCom has, whether or not it has spoken — the Transcription
+ * colors panel unions this with any channel that HAS spoken (which may be
+ * absent here if it was seen before this connection's channel list loaded) and
+ * any channel with a saved custom color (which may name a channel ProdCom no
+ * longer has, e.g. after a rename in ProdCom itself).
+ */
+export interface ProdcomChannelDTO {
+  /** ProdCom's channel id — stable across a rename, unlike `name`. */
+  id: string;
+  /** Current display name, or null if ProdCom did not send one. */
+  name: string | null;
+  /** ProdCom's own color for this channel ("#rrggbb"), or null if it did not
+   *  send one. ProdCom 2.3.2 reuses colors across channels (see
+   *  followProdcomColors on StageState), so this is never assumed distinct. */
+  color: string | null;
+}
+
 /** A ProPresenter slide group/section (e.g. Verse, Chorus) with its color. */
 export interface ProSection {
   name: string;

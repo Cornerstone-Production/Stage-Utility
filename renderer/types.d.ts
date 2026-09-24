@@ -55,6 +55,7 @@ declare global {
   type PlanDTO = Stage.PlanDTO;
   type PlanItemDTO = Stage.PlanItemDTO;
   type PlanItemsDTO = Stage.PlanItemsDTO;
+  type ProdcomChannelDTO = Stage.ProdcomChannelDTO;
   type PropInstanceConn = Stage.PropInstanceConn;
   type PropInstanceMeta = Stage.PropInstanceMeta;
   type PropInstancesDTO = Stage.PropInstancesDTO;

@@ -46,11 +46,21 @@ class TestProdCom extends ProdComService {
   protected override get reconnectMs(): number {
     return 25;
   }
+  /** The real five minutes, so a WebSocket attempt that gives up without
+   *  proving itself is retried inside a test rather than a coffee break. */
+  protected override get wsRetryIntervalMs(): number {
+    return 120;
+  }
   public settled(): Promise<void> {
     return this.priming;
   }
+  /** Whether the WebSocket has been PROMOTED (proven, SSE fallback closed). */
   public get onWebSocketNow(): boolean {
     return this.onWebSocketTransport;
+  }
+  /** Whether a WebSocket attempt is currently open, proven or not. */
+  public get wsOpenNow(): boolean {
+    return this.wsAttemptOpen;
   }
   public texts(): string[] {
     return this.getBuffer().map((l) => l.text);
@@ -177,15 +187,19 @@ describe("the transcript comes over the websocket", () => {
 });
 
 describe("a missed heartbeat reconnects", () => {
-  it("drops and reopens the connection when the heartbeat stops, and logs why", async (t) => {
+  it("drops the socket when the heartbeat stops, retries on the WebSocket's own cadence, and never touches SSE", async (t) => {
     let stub: ProdComStub | null = null;
+    let svc: TestProdCom | null = null;
     const lines = await withLogs(async () => {
       const c = await connected(t);
       stub = c.stub;
+      svc = c.svc;
       await c.stub.waitForUpgrades(1);
       // Say nothing at all: no heartbeat, no transcript. On the old SSE stream
       // this was indistinguishable from a quiet room and cost 15 minutes; here
-      // it means the peer is gone.
+      // it means the peer is gone. The socket was never proven, so giving up on
+      // it must not touch the SSE stream that has been live the whole time —
+      // only wait for the WebSocket's own retry cadence, not reconnect fast.
       await c.stub.waitForUpgrades(2, 3000);
     });
 
@@ -194,6 +208,10 @@ describe("a missed heartbeat reconnects", () => {
       lines.some((l) => l.startsWith("[prodcom] no websocket frame for 0s — heartbeat missed")),
       `expected the heartbeat-missed line, got: ${JSON.stringify(lines)}`,
     );
+    assert.equal(stub!.sseOpens, 1, "an unproven websocket's heartbeat timeout reconnected the live SSE fallback");
+    // Captions kept moving the whole time — the point of this fix.
+    stub!.sseSend(entry("said-while-the-socket-was-being-retried"));
+    await eventually(() => svc!.texts().includes("said-while-the-socket-was-being-retried"), "an SSE event to land");
   });
 
   it("does not reconnect while the heartbeat keeps arriving, even with nobody speaking", async (t) => {

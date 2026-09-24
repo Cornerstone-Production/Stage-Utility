@@ -111,6 +111,9 @@ export interface SettingsData {
   /** User-assigned caption colors, keyed by ProdCom channel label (channelName,
    *  or channelId when unnamed). Overrides the auto/ProdCom color. */
   captionChannelColors: Record<string, string>;
+  /** When true, a channel with no entry above uses ProdCom's own color for it
+   *  instead of the distinct auto color. Off by default. */
+  followProdcomColors?: boolean;
   /** Scheduled in-app auto-update window. */
   autoUpdate: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek: number | null; hour: number };
   /** Time-aware integration reconnect tunables (leadMin/tailMin/dormantMin). */
@@ -210,6 +213,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   iconColors: {},
   iconGlyphs: {},
   captionChannelColors: {},
+  followProdcomColors: false,
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],

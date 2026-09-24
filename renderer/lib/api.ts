@@ -150,6 +150,7 @@ export type IpcChannel =
   | "calendar:getGrid"
   | "calendar:sources"
   | "captions:setChannelColor"
+  | "captions:setFollowProdcomColors"
   | "checklist:clear"
   | "checklist:get"
   | "checklist:sources"
@@ -240,6 +241,7 @@ export type IpcChannel =
   | "presets:reorder"
   | "presets:save"
   | "prodcom:clearTranscript"
+  | "prodcom:getChannels"
   | "prodcom:getTranscript"
   | "propresenter:getInstances"
   | "propresenter:getStatus"
@@ -367,6 +369,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/prodcom/transcript");
     case "prodcom:clearTranscript":
       return post<T>("/api/prodcom/transcript/clear");
+    case "prodcom:getChannels":
+      return apiFetch<T>("/api/prodcom/channels");
 
     case "stage:listServiceTypes":
       return apiFetch<T>("/api/service-types");
@@ -665,6 +669,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "captions:setChannelColor":
       return post<T>("/api/caption-colors", p);
+    case "captions:setFollowProdcomColors":
+      return post<T>("/api/caption-colors/follow-prodcom", p);
 
     // ── In-app self-update ───────────────────────────────────────────────
     case "update:status":

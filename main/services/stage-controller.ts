@@ -311,6 +311,7 @@ export class StageController {
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
+    followProdcomColors: false,
     autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
@@ -518,6 +519,7 @@ export class StageController {
       iconColors: settings.iconColors ?? {},
       iconGlyphs: settings.iconGlyphs ?? {},
       captionChannelColors: settings.captionChannelColors ?? {},
+      followProdcomColors: settings.followProdcomColors ?? false,
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
@@ -2537,6 +2539,16 @@ export class StageController {
     }
     this.state = { ...this.state, captionChannelColors: next };
     await settingsStore.patch({ captionChannelColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Turn "follow ProdCom's channel colors" on or off. A per-channel custom
+   *  pick (captionChannelColors above) always wins over either default;
+   *  clearing one returns that channel to whichever default is active now. */
+  async setFollowProdcomColors(on: boolean): Promise<StageState> {
+    this.state = { ...this.state, followProdcomColors: on };
+    await settingsStore.patch({ followProdcomColors: on });
     this.broadcast();
     return this.state;
   }
