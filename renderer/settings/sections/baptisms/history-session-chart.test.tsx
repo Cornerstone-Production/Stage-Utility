@@ -24,6 +24,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { HistorySessionChart } = await import("./session-chart.js");
+const { formatClock, setDisplayHourCycle } = await import("../../../lib/clock-format.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -98,7 +99,9 @@ test("one linked session with spans draws its chart and its per-person splits in
 // endpoint already returns every session's spans concatenated (see
 // sessionSpans' own comment) — this proves each past session here draws from
 // its own slice of that one shared fetch, never the whole thing.
-test("a service whose baptism.csv holds two sessions draws both, each on its own window", async () => {
+test("a service whose baptism.csv holds two sessions draws both, each on its own window", async (t) => {
+  setDisplayHourCycle("24h");
+  t.after(() => setDisplayHourCycle(null));
   const first = session({
     id: "b1",
     startedAt: "2026-09-20T15:00:00.000Z",
@@ -181,9 +184,19 @@ test("a service whose baptism.csv holds two sessions draws both, each on its own
   // the whole table would read "11:00" and could not tell "1:00" from a
   // coincidental digit run inside a different value.
   const tables = [...document.querySelectorAll("table")];
-  const testimonyCell = (t: Element) => text(t.querySelector("tbody tr td:nth-child(3)"));
+  const testimonyCell = (tbl: Element) => text(tbl.querySelector("tbody tr td:nth-child(3)"));
   assert.equal(testimonyCell(tables[0]!), "1:00", "session 1's own testimony (60s)");
   assert.equal(testimonyCell(tables[1]!), "0:45", "session 2's own testimony (45s)");
+
+  // Each session's own "Session · <time>" header, in the app's own clock
+  // format (formatClock, 24h here) rather than the browser's raw locale —
+  // see session-chart.tsx's own comment on why toLocaleTimeString is the
+  // wrong call.
+  const headers = [...document.querySelectorAll("span")].filter((el) => (el.textContent ?? "").startsWith("Session ·"));
+  assert.equal(headers.length, 3, "expected one 'Session ·' header per session");
+  assert.equal(text(headers[0]!), `Session · ${formatClock(first.startedAt)}`);
+  assert.equal(text(headers[1]!), `Session · ${formatClock(second.startedAt)}`);
+  assert.equal(text(headers[2]!), `Session · ${formatClock(third.startedAt)}`);
 });
 
 test("a KEYED session with no spans in the shared lane (recorded before the raw layer) gets its splits and a plain 'no timeline' line, never an empty chart", async () => {
