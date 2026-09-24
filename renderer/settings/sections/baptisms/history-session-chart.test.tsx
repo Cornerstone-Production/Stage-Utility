@@ -95,9 +95,9 @@ test("one linked session with spans draws its chart and its per-person splits in
 
 // The two ways a service ends up with more than one session: a reset-and-
 // restart, or two sessions genuinely recorded in one service. The lane
-// endpoint already returns every
-// session's spans concatenated (see sessionSpans' own comment) — this proves
-// TWO past sessions here each get their OWN chart from that one shared fetch.
+// endpoint already returns every session's spans concatenated (see
+// sessionSpans' own comment) — this proves each past session here draws from
+// its own slice of that one shared fetch, never the whole thing.
 test("a service whose baptism.csv holds two sessions draws both, each on its own window", async () => {
   const first = session({
     id: "b1",
@@ -111,8 +111,23 @@ test("a service whose baptism.csv holds two sessions draws both, each on its own
     finishedAt: "2026-09-20T15:25:00.000Z",
     people: [{ testimonyMs: 45_000, baptizeMs: 20_000 }],
   });
+  // A third, KEYED session with NO spans of its own anywhere in the lane —
+  // this is what actually catches a "whole lane" draw: the other two
+  // sessions' spans both fall outside ITS OWN window, so the chart's own
+  // geometry hides them as not-visible either way (see laneSegments' own
+  // domain check) and a plain rect count cannot tell "correctly empty" from
+  // "wrongly handed the whole lane, then geometrically masked" apart. Only
+  // `hasChart`/the EmptyNote can: a whole-lane draw makes `sessionOnlySpans`
+  // non-empty for THIS session too, so it would draw an empty-looking chart
+  // instead of the correct "no timing detail" note.
+  const third = session({
+    id: "b3",
+    startedAt: "2026-09-20T15:40:00.000Z",
+    finishedAt: "2026-09-20T15:41:00.000Z",
+    people: [{ testimonyMs: 30_000, baptizeMs: 15_000 }],
+  });
   await mount(
-    [first, second],
+    [first, second, third],
     {
       spans: [
         { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:01:00.000Z" },
@@ -123,10 +138,52 @@ test("a service whose baptism.csv holds two sessions draws both, each on its own
     },
   );
 
-  assert.equal(chartCount(), 2, "both sessions' spans are in the one shared lane fetch — both must draw");
-  // Two people tables, one per session — each session's own splits, not one
+  assert.equal(chartCount(), 2, "only the two sessions with spans of their OWN must draw a chart");
+  assert.equal(
+    !!screen.queryByText(/No timing detail was recorded for this session/i),
+    true,
+    "the third, keyed session with no spans of its own must get the empty note, never an empty-looking chart",
+  );
+  // Three people tables, one per session — each session's own splits, not one
   // combined table that loses which figures belong to which session.
-  assert.equal(tableCount(), 2, "expected one People table per session");
+  assert.equal(tableCount(), 3, "expected one People table per session");
+
+  // Each chart must draw ONLY its own session's spans, never the whole
+  // shared lane — a span's own startedAt is encoded straight into its
+  // segment's own data-timer-segment id (session-lane.ts's timerLaneItems),
+  // so this reads what actually landed in each chart's own SVG rather than
+  // trusting a rect count alone, which a whole-lane draw could coincidentally
+  // still match if a fixture's two sessions carried the same span count.
+  const svgs = screen.queryAllByRole("img", { name: /Baptism session timeline/i });
+  assert.equal(svgs.length, 2);
+  function segmentTimes(svg: Element): string[] {
+    return [...svg.querySelectorAll("[data-timer-segment]")]
+      .map((g) => g.getAttribute("data-timer-segment") ?? "")
+      .map((id) => id.replace(/^(?:testimony|baptism)-\d+-/, ""))
+      .sort();
+  }
+  assert.deepEqual(
+    segmentTimes(svgs[0]!),
+    ["2026-09-20T15:00:00.000Z", "2026-09-20T15:04:00.000Z"].sort(),
+    "session 1's own chart must show only session 1's own spans, not session 2's",
+  );
+  assert.deepEqual(
+    segmentTimes(svgs[1]!),
+    ["2026-09-20T15:20:00.000Z", "2026-09-20T15:24:40.000Z"].sort(),
+    "session 2's own chart must show only session 2's own spans, not session 1's",
+  );
+
+  // Each People table must carry its OWN session's testimony, never the
+  // first session's repeated under every one. The Testimony cell itself
+  // (people-table.tsx's own column order: #, Person, Testimony, ...), not
+  // the table's whole flattened text — jsdom concatenates "Person 1" and
+  // "1:00" with no whitespace between them, so a bare substring match on
+  // the whole table would read "11:00" and could not tell "1:00" from a
+  // coincidental digit run inside a different value.
+  const tables = [...document.querySelectorAll("table")];
+  const testimonyCell = (t: Element) => text(t.querySelector("tbody tr td:nth-child(3)"));
+  assert.equal(testimonyCell(tables[0]!), "1:00", "session 1's own testimony (60s)");
+  assert.equal(testimonyCell(tables[1]!), "0:45", "session 2's own testimony (45s)");
 });
 
 test("a KEYED session with no spans in the shared lane (recorded before the raw layer) gets its splits and a plain 'no timeline' line, never an empty chart", async () => {
