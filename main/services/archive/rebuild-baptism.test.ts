@@ -520,6 +520,19 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
     assert.match(warnings[0]!, /3 row\(s\) belonging to no started session/);
   });
 
+  it("counts a session left open with people banked but no finish or reset to close it", () => {
+    // A full or read-only disk drops the finish row itself, not only the
+    // store's own save — the raw rows hold every press up to the last one
+    // and nothing that closes the session.
+    const rows: BaptismRow[] = [
+      row(0, { event: "start", phase: "testimony", personNumber: "1" }),
+      row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "20000" }),
+    ];
+    const { value, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    assert.deepEqual(value, [], "a session with no finish row has nothing to reconstruct");
+    assert.match(warnings[0]!, /presses recorded but no finish row to close them/);
+  });
+
   it("says nothing at all about an undamaged file", () => {
     const rows: BaptismRow[] = [
       row(0, { event: "reset", phase: "idle" }),

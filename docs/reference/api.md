@@ -300,9 +300,10 @@ thing.
 | Method | Path | Purpose |
 |--------|------|---------|
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
+| GET | `/api/history/live?serviceKey=<key>` | Read-only: `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
-| POST | `/api/history/rebuild` | Recompute all three summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timelineItems, splItems, attendanceSamples }`; `500` with the reason if it cannot |
+| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
@@ -370,6 +371,24 @@ pause, a press that was undone — are time nobody was timed for. The last span'
 finished is not in the lane, because it was never recorded. `{ spans: [] }` for a
 service with no baptism archive; a `500` when the archive exists and cannot be
 read.
+
+`POST /api/baptism/rebuild` takes `{ serviceKey }` rather than acting on the
+live timer: it replays that service's `baptism.csv` and MERGES the result into
+the stored sessions, never replacing them — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
+Answers `{ rows, sessions, updated, added, unchanged, newer, disagreeing,
+invalid, kept, full }` — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for what each of the eight outcome categories means. `400` for a body
+with no `serviceKey`; `409` while that service is recording, and a DIFFERENT
+`409` when it has no `baptism.csv` at all (a session recorded before the raw
+layer existed has a timeline record but none) — both carry a body of
+`{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"`
+for the second, since a client cannot tell two 409s apart by status alone;
+`500` for any other failure, with no detail in the body. `/api/history/rebuild`
+runs the same merge as its own baptism leg, and its 409s carry the same
+`code` (see below), since both routes throw the same two errors through the
+same dispatcher.
 
 **Updates, backup and the archive** — see
 [Updates and logs](../ops/updates-and-logs.md) and

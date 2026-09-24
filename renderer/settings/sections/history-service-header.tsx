@@ -115,6 +115,18 @@ const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
 };
 
 /**
+ * Figures for a service whose sound record could not be READ.
+ *
+ * The level says "sound unavailable", the Trends card's words for the same case,
+ * never "no sound recorded": that is a claim about the service, and a server
+ * that did not answer has made none. The header and the All services row both
+ * say it through here.
+ */
+export function markSoundUnavailable<F extends StatFigure & { sub?: string }>(figures: F[]): F[] {
+  return figures.map((f) => (f.key === "level" ? { ...f, sub: "sound unavailable" } : f));
+}
+
+/**
  * Everything derived from one recording that a figure about it can be built
  * from — the header's six KPIs and the All services row's four alike.
  *
@@ -462,6 +474,9 @@ export interface ServiceHeaderProps {
   timeline: ServiceTimeline;
   attendance: ServiceAttendance | null;
   spl: ServiceSplHistory | null;
+  /** The sound record could not be read. Its absence then means nothing about
+   *  the service, so the level figure must not say "no sound recorded". */
+  soundUnavailable?: boolean;
   /** Ticks every second while the record is open, so Actual counts up. */
   now?: number;
   readOnly?: boolean;
@@ -476,12 +491,18 @@ export interface ServiceHeaderProps {
   onDelete: () => void;
   /** Live only — items before now stop counting toward the pacing readout. */
   onResetPacing: () => void;
+  /** The nav's own list — SERVICE_SECTIONS by default. The caller passes a
+   *  longer one for a service the Baptisms card applies to: the header must
+   *  not hold a second, competing const of its own, since the two could
+   *  drift on which sections exist at all. */
+  sections?: readonly { id: string; label: string }[];
 }
 
 export function ServiceHeader({
   timeline,
   attendance,
   spl,
+  soundUnavailable = false,
   now,
   readOnly = false,
   meta,
@@ -492,6 +513,7 @@ export function ServiceHeader({
   onRebuild,
   onDelete,
   onResetPacing,
+  sections = SERVICE_SECTIONS,
 }: ServiceHeaderProps) {
   const live = timeline.endedAt == null;
   // `serviceKpis` reads the Smaart metric selection through `servicePeakLevel`,
@@ -505,9 +527,10 @@ export function ServiceHeader({
       // Read so the dependency is a real one and not "unnecessary" to the
       // linter: the value is never used, the CHANGE is the whole point.
       void metricsVersion;
-      return serviceKpis(timeline, attendance, spl, live ? now : undefined);
+      const figures = serviceKpis(timeline, attendance, spl, live ? now : undefined);
+      return soundUnavailable && !spl ? markSoundUnavailable(figures) : figures;
     },
-    [timeline, attendance, spl, live, now, metricsVersion],
+    [timeline, attendance, spl, soundUnavailable, live, now, metricsVersion],
   );
 
   // Geometry: see useHeaderInset's own doc comment — 184px tall at 1280 and
@@ -517,7 +540,7 @@ export function ServiceHeader({
   // Attendance while Sound filled the screen).
   const ref = useRef<HTMLElement | null>(null);
   const bottom = useHeaderInset(ref);
-  const active = useSectionNav(SERVICE_SECTIONS.map((s) => s.id), bottom);
+  const active = useSectionNav(sections.map((s) => s.id), bottom);
 
   return (
     <header
@@ -592,7 +615,7 @@ export function ServiceHeader({
               variant="filled"
               size="small"
               onClick={onRebuild}
-              tooltip="Recompute all three records from the raw rows in the data archive — your per-item time corrections are kept"
+              tooltip="Recompute timing, sound and attendance from the raw rows, and merge in this service's baptism sessions — your per-item time corrections are kept"
             >
               <WrenchIcon className="size-3.5 text-fg-muted" /> Rebuild from raw
             </Button>
@@ -622,7 +645,7 @@ export function ServiceHeader({
       </div>
 
       <nav aria-label="Sections of this service" className="flex items-center gap-1 text-caption1">
-        {SERVICE_SECTIONS.map((s) => (
+        {sections.map((s) => (
           <a
             key={s.id}
             href={`#${s.id}`}

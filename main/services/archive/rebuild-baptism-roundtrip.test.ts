@@ -12,16 +12,17 @@
 // the emit calls themselves: delete any one emitRaw in baptism-timer-service.ts
 // and a scenario here reconstructs the wrong people.
 //
-// WHAT IS COMPARED, AND THE ONE THING THAT IS NOT
+// WHAT IS COMPARED
 //
-// `people`, `serviceKey`, `title`, `serviceTypeId` and `planId` are compared
-// exactly. `startedAt`, `finishedAt` and the `id` derived from `startedAt` are
-// compared within a tolerance, because they CANNOT be reconstructed exactly:
-// the timer stamps its own state (`new Date().toISOString()` in start() and
-// finalize()) a moment before handing the row to emitRaw, and recordBaptism
-// stamps the row itself. The replay only has the row's stamp, so it runs a
-// millisecond or two late. See the header of rebuild-baptism.ts. The splits —
-// which is what this feature exists to record — come back exactly.
+// Everything, exactly: `people`, `serviceKey`, `title`, `serviceTypeId`,
+// `planId`, `startedAt`, `finishedAt` and the `id` derived from `startedAt`.
+// `start()` and `finalize()` pass their own `now`/`finishedAt` through emitRaw
+// to recordBaptism, which stamps the `start` and `finish` rows with that exact
+// string instead of reading its own clock — see recordBaptism and the header of
+// rebuild-baptism.ts. Before that threading existed the two stamps were
+// separate reads of the clock a moment apart, and the ticking-clock tests below
+// reproduce that drift deterministically rather than at the ~4% rate it was
+// measured at.
 //
 // Each `it` uses its OWN serviceKey, for the same reason baptism-timer-raw.
 // test.ts does: the archive is an append-only CSV keyed by serviceKey and the
@@ -81,23 +82,123 @@ async function assertRoundTrip(ctx: { serviceKey: string; serviceDate: string },
     assert.equal(got.serviceTypeId, want.serviceTypeId, `${why}: serviceTypeId`);
     assert.equal(got.planId, want.planId, `${why}: planId`);
 
-    // The archive stamps each row itself, a beat after the timer stamped its
-    // own state — see this file's header. Bounded, never exact.
-    const startDrift = Date.parse(got.startedAt) - Date.parse(want.startedAt);
-    const finishDrift = Date.parse(got.finishedAt) - Date.parse(want.finishedAt);
-    assert.ok(
-      startDrift >= 0 && startDrift < 100,
-      `${why}: startedAt is the archive's stamp, at or just after the timer's (drift ${startDrift}ms)`,
-    );
-    assert.ok(
-      finishDrift >= 0 && finishDrift < 100,
-      `${why}: finishedAt is the archive's stamp, at or just after the timer's (drift ${finishDrift}ms)`,
-    );
-    assert.equal(got.id, `bap-${Date.parse(got.startedAt)}`, `${why}: the id follows its own startedAt`);
+    // The `start`/`finish` rows carry the timer's OWN stamp now (see this
+    // file's header), so these match exactly rather than within a bound.
+    assert.equal(got.startedAt, want.startedAt, `${why}: startedAt matches the stored session exactly`);
+    assert.equal(got.finishedAt, want.finishedAt, `${why}: finishedAt matches the stored session exactly`);
+    assert.equal(got.id, want.id, `${why}: the rebuilt id is the id the store saved the session under`);
   });
 
   return replayed;
 }
+
+/**
+ * Swap the global `Date` for one whose every read — `new Date()` with no
+ * arguments, or `Date.now()` — hands back a NEW, strictly later instant, so two
+ * reads a moment apart in the same synchronous call can never land on the same
+ * millisecond. On a real clock this drift only shows on about one session in
+ * twenty; forcing every read strictly later reproduces it on EVERY run instead:
+ * on today's code, start()'s own stamp and the row's stamp (recordBaptism's own
+ * `new Date()`) are two separate reads of this clock, so they now differ every
+ * time instead of one session in twenty.
+ *
+ * `Date.parse` and `Date.UTC` are copied from the real `Date` unchanged —
+ * segmentElapsedMs calls `Date.parse` while this is installed (baptized(),
+ * next() and finish() all read elapsed time), and it must parse the real ISO
+ * strings this clock still produces rather than losing the method entirely.
+ *
+ * Restore with the returned function. Every call site below does so in a
+ * `finally`, so a failing assertion mid-drive cannot leave the fake clock
+ * running under whatever `it` node:test schedules next in this file.
+ */
+function installEverTickingClock(): () => void {
+  const RealDate = globalThis.Date;
+  let ticks = 0;
+  const nextMs = (): number => RealDate.now() + ++ticks;
+
+  function TickingDate(): Date {
+    return new RealDate(nextMs());
+  }
+  TickingDate.now = nextMs;
+  TickingDate.parse = RealDate.parse;
+  TickingDate.UTC = RealDate.UTC;
+  TickingDate.prototype = RealDate.prototype;
+
+  globalThis.Date = TickingDate as unknown as DateConstructor;
+  return () => {
+    globalThis.Date = RealDate;
+  };
+}
+
+describe("a rebuilt session's id, startedAt and finishedAt match the stored ones exactly", () => {
+  // A 4% race is a weak red: it can pass by luck on the very run meant to prove
+  // it fails. This clock removes the luck — on today's code these two fail on
+  // every run, not sometimes.
+  it("start() and finish() under a clock that never lands on the same millisecond twice", async () => {
+    const ctx = freshCtx("replay-clock");
+    const restore = installEverTickingClock();
+    try {
+      openService(ctx);
+      baptismTimerService.reset();
+      baptismTimerService.setMode("per-person");
+
+      baptismTimerService.start();
+      const finished = baptismTimerService.finish();
+      assert.equal(finished.people.length, 1, "sanity: the testimony alone still logs a session");
+    } finally {
+      restore();
+    }
+
+    await assertRoundTrip(ctx, "a clock that ticks on every read");
+  });
+
+  it("still matches through Finish, Undo, and a second Finish that replaces the same id", async () => {
+    const ctx = freshCtx("replay-clock");
+    const restore = installEverTickingClock();
+    try {
+      openService(ctx);
+      baptismTimerService.reset();
+      baptismTimerService.setMode("grouped");
+
+      baptismTimerService.start();
+      baptismTimerService.next(); // person 1's testimony ends, person 2's begins
+      baptismTimerService.startBaptisms(); // person 2 folds in; two people, armed
+      baptismTimerService.finish(); // Finish while armed — nobody has stepped in yet
+      assert.equal(baptismTimerService.undo().armed, true, "sanity: armed again");
+      baptismTimerService.advance(); // person 1 in
+      baptismTimerService.next(); // person 2 in
+      const finished = baptismTimerService.next(); // auto-finishes: the SECOND finalize()
+
+      assert.equal(finished.people.length, 2, "sanity: neither person was skipped");
+      assert.ok(finished.people.every((p) => p.baptizeMs > 0), "sanity: both were actually baptized");
+    } finally {
+      restore();
+    }
+
+    // finalize() ran twice for one session (Finish, Undo, Finish-via-auto) — the
+    // store replaces by id, and the replay must log the SAME id both times, so
+    // this is the path the strictly-increasing clock above has to hold for, not
+    // just a single finish.
+    await assertRoundTrip(ctx, "finish, undo, finish again, under the same ticking clock");
+  });
+
+  // Cheap insurance beyond the deterministic clock above: many real-clock
+  // sessions back to back, asserted with the same strict equality. Unlike the
+  // ticking clock this cannot be relied on to fail before the fix — the drift
+  // it is checking for is the ~4% race itself — but every one of them must pass
+  // after it, and none may regress back toward it.
+  it("thirty ordinary driven sessions in a row, real clock", async () => {
+    for (let i = 0; i < 30; i++) {
+      const ctx = freshCtx("replay-bulk");
+      openService(ctx);
+      baptismTimerService.reset();
+      baptismTimerService.setMode("per-person");
+      baptismTimerService.start();
+      baptismTimerService.finish();
+      await assertRoundTrip(ctx, `driven session ${i + 1} of 30, real clock`);
+    }
+  });
+});
 
 describe("a real grouped session replays back into the session the store recorded", () => {
   it("run to its natural end, where the last person auto-finishes", async () => {

@@ -77,11 +77,13 @@
 //
 //  • `finish` with nobody in `people` logs no session, matching finalize().
 //
-// What it CANNOT reconstruct exactly: `startedAt`, `finishedAt` and therefore
-// `id`. The timer stamps its own state a moment before emitRaw hands the row to
-// the archive, which stamps the row itself — so a replayed session's stamps run
-// a millisecond or two late. The per-person splits, which is what the feature
-// exists to record, come back exactly.
+// What it reconstructs exactly: everything, including `startedAt`, `finishedAt`
+// and therefore `id`. start() and finalize() pass their own stamp through
+// emitRaw to the row (see sample-archive.ts's recordBaptism) instead of letting
+// the archive read its own clock a moment later, so a replayed session's stamps
+// are the same string the store holds, not a separate read of it. The
+// per-person splits, which is what the feature exists to record, come back
+// exactly too.
 
 import { baptismSessionId, type BaptismMode, type BaptismPerson, type BaptismSession } from "../../types/stage.js";
 import { scrub } from "../scrub.js";
@@ -130,6 +132,15 @@ interface Skips {
   noSession: number;
   missingIndex: number;
   unknownMode: number;
+  /** A session with at least one press recorded (armed, a testimony, a
+   *  baptism) whose rows simply stop — no `finish` and no `reset` ever
+   *  closed it. A full or read-only disk drops a failed CSV append
+   *  silently (csv-appender logs and discards it), so the one row that
+   *  would have turned these presses into a session can go missing even
+   *  though everything before it wrote fine. Distinct from a session with
+   *  no presses at all: `finish` itself logs nothing for one of those, so
+   *  its own missing row would have changed nothing either way. */
+  neverFinished: number;
 }
 
 /**
@@ -142,28 +153,17 @@ interface Skips {
  * Rows before the first `start`, or after a `reset`, belong to no session and
  * are ignored: the timer had no session to record them against either.
  *
- * THE IDS THIS PRODUCES ARE NOT COMPARABLE TO THE STORE'S. `start()` stamps
- * `sessionStartedAt` from its own clock and then calls `emitRaw`, and
- * `recordBaptism` stamps the row from ITS clock — microseconds later, but often
- * enough across a millisecond boundary that roughly one session in twenty comes
- * back with `bap-<ms>` one higher than the one `finalize()` wrote. Measured over
- * 50 driven sessions: never more than 1ms of skew, ~4% of ids different, and
- * unmoved by CPU load.
- *
- * So a caller must NOT merge a rebuild through `baptismStore.addSessions`,
- * which de-duplicates on id: a rebuilt copy of a session that survived would
- * land beside it rather than being recognised as the same one. Replace by
- * service, or match on `startedAt` within a tolerance.
- *
- * The fix, for whoever wires this up: thread an optional trailing `at` through
- * `emitRaw` and `recordBaptism`, with `start()` passing its own `now` and
- * `finalize()` its `finishedAt`, so the row carries the timer's stamp rather
- * than the archive's. Deliberately not done here — the emitter is live-service
- * code and this was built days before a baptism service.
+ * THE IDS THIS PRODUCES MATCH THE STORE'S EXACTLY. `start()` stamps
+ * `sessionStartedAt` and passes that same string through `emitRaw` to the
+ * `start` row's `at`; `finalize()` does the same with `finishedAt` on the
+ * `finish` row (see sample-archive.ts's recordBaptism). Neither row is a
+ * separate read of the clock, so `baptismStore.addSessions`, which
+ * de-duplicates on id, recognises a rebuilt session as the one it already
+ * holds rather than landing it beside that session as a second copy.
  */
 export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIdentity): BaptismSession[] {
   const out: BaptismSession[] = [];
-  const skips: Skips = { unreadableStart: 0, noSession: 0, missingIndex: 0, unknownMode: 0 };
+  const skips: Skips = { unreadableStart: 0, noSession: 0, missingIndex: 0, unknownMode: 0, neverFinished: 0 };
   let open: OpenSession | null = null;
 
   for (const r of rowsByTime(rows)) {
@@ -308,11 +308,18 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
     }
   }
 
+  // A session still open when the rows run out, with something in it a
+  // `finish` row would have logged: the row that would have closed it is
+  // simply not there, not a session the operator is still mid-way through
+  // (that only exists live, never in a closed archive file being replayed).
+  if (open && open.logged === null && open.people.length > 0) skips.neverFinished += 1;
+
   const notes: string[] = [];
   if (skips.unreadableStart) notes.push(`${skips.unreadableStart} session(s) whose start row had an unreadable timestamp`);
   if (skips.noSession) notes.push(`${skips.noSession} row(s) belonging to no started session`);
   if (skips.missingIndex) notes.push(`${skips.missingIndex} row(s) naming a baptismIndex with nobody at it`);
   if (skips.unknownMode) notes.push(`${skips.unknownMode} start row(s) with an unreadable mode, replayed as grouped`);
+  if (skips.neverFinished) notes.push(`${skips.neverFinished} session(s) with presses recorded but no finish row to close them`);
   if (notes.length > 0) {
     // The serviceKey arrives verbatim in an HTTP body wherever a rebuild is
     // triggered, the same way history-edit.ts's does — scrubbed, or a newline

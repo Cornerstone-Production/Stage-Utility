@@ -81,7 +81,8 @@ REAPER is the cleanest end-to-end template for a polling integration — see
 3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
    from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
    `RevisionedStatus`.
-4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; `api.ts` invoke case.
+4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; in `api.ts`, an
+   `invoke` case and its `IpcChannel` member (skip either and `tsc` fails).
 5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;
    layout object render case + inspector; `object-integration.ts` mapping; a place
    in `CATEGORY_ORDER` in `integrations-panel.tsx`.

@@ -82,29 +82,26 @@ function del<T>(path: string): Promise<T> {
  * single line is a guaranteed merge conflict between two branches each adding
  * a channel.
  *
- * Tied to the switch below by the exhaustiveness check at its `default:` —
- * delete a `case` without removing it here and `ch` still carries that member
- * at `default`, which is not assignable to `never` and fails `tsc`. Delete it
- * from HERE without removing the `case` ALSO fails `tsc` — not "nothing
- * breaks" as this comment once claimed. Two errors: the orphaned `case`'s own
- * literal no longer compares to the narrowed union, and any call site already
- * typed `IpcChannel` that still sends it (see baptism-operator.tsx) fails the
- * same way — verified by removing "baptism:pause" alone and reading `tsc`'s
- * output. What NEITHER direction catches is a caller typed as plain `string`:
- * it would carry a channel neither list has ever heard of straight through,
- * so this union is a floor under a caller's OWN channel type, not proof every
- * case here is reachable from one — pair it with a typed local variable (`let
- * primaryChannel: IpcChannel`, not `string`) at the call site for that
- * direction.
+ * Tied to the switch below in both directions, each a `tsc` failure: delete a
+ * `case` and its member reaches `default:`, which is not assignable to
+ * `never`; delete a member and its `case` is no longer comparable to the
+ * union (TS2678). A new channel is a member here AND a case there.
  *
- * Complements, not replaces, the text scans in api-channels.test.ts: this
- * catches a channel a caller's own TYPE admits reaching but api.ts stopped
- * handling; the widened scan catches a channel some renderer file's SOURCE
- * TEXT reaches for (including through a wrapper or a ternary) with no case at
- * all. Neither sees a channel assembled from a variable, a parenthesised
- * condition, a three-way ternary or a template literal — the scan is textual
- * and blind to those shapes, and typing only helps where the call site
- * ITSELF is annotated with this union rather than `string`.
+ * `invoke()` takes this union rather than `string`, so every channel reaching
+ * it has to be a member to compile: a literal, a ternary, a typed variable
+ * (baptism-operator.tsx's `primaryChannel`), or the parameter of a wrapper
+ * however deeply nested. A wrapper whose channel is `string` cannot forward to
+ * it at all. The ways past that are a cast, an `any`, and a METHOD-syntax
+ * signature that declares `string`: TypeScript checks method parameters
+ * bivariantly, so anything whose channel is IpcChannel (`invoke`, a typed
+ * wrapper, a class or object-literal method) can stand in for
+ * `{ send(channel: string): Promise<unknown> }`, where the property form
+ * `send: (channel: string) => Promise<unknown>` rejects it. A channel chosen
+ * at runtime belongs in an `as const` table instead, as in use-stream-state.ts.
+ *
+ * What a type cannot say is whether a channel still has a caller. That
+ * direction stays with the text scans in api-channels.test.ts, which also
+ * catch a literal cast past this union, but only at a call they recognise.
  */
 export type IpcChannel =
   | "action:invoke"
@@ -140,6 +137,7 @@ export type IpcChannel =
   | "baptism:lane"
   | "baptism:next"
   | "baptism:pause"
+  | "baptism:rebuild"
   | "baptism:reset"
   | "baptism:resume"
   | "baptism:sessions"
@@ -179,6 +177,7 @@ export type IpcChannel =
   | "displays:refresh"
   | "history:deleteMilestone"
   | "history:editWindow"
+  | "history:live"
   | "history:listMilestones"
   | "history:merge"
   | "history:rebuild"
@@ -356,15 +355,10 @@ export type IpcChannel =
   | "youtube:connectStatus"
   | "youtube:getStatus";
 
-export async function invoke<T>(channel: string, params?: Params): Promise<T> {
+export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T> {
   const p = params ?? {};
 
-  // Narrowed for the exhaustiveness check at `default:` below, not for the
-  // switch's own case-matching (identical either way) — see IpcChannel's doc
-  // comment for what this can and cannot catch.
-  const ch = channel as IpcChannel;
-
-  switch (ch) {
+  switch (channel) {
     // ── Stage state ────────────────────────────────────────────────────
     case "stage:getState":
       return apiFetch<T>("/api/state");
@@ -580,6 +574,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
 
+    case "history:live":
+      return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
+
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
     case "history:saveMilestone":
@@ -629,6 +626,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
         testimonyItemId: p.testimonyItemId,
         baptismItemId: p.baptismItemId,
       });
+    case "baptism:rebuild":
+      return post<T>("/api/baptism/rebuild", { serviceKey: p.serviceKey });
 
     case "spl:series":
       return apiFetch<T>(
@@ -1261,7 +1260,7 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       // If this line fails to compile, IpcChannel above lists a channel with
       // no `case` — add one, or the exhaustiveness check would otherwise be
       // silently defeated by an `any`-shaped default falling through.
-      const exhaustive: never = ch;
+      const exhaustive: never = channel;
       void exhaustive;
       throw new Error(`[api] Unknown IPC channel: "${channel}"`);
     }

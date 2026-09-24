@@ -110,7 +110,7 @@ describe("useSessionLane refetches on baptism:state, and only on it", () => {
     await flush();
     assert.equal(f.calls.length, 1, "fetched the lane on a timer with no push at all — that is polling");
 
-    await act(async () => es.push("baptism:state", { phase: "testimony", personNumber: 1 }));
+    await act(async () => es.push("baptism:state", { phase: "testimony", personNumber: 1, serviceKey: KEY }));
     await flush();
     assert.equal(f.calls.length, 2, "a live baptism:state push did not refetch the lane");
 
@@ -118,13 +118,48 @@ describe("useSessionLane refetches on baptism:state, and only on it", () => {
     await flush();
     assert.equal(f.calls.length, 2, "idle time between two pushes fetched the lane again — that is polling");
 
-    await act(async () => es.push("baptism:state", { phase: "baptism", personNumber: 1 }));
+    await act(async () => es.push("baptism:state", { phase: "baptism", personNumber: 1, serviceKey: KEY }));
     await flush();
     assert.equal(f.calls.length, 3, "a second push did not refetch the lane");
 
     act(() => mock.timers.tick(60_000));
     await flush();
     assert.equal(f.calls.length, 3, "exactly two pushes must mean exactly two refetches beyond the mount hydrate");
+  });
+
+  // This hook also backs HistorySessionChart, the read-only PAST-service view
+  // on a service's History page — open on a service that finished weeks ago
+  // while somewhere else in the building an unrelated live baptism is
+  // pressing buttons on ITS OWN service. Every one of those presses
+  // broadcasts this exact channel; none of them can have changed a lane that
+  // finished weeks ago.
+  test("a push naming a DIFFERENT service's key never refetches this one's lane", async (t) => {
+    mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const f = stubLaneFetch();
+    const { __resetReplayCacheForTests } = await import("../../../lib/api.js");
+    __resetReplayCacheForTests();
+    t.after(() => {
+      f.restore();
+      mock.timers.reset();
+      __resetReplayCacheForTests();
+    });
+
+    renderHook(() => useSessionLane(KEY));
+    await flush();
+    assert.equal(f.calls.length, 1, "the mount hydrate never fetched the lane");
+    const es = FakeEventSource.last!;
+
+    await act(async () =>
+      es.push("baptism:state", { phase: "testimony", personNumber: 1, serviceKey: "st1:plan1:some-other-service" }),
+    );
+    await flush();
+    assert.equal(f.calls.length, 1, "a push for an unrelated service's own key refetched this one's lane");
+
+    // The SAME service's own key still must refetch — this is not "never
+    // refetch on a push," only "never refetch on someone ELSE's push."
+    await act(async () => es.push("baptism:state", { phase: "baptism", personNumber: 1, serviceKey: KEY }));
+    await flush();
+    assert.equal(f.calls.length, 2, "a push naming this hook's own service must still refetch");
   });
 
   test("a late subscriber's replayed frame is not a second live push", async (t) => {
@@ -148,7 +183,7 @@ describe("useSessionLane refetches on baptism:state, and only on it", () => {
     await flush();
     assert.equal(f.calls.length, 1, "A's own mount hydrate");
     const es = FakeEventSource.last!;
-    await act(async () => es.push("baptism:state", { phase: "testimony", personNumber: 1 }));
+    await act(async () => es.push("baptism:state", { phase: "testimony", personNumber: 1, serviceKey: KEY }));
     await flush();
     assert.equal(f.calls.length, 2, "A's live push refetched — see the first test");
 

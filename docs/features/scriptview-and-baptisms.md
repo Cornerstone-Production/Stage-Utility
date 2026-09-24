@@ -15,7 +15,12 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ScriptView**, with a live preview.
+Configure it under **Settings → ScriptView**, with a live preview. The layouts
+and category roles are this app's own and can be edited before Planning Center
+is connected; the preview, which reads a plan, says to connect it. So do the
+landing page, a ScriptView page and a Script display, which ask Planning Center
+for nothing until it is connected. A Script display with no service type
+selected says that instead.
 
 ## Where the rundown can appear
 
@@ -63,6 +68,14 @@ global: define one and it works across every service type.
 
 Each has per-element toggles for the clock, item time, song key, BPM,
 arrangement, item notes and total time.
+
+A rundown whose layouts or category roles cannot be read says so above the
+table: without the layouts it shows all columns, and without the roles it shows
+no note columns, until they load. A display keeps the last layouts it read
+through a later failure and says nothing, since what it shows is still right.
+The plan works the same way: one that cannot be read says so while there is
+nothing to show yet, and a later failure keeps the last plan on screen. Each
+failure is on a `[scriptview]` line on the server log.
 
 ## Category roles
 
@@ -206,8 +219,8 @@ baptism length, and the total. Each row with a known service links to that
 service's page in Service History; a session recorded before that link
 existed has no service key to link with, and renders without one rather than
 a broken link. Delete removes a session after confirming — its raw rows in
-`baptism.csv` are untouched, so it can still be replayed once a rebuild action
-exists for baptisms (see Recovery, below).
+`baptism.csv` are untouched, so **Rebuild from raw** can bring it back (see
+Recovery, below).
 
 A **Trends** card averages the last eight sessions against the eight before
 them, across four figures: baptized per service, average testimony, average
@@ -302,12 +315,16 @@ clean restart), or — in a grouped baptism section nobody had stepped into yet
 Every press on the timer appends a row to `baptism.csv`, the same append-only
 file the rest of the archive uses. A session that `baptism.json` loses — a
 corrupt file, or a crash between the debounced save and the next write — is not
-gone: it can be replayed from those rows. The derived record is a cache of what
-the presses already said, not the only copy of it — but unlike an item's
-recorded timing, there is no **Rebuild from raw** entry for it yet, so that
-replay is not something an operator can trigger from the app. See
-[Data archive](../data-archive.md) for the column list, which presses are
-recorded, and what the append-only rule buys the rest of the archive.
+gone: **Rebuild from raw**, in this tab's own header or in History's, replays
+it from those rows. The header targets the session it is showing, or the most
+recent past one if none is; it is disabled, with a reason, while that service
+is still recording. The derived record is a cache of what the presses already
+said, not the only copy of it. Unlike an item's recorded timing, a baptism
+rebuild never replaces what is already stored — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for why. See [Data archive](../data-archive.md) for the column list, which
+presses are recorded, and what the append-only rule buys the rest of the
+archive.
 
 A save that fails says so. If Finish cannot write a session to
 `baptism.json`, the Timer card shows a line for it under the readout — that
@@ -318,6 +335,27 @@ beside the first; a different session saving cleanly clears only its own
 line, never another's. **Dismiss** on the note, or **Reset**, clears every
 line at once. Past sessions does not list an unsaved session; its rows in
 `baptism.csv` still hold it, if a service was open while it ran.
+
+Each line also has its own **Rebuild from raw**, for that session's own
+service — never whichever session the tab is showing next, which by then may
+be a different one. It is disabled, with a reason, while that service is
+still recording, and when the session ran with no service open at all (no
+raw rows exist to rebuild it from). A rebuild clears that line the moment it
+actually writes that session, either by **adding** it — the ordinary case,
+since Finish's own failure means the store never had a copy at all — or by
+**updating** an existing one, which only happens when a LATER re-Finish (an
+Undo followed by another Finish) is the one that failed to save: the store
+already holds that session's earlier, now-stale Finish, so the rebuild can
+only bring it up to date, never add a second copy. Either way, whichever
+route actually wrote it — the note's own button, this tab's header, or
+History's whole-service Rebuild — clears the line. A rebuild that leaves the
+session exactly as the store already had it — unchanged, or the store's own
+copy is already newer, or the rows and the store disagree — never clears the
+line, because nothing about the store's own record actually changed. A
+rebuild that does not find it — the rows never reached a finish (a full or
+read-only disk drops that row too, not only the store's own save), a row
+could not be read, or the store is already full — says so plainly instead of
+the ordinary success message, and the line stays.
 
 ## Logging
 

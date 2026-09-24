@@ -21,11 +21,12 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.
 
 const teardown = installRenderDom();
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { TimerCard } = await import("./timer-card.js");
-const { TooltipProvider } = await import("../../../components/ui/index.js");
+const { TooltipProvider, ConfirmHost, Toaster } = await import("../../../components/ui/index.js");
 const { baptismSessionId } = await import("@main/types/stage");
+const { rebuildButtonsIn: rebuildButtonsMatching, tooltipTextOf } = await import("./rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -68,7 +69,7 @@ async function mount(state: BaptismState): Promise<HTMLElement> {
   globalThis.fetch = emptyFetch;
   try {
     const view = render(
-      React.createElement(TooltipProvider, null, React.createElement(TimerCard, { state, onFinished: () => {} })),
+      React.createElement(TooltipProvider, null, React.createElement(TimerCard, { state, onFinished: () => {}, onRebuilt: () => {} })),
     );
     await settle();
     return view.container;
@@ -106,7 +107,7 @@ async function mountRecording(state: BaptismState): Promise<{ root: HTMLElement;
     return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
   }) as unknown as typeof fetch;
   const view = render(
-    React.createElement(TooltipProvider, null, React.createElement(TimerCard, { state, onFinished: () => {} })),
+    React.createElement(TooltipProvider, null, React.createElement(TimerCard, { state, onFinished: () => {}, onRebuilt: () => {} })),
   );
   await settle();
   return { root: view.container, calls, restore: () => void (globalThis.fetch = realFetch) };
@@ -186,4 +187,263 @@ test("two failed sessions both show their own line, naming their own reason", as
   assert.ok(text!.includes(DISK), `expected the first session's own reason: ${text}`);
   assert.ok(text!.includes(OTHER), `expected the second session's own reason: ${text}`);
   assert.match(text!, /2 sessions did not save/, "the note counts both, not just the latest");
+});
+
+// ── each failed session offers its own Rebuild from raw ────────────────────
+//
+// The clearing itself — that a real rebuild through the real route restores
+// the session and removes exactly its own entry, on the server, whichever
+// route did it — is proven end to end in
+// main/services/routes/baptism-rebuild-clears-save-error.test.ts, against a
+// REAL failed save (addSession stubbed to reject) and the real routes; a
+// component test cannot drive a real route at all. What belongs here is the
+// UI: which serviceKey each entry's button targets, when it is disabled and
+// why, and that a click confirms before posting — the same three things
+// header.test.tsx already proves for the header's own Rebuild button, reused
+// rather than re-derived.
+
+function stubRebuildFetch(
+  opts: { live?: boolean; rebuildAnswer?: unknown; rebuildStatus?: number } = {},
+) {
+  const calls: { url: string; body: unknown }[] = [];
+  const fetchFn = (async (input: string, init?: RequestInit) => {
+    const url = String(input);
+    const ok = (json: unknown, status = 200) => ({
+      ok: status < 400,
+      status,
+      json: async () => json,
+      text: async () => JSON.stringify(json),
+    });
+    const body = init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined;
+    calls.push({ url, body });
+    if (url.includes("/api/history/live")) return ok({ live: opts.live ?? false });
+    if (url.includes("/api/baptism/rebuild")) {
+      if (opts.rebuildStatus && opts.rebuildStatus >= 400) {
+        const a = opts.rebuildAnswer as { error?: string; code?: string } | undefined;
+        const errBody: { error: string; code?: string } = { error: a?.error ?? "Rebuild refused" };
+        if (a?.code) errBody.code = a.code;
+        return ok(errBody, opts.rebuildStatus);
+      }
+      return ok(
+        opts.rebuildAnswer ?? { rows: 1, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
+      );
+    }
+    return ok({});
+  }) as unknown as typeof fetch;
+  return { fetchFn, calls };
+}
+
+async function mountWithRebuild(
+  state: BaptismState,
+  opts: Parameters<typeof stubRebuildFetch>[0] = {},
+): Promise<{ root: HTMLElement; calls: { url: string; body: unknown }[]; rebuiltCount: () => number; restore: () => void }> {
+  const { fetchFn, calls } = stubRebuildFetch(opts);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fetchFn;
+  let rebuiltCount = 0;
+  const view = render(
+    React.createElement(
+      TooltipProvider,
+      null,
+      React.createElement(TimerCard, {
+        state,
+        onFinished: () => {},
+        onRebuilt: () => {
+          rebuiltCount += 1;
+        },
+      }),
+      React.createElement(ConfirmHost),
+      React.createElement(Toaster),
+    ),
+  );
+  await settle();
+  await settle(); // one more turn for the per-entry live-check's own fetch to resolve
+  return {
+    root: view.container,
+    calls,
+    rebuiltCount: () => rebuiltCount,
+    restore: () => {
+      globalThis.fetch = realFetch;
+    },
+  };
+}
+
+const findInBody = (label: string) =>
+  [...document.body.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label) as HTMLElement | undefined;
+
+/** The save-failure note's own per-entry buttons — each inside its own
+ *  `[role="alert"]`, and a service can fail more than one session at once,
+ *  so this needs every match, not just the first (see the shared helper's
+ *  own doc comment on why the header's single action-group button and this
+ *  note's per-entry ones need different scopes). */
+const rebuildButtonsIn = (root: ParentNode) => rebuildButtonsMatching(root, '[role="alert"] button');
+
+test("a failed entry with a serviceKey offers its own Rebuild from raw; one with none is disabled and says why", async () => {
+  const { root, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      saveErrors: [
+        { sessionId: baptismSessionId("2026-09-13T15:00:00.000Z"), serviceKey: "svc-a", reason: DISK },
+        { sessionId: baptismSessionId("2026-09-06T15:00:00.000Z"), serviceKey: null, reason: DISK },
+      ],
+    },
+    { live: false },
+  );
+  try {
+    const buttons = rebuildButtonsIn(root);
+    assert.equal(buttons.length, 2, "expected one Rebuild action per failed entry");
+    assert.equal(buttons[0]!.disabled, false, "an entry with a serviceKey, not live, must be usable");
+    assert.equal(buttons[1]!.disabled, true, "an entry with no serviceKey has no raw rows to rebuild from");
+    assert.match(
+      await tooltipTextOf(buttons[1]!),
+      /no service open.*no raw rows/i,
+      "expected the disabled entry's own tooltip to say WHY, not just that it is off",
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("the offer is disabled while THAT entry's own service is live", async () => {
+  // A real serviceKey, not failedSave()'s own null: a null serviceKey is
+  // already, on its own, disabled by the no-service branch — { live: true }
+  // is never even consulted for it, so hard-coding "not-live" in the real
+  // useServiceLive check would stay green here for the wrong reason.
+  const { root, restore } = await mountWithRebuild(
+    { ...FINISHED, saveErrors: [{ sessionId: baptismSessionId("2026-09-13T15:00:00.000Z"), serviceKey: "svc-live", reason: DISK }] },
+    { live: true },
+  );
+  try {
+    const buttons = rebuildButtonsIn(root);
+    assert.equal(buttons.length, 1);
+    assert.equal(buttons[0]!.disabled, true, "the server's own 'live' answer must disable this entry's own action");
+  } finally {
+    restore();
+  }
+});
+
+test("clicking an entry's Rebuild confirms, then posts for THAT entry's serviceKey — never state.serviceKey", async () => {
+  // state.serviceKey names the NEXT session once one has started (see
+  // baptismSubline) — exactly what this must NOT target.
+  const entryStartedAt = "2026-09-13T15:00:00.000Z";
+  const { root, calls, rebuiltCount, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      serviceKey: "svc-next-session",
+      saveErrors: [{ sessionId: baptismSessionId(entryStartedAt), serviceKey: "svc-failed", reason: DISK }],
+    },
+    { live: false },
+  );
+  try {
+    const [btn] = rebuildButtonsIn(root);
+    fireEvent.click(btn!);
+    await settle();
+    const dialog = (document.body.textContent ?? "");
+    assert.match(dialog, /Rebuild from raw\?/, "expected the shared confirm dialog to open");
+    fireEvent.click(findInBody("Rebuild")!);
+    await settle();
+    await settle();
+    const rebuild = calls.find((c) => c.url.includes("/api/baptism/rebuild"));
+    assert.ok(rebuild, "expected a POST to /api/baptism/rebuild");
+    assert.deepEqual(rebuild!.body, { serviceKey: "svc-failed" }, "must target the FAILED entry's own serviceKey");
+    assert.equal(rebuiltCount(), 1, "onRebuilt must fire so Past sessions/Trends can reload");
+  } finally {
+    restore();
+  }
+});
+
+test("a rebuild that restored nothing for THIS session warns plainly instead of reporting success", async () => {
+  // A full or read-only disk drops the finish row itself, not only the JSON
+  // save (see rebuildBaptismSessions' own neverFinished counter) — a 200 from
+  // POST /api/baptism/rebuild is not proof THIS session came back, only that
+  // the request succeeded. restoredIds is the write-time truth; an entry
+  // whose own id is missing from it must say so, not echo the generic
+  // "N updated, M added" success toast meant for the service as a whole.
+  const entryStartedAt = "2026-09-13T15:00:00.000Z";
+  const sessionId = baptismSessionId(entryStartedAt);
+  const { root, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      saveErrors: [{ sessionId, serviceKey: "svc-never-finished", reason: DISK }],
+    },
+    {
+      live: false,
+      rebuildAnswer: {
+        rows: 3, sessions: 0, updated: 0, added: 0, unchanged: 0, newer: 0,
+        disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: [],
+      },
+    },
+  );
+  try {
+    const [btn] = rebuildButtonsIn(root);
+    fireEvent.click(btn!);
+    await settle();
+    fireEvent.click(findInBody("Rebuild")!);
+    await settle();
+    await settle();
+    const body = document.body.textContent ?? "";
+    assert.match(
+      body,
+      /The raw rows hold no finished copy of this session — copy the report now/,
+      `expected the plain warning, got: ${body}`,
+    );
+    assert.doesNotMatch(body, /0 updated, 0 added/i, "must not also show the generic success toast");
+  } finally {
+    restore();
+  }
+});
+
+test("cancelling the confirm reaches neither the server nor onRebuilt", async () => {
+  const { root, calls, rebuiltCount, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      saveErrors: [{ sessionId: baptismSessionId("2026-09-13T15:00:00.000Z"), serviceKey: "svc-a", reason: DISK }],
+    },
+    { live: false },
+  );
+  try {
+    const [btn] = rebuildButtonsIn(root);
+    fireEvent.click(btn!);
+    await settle();
+    fireEvent.click(findInBody("Cancel")!);
+    await settle();
+    assert.equal(calls.some((c) => c.url.includes("/api/baptism/rebuild")), false);
+    assert.equal(rebuiltCount(), 0);
+  } finally {
+    restore();
+  }
+});
+
+test("a live 409 the recheck did not catch shows the same refusal the header shows, and the entry stays", async () => {
+  const { root, calls, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      saveErrors: [{ sessionId: baptismSessionId("2026-09-13T15:00:00.000Z"), serviceKey: "svc-a", reason: DISK }],
+    },
+    { live: false, rebuildStatus: 409, rebuildAnswer: { error: "That service is recording right now.", code: "live" } },
+  );
+  try {
+    const [btn] = rebuildButtonsIn(root);
+    fireEvent.click(btn!);
+    await settle();
+    fireEvent.click(findInBody("Rebuild")!);
+    await act(async () => {
+      await settle();
+      await settle();
+    });
+    assert.ok(calls.some((c) => c.url.includes("/api/baptism/rebuild")), "the POST must still have been attempted");
+    const body = document.body.textContent ?? "";
+    assert.match(
+      body,
+      /This service started recording again — rebuild once it ends/,
+      `expected the same live-refusal toast the header's own Rebuild shows, got: ${body}`,
+    );
+    // The entry itself is drawn from `state.saveErrors`, which this refused
+    // rebuild never changed — a real clear only ever arrives as a NEW state
+    // prop, on the server's own push (see baptism-rebuild-clears-save-error
+    // .test.ts). Nothing client-side may remove it optimistically.
+    assert.equal(rebuildButtonsIn(root).length, 1, "a refused rebuild must leave the entry, and its action, in place");
+  } finally {
+    restore();
+  }
 });

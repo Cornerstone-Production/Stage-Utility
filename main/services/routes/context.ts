@@ -72,8 +72,8 @@ export function json(res: http.ServerResponse, data: unknown, status = 200): voi
   res.end(JSON.stringify(data));
 }
 
-export function error(res: http.ServerResponse, message: string, status = 400): void {
-  json(res, { error: message }, status);
+export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {
+  json(res, code ? { error: message, code } : { error: message }, status);
 }
 
 /**
