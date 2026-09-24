@@ -44,7 +44,15 @@ export function ActionButtonInspector({
   // there is no "first press" to gate on the way the rule editor's `attempted`
   // does. A field that needs setup says so as soon as it is looked at.
   const issues = action ? validateParams(action.params, params) : [];
-  const issueMap = Object.fromEntries(issues.map((i) => [i.key, i.message]));
+  // The extra sentence is this component's own — Button.dc.html says it here
+  // because this is the one surface a missing field actually does something:
+  // an operator can press an unconfigured button on the live canvas, and
+  // nothing here stops them. The rule editor's Save is already blocked from
+  // running a rule with issues (it saves turned off instead — see
+  // automation-routes.ts), so ParamField there keeps the plain message.
+  const issueMap = Object.fromEntries(
+    issues.map((i) => [i.key, `${i.message}. Until then, pressing this button does nothing and says why.`]),
+  );
 
   return (
     <>

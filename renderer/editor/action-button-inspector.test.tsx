@@ -48,6 +48,13 @@ const REGISTRY_ACTIONS: { id: string; label: string; params: ParamDef[]; help?: 
     label: "Send an OSC message",
     params: [{ key: "argument", label: "Argument", type: "number", min: 0, max: 7 }],
   },
+  {
+    id: "rosstalk.command",
+    label: "Send a RossTalk command",
+    // The exact param Button.dc.html's mockup shows unset ("Target"), so the
+    // suffix test below matches the mockup's own wording, not a stand-in.
+    params: [{ key: "targetId", label: "Target", type: "enum", optionsFrom: "rosstalk-targets" }],
+  },
 ];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
@@ -146,6 +153,25 @@ describe("the action-button inspector", () => {
     const { container } = mount({ type: "action-button", actionId: "baptism.advance", params: {} });
     await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     assert.equal(container.querySelectorAll("input").length, 1);
+  });
+
+  // Button.dc.html: "Pick a target. Until then, pressing this button does
+  // nothing and says why." — the plain validateParams message ("Pick a
+  // target") plus a second sentence that is THIS component's own, because
+  // this is the one surface where an operator can press an unconfigured
+  // button and have nothing stop them. The rule editor renders the exact
+  // same ParamField/validateParams message with no such second sentence —
+  // see rule-editor-dialog.test.tsx's own issue-message assertions, unchanged
+  // by this file.
+  test("a missing field's message names the field, then says why it matters here", async () => {
+    const { container } = mount({ type: "action-button", actionId: "rosstalk.command", params: {} });
+    await waitFor(() =>
+      assert.ok(
+        container.textContent?.includes(
+          "Pick a target. Until then, pressing this button does nothing and says why.",
+        ),
+      ),
+    );
   });
 
   // The bug this guards: seedNumberDefaults ran unconditionally, including for
