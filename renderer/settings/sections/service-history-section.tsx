@@ -516,6 +516,27 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    *  peak. A summary, not the archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
 
+  /**
+   * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
+   * level is the same figure the service page's header quotes.
+   *
+   * Per month rather than for the whole history on purpose: `spl:getSummary`
+   * carries a service-level Leq per metric and no PEAK at all, so a row built
+   * from it would be labelled "Peak" and be showing an energy average. The
+   * full record is the only thing that has the peak, and a month is a dozen or
+   * so of them — not a year of them. Fetched below, once per month; kept
+   * current between fetches by the `spl:history` live push handler, which
+   * writes the SAME shape straight into this map — see the handler's comment.
+   *
+   * A FAILED read and a service that recorded no sound are told apart. Both
+   * used to land as `null`, which `servicePeakLevel` reads as "no sound
+   * recorded" — so a server that was down, or a request that timed out, told
+   * the operator their meter had not been recording. `"error"` is its own
+   * state, the row says "sound unavailable", and the reason is logged per key.
+   */
+  type RowSpl = ServiceSplHistory | null | "error";
+  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
+
   // A live-updating mirror of selectedKey for the service-timeline:history
   // handler below, which subscribes once (empty deps) and would otherwise only
   // ever see the selectedKey from the render it mounted in.
@@ -657,6 +678,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       const rec = p as ServiceSplHistory | null;
       if (!rec) return;
       setSpl((s) => (s ? (s.serviceKey === rec.serviceKey ? rec : s) : selectedKeyRef.current === rec.serviceKey ? rec : s));
+      // The list's own row reads splByKey (see its declaration above), fetched
+      // once per month by key. A record opened after that fetch ran — or one
+      // whose first disk write lands after the fetch raced it — has no entry
+      // there and its row reads "no sound recorded" forever, since nothing
+      // else invalidates that cache. The push already carries the exact shape
+      // splByKey stores, so write it straight in.
+      setSplByKey((prev) => {
+        const next = new Map(prev);
+        next.set(rec.serviceKey, rec);
+        return next;
+      });
     });
     return () => { offTl(); offAtt(); offSpl(); };
   }, []);
@@ -1009,24 +1041,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    *  the per-row SPL fetch below asks for. */
   const monthServices = useMemo(() => monthGroups.flatMap((g) => g.services), [monthGroups]);
 
-  /**
-   * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
-   * level is the same figure the service page's header quotes.
-   *
-   * Per month rather than for the whole history on purpose: `spl:getSummary`
-   * (already loaded, above) carries a service-level Leq per metric and no PEAK
-   * at all, so a row built from it would be labelled "Peak" and be showing an
-   * energy average. The full record is the only thing that has the peak, and a
-   * month is a dozen or so of them — not a year of them.
-   *
-   * A FAILED read and a service that recorded no sound are told apart. Both
-   * used to land as `null`, which `servicePeakLevel` reads as "no sound
-   * recorded" — so a server that was down, or a request that timed out, told
-   * the operator their meter had not been recording. `"error"` is its own
-   * state, the row says "sound unavailable", and the reason is logged per key.
-   */
-  type RowSpl = ServiceSplHistory | null | "error";
-  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
+  // splByKey/RowSpl are declared above, beside splList — see that comment.
   // The key list, as a stable string: `monthServices` is a fresh array every
   // render and would refetch the month's SPL on each one.
   const monthKeys = monthServices.map((s) => s.serviceKey).join("|");
