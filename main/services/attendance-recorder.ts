@@ -49,6 +49,11 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     };
   }
 
+  /** Told by ensureRecord's split — see publishClosed's doc on the base class. */
+  protected override publishClosed(record: ServiceAttendance): void {
+    broadcast("attendance:history", record);
+  }
+
   protected override onRecordEstablished(): void {
     this.lastSampleAt = 0; // sample immediately on the next tick
     // ...and make sure there is something fresh TO sample. Until now this
