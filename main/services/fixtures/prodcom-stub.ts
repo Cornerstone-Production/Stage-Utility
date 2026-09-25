@@ -151,10 +151,31 @@ export type StubOptions = {
    * is which.
    */
   delayTranscriptMs?: (url: URL) => number;
+  /**
+   * Like `delayTranscriptMs`, but applied to EVERY request before its own
+   * handler runs — channels, keywords, transcript, alike. Independent of
+   * `delayTranscriptMs`, which only ever covers `/api/v1/transcript`, so no
+   * existing test that sets one is affected by the other. Exists for the same
+   * reason: opening a window where a connection can be reconfigured or
+   * stopped while a REST read that is not the transcript is still in flight.
+   */
+  delayRequestMs?: (url: URL) => number;
   /** Bind to this exact port rather than an ephemeral one — so a test can close
    *  one stub and start another on the same port, simulating a box that dropped
    *  off the network and came back rather than one that changed address. */
   port?: number;
+  /**
+   * Cap `GET /api/v1/transcript`'s history at this many rows: once it holds
+   * this many, appending one more drops the oldest, and `meta.totalCount`
+   * reports the capped size rather than growing — what the real box does.
+   *
+   * Measured on ProdCom 2.3.2 (24 Sep, 21:08–21:10Z): `totalCount` sat at 3001
+   * across a two-minute capture while new rows kept arriving at the top of the
+   * range and old ones dropped off the bottom. Off by default, so every
+   * existing case (an unbounded history) is unaffected. Applied to the seeded
+   * `entries` too, so a test can start a box already full.
+   */
+  rollingWindowCap?: number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -300,6 +321,15 @@ function clientFrameType(text: string): string | null {
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
   // Mutable: addEntry() appends to it while the stub is running.
   const entries = [...(options.entries ?? [])];
+  const rollingWindowCap = options.rollingWindowCap;
+  /** Drop the oldest rows past the cap — what ProdCom itself does once its
+   *  rolling window is full. A no-op when no cap is set. */
+  const applyRollingWindowCap = (): void => {
+    if (rollingWindowCap !== undefined && entries.length > rollingWindowCap) {
+      entries.splice(0, entries.length - rollingWindowCap);
+    }
+  };
+  applyRollingWindowCap(); // a test can seed `entries` already past the cap
   const channels = options.channels ?? [];
   const channelKeywords = options.channelKeywords ?? {};
   /** ProdCom's clock, which is not this process's — see StubOptions.now. */
@@ -331,14 +361,25 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     !options.requireBearer || headers["authorization"] === `Bearer ${options.requireBearer}`;
 
   const server = http.createServer((req, res) => {
-    // On arrival, and only once: a held answer (see delayTranscriptMs) re-enters
-    // this handler, and counting it twice would tell a test two reads happened
-    // where one did.
-    if (!held.has(res)) {
+    // On arrival, and only once: a held answer (see delayTranscriptMs and
+    // delayRequestMs) re-enters this handler, and counting it twice would tell
+    // a test two reads happened where one did.
+    const alreadyHeld = held.has(res);
+    if (!alreadyHeld) {
       requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
       notify();
     }
     const url = new URL(req.url ?? "/", "http://stub");
+
+    if (!alreadyHeld && options.delayRequestMs) {
+      const delay = options.delayRequestMs(url);
+      if (delay > 0) {
+        held.add(res);
+        const timer = setTimeout(() => server.emit("request", req, res), delay);
+        timer.unref?.();
+        return;
+      }
+    }
 
     if (!authorized(req.headers)) {
       res.writeHead(401, { "content-type": "application/json" });
@@ -573,6 +614,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     addEntry: (entry: StubEntry) => {
       entries.push(entry);
+      applyRollingWindowCap();
       notify();
     },
     setFailTranscript: (fail: boolean) => {

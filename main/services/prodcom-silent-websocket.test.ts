@@ -209,33 +209,18 @@ const wsAttempts = (stub: ProdComStub): number =>
   stub.requests.filter((r) => r.url === "/api/v1/ws" && r.headers["user-agent"] !== PROBE_USER_AGENT).length;
 
 /**
- * Reads of `GET /api/v1/transcript` made BY THE SILENCE CHECK.
+ * Reads of `GET /api/v1/transcript` made BY THE SILENCE CHECK (either priming a
+ * fresh socket's baseline, or the check itself asking again).
  *
  * Matched on the check's own page size, which backfill cannot produce: backfill
- * asks for the spec's documented maximum of 200 and the check asks for 20. A
- * plain count of transcript reads would be satisfied by the backfill every
- * transport does on connect, and every assertion here about what the check did
- * or did not cost would then be true whether or not the check ran at all.
+ * asks for the spec's documented maximum of 200 and the check asks for
+ * WS_SILENCE_CHECK_PAGE_SIZE (100). A plain count of transcript reads would be
+ * satisfied by the backfill every transport does on connect, and every
+ * assertion here about what the check did or did not cost would then be true
+ * whether or not the check ran at all.
  */
-const silenceChecks = (stub: ProdComStub): number =>
-  stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && r.url.includes("limit=20&")).length;
-
-/**
- * Reads the check made BEYOND its first page, on a connection whose baseline is
- * zero.
- *
- * `running()` seeds no history, so the first socket's baseline row count is 0 and
- * the check's pages fall at offset 0, 20, 40. `offset=20` is therefore a read the
- * paging loop can only have made by paging, and a client that reads one page per
- * attempt never produces it however many attempts it makes — which a count of
- * reads would not distinguish.
- */
-const pagedReads = (stub: ProdComStub): number =>
-  stub.requests.filter((r) => {
-    if (!r.url.startsWith("/api/v1/transcript?")) return false;
-    const params = new URL(r.url, "http://stub").searchParams;
-    return params.get("limit") === "20" && params.get("offset") === "20";
-  }).length;
+const transcriptPageReads = (stub: ProdComStub): number =>
+  stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && r.url.includes("limit=100&")).length;
 
 const subscribeFrames = (stub: ProdComStub): number =>
   stub.wsReceived.filter((f) => f.includes('"subscribe"')).length;
@@ -295,6 +280,9 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     const { stub, svc } = await running(t, { entries: [spoken("said-before-we-connected", -120_000)] });
     await eventually(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
+    // Priming already made one read; the assertion below is about the CHECK
+    // asking again, so it counts from here rather than from zero.
+    const afterPriming = transcriptPageReads(stub);
 
     // Three check intervals, with heartbeats throughout, exactly as a quiet
     // weeknight looks.
@@ -304,7 +292,7 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     }
 
     assert.ok(
-      silenceChecks(stub) > 0,
+      transcriptPageReads(stub) > afterPriming,
       "the check never asked REST anything — a socket delivering nothing was simply trusted",
     );
     assert.equal(svc.wsOpenNow, true, "a socket with nothing to deliver was torn down anyway");
@@ -339,8 +327,11 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     });
     await eventually(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
+    // Priming already made one read; wait for the check itself to run twice
+    // beyond it.
+    const afterPriming = transcriptPageReads(stub);
 
-    await eventually(() => silenceChecks(stub) >= 2, "the check to run twice");
+    await eventually(() => transcriptPageReads(stub) >= afterPriming + 2, "the check to run twice");
     assert.equal(svc.wsOpenNow, true, "a healthy socket was torn down by a clock difference");
     assert.equal(stub.sseOpens, 1, "captions were moved off the initial fallback by a clock difference");
     assert.equal(svc.knownSilent, false, "a fast appliance clock was recorded as a broken ProdCom");
@@ -371,18 +362,26 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // and a verdict computed over socket A's window lands on socket B seconds
     // into its life. In production the read has four seconds and the reconnect
     // floor is one, so one slow transcript read during one drop is enough.
+    // Priming and the check share the same request shape now (both read the
+    // newest page), so they are told apart by ORDER rather than by size: the
+    // first limit=100 read is always priming (fired the instant the socket
+    // opens), and the second is the check's own first read (fired after
+    // wsSilenceCheckMs). Only the second is held — priming stays fast, so the
+    // line below is spoken before the first check even fires. 1400 ms because
+    // the answer has to land AFTER the replacement socket is up, and
+    // service-window.ts floors every reconnect delay at one second: a shorter
+    // hold returns while `this.ws` is still null and no verdict is reachable,
+    // which is a test that proves nothing.
+    let transcriptReads = 0;
     const { stub, svc } = await running(t, {
-      // Only the CHECK's reads are held, by its page size — priming stays fast,
-      // so the line below is spoken before the first check even fires. 1400 ms
-      // because the answer has to land AFTER the replacement socket is up, and
-      // service-window.ts floors every reconnect delay at one second: a shorter
-      // hold returns while `this.ws` is still null and no verdict is reachable,
-      // which is a test that proves nothing.
-      delayTranscriptMs: (url) => (url.searchParams.get("limit") === "20" ? 1400 : 0),
+      delayTranscriptMs: (url) => {
+        if (url.searchParams.get("limit") !== "100") return 0;
+        return ++transcriptReads === 2 ? 1400 : 0;
+      },
     });
     await speaks(stub, svc, spoken("said-while-the-first-socket-was-up"));
 
-    await eventually(() => silenceChecks(stub) >= 1, "the check to put a read in flight");
+    await eventually(() => transcriptPageReads(stub) >= 2, "the check to put a read in flight");
     stub.wsDropAll();
     await eventually(() => stub.wsUpgrades >= 2, "the replacement socket to open", 6000);
     await sleep(1200); // past the held answer
@@ -396,37 +395,16 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     assert.equal(svc.knownSilent, false, "a box was condemned on a window that was not its socket's");
   });
 
-  it("finds speech sitting behind a full page of typed lines", async (t) => {
-    // `GET /api/v1/transcript` is ascending from the OLDEST row, so the check's
-    // first page is the first twenty rows added since the socket opened — not
-    // the most recent. The baseline never advances, so a run of typed rows
-    // longer than a page at the head of that window would pin the check on
-    // "nobody spoke" for the life of the connection, however much was said
-    // afterwards.
-    const said = [
-      ...Array.from({ length: 22 }, (_, i) => typed(`typed-${i}`, 10_000 + i)),
-      spoken("said-behind-the-typed-run", 40_000),
-    ];
-    const { stub, svc } = await running(t);
-    await speaks(stub, svc, ...said);
-
-    // That the check reads BEYOND its first page, asserted before any outcome
-    // and on the request the paging loop can only make by paging. The outcome
-    // assertions below cannot stand in for this: in the single-page world they
-    // are never reached, because the `eventually` for the fallback times out
-    // first — so an assertion after them is decoration whatever it says.
-    await eventually(
-      () => pagedReads(stub) >= 1,
-      "the check to read past its first page — a single-page read can never see behind the typed run",
-    );
-
-    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
-    await speaks(stub, svc, ...said.map((e) => ({ ...e, id: `${e.id}-again` })));
-
-    // The verdict, not stub.sseOpens — the SSE stream has been live since
-    // connect() and finding the speech never touches it.
-    await eventually(() => svc.knownSilent, "the box to be marked silent once the speech is found", 6000);
-  });
+  // "finds speech sitting behind a full page of typed lines" lived here: it
+  // proved a fix to the OLD design, which paged forward from a fixed offset
+  // and could get stuck behind a run of `typed`/`automation` rows longer than
+  // one page. The newest-page id design this file now exercises has no
+  // "behind a page" to get stuck behind — every check reads the actual tail of
+  // ProdCom's history regardless of what precedes it — so the scenario this
+  // test proved no longer applies. Its replacement — a burst of new rows
+  // larger than one page still finds a spoken one, in
+  // prodcom-rolling-window.test.ts — covers what remains of the concern: a
+  // page too small to name every missed row must still find at least one.
 
   it("reopens the socket without the subscribe frame when REST has lines it never delivered", async (t) => {
     // The prod failure, and the hypothesis the fix tests first: ProdCom's
@@ -526,12 +504,13 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
 
     stub.wsTranscript(spoken("delivered-over-the-socket"));
     await eventually(() => svc.texts().includes("delivered-over-the-socket"), "the entry to land");
+    const afterDelivery = transcriptPageReads(stub);
 
     for (let i = 0; i < 8; i++) {
       stub.wsPing();
       await sleep(60);
     }
-    assert.ok(silenceChecks(stub) > 0, "the check stopped running after the socket's first delivery");
+    assert.ok(transcriptPageReads(stub) > afterDelivery, "the check stopped running after the socket's first delivery");
     assert.equal(svc.onWebSocketNow, true, "a delivering socket sitting in a quiet room was torn down");
     assert.equal(stub.sseOpens, 1, "a quiet room reopened the fallback that promotion had already closed");
   });
@@ -549,8 +528,9 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       // asks — then the endpoint goes away under it. Starting with it broken
       // would exercise the no-baseline path instead, which is a different thing.
       await speaks(c.stub, c.svc, spoken("said-while-the-socket-was-quiet"));
+      const afterPriming = transcriptPageReads(c.stub);
       c.stub.setFailTranscript(true);
-      await eventually(() => silenceChecks(c.stub) >= 1, "the check to ask REST");
+      await eventually(() => transcriptPageReads(c.stub) > afterPriming, "the check to ask REST");
       await sleep(200);
     });
 
@@ -686,7 +666,7 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // the question has already been answered for this box, so no REST call is
     // spent asking it again.
     const { stub, svc } = await silenced(t);
-    const checksBefore = silenceChecks(stub);
+    const checksBefore = transcriptPageReads(stub);
     const sseOpensBefore = stub.sseOpens;
 
     const lines = await withLogs(async () => {
@@ -716,7 +696,7 @@ describe("a box whose socket carries nothing stops being preferred", () => {
         `${JSON.stringify(cardMessages(svc))}`,
     );
     assert.equal(
-      silenceChecks(stub),
+      transcriptPageReads(stub),
       checksBefore,
       "the probation re-test spent a REST call re-asking a question already answered for this box",
     );
