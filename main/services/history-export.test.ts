@@ -7,14 +7,16 @@
 // cells by looking their heading up rather than by index.
 
 import assert from "node:assert/strict";
-import { test, describe, before } from "node:test";
+import { test, describe, before, afterEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import readXlsxFile from "read-excel-file/node";
 import writeXlsxFile from "write-excel-file/node";
+import { unzipSync } from "fflate";
 import { setAppTimeZone } from "./app-timezone.js";
+import type { BaptismSession } from "../types/stage.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-export-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -25,6 +27,7 @@ const { parseXlsx } = await import("./patch-xlsx.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
+const { baptismStore } = await import("./baptism-store.js");
 
 const KEY = "st1:plan1:t1";
 
@@ -377,6 +380,168 @@ describe("buildHistoryWorkbook", () => {
     const buf = await buildHistoryWorkbook({ from: "2026-01-01", to: "2026-01-31", include: ["services"] });
     const { rows } = await sheetOf(buf, "Services");
     assert.equal(rows.length, 0);
+  });
+});
+
+describe("buildHistoryWorkbook: the Baptisms sheet is a real Excel table", () => {
+  // Regression: `specs` (the per-sheet header/row-count list `tableFeature`
+  // promotes into a ListObject) used to be computed BEFORE the Baptisms sheet
+  // was pushed, so it was always one entry short whenever Baptisms was
+  // included and that sheet silently never became a table — no filter arrows,
+  // no PivotTable-ready range, despite the docs promising every sheet gets one.
+  afterEach(async () => {
+    for (const s of await baptismStore.listSessions()) await baptismStore.deleteSession(s.id);
+  });
+
+  test("the sheet becomes a real Excel table, same as every other sheet", async () => {
+    await baptismStore.addSession({
+      id: "bap-table",
+      startedAt: "2026-08-02T09:00:00.000Z",
+      finishedAt: "2026-08-02T09:30:00.000Z",
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+      serviceKey: null,
+      people: [{ testimonyMs: 1000, baptizeMs: 2000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    const files = unzipSync(new Uint8Array(buf));
+    const tables = Object.keys(files).filter((n) => n.startsWith("xl/tables/"));
+    assert.equal(tables.length, 1, `expected one table part (About is not tabular), got: ${tables.join(", ") || "(none)"}`);
+  });
+});
+
+describe("buildHistoryWorkbook: Baptisms sheet", () => {
+  const HOST = "cornerstone.local:8788";
+
+  /** A finished session, with every field the export reads defaulted so a test
+   *  only has to name what it is actually about. */
+  async function seedSession(session: Partial<BaptismSession> & { id: string }): Promise<void> {
+    await baptismStore.addSession({
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+      serviceKey: null,
+      people: [],
+      startedAt: "2026-08-02T09:00:00.000Z",
+      finishedAt: "2026-08-02T09:30:00.000Z",
+      ...session,
+    });
+  }
+
+  // The store persists to this file's shared TMP data dir, so a fixture left
+  // over from one test would otherwise leak into the next one's row count.
+  afterEach(async () => {
+    for (const s of await baptismStore.listSessions()) await baptismStore.deleteSession(s.id);
+  });
+
+  test("the columns are exactly as declared, in order", async () => {
+    await seedSession({ id: "bap-cols", people: [{ testimonyMs: 1000, baptizeMs: 2000 }] });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    assert.deepEqual((await sheetOf(buf, "Baptisms")).headers, [
+      "Date",
+      "Service time",
+      "Service type",
+      "Session",
+      "#",
+      "Baptized",
+      "Testimony (s)",
+      "Baptism (s)",
+      "Total (s)",
+      "Segment (s)",
+      "History",
+    ]);
+  });
+
+  test("a person is Baptized only once baptizeMs is greater than zero", async () => {
+    // A grouped session times every testimony first, then every baptism — a
+    // person whose testimony closed before anyone was baptized has baptizeMs 0
+    // and must not read as baptized just for being in the session.
+    await seedSession({
+      id: "bap-grouped",
+      people: [
+        { testimonyMs: 4000, baptizeMs: 0 },
+        { testimonyMs: 3000, baptizeMs: 5000 },
+      ],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows[0]!["Baptized"], "No");
+    assert.equal(rows[1]!["Baptized"], "Yes");
+  });
+
+  test("Segment is the session's wall-clock length in whole seconds", async () => {
+    await seedSession({
+      id: "bap-segment",
+      startedAt: "2026-08-02T09:00:00.000Z",
+      finishedAt: "2026-08-02T09:12:30.000Z",
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows[0]!["Segment (s)"], 750);
+  });
+
+  test("Segment is blank for a session missing a finished time", async () => {
+    await seedSession({
+      id: "bap-unfinished",
+      finishedAt: "",
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows[0]!["Segment (s)"], null);
+  });
+
+  test("History links to the read-only page with the host and an encoded key", async () => {
+    await seedSession({
+      id: "bap-linked",
+      serviceKey: "st1:plan1:t1",
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"], host: HOST });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows[0]!["History"], `http://${HOST}/history?service=st1%3Aplan1%3At1`);
+  });
+
+  test("History is blank when the session has no serviceKey", async () => {
+    await seedSession({
+      id: "bap-unlinked",
+      serviceKey: null,
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"], host: HOST });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows[0]!["History"], null);
+  });
+
+  test("History is blank when the Host header is not a plain host", async () => {
+    await seedSession({
+      id: "bap-badhost",
+      serviceKey: "st1:plan1:t1",
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    for (const host of ["evil.example/path", "a b", "host:port", "\"quoted\""]) {
+      const buf = await buildHistoryWorkbook({ include: ["baptisms"], host });
+      const { rows } = await sheetOf(buf, "Baptisms");
+      assert.equal(rows[0]!["History"], null, `a Host of ${JSON.stringify(host)} reached the link`);
+    }
+    for (const host of ["192.168.16.10", "stage.local:8788", "[::1]:8788"]) {
+      const buf = await buildHistoryWorkbook({ include: ["baptisms"], host });
+      const { rows } = await sheetOf(buf, "Baptisms");
+      assert.equal(rows[0]!["History"], `http://${host}/history?service=st1%3Aplan1%3At1`);
+    }
+  });
+
+  test("History is blank when the export was built with no host", async () => {
+    await seedSession({
+      id: "bap-nohost",
+      serviceKey: "st1:plan1:t1",
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"] });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows[0]!["History"], null);
   });
 });
 

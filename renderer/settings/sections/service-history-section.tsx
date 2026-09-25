@@ -416,7 +416,11 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
 const HISTORY_MANAGE_PATH = "/history/manage";
 /** The search param holding the open service. A search param, not a path
  *  segment: a service key looks like "st1:plan123:time456" — colons — which
- *  a path segment would need escaped either way it's spelled. */
+ *  a path segment would need escaped either way it's spelled.
+ *
+ *  Also built, independently, by the Baptisms sheet's History column in
+ *  main/services/history-export.ts — a server file that cannot import this
+ *  one. Renaming this constant means updating that literal too. */
 const HISTORY_SERVICE_PARAM = "service";
 
 /**
