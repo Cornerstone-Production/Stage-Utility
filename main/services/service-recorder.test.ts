@@ -29,8 +29,12 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-back-to-back-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { setAppTimeZone } = await import("./app-timezone.js");
-setAppTimeZone("America/Chicago"); // a UTC box must not file these on two dates
+// Through the settings store, not setAppTimeZone: every settings read re-applies
+// the saved zone (null means the host's), so a recorder that reads settings on
+// its first tick silently put a UTC CI runner back on UTC and filed tonight's
+// two services on two dates. A UTC box must not file these on two dates.
+const { settingsStore } = await import("./settings-store.js");
+await settingsStore.patch({ timezone: "America/Chicago" });
 
 const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
