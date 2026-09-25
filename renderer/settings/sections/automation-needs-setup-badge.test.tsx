@@ -203,7 +203,11 @@ describe("turning a needs-setup rule ON", () => {
       sw!.click();
     });
     await settle();
-    assert.equal(requests.length, 0, "a refused enable must not even reach the server");
+    // PATCHes only: the section's SSE reconnect can fire an unrelated GET in
+    // this harness at any moment (see the next test), and counting that made
+    // this guard fail on a slow CI runner with the refusal working.
+    const patches = requests.filter((r) => r.method === "PATCH");
+    assert.equal(patches.length, 0, `a refused enable must not even reach the server: ${JSON.stringify(patches)}`);
     assert.equal(errorSpy.mock.calls.length, 1);
     assert.equal(
       errorSpy.mock.calls[0]?.arguments[0],
