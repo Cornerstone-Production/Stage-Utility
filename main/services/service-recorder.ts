@@ -192,6 +192,22 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   protected abstract createRecord(ctx: NewRecordContext, live: PcoLiveDTO): T;
 
   /**
+   * Publish a record this recorder just closed, on this recorder's own channel,
+   * in the same shape a live push already uses (broadcastTimeline for the
+   * timeline recorder; `broadcast("…:history", record)` for the other two).
+   *
+   * Exists for exactly one caller: ensureRecord's split path below. Every other
+   * close a recorder produces (onLiveTick leaving "item"/service mode) already
+   * broadcasts inline right after it persists, but the split finalizes and
+   * persists the OUTGOING record and then moves straight on to the incoming
+   * one — the new record's first push was the only broadcast a split ever
+   * produced, so a History page open at the moment of a split never heard the
+   * old occurrence close and kept showing it "recording" until the page was
+   * reloaded (24 Sep 2026, all three recorders).
+   */
+  protected abstract publishClosed(record: T): void;
+
+  /**
    * Prepare a stored record for further writing.
    *
    * Default is to take it as-is. SPL overrides: a restart loses everything since
@@ -425,11 +441,14 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       return;
     }
 
-    // Key changed → finalize + persist the outgoing record.
+    // Key changed → finalize + persist the outgoing record, then publish it on
+    // this recorder's own channel — see publishClosed's doc above.
     if (this.current) {
       this.finalizeRecord();
-      await this.store.upsert(this.current);
+      const outgoing = this.current;
+      await this.store.upsert(outgoing);
       if (gen !== this.generation) return; // forgotten while we waited
+      this.publishClosed(outgoing);
     }
 
     const existing = await this.store.get(key);
