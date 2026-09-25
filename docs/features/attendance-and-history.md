@@ -48,6 +48,23 @@ Each decision is logged once, whichever way it goes:
 [service-recorder] attendance-recorder: service time 1001 → 1002 began at 11:00:00, closing 100:200:1001 and opening a new record
 ```
 
+The clock is not the only thing that can end a hold. While held, the item the
+open record OPENED with — its very first entry — going live again means the
+next service has begun, whatever the ten-minute rule still says: an overrunning
+service does not restart its own first item, but the next one always starts
+with one. The hold closes right then, on that tick, rather than waiting out the
+clock. A reprise of any OTHER item — a song, a step back — is not evidence of a
+next service and keeps holding:
+
+```
+[service-recorder] service-timeline-recorder: "Doors" went live again during the hold — the next service has begun, closing 100:200:1001 and opening a new record
+```
+
+SPL and attendance keep no ordered list of items to read the opening one back
+from, so the decision is made once, in the machinery all three recorders
+share, and the item id travels on the record itself — surviving a restart mid-
+hold the same way the rest of the record does.
+
 Inside a record, a plan item that goes live again more than ten minutes after its
 last run ended is recorded as a second entry rather than reopening the first, so a
 re-run never rewrites what already happened. Both the timeline and the SPL

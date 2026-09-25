@@ -24,6 +24,7 @@
 import type { PcoLiveDTO } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
 import { serviceDateKey } from "./live-service-gate.js";
+import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 
 /**
@@ -125,6 +126,20 @@ export interface ServiceRecord {
   serviceTimeId: string | null;
   startedAt: string;
   endedAt: string | null;
+  /**
+   * The item this record OPENED with — the first live item id any of the three
+   * recorders saw for this occurrence. Set once, by ensureRecord's
+   * captureOpeningItem, and never overwritten.
+   *
+   * SPL and attendance keep no item list of their own to derive this from
+   * later (attendance keeps none at all; SPL's is per-metric, not ordered by
+   * arrival), so it travels on the record itself — one field, set in one
+   * place, read by all three. Persisted, so a restart mid-hold still knows it.
+   * Absent (undefined) on a record made before this existed, which is treated
+   * the same as null: unknown, so shouldHoldThroughServiceTimeChange falls
+   * back to the ten-minute/gap rule alone.
+   */
+  openingItemId?: string | null;
 }
 
 /** The slice of a keyed store the lifecycle needs. */
@@ -294,6 +309,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * start, so up to SERVICE_GAP_MS of the second service's pre-service can still
    * land in the first record before the split. That is the same window the
    * overrun case needs, and it is bounded — not the unbounded merge this fixes.
+   *
+   * One more thing beats the clock: the OPENING item of this record going live
+   * again while held (Doors, tonight) is the next service actually starting,
+   * whatever the ten-minute rule still says — an operator does not restart a
+   * service's first item mid-overrun, but the next service always starts with
+   * one. A reprise of any OTHER item (a song, a step back) is not evidence of
+   * that and keeps holding. See openingItemId / captureOpeningItem.
    */
   private shouldHoldThroughServiceTimeChange(
     live: PcoLiveDTO,
@@ -307,6 +329,19 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
+
+    // The opening item overrides a hold outright. Logged unconditionally, not
+    // through loggedServiceTimeChange: the split below changes currentKey on
+    // THIS tick, so this transition is never asked about again and nothing can
+    // double-log it.
+    const openingItemId = this.current?.openingItemId ?? null;
+    if (hold && openingItemId != null && live.currentItemId === openingItemId) {
+      console.log(
+        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? openingItemId)}" went live again during the hold — the next service has begun, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+      );
+      return false;
+    }
+
     const transition = `${from}→${serviceTimeId}`;
     if (this.loggedServiceTimeChange !== transition) {
       this.loggedServiceTimeChange = transition;
@@ -317,6 +352,25 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       );
     }
     return hold;
+  }
+
+  /**
+   * Remember the item THIS record opened with — the first live tick to reach
+   * here with an item id, whichever recorder sees it first.
+   *
+   * The timeline and SPL recorders only call ensureRecord once an item is
+   * live, so this fires the moment their record is created. Attendance can
+   * establish a record during the pre-service arrival ramp with no item live
+   * yet (see attendance-phase.ts), so its record's openingItemId starts null
+   * and this backfills it on whichever later tick brings the first real item —
+   * the same value the other two captured, because this is the one place any
+   * of the three ever sets it. Never overwritten once set, so a resumed or
+   * reopened record keeps the value it was created with.
+   */
+  private captureOpeningItem(live: PcoLiveDTO): void {
+    if (this.current && this.current.openingItemId == null && live.currentItemId) {
+      this.current.openingItemId = live.currentItemId;
+    }
   }
 
   /**
@@ -347,7 +401,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
     const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) return;
+    if (this.currentKey === key && this.current) {
+      this.captureOpeningItem(live); // backfill for a record that opened before any item was live
+      return;
+    }
 
     // Hold the open record through a serviceTimeId change WITHIN one live service
     // — see SERVICE_GAP_MS.
@@ -398,6 +455,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     }
     this.currentKey = key;
     this.loggedServiceTimeChange = null; // the next transition out of THIS record is news again
+    this.captureOpeningItem(live);
     this.onRecordEstablished();
   }
 }

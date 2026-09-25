@@ -106,6 +106,9 @@ export interface ServiceSplHistory {
   serviceTimeId: string | null;
   /** ISO start of this service occurrence (for the title, e.g. "9:00 AM"). */
   serviceTimeStartsAt: string | null;
+  /** The item this record opened with — see ServiceRecord.openingItemId in
+   *  service-recorder.ts, which sets it for all three recorders alike. */
+  openingItemId?: string | null;
   /** Which Smaart meter the levels were recorded from. */
   meterId: string | null;
   /** Legacy "primary" metric key (first preferred) — for back-compat display. */
@@ -143,6 +146,11 @@ export interface ServiceAttendance {
   serviceDate: string;
   serviceTimeId: string | null;
   serviceTimeStartsAt: string | null;
+  /** The item this record opened with — see ServiceRecord.openingItemId in
+   *  service-recorder.ts, which sets it for all three recorders alike. Null
+   *  while the record has only ever held pre-service samples with no item
+   *  live yet (the arrival ramp can open a record before Doors does). */
+  openingItemId?: string | null;
   /** When recording began — may be BEFORE the service (pre-service arrival ramp). */
   startedAt: string;
   /** First in-service sample (the service proper began). Null while only pre-service
@@ -256,6 +264,11 @@ export interface ServiceTimeline {
   serviceTimeId: string | null;
   /** Scheduled service start (PCO service-time occurrence). */
   serviceTimeStartsAt: string | null;
+  /** The item this record opened with — see ServiceRecord.openingItemId in
+   *  service-recorder.ts, which sets it for all three recorders alike. Kept
+   *  here alongside `items[0].itemId`, which the same tick sets, because SPL
+   *  and attendance don't have an ordered items list to read it back from. */
+  openingItemId?: string | null;
   /** ISO when recording began (first live item seen). */
   startedAt: string;
   /** ISO when recording ended / service finalized. */
