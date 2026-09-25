@@ -207,6 +207,13 @@ const NOT_SCANNED = new Map<string, string>([
     "logs its own save failures only (a filesystem error), never an entry's content; audited",
   ],
   ["backup-scheduler.ts", UNAUDITED],
+  [
+    "baptism-store.ts",
+    "logs one line, when a live append evicts a session to stay at the cap, and " +
+      "interpolates only a count this file computed itself (merged.length minus the " +
+      "kept length) — never a session id, a title or anything else a request could " +
+      "have put a newline into. Audited, not just excused.",
+  ],
   ["baptism-timer-service.ts", UNAUDITED],
   ["bar-config-store.ts", UNAUDITED],
   ["branding-image-store.ts", UNAUDITED],
