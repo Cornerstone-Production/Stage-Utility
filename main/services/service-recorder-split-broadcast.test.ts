@@ -25,8 +25,11 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-split-broadcast-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { setAppTimeZone } = await import("./app-timezone.js");
-setAppTimeZone("America/Chicago");
+// Through the settings store, not setAppTimeZone: every settings read re-applies
+// the saved zone (null means the host's), so a recorder that reads settings
+// would put a UTC CI runner back on UTC mid-test.
+const { settingsStore } = await import("./settings-store.js");
+await settingsStore.patch({ timezone: "America/Chicago" });
 
 const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
