@@ -72,13 +72,39 @@ const REGISTRY = {
       id: "occupancy.threshold",
       label: "Occupancy crosses a threshold",
       channel: "people:changed",
-      params: [{ key: "metric", label: "Metric", type: "enum", options: [{ value: "attendance", label: "Attendance" }] }],
+      params: [
+        { key: "metric", label: "Metric", type: "enum", options: [{ value: "attendance", label: "Attendance" }] },
+        { key: "threshold", label: "Threshold", type: "number", min: 0, max: 100 },
+      ],
     },
   ],
-  conditions: [{ id: "service.is-not-live", label: "No service is live", params: [] }],
+  conditions: [
+    { id: "service.is-not-live", label: "No service is live", params: [] },
+    {
+      id: "battery.below",
+      label: "Battery falls below",
+      params: [{ key: "threshold", label: "Battery (%)", type: "number", min: 0, max: 100 }],
+    },
+  ],
   actions: [
-    { id: "companion.press", label: "Press a Companion button", params: [] },
+    {
+      id: "companion.press",
+      label: "Press a Companion button",
+      // Real shape, not an empty array: page/row/col with real minimums —
+      // the exact params that get wrongly seeded if companion.press is ever
+      // treated like an ordinary action (see the "no button chosen" test).
+      params: [
+        { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+        { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+        { key: "col", label: "Column", type: "number", min: 0, max: 99 },
+      ],
+    },
     { id: "log.message", label: "Write a log message", params: [] },
+    {
+      id: "osc.send",
+      label: "Send an OSC message",
+      params: [{ key: "argument", label: "Argument", type: "number", min: 0, max: 7 }],
+    },
   ],
 };
 
@@ -119,18 +145,26 @@ let REFUSE: { id: string; error: string } | null = null;
     if (method === "PATCH") {
       const patch = JSON.parse(String(init?.body)) as Partial<StubRule>;
       RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      // The real route's shape: the rule's own fields, flat, plus `issues` —
+      // the SAME shape GET's list items carry, not a { rule, issues } wrapper.
+      // Every stub rule here already carries every param its own action/
+      // trigger needs, so issues is always empty — the seeding and validation
+      // tests read the PATCH's SENT body, not this response.
+      const rule = RULES.find((r) => r.id === id);
+      const answered = { ...rule, issues: [] };
+      return { ok: true, status: 200, json: async () => answered, text: async () => JSON.stringify(answered) };
     }
     if (method === "DELETE") RULES = RULES.filter((r) => r.id !== id);
     if (method === "POST" && url.endsWith("/api/automation/rules") && CREATED) {
       RULES = [...RULES, CREATED];
-      const created = CREATED;
+      const created = { ...CREATED, issues: [] };
       return { ok: true, status: 201, json: async () => created, text: async () => JSON.stringify(created) };
     }
   }
   let body: unknown = {};
   if (url.includes("/api/automation/registry")) body = REGISTRY;
   else if (url.includes("/api/automation/rules")) {
-    body = { rules: RULES, settings: { simulate: true, disarmed: false } };
+    body = { rules: RULES.map((r) => ({ ...r, issues: [] })), settings: { simulate: true, disarmed: false } };
   } else if (url.includes("/api/automation/log")) body = { entries: [] };
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };
@@ -760,6 +794,108 @@ describe("a rule naming a trigger, action or param value the registry no longer 
     assert.ok(
       metricOpt?.textContent?.includes("not found"),
       `the stored metric value must be labelled as no longer offered, got ${JSON.stringify(metricOpt?.textContent)}`,
+    );
+  });
+});
+
+// The bug this guards: a number field DISPLAYS Number(value ?? spec.min ?? 0)
+// while the stored value stays unset until the operator touches it — a
+// "battery falls below" rule nobody touched shows a threshold but saves none,
+// and never fires. Reverting any of the three seedNumberDefaults calls below
+// back to `params: {}` turns its test red.
+describe("picking a trigger, condition or action seeds its number params at once", () => {
+  test("picking a trigger with a number param stores it, not just displays it", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    await act(async () => {
+      fireEvent.change(selectField("Trigger")!, { target: { value: "occupancy.threshold" } });
+    });
+    await settle();
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { trigger?: { params?: Record<string, unknown> } };
+    assert.equal(
+      patch.trigger?.params?.threshold,
+      0,
+      `switching to a trigger with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+
+  test("picking an action with a number param stores it, not just displays it", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    const actionSelect = () => selectField("Action");
+    await act(async () => {
+      fireEvent.change(actionSelect()!, { target: { value: "osc.send" } });
+    });
+    await settle();
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { action?: { params?: Record<string, unknown> } };
+    assert.equal(
+      patch.action?.params?.argument,
+      0,
+      `switching to an action with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+
+  test("adding a condition with a number param stores it, not just displays it", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    const addCondition = () =>
+      [...document.querySelectorAll("select")].find((s) =>
+        [...s.options].some((o) => o.value === "battery.below"),
+      ) as HTMLSelectElement | undefined;
+    await act(async () => {
+      fireEvent.change(addCondition()!, { target: { value: "battery.below" } });
+    });
+    await settle();
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as {
+      conditions?: { id: string; params?: Record<string, unknown> }[];
+    };
+    const added = patch.conditions?.find((c) => c.id === "battery.below");
+    assert.equal(
+      added?.params?.threshold,
+      0,
+      `adding a condition with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+});
+
+// The bug this guards: seedNumberDefaults ran unconditionally, including for
+// companion.press, whose page (min 1) then seeded to 1 the instant the action
+// was picked — before any button was ever chosen. CompanionPressFields reads
+// page > 0 as "a button is chosen", so the picker showed "p1 r0 c0" instead of
+// "Choose Companion button…", the saved rule carried real-looking coordinates,
+// and validateParams saw three in-range numbers and reported nothing. Reverting
+// hasCustomParamsPicker to always return false turns this red.
+describe("companion.press has its own picker, and is never number-seeded", () => {
+  test("picking it shows 'Choose Companion button…', not a fake coordinate, and saves no params", async () => {
+    // Starts on a DIFFERENT action (not companion.press already), so the
+    // Action select's change actually exercises picking it fresh.
+    RULES = [
+      { ...cue("take_screens"), action: { id: "log.message", params: { message: "x" } } },
+    ];
+    await mount();
+    await openRow("Rule take_screens");
+    await act(async () => {
+      fireEvent.change(selectField("Action")!, { target: { value: "companion.press" } });
+    });
+    await settle();
+    assert.ok(
+      button("Choose Companion button…"),
+      "an unpicked companion.press button must read 'Choose Companion button…', not a seeded coordinate",
+    );
+    assert.equal(button("p1 r0 c0"), null, "page must not have been seeded to its min the instant the action was picked");
+
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { action?: { params?: Record<string, unknown> } };
+    assert.deepEqual(
+      patch.action?.params ?? {},
+      {},
+      `companion.press must never be number-seeded, got ${JSON.stringify(patch.action?.params)}`,
     );
   });
 });

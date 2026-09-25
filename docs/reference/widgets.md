@@ -464,7 +464,13 @@ one that takes parameters (a Companion button coordinate, a RossTalk command)
 shows the same fields the rule editor would show for it. **Label** is blank by
 default, which draws the action's own name; type one to override it. A button
 saved against an action that has since been removed or renamed still shows its
-stored id, marked as unknown, rather than doing nothing when pressed.
+stored id, marked as unknown, rather than doing nothing when pressed. One with
+a required field left blank — see [Needs setup](../automation.md#needs-setup)
+— shows a **Needs setup** marker over the tile in the layout editor's own
+canvas only; a live display or a console never shows it, and pressing the
+button there keeps refusing exactly as it always has. The layout still saves —
+a button is part of a screen, so a field it is missing marks the button, not
+the whole layout.
 
 **Cue button** binds to a cue. The picker lists **Built in** first — the cues
 the app ships for OBS, REAPER, ProVideoPlayer and itself, which need no rule

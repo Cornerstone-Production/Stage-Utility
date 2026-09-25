@@ -1037,7 +1037,7 @@ export function EditorCanvas({
   const sorted = [...objects].sort((a, b) => a.z - b.z);
   // Editor canvas is never interactive — live-control objects render as static
   // previews here so editing can't fire real PCO commands.
-  const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false };
+  const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false, editing: true };
 
   // The grid lives INSIDE the content layer (see below) so it shares the object's
   // EXACT box + transform: drawn once in fixed design-space px, with only the

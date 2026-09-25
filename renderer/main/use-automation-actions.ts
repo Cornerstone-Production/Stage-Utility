@@ -18,10 +18,16 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { automationRegistryQuery } from "../lib/automation-registry";
+import type { ParamDef } from "@main/types/automation";
 
 export interface AutomationActionSpec {
   id: string;
   label: string;
+  /** Was already on the wire (GET /api/automation/registry sends every
+   *  action's full params) — this just gives it a type. The action-button
+   *  object's canvas tile needs it to know whether its own config still needs
+   *  setup; see action-button.tsx. */
+  params: ParamDef[];
 }
 
 export interface AutomationActionsState {

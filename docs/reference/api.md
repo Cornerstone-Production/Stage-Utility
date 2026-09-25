@@ -186,12 +186,31 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/automation/plan-items` | The current plan's items, for the item pickers |
 | GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{value, label}` |
 | GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned: `{items, unreachable}`. Empty, never an error, when one is unreachable, and `unreachable` names the instances that did not answer. A name only some instances have is labelled `DOORS (MA only)` — but only while every instance answered, since "only" is a claim about the machines that did |
-| GET / POST | `/api/automation/rules` | List (`{rules, settings}`) / create a rule |
+| GET / POST | `/api/automation/rules` | List (`{rules, settings}`, each rule carrying its own `issues` — see below) / create a rule |
 | PATCH / DELETE | `/api/automation/rules/:id` | Update / delete |
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
 | POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. A button carrying `stateVariable` is a [toggle](../integrations/companion.md#toggle-buttons) and makes a PAIR instead — two cues pressing that one button, bound on the `_on` half. `stateVariable` on a pair binds its `_on` half the same way; a pair sent without one whose connections have no verified row has its source [learned](../integrations/companion.md#learning-a-state-source) instead. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+
+A rule's **issues** — see [Needs setup](../automation.md#needs-setup) — are an
+array of `{step, index?, key, label, message}`: `step` is `"trigger"`,
+`"condition"` or `"action"`; `index` is which condition, present only for that
+step; `key` and `label` name the param; `message` is the reason, worded for
+display. GET computes them fresh against the current build's registry on every
+read — never stored on the rule.
+
+POST and PATCH validate the same way and answer the rule itself with `issues`
+attached — the same shape GET's list items carry, not a wrapper — so a script
+reading the rule off the response is unaffected (POST is `201`). A save with
+issues never fails: it writes the rule with `enabled: false`
+regardless of what was asked, and reports why. The one refusal is a request
+whose *entire* content is turning a rule with issues ON — `patch: {enabled:
+true}` and nothing else, which is what the rules list's switch sends — refused
+`409` with `{error, code: "invalid-params", issues}` and nothing written. A rule
+already enabled with issues (predates this build, or arrived from a restore) is
+untouched by GET, by init, and by any write that does not go through this route
+— see [Needs setup](../automation.md#needs-setup) for why that matters.
 
 **Cues** — an automation rule called by name. See
 [Companion](../integrations/companion.md#calling-a-cue-by-name).

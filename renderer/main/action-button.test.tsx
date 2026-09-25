@@ -169,6 +169,103 @@ describe("action-button — the registry itself could not be loaded", () => {
   });
 });
 
+// The Needs setup badge — Button.dc.html's board. `editing` is the layout
+// editor's own flag (LayoutRenderCtx, set only by layout-editor.tsx's
+// fullCtx); this file drives it directly rather than through the editor, the
+// way every other case above drives `interactive` directly.
+describe("action-button — the Needs setup badge (editor only)", () => {
+  const WITH_PARAMS = [
+    {
+      id: "rosstalk.command",
+      label: "Send a RossTalk command",
+      params: [{ key: "targetId", label: "Target", type: "enum", optionsFrom: "rosstalk-targets" }],
+    },
+  ];
+
+  function renderWithCtx(
+    config: { type: "action-button"; actionId: string; params?: Record<string, unknown> },
+    ctxOverrides: { interactive?: boolean; editing?: boolean },
+  ) {
+    const obj = { id: "o1", x: 0, y: 0, w: 0.3, h: 0.2, z: 1, config, style: {} } as never;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const ctx = makeRenderCtx(ctxOverrides);
+    return render(
+      React.createElement(
+        QueryClientProvider as never,
+        { client: qc },
+        React.createElement(ObjectContent as never, { o: obj, ctx }),
+      ),
+    );
+  }
+
+  test("editing + a required param unset: shows the badge", async () => {
+    registryActions = WITH_PARAMS;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "rosstalk.command", params: {} },
+      { interactive: false, editing: true },
+    );
+    await waitFor(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
+  });
+
+  test("editing + every required param set: no badge", async () => {
+    registryActions = WITH_PARAMS;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "rosstalk.command", params: { targetId: "t1" } },
+      { interactive: false, editing: true },
+    );
+    await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    // A COUNT, never the element itself: node:assert inspects `actual` to build
+    // a failure message, and inspecting a live jsdom element does not
+    // terminate in any useful time — see the header comment on
+    // rule-editor-dialog.test.tsx. `assert.equal(el, null)` looks safe and
+    // hangs the runner for ~30s the moment the assertion is false, which
+    // reads as a stuck render loop rather than the one failing line it is.
+    assert.equal(container.querySelectorAll('[data-needs-setup="true"]').length, 0);
+  });
+
+  test("NOT editing (a live display or console): never shows the badge, issues or not", async () => {
+    registryActions = WITH_PARAMS;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "rosstalk.command", params: {} },
+      { interactive: true, editing: false },
+    );
+    await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    // A count, not the element — see the comment above.
+    assert.equal(
+      container.querySelectorAll('[data-needs-setup="true"]').length,
+      0,
+      "a live display must never show the editor-only marker",
+    );
+  });
+
+  // companion.press's real shape, truly unpicked (params: {} — never seeded,
+  // see hasCustomParamsPicker in rule-editor-dialog.tsx). The bug this guards:
+  // seedNumberDefaults used to run for every action including this one, so a
+  // freshly-picked companion.press button never actually reached this state —
+  // it landed on {page: 1, row: 0, col: 0} instead, which validateParams (and
+  // this badge) reads as complete. This proves the OTHER half: once nothing
+  // is seeded, an unpicked button still reports its three missing params and
+  // still shows the badge, the same as any other action with unset params.
+  test("companion.press with no button chosen: shows the badge, same as any other unset action", async () => {
+    registryActions = [
+      {
+        id: "companion.press",
+        label: "Press a Companion button",
+        params: [
+          { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+          { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+          { key: "col", label: "Column", type: "number", min: 0, max: 99 },
+        ],
+      },
+    ] as never;
+    const { container } = renderWithCtx(
+      { type: "action-button", actionId: "companion.press", params: {} },
+      { interactive: false, editing: true },
+    );
+    await waitFor(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
+  });
+});
+
 describe("action-button — sharing the registry request", () => {
   test("a panel of several buttons fetches the registry once, not once per button", async () => {
     // One client for the whole panel, the way renderer/main/index.tsx provides

@@ -112,6 +112,11 @@ export interface LayoutRenderCtx {
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
   interactive: boolean;
+  /** True only inside the layout editor's own canvas (layout-editor.tsx's
+   *  `fullCtx`) — never on a live display, a preview, or a kiosk route. An
+   *  editor-only affordance (an action button's "Needs setup" marker) reads
+   *  this rather than `interactive`, which is false in the editor too. */
+  editing?: boolean;
   /** Pixel placements when the layout is rendering responsively; absent when it
    *  is letterboxed, in which case objects position by percentage as before. */
   placed?: Map<string, PlacedObject>;
@@ -1346,7 +1351,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     case "action-button":
-      return <ActionButton config={c} interactive={ctx.interactive} ts={ts} />;
+      return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
       return <CueButton config={c} cues={ctx.cues} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":

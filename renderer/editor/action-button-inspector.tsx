@@ -16,8 +16,9 @@ import { automationRegistryQuery } from "../lib/automation-registry";
 import { ActionPicker } from "./action-picker";
 import { Row, RowText } from "./inspector-rows";
 import type { LayoutObjectConfig } from "@main/types/views";
-import { ActionParamsFields } from "../settings/sections/rule-editor-dialog";
+import { ActionParamsFields, seededParams } from "../settings/sections/rule-editor-dialog";
 import { useOptionSources } from "../settings/sections/automation-option-sources";
+import { validateParams } from "@main/services/automation-param-validation";
 
 export function ActionButtonInspector({
   c,
@@ -35,7 +36,20 @@ export function ActionButtonInspector({
   const optionSources = useOptionSources();
   const actions = registry?.actions ?? null;
   const action = actions?.find((a) => a.id === c.actionId) ?? null;
-  const params = c.params ?? {};
+  const params = (c.params ?? {}) as Record<string, string | number>;
+  // No "Save" step here — the layout editor writes on every change — so
+  // there is no "first press" to gate on the way the rule editor's `attempted`
+  // does. A field that needs setup says so as soon as it is looked at.
+  const issues = action ? validateParams(action.params, params) : [];
+  // The extra sentence is this component's own — Button.dc.html says it here
+  // because this is the one surface a missing field actually does something:
+  // an operator can press an unconfigured button on the live canvas, and
+  // nothing here stops them. The rule editor's Save is already blocked from
+  // running a rule with issues (it saves turned off instead — see
+  // automation-routes.ts), so ParamField there keeps the plain message.
+  const issueMap = Object.fromEntries(
+    issues.map((i) => [i.key, `${i.message}. Until then, pressing this button does nothing and says why.`]),
+  );
 
   return (
     <>
@@ -46,16 +60,20 @@ export function ActionButtonInspector({
         <ActionPicker
           actions={actions}
           value={c.actionId}
-          onChange={(id) => onConfig({ ...c, actionId: id, params: {} })}
+          onChange={(id) =>
+            onConfig({ ...c, actionId: id, params: seededParams("action", id, actions?.find((a) => a.id === id)?.params ?? []) })
+          }
         />
       </Row>
       {action?.help && <p className="text-caption2 text-fg-muted leading-snug">{action.help}</p>}
       <ActionParamsFields
         actionId={c.actionId}
         action={action}
-        params={params as Record<string, string | number>}
+        params={params}
         optionSources={optionSources}
         onChange={(next) => onConfig({ ...c, params: next })}
+        issues={issueMap}
+        attempted
       />
       <RowText
         label="Label"
