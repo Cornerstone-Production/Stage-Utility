@@ -41,10 +41,12 @@ replaced once it has started or is about to. Where no start time is available th
 decision falls back to the gap since the last live item: under ten minutes holds,
 longer splits.
 
-Each decision is logged once, whichever way it goes:
+Each decision is logged once, whichever way it goes, and a hold that later
+ends in a split logs the split too:
 
 ```
 [service-recorder] service-timeline-recorder: service time 1001 → 1002, holding the open record (next occurrence starts in 25 min)
+[service-recorder] service-timeline-recorder: service time 1001 → 1002 starts in 10 min, closing 100:200:1001 and opening a new record
 [service-recorder] attendance-recorder: service time 1001 → 1002 began at 11:00:00, closing 100:200:1001 and opening a new record
 ```
 

@@ -342,13 +342,20 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       return false;
     }
 
-    const transition = `${from}→${serviceTimeId}`;
+    // Keyed on the decision as well as the transition: a hold announced 35
+    // minutes out is followed, ten minutes out, by the split it was holding
+    // for, and that split is news too. Keyed on the transition alone, it was
+    // silent: the log read "holding" and never said the record closed.
+    const transition = `${from}→${serviceTimeId}:${hold ? "hold" : "split"}`;
     if (this.loggedServiceTimeChange !== transition) {
       this.loggedServiceTimeChange = transition;
+      const closing = `closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`;
       console.log(
         hold
           ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId}, holding the open record (next occurrence starts in ${Math.round(untilMs / 60_000)} min)`
-          : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+          : untilMs > 0
+            ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} starts in ${Math.max(1, Math.round(untilMs / 60_000))} min, ${closing}`
+            : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, ${closing}`,
       );
     }
     return hold;
