@@ -25,7 +25,8 @@ class NoStream {
 
 const { render, cleanup, waitFor, act } = await import("@testing-library/react");
 const React = await import("react");
-const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { QueryClient, QueryClientProvider, useQuery } = await import("@tanstack/react-query");
+const { automationRegistryQuery } = await import("../lib/automation-registry.js");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 
@@ -186,4 +187,41 @@ describe("action-button — sharing the registry request", () => {
     await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     assert.equal(registryFetchCount, 1, `expected one shared GET /api/automation/registry, saw ${registryFetchCount}`);
   });
+});
+
+// The registry's query key is shared with the action-button inspector and the
+// Automation section. The button once cached the bare actions list under it
+// while they cached the whole registry, so whichever mounted first handed the
+// other the wrong shape: the inspector waited forever, or a layout opened with a
+// button already on it crashed calling `.find` on an object.
+describe("action-button — one registry shape, shared with the editors", () => {
+  function RegistryReader({ onRead }: { onRead: (data: unknown) => void }) {
+    const { data } = useQuery(automationRegistryQuery);
+    onRead(data);
+    return null;
+  }
+  for (const order of ["button first", "registry reader first"] as const) {
+    test(`${order}: the button resolves its label and the reader gets the whole registry`, async () => {
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+      let read: unknown;
+      const ctx = makeRenderCtx({ interactive: true });
+      const obj = { id: "o1", x: 0, y: 0, w: 0.3, h: 0.2, z: 1, config: { type: "action-button", actionId: "baptism.advance" }, style: {} } as never;
+      const button = React.createElement(ObjectContent as never, { key: "button", o: obj, ctx });
+      const reader = React.createElement(RegistryReader, { key: "reader", onRead: (d: unknown) => (read = d) });
+      const { container } = render(
+        React.createElement(
+          QueryClientProvider as never,
+          { client: qc },
+          ...(order === "button first" ? [button, reader] : [reader, button]),
+        ),
+      );
+      await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer"), container.textContent ?? ""));
+      await waitFor(() =>
+        assert.ok(
+          Array.isArray((read as { actions?: unknown } | undefined)?.actions),
+          `the registry reader got ${JSON.stringify(read)}, not the whole registry`,
+        ),
+      );
+    });
+  }
 });

@@ -12,11 +12,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { invoke } from "../lib/api";
+import { automationRegistryQuery } from "../lib/automation-registry";
 import { ActionPicker } from "./action-picker";
 import { Row, RowText } from "./inspector-rows";
 import type { LayoutObjectConfig } from "@main/types/views";
-import { ActionParamsFields, type Registry } from "../settings/sections/rule-editor-dialog";
+import { ActionParamsFields } from "../settings/sections/rule-editor-dialog";
 import { useOptionSources } from "../settings/sections/automation-option-sources";
 
 export function ActionButtonInspector({
@@ -31,10 +31,7 @@ export function ActionButtonInspector({
   // once. Unconditional here (not gated on c.type, unlike the query this
   // mirrors in the rule editor): this component only ever mounts for an
   // action-button object in the first place.
-  const { data: registry } = useQuery({
-    queryKey: ["automation:registry"],
-    queryFn: () => invoke<Registry>("automation:registry"),
-  });
+  const { data: registry } = useQuery(automationRegistryQuery);
   const optionSources = useOptionSources();
   const actions = registry?.actions ?? null;
   const action = actions?.find((a) => a.id === c.actionId) ?? null;
