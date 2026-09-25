@@ -730,11 +730,17 @@ the day you exported.
 | `SPL` | one row per plan item, every metric side by side |
 | `SPL data` | one row per item per metric — the shape a PivotTable wants |
 | `Attendance` | per service |
-| `Baptisms` | one row per person, with testimony and baptism splits |
+| `Baptisms` | one row per person: testimony and baptism splits, whether they were baptized, the session's wall-clock length, and a link to that service's read-only History page |
 
 Both SPL sheets are real tables, so *Insert → PivotTable* opens with the range
 already filled in. A `Service time` column distinguishes a 9am from an 11am on the
 same date.
+
+The Baptisms sheet's `History` link is absolute — built from the host you exported
+from — and always points at the read-only `/history` page, never
+`/history/manage`, so a copy handed to someone outside Production never opens
+into the operator app. It is blank on a session recorded before `serviceKey` was
+captured.
 
 Blank metric cells are normal: columns are the union across everything exported,
 so a service whose meter reported fewer metrics leaves the rest empty. Services

@@ -5,9 +5,10 @@
 // A shared react-query cache, not a private one-shot fetch: a panel of several
 // action-buttons each mount this hook, and a private fetch per mount meant a
 // three-button panel fired three identical GET /api/automation/registry
-// requests. Same queryKey the inspector and the automation section already
-// use, so every ActionButton on screen (and either editor surface, if ever
-// open at the same time) settles from one request. `retry` and
+// requests. The one shared definition in lib/automation-registry.ts, which
+// the inspector and the automation section use too, so every ActionButton on
+// screen (and either editor surface, if ever open at the same time) settles
+// from one request, in one shape. `retry` and
 // `refetchOnWindowFocus` are off to match the one-shot semantics this hook
 // always had — the registry has no live push channel (it changes only when
 // the app itself changes, never at runtime), so retrying it, or re-reading it
@@ -16,9 +17,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { invoke } from "../lib/api";
-import { errorMessage } from "@main/services/errors";
-import { logToServer } from "../lib/client-log";
+import { automationRegistryQuery } from "../lib/automation-registry";
 import type { ParamDef } from "@main/types/automation";
 
 export interface AutomationActionSpec {
@@ -51,19 +50,10 @@ export interface AutomationActionsState {
  *  action-button on screen reading a bare id with nothing saying why. */
 export function useAutomationActions(): AutomationActionsState {
   const { data, isError } = useQuery({
-    queryKey: ["automation:registry"],
+    ...automationRegistryQuery,
     retry: false,
     refetchOnWindowFocus: false,
-    queryFn: async () => {
-      try {
-        const r = await invoke<{ actions?: AutomationActionSpec[] }>("automation:registry");
-        if (!Array.isArray(r?.actions)) throw new Error("answered with no actions array");
-        return r.actions;
-      } catch (err) {
-        logToServer("action-button", `could not load the automation registry: ${errorMessage(err)}`);
-        throw err;
-      }
-    },
+    select: (registry): AutomationActionSpec[] => registry.actions,
   });
   return { actions: data ?? null, error: isError };
 }

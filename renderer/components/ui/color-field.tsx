@@ -32,6 +32,7 @@ export interface IconEditing {
 }
 import { createPortal } from "react-dom";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
+import { FocusScope } from "radix-ui/internal";
 
 import { cn } from "../../lib/cn";
 // The same Tab cycle and focus restoration the expanded-tile overlay uses. This
@@ -201,6 +202,35 @@ function ColorPanel({
    *
    * Flips above the swatch when there is no room below, so a control at the foot
    * of a long panel still opens onto something.
+   *
+   * A SECOND reason this has to be a portal on `document.body` rather than
+   * anywhere inside a Radix dialog's own content: opened from a swatch that
+   * itself sits inside a modal `DialogContent` — ProdCom's per-channel colours
+   * are the case that shipped this way — a portal on `document.body` is a
+   * sibling of that dialog's Content, not a descendant of it, and a modal
+   * dialog treats everything outside Content as off-limits in two ways:
+   *
+   *   - `<body>` gets `pointer-events: none` so a click can only land inside
+   *     Content, which re-enables it on itself; anything else appended to
+   *     `<body>` is unclickable, and a click meant for it falls through to the
+   *     dialog's own overlay and closes the dialog around it. `pointer-events-
+   *     auto` below is what wins the click back — an explicit override, not
+   *     only inherited, because that is exactly the property being fought.
+   *   - Content's own `FocusScope` treats any focus that lands outside it —
+   *     including this panel's own opening `focus()` below, and every Tab —
+   *     as focus that escaped, and snaps it straight back into the dialog.
+   *     `FocusScope.Root` below, `trapped`, is what a Radix `Select` or
+   *     `Popover` content wraps itself in for exactly this reason: a second
+   *     trapped scope pauses the enclosing one for as long as it is mounted
+   *     (`@radix-ui/react-focus-scope`'s own stack), so this panel keeps focus
+   *     rather than losing every keystroke back to the dialog it opened from.
+   *     It is not wired to close anything itself — the click-away and Escape
+   *     handling below already owns that — it only has to hold focus.
+   *
+   * Once a click actually reaches the panel, closing it is no different from
+   * closing it outside a dialog: it is still a React child of whatever opened
+   * it, portal or not, and a dialog already knows a pointerdown inside its own
+   * react tree is not an outside click. No third piece is needed for that half.
    */
   const PANEL_W = 224;
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -252,6 +282,21 @@ function ColorPanel({
   }, [placed, pickingIcon]);
 
   return createPortal(
+    <FocusScope.Root
+      asChild
+      trapped
+      // We move focus onto the panel ourselves, below, once it is placed and
+      // therefore visible — see that effect. Left to its own default, mounting
+      // a trapped scope also auto-focuses its first tabbable child, which would
+      // race that effect and land Tab on a slider with the panel's own label
+      // never announced.
+      onMountAutoFocus={(e) => e.preventDefault()}
+      // useReturnFocus (in ColorField, above) already returns focus to the
+      // swatch by id on close — see its own comment for why a held reference
+      // is not enough. Left un-prevented, the scope would additionally try to
+      // restore focus itself, to whatever it saw as focused before it mounted.
+      onUnmountAutoFocus={(e) => e.preventDefault()}
+    >
     <div
       ref={panelRef}
       role="dialog"
@@ -265,7 +310,9 @@ function ColorPanel({
       onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => trapTab(panelRef.current, e)}
       style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width: PANEL_W, visibility: pos ? "visible" : "hidden" }}
       className={cn(
-        "fixed z-[100] rounded-lg p-3 focus:outline-none",
+        // Explicit, not inherited: a modal dialog forces `pointer-events: none`
+        // on <body>, and this panel is a child of <body> — see the comment above.
+        "pointer-events-auto fixed z-[100] rounded-lg p-3 focus:outline-none",
         "border border-line-strong bg-popover/95 shadow-2xl backdrop-blur-xl",
         "flex flex-col gap-2.5",
       )}
@@ -454,7 +501,8 @@ function ColorPanel({
       </div>
       </>
       )}
-    </div>,
+    </div>
+    </FocusScope.Root>,
     document.body,
   );
 }
