@@ -1,52 +1,13 @@
-// History's selection used to be a bare `useState<string | null>(null)`, with
-// no URL behind it. That left the Baptisms tab's past-session links with
-// nowhere to send an operator: there was no address that opened one service.
+// History's selection lives in the URL: /history/manage?service=<key>.
 //
-// `historyServiceHref` is now the one place that URL is built, and
-// `ServiceHistorySection` reads `?service=<key>` on load and writes it back
-// when a row is selected. Driven through a REAL TanStack router
-// (createMemoryHistory + RouterContextProvider), not a stub of
-// useSearch/useNavigate, so what is proved is a real navigation resolving to
-// the right page — not a mock agreeing with itself.
-//
-// RouterContextProvider, not the higher-level RouterProvider: RouterProvider
-// also renders <Matches>, which renders <Transitioner> only when
-// `@tanstack/router-core/isServer` reads false. That module resolves through
-// Node's own "require"/"import" conditions under this test runner (no
-// bundler), which picks the SERVER build and makes it read true — so
-// <Transitioner> never mounts and its effect throws reading
-// `router._rendered[0]` on an object Transitioner alone initializes. That is
-// a packaging quirk of running this router outside a bundler, not a bug this
-// page owns, so RouterContextProvider is used instead: it provides the same
-// `useRouter()` context without rendering the tree that crashes.
-//
-// One consequence: `<Transitioner>` is also what makes the router notice a
-// history change it did not itself initiate — Back, Forward, another tab.
-// `router.navigate()` still updates `router.state.location` synchronously
-// without it (proved below), but `router.history.back()` alone does not, so
-// "Back returns to the list" is NOT asserted here. Tried and confirmed by
-// direct check, not assumed: neither a bare `router.navigate()` nor an
-// explicit `router.load()` afterwards fires the router's `onResolved` event
-// in this harness either — it is emitted from inside `commit()`'s own
-// `router.startTransition(commit, matches)` (see
-// @tanstack/router-core/dist/esm/load-client.js), which needs the
-// `<Matches>`/`<Transitioner>` tree actually mounted to run, the identical
-// packaging quirk above. So the router noticing ANY externally-driven
-// navigation and firing `onResolved` — not just literal Back — cannot be
-// driven in this file at all, and — say this plainly — it was NOT driven in
-// a real browser either, until now: this environment gained a scratch
-// Playwright install partway through this feature's build, and a literal
-// Back press on this exact page has since been confirmed there twice — the
-// URL drops `?service=` and the list returns.
-//
-// What IS proved here: `useSelectedServiceKey`'s `onResolved` subscription
-// (the one thing a click's own direct `setLocal` call does not go through —
-// see that function's own doc comment) is registered, and its callback, once
-// invoked, correctly reacts. "the onResolved subscription..." below captures
-// the real callback the component registers (by wrapping `router.subscribe`
-// before render) and calls it directly, since the router itself cannot be
-// made to call it here. Removing the subscription means no callback is ever
-// registered to capture, which is what fails first.
+// `historyServiceHref` is the one place that URL is built, and
+// `ServiceHistorySection` reads `?service=<key>` on load, writes it back when a
+// row is selected, and follows Back, Forward or a link that lands on the page.
+// Driven through a real TanStack router mounted with RouterProvider over a
+// memory history, not a stub of useSearch/useNavigate, so what is proved is a
+// real navigation resolving to the right page — not a mock agreeing with
+// itself. test-dom.ts gives these tests the router's client build, the one the
+// browser runs; see its header for why that matters.
 //
 // NOT asserted here: jsdom loads no stylesheet, so this does not touch layout.
 // See history-service-page.test.tsx's own header for that split.
@@ -121,13 +82,9 @@ function installFetch(): void {
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/index.js");
-const {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  RouterContextProvider,
-} = await import("@tanstack/react-router");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import(
+  "@tanstack/react-router"
+);
 const { ServiceHistorySection, historyServiceHref } = await import("./service-history-section.js");
 
 afterEach(cleanup);
@@ -135,30 +92,31 @@ after(() => unmountAndTeardown(cleanup, teardown));
 
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/**
- * The operator's History route alone, starting at `initialUrl` — a real
- * router (see the file header for why it is mounted via
- * RouterContextProvider, not RouterProvider).
- */
+/** The operator's History route alone, mounted at `initialUrl`. */
 function renderHistoryAt(initialUrl: string) {
   const rootRoute = createRootRoute({});
   const historyRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/history/manage",
-    component: () => null,
+    component: () => React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection)),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([historyRoute]),
     history: createMemoryHistory({ initialEntries: [initialUrl] }),
   });
-  const view = render(
-    React.createElement(
-      TooltipProvider,
-      null,
-      React.createElement(RouterContextProvider, { router, children: React.createElement(ServiceHistorySection) }),
-    ),
-  );
+  const view = render(React.createElement(RouterProvider, { router } as never));
   return { view, router };
+}
+
+const isOpen = (view: ReturnType<typeof render>) =>
+  view.container.querySelector('[data-testid="history-service-header"]') != null;
+
+/** The seeded row, clicked, with the page it opens given time to land. */
+async function clickRow(view: ReturnType<typeof render>): Promise<void> {
+  const row = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Sunday 11:00"));
+  assert.ok(row, "the seeded row never rendered");
+  fireEvent.click(row!);
+  for (let i = 0; i < 4; i++) await settle();
 }
 
 describe("historyServiceHref", () => {
@@ -204,16 +162,9 @@ describe("History opens the service named in its URL", () => {
     const { view, router } = renderHistoryAt("/history/manage");
     for (let i = 0; i < 4; i++) await settle();
 
-    const row = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Sunday 11:00"));
-    assert.ok(row, "the seeded row never rendered");
-    fireEvent.click(row!);
-    for (let i = 0; i < 4; i++) await settle();
+    await clickRow(view);
 
-    assert.equal(
-      view.container.querySelector('[data-testid="history-service-header"]') != null,
-      true,
-      "clicking a row must open its detail page, same as before this change",
-    );
+    assert.equal(isOpen(view), true, "clicking a row must open its detail page");
     assert.equal(
       (router.state.location.search as Record<string, unknown>).service,
       KEY,
@@ -222,73 +173,45 @@ describe("History opens the service named in its URL", () => {
   });
 });
 
-// The `onResolved` subscription in useSelectedServiceKey
-// (service-history-section.tsx) was untested — removing it stayed green,
-// even though it is the ONLY thing that reacts to
-// Back, Forward, or a link landing on this page from elsewhere (a click's own
-// `setSelectedKey` sets local state directly; see this file's own header).
-describe("the onResolved subscription (Back, Forward, or a link landing here)", () => {
-  test("its callback, once fired, closes the detail page — and removing the subscription means no callback is ever registered to fire", async () => {
-    // What was tried, and why this is not a drive of Back itself: a bare
-    // `router.navigate()` DOES update `router.state.location` synchronously
-    // (proved above, and again here), but a direct check confirms `onResolved`
-    // itself never fires from it — nor from an explicit `router.load()`
-    // afterwards — in this harness. `onResolved` is emitted from inside
-    // `commit()`'s own `router.startTransition(commit, matches)`
-    // (@tanstack/router-core/dist/esm/load-client.js), which needs the
-    // `<Matches>`/`<Transitioner>` tree actually mounted to run that commit —
-    // the same packaging quirk (this file's own header) that keeps
-    // `<Transitioner>` itself from mounting here. So the RIGHT half of this
-    // guard — the router noticing Back and firing onResolved — has no way to
-    // go red or green in this file; only a real browser proves it, and it has
-    // been driven there twice (this file's own header, corrected).
-    //
-    // What CAN be proven here, and is the actual code under review: that
-    // `useSelectedServiceKey` subscribes at all, and that its callback reacts
-    // correctly once invoked. Captured by wrapping `router.subscribe` before
-    // render, then invoked directly — bypassing the router's own broken
-    // resolution pipeline, not the component's.
+// A click opens the page by setting state directly, not by waiting for its own
+// navigation to echo back. Everything else — Back, Forward, a link landing on
+// the page — reaches the component only through its `onResolved` subscription,
+// so these are the cases that fail without it.
+describe("a navigation the page did not start", () => {
+  test("Back from an opened service returns to the list", async () => {
     installFetch();
-    const rootRoute = createRootRoute({});
-    const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-    const router = createRouter({
-      routeTree: rootRoute.addChildren([historyRoute]),
-      history: createMemoryHistory({ initialEntries: [historyServiceHref(KEY)] }),
+    const { view, router } = renderHistoryAt("/history/manage");
+    for (let i = 0; i < 4; i++) await settle();
+    await clickRow(view);
+    assert.equal(isOpen(view), true, "sanity: the row opened");
+
+    await act(async () => {
+      router.history.back();
     });
-    const onResolvedCallbacks: (() => void)[] = [];
-    const originalSubscribe = router.subscribe.bind(router);
-    router.subscribe = ((eventType: string, cb: () => void) => {
-      if (eventType === "onResolved") onResolvedCallbacks.push(cb);
-      return originalSubscribe(eventType as never, cb as never);
-    }) as typeof router.subscribe;
-
-    const view = render(
-      React.createElement(
-        TooltipProvider,
-        null,
-        React.createElement(RouterContextProvider, { router, children: React.createElement(ServiceHistorySection) }),
-      ),
-    );
     for (let i = 0; i < 6; i++) await settle();
-    assert.equal(
-      view.container.querySelector('[data-testid="history-service-header"]') != null,
-      true,
-      "sanity: the seeded service opened from its URL",
-    );
-    assert.equal(onResolvedCallbacks.length, 1, "expected useSelectedServiceKey to subscribe to onResolved exactly once");
-
-    // A real navigation updates the router's own location (proved above too),
-    // so the callback — which re-reads router.state.location itself — sees
-    // the same thing a genuine Back press would leave behind.
-    await router.navigate({ to: router.state.location.pathname, search: {} });
-    act(() => onResolvedCallbacks[0]!());
-    await settle();
 
     assert.equal(
-      view.container.querySelector('[data-testid="history-service-header"]') != null,
-      false,
-      "the list must return once onResolved fires with the URL no longer naming a service",
+      (router.state.location.search as Record<string, unknown>).service,
+      undefined,
+      "Back must leave a URL that names no service",
     );
+    assert.equal(isOpen(view), false, "the list must return once Back resolves");
     assert.ok(text(view.container).includes("Sunday 11:00"), "the list itself must actually render");
+  });
+
+  test("a link to a service opens it on a page already showing the list", async () => {
+    installFetch();
+    const { view, router } = renderHistoryAt("/history/manage");
+    for (let i = 0; i < 4; i++) await settle();
+    assert.equal(isOpen(view), false, "sanity: the list is showing");
+
+    // Cast: `to` and `search` are typed against the app's registered route
+    // tree, not this one-route one.
+    await act(async () => {
+      await router.navigate({ to: "/history/manage", search: { service: KEY } } as never);
+    });
+    for (let i = 0; i < 6; i++) await settle();
+
+    assert.equal(isOpen(view), true, "a navigation naming a service must open it");
   });
 });
