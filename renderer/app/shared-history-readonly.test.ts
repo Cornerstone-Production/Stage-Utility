@@ -19,8 +19,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
 import { settle, unmountAndTeardown } from "../test-dom.js";
+import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
 
 // Without this React neither act-wraps a render nor warns about an update
 // outside act — which is why this file reported no undrained work while

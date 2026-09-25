@@ -11,12 +11,43 @@
 //   ...
 //   teardown();
 
+import { registerHooks } from "node:module";
+
 import { act } from "react";
 import { JSDOM } from "jsdom";
+
+// The router's CLIENT build, the one Vite bundles for the browser.
+// `@tanstack/router-core/isServer` picks its build by export condition, and
+// plain Node matches "node" and gets the server build, where `isServer` is a
+// constant `true` that no router option can override. A server router commits
+// no navigation at all: `router.navigate()` resolves having changed neither the
+// history nor `router.state.location`, so a test that clicks and then reads the
+// URL sees nothing, and passes or fails for a reason no browser shares. Here at
+// module scope, not in installDom(), so it is in place before any component
+// import can load the router; a file must import this module before anything
+// that reaches the router.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier !== "@tanstack/router-core/isServer") return nextResolve(specifier, context);
+    return nextResolve(specifier, { ...context, conditions: ["browser", ...context.conditions] });
+  },
+});
 
 /** Globals a React render expects to find. */
 const EXPOSED = [
   "window",
+  // What the router's client build (see the hook above) reads as bare globals,
+  // the way browser code may: it registers itself on `self`, and scroll
+  // restoration sets `history.scrollRestoration`, listens for "pagehide",
+  // snapshots `scrollX`/`scrollY` and calls `scrollTo`. Creating the app's
+  // router throws without them.
+  "self",
+  "history",
+  "addEventListener",
+  "removeEventListener",
+  "scrollX",
+  "scrollY",
+  "scrollTo",
   "document",
   "navigator",
   "HTMLElement",
@@ -84,6 +115,12 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
       disconnect() {}
     };
   }
+
+  // jsdom's window.scrollTo only reports "not implemented" through the virtual
+  // console. The same reasoning as ResizeObserver: there is no layout, so there
+  // is nothing to scroll, and the router's scroll restoration calls it on every
+  // navigation.
+  win.scrollTo = () => {};
 
   for (const key of EXPOSED) {
     // defineProperty rather than assignment: some of these — `navigator` on

@@ -36,30 +36,6 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-// The router package ships three `isServer` builds behind conditional exports,
-// and Node picks the SERVER one — which short-circuits scroll restoration
-// entirely unless NODE_ENV says "test". Without this every case below passes or
-// fails on a code path that never ran, which is how the first draft of this file
-// reported the offset carrying over in both directions.
-process.env.NODE_ENV = "test";
-
-// Globals the restoration code reaches for bare, which the shared DOM harness
-// does not expose because nothing else in the suite has needed them. Local to
-// this file rather than added to test-dom.ts: a global that appears for every
-// test file is a global that changes how twenty other files behave.
-const w = globalThis as unknown as Record<string, unknown>;
-w.history = (globalThis as unknown as { window: Window }).window.history;
-w.addEventListener = (globalThis as unknown as { window: Window }).window.addEventListener.bind(
-  (globalThis as unknown as { window: Window }).window,
-);
-w.self = globalThis;
-w.scrollX = 0;
-w.scrollY = 0;
-// jsdom's window.scrollTo reports "not implemented" through the virtual console.
-// The library calls it on every reset and the document cannot scroll in this app
-// anyway, so silence it rather than read twenty of them per run.
-w.scrollTo = () => {};
-
 const { setupScrollRestoration, storageKey } = await import("@tanstack/router-core");
 const React = (await import("react")).default;
 const { render, cleanup, act } = await import("@testing-library/react");
