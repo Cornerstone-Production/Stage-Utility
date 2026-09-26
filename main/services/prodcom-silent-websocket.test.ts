@@ -213,18 +213,20 @@ const wsAttempts = (stub: ProdComStub): number =>
   stub.requests.filter((r) => r.url === "/api/v1/ws" && r.headers["user-agent"] !== PROBE_USER_AGENT).length;
 
 /**
- * Reads of `GET /api/v1/transcript` made BY THE SILENCE CHECK (either priming a
- * fresh socket's baseline, or the check itself asking again).
+ * Newest-page reads made BY THE SILENCE CHECK (either priming a fresh socket's
+ * baseline, or the check itself asking again), one per read.
  *
- * Matched on the check's own page size, which backfill cannot produce: backfill
- * asks for the spec's documented maximum of 200 and the check asks for
- * WS_SILENCE_CHECK_PAGE_SIZE (100). A plain count of transcript reads would be
- * satisfied by the backfill every transport does on connect, and every
- * assertion here about what the check did or did not cost would then be true
- * whether or not the check ran at all.
+ * Counted by the read's first request, the one-row `limit=1&offset=0` that
+ * learns the row count — which backfill cannot produce: backfill asks for the
+ * spec's documented maximum of 200 and always sends `since`. A plain count of
+ * transcript reads would be satisfied by the backfill every transport does on
+ * connect, and every assertion here about what the check did or did not cost
+ * would then be true whether or not the check ran at all.
  */
+const isNewestPageRead = (url: URL): boolean =>
+  url.pathname === "/api/v1/transcript" && !url.searchParams.has("since") && url.searchParams.get("limit") === "1";
 const transcriptPageReads = (stub: ProdComStub): number =>
-  stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && r.url.includes("limit=100&")).length;
+  stub.requests.filter((r) => isNewestPageRead(new URL(r.url, "http://stub"))).length;
 
 const subscribeFrames = (stub: ProdComStub): number =>
   stub.wsReceived.filter((f) => f.includes('"subscribe"')).length;
@@ -368,7 +370,7 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // floor is one, so one slow transcript read during one drop is enough.
     // Priming and the check share the same request shape now (both read the
     // newest page), so they are told apart by ORDER rather than by size: the
-    // first limit=100 read is always priming (fired the instant the socket
+    // first newest-page read is always priming (fired the instant the socket
     // opens), and the second is the check's own first read (fired after
     // wsSilenceCheckMs). Only the second is held — priming stays fast, so the
     // line below is spoken before the first check even fires. 1400 ms because
@@ -379,7 +381,7 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     let transcriptReads = 0;
     const { stub, svc } = await running(t, {
       delayTranscriptMs: (url) => {
-        if (url.searchParams.get("limit") !== "100") return 0;
+        if (!isNewestPageRead(url)) return 0;
         return ++transcriptReads === 2 ? 1400 : 0;
       },
     });

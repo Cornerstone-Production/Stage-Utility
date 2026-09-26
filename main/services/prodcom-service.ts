@@ -663,12 +663,23 @@ export class ProdComService extends ConnectionLifecycle {
    *
    * The check's other half of "already accounted for": a spoken row on
    * ProdCom's newest page that is neither in wsBaselineIds above nor in here
-   * is what the socket missed. Reset only when a socket OPENS — including the
-   * unsubscribed reopen — never per check window, so a delivery from several
-   * windows back still excuses a row that has not yet scrolled off the newest
-   * page.
+   * is what the socket missed. Reset when a socket OPENS — including the
+   * unsubscribed reopen — and otherwise only thinned: each check read moves
+   * the ids it saw into the baseline and drops them here, so a delivery from
+   * several windows back still excuses a row REST has not caught up on, and
+   * a promoted socket does not keep one id per utterance for its whole life.
    */
   private wsDeliveredIds = new Set<string>();
+  /**
+   * Whether the current socket has delivered an entry with no `id`.
+   *
+   * Nothing in wsDeliveredIds can excuse such a line once REST shows it (with
+   * the id REST always has), so a promoted check on this socket re-reads the
+   * page in every window it delivers in, the way every promoted check did
+   * before a delivering window stopped costing a read. The envelope is the
+   * one part of a websocket frame the spec does not pin. Reset on open.
+   */
+  private wsDeliversWithoutIds = false;
   /** Whether the current socket has ever delivered a transcript entry — once
    *  true, PROMOTED. Does not mean the silence check is done for good: it
    *  keeps running post-promotion too (see wsDeliveredThisWindow), because
@@ -867,6 +878,12 @@ export class ProdComService extends ConnectionLifecycle {
     return this.wsBaselineIds;
   }
 
+  /** Test seam: how many delivered ids the socket is still holding to excuse
+   *  rows REST has not shown yet. */
+  protected get wsDeliveredIdCount(): number {
+    return this.wsDeliveredIds.size;
+  }
+
   /**
    * Test seams for the two real-time constants.
    *
@@ -986,6 +1003,7 @@ export class ProdComService extends ConnectionLifecycle {
     // which describe the BOX and are cleared by configure() alone.
     this.wsBaselineIds = null;
     this.wsDeliveredIds.clear();
+    this.wsDeliversWithoutIds = false;
     this.wsDelivered = false;
     this.wsDeliveredThisWindow = false;
     this.skippedSources.clear();
@@ -1163,9 +1181,10 @@ export class ProdComService extends ConnectionLifecycle {
    * anything was missed.
    *
    * Armed on every open and re-armed after every inconclusive answer, and
-   * disarmed for good by closeSocket() or by the first transcript entry to
-   * arrive. A socket that is carrying the transcript never runs this and never
-   * costs a REST call.
+   * disarmed by closeSocket(). Promotion re-arms it for the post-promotion
+   * mode (runPromotedSilenceCheck), where a socket that is carrying the
+   * transcript costs one read after promotion and none in a window it
+   * delivers in.
    */
   private armSilenceCheck(): void {
     this.clearSilenceCheck();
@@ -1273,6 +1292,11 @@ export class ProdComService extends ConnectionLifecycle {
    */
   private promoteWebSocket(): void {
     this.onWebSocket = true;
+    // The promoted check measures from here. Rows the socket did not carry
+    // before it proved itself are probation's business, and a baseline from
+    // then would count them against it — so the first promoted window reads
+    // a fresh one (see runPromotedSilenceCheck).
+    this.wsBaselineIds = null;
     this.dropFallbackStream();
     console.log(
       `[prodcom] the websocket delivered a transcript entry — captions move to it and the SSE fallback closes`,
@@ -1328,10 +1352,14 @@ export class ProdComService extends ConnectionLifecycle {
    * The newest page of ProdCom's transcript — what every socket's baseline and
    * every check are measured against.
    *
-   * Two requests, except when the whole box already fits on one page: the
-   * first read is always `offset=0`, and its own `meta.totalCount` says
-   * whether that page IS the newest one already, or whether a second read at
-   * `max(0, total - PAGE)` is needed to reach the tail. `totalCount` can only
+   * Two requests, except on a box holding at most one row: the first asks for
+   * ONE row at `offset=0`, because all it is for is its `meta.totalCount`,
+   * which says where the tail starts — the second reads the page at
+   * `max(0, total - PAGE)`. It used to ask for a whole page there, which on
+   * any box holding more than a page (the live one holds 3001) fetched and
+   * parsed a hundred of the OLDEST rows on every check only to throw them
+   * away. That costs a small box a second request it used to be spared; a
+   * real box fills past a page within days. `totalCount` can only
    * grow between the two reads, never shrink — a box still filling its rolling
    * window only adds rows, and one that has already filled it stays at its
    * cap — so the second offset is always in range; on a box that is still
@@ -1363,10 +1391,10 @@ export class ProdComService extends ConnectionLifecycle {
     // second one. Every caller already drops an answer from a replaced
     // connection, so this only saves the request.
     const epoch = this.connectionEpoch;
-    const first = await this.fetchTranscriptSlice(host, port, 0, WS_SILENCE_CHECK_PAGE_SIZE);
+    const first = await this.fetchTranscriptSlice(host, port, 0, 1);
     if (epoch !== this.connectionEpoch) return { ok: false, error: "the connection was replaced" };
     if (!first.ok) return first;
-    if (first.total <= WS_SILENCE_CHECK_PAGE_SIZE) return { ok: true, rows: first.rows };
+    if (first.total <= 1) return { ok: true, rows: first.rows };
     const offset = Math.max(0, first.total - WS_SILENCE_CHECK_PAGE_SIZE);
     return this.fetchTranscriptSlice(host, port, offset, WS_SILENCE_CHECK_PAGE_SIZE);
   }
@@ -1390,8 +1418,9 @@ export class ProdComService extends ConnectionLifecycle {
    * that works), or else compute what this socket missed against `baseline`
    * and move the baseline past this page.
    *
-   * A null `baseline` — the socket's open-time read failed, or a known-silent
-   * box's re-test skipped it — makes this page the baseline and judges
+   * A null `baseline` — the socket's open-time read failed, a known-silent
+   * box's re-test skipped it, or promotion cleared it and the read after
+   * failed — makes this page the baseline and judges
    * nothing this round: every row on it predates the moment the check could
    * first see, so none of them can be called missed. It used to be a return
    * without a read, re-armed for the socket's whole life, which left a socket
@@ -1424,11 +1453,22 @@ export class ProdComService extends ConnectionLifecycle {
     const missed = baseline === null ? [] : this.missedSpokenRows(page.rows, baseline);
     // Move past whatever this check just read, whether or not it found
     // anything — a check must never re-judge a row it has already seen.
-    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+    this.adoptBaseline(page.rows);
     if (baseline === null) {
       console.debug(`[prodcom] the ${promoted ? "promoted " : ""}websocket's silence check read its baseline — judging from the next window`);
     }
     return missed;
+  }
+
+  /**
+   * Make `rows` the baseline. The socket's own record of any of them is spent
+   * once they are in it, so it is dropped — what REST has not caught up on
+   * yet stays, and a promoted socket does not keep one id per utterance for
+   * its whole life.
+   */
+  private adoptBaseline(rows: PageRow[]): void {
+    this.wsBaselineIds = new Set(rows.map((r) => r.id));
+    for (const r of rows) this.wsDeliveredIds.delete(r.id);
   }
 
   /**
@@ -1543,11 +1583,14 @@ export class ProdComService extends ConnectionLifecycle {
    * on a socket that has stopped carrying the transcript, which is the
    * original incident this whole file exists to catch.
    *
-   * A window the socket delivered anything in costs no REST call — same
-   * principle as probation, just re-checked every window instead of asked
-   * once — but the baseline still has to move forward on that window, or the
-   * NEXT silent window's read would find every already-delivered line sitting
-   * past a baseline that never advanced and misread routine silence as a miss.
+   * A window the socket delivered anything in needs no verdict, and no REST
+   * call either once there is a baseline: every entry it delivered is
+   * excused by wsDeliveredIds, so the baseline has no need to move on that
+   * window. It used to re-read every such window regardless — two GETs a
+   * minute, for ever, on a socket that works. It still reads when there is
+   * no baseline (the first promoted window, since promotion clears it) and
+   * on a socket delivering entries with no id (wsDeliversWithoutIds), which
+   * nothing else would excuse.
    */
   private async runPromotedSilenceCheck(
     host: string,
@@ -1559,10 +1602,14 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsDeliveredThisWindow = false;
 
     if (deliveredThisWindow) {
+      if (this.wsBaselineIds !== null && !this.wsDeliversWithoutIds) {
+        this.armSilenceCheck();
+        return;
+      }
       const epoch = this.connectionEpoch;
       const page = await this.readNewestPage(host, port);
       if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
-      if (page.ok) this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+      if (page.ok) this.adoptBaseline(page.rows);
       this.armSilenceCheck();
       return;
     }
@@ -2022,6 +2069,7 @@ export class ProdComService extends ConnectionLifecycle {
       this.wsBaselineIds = null;
       // Per-socket, per the plan: what THIS socket delivers, from THIS open.
       this.wsDeliveredIds.clear();
+      this.wsDeliversWithoutIds = false;
       this.wsDelivered = false;
       this.wsDeliveredThisWindow = false;
       this.noteWebSocketHealthy();
@@ -2461,6 +2509,7 @@ export class ProdComService extends ConnectionLifecycle {
     // socket missed.
     const id = str(found.entry, "id");
     if (id) this.wsDeliveredIds.add(id);
+    else this.wsDeliversWithoutIds = true;
     this.noteWebSocketDelivered();
     this.acceptEntry(found.entry);
   }
@@ -2911,6 +2960,10 @@ export class ProdComService extends ConnectionLifecycle {
       console.debug("[prodcom] dropped a baseline read that arrived after this websocket attempt was replaced");
       return;
     }
+    // Promoted while this was out: the promoted check reads its own baseline
+    // from promotion on, and this pre-promotion one would hand it rows the
+    // socket was never asked about.
+    if (this.wsDelivered) return;
     if (!page.ok) {
       console.warn(
         `[prodcom] could not read the transcript's newest page (${scrub(page.error)}) — ` +

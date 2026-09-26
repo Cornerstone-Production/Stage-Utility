@@ -81,8 +81,8 @@ ProdCom's own history still holds it.
 A WebSocket attempt does not repeat any of this priming — the SSE stream already
 owns keeping channels, keywords and the buffer current for as long as any
 WebSocket attempt is unproven, so a re-test costs only the silence check's own
-newest-page baseline below (one REST call, or two on a box holding more than a
-page), not a fresh channel read and backfill.
+newest-page baseline below (a one-row read for the row count, then the page),
+not a fresh channel read and backfill.
 
 Only entries whose `source` is `audio` become captions. A message an operator
 typed into a comms channel (`typed`) and a line ProdCom's own automations
@@ -126,9 +126,9 @@ box reached that state, trusting a socket that had delivered nothing for good an
 never demoting a promoted one that went quiet.
 
 So on open, and after every check, the app reads `GET /api/v1/transcript`'s
-newest page (the last 100 rows; two requests unless the whole box already fits on
-one) and records the entry ids on it, plus every id the socket has itself
-delivered since it opened. A spoken row on a later newest page that is in neither
+newest page (the last 100 rows, found with a one-row read of the row count
+first) and records the entry ids on it, plus every id the socket has itself
+delivered that REST did not show yet. A spoken row on a later newest page that is in neither
 set is one the socket missed. No timestamp is compared on either side, for the
 reason a row count also avoided one: a ProdCom is an appliance whose clock is its
 own, and a box running fast or slow would either condemn a healthy socket or hide
@@ -161,8 +161,9 @@ The first transcript entry over a socket **promotes** it: the SSE stream that ha
 been carrying captions closes and the WebSocket becomes the live transport — but
 the check that got it there does not stop asking. It keeps running on the same
 one-minute clock, now asking about a socket that has already proven itself
-rather than one still on probation: a window it delivers anything in costs no
-REST call; a
+rather than one still on probation. Its first window reads a fresh baseline —
+lines the socket did not carry before it proved itself are not held against
+it — and after that a window it delivers anything in costs no REST call; a
 window it stays quiet in asks the same question probation does — has ProdCom
 recorded anything since this socket last delivered that this socket did not
 carry. ProdCom 2.3.2 is known to deliver once and then go quiet while still

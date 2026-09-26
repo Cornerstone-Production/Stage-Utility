@@ -153,6 +153,14 @@ export type StubOptions = {
    */
   delayTranscriptMs?: (url: URL) => number;
   /**
+   * Like `delayTranscriptMs`, but the answer is COMPUTED on arrival and only
+   * sent late — what a real box does when it reads its history and the reply
+   * is slow getting back. `delayTranscriptMs` computes it when the hold ends,
+   * so anything added during the hold is in it; this one's answer describes
+   * the moment the request arrived.
+   */
+  delayTranscriptAnswerMs?: (url: URL) => number;
+  /**
    * Like `delayTranscriptMs`, but applied to EVERY request before its own
    * handler runs — channels, keywords, transcript, alike. Independent of
    * `delayTranscriptMs`, which only ever covers `/api/v1/transcript`, so no
@@ -491,17 +499,26 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
           ? entries.filter((e) => Date.parse(e.date) > Date.parse(since))
           : entries;
       const page = filtered.slice(offset, offset + limit);
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          data: page,
-          meta: {
-            timestamp: peerNow(),
-            totalCount: filtered.length,
-            hasMore: offset + page.length < filtered.length,
-          },
-        }),
-      );
+      const body = JSON.stringify({
+        data: page,
+        meta: {
+          timestamp: peerNow(),
+          totalCount: filtered.length,
+          hasMore: offset + page.length < filtered.length,
+        },
+      });
+      const answerIn = options.delayTranscriptAnswerMs?.(url) ?? 0;
+      const answer = (): void => {
+        if (res.destroyed) return;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(body);
+      };
+      if (answerIn > 0) {
+        const timer = setTimeout(answer, answerIn);
+        timer.unref?.();
+      } else {
+        answer();
+      }
       return;
     }
 

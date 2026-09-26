@@ -55,11 +55,11 @@ describe("a websocket attempt's baseline", () => {
     let baselineReads = 0;
     const stub = await startProdComStub({
       channels: CHANNELS,
-      // The baseline read is the only limit=100 request while the box holds
-      // fewer rows than that (readNewestPage's single-request fast path — see
-      // its own doc comment). Hold the first one (the first attempt's) for
-      // 800ms; answer every later one at once.
-      delayTranscriptMs: (url) => (url.searchParams.get("limit") === "100" && baselineReads++ === 0 ? 800 : 0),
+      // Every baseline read starts with readNewestPage's one-row `limit=1`
+      // request (see its own doc comment), and backfill never sends one. Hold
+      // the first (the first attempt's) for 800ms; answer every later one at
+      // once.
+      delayTranscriptMs: (url) => (url.searchParams.get("limit") === "1" && baselineReads++ === 0 ? 800 : 0),
     });
     const svc = new TestProdCom();
     t.after(async () => {
