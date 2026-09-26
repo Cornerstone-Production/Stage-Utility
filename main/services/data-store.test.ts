@@ -250,6 +250,14 @@ describe("a save racing the store's first read, on every path load() takes", () 
   /** After the race: the store serves the save, and the next save builds on it. */
   async function assertSaveSurvives(store: InstanceType<typeof DataStore<Doc>>, file: string) {
     assert.deepEqual(await store.load(), SAVED, "the store serves the save, not what its first read found");
+    // Read BEFORE the second save below, which recreates the file regardless —
+    // checking only after it would stay green even if the race had quarantined
+    // the save's own file and left disk with nothing at `file`.
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(file, "utf8")),
+      SAVED,
+      "the save is still on disk, not moved aside by the race",
+    );
     await store.update((c) => ({ ...c, count: c.count + 1 }));
     assert.deepEqual(
       JSON.parse(await fs.readFile(file, "utf8")),
