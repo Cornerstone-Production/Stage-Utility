@@ -373,24 +373,29 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // first newest-page read is always priming (fired the instant the socket
     // opens), and the second is the check's own first read (fired after
     // wsSilenceCheckMs). Only the second is held — priming stays fast, so the
-    // line below is spoken before the first check even fires. 1400 ms because
-    // the answer has to land AFTER the replacement socket is up, and
-    // service-window.ts floors every reconnect delay at one second: a shorter
-    // hold returns while `this.ws` is still null and no verdict is reachable,
-    // which is a test that proves nothing.
+    // line below is spoken before the first check even fires. The hold has to
+    // outlast the replacement socket's opening, and the assertions have to
+    // wait until PAST the hold: this used to sleep a fixed 1200 ms after the
+    // replacement opened, which is before a 1400 ms hold ends, so the stale
+    // answer landed after the assertions and the test passed with the identity
+    // check deleted.
+    const HOLD_MS = 1400;
     let transcriptReads = 0;
+    let heldAt = 0;
     const { stub, svc } = await running(t, {
       delayTranscriptMs: (url) => {
-        if (!isNewestPageRead(url)) return 0;
-        return ++transcriptReads === 2 ? 1400 : 0;
+        if (!isNewestPageRead(url) || ++transcriptReads !== 2) return 0;
+        heldAt = Date.now();
+        return HOLD_MS;
       },
     });
     await speaks(stub, svc, spoken("said-while-the-first-socket-was-up"));
 
     await eventually(() => transcriptPageReads(stub) >= 2, "the check to put a read in flight");
     stub.wsDropAll();
-    await eventually(() => stub.wsUpgrades >= 2, "the replacement socket to open", 6000);
-    await sleep(1200); // past the held answer
+    await eventually(() => stub.wsUpgrades >= 2 && svc.wsOpenNow, "the replacement socket to open", 6000);
+    assert.ok(Date.now() < heldAt + HOLD_MS, "precondition: the replacement opened after the held answer landed");
+    await sleep(heldAt + HOLD_MS + 300 - Date.now()); // past the held answer
 
     assert.equal(
       subscribeFrames(stub),
