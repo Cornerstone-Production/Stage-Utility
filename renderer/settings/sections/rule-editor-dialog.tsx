@@ -1458,11 +1458,17 @@ export function RuleEditorDialog({
   const onIssues = useMemo(() => ruleIssues(onDraft, lookup), [onDraft, lookup]);
   const offIssues = useMemo(() => (offDraft ? ruleIssues(offDraft, lookup) : []), [offDraft, lookup]);
   const totalIssues = onIssues.length + offIssues.length;
+  // Matches the save() gate exactly: a save only turns a half back on when
+  // its OWN switch reads on. "All set. Save to turn it back on." is a lie for
+  // a half whose switch is off — nothing is about to turn back on for it — so
+  // the footer only promises that when at least one half actually would.
+  const onWillReenable = forcedOff && onIssues.length === 0 && onDraft.enabled;
+  const offWillReenable = forcedOff && offIssues.length === 0 && !!offDraft?.enabled;
   const footer = !attempted
     ? null
     : totalIssues > 0
       ? { text: `${fieldsNeedAttention(totalIssues)}. Saved turned off: it runs once these are fixed.`, danger: true }
-      : forcedOff
+      : onWillReenable || offWillReenable
         ? { text: "All set. Save to turn it back on.", danger: false }
         : null;
 
@@ -1585,12 +1591,17 @@ export function RuleEditorDialog({
       // no-op the server already handles.
       const liveOn = isPair ? target.pair.on : target.rule;
       const onPatch = changesOnly(seed.current.on, onHalfPatch(), liveOn);
-      // A PREVIOUS save turned this off over issues that are now fixed: ask
-      // for it back on explicitly. Without this, the patch may carry no
-      // `enabled` key at all — the operator never touched the switch, only
-      // the broken field — and the rule would stay off forever, "fixed" and
-      // silent, which is the one outcome docs/automation.md rules out.
-      if (forcedOff && onIssues.length === 0) onPatch.enabled = true;
+      // A PREVIOUS save turned this off over issues that are now fixed, AND
+      // the switch in front of the operator still reads on: ask for it back
+      // on explicitly. Without this, the patch may carry no `enabled` key at
+      // all — the operator never touched the switch, only the broken field —
+      // and the rule would stay off forever, "fixed" and silent, which is the
+      // one outcome docs/automation.md rules out. Gated on `onDraft.enabled`
+      // because the operator may have turned the switch off themselves in the
+      // same session (their explicit off must win), or never turned it on in
+      // the first place (every Add rule starts off) — either way this must
+      // never override what the switch in front of them says.
+      if (forcedOff && onIssues.length === 0 && onDraft.enabled) onPatch.enabled = true;
       // The SAME shape GET's list items carry — Rule & { issues } — not a
       // wrapper, so a script (or a future caller) reading the rule straight
       // off this response is not broken by this feature. See automation-routes.ts.
@@ -1603,7 +1614,7 @@ export function RuleEditorDialog({
         writing = "Turn off";
         const liveOff = isPair ? target.pair.off : seed.current.off;
         const offPatch = changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff);
-        if (forcedOff && offIssues.length === 0) offPatch.enabled = true;
+        if (forcedOff && offIssues.length === 0 && offDraft.enabled) offPatch.enabled = true;
         const offResult = await invoke<Rule & { issues: RuleIssue[] }>("automation:updateRule", {
           id: offDraft.id,
           patch: offPatch,

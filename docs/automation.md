@@ -32,8 +32,11 @@ marking each bad field and putting the count in the footer.
 
 Saving with a problem still saves — turned off, with a note that it runs once the
 field is fixed. It is never refused outright, so a rule half set up is never lost
-because the dialog would not let go of it. Fix the field and save again and the
-footer offers to turn it back on; saving does.
+because the dialog would not let go of it. Fix the field and save again and, **if
+the Enabled switch still reads on**, it turns back on. A rule you switched off
+yourself, or one that was never turned on in the first place, stays off — fixing
+the field only clears the badge, and the switch in front of you is always the
+last word on whether the rule runs.
 
 The rules list marks a rule with a problem **Needs setup: N fields**, naming
 them, and its switch will not turn it on — turning ON a rule that still has a
