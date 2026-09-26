@@ -14,6 +14,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { interceptAddSession, type AddSession } from "../baptism-save-harness.js";
+
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-rebuild-clears-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
@@ -51,15 +53,6 @@ async function pushWhere(from: number, test: (s: BaptismState) => boolean, what:
   assert.fail(`no push ${what} within 1s; pushes since: ${JSON.stringify(seen)}`);
 }
 
-type AddSession = typeof baptismStore.addSession;
-function stubAddSession(impl: AddSession): () => void {
-  const store = baptismStore as unknown as { addSession: AddSession };
-  const original = store.addSession;
-  store.addSession = impl;
-  return () => {
-    store.addSession = original;
-  };
-}
 const FS_ERROR: unknown = Object.assign(new Error("ENOSPC: no space left on device"), { errno: -28 });
 const rejecting: AddSession = async () => {
   throw FS_ERROR;
@@ -99,7 +92,7 @@ function timeline(serviceKey: string) {
  */
 async function realFailedSave(serviceKey: string): Promise<string> {
   rec().current = { serviceKey, serviceDate: DATE, endedAt: null };
-  const restore = stubAddSession(rejecting);
+  const { restore } = interceptAddSession(baptismStore, rejecting);
   let sessionId!: string;
   try {
     const mark = pushes.length;
@@ -125,22 +118,6 @@ async function realFailedSave(serviceKey: string): Promise<string> {
   return sessionId;
 }
 
-/** Poll listSessions() until `id` actually lands — a successful save is a
- *  fire-and-forget promise inside finalize(), never awaited by finish()
- *  itself, and (unlike a FAILED save) a clean first-time save pushes
- *  NOTHING: finalize()'s own success callback only commits when it actually
- *  clears a PRIOR saveErrors entry, which a session's first Finish has
- *  none of. */
-async function waitForStored(id: string, timeoutMs = 3000): Promise<BaptismSession> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const found = (await baptismStore.listSessions()).find((s) => s.id === id);
-    if (found) return found;
-    await sleep(10);
-  }
-  throw new Error(`session ${id} never landed in baptism.json`);
-}
-
 /**
  * Drive a session to a REAL successful Finish, then Undo it and re-Finish
  * later with addSession stubbed to reject — a real failed save of a
@@ -156,10 +133,22 @@ async function realFailedReFinish(serviceKey: string): Promise<{ id: string; fir
   const started = timer.start();
   assert.equal(started.phase, "testimony", `sanity: start() actually started a session for ${serviceKey}`);
   await sleep(5);
-  const first = timer.finish(); // REAL save — addSession is not stubbed here
+  const firstSave = interceptAddSession(baptismStore); // REAL save — the store really writes
+  let first: BaptismState;
+  try {
+    first = timer.finish();
+  } finally {
+    firstSave.restore();
+  }
   assert.equal(first.phase, "idle", "sanity: the session finished the first time");
   const id = baptismSessionId(timer.getState().sessionStartedAt!);
-  await waitForStored(id); // sanity: the first Finish actually saved
+  // Awaited on the save itself, never on listSessions() showing it: the store
+  // caches a write before it reaches disk, so the session is listed while the
+  // write is still in flight. Landing after the stubbed re-Finish below
+  // failed, its success would clear that failure's entry, which carries this
+  // same id, as "this session saved".
+  assert.equal(firstSave.calls.length, 1, "sanity: the first Finish started exactly one save");
+  await firstSave.calls[0]; // rejects here if the first Finish did not actually save
   const firstFinishedAt = first.finishedAt!;
 
   const reopened = timer.undo();
@@ -169,7 +158,7 @@ async function realFailedReFinish(serviceKey: string): Promise<{ id: string; fir
   // never "the same one" within the tie band.
   await sleep(300);
 
-  const restore = stubAddSession(rejecting);
+  const { restore } = interceptAddSession(baptismStore, rejecting);
   let secondFinishedAt!: string;
   try {
     const mark = pushes.length;
@@ -206,7 +195,7 @@ type RecordBaptism = typeof sampleArchive.recordBaptism;
 async function realNeverFinishedSave(serviceKey: string): Promise<string> {
   timer.setMode("grouped"); // startBaptisms() below is a no-op outside grouped mode
   rec().current = { serviceKey, serviceDate: DATE, endedAt: null };
-  const restoreSave = stubAddSession(rejecting);
+  const { restore: restoreSave } = interceptAddSession(baptismStore, rejecting);
   const archive = sampleArchive as unknown as { recordBaptism: RecordBaptism };
   const originalRecord = archive.recordBaptism.bind(sampleArchive);
   archive.recordBaptism = (ctx, fields, at) => {

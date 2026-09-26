@@ -30,6 +30,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import { baptismSessionId, type BaptismSaveError, type BaptismState } from "../types/stage.js";
+import { interceptAddSession, type AddSession } from "./baptism-save-harness.js";
 
 const { baptismTimerService: timer } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
@@ -63,8 +64,6 @@ function errorEntry(s: BaptismState, sessionId: string): BaptismSaveError | unde
   return s.saveErrors?.find((e) => e.sessionId === sessionId);
 }
 
-type AddSession = typeof baptismStore.addSession;
-
 /** A REAL Node fs error, not a hand-built one: its message names the absolute
  *  path it failed on, the way the store's own failed write does (atomicWrite
  *  rethrows the fs error untouched). */
@@ -76,15 +75,6 @@ assert.ok(String((FS_ERROR as Error).message).includes(TMP), "sanity: the raw er
 /** What the operator's screen may say about FS_ERROR: why, never where. */
 const REASON = "ENOENT: no such file or directory";
 
-/** Replace addSession for the length of one test. Restore in a finally. */
-function stubAddSession(impl: AddSession): () => void {
-  const store = baptismStore as unknown as { addSession: AddSession };
-  const original = store.addSession;
-  store.addSession = impl;
-  return () => {
-    store.addSession = original;
-  };
-}
 const rejecting: AddSession = async () => {
   throw FS_ERROR;
 };
@@ -123,7 +113,7 @@ async function finishOnePerson(): Promise<number> {
 describe("a session save that fails reaches the operator", () => {
   it("arrives on a push, survives the next press, and a save that lands clears it", async () => {
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(rejecting);
+    const { restore } = interceptAddSession(baptismStore, rejecting);
     let sessionId!: string;
     try {
       const mark = await finishOnePerson();
@@ -167,7 +157,7 @@ describe("a session save that fails reaches the operator", () => {
 
   it("is carried across the workflow toggle and a new Start, and cleared by Reset", async () => {
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(rejecting);
+    const { restore } = interceptAddSession(baptismStore, rejecting);
     try {
       const mark = await finishOnePerson();
       await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
@@ -198,7 +188,7 @@ describe("a session save that fails reaches the operator", () => {
     // landed.
     rec().current = { serviceKey: "st1:plan1:save-error-scope", serviceDate: "2026-09-20", endedAt: null };
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(rejecting);
+    const { restore } = interceptAddSession(baptismStore, rejecting);
     try {
       const mark = await finishOnePerson(); // session A
       await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry for A");
@@ -220,13 +210,21 @@ describe("a session save that fails reaches the operator", () => {
     assert.equal(errorEntry(started, failedId!)?.reason, REASON, "sanity: starting B still carries A's note");
     await sleep(5);
     const mark2 = pushes.length;
-    const finishedB = timer.finish();
+    const savesB = interceptAddSession(baptismStore); // the store really writes
+    let finishedB: BaptismState;
+    try {
+      finishedB = timer.finish();
+    } finally {
+      savesB.restore();
+    }
     assert.equal(finishedB.people.length, 1, "sanity: B has its own session to save");
     await pushWhere(mark2, (s) => s.phase === "idle" && s.finishedAt != null, "B's finish push");
 
-    // Give B's save every chance to land — and to wrongly clear A's note —
-    // before asserting it did not.
-    await sleep(80);
+    // B's save has landed — and had its chance to wrongly clear A's note —
+    // before asserting it did not. Awaited on the save itself: a fixed sleep
+    // let a slow write land after these assertions, which then passed before
+    // B's save could have cleared anything.
+    await savesB.settled();
     const after = timer.getState();
     assert.equal(errorEntry(after, failedId!)?.reason, REASON, "A's note must survive an unrelated session's successful save");
     assert.equal(errorEntry(after, failedId!)?.serviceKey, failedServiceKey, "still naming A's service, not B's");
@@ -253,7 +251,7 @@ describe("a session save that fails reaches the operator", () => {
   it("two sessions fail; only the retried one's entry clears, A's stays exactly as it was", async () => {
     rec().current = { serviceKey: "st1:plan1:save-error-ab", serviceDate: "2026-09-20", endedAt: null };
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(rejecting);
+    const { restore } = interceptAddSession(baptismStore, rejecting);
     try {
       const markA = await finishOnePerson(); // session A fails
       await pushWhere(markA, (s) => !!s.saveErrors?.length, "carrying A's entry");
@@ -299,7 +297,7 @@ describe("a session save that fails reaches the operator", () => {
   it("a saveErrors entry persists and restores across a restart", async () => {
     rec().current = { serviceKey: "st1:plan1:save-error-persist", serviceDate: "2026-09-20", endedAt: null };
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(rejecting);
+    const { restore } = interceptAddSession(baptismStore, rejecting);
     try {
       const mark = await finishOnePerson();
       await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
@@ -330,7 +328,7 @@ describe("a session save that fails reaches the operator", () => {
 describe("the operator can dismiss a failed save", () => {
   async function failSave(): Promise<void> {
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(rejecting);
+    const { restore } = interceptAddSession(baptismStore, rejecting);
     try {
       const mark = await finishOnePerson();
       await pushWhere(mark, (s) => !!s.saveErrors?.length, "carrying a saveErrors entry");
@@ -406,7 +404,7 @@ describe("what a failed save may put on the screen is built from the errno alone
 
   async function reasonFor(error: unknown): Promise<string | undefined> {
     const log = captureError("[baptism-timer] session save failed:");
-    const restore = stubAddSession(async () => {
+    const { restore } = interceptAddSession(baptismStore, async () => {
       throw error;
     });
     try {
