@@ -247,6 +247,20 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * One service's record: this recorder's own in-memory copy while that
+   * service is still recording, else the store's. The store lags an open
+   * record by up to one debounced persist (schedulePersist), so a service
+   * started seconds ago, or one just resumed and rebuilt, reads null or an
+   * older copy from the store alone. A closed record is on disk as it closes,
+   * and the store may since hold a newer copy (an archive import), so it is
+   * never preferred. Every per-service read route answers through this.
+   */
+  async getRecord(serviceKey: string): Promise<T | null> {
+    const live = this.current;
+    return live?.serviceKey === serviceKey && live.endedAt == null ? live : this.store.get(serviceKey);
+  }
+
+  /**
    * Is this recorder writing to `serviceKey` right now?
    *
    * `currentKey` alone does not answer that: it is set when a record is

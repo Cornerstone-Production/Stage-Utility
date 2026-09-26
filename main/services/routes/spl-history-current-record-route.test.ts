@@ -24,6 +24,7 @@ const { statusRoutes } = await import("./status-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { splHistoryStore } = await import("../spl-history-store.js");
 const { splRecorder } = await import("../spl-recorder.js");
+const { serviceDirPath } = await import("../archive/archive-paths.js");
 
 type Held = { current: { serviceKey: string; endedAt: string | null; meterId: string | null } | null };
 const recorder = splRecorder as unknown as Held;
@@ -31,8 +32,8 @@ const recorder = splRecorder as unknown as Held;
 function record(serviceKey: string, meterId: string | null) {
   return {
     serviceKey,
-    serviceTypeId: "75953",
-    serviceTypeName: "The Salt Company",
+    serviceTypeId: "st-1",
+    serviceTypeName: "Weekend",
     planId: "909",
     planTitle: "Night of Worship",
     seriesTitle: null,
@@ -53,7 +54,7 @@ async function get(key: string) {
 
 describe("GET /api/spl/history/:key", () => {
   it("answers the recorder's live record when its key matches, before the persist debounce has written it", async () => {
-    const key = "75953:909:2251";
+    const key = "st-1:909:2251";
     recorder.current = record(key, "meter-1") as never;
     try {
       assert.equal(await splHistoryStore.get(key), null, "sanity: the store has not seen this service yet");
@@ -70,9 +71,9 @@ describe("GET /api/spl/history/:key", () => {
   });
 
   it("still answers the store when the recorder is holding a DIFFERENT key", async () => {
-    const key = "75953:909:2252";
+    const key = "st-1:909:2252";
     await splHistoryStore.upsert(record(key, "meter-2") as never);
-    recorder.current = record("75953:909:elsewhere", "meter-3") as never;
+    recorder.current = record("st-1:909:elsewhere", "meter-3") as never;
     try {
       const out = await get(key);
       assert.equal(out.status, 200);
@@ -87,5 +88,26 @@ describe("GET /api/spl/history/:key", () => {
     const out = await get("nope:nope:nope");
     assert.equal(out.status, 200);
     assert.equal(out.json, null);
+  });
+});
+
+describe("GET /api/spl/history/:key/series", () => {
+  it("draws a service still recording, before the persist debounce has written its record", async () => {
+    const key = "st-1:909:2254";
+    const rec = record(key, "meter-4");
+    const dir = serviceDirPath(key, rec.serviceDate);
+    await fs.mkdir(dir, { recursive: true });
+    const t0 = Date.parse(rec.startedAt);
+    const rows = Array.from({ length: 60 }, (_, i) => `${new Date(t0 + i * 1000).toISOString()},item-a,Message,85,81`);
+    await fs.writeFile(path.join(dir, "spl.csv"), ["at,itemId,item,SPL A Fast,LAeq 1", ...rows].join("\n"));
+    recorder.current = rec as never;
+    try {
+      assert.equal(await splHistoryStore.get(key), null, "sanity: the store has not seen this service yet");
+      const out = await callRoute(statusRoutes, `/api/spl/history/${encodeURIComponent(key)}/series?metric=LAeq%201&bucket=10`);
+      assert.equal(out.status, 200, "a service recording right now answered 404 for its own sound chart");
+      assert.ok((out.json as { buckets: unknown[] }).buckets.length > 0);
+    } finally {
+      recorder.current = null;
+    }
   });
 });
