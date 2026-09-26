@@ -27,16 +27,12 @@ import type { LayoutObject } from "@main/types/views";
 // The DOM has to exist before the component modules are evaluated — see
 // number-input.test.tsx for why this is not a `before` hook.
 import { installDom } from "../../test-dom.js";
+import { NoStream } from "../../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 
 // A widget's own SSE hooks open an EventSource on mount; jsdom has none, and
 // this test feeds state through the render context instead.
-class NoStream {
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = NoStream;
 
 const { render, cleanup } = await import("@testing-library/react");

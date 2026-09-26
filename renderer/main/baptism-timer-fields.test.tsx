@@ -14,16 +14,13 @@ import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import { baptismState } from "../test-fixtures/baptism-state.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 
 // ObjectContent reaches other layout objects' hooks that open a stream on
 // branches this test does not exercise; give them a stream that does nothing.
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, cleanup } = await import("@testing-library/react");
@@ -38,22 +35,7 @@ after(() => {
 
 type Field = "testimony" | "session" | "phase" | "person";
 
-const IDLE: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
-  personNumber: 0,
-  baptismIndex: 0,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  armed: false,
-  sessionStartedAt: null,
-  finishedAt: null,
-  people: [],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-};
+const IDLE: BaptismState = baptismState();
 
 /** Render one field over a given state (and shared "now"), returning the text
  *  it drew. No `label` override — the object falls back to its own wording. */

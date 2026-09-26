@@ -14,33 +14,15 @@ import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
+import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 import { fmtTime } from "./overview-data.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** api.ts opens an SSE stream on first use — most tests here never push on
- *  it, but a few drive a live channel through `FakeEventSource.last`. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
+// api.ts opens an SSE stream on first use — most tests here never push on
+// it, but a few drive a live channel through `FakeEventSource.last`.
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
   observe(): void {}
@@ -166,30 +148,20 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
-const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-  await import("@tanstack/react-router");
+const { RouterContextProvider } = await import("@tanstack/react-router");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/** A real (memory-history) router carrying /history/manage (where this page
- *  itself lives, so useSelectedServiceKey's own navigation has somewhere
- *  real to resolve) and /baptism (the Baptisms card's "Open in Baptisms"
- *  link) — the same mechanism past-sessions.test.tsx uses for its own
- *  cross-link, so the rendered href is AppLink/Link's real resolution, never
- *  a hand-built string compared against itself. Only the ONE test that
- *  needs a real destination for that link asks for this; every other test
- *  keeps rendering with no router at all, exactly as before. */
-function routerWithBaptismDestination() {
-  const rootRoute = createRootRoute({});
-  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-  const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
-  return createRouter({
-    routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
-    history: createMemoryHistory({ initialEntries: ["/history/manage"] }),
-  });
-}
+// A real (memory-history) router carrying /history/manage (where this page
+// itself lives, so useSelectedServiceKey's own navigation has somewhere real
+// to resolve) and /baptism (the Baptisms card's "Open in Baptisms" link) — the
+// same mechanism past-sessions.test.tsx uses for its own cross-link, so the
+// rendered href is AppLink/Link's real resolution, never a hand-built string
+// compared against itself. Only the ONE test that needs a real destination
+// for that link asks for this; every other test keeps rendering with no
+// router at all, exactly as before.
 
 async function openTheService(Section: React.ComponentType, opts: { router?: ReturnType<typeof routerWithBaptismDestination> } = {}) {
   const section = opts.router

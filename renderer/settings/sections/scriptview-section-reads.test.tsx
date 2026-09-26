@@ -24,33 +24,12 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-/** A stream a test can push on, as the server's SSE does. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  onopen: unknown = null;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");

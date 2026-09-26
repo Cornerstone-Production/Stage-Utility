@@ -29,33 +29,14 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
+import { FakeEventSource } from "../../../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
 
-/** A minimal fake EventSource that can push a named channel's payload on
- *  demand — what the "a push is a hint, never an answer" tests below use to
- *  prove it. `FakeEventSource.last` is whichever instance api.ts's SSE
- *  client most recently constructed. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
+// `FakeEventSource.last` is whichever instance api.ts's SSE client most
+// recently constructed — what the "a push is a hint, never an answer" tests
+// below use to prove it.
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
@@ -68,23 +49,7 @@ const { rebuildButtonsIn, tooltipTextOf } = await import("./rebuild-button-test-
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-const IDLE: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
-  personNumber: 0,
-  baptismIndex: 0,
-  armed: false,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  sessionStartedAt: null,
-  finishedAt: null,
-  people: [],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-  serviceKey: null,
-};
+const IDLE: BaptismState = baptismState({ serviceKey: null });
 
 function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
   return {

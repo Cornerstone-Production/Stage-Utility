@@ -21,14 +21,10 @@ import { after, afterEach, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installRenderDom();
 
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");

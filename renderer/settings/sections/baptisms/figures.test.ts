@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
 import { baptismFigures } from "./figures.js";
 
 const started = Date.UTC(2026, 8, 27, 11, 0, 0);
-const base = {
-  mode: "grouped", phase: "idle", armed: false,
+const base = baptismState({
   sessionStartedAt: new Date(started).toISOString(),
   finishedAt: new Date(started + 29 * 60_000).toISOString(),
-  personNumber: 1, baptismIndex: 0, segmentStartedAt: null, segmentAccumMs: 0,
-  pendingTestimonyMs: null, serviceTitle: null, serviceTypeId: null, planId: null,
-};
+  personNumber: 1,
+});
 const by = (f: { key: string; value: string }[], k: string) => f.find((x) => x.key === k)?.value;
 
 describe("baptismFigures", () => {

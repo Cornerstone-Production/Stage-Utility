@@ -20,14 +20,14 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { routerAt } from "../../../test-fixtures/router.js";
 
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../../components/ui/index.js");
-const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-  await import("@tanstack/react-router");
+const { RouterContextProvider } = await import("@tanstack/react-router");
 const { PastSessionsCard } = await import("./past-sessions.js");
 const { historyServiceHref } = await import("../service-history-section.js");
 const { baptismSessionFixture } = await import("./baptism-session-fixture.js");
@@ -66,12 +66,7 @@ function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
 /** Mounts the card under a real (memory-history) router plus the tooltip and
  *  confirm hosts every button here depends on. */
 function mount(props: { sessions: readonly BaptismSession[]; loadError?: boolean; onDelete?: (id: string) => void }) {
-  const rootRoute = createRootRoute({});
-  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-  const router = createRouter({
-    routeTree: rootRoute.addChildren([historyRoute]),
-    history: createMemoryHistory({ initialEntries: ["/baptism"] }),
-  });
+  const router = routerAt("/baptism", "/history/manage");
   const view = render(
     React.createElement(
       TooltipProvider,

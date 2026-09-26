@@ -13,6 +13,9 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
+import { FakeEventSource } from "../../../test-fixtures/fake-event-source.js";
+import { ok } from "../../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
@@ -28,29 +31,6 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
   },
 });
 
-/** A fake EventSource that hands the test its channel listeners to fire —
- *  the same shape session-chart-refetch.test.tsx's own FakeEventSource uses,
- *  copied rather than shared per this repo's per-file convention. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
@@ -61,36 +41,15 @@ import type { StatFigure } from "../history-chart";
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-const BASE: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
-  personNumber: 0,
-  baptismIndex: 0,
-  armed: false,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  sessionStartedAt: null,
-  finishedAt: null,
-  people: [],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-};
-
-/** A minimal ok `fetch()` response — shared by every stub below, which used
- *  to each define this same one-liner themselves. */
-function okResponse(json: unknown) {
-  return { ok: true, status: 200, json: async () => json, text: async () => "" };
-}
+const BASE: BaptismState = baptismState();
 
 function stubFetch(lane: { spans: unknown[] }) {
   return (async (input: string) => {
     const url = String(input);
-    if (url.includes("/api/baptism/lane")) return okResponse(lane);
-    if (url.includes("/api/service-timeline/current")) return okResponse(null);
-    if (url.includes("/api/service-timeline/")) return okResponse(null);
-    return okResponse({});
+    if (url.includes("/api/baptism/lane")) return ok(lane);
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(null);
+    return ok({});
   }) as unknown as typeof fetch;
 }
 
@@ -289,7 +248,7 @@ test("plan items before and after the session are left off the chart, not just s
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
     if (url.includes("/api/baptism/lane")) {
-      return okResponse({
+      return ok({
         spans: [
           { kind: "testimony", person: 1, startedAt: "2026-09-20T15:20:00.000Z", endedAt: "2026-09-20T15:26:00.000Z" },
           { kind: "testimony", person: 2, startedAt: "2026-09-20T15:26:00.000Z", endedAt: "2026-09-20T15:32:00.000Z" },
@@ -298,9 +257,9 @@ test("plan items before and after the session are left off the chart, not just s
         ],
       });
     }
-    if (url.includes("/api/service-timeline/current")) return okResponse(null);
-    if (url.includes("/api/service-timeline/")) return okResponse(timeline);
-    return okResponse({});
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(timeline);
+    return ok({});
   }) as unknown as typeof fetch;
 
   try {
@@ -367,16 +326,16 @@ test("Customize toggles the plan lane off, and the choice persists across a remo
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
     if (url.includes("/api/baptism/lane")) {
-      return okResponse({
+      return ok({
         spans: [
           { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:01:48.000Z" },
           { kind: "baptism", person: 1, startedAt: "2026-09-20T15:05:00.000Z", endedAt: "2026-09-20T15:05:42.000Z" },
         ],
       });
     }
-    if (url.includes("/api/service-timeline/current")) return okResponse(null);
-    if (url.includes("/api/service-timeline/")) return okResponse(timeline);
-    return okResponse({});
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(timeline);
+    return ok({});
   }) as unknown as typeof fetch;
 
   try {
@@ -435,10 +394,10 @@ test("a failed lane fetch shows its own note, not 'no timing detail', and reache
     const url = String(input);
     if (url.includes("/api/log/client")) {
       logCalls.push(JSON.parse(String(init?.body ?? "{}")));
-      return okResponse({});
+      return ok({});
     }
     if (url.includes("/api/baptism/lane")) throw new Error("network down");
-    return okResponse(null);
+    return ok(null);
   }) as unknown as typeof fetch;
 
   try {
@@ -489,7 +448,7 @@ test("a failed lane fetch on a live session says the next press tries again", as
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     if (String(input).includes("/api/baptism/lane")) throw new Error("network down");
-    return okResponse(null);
+    return ok(null);
   }) as unknown as typeof fetch;
   try {
     render(
@@ -523,18 +482,18 @@ test("a failed plan-timeline fetch shows its own note, and still reaches the log
     const url = String(input);
     if (url.includes("/api/log/client")) {
       logCalls.push(JSON.parse(String(init?.body ?? "{}")));
-      return okResponse({});
+      return ok({});
     }
     if (url.includes("/api/baptism/lane")) {
-      return okResponse({
+      return ok({
         spans: [
           { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:01:48.000Z" },
         ],
       });
     }
-    if (url.includes("/api/service-timeline/current")) return okResponse(null);
+    if (url.includes("/api/service-timeline/current")) return ok(null);
     if (url.includes("/api/service-timeline/")) throw new Error("network down");
-    return okResponse({});
+    return ok({});
   }) as unknown as typeof fetch;
 
   try {
@@ -589,13 +548,13 @@ test("hovering the running segment keeps moving, not frozen at whatever duration
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
     if (url.includes("/api/baptism/lane")) {
-      return okResponse({
+      return ok({
         spans: [{ kind: "testimony", person: 1, startedAt: new Date(T0).toISOString(), endedAt: null }],
       });
     }
-    if (url.includes("/api/service-timeline/current")) return okResponse(null);
-    if (url.includes("/api/service-timeline/")) return okResponse(null);
-    return okResponse({});
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(null);
+    return ok({});
   }) as unknown as typeof fetch;
 
   const seen: (StatFigure[] | null)[] = [];
@@ -674,10 +633,10 @@ test("a press's own new span draws immediately, even before the next second's cl
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    if (url.includes("/api/baptism/lane")) return okResponse(lane);
-    if (url.includes("/api/service-timeline/current")) return okResponse(null);
-    if (url.includes("/api/service-timeline/")) return okResponse(null);
-    return okResponse({});
+    if (url.includes("/api/baptism/lane")) return ok(lane);
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(null);
+    return ok({});
   }) as unknown as typeof fetch;
 
   try {

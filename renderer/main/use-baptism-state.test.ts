@@ -16,24 +16,14 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
+import { baptismState } from "../test-fixtures/baptism-state.js";
 import { fmtBaptizeMs, summarizeBaptism } from "./use-baptism-state.js";
 
-const BASE_STATE: BaptismState = {
-  mode: "grouped",
+const BASE_STATE: BaptismState = baptismState({
   phase: "baptism",
   personNumber: 3,
-  baptismIndex: 0,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  armed: false,
   sessionStartedAt: "2026-09-20T12:00:00.000Z",
-  finishedAt: null,
-  people: [],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-};
+});
 
 describe("a grouped session mid-testimony, nobody baptized yet", () => {
   const state: BaptismState = {

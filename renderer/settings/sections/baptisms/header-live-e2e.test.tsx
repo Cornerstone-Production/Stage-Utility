@@ -23,28 +23,10 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
+import { FakeEventSource } from "../../../test-fixtures/fake-event-source.js";
 const teardown = installRenderDom();
 
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { setAppTimeZone } = await import("../../../../main/services/app-timezone.js");
@@ -69,11 +51,7 @@ afterEach(() => cleanup());
 
 addBroadcastListener((channel, payload) => FakeEventSource.last?.push(channel, payload));
 
-const IDLE = {
-  mode: "grouped", phase: "idle", personNumber: 0, baptismIndex: 0, armed: false,
-  segmentStartedAt: null, segmentAccumMs: 0, sessionStartedAt: null, finishedAt: null,
-  people: [], pendingTestimonyMs: null, serviceTitle: null, serviceTypeId: null, planId: null, serviceKey: null,
-} as unknown as BaptismState;
+const IDLE = baptismState({ serviceKey: null });
 
 let planN = 0;
 let planId = "";

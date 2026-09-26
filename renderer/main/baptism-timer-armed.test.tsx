@@ -18,16 +18,13 @@ import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import { baptismState } from "../test-fixtures/baptism-state.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 
 // ObjectContent reaches other layout objects' hooks that open a stream on
 // branches this test does not exercise; give them a stream that does nothing.
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, cleanup } = await import("@testing-library/react");
@@ -40,26 +37,16 @@ after(() => {
   teardown();
 });
 
-const BASE_STATE: BaptismState = {
-  mode: "grouped",
+const BASE_STATE: BaptismState = baptismState({
   phase: "baptism",
   personNumber: 3,
-  baptismIndex: 0,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  armed: false,
   sessionStartedAt: "2026-09-20T12:00:00.000Z",
-  finishedAt: null,
   people: [
     { testimonyMs: 60_000, baptizeMs: 0 },
     { testimonyMs: 45_000, baptizeMs: 0 },
     { testimonyMs: 30_000, baptizeMs: 0 },
   ],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-};
+});
 
 /** Render one of the baptism-timer object's fields over a given state and
  *  return the text it drew. No `label` override — the object falls back to

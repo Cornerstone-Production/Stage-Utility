@@ -18,6 +18,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
 
@@ -36,23 +37,16 @@ afterEach(() => cleanup());
 const DISK = "ENOSPC: no space left on device";
 
 /** A grouped session just finished: one person testified and was baptized. */
-const FINISHED: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
+const FINISHED: BaptismState = baptismState({
   personNumber: 1,
-  baptismIndex: 0,
-  armed: false,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
   sessionStartedAt: "2026-09-20T15:00:00.000Z",
   finishedAt: "2026-09-20T15:12:00.000Z",
   people: [{ testimonyMs: 95_000, baptizeMs: 41_000 }],
-  pendingTestimonyMs: null,
   serviceTitle: "9am",
   serviceTypeId: "svc-1",
   planId: "plan-1",
   saveErrors: [],
-};
+});
 
 /** One saveErrors entry for `sessionStartedAt` (FINISHED's own, by default). */
 function failedSave(reason: string, sessionStartedAt = FINISHED.sessionStartedAt!) {

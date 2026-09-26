@@ -22,6 +22,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom } from "../../test-dom.js";
+import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -164,22 +165,12 @@ const { TooltipProvider } = await import("../../components/ui/index.js");
 const { ServiceHistorySection } = await import("./service-history-section.js");
 const { serviceKpis, serviceRowFigures } = await import("./history-service-header.js");
 const { baptismSessionFixture } = await import("./baptisms/baptism-session-fixture.js");
-const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-  await import("@tanstack/react-router");
+const { RouterContextProvider } = await import("@tanstack/react-router");
 
-/** A real (memory-history) router carrying /history/manage (where this page
- *  lives) and /baptism (the Baptisms card's "Open in Baptisms" link) — the
- *  same mechanism past-sessions.test.tsx and history-service-page.test.tsx
- *  use for their own cross-links. */
-function routerWithBaptismDestination() {
-  const rootRoute = createRootRoute({});
-  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-  const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
-  return createRouter({
-    routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
-    history: createMemoryHistory({ initialEntries: ["/history/manage"] }),
-  });
-}
+// A real (memory-history) router carrying /history/manage (where this page
+// lives) and /baptism (the Baptisms card's "Open in Baptisms" link) — the
+// same mechanism past-sessions.test.tsx and history-service-page.test.tsx use
+// for their own cross-links.
 
 afterEach(cleanup);
 after(() => {

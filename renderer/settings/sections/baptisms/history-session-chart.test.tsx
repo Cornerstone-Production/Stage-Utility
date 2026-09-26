@@ -18,6 +18,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { ok } from "../../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
@@ -45,17 +46,11 @@ function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
   };
 }
 
-/** A minimal ok `fetch()` response — shared by every stub below, which used
- *  to each define this same one-liner themselves. */
-function okResponse(json: unknown) {
-  return { ok: true, status: 200, json: async () => json, text: async () => "" };
-}
-
 function stubFetch(lane: { spans: unknown[] }) {
   return (async (input: string) => {
     const url = String(input);
-    if (url.includes("/api/baptism/lane")) return okResponse(lane);
-    return okResponse({});
+    if (url.includes("/api/baptism/lane")) return ok(lane);
+    return ok({});
   }) as unknown as typeof fetch;
 }
 
@@ -120,12 +115,12 @@ test("the plan lane draws from the `items` prop, and moves when the caller's own
     const url = String(input);
     if (url.includes("/api/baptism/lane")) {
       laneCalls += 1;
-      return okResponse({ spans: [{ kind: "testimony", person: 1, startedAt: "2026-09-20T15:01:00.000Z", endedAt: "2026-09-20T15:03:00.000Z" }] });
+      return ok({ spans: [{ kind: "testimony", person: 1, startedAt: "2026-09-20T15:01:00.000Z", endedAt: "2026-09-20T15:03:00.000Z" }] });
     }
     // No /api/service-timeline/ branch at all — a call to it fails the test
     // by returning {} where an items array was expected, which is exactly
     // the point: this component must never ask for its own copy.
-    return okResponse({});
+    return ok({});
   }) as unknown as typeof fetch;
   try {
     const view = render(
@@ -297,10 +292,10 @@ test("a load failure shows its own error note, distinct from 'no timeline was re
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/api/log/client")) return okResponse({});
+    if (url.includes("/api/log/client")) return ok({});
     if (url.includes("/api/baptism/lane")) throw new Error("network down");
     void init;
-    return okResponse({});
+    return ok({});
   }) as unknown as typeof fetch;
   try {
     render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()], items: [] }));
@@ -347,13 +342,13 @@ test("the host is observed from the very first render, before the lane even load
     const url = String(input);
     await new Promise((r) => setTimeout(r, 0));
     if (url.includes("/api/baptism/lane")) {
-      return okResponse({
+      return ok({
         spans: [
           { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:02:00.000Z" },
         ],
       });
     }
-    return okResponse({});
+    return ok({});
   }) as unknown as typeof fetch;
   try {
     render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()], items: [] }));

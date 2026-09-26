@@ -7,6 +7,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
 
 const teardown = installDom();
 
@@ -18,22 +19,14 @@ afterEach(cleanup);
 after(() => unmountAndTeardown(cleanup, teardown));
 
 function state(people: BaptismPerson[]): BaptismState {
-  return {
+  return baptismState({
     serviceKey: null,
-    mode: "grouped",
     phase: people.length ? "baptism" : "idle",
     personNumber: people.length + 1,
-    baptismIndex: 0,
-    segmentStartedAt: null,
     autoStartedFrom: null,
     sessionStartedAt: people.length ? "2026-09-20T15:00:00.000Z" : null,
-    finishedAt: null,
     people,
-    pendingTestimonyMs: null,
-    serviceTitle: null,
-    serviceTypeId: null,
-    planId: null,
-  };
+  });
 }
 
 describe("PeopleCard — empty state", () => {
