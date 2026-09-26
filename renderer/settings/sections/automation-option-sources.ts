@@ -162,40 +162,57 @@ export const OPTION_SOURCE_KEYS = Object.keys(buildOptionSources({})) as OptionS
  * ProPresenter pair — each answer with a list whatever the booth machines are
  * doing (an unreachable one yields an empty list, never an error), so none can
  * stop the editor opening. The macro read is cached server-side for 30s, which
- * is what keeps re-opening the editor off the LAN.
+ * is what keeps re-opening the editor off the LAN — the six queries below
+ * share that same 30s as their own client-side staleTime (react-query's
+ * default is 0), for the same reason: the layout editor's action-button
+ * Inspector remounts per selection, so a bare `useQuery` re-fetched all six on
+ * every click between buttons, whatever those buttons' actions actually used —
+ * selecting between four action buttons with no params at all issued ~28 GETs.
+ * 30s trades a little staleness (a target added in Carbonite, an item added to
+ * the plan, mid-edit) for not hammering the LAN every click; closing and
+ * reopening the editor still forces a fresh read.
  *
  * Stage state and service types go through the app-wide queries so the
  * Automation page shares one cache entry with the rest of settings rather than
  * refetching. `useServiceTypes` is already gated on PCO being configured: on a
  * machine with no credentials the request can only fail, and ungated it filled
- * the server log with handler errors.
+ * the server log with handler errors. Neither has a staleTime here: both live
+ * in renderer/app/queries.ts, outside this module.
  */
+const OPTION_SOURCE_STALE_MS = 30_000;
+
 export function useOptionSources(): OptionSources {
   const { data: rosstalkTargets } = useQuery({
     queryKey: ["rosstalk:targets"],
     queryFn: () => invoke<{ targets: { id: string; name: string }[] }>("rosstalk:targets"),
+    staleTime: OPTION_SOURCE_STALE_MS,
   });
   const { data: rosstalkCommands } = useQuery({
     queryKey: ["rosstalk:commands"],
     queryFn: () => invoke<{ id: string; label: string }[]>("rosstalk:commands"),
+    staleTime: OPTION_SOURCE_STALE_MS,
   });
   // Local config, so this costs no network — the same shape as rosstalk-targets
   // beside it, which was wired when this was not.
   const { data: oscTargets } = useQuery({
     queryKey: ["osc:listTargets"],
     queryFn: () => invoke<{ id: string; name: string }[]>("osc:listTargets"),
+    staleTime: OPTION_SOURCE_STALE_MS,
   });
   const { data: planItems } = useQuery({
     queryKey: ["automation:plan-items"],
     queryFn: () => invoke<{ items: Option[] }>("automation:plan-items"),
+    staleTime: OPTION_SOURCE_STALE_MS,
   });
   const { data: propresenterInstances } = useQuery({
     queryKey: ["automation:propresenter-instances"],
     queryFn: () => invoke<{ items: Option[] }>("automation:propresenter-instances"),
+    staleTime: OPTION_SOURCE_STALE_MS,
   });
   const { data: propresenterMacros } = useQuery({
     queryKey: ["automation:propresenter-macros"],
     queryFn: () => invoke<{ items: Option[]; unreachable?: string[] }>("automation:propresenter-macros"),
+    staleTime: OPTION_SOURCE_STALE_MS,
   });
   const { data: stageState } = useStageStateQuery();
   const { data: serviceTypes } = useServiceTypes(stageState);
