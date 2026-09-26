@@ -267,7 +267,9 @@ The `/log` page has the evidence when something looks wrong:
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
 - a read that lands after the integration has been reconfigured or stopped is
-  dropped rather than applied to the new connection: `[prodcom] dropped a
+  dropped rather than applied to the new connection, and the reads that would
+  have followed it (keywords after channels, backfill after both, the second
+  newest-page read) are never sent to the old box: `[prodcom] dropped a
   backfill (…) that arrived after this connection was replaced`, `… dropped a
   channel list read …`, `… dropped a keyword read …`, and `… dropped a
   baseline read that arrived after this websocket attempt was replaced`. All

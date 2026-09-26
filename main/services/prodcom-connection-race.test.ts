@@ -193,3 +193,164 @@ describe("a REST read started for one connection must not apply to whatever repl
     );
   });
 });
+
+describe("the rest of a replaced connection's REST chain does not run either", () => {
+  // Each read above drops its OWN stale answer. The chain it sits in —
+  // channels, then keywords, then backfill — used to carry on regardless,
+  // sending the next read to the OLD box and applying it under the NEW
+  // connection, whose epoch that next read captured when it started. These
+  // cases give box A the history and keywords that make that visible.
+  //
+  // Box A refuses the websocket in every case: an open socket reads its own
+  // baseline page the moment it opens, and that request — sent before the
+  // reconfigure, arriving after it — would be counted against the chain.
+
+  /** Requests box A saw after `from`, other than websocket attempts. */
+  const restAfter = (stub: { requests: { url: string }[] }, from: number): string[] =>
+    stub.requests
+      .slice(from)
+      .map((r) => r.url)
+      .filter((u) => !u.startsWith("/api/v1/ws"));
+
+  it("a reconfigure during box A's channel read sends box A no keyword or backfill read", async (t: TestContext) => {
+    const stubA = await startProdComStub({
+      channels: [{ id: "CH-OLD", name: "Old Box Channel" }],
+      refuseWebSocket: true,
+      keywords: [{ id: "kw-1", text: "secret", isSensitive: true }],
+      entries: [spoken("from-box-a")],
+      delayRequestMs: (url) => (url.pathname === "/api/v1/channels" ? 700 : 0),
+    });
+    const stubB = await startProdComStub({ channels: CHANNELS_B }); // no keywords, no history
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stubA.close();
+      await stubB.close();
+    });
+
+    svc.configure("127.0.0.1", stubA.port, null);
+    await eventually(() => stubA.requests.some((r) => r.url === "/api/v1/channels"), "box A's channel read in flight");
+    const mark = stubA.requests.length;
+    svc.configure("127.0.0.1", stubB.port, null);
+    await eventually(() => svc.sseUpNow, "box B's SSE stream to come up");
+    await sleep(1000); // past box A's held channel answer, and anything it would have chained
+
+    stubB.sseSend(spoken("this-is-a-secret-message"));
+    await eventually(() => svc.texts().some((l) => l.startsWith("this-is-a-")), "box B's line to land");
+    assert.deepEqual(restAfter(stubA, mark), [], "box A was sent the rest of its chain after the reconfigure");
+    assert.equal(svc.texts().includes("from-box-a"), false, "box A's history landed on box B's connection");
+    assert.ok(
+      svc.texts().includes("this-is-a-secret-message"),
+      `box A's sensitive keyword redacted box B's line: ${JSON.stringify(svc.texts())}`,
+    );
+  });
+
+  it("a reconfigure during box A's keyword read sends box A no backfill read", async (t: TestContext) => {
+    const stubA = await startProdComStub({
+      channels: [{ id: "CH-OLD", name: "Old Box Channel" }],
+      refuseWebSocket: true,
+      entries: [spoken("from-box-a")],
+      delayRequestMs: (url) => (url.pathname === "/api/v1/keywords" ? 700 : 0),
+    });
+    const stubB = await startProdComStub({ channels: CHANNELS_B });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stubA.close();
+      await stubB.close();
+    });
+
+    svc.configure("127.0.0.1", stubA.port, null);
+    await eventually(() => stubA.requests.some((r) => r.url === "/api/v1/keywords"), "box A's keyword read in flight");
+    const mark = stubA.requests.length;
+    svc.configure("127.0.0.1", stubB.port, null);
+    await eventually(() => svc.sseUpNow, "box B's SSE stream to come up");
+    await sleep(1000);
+
+    assert.deepEqual(
+      restAfter(stubA, mark).filter((u) => u.startsWith("/api/v1/transcript")),
+      [],
+      "box A was sent a backfill read after the reconfigure",
+    );
+    assert.equal(svc.texts().includes("from-box-a"), false, "box A's history landed on box B's connection");
+  });
+
+  it("box A's empty keyword list does not un-redact box B's sensitive word", async (t: TestContext) => {
+    // The direction that matters most: box B hides "secret", box A hides
+    // nothing, and box A's list used to land AFTER box B's.
+    const stubA = await startProdComStub({
+      channels: [{ id: "CH-OLD", name: "Old Box Channel" }],
+      refuseWebSocket: true,
+      delayRequestMs: (url) => (url.pathname === "/api/v1/channels" ? 500 : 0),
+    });
+    const stubB = await startProdComStub({
+      channels: CHANNELS_B,
+      keywords: [{ id: "kw-b", text: "secret", isSensitive: true }],
+    });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stubA.close();
+      await stubB.close();
+    });
+
+    svc.configure("127.0.0.1", stubA.port, null);
+    await eventually(() => stubA.requests.some((r) => r.url === "/api/v1/channels"), "box A's channel read in flight");
+    svc.configure("127.0.0.1", stubB.port, null);
+    await eventually(() => svc.sseUpNow, "box B's SSE stream to come up");
+    stubB.sseSend(spoken("before-a-lands-secret"));
+    await eventually(() => svc.texts().length > 0, "box B's line to land");
+    assert.equal(svc.texts()[0], "before-a-lands-******", "precondition: box B's keyword is loaded");
+
+    await sleep(900); // past box A's held channel answer
+    assert.equal(svc.texts()[0], "before-a-lands-******", "box A's empty keyword list un-redacted box B's sensitive word");
+  });
+
+  it("stop() during box A's channel read sends box A nothing more", async (t: TestContext) => {
+    const stubA = await startProdComStub({
+      channels: [{ id: "CH-OLD", name: "Old Box Channel" }],
+      refuseWebSocket: true,
+      entries: [spoken("from-box-a")],
+      delayRequestMs: (url) => (url.pathname === "/api/v1/channels" ? 500 : 0),
+    });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stubA.close();
+    });
+
+    svc.configure("127.0.0.1", stubA.port, null);
+    await eventually(() => stubA.requests.some((r) => r.url === "/api/v1/channels"), "box A's channel read in flight");
+    svc.stop();
+    const mark = stubA.requests.length;
+    await sleep(900);
+    assert.deepEqual(restAfter(stubA, mark), [], "requests went to the box after stop()");
+    assert.equal(svc.texts().includes("from-box-a"), false, "a backfill landed after stop()");
+  });
+
+  it("stop() during the silence check's first page read sends box A no second one", async (t: TestContext) => {
+    // readNewestPage is a two-read chain of its own on a box holding more than
+    // a page: the row count, then the tail. This one keeps its websocket — the
+    // socket's own baseline read is the chain under test.
+    let hold = true;
+    const stubA = await startProdComStub({
+      channels: [{ id: "CH-OLD", name: "Old Box Channel" }],
+      entries: Array.from({ length: 150 }, (_, i) => spoken(`row-${i}`, -3 * 60 * 60_000)),
+      delayTranscriptMs: (url) => (hold && !url.searchParams.has("since") ? 500 : 0),
+    });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stubA.close();
+    });
+
+    svc.configure("127.0.0.1", stubA.port, null);
+    const pageReads = (): string[] =>
+      stubA.requests.map((r) => r.url).filter((u) => u.startsWith("/api/v1/transcript?") && !u.includes("since="));
+    await eventually(() => pageReads().length === 1, "the socket's first page read in flight");
+    svc.stop();
+    hold = false;
+    await sleep(800);
+    assert.deepEqual(pageReads().slice(1), [], "the second page read went to the box after stop()");
+  });
+});

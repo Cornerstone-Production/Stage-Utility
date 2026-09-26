@@ -1352,7 +1352,13 @@ export class ProdComService extends ConnectionLifecycle {
     host: string,
     port: number,
   ): Promise<{ ok: true; rows: PageRow[] } | { ok: false; error: string }> {
+    // A two-read chain, so the same between-stages rule as primeFromRest: a
+    // stop() or a reconfigure during the first read sends the old box no
+    // second one. Every caller already drops an answer from a replaced
+    // connection, so this only saves the request.
+    const epoch = this.connectionEpoch;
     const first = await this.fetchTranscriptSlice(host, port, 0, WS_SILENCE_CHECK_PAGE_SIZE);
+    if (epoch !== this.connectionEpoch) return { ok: false, error: "the connection was replaced" };
     if (!first.ok) return first;
     if (first.total <= WS_SILENCE_CHECK_PAGE_SIZE) return { ok: true, rows: first.rows };
     const offset = Math.max(0, first.total - WS_SILENCE_CHECK_PAGE_SIZE);
@@ -2834,9 +2840,17 @@ export class ProdComService extends ConnectionLifecycle {
    *
    * Channels FIRST and awaited, so the backfilled lines carry their colours on
    * the very first broadcast rather than arriving grey and correcting later.
+   *
+   * The epoch is re-read between stages, not just inside each read. Every
+   * read drops its own stale answer, but a stage started AFTER a reconfigure
+   * or a stop() captures the new epoch itself and is then applied: the old
+   * box's four hours of history landing in the new box's buffer, or its
+   * keyword list replacing the new box's. See prodcom-connection-race.test.ts.
    */
   private async primeFromRest(host: string, port: number): Promise<void> {
+    const epoch = this.connectionEpoch;
     await this.refreshChannelMetadata(host, port);
+    if (epoch !== this.connectionEpoch) return;
     await this.backfillNow(host, port);
   }
 
@@ -2916,7 +2930,10 @@ export class ProdComService extends ConnectionLifecycle {
    * answering, without waiting out the refresh throttle.
    */
   protected async refreshChannelMetadata(host: string, port: number): Promise<void> {
+    // Re-read before the keyword stage for the reason primeFromRest gives.
+    const epoch = this.connectionEpoch;
     const channels = await this.fetchChannels(host, port);
+    if (epoch !== this.connectionEpoch) return;
     if (channels.error) {
       this.logChannelFailure(channels.error);
       // Without the channel list there is nothing to ask for keywords about.
