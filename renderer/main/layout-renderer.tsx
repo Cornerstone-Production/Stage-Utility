@@ -1058,10 +1058,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     }
     case "transcript-strip": {
-      // Optionally drop lines from hidden channels (by channel name).
+      // Optionally drop lines from hidden channels — by the SAME label the
+      // inspector's chips offer (channelLabel: channelName, falling back to
+      // the raw channel id for an unnamed ProdCom channel). Comparing
+      // l.channelName alone left an unnamed channel's chip switched off with
+      // nothing to match against — every one of its lines kept rendering.
       const hidden = c.hideChannels ?? [];
       const lines = hidden.length
-        ? ctx.transcript.filter((l) => !hidden.includes(l.channelName ?? ""))
+        ? ctx.transcript.filter((l) => !hidden.includes(channelLabel(l) ?? ""))
         : ctx.transcript;
       if (lines.length === 0) return null;
       if (c.mode !== "latest") {
