@@ -41,7 +41,9 @@ last word on whether the rule runs.
 The rules list marks a rule with a problem **Needs setup: N fields**, naming
 them, and its switch will not turn it on — turning ON a rule that still has a
 problem is the one thing this refuses, both in the editor and from the list,
-because that is the one action asking the rule to actually run.
+because that is the one action asking the rule to actually run. A pair's row
+carries one badge over both halves, the same as its **any time** badge below —
+either half needing setup is the pair needing setup.
 
 **A rule already enabled with a problem — from before this build, or a restored
 config — keeps running exactly as it did.** Loading it, restoring it, or a

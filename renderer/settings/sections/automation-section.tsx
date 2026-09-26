@@ -358,6 +358,7 @@ function PairRow({
   hidden,
   guarded,
   cueState,
+  issues,
   onOpen,
 }: {
   base: string;
@@ -368,6 +369,9 @@ function PairRow({
   /** BOTH halves carry `service.is-not-live`. See ServiceGuardBadge. */
   guarded: boolean;
   cueState: CueStateRow | null;
+  /** Both halves' issues, combined — either half needing setup is the pair
+   *  needing setup, the same as RuleRow's own badge one field down. */
+  issues: RuleIssue[];
   onOpen: () => void;
 }) {
   return (
@@ -380,8 +384,11 @@ function PairRow({
           aria-label={`${name} pair`}
         >
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-footnote font-medium text-fg" data-cue-pair-name={name}>
-              {name}
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-footnote font-medium text-fg" data-cue-pair-name={name}>
+                {name}
+              </span>
+              {issues.length > 0 && <NeedsSetupBadge issues={issues} />}
             </span>
             <span className="block truncate font-mono text-caption2 text-fg-subtle">
               {onName} / {offName}
@@ -716,6 +723,7 @@ export function AutomationSection() {
         hidden={p.hidden}
         guarded={hasServiceGuard(p.on.conditions) && hasServiceGuard(p.off.conditions)}
         cueState={cueStateFor(cueStateData?.states, p.base)}
+        issues={[...(p.on.issues ?? []), ...(p.off.issues ?? [])]}
         onOpen={() => setEditing({ kind: "pair", id: p.on.id })}
       />
     );

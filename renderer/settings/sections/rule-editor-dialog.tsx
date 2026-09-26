@@ -143,8 +143,12 @@ export interface PairRowData {
   onName: string;
   offName: string;
   hidden: boolean;
-  on: Rule;
-  off: Rule;
+  /** GET /api/automation/rules answers every rule with its issues, pair
+   *  halves included — `Rule` alone undersold what the caller actually has,
+   *  which is how PairRow went a whole release never showing a pair's own
+   *  Needs setup badge. */
+  on: Rule & { issues: RuleIssue[] };
+  off: Rule & { issues: RuleIssue[] };
 }
 
 // ── Shared row helpers, matching the layout inspector's shape ─────────────────
