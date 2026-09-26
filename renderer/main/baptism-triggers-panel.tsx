@@ -150,7 +150,7 @@ export function BaptismTriggersPanel() {
           <>
             This plan will start the testimonies at{" "}
             <span className="text-gray-12">&ldquo;{testimonyItem?.title}&rdquo;</span>
-            {testimonyItemId ? "" : " (found by the keyword in Advanced)"}, and{" "}
+            {testimonyItemId ? "" : " (found by the keyword below)"}, and{" "}
             {baptismItem ? (
               <>
                 switch to the baptisms at{" "}

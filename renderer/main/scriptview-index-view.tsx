@@ -74,7 +74,7 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
   const globalLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
 
   // The curated set is authoritative: show exactly the enabled service types, in
-  // the configured order. Nothing enabled → empty (guide the operator to Settings).
+  // the configured order. Nothing enabled → empty (guide the operator to the ScriptView page).
   const rows = useMemo(() => {
     if (!types) return [];
     return shownIds
@@ -123,7 +123,7 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Turn them on in Settings → ScriptView.</p>
+            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ScriptView page, under Shown on the landing page.</p>
           ) : (
             rows.map((type) => {
               const cur = selectedFor(type.id);
