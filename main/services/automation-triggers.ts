@@ -972,13 +972,18 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
       if (!want) return false; // an empty phrase would match every line
       const onlyChannel = String(params.channel ?? "").trim().toLowerCase();
 
-      // Only lines NOT already present: the transcript grows, so matching the
-      // whole feed would fire on every broadcast for the rest of the service.
-      const seen = new Set(asLines(prev).map((l) => l.id));
+      // Keyed by id, not "is this id new": ProdCom revises ONE id from an
+      // utterance's first partial through to its final, so a phrase said
+      // anywhere but that first partial would never see a new id to match. A
+      // phrase newly present in a line's text — whether the id is brand new or
+      // this is a later partial/final revising text already seen — fires once;
+      // a revision that already contained the phrase does not fire again.
+      const prevById = new Map(asLines(prev).map((l) => [l.id, l] as const));
       return asLines(next).some((l) => {
-        if (seen.has(l.id)) return false;
         if (onlyChannel && (l.channelName ?? "").trim().toLowerCase() !== onlyChannel) return false;
-        return (l.text ?? "").toLowerCase().includes(want);
+        const has = (t: string | undefined) => (t ?? "").toLowerCase().includes(want);
+        if (!has(l.text)) return false;
+        return !has(prevById.get(l.id)?.text);
       });
     },
   }),

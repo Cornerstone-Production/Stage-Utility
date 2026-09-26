@@ -78,7 +78,7 @@ simply be off right now.
 | OBS starts / stops streaming | the stream output starts or stops |
 | OBS starts / stops the virtual camera | the virtual camera output starts or stops |
 | An OSC message arrives | a value at an OSC address changes to equal, or crosses, what you name — see [Inbound OSC](#inbound-osc) |
-| A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only. It reads the line as displays receive it, so a phrase that is also a ProdCom keyword marked sensitive will not match while [redaction](integrations/prodcom.md#sensitive-keywords) is on |
+| A phrase is said on ProdCom | your text newly appears in a transcript line, optionally on one channel only — including a later partial or the final revising a line already seen, since ProdCom keeps one line id for a whole utterance. A revision that still contains it does not fire again; one that drops the phrase and a later one that brings it back can. It reads the line as displays receive it, so a phrase that is also a ProdCom keyword marked sensitive will not match while [redaction](integrations/prodcom.md#sensitive-keywords) is on |
 | Baptism timer starts | the timer leaves idle |
 | Baptism moves to another phase | testimony to baptism, or either back to idle |
 | Baptism timer finishes | it returns to idle |
