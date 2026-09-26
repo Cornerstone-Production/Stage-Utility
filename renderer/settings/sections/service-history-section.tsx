@@ -567,6 +567,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * state, the row says "sound unavailable", and the reason is logged per key.
    */
   const [splByKey, setSplByKey] = useState<ReadonlyMap<string, RowSpl>>(() => shown?.last.rowSpl ?? new Map());
+  /** How many `spl:history` pushes each key has had. A read sent before a push
+   *  answers with an older record than the push carried, so the fetch below
+   *  drops its answer for any key pushed since it asked. */
+  const splPushes = useRef(new Map<string, number>());
 
   // A live-updating mirror of selectedKey for the service-timeline:history
   // handler below, which subscribes once (empty deps) and would otherwise only
@@ -731,6 +735,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // there and its row reads "no sound recorded" forever, since nothing
       // else invalidates that cache. The push already carries the exact shape
       // splByKey stores, so write it straight in.
+      splPushes.current.set(rec.serviceKey, (splPushes.current.get(rec.serviceKey) ?? 0) + 1);
       setSplByKey((prev) => {
         const next = new Map(prev);
         next.set(rec.serviceKey, rec);
@@ -1107,6 +1112,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     // serviceKey, so an entry left over from another month can only ever miss.
     if (!keys.length) return;
     for (const k of keys) asked.keys.add(k);
+    const pushesWhenAsked = new Map(keys.map((k) => [k, splPushes.current.get(k) ?? 0]));
     // Not cancelled when the list changes again before it lands: its keys are
     // marked asked, so dropping the answer would leave those rows unread.
     Promise.all(
@@ -1124,10 +1130,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     ).then((pairs) => {
       // A reload since this was sent has asked again; this answer is older.
       if (splAsked.current !== asked) return;
-      for (const [k, v] of pairs) if (v === "error") asked.keys.delete(k);
+      // A key pushed while its read was out already holds the newer record.
+      const current = pairs.filter(([k]) => (splPushes.current.get(k) ?? 0) === pushesWhenAsked.get(k));
+      for (const [k, v] of current) if (v === "error") asked.keys.delete(k);
       setSplByKey((prev) => {
         const next = new Map(prev);
-        for (const [k, v] of pairs) next.set(k, v);
+        for (const [k, v] of current) next.set(k, v);
         return next;
       });
     });
