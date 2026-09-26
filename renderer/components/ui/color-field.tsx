@@ -32,7 +32,7 @@ export interface IconEditing {
 }
 import { createPortal } from "react-dom";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
-import { FocusScope } from "radix-ui/internal";
+import { DismissableLayer, FocusScope } from "radix-ui/internal";
 
 import { cn } from "../../lib/cn";
 // The same Tab cycle and focus restoration the expanded-tile overlay uses. This
@@ -149,6 +149,7 @@ function ColorPanel({
   allowAlpha,
   label,
   onChange,
+  onClose,
   anchor,
   icon,
 }: {
@@ -156,6 +157,10 @@ function ColorPanel({
   allowAlpha: boolean;
   label: string;
   onChange: (css: string) => void;
+  /** Escape, aimed at the panel — see the DismissableLayer comment below for
+   *  why this cannot be the same document keydown listener that closes it
+   *  outside a dialog. */
+  onClose: () => void;
   /** The swatch this panel belongs to, for placing it. */
   anchor: HTMLElement | null;
   /**
@@ -231,6 +236,19 @@ function ColorPanel({
    * closing it outside a dialog: it is still a React child of whatever opened
    * it, portal or not, and a dialog already knows a pointerdown inside its own
    * react tree is not an outside click. No third piece is needed for that half.
+   *
+   * Escape is the one exception, and it needs its OWN Radix layer.
+   * `ColorField`'s own document `keydown` listener (below) closes the panel on
+   * Escape, but Radix's `DismissableLayer` — which the dialog's `Content` is
+   * built from — listens for Escape on the document in the CAPTURE phase, so
+   * the dialog's ancestor listener runs before that bubble-phase listener ever
+   * fires, and the dialog dismisses right along with the panel. Wrapping this
+   * div in `DismissableLayer.Root` registers it as a layer of its own; Radix
+   * tracks layers in one shared, module-level stack (there is exactly one copy
+   * of `@radix-ui/react-dismissable-layer` installed, so the dialog's `Content`
+   * and this panel push onto the same `Set`), and only the topmost layer's
+   * listener actually acts on Escape — the dialog's own handler sees it is no
+   * longer the highest layer and returns without dismissing.
    */
   const PANEL_W = 224;
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -297,7 +315,7 @@ function ColorPanel({
       // restore focus itself, to whatever it saw as focused before it mounted.
       onUnmountAutoFocus={(e) => e.preventDefault()}
     >
-    <div
+    <DismissableLayer.Root
       ref={panelRef}
       role="dialog"
       aria-label={label}
@@ -308,6 +326,15 @@ function ColorPanel({
       // the container itself would be a stop on nothing.
       tabIndex={-1}
       onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => trapTab(panelRef.current, e)}
+      // The panel becoming its own DismissableLayer (see the placement comment
+      // above) is what stops this from also reaching the dialog: Radix only
+      // runs the TOPMOST layer's Escape handler, so once this fires the
+      // dialog's own handler never sees the key. preventDefault so DismissableLayer's
+      // own onDismiss default (unused here, we have none wired) never runs either.
+      onEscapeKeyDown={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
       style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width: PANEL_W, visibility: pos ? "visible" : "hidden" }}
       className={cn(
         // Explicit, not inherited: a modal dialog forces `pointer-events: none`
@@ -501,7 +528,7 @@ function ColorPanel({
       </div>
       </>
       )}
-    </div>
+    </DismissableLayer.Root>
     </FocusScope.Root>,
     document.body,
   );
@@ -580,8 +607,11 @@ export function ColorField({
   const swatchId = `${useId()}-swatch`;
   useReturnFocus(open, () => document.getElementById(swatchId));
 
-  // Close on a click elsewhere or on Escape — the same manners as every other
-  // floating panel here.
+  // Close on a click elsewhere — the same manners as every other floating
+  // panel here. Escape is NOT handled here: the panel's own DismissableLayer
+  // (in ColorPanel) owns it, because a document-level listener with no notion
+  // of layering closes this panel AND whatever Radix dialog it was opened
+  // inside of — see the placement comment on ColorPanel.
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
@@ -591,14 +621,9 @@ export function ColorField({
       if ((t as HTMLElement).closest?.("[data-color-panel]")) return;
       setOpen(false);
     };
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
     document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
     return () => {
       document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
     };
   }, [open]);
 
@@ -630,6 +655,7 @@ export function ColorField({
           allowAlpha={allowAlpha}
           label={label}
           onChange={onChange}
+          onClose={() => setOpen(false)}
           anchor={trigger}
           icon={icon}
         />
