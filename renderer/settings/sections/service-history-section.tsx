@@ -1680,7 +1680,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             }
           >
             <StatStrip figures={historyBaptismFigures(linkedBap, det.items)} hover={null} live={null} announce={false} />
-            <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} />
+            <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} items={det.items} />
           </SectionCard>
         ) : loadFailed.has("baptisms") ? (
           <SectionCard title="Baptisms">
