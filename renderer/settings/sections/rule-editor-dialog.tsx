@@ -22,6 +22,7 @@ import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
   fieldsNeedAttention,
+  numberParamDefault,
   ruleIssues,
   seedNumberDefaults,
   type RuleIssue,
@@ -375,7 +376,7 @@ export function ParamField({
       <Row label={spec.label} hint={spec.help}>
         <>
           <NumberInput
-            value={Number(value ?? spec.min ?? 0)}
+            value={Number(value ?? numberParamDefault(spec))}
             min={spec.min}
             max={spec.max}
             onChange={(n) => onChange(n)}

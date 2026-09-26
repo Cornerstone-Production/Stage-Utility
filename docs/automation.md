@@ -546,7 +546,8 @@ will tell you.
 - *The item's own time* — when that item is scheduled.
 - *The service start* — the service time, ignoring where the item sits.
 
-A negative offset fires early, positive late.
+A negative offset fires early, positive late. Left untouched it is **0** — right
+at the moment itself.
 
 ### How an item gets a time
 

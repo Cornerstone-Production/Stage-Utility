@@ -7,11 +7,16 @@
 // same rule rather than three hand-copies drifting apart. See docs/automation.md.
 //
 // A number field is NEVER "missing" here: NumberInput cannot display a blank box,
-// so an absent value reads as `spec.min ?? 0` — the same fallback ParamField and
-// every provider's own `Number(params.x ?? 0)` already use. That is also why the
-// "seed number defaults on pick" fix matters: before it, a freshly chosen step's
-// number params were genuinely `undefined` in storage while the field displayed a
-// default, so a required threshold could be saved unset and never fire.
+// so an absent value reads as `numberParamDefault(spec)` — 0, pulled into the
+// spec's own [min, max] — the same default ParamField, the RossTalk button
+// inspector and every provider's own read already agree on. NOT `spec.min ?? 0`:
+// for a param with a negative floor (only `offsetMinutes` today, min -720) that
+// fallback landed on the floor itself, storing a fresh pick 12 hours from where
+// the operator meant it and displaying that same wrong floor for a legacy value
+// that was never set. That is also why the "seed number defaults on pick" fix
+// matters: before it, a freshly chosen step's number params were genuinely
+// `undefined` in storage while the field displayed a default, so a required
+// threshold could be saved unset and never fire.
 //
 // multi-enum is deliberately NEVER "required" here, regardless of `optional`. Every
 // multi-enum in the registry today (`time.day-of-week`'s `days`,
@@ -45,13 +50,27 @@ export function fieldsNeedAttention(n: number): string {
   return n === 1 ? "1 field needs attention" : `${n} fields need attention`;
 }
 
-/** Every number param's default, keyed by its own `min` (or 0) — what a fresh
- *  pick of a trigger/condition/action must seed immediately, so the field never
- *  displays a value it has not actually stored. See the module doc. */
+/** A number param's own default: 0, pulled into its declared [min, max] — never
+ *  the bare floor, which is wrong for the one param with a negative min
+ *  (`offsetMinutes`, -720: the floor is 12 hours before, 0 is "right now").
+ *  Shared by the seed below, the rule editor's ParamField and the RossTalk
+ *  button inspector — not typed against `ParamDef` so `main/types/rosstalk.ts`'s
+ *  `RossTalkParam` (same `min`/`max`, a different `options` shape) can use it
+ *  too. See the module doc. */
+export function numberParamDefault(spec: { min?: number; max?: number }): number {
+  let n = 0;
+  if (spec.min !== undefined && n < spec.min) n = spec.min;
+  if (spec.max !== undefined && n > spec.max) n = spec.max;
+  return n;
+}
+
+/** Every number param's default — what a fresh pick of a trigger/condition/
+ *  action must seed immediately, so the field never displays a value it has
+ *  not actually stored. See the module doc. */
 export function seedNumberDefaults(specs: ParamDef[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const spec of specs) {
-    if (spec.type === "number") out[spec.key] = spec.min ?? 0;
+    if (spec.type === "number") out[spec.key] = numberParamDefault(spec);
   }
   return out;
 }
@@ -112,7 +131,7 @@ export function validateParams(specs: ParamDef[], params: Record<string, unknown
       case "number": {
         const present = value !== undefined && value !== null && value !== "";
         if (!present) {
-          if (spec.optional) break; // resolves to spec.min ?? 0, always in range
+          if (spec.optional) break; // resolves to numberParamDefault(spec), always in range
           issues.push({ key: spec.key, message: requiredMessage(spec) });
           break;
         }
