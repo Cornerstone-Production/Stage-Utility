@@ -248,6 +248,11 @@ export type ProdComStub = {
    *  whatever has already been sent — a mid-stream body error (client sees
    *  `res.on("error")`, ECONNRESET), not the clean end `close()` sends. */
   sseBreakAll(): void;
+  /** Reset every open SSE stream's TCP connection, AFTER its 200 — an RST, not
+   *  the FIN sseBreakAll sends. What a box that crashed, or a peer the
+   *  keepalive has given up on, looks like: Node reports it on the client's
+   *  REQUEST (`req.on("error")`, ECONNRESET), which sseBreakAll never reaches. */
+  sseResetAll(): void;
   /** Resolve once at least `n` WebSocket upgrades have been accepted. */
   waitForUpgrades(n: number, timeoutMs?: number): Promise<void>;
   /** Resolve once at least `n` SSE streams have been opened. */
@@ -693,6 +698,10 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     sseBreakAll: () => {
       for (const s of sseStreams) s.destroy();
+      sseStreams.clear();
+    },
+    sseResetAll: () => {
+      for (const s of sseStreams) s.socket?.resetAndDestroy();
       sseStreams.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),

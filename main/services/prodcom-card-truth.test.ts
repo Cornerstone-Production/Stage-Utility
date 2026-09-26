@@ -109,6 +109,43 @@ describe('the card never reports "connected" from a transport that is not up', (
     );
   });
 
+  it('stays off "connected" once the stream is reset after its 200', async (t: TestContext) => {
+    // A reset, not a clean end: the box crashed, or the keepalive gave up on
+    // a peer that vanished. Node reports that on the REQUEST, whose handler
+    // used to be the one teardown path that left sseUp true — so every
+    // websocket give-up afterwards told the card "Streaming" for as long as the
+    // outage lasted.
+    const stub = await startProdComStub({ channels: CHANNELS, refuseWebSocket: true });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.sseUpNow, "SSE to come up");
+
+    // From here nothing streams: the reset drops the live stream, and every
+    // reconnect after it is answered 500.
+    stub.setFailSseStream(true);
+    stub.sseResetAll();
+    await eventually(
+      () => svc.reports.some((r) => r.state === "error" && (r.message ?? "").includes("Can't reach")),
+      () => `the reset to reach the request's own error handler, got ${JSON.stringify(svc.reports)}`,
+    );
+    const mark = svc.reports.findIndex((r) => r.state === "error");
+    // Several websocket retry-and-give-up cycles (30ms apart), each of which
+    // reports "connected" when it believes SSE is up.
+    await new Promise((r) => setTimeout(r, 300));
+
+    assert.equal(svc.sseUpNow, false, "sseUp was still true after the stream was reset");
+    const since = svc.reports.slice(mark);
+    assert.equal(
+      since.some((r) => r.state === "connected"),
+      false,
+      `the card reported "connected" during an outage in which nothing streams: ${JSON.stringify(since)}`,
+    );
+  });
+
   it('reports "connected" once SSE is genuinely streaming', async (t: TestContext) => {
     // A single deterministic transport: the websocket refused, so only SSE
     // can possibly report anything — the positive control proving the fix

@@ -44,7 +44,7 @@ import type { ProdcomChannelDTO, TranscriptLineDTO } from "../types/stage.js";
 import { broadcast, channelInDemand } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
-import { ConnectionLifecycle } from "./integration-base.js";
+import { ConnectionLifecycle, type ConnState } from "./integration-base.js";
 import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { createSseReader, keepSocketAlive, parseSseBlock, SSE_MAX_BUFFER, type SseEvent } from "./sse-reader.js";
 
@@ -2472,11 +2472,8 @@ export class ProdComService extends ConnectionLifecycle {
         if (this.req !== req) return;
         const code = res.statusCode ?? 0;
         if (code < 200 || code >= 300) {
-          this.req = null;
+          this.sseStreamLost("error", `ProdCom HTTP ${code}`);
           res.destroy();
-          this.report("error", `ProdCom HTTP ${code}`);
-          this.countSseReconnect();
-          this.scheduleReconnect();
           return;
         }
         // The stream is open: the ramp has done its job, so the next drop
@@ -2518,37 +2515,46 @@ export class ProdComService extends ConnectionLifecycle {
         });
         res.on("end", () => {
           if (this.req !== req) return;
-          this.req = null;
-          this.sseUp = false;
-          this.clearSseIdleWatchdog();
-          this.report("disconnected", null);
-          this.countSseReconnect();
-          this.scheduleReconnect();
+          this.sseStreamLost("disconnected", null);
         });
         res.on("error", (e) => {
           if (this.req !== req) return;
-          this.req = null;
-          this.sseUp = false;
-          this.clearSseIdleWatchdog();
-          this.report("error", `Transcript stream broke — ${e.message}`);
-          this.countSseReconnect();
-          this.scheduleReconnect();
+          this.sseStreamLost("error", `Transcript stream broke — ${e.message}`);
         });
       },
     );
     this.req = req;
     // The real liveness check on this path — see SOCKET_KEEPALIVE_MS.
     keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
+    // Also where a reset AFTER the 200 lands (a crashed box, or the keepalive
+    // giving up on one that vanished): Node reports it on the request first,
+    // and nulling `req` here is what makes the response's own error handler
+    // stand down.
     req.on("error", (e) => {
       if (this.req !== req) return;
-      this.req = null;
-      // A watchdog armed by the dying stream must not outlive it, or it can
-      // destroy the NEXT request while it is still connecting.
-      this.clearSseIdleWatchdog();
-      this.report("error", `Can't reach ${host}:${port} — ${e.message}`);
-      this.countSseReconnect();
-      this.scheduleReconnect();
+      this.sseStreamLost("error", `Can't reach ${host}:${port} — ${e.message}`);
     });
+  }
+
+  /**
+   * The fallback's stream is gone, whichever of connectSse's four handlers saw
+   * it go — a bad status, a clean end, a broken body, or a request-level error.
+   *
+   * One helper because the four were copies, and one drifted: the request's
+   * error handler never cleared `sseUp`, so after a reset every websocket
+   * give-up and every socket open went on telling the card "Streaming" through
+   * an outage in which nothing streamed (prodcom-card-truth.test.ts). The idle
+   * watchdog is cleared here too: one armed by the dying stream must not
+   * outlive it, or it can destroy the NEXT request while it is still
+   * connecting.
+   */
+  private sseStreamLost(state: ConnState, message: string | null): void {
+    this.req = null;
+    this.sseUp = false;
+    this.clearSseIdleWatchdog();
+    this.report(state, message);
+    this.countSseReconnect();
+    this.scheduleReconnect();
   }
 
   /** Come back to the WebSocket periodically while stuck on the fallback — a box
