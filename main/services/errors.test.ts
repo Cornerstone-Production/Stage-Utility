@@ -49,3 +49,17 @@ describe("fetchFailureMessage", () => {
     assert.equal(errorMessage("nope"), "nope");
   });
 });
+
+describe("errorMessage", () => {
+  test("says an Error's message, and nothing of its stack", () => {
+    assert.equal(errorMessage(new Error("the archive is not a zip")), "the archive is not a zip");
+  });
+
+  test("says a thrown non-Error exactly as String() would, a Symbol included", () => {
+    // It stringifies with a template literal rather than String(), for CodeQL
+    // (see errorMessage). The two differ only on a Symbol, where a template
+    // literal throws, and this runs inside catch blocks.
+    const thrown: unknown[] = ["nope", 42, null, undefined, { toString: () => "custom" }, {}, [1, 2], Symbol("odd")];
+    for (const value of thrown) assert.equal(errorMessage(value), String(value));
+  });
+});
