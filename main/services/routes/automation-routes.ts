@@ -47,6 +47,21 @@ function issuesFor(rule: RuleStepsLike): RuleIssue[] {
   return ruleIssues(rule, specLookup);
 }
 
+/** POST and PATCH share this: a body with unresolved issues is force-saved OFF
+ *  rather than as asked, per docs/automation.md — "saved turned off, it runs
+ *  once these are fixed". */
+function forcedOff(body: Record<string, unknown>, issues: RuleIssue[]): Record<string, unknown> {
+  return issues.length > 0 ? { ...body, enabled: false } : body;
+}
+
+/** The one line POST and PATCH both log when a save lands with issues — kept
+ *  in one place so the wording on /log cannot drift between the two routes. */
+function logSavedOff(name: string, issues: RuleIssue[]): void {
+  if (issues.length > 0) {
+    console.log(`[automation] rule "${scrub(name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
+  }
+}
+
 export async function automationRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
 
@@ -182,12 +197,10 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     }
     // Otherwise issues never block the save — they force it OFF instead, per
     // docs/automation.md: "saved turned off, it runs once these are fixed".
-    const toSave = issues.length > 0 ? { ...body, enabled: false } : body;
+    const toSave = forcedOff(body, issues);
     try {
       const rule = await automationEngine.addRule(toSave as never);
-      if (issues.length > 0) {
-        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
-      }
+      logSavedOff(rule.name, issues);
       // The SAME shape GET's list items already carry (Rule & { issues }), not
       // a wrapper — a script reading `.id` or `.enabled` off what POST/PATCH
       // answer with must not break the moment this feature ships. The 409
@@ -240,13 +253,11 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       );
       return;
     }
-    const patch = issues.length > 0 ? { ...body, enabled: false } : body;
+    const patch = forcedOff(body, issues);
     try {
       await automationEngine.updateRule(idMatch[1], patch as never);
       const rule = automationEngine.listRules().find((r) => r.id === idMatch[1])!;
-      if (issues.length > 0) {
-        console.log(`[automation] rule "${scrub(rule.name)}" saved turned off: ${scrub(fieldsNeedAttention(issues.length))}`);
-      }
+      logSavedOff(rule.name, issues);
       json(res, { ...rule, issues: issuesFor(rule) });
     } catch (err) {
       error(res, errorMessage(err), 400);
