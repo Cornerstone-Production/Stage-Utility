@@ -8,12 +8,23 @@
 // requests. The one shared definition in lib/automation-registry.ts, which
 // the inspector and the automation section use too, so every ActionButton on
 // screen (and either editor surface, if ever open at the same time) settles
-// from one request, in one shape. `retry` and
-// `refetchOnWindowFocus` are off to match the one-shot semantics this hook
-// always had — the registry has no live push channel (it changes only when
-// the app itself changes, never at runtime), so retrying it, or re-reading it
-// every time an operator's browser tab regains focus, only adds noise around
-// a failure that will not resolve itself.
+// from one request, in one shape.
+//
+// `refetchOnWindowFocus` is off: a kiosk display sits on a wall, not in a
+// browser tab an operator switches back to, so that signal means nothing here.
+// `retry` is NOT overridden, so the QueryClient's own setting applies: the
+// displays' client (renderer/main/router.tsx) keeps react-query's default of
+// 3 with backoff, which is where a button has to recover on its own; the
+// operator app's client turns retry off app-wide, and its editor canvas shows
+// the failure at once instead. It used to be forced off here, on the theory that the
+// registry never changes at runtime so a failure "will not resolve itself" —
+// true of the DATA, false of the READ: a console panel loading while the
+// server is still coming up (a Pi at boot, or the 15 s request timeout under
+// load) fails once and would succeed on the very next attempt. `retry: false`
+// left every button on that panel dimmed for as long as the page stayed up,
+// since nothing re-mounts this observer to try again. automationRegistryQuery
+// already logs once per failed FETCH, not once total, so the few extra
+// attempts a real outage produces do not flood /log.
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -51,7 +62,6 @@ export interface AutomationActionsState {
 export function useAutomationActions(): AutomationActionsState {
   const { data, isError } = useQuery({
     ...automationRegistryQuery,
-    retry: false,
     refetchOnWindowFocus: false,
     select: (registry): AutomationActionSpec[] => registry.actions,
   });

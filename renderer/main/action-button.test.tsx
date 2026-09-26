@@ -169,6 +169,70 @@ describe("action-button — the registry itself could not be loaded", () => {
   });
 });
 
+// One failed registry read must not dim every action-button until the
+// page reloads — a console panel loading while the server is still coming up
+// (a Pi at boot) fails the FIRST read and answers fine seconds later, with
+// nothing on the panel re-mounting this observer to try again. This is the one
+// describe block in the file that does NOT force `retry: false` on its
+// QueryClient — every other one does, deliberately, so it never masks the
+// hook's own retry setting the way a shared default would. Reverting
+// use-automation-actions.ts's query back to `retry: false` turns this red:
+// the button hangs on "could not be loaded" instead of recovering.
+describe("action-button — a registry read that fails once, then answers", () => {
+  test("recovers on its own, without a remount", async () => {
+    let attempts = 0;
+    // This test's own fetch, saved and restored: the shared one installed in
+    // `before()` above is what every OTHER test in this file depends on
+    // (registryFetchCount, logCalls), and a global left pointed at this one
+    // would carry a stale stub — and a hard-coded "registry unreachable" on
+    // attempt 1 — into whichever test runs next.
+    const realFetch = (globalThis as unknown as { fetch: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown, init?: unknown) => {
+      const u = String(url);
+      if (u.includes("/api/automation/registry")) {
+        attempts++;
+        if (attempts === 1) throw new Error("registry unreachable");
+        const body = { triggers: [], conditions: [], actions: registryActions };
+        return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+      }
+      if (u.includes("/api/log/client")) {
+        const b = JSON.parse(String((init as { body?: unknown } | undefined)?.body ?? "{}")) as {
+          tag: string;
+          message: string;
+        };
+        logCalls.push(b);
+      }
+      const body = { ok: true, detail: "" };
+      return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+    };
+    try {
+      // Real retry, fast: retryDelay:0 keeps the test from waiting out
+      // react-query's default backoff (~1s before the first retry) without
+      // disabling retrying itself, which is the one thing under test.
+      const qc = new QueryClient({ defaultOptions: { queries: { retryDelay: 0, gcTime: 0 } } });
+      const ctx = makeRenderCtx({ interactive: true });
+      const obj = {
+        id: "o1", x: 0, y: 0, w: 0.3, h: 0.2, z: 1,
+        config: { type: "action-button", actionId: "baptism.advance" }, style: {},
+      } as never;
+      const { container } = render(
+        React.createElement(
+          QueryClientProvider as never,
+          { client: qc },
+          React.createElement(ObjectContent as never, { o: obj, ctx }),
+        ),
+      );
+      await waitFor(
+        () => assert.ok(container.textContent?.includes("Advance the baptism timer"), container.textContent ?? ""),
+        { timeout: 5000 },
+      );
+      assert.ok(attempts >= 2, `expected more than one registry fetch, got ${attempts}`);
+    } finally {
+      (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+    }
+  });
+});
+
 // The Needs setup badge — Button.dc.html's board. `editing` is the layout
 // editor's own flag (LayoutRenderCtx, set only by layout-editor.tsx's
 // fullCtx); this file drives it directly rather than through the editor, the
