@@ -125,6 +125,73 @@ test("a failed service-type read under a slug URL says so instead of spinning", 
   }
 });
 
+test("a transient service-type failure recovers on the page's own retry timer, not a manual reload", async () => {
+  const intervals: (() => void)[] = [];
+  const realSetInterval = globalThis.setInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    intervals.push(fn);
+    return realSetInterval(fn, ms);
+  }) as typeof setInterval;
+  let typeReads = 0;
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/service-types")) {
+      typeReads++;
+      return typeReads === 1 ? reply(502, { error: "Planning Center answered 429" }) : ok([{ id: "st1", name: "Weekend" }]);
+    }
+    if (url.includes("/api/scriptview/layouts")) return ok([{ id: "svl1", name: "Audio", order: 0, columnRoles: ["r1"] }]);
+    if (url.includes("/api/scriptview/roles")) return ok([{ id: "r1", name: "Sound", members: ["Audio"] }]);
+    if (url.includes("/api/scriptview/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/pco/live")) return ok(null);
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    return ok({});
+  });
+  try {
+    await mount();
+    assert.match(alerts(), /Couldn't load the service types/i);
+    await act(async () => { for (const fn of [...intervals]) fn(); });
+    await settle();
+    assert.equal(alerts(), "", "the failure cleared once the retry succeeded");
+    assert.ok(typeReads > 1, "the page asked for the service types again on its own, without a reload");
+  } finally {
+    f.restore();
+    globalThis.setInterval = realSetInterval;
+  }
+});
+
+test("a transient layouts/roles failure recovers the same way", async () => {
+  const intervals: (() => void)[] = [];
+  const realSetInterval = globalThis.setInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    intervals.push(fn);
+    return realSetInterval(fn, ms);
+  }) as typeof setInterval;
+  let layoutReads = 0;
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }]);
+    if (url.includes("/api/scriptview/layouts")) {
+      layoutReads++;
+      if (layoutReads === 1) throw new TypeError("fetch failed");
+      return ok([{ id: "svl1", name: "Audio", order: 0, columnRoles: ["r1"] }]);
+    }
+    if (url.includes("/api/scriptview/roles")) return ok([{ id: "r1", name: "Sound", members: ["Audio"] }]);
+    if (url.includes("/api/scriptview/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/pco/live")) return ok(null);
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    return ok({});
+  });
+  try {
+    await mount();
+    assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i);
+    await act(async () => { for (const fn of [...intervals]) fn(); });
+    await settle();
+    assert.equal(alerts(), "", "the layouts failure cleared once the retry succeeded");
+    assert.ok(layoutReads > 1, "the page asked for the layouts again on its own, without a reload");
+  } finally {
+    f.restore();
+    globalThis.setInterval = realSetInterval;
+  }
+});
+
 test("a failed layout read says the page fell back to all columns", async () => {
   const f = stubFetch("layouts");
   try {

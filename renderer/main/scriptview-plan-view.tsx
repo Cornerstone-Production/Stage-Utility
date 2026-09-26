@@ -42,26 +42,51 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     setError(null);
     setRundown(null);
   });
+  // A 502/429 at boot (Planning Center still waking up, the LAN up before the
+  // WAN) used to be permanent: nothing re-ran this effect, since neither
+  // `pcoConnected(null, error)` nor `pcoConnected(state, null)` changes once the
+  // state itself arrives. Retried on the same slow timer as the rundown below,
+  // as script-view.tsx retries its own reads for the identical reason.
   useEffect(() => {
     if (!pcoConfigured) return;
     let cancelled = false;
-    invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
-      .then((t) => {
-        if (cancelled) return;
-        setTypes(t);
-        clear("types");
-      })
-      .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
-    return () => { cancelled = true; };
+    const load = () =>
+      invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
+        .then((t) => {
+          if (cancelled) return;
+          setTypes(t);
+          clear("types");
+        })
+        .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [pcoConfigured, fail, clear]);
+  // Same reasoning for the layouts and roles: a transient failure at boot left
+  // them empty for the life of the page (see script-view.tsx's comment on this
+  // exact shape).
   useEffect(() => {
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
-      .then(setLayouts)
-      .catch((err: unknown) => fail("layouts", "the column layouts", err));
-    invoke<CategoryRole[]>("scriptview:listRoles")
-      .then(setRoles)
-      .catch((err: unknown) => fail("roles", "the category roles", err));
-  }, [fail]);
+    let cancelled = false;
+    const load = () => {
+      invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+        .then((l) => {
+          if (cancelled) return;
+          setLayouts(l);
+          clear("layouts");
+        })
+        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts", err); });
+      invoke<CategoryRole[]>("scriptview:listRoles")
+        .then((r) => {
+          if (cancelled) return;
+          setRoles(r);
+          clear("roles");
+        })
+        .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles", err); });
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [fail, clear]);
 
   // Resolve the service-type slug (or raw id) to an id.
   const serviceType = useMemo(
