@@ -364,6 +364,7 @@ test("describeBaptismRebuild names updated, added, newer, disagreeing and kept â
       invalid: 0,
       kept: 3,
       full: 0,
+      restoredIds: [],
     }),
     "Rebuilt from raw: 1 updated, 1 added, 1 newer than their rows, 1 disagreeing with the rows, 3 left alone",
   );
@@ -382,6 +383,7 @@ test("describeBaptismRebuild names a full store only when it turned any session 
       invalid: 0,
       kept: 0,
       full: 2,
+      restoredIds: [],
     }),
     "Rebuilt from raw: 0 updated, 1 added, the store is full, so 2 were not added",
   );
@@ -397,6 +399,7 @@ test("describeBaptismRebuild names a full store only when it turned any session 
       invalid: 0,
       kept: 0,
       full: 0,
+      restoredIds: [],
     }),
     /full/,
     "full:0 must not mention the store being full at all",

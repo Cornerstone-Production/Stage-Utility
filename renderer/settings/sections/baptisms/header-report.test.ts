@@ -1,4 +1,4 @@
-// header.test.ts — baptismReportText's plain-text summary, the Copy report
+// header-report.test.ts — baptismReportText's plain-text summary, the Copy report
 // button's clipboard target. Pure function, no DOM: the header COMPONENT
 // (sticky positioning, the ResizeObserver measurement, the action group's
 // wrap) is not unit-tested here, for the reason header.tsx's own top comment
