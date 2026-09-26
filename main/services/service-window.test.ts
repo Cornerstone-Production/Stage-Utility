@@ -33,13 +33,29 @@ describe("serviceWindow.capDelayMs", () => {
   });
 
   test("forceActive keeps an integration snappy while someone is watching it", () => {
-    // No windows at all — dormant — but a client is subscribed to the channel.
+    // Dormant — the next window is a day off — but a client is subscribed.
+    serviceWindow.setWindows([{ open: Date.now() + 24 * 60 * MIN, close: Date.now() + 25 * 60 * MIN }]);
     assert.equal(serviceWindow.capDelayMs(60 * MIN, true), ACTIVE_CAP_MS);
   });
 
   test("dormant backs off to the idle ceiling instead of the active cap", () => {
     serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE, dormantMin: 30 });
+    serviceWindow.setWindows([{ open: Date.now() + 24 * 60 * MIN, close: Date.now() + 25 * 60 * MIN }]);
     assert.equal(serviceWindow.capDelayMs(60 * MIN), 30 * MIN);
+  });
+
+  // No PCO credentials, a first fetch that failed, or every fetch failing since
+  // the last known service closed: the schedule could not be worked out, and a
+  // box at an event Planning Center does not know about must not go quiet.
+  test("with no windows known a reconnect keeps the 2-minute cap", () => {
+    serviceWindow.setWindows([]);
+    assert.equal(serviceWindow.capDelayMs(60 * MIN), ACTIVE_CAP_MS);
+  });
+
+  test("with only closed windows known a reconnect keeps the 2-minute cap", () => {
+    const now = Date.now();
+    serviceWindow.setWindows([{ open: now - 5 * 60 * MIN, close: now - 60 * MIN }]);
+    assert.equal(serviceWindow.capDelayMs(60 * MIN, false, now), ACTIVE_CAP_MS);
   });
 
   test("dormant never sleeps past the next window opening", () => {
@@ -66,7 +82,7 @@ describe("serviceWindow.capDelayMs", () => {
     assert.equal(overflowed, Infinity, "precondition: the raw back-off has overflowed");
 
     for (const [label, setup] of [
-      ["dormant, no windows known", () => serviceWindow.setWindows([])],
+      ["no schedule known", () => serviceWindow.setWindows([])],
       ["dormant, window ahead", () => serviceWindow.setWindows([{ open: Date.now() + 10 * MIN, close: Date.now() + 60 * MIN }])],
       ["active", () => serviceWindow.setWindows([{ open: Date.now() - MIN, close: Date.now() + MIN }])],
     ] as const) {
@@ -141,6 +157,13 @@ test("with no windows known the poller stays awake, rather than going quiet", ()
   serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
   serviceWindow.setWindows([]);
   assert.equal(serviceWindow.pollDelayMs(4000, 300_000, Date.now()), 4000);
+});
+
+test("with only closed windows known the poller stays awake", () => {
+  const now = Date.now();
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  serviceWindow.setWindows([{ open: now - 5 * 3600_000, close: now - 3600_000 }]);
+  assert.equal(serviceWindow.pollDelayMs(4000, 300_000, now), 4000);
 });
 
 test("with the feature switched off the poller is untouched", () => {

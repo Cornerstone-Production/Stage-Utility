@@ -249,6 +249,11 @@ const NOT_SCANNED = new Map<string, string>([
   ["secrets.ts", UNAUDITED],
   ["sensource-service.ts", DEVICE],
   ["service-recorder.ts", UNAUDITED],
+  [
+    "service-window.ts",
+    "logs two fixed sentences when the schedule becomes unknown or known again, and " +
+      "interpolates nothing. Audited, not just excused.",
+  ],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   ["stream-start-store.ts", UNAUDITED],
