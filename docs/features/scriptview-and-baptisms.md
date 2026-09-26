@@ -218,12 +218,14 @@ that has not happened yet took no time.
 
 A **Past sessions** card lists every finished session, newest first: the
 service and date, then how many were baptized, the average testimony and
-baptism length, and the total. Each row with a known service links to that
-service's page in Service History; a session recorded before that link
-existed has no service key to link with, and renders without one rather than
-a broken link. Delete removes a session after confirming — its raw rows in
-`baptism.csv` are untouched, so **Rebuild from raw** can bring it back (see
-Recovery, below).
+baptism length, and the total. An average whose own group never happened at
+all — a grouped Finish during the testimonies, before anyone reached the
+water — shows a dash rather than "0:00", the same rule the People card and
+Copy report apply. Each row with a known service links to that service's page
+in Service History; a session recorded before that link existed has no
+service key to link with, and renders without one rather than a broken link.
+Delete removes a session after confirming — its raw rows in `baptism.csv` are
+untouched, so **Rebuild from raw** can bring it back (see Recovery, below).
 
 A **Trends** card averages the last eight services against the eight before
 them, across four figures: baptized per service, average testimony, average

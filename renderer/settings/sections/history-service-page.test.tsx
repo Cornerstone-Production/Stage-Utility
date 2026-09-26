@@ -702,6 +702,56 @@ describe("the History service page", () => {
     );
   });
 
+  // fmtDur(0) prints "0:00" for a real instant, false for a testimony or
+  // baptism average that never happened at all. A grouped Finish during the
+  // testimonies is a real, common session: real testimony time, nobody
+  // baptized.
+  test("the pasted report dashes an average whose baptism (or testimony) never happened, never '0:00'", async () => {
+    const { buildReport } = await import("./service-history-section.js");
+    const nobodyBaptized = [
+      {
+        id: "b-nobody",
+        startedAt: iso("20:45:00"),
+        finishedAt: iso("20:47:00"),
+        title: "Evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        serviceKey: KEY,
+        people: [{ testimonyMs: 60_000, baptizeMs: 0 }, { testimonyMs: 50_000, baptizeMs: 0 }],
+      },
+    ] as unknown as BaptismSession[];
+    const lines = buildReport(timeline() as unknown as ServiceTimeline, null, null, nobodyBaptized).split("\n");
+    assert.equal(
+      lines.find((l) => l.startsWith("baptism ")),
+      "baptism 0:00 (avg —)",
+      "the total is a real 0:00 (nobody baptized); the AVERAGE must not also claim a baptism took no time",
+    );
+    assert.equal(
+      lines.find((l) => l.startsWith("testimony ")),
+      "testimony 1:50 (avg 0:55)",
+      "testimony DID happen — this real average must not dash just because nobody was baptized",
+    );
+  });
+
+  test("historyBaptismFigures dashes Testimony/Baptism total's own average the same way, for the same reason", async () => {
+    const { historyBaptismFigures } = await import("./service-history-section.js");
+    const nobodyBaptized = [
+      {
+        id: "b-nobody",
+        startedAt: iso("20:45:00"),
+        finishedAt: iso("20:47:00"),
+        title: "Evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        serviceKey: KEY,
+        people: [{ testimonyMs: 60_000, baptizeMs: 0 }],
+      },
+    ] as unknown as BaptismSession[];
+    const figs = historyBaptismFigures(nobodyBaptized, []);
+    assert.equal(figs.find((f) => f.key === "baptism")?.sub, "avg —");
+    assert.equal(figs.find((f) => f.key === "testimony")?.sub, "avg 1:00");
+  });
+
   test("the header's KPI row is not a live region; a chart strip is", async (t) => {
     installFetch();
     const view = await openTheService(ServiceHistorySection);

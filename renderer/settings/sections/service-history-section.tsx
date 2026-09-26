@@ -378,8 +378,13 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
     const t = baptismStats(baptisms);
     L.push("", "BAPTISMS");
     L.push(`${t.people} baptized · total ${fmtDur(t.totalSec)}`);
-    L.push(`testimony ${fmtDur(t.testimonySec)} (avg ${fmtDur(t.avgTestimonySec)})`);
-    L.push(`baptism ${fmtDur(t.baptismSec)} (avg ${fmtDur(t.avgBaptismSec)})`);
+    // fmtDur(0) prints "0:00" — true for a genuinely instant testimony/baptism,
+    // false for one that never happened yet (a grouped Finish during the
+    // testimonies has real testimony time but nobody baptized). null reads as
+    // "—", the same call the Past sessions card and the header's own stat
+    // strip (figures.ts) make for the identical shape.
+    L.push(`testimony ${fmtDur(t.testimonySec)} (avg ${fmtDur(t.testified ? t.avgTestimonySec : null)})`);
+    L.push(`baptism ${fmtDur(t.baptismSec)} (avg ${fmtDur(t.people ? t.avgBaptismSec : null)})`);
   }
   return L.join("\n");
 }
@@ -2266,7 +2271,7 @@ function SectionCard({
  * planLaneItems, session-lane.ts), so Vs plan can never name a different plan
  * than the chart draws right underneath it.
  */
-function historyBaptismFigures(sessions: readonly BaptismSession[], items: readonly ServiceTimelineItem[]): StatFigure[] {
+export function historyBaptismFigures(sessions: readonly BaptismSession[], items: readonly ServiceTimelineItem[]): StatFigure[] {
   const stats = baptismStats(sessions);
 
   // Segment: each session's own WALL-CLOCK span (finishedAt − startedAt),
@@ -2328,8 +2333,12 @@ function historyBaptismFigures(sessions: readonly BaptismSession[], items: reado
   return [
     { key: "people", label: "Baptized", value: String(stats.people) },
     { key: "segment", label: "Segment", value: fmtDur(segmentSec), sub: segmentSub },
-    { key: "testimony", label: "Testimony", value: fmtDur(stats.testimonySec), color: "var(--color-accent)", sub: `avg ${fmtDur(stats.avgTestimonySec)}` },
-    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec), color: "var(--color-live-11)", sub: `avg ${fmtDur(stats.avgBaptismSec)}` },
+    // fmtDur(0) prints "0:00" — a real claim for an instant testimony/baptism,
+    // false for one that has not happened yet. null reads as "—" (fmtDur's
+    // own rule), the same call past-sessions.tsx and figures.ts make for the
+    // identical shape.
+    { key: "testimony", label: "Testimony", value: fmtDur(stats.testimonySec), color: "var(--color-accent)", sub: `avg ${fmtDur(stats.testified ? stats.avgTestimonySec : null)}` },
+    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec), color: "var(--color-live-11)", sub: `avg ${fmtDur(stats.people ? stats.avgBaptismSec : null)}` },
     { key: "longest", label: "Longest", value: longestPerson ? fmtDur(longestMs / 1000) : "—", sub: longestPerson ? `person ${longestPerson}` : undefined },
     vsPlan,
   ];

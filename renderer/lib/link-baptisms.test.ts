@@ -91,10 +91,27 @@ describe("baptismStats", () => {
 
   test("no people is zero, never NaN", () => {
     assert.deepEqual(baptismStats([]), {
-      people: 0, totalSec: 0, testimonySec: 0, baptismSec: 0, avgTestimonySec: 0, avgBaptismSec: 0,
+      people: 0, testified: 0, totalSec: 0, testimonySec: 0, baptismSec: 0, avgTestimonySec: 0, avgBaptismSec: 0,
     });
     // A session that was started and finished without timing anyone.
     assert.equal(baptismStats([people()]).avgTestimonySec, 0);
+  });
+
+  // fmtClock(0)/fmtDur(0) prints "0:00" for a real instant, which every
+  // caller that renders this must not do for a divisor of ZERO — a claim that
+  // a baptism or testimony took no time when none happened at all. `people`
+  // and `testified` are the two denominators every caller (Past sessions,
+  // the Copy report, the History Baptisms card) checks before printing
+  // either average — see past-sessions.tsx's own doc comment for why they
+  // are not the same condition.
+  test("testified and people are exposed separately — a grouped Finish during the testimonies has one but not the other", () => {
+    const out = baptismStats([people([60, 0], [50, 0])]);
+    assert.equal(out.testified, 2, "both people testified");
+    assert.equal(out.people, 0, "nobody was actually baptized");
+  });
+
+  test("testified is zero only for a session with no people recorded at all", () => {
+    assert.equal(baptismStats([people()]).testified, 0);
   });
 
   test("one long testimony pulls the average up, which is the point of showing it", () => {

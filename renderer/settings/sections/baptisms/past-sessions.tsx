@@ -17,6 +17,15 @@
 // Counts and averages come from baptismStats, applied to ONE session at a
 // time — never s.people.length, which would count a grouped session's
 // mid-testimony entries as baptized. See link-baptisms.ts's own doc comment.
+//
+// Avg testimony and Avg baptism each dash rather than print fmtClock's own
+// "0:00" when their OWN denominator is zero (testified / people
+// respectively, not each other's) — "0:00" claims a baptism (or testimony)
+// took no time, which is false for a session that simply had none yet: a
+// grouped Finish during the testimonies has real testified people and
+// nothing baptized, so only Avg baptism dashes there. The header's own stat
+// strip (figures.ts) and fmtBaptizeMs (use-baptism-state.ts) make the exact
+// same call for the same reason.
 
 import { Trash2Icon } from "lucide-react";
 
@@ -79,8 +88,16 @@ export function PastSessionsCard({ sessions, loadError, onDelete }: PastSessions
                   </span>
                 </div>
                 <RowFigure label="Baptized" value={String(stats.people)} className="flex flex-col" />
-                <RowFigure label="Avg testimony" value={fmtClock(stats.avgTestimonySec * 1000)} className="hidden flex-col sm:flex" />
-                <RowFigure label="Avg baptism" value={fmtClock(stats.avgBaptismSec * 1000)} className="hidden flex-col sm:flex" />
+                <RowFigure
+                  label="Avg testimony"
+                  value={stats.testified ? fmtClock(stats.avgTestimonySec * 1000) : "—"}
+                  className="hidden flex-col sm:flex"
+                />
+                <RowFigure
+                  label="Avg baptism"
+                  value={stats.people ? fmtClock(stats.avgBaptismSec * 1000) : "—"}
+                  className="hidden flex-col sm:flex"
+                />
                 <RowFigure label="Total" value={fmtClock(stats.totalSec * 1000)} className="flex flex-col" />
                 <Tooltip label="Delete session">
                   <button
