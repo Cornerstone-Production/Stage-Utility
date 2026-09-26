@@ -780,6 +780,11 @@ from — and always points at the read-only `/history` page, never
 into the operator app. It is blank on a session recorded before `serviceKey` was
 captured.
 
+A baptism session's `Date` — and the date range you picked — go by the linked
+service's own date in the app time zone, not the session's raw UTC timestamp, so
+a session recorded after 7pm still lands on the service's own day. A session with
+no linked service falls back to its own start time, zoned the same way.
+
 Blank metric cells are normal: columns are the union across everything exported,
 so a service whose meter reported fewer metrics leaves the rest empty. Services
 recorded before a given metric existed are blank for it.

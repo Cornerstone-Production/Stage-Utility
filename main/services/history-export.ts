@@ -12,7 +12,7 @@
 import writeXlsxFile, { type Cell, type Row } from "write-excel-file/node";
 
 import { tableFeature, type TableSpec } from "./xlsx-table.js";
-import { appTimeZone } from "./app-timezone.js";
+import { appTimeZone, zonedDateKey } from "./app-timezone.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -143,6 +143,10 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
   // that one has to round-trip back into the store with Reset still working.
   const tl = timelines.filter((t) => inRange(t.serviceDate, from, to)).map((t) => overlaidTimeline(t));
   const spl = spls.filter((s) => inRange(s.serviceDate, from, to));
+  // Unfiltered by date, so a baptism session's own service names its real
+  // (zoned) date below regardless of whether that service itself falls in
+  // range — see baptismDate.
+  const timelineByKey = new Map(timelines.map((t) => [t.serviceKey, t]));
 
   type Timeline = (typeof tl)[number];
   type Attendance = (typeof att)[number];
@@ -348,8 +352,15 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     // session is just when the operator started and stopped. Sessions carry the
     // service they were recorded in, so these line up with the other sheets by
     // date and time rather than needing to be matched by hand.
-    const sessions = baptismSessions.filter((b) => inRange((b.startedAt ?? "").slice(0, 10), from, to));
-    const byKey = new Map(tl.map((t) => [t.serviceKey, t]));
+    //
+    // Dated by the linked service's own zoned date, not a slice of the raw
+    // `startedAt` ISO string — that string is UTC, so a session after 19:00
+    // Chicago read as the next day and fell outside a date-bounded export that
+    // should have included it. Falls back to the session's own startedAt,
+    // zoned, only for a session no service record names.
+    const baptismDate = (b: (typeof baptismSessions)[number]): string =>
+      timelineByKey.get(b.serviceKey ?? "")?.serviceDate ?? zonedDateKey(Date.parse(b.startedAt ?? "") || Date.now());
+    const sessions = baptismSessions.filter((b) => inRange(baptismDate(b), from, to));
     const rows = sessions
       .flatMap((b) => b.people.map((p, i) => ({ b, p, n: i + 1 })))
       .sort((a, z) => a.b.startedAt.localeCompare(z.b.startedAt) || a.n - z.n);
@@ -358,13 +369,17 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
       sheet<(typeof rows)[number]>(
         "Baptisms",
         [
-          { header: "Date", width: 12, value: ({ b }) => (b.startedAt ?? "").slice(0, 10) },
+          { header: "Date", width: 12, value: ({ b }) => baptismDate(b) },
           {
             header: "Service time",
             width: 13,
-            value: ({ b }) => serviceTimeLabel(byKey.get(b.serviceKey ?? "")?.serviceTimeStartsAt),
+            value: ({ b }) => serviceTimeLabel(timelineByKey.get(b.serviceKey ?? "")?.serviceTimeStartsAt),
           },
-          { header: "Service type", width: 20, value: ({ b }) => byKey.get(b.serviceKey ?? "")?.serviceTypeName ?? "" },
+          {
+            header: "Service type",
+            width: 20,
+            value: ({ b }) => timelineByKey.get(b.serviceKey ?? "")?.serviceTypeName ?? "",
+          },
           { header: "Session", width: 22, value: ({ b }) => b.title ?? "" },
           { header: "#", width: 6, value: (r) => r.n },
           // A grouped session times every testimony first, then every baptism, so a
