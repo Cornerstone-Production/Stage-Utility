@@ -43,26 +43,12 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../../types/stage.js";
+import { interceptAddSession } from "../baptism-save-harness.js";
 
 const { historyRoutes, BAPTISM_ACTIONS } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { baptismTimerService: timer } = await import("../baptism-timer-service.js");
 const { baptismStore } = await import("../baptism-store.js");
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-type AddSession = typeof baptismStore.addSession;
-/** Replace addSession for exactly the "dismiss-save-error" precondition, which
- *  needs a REAL failed save to have something to dismiss. Restored in a
- *  finally — the same pattern baptism-save-error.test.ts uses. */
-function stubAddSession(impl: AddSession): () => void {
-  const store = baptismStore as unknown as { addSession: AddSession };
-  const original = store.addSession;
-  store.addSession = impl;
-  return () => {
-    store.addSession = original;
-  };
-}
 
 interface ActionCase {
   action: string;
@@ -218,15 +204,19 @@ const ACTIONS: ActionCase[] = [
       timer.reset();
       timer.setMode("grouped");
       timer.start();
-      const restore = stubAddSession(async () => {
+      // A REAL failed save, so there is something to dismiss. finish() calls
+      // addSession synchronously, so the stub can come off straight away; the
+      // entry lands when finalize()'s rejection handler runs, which is what
+      // awaiting the save itself waits for.
+      const failing = interceptAddSession(baptismStore, async () => {
         throw new Error("scratch failure for the route guard's precondition");
       });
-      timer.finish();
       try {
-        for (let i = 0; i < 200 && !timer.getState().saveErrors?.length; i++) await sleep(5);
+        timer.finish();
       } finally {
-        restore();
+        failing.restore();
       }
+      await failing.settled();
       assert.ok(timer.getState().saveErrors?.length, "sanity: the precondition failed to produce a failed save");
     },
     check: (s) => {
@@ -293,10 +283,23 @@ describe("POST /api/baptism/<action>", () => {
 
   for (const { action, setup, body, status = 200, check } of ACTIONS) {
     it(`/api/baptism/${action} reaches the real handler for it`, async () => {
-      await setup();
-      const out = await callRoute(historyRoutes, `/api/baptism/${action}`, { method: "POST", body });
-      assert.equal(out.status, status, `expected ${status}, got ${out.status}: ${out.body}`);
-      check(timer.getState());
+      // Every save a row starts settles before the next row begins, so no
+      // row depends on how long another row's write takes. A save that lands
+      // clears the saveErrors entry for its own session id, `bap-<start ms>`,
+      // and these rows start sessions well under a millisecond apart: the
+      // "finish" row's save, left in flight, landed during
+      // "dismiss-save-error" and erased that row's failed save whenever the
+      // two sessions started in the same millisecond.
+      const saves = interceptAddSession(baptismStore);
+      try {
+        await setup();
+        const out = await callRoute(historyRoutes, `/api/baptism/${action}`, { method: "POST", body });
+        assert.equal(out.status, status, `expected ${status}, got ${out.status}: ${out.body}`);
+        check(timer.getState());
+      } finally {
+        saves.restore();
+        await saves.settled();
+      }
       timer.reset();
     });
   }
