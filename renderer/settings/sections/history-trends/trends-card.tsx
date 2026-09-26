@@ -36,7 +36,7 @@ import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
 import { HistoryChart, useStoredKeys, type ChartMilestone, type StripHover } from "../history-chart";
-import { toast } from "../../../components/ui";
+import { Skeleton, toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
 import { ContextMenu, type ContextMenuItem } from "../../../components/ui/context-menu";
@@ -260,10 +260,15 @@ export function TrendsCard({
    *  sound measure reads "No sound recorded yet" at a church that records it
    *  every week. */
   soundUnavailable = false,
+  /** The page's lists have not all arrived yet. Without this the card answers
+   *  "No recordings in this range" before it has read a single recording,
+   *  which on a slow link is most of the wait. */
+  loading = false,
 }: {
   recordings: TrendRecording[];
   clock?: TrendClock | null;
   soundUnavailable?: boolean;
+  loading?: boolean;
 }) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
   /** Attendance or sound. Attendance by default: it is the question the tab is
@@ -627,7 +632,17 @@ export function TrendsCard({
         )}
       </p>
 
-      {tiles.length === 0 ? (
+      {loading ? (
+        // The shape of what is coming, at its size, so the card does not jump
+        // when the tiles and the plot arrive.
+        <div data-trends-loading aria-busy="true" className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Skeleton className="h-[72px]" />
+          </div>
+          <Skeleton className="h-[190px] w-full" />
+          <span className="sr-only">Loading the history</span>
+        </div>
+      ) : tiles.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-caption1 text-fg-muted">
           {sound && soundUnavailable
             ? "The sound summary could not be read — see the server log for the reason."

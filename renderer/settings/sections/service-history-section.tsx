@@ -535,6 +535,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // Attendance records for all services — the day rows and the Trends card are
   // both built from these.
   const [attList, setAttList] = useState<ServiceAttendanceSummary[]>([]);
+  // Whether the attendance list and the SPL summary have come back at all, well
+  // or not: an empty array cannot tell "none recorded" from "not read yet", and
+  // the Trends card must not say the first while it is the second.
+  const [attSettled, setAttSettled] = useState(false);
+  const [splSettled, setSplSettled] = useState(false);
   /** One level per service — the sound measure on Trends, and each day row's
    *  peak. A summary, not the archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
@@ -645,7 +650,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .catch((e) => {
         setAttList([]);
         noteFailure("attendance", "the attendance history", e);
-      });
+      })
+      .finally(() => setAttSettled(true));
     invoke<SplServiceSummary[]>("spl:getSummary")
       .then((r) => {
         setSplList(r ?? []);
@@ -654,7 +660,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .catch((e) => {
         setSplList([]);
         noteFailure("spl", "the sound summary", e);
-      });
+      })
+      .finally(() => setSplSettled(true));
   }, [reload, noteFailure, noteLoaded]);
 
   // Live updates while a service is recording — refresh the open detail/list, the
@@ -1748,7 +1755,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           length, overrun, peak, level — is on the service page's own KPI row
           against the service it belongs to, where it means something specific.
           Export moved into the Recorded services header; it is not removed. */}
-      <TrendsCard recordings={trendRecordings} clock={clock} soundUnavailable={loadFailed.has("spl")} />
+      <TrendsCard
+        recordings={trendRecordings}
+        clock={clock}
+        soundUnavailable={loadFailed.has("spl")}
+        loading={list === null || !attSettled || !splSettled}
+      />
 
       {/* Calendar (sticky) beside the month's services. The calendar decides
           which month both of them are about. There is no "Selected: …" summary
