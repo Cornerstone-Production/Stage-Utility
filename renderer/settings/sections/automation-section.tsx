@@ -19,6 +19,7 @@ import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-p
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useOptionSources } from "./automation-option-sources";
+import { joinWithAnd } from "../../lib/join-with-and";
 
 /** A rule as GET /api/automation/rules sends it — its own fields plus the
  *  issues the server computed against the current registry. See
@@ -173,13 +174,6 @@ function ServiceGuardBadge({ guarded }: { guarded: boolean }) {
       {guarded ? "service-safe" : "any time"}
     </span>
   );
-}
-
-/** "A, B and C" — never an Oxford comma, matching how the app already reads
- *  a short list out loud elsewhere (the pair-delete confirm). */
-function joinWithAnd(items: string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 /**

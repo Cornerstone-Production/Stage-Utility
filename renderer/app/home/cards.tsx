@@ -39,6 +39,7 @@ import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { joinWithAnd } from "../../lib/join-with-and";
 import { ErrorNote } from "../../components/ui/error-note";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
@@ -342,10 +343,10 @@ function useHistoryRecords(wantSpl = false) {
   return { list, attList, splList, failed };
 }
 
-/** "the a", "the a and the b", "the a, the b and the c". */
+/** "the a", "the a and the b", "the a, the b and the c" — the join-with-and
+ *  shape, plus this file's own "the " prefix per item. */
 function theList(items: string[]): string {
-  const the = items.map((i) => `the ${i}`);
-  return the.length < 2 ? (the[0] ?? "") : `${the.slice(0, -1).join(", ")} and ${the[the.length - 1]}`;
+  return joinWithAnd(items.map((i) => `the ${i}`));
 }
 
 /* ── The cards ────────────────────────────────────────────────────────────── */

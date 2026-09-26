@@ -78,6 +78,7 @@ import {
   DialogDescription,
 } from "../components/ui";
 import { cn } from "../lib/cn";
+import { joinWithAnd } from "../lib/join-with-and";
 
 const ALL_IDS = Object.keys(BAR_ITEMS) as BarItemId[];
 
@@ -305,12 +306,6 @@ const NARROWEST = 320;
  *  every arrangement to make one of them honest. */
 const PHONE_PREVIEW = 390;
 
-/** "the plan", "the plan and the current item". */
-function nameList(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-
 /**
  * The same arrangement, laid out off-screen at 320px, so the dialog can say what
  * will happen on the narrowest phone rather than only what is happening in here.
@@ -517,7 +512,7 @@ export function BarConfigurator({
       return `On a ${NARROWEST}px phone this is ${narrow.over}px too long even with every word given up, so a reading at the end would be cut off. Take an item off the phone's bar.`;
     }
     if (narrow.cut.length === 0) return null;
-    return `On a ${NARROWEST}px phone this runs out of room, and ${nameList(narrow.cut)} will be cut short. Take ${narrow.cut.length > 1 ? "one of them" : "it"} off the phone's bar to keep every reading whole.`;
+    return `On a ${NARROWEST}px phone this runs out of room, and ${joinWithAnd(narrow.cut)} will be cut short. Take ${narrow.cut.length > 1 ? "one of them" : "it"} off the phone's bar to keep every reading whole.`;
   }
   const warning = shownOnPhone ? narrowWarning() : null;
 
