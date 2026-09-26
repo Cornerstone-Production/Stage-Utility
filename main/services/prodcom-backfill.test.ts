@@ -247,6 +247,33 @@ describe("an operator's clear holds across a reconnect", () => {
       ["[prodcom] backfill skipped 3 line(s) from before the operator cleared the transcript"],
     );
   });
+
+  it("does not hold across a reconfigure to a different box", async (t) => {
+    // configure() resets `clearedIds` — ids from the old box mean nothing on a
+    // new one. Box B's own history happens to carry a row with the SAME id
+    // that was cleared on box A (two ProdCom installs numbering their own rows
+    // independently), so this is also the strongest form of the "position, not
+    // time" test above: nothing about the OLD box's clear should be able to
+    // reach a connection this box never ran on.
+    const { stub: stubA, svc } = await connected(t, { entries: [row("nine-oclock-sermon", 1)], refuseWebSocket: true });
+    await stubA.waitForRequest(isTranscriptPage);
+    await svc.settled();
+    assert.deepEqual(svc.captions().map((c) => c.text), ["nine-oclock-sermon"], "precondition: backfill landed");
+
+    svc.clearTranscript();
+
+    const stubB = await startProdComStub({ channels: CHANNELS, entries: [row("nine-oclock-sermon", 1)], refuseWebSocket: true });
+    t.after(async () => stubB.close());
+    svc.configure("127.0.0.1", stubB.port, null);
+    await stubB.waitForRequest(isTranscriptPage);
+    await svc.settled();
+
+    assert.deepEqual(
+      svc.captions().map((c) => c.text),
+      ["nine-oclock-sermon"],
+      "a clear on the old box held across the reconfigure, hiding a row on the new one it never cleared",
+    );
+  });
 });
 
 describe("per-speaker colour comes from the channel list", () => {
