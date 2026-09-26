@@ -10,15 +10,28 @@
 // baptism-operator-armed.test.tsx's note on why.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
 
 const teardown = installRenderDom();
 
+// jsdom's getBoundingClientRect is all zeros, and onMove bails out on a
+// zero-width box (see session-chart.tsx's own guard) — give the SVG a real
+// box so a pointer move means something. Copied from history-chart.test.tsx's
+// identical need.
+const SVG_W = 640;
+Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+  configurable: true,
+  value() {
+    return { left: 0, top: 0, right: SVG_W, bottom: 217, width: SVG_W, height: 217, x: 0, y: 0, toJSON() {} };
+  },
+});
+
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { SessionChart, SESSION_LANES_STORAGE_KEY } = await import("./session-chart.js");
+import type { StatFigure } from "../history-chart";
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -526,6 +539,88 @@ test("a failed plan-timeline fetch shows its own note, and still reaches the log
     assert.ok(
       logCalls.some((c) => c.tag === "baptism" && /plan timeline fetch failed/i.test(c.message)),
       `expected a logToServer("baptism", ...) call naming the plan timeline fetch — got ${JSON.stringify(logCalls)}`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// hoveredKey (the effect's own dependency for reporting hoverFigs up to the
+// header) used to be built from the running span's OWN identity alone
+// (`${itemId}-running`), which never changes while the span stays open — so
+// the effect that reports hoverFigs never re-ran, and the header kept
+// showing whatever duration was true the instant the hover started, while
+// the bar and the Timer card kept counting underneath the frozen number.
+test("hovering the running segment keeps moving, not frozen at whatever duration was true when the hover started", async (t) => {
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const T0 = Date.parse("2026-09-27T15:00:00.000Z");
+  // 30s into the segment already, not AT its own start — a zero-width domain
+  // (now === segmentStartedAt) draws no segment at all to hover in the first
+  // place.
+  mock.timers.setTime(T0 + 30_000);
+  t.after(() => mock.timers.reset());
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/api/baptism/lane")) {
+      return okResponse({
+        spans: [{ kind: "testimony", person: 1, startedAt: new Date(T0).toISOString(), endedAt: null }],
+      });
+    }
+    if (url.includes("/api/service-timeline/current")) return okResponse(null);
+    if (url.includes("/api/service-timeline/")) return okResponse(null);
+    return okResponse({});
+  }) as unknown as typeof fetch;
+
+  const seen: (StatFigure[] | null)[] = [];
+  try {
+    await act(async () => {
+      render(
+        React.createElement(SessionChart, {
+          state: {
+            ...BASE,
+            phase: "testimony",
+            personNumber: 1,
+            serviceKey: "svc-hover-freeze",
+            sessionStartedAt: new Date(T0).toISOString(),
+            segmentStartedAt: new Date(T0).toISOString(),
+          },
+          onHover: (figs: StatFigure[] | null) => seen.push(figs),
+        }),
+      );
+      await settle();
+      await settle();
+    });
+
+    const svg = screen.getByRole("img", { name: /Baptism session timeline/i }) as unknown as SVGSVGElement;
+    // Inside the plot area (session-chart.tsx's own PAD_L=46/PAD_R=14), near
+    // the live edge where a running segment (open-ended, drawn to "now")
+    // sits.
+    await act(async () => {
+      fireEvent.pointerMove(svg, { clientX: SVG_W - 20, clientY: 20 });
+      await settle();
+    });
+
+    const first = seen.at(-1);
+    assert.ok(first, `expected a hover readout for the running segment; saw ${JSON.stringify(seen)}`);
+    const firstPhase = first!.find((f) => f.key === "hoverPhase");
+    assert.ok(firstPhase, "expected the Testimony/Baptism duration figure");
+
+    // 5 seconds pass with the pointer resting in place — no new pointer
+    // event at all, exactly what a still mouse leaves behind. The component
+    // re-renders every second regardless (useServerNow(1000, live)).
+    await act(async () => {
+      mock.timers.tick(5000);
+      await settle();
+    });
+
+    const later = seen.at(-1);
+    const laterPhase = later!.find((f) => f.key === "hoverPhase");
+    assert.notEqual(
+      laterPhase!.value,
+      firstPhase!.value,
+      `hover duration froze at ${firstPhase!.value} through 5 seconds of a still-running segment`,
     );
   } finally {
     globalThis.fetch = realFetch;

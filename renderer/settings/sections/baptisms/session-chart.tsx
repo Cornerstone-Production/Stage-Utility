@@ -675,8 +675,18 @@ function SessionSvg({
   const hoveredTimerSeg = hoverX != null
     ? (segmentAt(timerSegments, hoverX, "service") as (LaneSegment & { item: TimerLaneItem }) | null)
     : null;
+  // A running span's own endedAt is null for as long as it runs, so a key
+  // built from it alone stays IDENTICAL for the whole time the pointer rests
+  // on it — the effect below, keyed on this, would then never re-run, and
+  // the header's hover figures would freeze at whatever duration was true the
+  // instant the hover started, while the bar and the Timer card keep
+  // counting. Folding in domainEndMs (already recomputed every 1s render, via
+  // useServerNow above) keeps the key moving for exactly as long as the span
+  // stays open, without changing it at all once the span closes (endedAt then
+  // wins outright, so hovering a closed segment still keys on nothing but its
+  // own identity).
   const hoveredKey = hoveredTimerSeg
-    ? `${hoveredTimerSeg.item.itemId}-${hoveredTimerSeg.item.endedAt ?? "running"}`
+    ? `${hoveredTimerSeg.item.itemId}-${hoveredTimerSeg.item.endedAt ?? `running-${Math.floor(domainEndMs / 1000)}`}`
     : "";
   const hoverFigs = hoveredTimerSeg ? timerHoverFigures(hoveredTimerSeg.item, domainEndMs) : null;
   const onHoverRef = useRef(onHover);
