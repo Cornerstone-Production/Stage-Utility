@@ -60,9 +60,13 @@ function fmtDay(day: string): string {
  * recessed fill is what the Stat tiles and the time editor already use for the
  * same reason. Both row shapes — the normal one and the arrival-only one — read
  * it, so they cannot drift apart.
+ *
+ * ROW_SHELL is the part that takes up room: the border and the right padding.
+ * The heading row wears it too, invisibly, so its grid is exactly as wide as a
+ * row's; without it every heading sat 7px right of its figures.
  */
-const ROW_SURFACE =
-  "flex items-center gap-1 rounded-lg border border-line bg-fill/40 pr-1.5 transition-colors hover:bg-fill";
+const ROW_SHELL = "flex items-center gap-1 border pr-1.5";
+const ROW_SURFACE = `${ROW_SHELL} rounded-lg border-line bg-fill/40 transition-colors hover:bg-fill`;
 
 /**
  * The grid every row in the Recorded services list shares WITH ITS HEADER.
@@ -71,13 +75,27 @@ const ROW_SURFACE =
  * over the columns it names. Two declarations of the same track list is how a
  * heading ends up one column left of its figures.
  *
- * Below `sm` the four figure columns and the chevron are dropped and the row
- * stacks: six 88px columns do not fit a phone, and a squashed "1,1…" is worse
- * than a figure you open the service to read.
+ * Keyed to the LIST CARD's width (`@container` on it), not the viewport's. The
+ * card shares the page with the rail and the calendar, so a window well past
+ * any viewport breakpoint can still leave it too narrow for seven tracks: the
+ * fixed ones then ran off the card and scrolled the page sideways, and SERVICE
+ * resolved to nothing. The full grid needs 46rem of card; narrower, a row wraps
+ * — WHEN, SERVICE and the chevron on one line, the four figures on the next,
+ * each with its caption under it, top-aligned so a caption that wraps does not
+ * drop its value below the others — and the heading row, which only means
+ * anything over the full grid, is hidden. ROW_PLACE carries the placement.
  */
 const ROW_GRID =
-  "grid grid-cols-[1fr_1fr] items-center gap-x-3 gap-y-1 "
-  + "sm:grid-cols-[104px_minmax(0,1fr)_repeat(4,84px)_20px] sm:gap-y-0";
+  "grid grid-cols-[repeat(4,minmax(0,1fr))_16px] items-start gap-x-3 gap-y-2 "
+  + "@min-[46rem]:grid-cols-[104px_minmax(0,1fr)_repeat(4,84px)_20px] @min-[46rem]:items-center @min-[46rem]:gap-y-0";
+
+/** Where the SERVICE cell and the chevron sit in the wrapped row, undone for
+ *  the full grid. Auto-placement does the rest: WHEN takes the first cell and
+ *  the figures fill the second line. */
+const ROW_PLACE = {
+  service: "col-span-3 @min-[46rem]:col-span-1",
+  chevron: "col-start-5 row-start-1 @min-[46rem]:col-start-auto @min-[46rem]:row-start-auto",
+};
 
 /**
  * The four figure columns, in order, with the heading each one carries.
@@ -116,17 +134,18 @@ const ROW_COLUMNS: {
  *  same tracks the rows use — see ROW_GRID. */
 function ServiceRowHeader() {
   return (
-    <div
-      data-row-header
-      aria-hidden
-      className={cn(ROW_GRID, "max-sm:hidden px-3 pb-0.5 text-[10px] uppercase tracking-wider text-fg-subtle")}
-    >
-      <span>When</span>
-      <span>Service</span>
-      {ROW_COLUMNS.map((c) => (
-        <span key={c.key}>{c.heading}</span>
-      ))}
-      <span />
+    <div aria-hidden className={cn(ROW_SHELL, "border-transparent @max-[46rem]:hidden")}>
+      <div
+        data-row-header
+        className={cn(ROW_GRID, "min-w-0 flex-1 px-3 pb-0.5 text-[10px] uppercase tracking-wider text-fg-subtle")}
+      >
+        <span>When</span>
+        <span>Service</span>
+        {ROW_COLUMNS.map((c) => (
+          <span key={c.key}>{c.heading}</span>
+        ))}
+        <span />
+      </div>
     </div>
   );
 }
@@ -1383,13 +1402,22 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }
     }
     // The include/exclude checkbox column only shows while editing times.
-    // Mobile drops #, Plan, Started and Ended (see the max-sm:hidden cells) so the
-    // item name isn't crushed; sm+ shows the full grid. Templates must match the
-    // visible cells. Started and Ended are wider in edit mode because they hold an
-    // HH:MM:SS field there rather than a formatted time.
-    const gridCols = editingTimes
-      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]"
-      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]";
+    // A narrow table drops #, Plan, Started and Ended (the `wideOnly` cells) so
+    // the item name isn't crushed. Keyed to the TABLE's width (`@container` on
+    // it), not the viewport's: beside the rail at 640px the full grid needed more
+    // than the table had, and its overflow-hidden clipped Started and Ended away.
+    // Templates must match the visible cells. Started and Ended are wider in edit
+    // mode because they hold an HH:MM:SS field there, so edit mode needs 42rem of
+    // table where reading needs 35.
+    const { gridCols, wideOnly } = editingTimes
+      ? {
+          gridCols: "grid-cols-[1.4rem_1fr_3.5rem_3rem] @min-[42rem]:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]",
+          wideOnly: "@max-[42rem]:hidden",
+        }
+      : {
+          gridCols: "grid-cols-[1fr_3.5rem_3rem] @min-[35rem]:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]",
+          wideOnly: "@max-[35rem]:hidden",
+        };
     // Series · service type · date · time, in one muted line. Blank parts drop
     // out rather than leaving a dangling separator.
     const metaLine = [
@@ -1471,7 +1499,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             down the page. The marks — live, not counted, edited — and the two
             row buttons were each on a bespoke 10px; they are on the scale's
             11px caption now. Nothing about what the table DOES changed. */}
-        <div className="flex flex-col overflow-hidden rounded-lg border border-line">
+        <div className="@container flex flex-col overflow-hidden rounded-lg border border-line">
           <div
             data-testid="rundown-header"
             className={`grid ${gridCols} gap-2 border-b border-line bg-fill px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle`}
@@ -1481,7 +1509,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 <span className="text-center">✓</span>
               </Tooltip>
             )}
-            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Started</span><span className="text-right max-sm:hidden">Ended</span>
+            <span className={cn("", wideOnly)}>#</span><span>Item</span><span className={cn("text-right", wideOnly)}>Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className={cn("text-right", wideOnly)}>Started</span><span className={cn("text-right", wideOnly)}>Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
@@ -1511,7 +1539,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     />
                   </Tooltip>
                 )}
-                <span className="font-mono tabular-nums text-fg-subtle max-sm:hidden">{i + 1}</span>
+                <span className={cn("font-mono tabular-nums text-fg-subtle", wideOnly)}>{i + 1}</span>
                 <span className="truncate text-fg">
                   {it.title || "—"}
                   {itemLive && <span className="ml-1.5 text-caption2 text-live-11">live</span>}
@@ -1523,7 +1551,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   )}
                   {editingTimes && dirty && (
                     <button
-                      className="ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10 max-sm:hidden"
+                      className={cn("ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10", wideOnly)}
                       disabled={saving}
                       aria-label={`Save times — ${it.title || "item"}`}
                       onClick={() => void saveItemTimes(it)}
@@ -1538,7 +1566,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       wanted. Reset discards the draft along with the override. */}
                   {editingTimes && edited && (
                     <button
-                      className="ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill max-sm:hidden"
+                      className={cn("ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill", wideOnly)}
                       aria-label={`Reset times — ${it.title || "item"}`}
                       onClick={() => void resetItemTimes(it)}
                     >
@@ -1546,7 +1574,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     </button>
                   )}
                 </span>
-                <span className="text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
+                <span className={cn("text-right font-mono tabular-nums text-fg-muted", wideOnly)}>{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
                 <span className="text-right font-mono tabular-nums text-fg">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
                 <span className={`text-right font-mono tabular-nums ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
                 {editingTimes ? (
@@ -1564,7 +1592,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded start"
                       value={draft.start}
                       onChange={(e) => setDraft(it, { start: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
+                      className={cn("rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg", wideOnly)}
                     />
                     <input
                       type="time"
@@ -1574,13 +1602,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded end"
                       value={draft.end}
                       onChange={(e) => setDraft(it, { end: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
+                      className={cn("rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg", wideOnly)}
                     />
                   </>
                 ) : (
                   <>
-                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
-                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                    <span className={cn("whitespace-nowrap text-right font-mono tabular-nums text-fg-muted", wideOnly)}>{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
+                    <span className={cn("whitespace-nowrap text-right font-mono tabular-nums text-fg-muted", wideOnly)}>{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
                   </>
                 )}
               </div>
@@ -1710,7 +1738,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
   // ── List view: services for the selected day. ──
   return (
-    <div className="flex flex-col gap-3">
+    <div className="@container flex flex-col gap-3">
       {/* Trends LEADS the page. It is the defining view of the tab: what a month
           of Sundays did, per service type, with the dates that explain a step
           marked under the axis. Below it, the calendar and the recorded-services
@@ -1727,8 +1755,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           card under it any more: the same two facts are the list's own header,
           and the day's services are one scroll away rather than hidden behind
           the other fifteen. */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
-        <div className="sm:sticky sm:top-0 flex flex-col gap-3">
+      {/* Calendar beside the list once the PAGE has room for both, not the
+          viewport: the rail takes its share first, and a 640px breakpoint left
+          the list 96px wide beside a 320px calendar. */}
+      <div className="grid grid-cols-1 gap-5 @min-[43rem]:grid-cols-[320px_1fr] @min-[43rem]:items-start">
+        <div className="@min-[43rem]:sticky @min-[43rem]:top-0 flex flex-col gap-3">
           <HistoryCalendar
             counts={dateCounts}
             selected={day}
@@ -1746,7 +1777,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             between one day group and the next. It is the clearance the selected
             day's ring stands in — see the ring's own note below — and 8px was
             less than the ring's own 12px inset, so the ring had nowhere to be. */}
-        <section data-services-card className="su-card min-w-0 flex flex-col gap-3 px-4 py-3.5">
+        <section data-services-card className="@container su-card min-w-0 flex flex-col gap-3 px-4 py-3.5">
           {/* The card's own header: what the list is, what it is showing, and
               the Export control. Export used to be a full-width disclosure of
               its own above the calendar — a builder for a thing you do twice a
@@ -1754,7 +1785,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               a button, beside the list it exports. */}
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <h3 className="text-body font-semibold text-fg">Recorded services</h3>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span data-list-showing className="text-caption2 text-fg-subtle">
                 Showing {fmtMonth(viewMonth ?? day?.slice(0, 7) ?? null)} · {monthServices.length}
                 {` service${monthServices.length === 1 ? "" : "s"}`}
@@ -1900,13 +1931,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     {/* The live DOT rides with the start time, and the pill in
                         the SERVICE column says the word.
                         Not redundant — belt and braces on purpose. SERVICE is
-                        the grid's only flexible track and it resolves to ZERO
-                        between 640 and about 1,150px wide, where the pill is
-                        clipped away with the plan title beside it. WHEN is a
-                        fixed 104px and is the leftmost column, so it is the one
-                        place a marker cannot be squeezed out of. Six pixels
-                        beside a 42px time, rather than the 84px pill that used
-                        to live here and truncated "Weekend" to "W…". */}
+                        the grid's only flexible track, so a long plan title
+                        truncates the pill away with it. WHEN is the leftmost
+                        column, so it is the one place a marker cannot be
+                        squeezed out of. Six pixels beside a 42px time, rather
+                        than the 84px pill that used to live here and truncated
+                        "Weekend" to "W…". */}
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate font-mono text-footnote font-semibold tabular-nums text-fg">
                         {started.value}
@@ -1923,14 +1953,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       as "W…". It belongs here anyway. It says what is happening
                       to this RECORDING, and it is where the service page and the
                       arrival page both put it — after the title. */}
-                  <span data-row-service className="flex min-w-0 flex-col">
+                  <span data-row-service className={cn("flex min-w-0 flex-col", ROW_PLACE.service)}>
                     {/* `overflow-hidden`, because the pill does not shrink. The
-                        SERVICE track is the only flexible one, and between 640
-                        and about 1,150px wide it resolves to ZERO — the plan
-                        title has been clipped to nothing there since the row
-                        grid was built. A fixed-width pill in a zero-width cell
-                        paints over the figure in the next column instead of
-                        being clipped with the title beside it. */}
+                        SERVICE track is the only flexible one, and a fixed-width
+                        pill in a cell too narrow for it paints over the figure
+                        in the next column instead of being clipped with the
+                        title beside it. */}
                     <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
                       <span className="truncate text-footnote font-medium text-fg">{s.planTitle ?? s.serviceKey}</span>
                       {bapCount > 0 && (
@@ -1974,7 +2002,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                             sends an operator to look at a meter that is fine. */}
                         <span
                           data-row-figure-note
-                          className="truncate text-[10px] uppercase tracking-wider text-fg-subtle"
+                          className="truncate text-[10px] uppercase leading-tight tracking-wider text-fg-subtle @max-[46rem]:whitespace-normal"
                         >
                           {f?.sub ?? col.caption(f?.label)}
                         </span>
@@ -1983,7 +2011,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   })}
                   {/* The row opens a page. Nothing on it said so — the whole
                       card was clickable and looked like a read-only summary. */}
-                  <ChevronRightIcon aria-hidden className="size-4 self-center justify-self-end text-fg-faint" />
+                  <ChevronRightIcon aria-hidden className={cn("size-4 self-center justify-self-end text-fg-faint", ROW_PLACE.chevron)} />
                 </button>
               </div>
             );

@@ -550,7 +550,7 @@ export function ServiceHeader({
         // The app has exactly one scroller — the shell's <main> — and this is
         // rendered directly inside it, so `sticky top-0` pins to the top of the
         // pane, immediately under the context bar.
-        "sticky top-0 z-20 -mx-1 flex flex-col gap-3 bg-bg px-1 pb-2 pt-1",
+        "@container sticky top-0 z-20 -mx-1 flex flex-col gap-3 bg-bg px-1 pb-2 pt-1",
         "border-b border-line",
         // The pane carries its own top padding and `sticky top-0` pins BELOW
         // it, leaving a strip the page scrolls through above the header. This
@@ -563,7 +563,10 @@ export function ServiceHeader({
         ← All services
       </button>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      {/* Title beside the actions once the HEADER has room for both, not the
+          viewport: beside the rail at 640px the actions would not shrink and
+          scrolled the page sideways. */}
+      <div className="flex flex-col gap-3 @min-[44rem]:flex-row @min-[44rem]:items-start @min-[44rem]:justify-between">
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-title3 font-semibold text-fg">
             {timeline.planTitle ?? timeline.serviceKey}
@@ -576,7 +579,7 @@ export function ServiceHeader({
 
         {/* One group, in the order an operator reaches for them, with Delete
             pushed past a hairline because it is the one that cannot be undone. */}
-        <div data-testid="history-actions" className="flex flex-wrap items-center gap-2 sm:shrink-0">
+        <div data-testid="history-actions" className="flex flex-wrap items-center gap-2 @min-[44rem]:shrink-0">
           {!readOnly && live && (
             <Button
               variant="filled"
