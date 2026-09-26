@@ -89,7 +89,8 @@ operator jumping to the previous song expects.
 ## Reading it back
 
 The History tab opens on **All services**: a Trends card, then a calendar beside
-the day's services. Open a service for its own page, described after it.
+the day's services, or above them when the page is too narrow for both. Open a
+service for its own page, described after it.
 
 ### All services
 
@@ -333,11 +334,14 @@ to that day's group and rings it; it does not hide the rest of the month.
 A column header is drawn once, under the first day's label, then a row per
 service: the start time with the service type under it, the plan title with its
 series and item count under that, and four figures. Each figure's caption sits
-under its value. While a recording is still open the row says so twice: the same
-green **recording** pill the service's own page carries, after the plan title,
-and the pill's dot on its own beside the start time. The dot is the one that
-survives a narrow window — the Service column is the only one that can shrink,
-and the pill goes with the plan title when it does.
+under its value. When the list is too narrow for the columns, each row wraps
+instead: the start time, the plan title and the arrow on one line, the four
+figures on the next, and no column header, since each caption names its figure.
+While a recording is still open the row says so twice: the same green
+**recording** pill the service's own page carries, after the plan title, and the
+pill's dot on its own beside the start time. The dot is the one that survives a
+long plan title — the Service column is the only one that can shrink, and the
+pill goes with the plan title when it does.
 
 A service a baptism session links to carries a small droplet beside the plan
 title, with the count itself next to it — *2* beside the droplet, never a bare
