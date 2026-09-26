@@ -315,6 +315,33 @@ describe("sessionAxisTicks", () => {
     assert.deepEqual(sessionAxisTicks(NaN, T0 + 60_000), []);
     assert.deepEqual(sessionAxisTicks(T0, Infinity), []);
   });
+
+  // A baptism timer has no natural ceiling on the window: nobody pressed
+  // Finish or Reset after a Saturday rehearsal, and the persisted state
+  // resumes live after any restart. A flat 10-minute step (the old behaviour)
+  // drew 145 ticks a day in and 1009 a week in — a canvas measureText call
+  // for each one, every second, for as long as the Baptisms tab stayed open.
+  test("a session left running a day draws 12 ticks or fewer, stepping by 6 hours", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 24 * 60 * 60_000);
+    assert.ok(ticks.length <= 12, `expected 12 ticks or fewer, got ${ticks.length}`);
+    assert.deepEqual(
+      ticks.map((t) => sessionAxisLabel(t, T0)),
+      ["0m", "360m", "720m", "1080m", "1440m"],
+    );
+  });
+
+  test("a session left running a week draws 12 ticks or fewer, stepping by a day", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 7 * 24 * 60 * 60_000);
+    assert.ok(ticks.length <= 12, `expected 12 ticks or fewer, got ${ticks.length} (was 1009 before this fix)`);
+    assert.equal(ticks.length, 8);
+  });
+
+  // The ladder's own coarsest rung is a day; a session left running even
+  // longer than that must not blow the 12-tick ceiling back open.
+  test("a session left running a full month still draws 12 ticks or fewer", () => {
+    const ticks = sessionAxisTicks(T0, T0 + 30 * 24 * 60 * 60_000);
+    assert.ok(ticks.length <= 12, `expected 12 ticks or fewer, got ${ticks.length}`);
+  });
 });
 
 describe("sessionAxisLabel", () => {
