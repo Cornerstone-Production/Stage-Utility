@@ -15,6 +15,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
+import type { BaptismRawFields } from "../../types/stage.js";
 import { atomicWrite } from "../write-queue.js";
 import { serviceDirPath } from "./archive-paths.js";
 import { readArchiveRows, rolledFiles, type ArchiveRow } from "./archive-rows.js";
@@ -40,8 +41,10 @@ export interface EventItemFields {
 const MANIFEST_VERSION = 1;
 
 /** Every source this archive writes. Merging has to move all of them, so the
- *  list is named once rather than inferred from whatever happens to be on disk. */
-const SOURCES = ["spl", "attendance", "events"] as const;
+ *  list is named once rather than inferred from whatever happens to be on disk.
+ *  Exported for the guard in archive-sources.test.ts — a source missing here is
+ *  one a history merge silently leaves behind. */
+export const ARCHIVE_SOURCES = ["spl", "attendance", "events", "baptism"] as const;
 
 interface ServiceEntry {
   ctx: ServiceCtx;
@@ -127,7 +130,61 @@ class SampleArchive {
     );
   }
 
-  /** Settle every queued write. Tests await this; the live path does not need to. */
+  /**
+   * One row per operator action on the baptism timer.
+   *
+   * The column set is FIXED for the same reason recordEvent's own doc gives:
+   * a source that alternates header shapes rolls the file on every alternation,
+   * and readArchiveRows concatenates rolled files in FILE order, so a rebuild
+   * would walk rows out of time order.
+   *
+   * APPEND ONLY. An undo is a new `undo` row, never the removal of the row it
+   * undoes, so the file is the full record of what the operator did and a replay
+   * can reproduce any intermediate state.
+   *
+   * `item` names the plan item live at the time. Without it the file knows a
+   * baptism happened at 11:31:40 but not that the room was singing O Praise The
+   * Name, and the plan lane cannot be redrawn from raw.
+   *
+   * `at` defaults to this call's own clock read, like every other recorder
+   * here — but a caller that already stamped this exact moment elsewhere may
+   * pass it in, so the row carries that SAME string rather than a moment-later
+   * read of the clock. The baptism timer's `start` and `finish` rows do this,
+   * so a rebuilt session's id/startedAt/finishedAt match what the store holds
+   * instead of drifting a millisecond apart from it (see baptism-timer-
+   * service.ts's emitRaw and rebuild-baptism.ts's header).
+   */
+  recordBaptism(ctx: ServiceCtx, fields: BaptismRawFields, at: string = new Date().toISOString()): void {
+    const e = this.entry(ctx);
+    if (!e) return;
+    void this.appender(e, "baptism").append(
+      ["at", "event", "mode", "phase", "personNumber", "baptismIndex", "segmentMs", "itemId", "item", "detail"],
+      [
+        at,
+        fields.event,
+        fields.mode,
+        fields.phase,
+        fields.personNumber,
+        fields.baptismIndex,
+        Math.max(0, Math.round(fields.segmentMs)),
+        fields.itemId ?? "",
+        fields.item ?? "",
+        fields.detail,
+      ],
+    );
+  }
+
+  /**
+   * Settle every queued write.
+   *
+   * The recorders never await this, since the live tick must not block on disk.
+   * A READER of these files must, before it reads: every record method queues its
+   * append without awaiting it. GET /api/baptism/lane is one — the Baptisms tab
+   * fetches it on the very `baptism:state` push a press broadcasts, and without
+   * this every read made on that push came back a row short
+   * (baptism-lane-route.test.ts fails on it). writeManifest below awaits it for
+   * the same reason. Do not remove a reader's call to it.
+   */
   async flush(): Promise<void> {
     const waits: Promise<void>[] = [];
     for (const e of this.services.values()) for (const a of e.appenders.values()) waits.push(a.settled());
@@ -181,7 +238,7 @@ class SampleArchive {
     if (srcDir === tgtDir) return {};
 
     const moved: Record<string, number> = {};
-    for (const base of SOURCES) {
+    for (const base of ARCHIVE_SOURCES) {
       const srcRows = await readArchiveRows(srcDir, base);
       if (!srcRows || srcRows.length === 0) continue;
       const tgtRows = (await readArchiveRows(tgtDir, base)) ?? [];
@@ -213,7 +270,7 @@ class SampleArchive {
    *  appenders' record of what they wrote no longer describes the directory. */
   private async rewriteManifest(ctx: ServiceCtx, dir: string): Promise<void> {
     const files: string[] = [];
-    for (const base of SOURCES) files.push(...(await rolledFiles(dir, base)));
+    for (const base of ARCHIVE_SOURCES) files.push(...(await rolledFiles(dir, base)));
     if (files.length === 0) return;
     await atomicWrite(
       path.join(dir, "manifest.json"),

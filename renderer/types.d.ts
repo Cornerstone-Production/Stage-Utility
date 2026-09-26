@@ -55,6 +55,7 @@ declare global {
   type PlanDTO = Stage.PlanDTO;
   type PlanItemDTO = Stage.PlanItemDTO;
   type PlanItemsDTO = Stage.PlanItemsDTO;
+  type ProdcomChannelDTO = Stage.ProdcomChannelDTO;
   type PropInstanceConn = Stage.PropInstanceConn;
   type PropInstanceMeta = Stage.PropInstanceMeta;
   type PropInstancesDTO = Stage.PropInstancesDTO;
@@ -83,6 +84,7 @@ declare global {
   type ScriptViewLayout = Stage.ScriptViewLayout;
   type ScriptViewRundownDTO = Stage.ScriptViewRundownDTO;
   type ServiceAttendance = Stage.ServiceAttendance;
+  type ServiceAttendanceSummary = Stage.ServiceAttendanceSummary;
   type ServiceSplHistory = Stage.ServiceSplHistory;
   type ServiceTimeline = Stage.ServiceTimeline;
   type ServiceTimelineItem = Stage.ServiceTimelineItem;

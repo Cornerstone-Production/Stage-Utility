@@ -38,6 +38,8 @@ export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` 
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";
+import { useFailedReads } from "../../lib/use-failed-reads";
+import { ErrorNote } from "../../components/ui/error-note";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
@@ -256,30 +258,59 @@ export function Stat({
  */
 function useHistoryRecords(wantSpl = false) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
-  const [attList, setAttList] = useState<ServiceAttendance[]>([]);
+  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>([]);
   /** One level per service. Fetched only when a card is actually drawing the
    *  line — Home is the page every operator lands on, and this is a read nobody
    *  who leaves the setting off should ever pay for. */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  /** Which reads FAILED, as opposed to came back empty. The same three reads
+   *  History makes, said the same way on the same `[history]` tag. Each list is
+   *  still emptied on a failure, so a live push can land in it, and a read that
+   *  later succeeds takes its note with it. */
+  const { failed, fail, clear } = useFailedReads<"timeline" | "attendance" | "spl">("history");
   useEffect(() => {
     if (!wantSpl) return;
     let alive = true;
     invoke<SplServiceSummary[]>("spl:getSummary")
-      .then((r) => { if (alive) setSplList(r ?? []); })
-      .catch(() => { if (alive) setSplList([]); });
+      .then((r) => {
+        if (!alive) return;
+        setSplList(r ?? []);
+        clear("spl");
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setSplList([]);
+        fail("spl", "the sound summary", err);
+      });
     return () => { alive = false; };
-  }, [wantSpl]);
+  }, [wantSpl, fail, clear]);
 
   useEffect(() => {
     let alive = true;
     invoke<ServiceTimeline[]>("serviceTimeline:list")
-      .then((l) => { if (alive) setList(l ?? []); })
-      .catch(() => { if (alive) setList([]); });
-    invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((a) => { if (alive) setAttList(a ?? []); })
-      .catch(() => { if (alive) setAttList([]); });
+      .then((l) => {
+        if (!alive) return;
+        setList(l ?? []);
+        clear("timeline");
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setList([]);
+        fail("timeline", "the service timings", err);
+      });
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
+      .then((a) => {
+        if (!alive) return;
+        setAttList(a ?? []);
+        clear("attendance");
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setAttList([]);
+        fail("attendance", "the attendance history", err);
+      });
     return () => { alive = false; };
-  }, []);
+  }, [fail, clear]);
 
   useEffect(() => {
     const offTl = onNotification("service-timeline:history", (p: unknown) => {
@@ -308,7 +339,13 @@ function useHistoryRecords(wantSpl = false) {
     return () => { offTl(); offAtt(); };
   }, []);
 
-  return { list, attList, splList };
+  return { list, attList, splList, failed };
+}
+
+/** "the a", "the a and the b", "the a, the b and the c". */
+function theList(items: string[]): string {
+  const the = items.map((i) => `the ${i}`);
+  return the.length < 2 ? (the[0] ?? "") : `${the.slice(0, -1).join(", ")} and ${the[the.length - 1]}`;
 }
 
 /* ── The cards ────────────────────────────────────────────────────────────── */
@@ -473,7 +510,8 @@ function useRowBudget(rowPx: number, headerPx: number) {
  * History's Overview uses, for exactly that reason.
  *
  * Renders nothing until something has been recorded: a row of "—" teaches an
- * operator that this card is broken.
+ * operator that this card is broken. A history that could not be READ is not
+ * that, and hiding the card for it said the opposite, so it says so instead.
  */
 export function RecentServicesCard({
   state,
@@ -489,7 +527,7 @@ export function RecentServicesCard({
    *  the menu and keeps tracking the pointer underneath it. */
   hoverSuppressed?: boolean;
 }) {
-  const { list, attList, splList } = useHistoryRecords(showSpl);
+  const { list, attList, splList, failed } = useHistoryRecords(showSpl);
 
   // Scoped to the ACTIVE service type, like History's Overview — an Events night
   // must not show up under a Weekend heading. asOf is null: on Home the question
@@ -503,7 +541,13 @@ export function RecentServicesCard({
     { splList, splMetric },
   );
 
-  if (!(overview.attPoints.length > 0 || list?.length)) return null;
+  const empty = !(overview.attPoints.length > 0 || list?.length);
+  if (empty && !failed.has("timeline") && !failed.has("attendance")) return null;
+  const unread = [
+    failed.has("timeline") && "service timings",
+    failed.has("attendance") && "attendance history",
+    showSpl && failed.has("spl") && "sound summary",
+  ].filter((w): w is string => !!w);
   const scope = overview.scopeName ?? "services";
 
   return (
@@ -525,22 +569,27 @@ export function RecentServicesCard({
           Open History
         </AppLink>
       </header>
-      <div className="grid shrink-0 grid-cols-2 divide-x divide-y divide-line sm:grid-cols-4 sm:divide-y-0">
-        <Headline label="Attendance" value={overview.avgAttendance} sub="average" trend={overview.attTrend} />
-        <Headline label="Peak" value={overview.peakAttendance} sub={overview.peakSub} />
-        <Headline label="Length" value={overview.avgLength} sub="average" />
-        <Headline label="Start" value={overview.avgStart} sub="average" />
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden border-t border-line px-2 pb-1 [&:has(>*:empty)]:hidden">
-        <AttendanceTrendChart
-          points={overview.attPoints}
-          splLabel={showSpl ? overview.splMetric : null}
-          // Home has the identical right-click menu History does — the chart
-          // was tracking the pointer under it here too, the one call site the
-          // History fix did not reach.
-          hoverSuppressed={hoverSuppressed}
-        />
-      </div>
+      {unread.length > 0 && <ErrorNote className="mx-3 my-2 shrink-0">Couldn't load {theList(unread)}.</ErrorNote>}
+      {!empty && (
+        <>
+          <div className="grid shrink-0 grid-cols-2 divide-x divide-y divide-line sm:grid-cols-4 sm:divide-y-0">
+            <Headline label="Attendance" value={overview.avgAttendance} sub="average" trend={overview.attTrend} />
+            <Headline label="Peak" value={overview.peakAttendance} sub={overview.peakSub} />
+            <Headline label="Length" value={overview.avgLength} sub="average" />
+            <Headline label="Start" value={overview.avgStart} sub="average" />
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden border-t border-line px-2 pb-1 [&:has(>*:empty)]:hidden">
+            <AttendanceTrendChart
+              points={overview.attPoints}
+              splLabel={showSpl ? overview.splMetric : null}
+              // Home has the identical right-click menu History does — the chart
+              // was tracking the pointer under it here too, the one call site the
+              // History fix did not reach.
+              hoverSuppressed={hoverSuppressed}
+            />
+          </div>
+        </>
+      )}
     </section>
   );
 }

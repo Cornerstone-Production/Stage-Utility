@@ -15,9 +15,9 @@ page first loads.
 | Channel | Size | Cadence |
 |---|---|---|
 | `slots:devices` | 4.5 KB | up to 6.7/s during a service — RF, battery, audio level |
-| `stage:state` | ~35 KB | only when something structural changes |
+| `stage:state-changed` | ~35 KB | only when something structural changes |
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive |
-| `spl:metrics` | under 1 KB | 1 Hz while Smaart is connected |
+| `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
 

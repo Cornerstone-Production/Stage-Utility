@@ -194,6 +194,16 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // ── ProdCom's own channel list (name, id, color) ─────────────────────────
+    // Every channel the box has, whether or not it has spoken — see
+    // ProdcomChannelDTO. The Transcription colors panel reads this once on
+    // mount and then follows the "prodcom:channels" broadcast, the same shape
+    // as the transcript above.
+    if (method === "GET" && pathname === "/api/prodcom/channels") {
+      json(res, prodcomService.getChannels());
+      return;
+    }
+
     /**
      * The same buffer, UNREDACTED — what was actually said.
      *

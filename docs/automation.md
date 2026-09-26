@@ -23,6 +23,42 @@ every poll — so a trigger compares the previous snapshot with the new one.
 *People count rises above 50* fires on the poll where it crossed, not on every
 poll after.
 
+## Needs setup
+
+A trigger, condition or action can declare a param **required** — a RossTalk
+command needs a target, an SPL trigger needs a meter key. The editor checks
+every param against the current build's registry the moment you press **Save**,
+marking each bad field and putting the count in the footer.
+
+Saving with a problem still saves — turned off, with a note that it runs once the
+field is fixed. It is never refused outright, so a rule half set up is never lost
+because the dialog would not let go of it. Fix the field and save again and the
+footer offers to turn it back on; saving does.
+
+The rules list marks a rule with a problem **Needs setup: N fields**, naming
+them, and its switch will not turn it on — turning ON a rule that still has a
+problem is the one thing this refuses, both in the editor and from the list,
+because that is the one action asking the rule to actually run.
+
+**A rule already enabled with a problem — from before this build, or a restored
+config — keeps running exactly as it did.** Loading it, restoring it, or a
+background pass (the Companion reconcile, learning a state source) touching an
+unrelated field never turns it off. The list still shows the badge; the switch
+still refuses to re-enable it if you turn it off yourself. It is enforced the
+next time *you* save or enable it, not the moment this build starts.
+
+The layout editor's action-button object follows the same check, live as you
+edit — there is no Save step there. A button needing setup is marked in the
+editor's canvas only, never on a live display; pressing it on a display or a
+console keeps refusing exactly as it always has (`action-invoke.ts`) if nothing
+is configured.
+
+An **optional** field is never a problem when it is empty. A field naming a
+runtime list — a RossTalk target, a ProPresenter macro — is never a problem
+just because that list came back short or without the stored value; the field
+shows an amber note instead and saves as it is, because the machine it names may
+simply be off right now.
+
 ## Triggers
 
 | | Fires when |
@@ -180,6 +216,11 @@ for "idle", because before it runs we do not know that it is idle.
 | Hide / unhide a ProVideoPlayer layer | the layer's hidden flag |
 | Mute / unmute a ProVideoPlayer layer | the layer's mute flag |
 | Set a ProVideoPlayer layer's opacity | 0 is invisible, 100 is fully opaque |
+| Start a baptism session | begins a session at person 1's testimony; does nothing while one is already running |
+| Advance the baptism timer | the phase-aware primary press — see below |
+| Step the baptism timer back | undoes the last press without losing the session |
+| Pause or resume the baptism timer | toggles the running clock; says so when nothing is running to pause |
+| Finish the baptism session | closes the in-progress person, freezes the session, and logs it |
 
 > ProVideoPlayer answers every command with "OK" whether or not it acted on it, so
 > every ProVideoPlayer action above reads PVP's state back to confirm what it did.
@@ -229,6 +270,13 @@ for "idle", because before it runs we do not know that it is idle.
 >
 > A rule whose ProPresenter is **switched off** triggers nothing and says so —
 > `MA is switched off` — rather than dialling the last address the card held.
+
+> **Advance the baptism timer** is one action, not four. It does whatever the
+> [baptism timer's](features/scriptview-and-baptisms.md) own operator panel
+> would do right now — start a session, begin person 1 once a grouped session
+> arms, close a testimony or a baptism, move to the next person — so a single
+> [action button](reference/widgets.md#control) or Companion key runs the whole
+> service and nobody has to know which press is legal in which phase.
 
 ## Cues
 
@@ -557,6 +605,10 @@ time. The cooldown stops one flapping sensor firing repeatedly.
 **Restart seeding** — the first snapshot on each channel after startup establishes a
 baseline and is never evaluated, so an update or crash mid-service cannot read it as
 a change and fire everything at once.
+
+**A rule with a missing or invalid param** — see [Needs setup](#needs-setup)
+above; a rule saved with a problem runs turned off rather than with a param the
+action cannot use.
 
 **A rule this build does not understand** — `automation-rules.json` travels: it is
 exported, restored onto other machines and hand-edited. A rule naming a trigger,

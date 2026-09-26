@@ -53,6 +53,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   ndiEnabled: false,
   publicUrl: null,
   captionChannelColors: {},
+  followProdcomColors: false,
   chargerBays: [],
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 0 },
   reconnectSchedule: { enabled: false, leadMin: 0, tailMin: 0, dormantMin: 0 },

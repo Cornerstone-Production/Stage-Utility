@@ -16,6 +16,7 @@ import { errorMessage } from "@main/services/errors";
 
 import { invoke } from "../../lib/api";
 import { Button } from "../../components/ui/button";
+import { ErrorNote } from "../../components/ui/error-note";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
@@ -80,11 +81,7 @@ export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
         )}
       </header>
 
-      {error && (
-        <p className="mb-2 rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-          {error}
-        </p>
-      )}
+      {error && <ErrorNote className="mb-2">{error}</ErrorNote>}
 
       <div className="overflow-hidden rounded-xl border border-line bg-surface">
         {data.seen.map((d) => {

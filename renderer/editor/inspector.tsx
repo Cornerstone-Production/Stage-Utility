@@ -38,6 +38,7 @@ import {
   InfoHint,
   ChipToggle,
   ChipToggleRow,
+  ErrorNote,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
@@ -55,7 +56,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
-import { useStageState } from "../main/use-stage-state";
+import { pcoConnected, useStageState } from "../main/use-stage-state";
+import { useProdcomChannels } from "../main/use-prodcom-channels";
+import { useTranscript } from "../main/use-transcript";
+import { mergeChannels } from "../main/channel-color";
 import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
@@ -73,12 +77,15 @@ import {
 } from "../main/layout-objects";
 import { DEFAULT_READOUT_ALIGN, READOUT_ALIGNED_TYPES } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
+import { useFailedReads } from "../lib/use-failed-reads";
+import { useResyncOn } from "../lib/use-resync-on";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { CuePicker } from "./cue-picker";
+import { ActionButtonInspector } from "./action-button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -202,15 +209,135 @@ function PvpLayerPicker({
   );
 }
 
+/** A RossTalk command, as the catalogue route sends it (no `format`). */
+type RossTalkCommandDTO = { id: string; label: string; family: string; params: RossTalkParam[]; help?: string };
+
+/**
+ * Inspector controls for a RossTalk button: the target, the command (only the
+ * target's own family), the command's parameters and the label.
+ *
+ * It reads the target list and command catalogue itself, so they are fetched
+ * only when a RossTalk button is the object being edited. The Inspector used to
+ * read them for every object; it remounts per selection, so that was once per
+ * object selected, whatever its type. Exported for inspector-reads.test.tsx.
+ */
+export function RossTalkButtonConfig({
+  c,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "rosstalk-button" }>;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  const [targets, setTargets] = useState<RossTalkTarget[]>([]);
+  const [catalogue, setCatalogue] = useState<RossTalkCommandDTO[]>([]);
+  // A failed read is not "no targets". Both lists start empty, so a configured
+  // button labelled its own target and command "not found".
+  const { failed, fail } = useFailedReads<"targets" | "commands">("layout-editor");
+  useEffect(() => {
+    void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
+      .then((r) => setTargets(r.targets))
+      .catch((err: unknown) => fail("targets", "the RossTalk targets", err));
+    void invoke<RossTalkCommandDTO[]>("rosstalk:commands")
+      .then(setCatalogue)
+      .catch((err: unknown) => fail("commands", "the RossTalk commands", err));
+  }, [fail]);
+  if (failed.size > 0) {
+    return (
+      <>
+        {/* In the pickers' place: with no lists, choosing from them could only
+            clear the button's real target. */}
+        <Row label="Target">
+          <ErrorNote>
+            Couldn't load the RossTalk {failed.size > 1 ? "targets and commands" : failed.has("targets") ? "targets" : "commands"}, so
+            this button can't be changed right now.
+          </ErrorNote>
+        </Row>
+        <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+      </>
+    );
+  }
+  const target = targets.find((t) => t.id === c.targetId) ?? null;
+  const family = target?.config.family ?? "carbonite";
+  // Only ever offer commands for THIS target's family — a Carbonite XPT sent
+  // to an Ultrix is a different command entirely.
+  const commands = catalogue.filter((cmd) => cmd.family === family);
+  const command = commands.find((cmd) => cmd.id === c.commandId) ?? null;
+  return (
+    <>
+      <RowSelect
+        label="Target"
+        value={c.targetId ?? ""}
+        options={[
+          { value: "", label: "Pick a target…" },
+          ...targets.map((t) => ({
+            value: t.id,
+            label: `${t.name} (${t.config.family ?? "carbonite"})`,
+          })),
+        ]}
+        onChange={(v) => onConfig({ ...c, targetId: v || null, commandId: null, params: {} })}
+      />
+      <RowSelect
+        label="Command"
+        hint={target ? undefined : "Pick a target first"}
+        value={c.commandId ?? ""}
+        options={[
+          { value: "", label: "Pick a command…" },
+          ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
+        ]}
+        onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
+      />
+      {command?.params.map((p) =>
+        p.type === "number" ? (
+          <RowNumber
+            key={p.key}
+            label={p.label}
+            hint={p.help}
+            value={Number(c.params[p.key] ?? p.min ?? 0)}
+            min={p.min}
+            max={p.max}
+            onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}
+          />
+        ) : p.type === "enum" ? (
+          <RowSelect
+            key={p.key}
+            label={p.label}
+            hint={p.help}
+            value={String(c.params[p.key] ?? "")}
+            options={(p.options ?? []).map((o) => ({ value: o, label: o }))}
+            onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+          />
+        ) : (
+          <RowText
+            key={p.key}
+            label={p.label}
+            hint={p.help}
+            value={String(c.params[p.key] ?? "")}
+            onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+          />
+        ),
+      )}
+      <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+    </>
+  );
+}
+
 /** Inspector controls for the people-graph object: live vs. a recorded service,
- *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
-function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
+ *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle.
+ *  Exported for inspector-reads.test.tsx. */
+export function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
   const source = c.source ?? "live";
   const [services, setServices] = useState<{ value: string; label: string }[]>([]);
+  // A failed read is not "no recorded services". Drawn as one, the picker
+  // offered only Most recent and labelled a chosen service "not found".
+  const { failed, fail, clear } = useFailedReads<"services">("layout-editor");
   useEffect(() => {
     if (source !== "recorded") return;
-    invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((list) =>
+    // Cancelled on a source change: Recorded, Live and Recorded again must not
+    // let the first read's late failure replace a picker the second one filled.
+    let cancelled = false;
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
+      .then((list) => {
+        if (cancelled) return;
         setServices(
           (list ?? [])
             .filter((s) => s.endedAt)
@@ -220,10 +347,16 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
               const when = `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${formatClock(d)}`;
               return { value: s.serviceKey, label: s.serviceTypeName ? `${when} — ${s.serviceTypeName}` : when };
             }),
-        ),
-      )
-      .catch(() => setServices([]));
-  }, [source]);
+        );
+        clear("services");
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) fail("services", "the recorded services for a people graph", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, fail, clear]);
 
   return (
     <>
@@ -243,15 +376,22 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
         options={[{ value: "live", label: "Live" }, { value: "recorded", label: "Recorded" }]}
         onChange={(v) => onConfig({ ...c, source: v as "live" | "recorded" })}
       />
-      {source === "recorded" && (
-        <RowSelect
-          label="Service"
-          hint="Which past service's curve to show. 'Most recent' auto-follows the latest finished service."
-          value={c.recordedServiceKey || RECORDED_LATEST}
-          options={[{ value: RECORDED_LATEST, label: "Most recent" }, ...services]}
-          onChange={(v) => onConfig({ ...c, recordedServiceKey: v === RECORDED_LATEST ? null : v })}
-        />
-      )}
+      {source === "recorded" &&
+        (failed.has("services") ? (
+          // In the picker's place: with no list it could only offer Most recent,
+          // and picking that by accident would drop the chosen service.
+          <Row label="Service">
+            <ErrorNote>Couldn't load the recorded services, so the service can't be changed right now.</ErrorNote>
+          </Row>
+        ) : (
+          <RowSelect
+            label="Service"
+            hint="Which past service's curve to show. 'Most recent' auto-follows the latest finished service."
+            value={c.recordedServiceKey || RECORDED_LATEST}
+            options={[{ value: RECORDED_LATEST, label: "Most recent" }, ...services]}
+            onChange={(v) => onConfig({ ...c, recordedServiceKey: v === RECORDED_LATEST ? null : v })}
+          />
+        ))}
       <RowSwitch label="Plan-item markers" hint="Overlay a dashed line + time where each PCO item started." checked={c.showMarkers ?? true} onChange={(v) => onConfig({ ...c, showMarkers: v })} />
       <RowSwitch label="Hover tooltip" hint="Show the value + time at the pointer." checked={c.showTooltip ?? true} onChange={(v) => onConfig({ ...c, showTooltip: v })} />
       <RowSwitch label="Kiosk live/recorded toggle" hint="Show an on-screen pill so a viewer can flip between live and the last recorded service." checked={c.kioskToggle ?? false} onChange={(v) => onConfig({ ...c, kioskToggle: v })} />
@@ -265,9 +405,35 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
  * tracks the stage plot week to week), a picker of the current plan's files, the
  * PDF page, plus crop / trim / background recolor of the rendered image and a
  * "fit box to file" action. All framing acts on the rendered image, not the source
- * file in Planning Center.
+ * file in Planning Center. Exported for inspector-reads.test.tsx.
  */
-function PlanAttachmentConfig({
+/**
+ * The Rolling feed's line cap. Blank is a real setting, not a missing one: an
+ * unset cap shows as many lines as the widget holds, which is what the renderer
+ * does with it, so the field says "Fit" rather than a number it does not use.
+ */
+export function TranscriptLinesRow({
+  c,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "transcript-strip" }>;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  return (
+    <RowNumber
+      label="Lines"
+      value={c.maxLines ?? null}
+      placeholder="Fit"
+      step={1}
+      min={1}
+      max={10}
+      onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })}
+      onUnset={() => onConfig({ ...c, maxLines: undefined })}
+    />
+  );
+}
+
+export function PlanAttachmentConfig({
   c,
   onConfig,
   o,
@@ -282,24 +448,45 @@ function PlanAttachmentConfig({
 }) {
   const [files, setFiles] = useState<PcoAttachmentDTO[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // A read that failed, as opposed to a plan with no documents. The server
+  // answers 200 [] for "no plan", so a non-ok status is only ever a failure;
+  // both it and a thrown fetch used to read "No documents on the current plan".
+  const { failed, fail, clear } = useFailedReads<"files">("layout-editor");
   const [fitting, setFitting] = useState(false);
+  // The files are the current plan's, from Planning Center, so they are asked
+  // for only once it is connected, and until then the picker says to connect
+  // it rather than that the plan has none (see pcoConnected).
+  const stage = useStageState();
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  useResyncOn([pcoConfigured], () => {
+    if (pcoConfigured === false) clear("files");
+  });
   useEffect(() => {
+    if (!pcoConfigured) return;
     let cancelled = false;
     fetch("/api/pco/attachments")
-      .then((r) => (r.ok ? r.json() : []))
+      .then(async (r) => {
+        if (r.ok) return r.json();
+        // The route's own reason (a 502 carries Planning Center's), for the log.
+        const body = (await r.json().catch(() => null)) as { error?: unknown } | null;
+        throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${r.status}`);
+      })
       .then((list: PcoAttachmentDTO[]) => {
         if (!cancelled) {
           setFiles(Array.isArray(list) ? list : []);
           setLoaded(true);
+          clear("files");
         }
       })
-      .catch(() => {
-        if (!cancelled) setLoaded(true);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoaded(true);
+        fail("files", "the current plan's files", err);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pcoConfigured, fail, clear]);
 
   // Hide audio stems / raw media — a stage plot is a document (PDF/image).
   const pickable = files.filter((f) => {
@@ -342,7 +529,7 @@ function PlanAttachmentConfig({
           className="text-fg"
         />
       </Row>
-      {pickable.length > 0 && (
+      {pcoConfigured !== false && pickable.length > 0 && (
         <Row label="Current plan">
           <Select value="" onValueChange={(v: string) => onConfig({ ...c, match: v })}>
             <SelectTrigger><SelectValue placeholder="Pick a file…" /></SelectTrigger>
@@ -356,12 +543,19 @@ function PlanAttachmentConfig({
           </Select>
         </Row>
       )}
-      {loaded && pickable.length === 0 && (
+      {pcoConfigured === false ? (
         <p className="text-caption2 text-fg-muted leading-snug">
-          No documents on the current plan (or PCO isn’t connected). The match still
-          applies whenever a plan with a matching file goes live.
+          Connect Planning Center to pick from the current plan’s files. The match
+          still applies whenever a plan with a matching file goes live.
         </p>
-      )}
+      ) : failed.has("files") ? (
+        <ErrorNote>Couldn't load the current plan's files. The match still applies.</ErrorNote>
+      ) : loaded && pickable.length === 0 ? (
+        <p className="text-caption2 text-fg-muted leading-snug">
+          No documents on the current plan. The match still applies whenever a plan
+          with a matching file goes live.
+        </p>
+      ) : null}
       <Row label="PDF page">
         <NumberInput value={c.page ?? 1} step={1} min={1} max={99} onChange={(v) => onConfig({ ...c, page: Math.round(v) })} />
       </Row>
@@ -447,22 +641,6 @@ export function Inspector({
   // cues:all channel and start the server's Companion read. Hooks cannot be
   // conditional, so the flag is the argument.
   const cues = useCueLive(c.type === "cue-button");
-  // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
-  // once here rather than per-object; both are small and change rarely.
-  const [rosstalkTargets, setRosstalkTargets] = useState<RossTalkTarget[]>([]);
-  const [rosstalkCommands, setRosstalkCommands] = useState<
-    { id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]
-  >([]);
-  useEffect(() => {
-    void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
-      .then((r) => setRosstalkTargets(r.targets))
-      .catch(() => {});
-    void invoke<{ id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]>(
-      "rosstalk:commands",
-    )
-      .then(setRosstalkCommands)
-      .catch(() => {});
-  }, []);
   // The followed teams, for the scores object's team select. The SAME query key
   // the settings panel writes through, so following a new team there populates
   // this select without a reload.
@@ -484,7 +662,17 @@ export function Inspector({
   // fetches and subscribes per call, so the two separate calls this replaced
   // were two `stage:getState` requests and two state streams for one panel.
   const stageState = useStageState().state;
-  const captionChannels = Object.keys(stageState?.captionChannelColors ?? {});
+  // The full ProdCom channel list, not just whatever has a saved custom
+  // color — the same merge the Transcription colors panel uses, so every
+  // channel can be hidden whether or not it has spoken or been given a
+  // color. Gated to the one object type that uses it, like useFavourites
+  // below: an inspector open on anything else pays neither subscription.
+  const isTranscriptStrip = c.type === "transcript-strip";
+  const prodcomChannels = useProdcomChannels(isTranscriptStrip);
+  const transcriptLines = useTranscript(isTranscriptStrip);
+  const captionChannels = mergeChannels(prodcomChannels, transcriptLines, stageState?.captionChannelColors ?? {}).map(
+    (row) => row.label,
+  );
   // Home excluded: its stored geometry is meaningless (it is a card list, not a
   // canvas), so embedding it would draw four cards stacked at whatever filler
   // coordinates happen to be in the file.
@@ -761,7 +949,7 @@ export function Inspector({
             onChange={(v) => onConfig({ ...c, mode: v })}
           />
           {c.mode === "rolling" && (
-            <RowNumber label="Lines" value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} />
+            <TranscriptLinesRow c={c} onConfig={onConfig} />
           )}
           {captionChannels.length === 0 ? (
             <span className="text-caption2 text-fg-muted">Channels appear here once captions arrive — toggle any to hide.</span>
@@ -1209,71 +1397,7 @@ export function Inspector({
           <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
-      {c.type === "rosstalk-button" && (() => {
-        const target = rosstalkTargets.find((t) => t.id === c.targetId) ?? null;
-        const family = target?.config.family ?? "carbonite";
-        // Only ever offer commands for THIS target's family — a Carbonite XPT sent
-        // to an Ultrix is a different command entirely.
-        const commands = rosstalkCommands.filter((cmd) => cmd.family === family);
-        const command = commands.find((cmd) => cmd.id === c.commandId) ?? null;
-        return (
-          <>
-            <RowSelect
-              label="Target"
-              value={c.targetId ?? ""}
-              options={[
-                { value: "", label: "Pick a target…" },
-                ...rosstalkTargets.map((t) => ({
-                  value: t.id,
-                  label: `${t.name} (${t.config.family ?? "carbonite"})`,
-                })),
-              ]}
-              onChange={(v) => onConfig({ ...c, targetId: v || null, commandId: null, params: {} })}
-            />
-            <RowSelect
-              label="Command"
-              hint={target ? undefined : "Pick a target first"}
-              value={c.commandId ?? ""}
-              options={[
-                { value: "", label: "Pick a command…" },
-                ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
-              ]}
-              onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
-            />
-            {command?.params.map((p) =>
-              p.type === "number" ? (
-                <RowNumber
-                  key={p.key}
-                  label={p.label}
-                  hint={p.help}
-                  value={Number(c.params[p.key] ?? p.min ?? 0)}
-                  min={p.min}
-                  max={p.max}
-                  onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}
-                />
-              ) : p.type === "enum" ? (
-                <RowSelect
-                  key={p.key}
-                  label={p.label}
-                  hint={p.help}
-                  value={String(c.params[p.key] ?? "")}
-                  options={(p.options ?? []).map((o) => ({ value: o, label: o }))}
-                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
-                />
-              ) : (
-                <RowText
-                  key={p.key}
-                  label={p.label}
-                  hint={p.help}
-                  value={String(c.params[p.key] ?? "")}
-                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
-                />
-              ),
-            )}
-            <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
-          </>
-        );
-      })()}
+      {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {
         const oc = c; // narrowed osc-button config (preserved into nested fns)
@@ -1335,6 +1459,7 @@ export function Inspector({
           </>
         );
       })()}
+      {c.type === "action-button" && <ActionButtonInspector c={c} onConfig={onConfig} />}
       {c.type === "cue-button" && (() => {
         return (
           <>
@@ -1442,6 +1567,10 @@ export function Inspector({
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="live">Live (running clock)</SelectItem>
+                <SelectItem value="testimony">Testimony (this person's, once banked)</SelectItem>
+                <SelectItem value="session">Session (wall clock)</SelectItem>
+                <SelectItem value="phase">Phase (the word)</SelectItem>
+                <SelectItem value="person">Person (number, or N of M)</SelectItem>
                 <SelectItem value="count">Count baptized</SelectItem>
                 <SelectItem value="total">Total time</SelectItem>
                 <SelectItem value="average">Average per person</SelectItem>

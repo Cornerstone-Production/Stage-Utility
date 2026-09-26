@@ -14,16 +14,32 @@ import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { fmtTime } from "./overview-data.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** api.ts opens an SSE stream on first use; nothing here pushes on it. */
+/** api.ts opens an SSE stream on first use — most tests here never push on
+ *  it, but a few drive a live channel through `FakeEventSource.last`. */
 class FakeEventSource {
+  static last: FakeEventSource | null = null;
   readyState = 1;
-  addEventListener(): void {}
-  removeEventListener(): void {}
+  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
+  constructor() {
+    FakeEventSource.last = this;
+  }
+  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
+    let set = this.listeners.get(name);
+    if (!set) this.listeners.set(name, (set = new Set()));
+    set.add(fn);
+  }
+  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
+    this.listeners.get(name)?.delete(fn);
+  }
   close(): void {}
+  push(channel: string, payload: unknown): void {
+    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
+  }
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
@@ -105,9 +121,22 @@ function baptisms() {
       serviceTypeId: "salt",
       planId: "plan-1",
       serviceKey: KEY,
-      people: [{ id: "p1", name: "A", testifyMs: 120_000, baptizeMs: 60_000 }],
+      people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
     },
   ];
+}
+
+/** GET /api/baptism/lane's own shape — the session's two spans, matching
+ *  baptisms()'s own testimony/baptism split and finish time exactly, so the
+ *  chart this fixture draws agrees with the figures the card's strip and
+ *  table print for the same session. */
+function baptismLane() {
+  return {
+    spans: [
+      { kind: "testimony", person: 1, startedAt: iso("20:45:00"), endedAt: iso("20:47:00") },
+      { kind: "baptism", person: 1, startedAt: iso("20:51:00"), endedAt: iso("20:52:00") },
+    ],
+  };
 }
 
 function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } = {}) {
@@ -117,8 +146,9 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
     if (method !== "GET") return ok({ ok: true });
     if (url === "/api/baptism/sessions") return ok(opts.baptisms ? baptisms() : []);
+    if (/^\/api\/baptism\/lane\?/.test(url)) return ok(opts.baptisms ? baptismLane() : { spans: [] });
     if (url === "/api/service-timeline") return ok(opts.timelineRecords ?? [timeline()]);
-    if (url === "/api/attendance/history") return ok([attendance()]);
+    if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -136,14 +166,37 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
+  await import("@tanstack/react-router");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-async function openTheService(Section: React.ComponentType) {
+/** A real (memory-history) router carrying /history/manage (where this page
+ *  itself lives, so useSelectedServiceKey's own navigation has somewhere
+ *  real to resolve) and /baptism (the Baptisms card's "Open in Baptisms"
+ *  link) — the same mechanism past-sessions.test.tsx uses for its own
+ *  cross-link, so the rendered href is AppLink/Link's real resolution, never
+ *  a hand-built string compared against itself. Only the ONE test that
+ *  needs a real destination for that link asks for this; every other test
+ *  keeps rendering with no router at all, exactly as before. */
+function routerWithBaptismDestination() {
+  const rootRoute = createRootRoute({});
+  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
+  const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
+  return createRouter({
+    routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
+    history: createMemoryHistory({ initialEntries: ["/history/manage"] }),
+  });
+}
+
+async function openTheService(Section: React.ComponentType, opts: { router?: ReturnType<typeof routerWithBaptismDestination> } = {}) {
+  const section = opts.router
+    ? React.createElement(RouterContextProvider, { router: opts.router, children: React.createElement(Section) })
+    : React.createElement(Section);
   const view = render(
-    React.createElement(TooltipProvider, null, React.createElement(Section), React.createElement(ConfirmHost)),
+    React.createElement(TooltipProvider, null, section, React.createElement(ConfirmHost)),
   );
   await settle();
   await settle();
@@ -223,9 +276,9 @@ describe("the History service page", () => {
     }
   });
 
-  test("Baptisms is a card between Rundown and Attendance, and not in the nav", async (t) => {
+  test("Baptisms is a card between Rundown and Attendance, in the nav in the same order, with the chart and splits inline", async (t) => {
     installFetch({ baptisms: true });
-    const view = await openTheService(ServiceHistorySection);
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
     t.after(() => cleanup());
 
     const cards = [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label"));
@@ -234,17 +287,156 @@ describe("the History service page", () => {
       ["Rundown", "Baptisms", "Attendance", "Sound"],
       "baptism timings explain the overrun in the table right above them",
     );
-    // Deliberately absent from the nav: it is there on a baptism weekend and
-    // gone the rest, and an entry that comes and goes reads as a fault.
+    // A service that HAS baptisms gains a nav entry, in the same order the
+    // card actually sits in — a live one no longer means a stale entry
+    // pointing nowhere, which is what the OLD "never in the nav" rule was
+    // guarding against before per-person splits moved onto this page.
     const nav = [...view.container.querySelectorAll('[data-testid="history-service-header"] nav a')].map((a) => text(a));
-    assert.deepEqual(nav, ["Rundown", "Attendance", "Sound"]);
-    // The card is a card, not a bare block, and carries real figures.
+    assert.deepEqual(nav, ["Rundown", "Baptisms", "Attendance", "Sound"]);
+
     const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
     assert.match(bap.className, /su-card/);
-    assert.match(text(bap), /Baptized/);
+    assert.match(text(bap), /Baptized/, "the stat strip");
+    // The dead-end sentence this card replaced must never come back now that
+    // it has something real to show instead.
+    assert.doesNotMatch(text(bap), /Per-person splits are in the Baptisms tab/);
+    // The per-person splits are INLINE now, not a link elsewhere.
+    assert.match(text(bap), /Person 1/, "the per-person split table");
+    assert.match(text(bap), /Testimony/);
+    // The chart itself: an SVG carrying the same "Baptism session timeline"
+    // label the live Session card's own SVG uses (SessionSvg is shared, not
+    // copied — see session-chart.tsx).
+    const svg = bap.querySelector('svg[aria-label="Baptism session timeline"]');
+    assert.ok(svg, "expected the two-lane chart, read-only, inside the card");
+    // "Open in Baptisms" replaces the dead end with a real link to the tab.
+    const openLink = [...bap.querySelectorAll("a")].find((a) => text(a).includes("Open in Baptisms"));
+    assert.ok(openLink, "expected an Open in Baptisms link");
+    assert.equal(openLink!.getAttribute("href"), "/baptism");
   });
 
-  test("a baptism-free service has no Baptisms card at all", async (t) => {
+  test("the Baptisms card's six figures are the approved mockup's, computed for real", async (t) => {
+    // A tailored fixture, not the shared timeline()/baptisms() pair: those
+    // two do not overlap in time at all, which would leave Vs plan with
+    // nothing to compare against and prove nothing about the happy path.
+    //
+    //   Session: 20:41:00–20:49:00 (8:00 wall clock)
+    //   Person 1: testimony 2:00 (120s), baptism 1:00 (60s) — the longest
+    //             person, 3:00 in all
+    //   Person 2: testimony 1:00 (60s), baptism 1:30 (90s) — the longest
+    //             baptism, which Longest must NOT pick
+    //   Plan items the session's own window overlaps (clipToSession keeps
+    //   anything with ANY overlap, at its own full planned length):
+    //     Baptism Stories   20:40–20:44   planned 5:00 (300s)
+    //     Great Are You Lord 20:44–20:50  planned 4:00 (240s)
+    //   Planned total 9:00 (540s); segment 8:00 (480s) → Vs plan −1:00.
+    const tlItems = [
+      { itemId: "a", title: "Baptism Stories", sequence: 0, plannedLengthSec: 300, startedAt: iso("20:40:00"), endedAt: iso("20:44:00"), actualDurationSec: 240, counted: true },
+      { itemId: "b", title: "Great Are You Lord", sequence: 1, plannedLengthSec: 240, startedAt: iso("20:44:00"), endedAt: iso("20:50:00"), actualDurationSec: 360, counted: true },
+    ];
+    const tl = { ...timeline(), items: tlItems };
+    const session = {
+      id: "figs-1",
+      startedAt: iso("20:41:00"),
+      finishedAt: iso("20:49:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [
+        { testimonyMs: 120_000, baptizeMs: 60_000 },
+        { testimonyMs: 60_000, baptizeMs: 90_000 },
+      ],
+    };
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([session]);
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
+      if (url === "/api/service-timeline") return ok([tl]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    assert.ok(bap, "expected the Baptisms card to render");
+    function figure(label: string): { value: string; sub: string | null } {
+      const labelSpan = [...bap.querySelectorAll("span")].find((s) => (s.textContent ?? "").trim() === label);
+      assert.ok(labelSpan, `expected a "${label}" figure`);
+      const valueSpan = labelSpan!.nextElementSibling;
+      const subSpan = valueSpan?.nextElementSibling;
+      const sub = subSpan && subSpan.tagName === "SPAN" ? (subSpan.textContent ?? "").trim() : null;
+      return { value: (valueSpan?.textContent ?? "").trim(), sub };
+    }
+
+    assert.equal(figure("Baptized").value, "2");
+    assert.equal(figure("Segment").value, "8:00");
+    assert.equal(figure("Segment").sub, `${fmtTime(session.startedAt)}–${fmtTime(session.finishedAt)}`);
+    assert.equal(figure("Testimony").value, "3:00", "120s + 60s");
+    assert.equal(figure("Testimony").sub, "avg 1:30", "180s over 2 people");
+    assert.equal(figure("Baptism total").value, "2:30", "60s + 90s");
+    assert.equal(figure("Baptism total").sub, "avg 1:15", "150s over 2 baptized");
+    assert.equal(figure("Longest").value, "3:00", "testimony plus baptism, not the longest baptism alone");
+    assert.equal(figure("Longest").sub, "person 1");
+    assert.equal(figure("Vs plan").value, "−1:00", "480s segment vs 540s planned");
+    assert.equal(figure("Vs plan").sub, "9:00 planned");
+  });
+
+  test("Vs plan says the plan has no lengths rather than pretending they are zero", async (t) => {
+    const tlItems = [
+      { itemId: "a", title: "Baptism Stories", sequence: 0, plannedLengthSec: null, startedAt: iso("20:40:00"), endedAt: iso("20:50:00"), actualDurationSec: 600, counted: true },
+    ];
+    const tl = { ...timeline(), items: tlItems };
+    const session = {
+      id: "figs-2",
+      startedAt: iso("20:41:00"),
+      finishedAt: iso("20:49:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+    };
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([session]);
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
+      if (url === "/api/service-timeline") return ok([tl]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    const labelSpan = [...bap.querySelectorAll("span")].find((s) => (s.textContent ?? "").trim() === "Vs plan")!;
+    const valueSpan = labelSpan.nextElementSibling;
+    const subSpan = valueSpan?.nextElementSibling;
+    assert.equal((valueSpan?.textContent ?? "").trim(), "—", "no planned length anywhere the session spans");
+    assert.equal((subSpan?.textContent ?? "").trim(), "the plan has no lengths to compare against");
+  });
+
+  test("a baptism-free service has no Baptisms card at all, and no nav entry for it", async (t) => {
     installFetch();
     const view = await openTheService(ServiceHistorySection);
     t.after(() => cleanup());
@@ -252,6 +444,114 @@ describe("the History service page", () => {
       [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")),
       ["Rundown", "Attendance", "Sound"],
     );
+    const nav = [...view.container.querySelectorAll('[data-testid="history-service-header"] nav a')].map((a) => text(a));
+    assert.deepEqual(nav, ["Rundown", "Attendance", "Sound"], "no Baptisms entry when the service has none");
+  });
+
+  test("a session finished after the page mounted still shows once its own service is opened", async (t) => {
+    // The page's baptisms list is fetched once, for the whole page, on mount —
+    // stale the moment a session finishes anywhere on this page's own life:
+    // answering [] on mount and only a real session afterward, the same shape
+    // a page left open through a live baptism session actually sees.
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") {
+        calls += 1;
+        return ok(calls === 1 ? [] : baptisms());
+      }
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
+      if (url === "/api/service-timeline") return ok([timeline()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    assert.ok(calls >= 2, `expected selecting the service to refetch baptisms (only [] on mount otherwise); saw ${calls} call(s)`);
+    assert.deepEqual(
+      [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")),
+      ["Rundown", "Baptisms", "Attendance", "Sound"],
+      "the just-finished session's own card must show without a page reload",
+    );
+  });
+
+  test("a live baptism:state push for the OPEN service refetches its sessions", async (t) => {
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") {
+        calls += 1;
+        return ok(baptisms());
+      }
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
+      if (url === "/api/service-timeline") return ok([timeline()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+    const before = calls;
+
+    FakeEventSource.last!.push("baptism:state", { finishedAt: iso("20:52:00"), saveErrors: null });
+    await settle();
+    await settle();
+
+    assert.ok(calls > before, `expected a live baptism:state push to refetch this page's own sessions; calls stayed at ${calls}`);
+  });
+
+  test("a live baptism:rebuilt push for the OPEN service refetches its sessions", async (t) => {
+    let calls = 0;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") {
+        calls += 1;
+        return ok(baptisms());
+      }
+      if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
+      if (url === "/api/service-timeline") return ok([timeline()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+    const before = calls;
+
+    FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: KEY, ids: ["b1"] });
+    await settle();
+    await settle();
+
+    assert.ok(calls > before, `expected a live baptism:rebuilt push to refetch this page's own sessions; calls stayed at ${calls}`);
   });
 
   test("the arriving page speaks the same vocabulary as a service's page", async (t) => {
@@ -296,7 +596,7 @@ describe("the History service page", () => {
     (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: unknown) => {
       const url = String(input);
       const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
-      if (url === "/api/attendance/history") return ok([open]);
+      if (url === "/api/attendance/history?summary=1") return ok([open]);
       if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(open);
       return realFetch(input, init);
     };

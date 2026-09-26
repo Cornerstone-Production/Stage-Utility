@@ -96,3 +96,30 @@ describe("loading a layout", () => {
     assert.equal((await settingsStore.get()).layoutDefaultsCleaned, true);
   });
 });
+
+/** A card wearing the 8% hairline the fold above used to write. */
+function faintCardView(): View[] {
+  const views = seedView();
+  const o = views[0]!.layout!.objects[0]!;
+  o.style = { background: "#141414", borderColor: "rgba(255,255,255,0.08)" };
+  return views;
+}
+
+describe("the 8% card hairline, on an install that already folded its cards", () => {
+  test("is raised to 10% on the next load, with its own flag", async () => {
+    // The first pass has had its turn; this one has not.
+    await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: false });
+    await viewsStore.save(faintCardView());
+    const out = await runLoadPass(await viewsStore.load(), []);
+    assert.equal(styleOf(out.views).borderColor, "rgba(255,255,255,0.1)", "the faint border survived the load");
+    assert.equal(styleOf(await viewsStore.load()).borderColor, "rgba(255,255,255,0.1)", "and was not written to disk");
+    assert.equal((await settingsStore.get()).cardHairlineRaised, true);
+  });
+
+  test("and raises nothing on the load after, whatever it finds", async () => {
+    // An 8% border the operator picked after the pass ran is theirs.
+    await viewsStore.save(faintCardView());
+    const out = await runLoadPass(await viewsStore.load(), []);
+    assert.equal(styleOf(out.views).borderColor, "rgba(255,255,255,0.08)", "it raised a second time");
+  });
+});

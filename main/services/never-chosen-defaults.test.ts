@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
-import { IDIOM_TYPES, LEGACY_TRANSLUCENT_GROUNDS } from "../types/readout-types.js";
+import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
+import { CARD_HAIRLINE, IDIOM_TYPES, LEGACY_TRANSLUCENT_GROUNDS } from "../types/readout-types.js";
+import { CARD_PRESETS } from "../../renderer/main/layout-objects.js";
 import type { View } from "../types/views.js";
 
 // This edits the operator's layouts, so the tests are as much about what it must
@@ -147,13 +148,15 @@ describe("the count that gets logged", () => {
 // others don't" turned out to be, measured on a real console: #191919 with a 10%
 // hairline beside #141414 with an 8% one.
 
-test("the older card is folded into the current one", () => {
+test("the older card is folded into exactly the card a new widget gets", () => {
   const out = migrateNeverChosenDefaults([
     view([obj("clock", { background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001 })]),
   ]);
   const style = out[0].layout!.objects[0].style!;
-  assert.equal(style.background, "#141414");
-  assert.equal(style.borderColor, "rgba(255,255,255,0.08)");
+  // Against the registry's own card, not a copy of its value: the fold once
+  // wrote 8% while new widgets got 10%, and a literal here pinned that.
+  assert.equal(style.background, CARD_PRESETS.neutral.background);
+  assert.equal(style.borderColor, CARD_PRESETS.neutral.borderColor);
   assert.equal(style.borderWidth, 0.001, "the width was not part of the difference and must not move");
 });
 
@@ -169,4 +172,50 @@ test("only the PAIR counts — a ground somebody picked is left alone", () => {
 test("the count includes them, so the log is not silent about it", () => {
   const views = [view([obj("clock", { background: "#191919", borderColor: "rgba(255,255,255,0.10)" })])];
   assert.equal(countNeverChosen(views), 1);
+});
+
+// ── The 8% hairline ──────────────────────────────────────────────────────────
+// The registry, the templates and the fold above all wrote an 8% card border
+// for a while; every card now gets CARD_HAIRLINE, and this raises the rest.
+
+describe("the 8% card hairline", () => {
+  const FAINT = "rgba(255,255,255,0.08)";
+  const borderOf = (views: View[], i = 0) => views[0].layout!.objects[i].style?.borderColor;
+
+  test("is raised to the border a new widget gets, on any ground", () => {
+    const out = migrateCardHairline([
+      view([
+        obj("clock", { background: "#141414", borderColor: FAINT }),
+        obj("container", { background: "rgba(255,255,255,0.035)", borderColor: FAINT }),
+      ]),
+    ]);
+    assert.equal(borderOf(out, 0), CARD_PRESETS.neutral.borderColor);
+    assert.equal(borderOf(out, 1), CARD_HAIRLINE, "a template's glass card kept the faint border");
+  });
+
+  test("reaches nested objects, and a spaced value", () => {
+    const out = migrateCardHairline([
+      view([obj("container", undefined, [obj("clock", { borderColor: "rgba(255, 255, 255, 0.08)" })])]),
+    ]);
+    const child = (out[0].layout!.objects[0] as { children: { style: { borderColor: string } }[] }).children[0];
+    assert.equal(child.style.borderColor, CARD_HAIRLINE);
+  });
+
+  test("leaves every other border alone, and the rest of the style", () => {
+    const picked = view([
+      obj("clock", { borderColor: "#ff0000" }),
+      obj("text", { borderColor: "rgba(255,255,255,0.2)" }),
+      obj("spl-meter", undefined),
+    ]);
+    const out = migrateCardHairline([picked]);
+    assert.equal(out[0], picked, "an untouched view should come back by reference");
+    const moved = migrateCardHairline([view([obj("clock", { background: "#141414", borderColor: FAINT, borderWidth: 0.001 })])]);
+    assert.deepEqual(moved[0].layout!.objects[0].style, { background: "#141414", borderColor: CARD_HAIRLINE, borderWidth: 0.001 });
+  });
+
+  test("the count matches what it changes, and is zero afterwards", () => {
+    const views = [view([obj("clock", { borderColor: FAINT }), obj("container", undefined, [obj("text", { borderColor: FAINT })])])];
+    assert.equal(countFaintHairlines(views), 2);
+    assert.equal(countFaintHairlines(migrateCardHairline(views)), 0);
+  });
 });

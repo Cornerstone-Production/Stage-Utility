@@ -7,6 +7,7 @@
 
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
 import { errorMessage } from "./errors.js";
+import { scrub } from "./scrub.js";
 import type { ActionResult } from "../types/automation.js";
 
 /**
@@ -18,20 +19,34 @@ import type { ActionResult } from "../types/automation.js";
  * RETURNED so the caller can show it — a catch that only logged would be the
  * repository's "do not swallow a failure" rule broken in the one place an
  * operator is watching.
+ *
+ * A refusal is ALSO logged, here rather than in each caller: this is the one
+ * entry point every press and every rule fire shares (see the file header), so
+ * logging here covers a layout button, a Companion key and a future caller
+ * alike, rather than depending on each one remembering to. Before this, a
+ * same-origin operator pressing a refused layout button saw a toast and
+ * nothing else — no line on /log, nothing in Activity — because the HTTP route
+ * only ever logged non-same-origin (bearer-token) callers, and only who they
+ * were, never whether the press actually did anything. Silent on success: a
+ * working console would otherwise fill /log with a line per press.
  */
 export async function invokeAction(
   id: string,
   params: Record<string, unknown> = {},
 ): Promise<ActionResult> {
   const def = AUTOMATION_ACTIONS[id];
+  let result: ActionResult;
   if (!def) {
-    return { ok: false, detail: `unknown action "${id}"` };
+    result = { ok: false, detail: `unknown action "${id}"` };
+  } else {
+    try {
+      result = await def.run(params, { simulate: false });
+    } catch (e) {
+      result = { ok: false, detail: errorMessage(e) };
+    }
   }
-  try {
-    return await def.run(params, { simulate: false });
-  } catch (e) {
-    return { ok: false, detail: errorMessage(e) };
-  }
+  if (!result.ok) console.warn(`[action] ${scrub(id)} refused: ${scrub(result.detail)}`);
+  return result;
 }
 
 /** Every action a control can be bound to, for the layout inspector's picker. */

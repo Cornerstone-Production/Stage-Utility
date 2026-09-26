@@ -7,7 +7,9 @@ Most endpoints are under `/api`; the exceptions are listed under
 by polling. What a state-changing route answers with depends on what it changed:
 the plan, view, output and slot routes return the updated `StageState`, while the
 rest return the collection they touched (`{targets}`, `{rules}`, `{presets}`) or
-an outcome (`{ok, …}`). Creating something answers `201`.
+an outcome (`{ok, …}`). Creating something answers `201`. A JSON reply of 8 KB
+or more is gzipped when the request sends `Accept-Encoding: gzip`, as every
+browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
 for a body or query the caller got wrong, `409` for something the server cannot
@@ -65,6 +67,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | POST | `/api/refresh` | Re-fetch from Planning Center |
 | POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
+| GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |
 | POST | `/api/allowed-service-types` | Set the allowlist |
 | POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
 | POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`) |
@@ -186,12 +189,31 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/automation/plan-items` | The current plan's items, for the item pickers |
 | GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{value, label}` |
 | GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned: `{items, unreachable}`. Empty, never an error, when one is unreachable, and `unreachable` names the instances that did not answer. A name only some instances have is labelled `DOORS (MA only)` — but only while every instance answered, since "only" is a claim about the machines that did |
-| GET / POST | `/api/automation/rules` | List (`{rules, settings}`) / create a rule |
+| GET / POST | `/api/automation/rules` | List (`{rules, settings}`, each rule carrying its own `issues` — see below) / create a rule |
 | PATCH / DELETE | `/api/automation/rules/:id` | Update / delete |
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
 | POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. A button carrying `stateVariable` is a [toggle](../integrations/companion.md#toggle-buttons) and makes a PAIR instead — two cues pressing that one button, bound on the `_on` half. `stateVariable` on a pair binds its `_on` half the same way; a pair sent without one whose connections have no verified row has its source [learned](../integrations/companion.md#learning-a-state-source) instead. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+
+A rule's **issues** — see [Needs setup](../automation.md#needs-setup) — are an
+array of `{step, index?, key, label, message}`: `step` is `"trigger"`,
+`"condition"` or `"action"`; `index` is which condition, present only for that
+step; `key` and `label` name the param; `message` is the reason, worded for
+display. GET computes them fresh against the current build's registry on every
+read — never stored on the rule.
+
+POST and PATCH validate the same way and answer the rule itself with `issues`
+attached — the same shape GET's list items carry, not a wrapper — so a script
+reading the rule off the response is unaffected (POST is `201`). A save with
+issues never fails: it writes the rule with `enabled: false`
+regardless of what was asked, and reports why. The one refusal is a request
+whose *entire* content is turning a rule with issues ON — `patch: {enabled:
+true}` and nothing else, which is what the rules list's switch sends — refused
+`409` with `{error, code: "invalid-params", issues}` and nothing written. A rule
+already enabled with issues (predates this build, or arrived from a restore) is
+untouched by GET, by init, and by any write that does not go through this route
+— see [Needs setup](../automation.md#needs-setup) for why that matters.
 
 **Cues** — an automation rule called by name. See
 [Companion](../integrations/companion.md#calling-a-cue-by-name).
@@ -221,6 +243,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display). Text that matched a ProdCom keyword marked sensitive is already replaced with asterisks; such a line carries `redactions`, the number of hidden runs. Never gated — a display carries no token |
 | GET | `/api/prodcom/transcript/raw` | The same buffer with nothing hidden, for reviewing what a keyword covered up. Token-gated by `STAGE_UTILITY_LOG_TOKEN`, exactly like `/api/log`: unset means open, set means `?token=…` or a `401` |
 | POST | `/api/prodcom/transcript/clear` | Empty the buffer everywhere at once |
+| GET | `/api/prodcom/channels` | ProdCom's own channel list (id, name, color) — every channel it has, whether or not it has spoken. Backs the Transcription colors panel |
 
 **SPL (Smaart) & rundown**
 | Method | Path | Purpose |
@@ -232,6 +255,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
+| GET / POST | `/api/spl/trend` | Whether History's attendance trend also draws the SPL trend line, and which metric it plots (`{shown, metric}`) |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
@@ -245,7 +269,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/people/count` | Live building occupancy (SenSource) |
 | GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
-| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them |
 | GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
 | GET | `/api/obs/status` \| `/api/reaper/status` | Whether that recorder is rolling, and for how long |
 | GET | `/api/pvp/status` | ProVideoPlayer layer state — what is on each layer, and how far in |
@@ -254,6 +278,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET \| POST | `/api/scores/favourites` | Read / replace the followed teams |
 | GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
+| GET | `/api/baptism/lane?serviceKey=<key>` | One service's session lane: each testimony and baptism in real time, from its raw rows |
 
 **The SPL series**
 
@@ -299,9 +324,10 @@ thing.
 | Method | Path | Purpose |
 |--------|------|---------|
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
+| GET | `/api/history/live?serviceKey=<key>` | Read-only: `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
-| POST | `/api/history/rebuild` | Recompute all three summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timelineItems, splItems, attendanceSamples }`; `500` with the reason if it cannot |
+| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
@@ -349,10 +375,45 @@ Two things to know:
 
 **Baptisms** — the timer's actions are one `POST` each under `/api/baptism/`,
 and each returns the new timer state: `start`, `baptized`, `start-baptisms`,
-`next`, `undo`, `finish`, `pause`, `resume`, `reset`, and `mode`
-(`{mode: "grouped"|"per-person"}`). `GET` and `POST /api/baptism/triggers` read
+`next`, `advance`, `undo`, `finish`, `pause`, `resume`, `reset`,
+`dismiss-save-error` (clears the note a failed session save leaves), and `mode`
+(`{mode: "grouped"|"per-person"}`). `advance` dispatches to whichever action is
+legal for the timer's current phase — meant for a caller (an automation,
+Companion) that should not have to track phase to drive the timer forward. The
+operator panel itself calls it only while armed ("First person in"); once a
+phase is running the panel already knows which specific action applies and
+calls that one directly. `GET` and `POST /api/baptism/triggers` read
 and set which plan items start each phase, and
 `DELETE /api/baptism/sessions/:id` removes one saved session.
+
+`GET /api/baptism/lane?serviceKey=<key>` answers `{ spans }`, each
+`{ kind: "testimony"|"baptism", person, startedAt, endedAt }`, oldest first,
+derived from the service's `baptism.csv`. A span is one run of one clock: a pause
+splits a testimony in two, and the stretches between spans — the armed wait, a
+pause, a press that was undone — are time nobody was timed for. The last span's
+`endedAt` is `null` while its clock is still running. A session reset before it
+finished is not in the lane, because it was never recorded. `{ spans: [] }` for a
+service with no baptism archive; a `500` when the archive exists and cannot be
+read.
+
+`POST /api/baptism/rebuild` takes `{ serviceKey }` rather than acting on the
+live timer: it replays that service's `baptism.csv` and MERGES the result into
+the stored sessions, never replacing them — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
+Answers `{ rows, sessions, updated, added, unchanged, newer, disagreeing,
+invalid, kept, full, restoredIds }` — see
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for what each of the eight outcome categories means; `restoredIds` names the
+sessions this call actually added or updated. `400` for a body
+with no `serviceKey`; `409` while that service is recording, and a DIFFERENT
+`409` when it has no `baptism.csv` at all (a session recorded before the raw
+layer existed has a timeline record but none) — both carry a body of
+`{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"`
+for the second, since a client cannot tell two 409s apart by status alone;
+`500` for any other failure, with no detail in the body. `/api/history/rebuild`
+runs the same merge as its own baptism leg, and its 409s carry the same
+`code` (see below), since both routes throw the same two errors through the
+same dispatcher.
 
 **Updates, backup and the archive** — see
 [Updates and logs](../ops/updates-and-logs.md) and
@@ -400,7 +461,7 @@ recorder is running. Pass `{override: true}` to go anyway.
 `/api/taper-window`, `/api/checklist-sources`, `/api/kiosk-discovery`,
 `/api/baptism-auto-start`, `/api/ndi-enabled`, `/api/onboarding-dismissed`,
 `/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
-`/api/caption-colors`.
+`/api/caption-colors`, `/api/caption-colors/follow-prodcom`.
 
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a
@@ -504,12 +565,16 @@ something to change:
 
 **Pushed only when something happens:**
 
-`prodcom:transcript` · `slots:devices` · `integrations:state-changed` ·
+`prodcom:transcript` · `prodcom:channels` · `slots:devices` · `integrations:state-changed` ·
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` ·
-`display:refresh` · `settings:allowedServiceTypeIds-changed`
+`display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt`
+
+`baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
+save-failure note's, or History's whole-service rebuild — actually writes a
+session: `{serviceKey, ids}`, `ids` naming the sessions it added or updated.
 
 Every status snapshot carries a `rev` counter so a hydrate read cannot overwrite
 a newer push — see [Integrations](../integrations/README.md#the-snapshot-version).
@@ -520,7 +585,7 @@ pair's device changes — or when it enters or leaves its
 [settle window](../integrations/companion.md#the-settle-window), which is a
 change in what the reading is worth — and `{type: "manifest", version}` when the
 rules change and
-[`/api/cues/manifest`](#cues) should be re-read. `id` is the pair's base, as in
+`/api/cues/manifest` should be re-read. `id` is the pair's base, as in
 the manifest, and only pairs the manifest lists are pushed — a pair whose
 **Home Assistant** switch is off is absent from this channel exactly as it is
 from the manifest, though `/api/cues/states` still carries it. While at least

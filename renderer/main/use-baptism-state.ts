@@ -1,6 +1,8 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
+import { reduceBaptismPeople } from "../lib/baptism-people";
+import { formatClock } from "../lib/clock-format";
 import { useStatusChannel } from "./use-status-channel";
 
 /**
@@ -16,21 +18,29 @@ export function useBaptismState(): BaptismState | null {
   return useStatusChannel<BaptismState>(read, "baptism:state");
 }
 
-/** Totals + averages over the completed people in a session. */
+/**
+ * Totals + averages over a session's people.
+ *
+ * `people` fills during the testimony pass in grouped mode, before anyone has
+ * been baptized — an entry there means "testified", not "baptized"; its
+ * `baptizeMs` sits at 0 until a baptism actually closes it (the same is true
+ * of a per-person session finished early, mid-testimony). `count` — the figure
+ * the panel and the layout object label "Baptized" — must not be `people.length`
+ * for that reason, or three testimonies with nobody in the water yet reads as
+ * three baptized. It counts entries with a real `baptizeMs`, and the averages
+ * that describe a baptism (`avgBaptizeMs`, `avgPersonMs`) divide by that same
+ * count, not by everyone who happened to testify.
+ */
 export function summarizeBaptism(s: BaptismState | null) {
-  const people = s?.people ?? [];
-  const count = people.length;
-  const totalTestimonyMs = people.reduce((a, p) => a + p.testimonyMs, 0);
-  const totalBaptizeMs = people.reduce((a, p) => a + p.baptizeMs, 0);
-  const totalMs = totalTestimonyMs + totalBaptizeMs;
+  const r = reduceBaptismPeople(s?.people ?? []);
   return {
-    count,
-    totalTestimonyMs,
-    totalBaptizeMs,
-    totalMs,
-    avgTestimonyMs: count ? totalTestimonyMs / count : 0,
-    avgBaptizeMs: count ? totalBaptizeMs / count : 0,
-    avgPersonMs: count ? totalMs / count : 0,
+    count: r.baptized,
+    totalTestimonyMs: r.totalTestimonyMs,
+    totalBaptizeMs: r.totalBaptizeMs,
+    totalMs: r.totalTestimonyMs + r.totalBaptizeMs,
+    avgTestimonyMs: r.testified ? r.totalTestimonyMs / r.testified : 0,
+    avgBaptizeMs: r.baptized ? r.totalBaptizeMs / r.baptized : 0,
+    avgPersonMs: r.baptized ? r.totalBaptizedPersonMs / r.baptized : 0,
   };
 }
 
@@ -41,4 +51,34 @@ export function fmtClock(ms: number): string {
   const r = s % 60;
   if (m >= 60) return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/**
+ * A person's baptizeMs, the way both the People table and Copy report must
+ * print it: a dash for "not yet baptized" (baptizeMs === 0), never fmtClock's
+ * own "0:00" — that would claim a baptism took no time when none has happened
+ * yet. `people-table.tsx`'s own doc comment names the shape this guards: a
+ * grouped session's `people` fills during the testimony pass, before anyone
+ * is baptized, and a per-person session finished mid-baptism leaves the
+ * identical shape behind. Shared so the two places that print this cannot
+ * disagree about the same person — Copy report used to print "0:00" here
+ * while the table printed a dash for the same entry.
+ */
+export function fmtBaptizeMs(ms: number): string {
+  return ms > 0 ? fmtClock(ms) : "—";
+}
+
+/**
+ * "Sun, Sep 27 · 11:34 AM" — when a session (or a past one) started.
+ *
+ * Shared by the operator page and its header, rather than a private copy in
+ * each: both name the same session, off the same field, and a second copy is
+ * how the two would drift. `service-history-section.tsx` has its own
+ * differently-shaped `fmtDate` (a bare calendar day, no time, for grouping past
+ * services) — a different job, not a third copy of this one.
+ */
+export function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + " · " + formatClock(d);
 }

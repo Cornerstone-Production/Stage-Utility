@@ -1,7 +1,7 @@
 // Persists non-secret settings: service type/plan selection, planMode,
 // integration configs (non-secret fields), display options.
 
-import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
+import type { BaptismAutoStart, BaptismMode, DisplayInfo, Output } from "../types/stage.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
@@ -10,6 +10,10 @@ import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
 export interface SettingsData {
   /** Whether and how the baptism timer starts itself from the plan. */
   baptismAutoStart?: BaptismAutoStart;
+  /** Workflow the baptism timer opens in. Grouped is how a baptism actually
+   *  runs here: every testimony inside one plan item, then the baptisms spread
+   *  across the song set. Per-person is the minority case. */
+  baptismDefaultMode?: BaptismMode;
   serviceTypeId: string | null;
   serviceTypeName: string | null;
   planMode: "auto" | "manual";
@@ -107,6 +111,9 @@ export interface SettingsData {
   /** User-assigned caption colors, keyed by ProdCom channel label (channelName,
    *  or channelId when unnamed). Overrides the auto/ProdCom color. */
   captionChannelColors: Record<string, string>;
+  /** When true, a channel with no entry above uses ProdCom's own color for it
+   *  instead of the distinct auto color. Off by default. */
+  followProdcomColors?: boolean;
   /** Scheduled in-app auto-update window. */
   autoUpdate: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek: number | null; hour: number };
   /** Time-aware integration reconnect tunables (leadMin/tailMin/dormantMin). */
@@ -148,6 +155,13 @@ export interface SettingsData {
    */
   layoutDefaultsCleaned?: boolean;
   /**
+   * Whether the one pass raising every 8% card hairline to the registry's has
+   * run (never-chosen-defaults.ts, migrateCardHairline). Separate from
+   * layoutDefaultsCleaned because installs that had already run that pass
+   * still need this one. Absent means never run.
+   */
+  cardHairlineRaised?: boolean;
+  /**
    * Which of a plan's notes become the pre-service checklist.
    *
    * Names, not ids. A plan note carries `category_name` on its own attributes
@@ -166,6 +180,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   // Off until someone turns it on: a timer that starts itself unasked during a
   // service is worse than one that has to be started.
   baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
+  baptismDefaultMode: "grouped",
   serviceTypeId: null,
   serviceTypeName: null,
   planMode: "auto",
@@ -205,6 +220,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   iconColors: {},
   iconGlyphs: {},
   captionChannelColors: {},
+  followProdcomColors: false,
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],

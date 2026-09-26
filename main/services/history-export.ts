@@ -26,6 +26,12 @@ export interface HistoryExportOptions {
   from?: string | null; // YYYY-MM-DD inclusive
   to?: string | null; // YYYY-MM-DD inclusive
   include: HistorySheet[];
+  /** The exporting request's own `Host` header, so the Baptisms sheet's History
+   *  column can build an absolute link — whichever hostname or port the browser
+   *  actually used to reach this server, not this box's own idea of its address.
+   *  A spreadsheet handed to someone outside Production must never carry a
+   *  relative path that only resolves inside the app. */
+  host?: string | null;
 }
 
 const inRange = (date: string, from?: string | null, to?: string | null): boolean =>
@@ -37,6 +43,27 @@ const durationSec = (startedAt: string | null | undefined, endedAt: string | nul
   const b = Date.parse(endedAt);
   return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / 1000) : null;
 };
+
+/**
+ * Absolute link to the shared READ-ONLY History page for one service — `/history`,
+ * never `/history/manage`, so a spreadsheet handed outside Production cannot open
+ * into the operator app. Blank when either half is missing, since neither a
+ * relative path nor a link with nothing to open belongs in the cell.
+ *
+ * `service` is the param name `HISTORY_SERVICE_PARAM` defines in
+ * service-history-section.tsx (renderer) — that file cannot be imported here, so
+ * the name is repeated rather than shared, and would need to change in both
+ * places together.
+ */
+const historyUrl = (host: string | null | undefined, serviceKey: string | null | undefined): string | null =>
+  host && serviceKey && HOST_HEADER.test(host)
+    ? `http://${host}/history?service=${encodeURIComponent(serviceKey)}`
+    : null;
+
+/** A hostname, IPv4 or bracketed IPv6 address, with an optional port. `Host`
+ *  is whatever the client sent, so anything else leaves the cell blank rather
+ *  than writing it into a link. */
+const HOST_HEADER = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
 
 /** Everything a cell can hold here. Dates are already ISO strings in the stores. */
 type Scalar = string | number | null | undefined;
@@ -101,7 +128,7 @@ export function historyFileName(from?: string | null, to?: string | null): strin
 
 /** Assemble the workbook and return its bytes. */
 export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<Buffer> {
-  const { from, to, include } = opts;
+  const { from, to, include, host } = opts;
   const [attendance, timelines, spls, baptismSessions] = await Promise.all([
     attendanceStore.list(),
     serviceTimelineStore.list(),
@@ -316,15 +343,6 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     );
   }
 
-  // Each sheet's shape, in sheet order, so the table parts name their columns
-  // exactly as row 1 does. Derived from what was just built rather than read back
-  // out of the XML, where the header strings are not resolvable yet.
-  const specs: TableSpec[] = sheets.map((s, i) => ({
-    headers: tabular[i]
-      ? (s.data[0] ?? []).map((c) => (c && typeof c === "object" && "value" in c ? String(c.value ?? "") : ""))
-      : [],
-    rowCount: tabular[i] ? Math.max(0, s.data.length - 1) : 0,
-  }));
   if (include.includes("baptisms")) {
     // One row per person, not per session: the timings are per person, and a
     // session is just when the operator started and stopped. Sessions carry the
@@ -349,14 +367,46 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
           { header: "Service type", width: 20, value: ({ b }) => byKey.get(b.serviceKey ?? "")?.serviceTypeName ?? "" },
           { header: "Session", width: 22, value: ({ b }) => b.title ?? "" },
           { header: "#", width: 6, value: (r) => r.n },
+          // A grouped session times every testimony first, then every baptism, so a
+          // person whose testimony closed before anyone was baptized has baptizeMs
+          // 0 — the same rule reduceBaptismPeople (renderer/lib/baptism-people.ts)
+          // shares between baptismStats and summarizeBaptism: baptized only once
+          // baptizeMs is greater than zero, never merely by being in `people`.
+          { header: "Baptized", width: 10, value: ({ p }) => (p.baptizeMs > 0 ? "Yes" : "No") },
           { header: "Testimony (s)", width: 14, value: ({ p }) => Math.round(p.testimonyMs / 1000) },
           { header: "Baptism (s)", width: 13, value: ({ p }) => Math.round(p.baptizeMs / 1000) },
           { header: "Total (s)", width: 11, value: ({ p }) => Math.round((p.testimonyMs + p.baptizeMs) / 1000) },
+          // The SESSION's wall-clock length, not the sum of the people in it — the
+          // same value repeats on every row of that session, same as Service time.
+          // The same figure the History page's own "Segment" stat reports
+          // (historyBaptismFigures → sessionWindow in
+          // renderer/settings/sections/baptisms/session-lane.ts), for the same
+          // startedAt/finishedAt pair. sessionWindow additionally floors a
+          // corrupted record's window at 1ms rather than reporting it as blank —
+          // a case `finish()` never actually produces, since a session is only
+          // ever pushed to the store once finishedAt is a real timestamp — so a
+          // blank cell here is the more honest answer for data that never occurs.
+          { header: "Segment (s)", width: 12, value: ({ b }) => durationSec(b.startedAt, b.finishedAt) },
+          { header: "History", width: 46, value: ({ b }) => historyUrl(host, b.serviceKey) },
         ],
         rows,
       ),
     );
   }
+
+  // Each sheet's shape, in sheet order, so the table parts name their columns
+  // exactly as row 1 does. Derived from what was just built rather than read back
+  // out of the XML, where the header strings are not resolvable yet. Computed
+  // LAST, after every conditional sheet (including Baptisms) has been pushed —
+  // this used to run before the Baptisms push, so `specs` was always one short
+  // whenever that sheet was included and it silently never became a real Excel
+  // table (no filter arrows, no PivotTable-ready range).
+  const specs: TableSpec[] = sheets.map((s, i) => ({
+    headers: tabular[i]
+      ? (s.data[0] ?? []).map((c) => (c && typeof c === "object" && "value" in c ? String(c.value ?? "") : ""))
+      : [],
+    rowCount: tabular[i] ? Math.max(0, s.data.length - 1) : 0,
+  }));
 
   return writeXlsxFile(sheets, { features: [tableFeature(specs)] }).toBuffer();
 }

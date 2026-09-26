@@ -41,12 +41,31 @@ replaced once it has started or is about to. Where no start time is available th
 decision falls back to the gap since the last live item: under ten minutes holds,
 longer splits.
 
-Each decision is logged once, whichever way it goes:
+Each decision is logged once, whichever way it goes, and a hold that later
+ends in a split logs the split too:
 
 ```
 [service-recorder] service-timeline-recorder: service time 1001 → 1002, holding the open record (next occurrence starts in 25 min)
+[service-recorder] service-timeline-recorder: service time 1001 → 1002 starts in 10 min, closing 100:200:1001 and opening a new record
 [service-recorder] attendance-recorder: service time 1001 → 1002 began at 11:00:00, closing 100:200:1001 and opening a new record
 ```
+
+The clock is not the only thing that can end a hold. While held, the item the
+open record OPENED with — its very first entry — going live again means the
+next service has begun, whatever the ten-minute rule still says: an overrunning
+service does not restart its own first item, but the next one always starts
+with one. The hold closes right then, on that tick, rather than waiting out the
+clock. A reprise of any OTHER item — a song, a step back — is not evidence of a
+next service and keeps holding:
+
+```
+[service-recorder] service-timeline-recorder: "Doors" went live again during the hold — the next service has begun, closing 100:200:1001 and opening a new record
+```
+
+SPL and attendance keep no ordered list of items to read the opening one back
+from, so the decision is made once, in the machinery all three recorders
+share, and the item id travels on the record itself — surviving a restart mid-
+hold the same way the rest of the record does.
 
 Inside a record, a plan item that goes live again more than ten minutes after its
 last run ended is recorded as a second entry rather than reopening the first, so a
@@ -70,7 +89,8 @@ operator jumping to the previous song expects.
 ## Reading it back
 
 The History tab opens on **All services**: a Trends card, then a calendar beside
-the day's services. Open a service for its own page, described after it.
+the day's services, or above them when the page is too narrow for both. Open a
+service for its own page, described after it.
 
 ### All services
 
@@ -292,6 +312,11 @@ If the milestone list cannot be read at all, the card says *milestones
 unavailable* and the reason is logged. The derived series-change marks still
 draw.
 
+The Settings list says the same rather than *No milestones yet*, and a save
+shows the list the server answers with. When the service type names cannot be
+read, it says so and offers only *Every service type*. Both are logged on
+`[history]`.
+
 The **calendar** shades a day **green** by how many services were recorded on it,
 in four steps, with everything at four or more on the darkest. There is no dot
 and no count in the cell: the day number sits alone and the shade carries the
@@ -309,11 +334,26 @@ to that day's group and rings it; it does not hide the rest of the month.
 A column header is drawn once, under the first day's label, then a row per
 service: the start time with the service type under it, the plan title with its
 series and item count under that, and four figures. Each figure's caption sits
-under its value. While a recording is still open the row says so twice: the same
-green **recording** pill the service's own page carries, after the plan title,
-and the pill's dot on its own beside the start time. The dot is the one that
-survives a narrow window — the Service column is the only one that can shrink,
-and the pill goes with the plan title when it does.
+under its value. When the list is too narrow for the columns, each row wraps
+instead: the start time, the plan title and the arrow on one line, the four
+figures on the next, and no column header, since each caption names its figure.
+While a recording is still open the row says so twice: the same green
+**recording** pill the service's own page carries, after the plan title, and the
+pill's dot on its own beside the start time. The dot is the one that survives a
+long plan title — the Service column is the only one that can shrink, and the
+pill goes with the plan title when it does.
+
+A service a baptism session links to carries a small droplet beside the plan
+title, with the count itself next to it — *2* beside the droplet, never a bare
+icon — and an accessible name spelling out *2 baptized*. The subtitle under the
+title never repeats the count in words: the badge is what survives when the
+Service column has no room left, so the series title and item count keep
+theirs instead. A service with no linked session carries neither.
+
+A failed read of the baptism sessions is not a baptism-free month: rather than
+guessing per row, the list shows *Baptism counts could not be loaded* once,
+above the day groups, and the reason is on a `[history]` line on the server
+log.
 
 | | |
 |---|---|
@@ -342,6 +382,14 @@ history could not be read", or *sound unavailable* on the Trends card — rather
 than showing the copy for a history that is genuinely empty. The reason is on a
 `[history]` line on the server log, one per thing that failed.
 
+A service's own page does the same card by card. An attendance, sound or
+baptism record that cannot be read says so on its card, and the header's level
+reads *sound unavailable*, never *no sound recorded*. The Baptisms card appears
+for a failed read even on a service without baptisms, because the page cannot
+tell the two apart. A service whose record cannot be read opens to a note and a
+way back, not to nothing. Home's **Recent services** card, which stays hidden
+until something is recorded, shows the same note instead of hiding.
+
 **Export** is a button in the Recorded services header. It opens a date range —
 blank for all dates — and a list of sheets, and downloads them as one `.xlsx`.
 It reads only, so it is offered on the shared `/history` link too.
@@ -353,6 +401,14 @@ to, where it means something specific rather than something all-time.
 
 A row is a summary that opens the service page; Delete lives on that page's
 header, not on the row. The shared `/history` link shows the same figures.
+
+Opening a service writes its key to the URL as `?service=`, so the address bar
+names exactly which occurrence is open — reload, bookmark or share it and the
+same one opens again, rather than landing back on the whole month. This is the
+one URL that opens a specific service, and the only way in from outside the
+page itself: a baptism session's own **Past sessions** card, on the Baptisms
+tab, links each row with a known service through this same address, so
+opening one from there lands here rather than on a copy of this page.
 
 ### The service page
 
@@ -389,12 +445,46 @@ bottom:
   the keyboard and with middle-click, and the one you are looking at is
   highlighted as you scroll.
 
-On a phone the header stacks and the six figures scroll sideways in their own
-row; the page itself never scrolls sideways.
+When the page is too narrow for the title beside the actions, the header stacks
+them, and the six figures scroll sideways in their own row; the page itself never
+scrolls sideways.
 
 On a weekend a baptism session links to, a fourth **Baptisms** card appears
-between Rundown and Attendance. It is not in the nav — an entry that came and
-went by the week would read as a fault.
+between Rundown and Attendance, and the nav gains an entry for it in the same
+position. Neither shows on an ordinary Sunday.
+
+The card carries: a stat strip of its own six figures — Baptized; Segment,
+the linked session's own wall-clock span with the clock time it ran, start to
+finish; Testimony and Baptism total, each with its own per-person average;
+Longest, the person whose testimony and baptism together ran longest, and who
+it was; and Vs plan, that same segment against the *planned* length of
+whichever plan items it spans — the
+same items the chart below clips its own plan lane to, so the two can never
+name a different plan. A plan recorded with no lengths at all has nothing for
+Vs plan to compare against, and it says so rather than reporting a false
+overrun. These are not the Baptisms tab's own six (Timed, Wall clock, Not
+counted and the two averages) — this card is about one recorded segment of a
+finished service, not a running session, and the two answer different
+questions. Two or more sessions linked to one occurrence sum into these same
+six figures rather than each getting their own row.
+
+Below the strip: a read-only two-lane chart per linked session — the same
+timer-over-plan chart the live Baptisms tab draws, showing that session's own
+testimonies and baptisms against the plan items running at the time; and,
+under each chart, that session's own per-person splits (testimony, baptism
+and total time per person). A session with nothing in the shared timing rows
+for it — recorded before that raw layer existed, or matched to this service
+only by its start time rather than by a service key of its own — shows its
+splits with a plain line in place of the chart rather than one reading as an
+empty session. A **Open in Baptisms →** link beside the card's title returns
+to the live tab; the shared `/history` link never shows it, since it opens
+into the operator app.
+
+Two or more sessions recorded in one occurrence — an operator finishing,
+resetting and running the whole thing again, or two people baptized in
+genuinely separate sessions the same weekend — each draw their own chart and
+their own splits, never merged into one. A reset on its own never stores
+anything; it is the Finish on each side of it that does.
 
 ### The service chart
 
@@ -537,9 +627,10 @@ Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
 The rundown itself is a table of every item as it ran: number, title, planned
-length, actual, the difference, and the times it started and ended. An item
-excluded from the timers is marked **not counted** and dimmed; one whose times
-were corrected is marked **edited**.
+length, actual, the difference, and the times it started and ended. A table too
+narrow for all of them keeps the title, actual and difference. An item excluded
+from the timers is marked **not counted** and dimmed; one whose times were
+corrected is marked **edited**.
 
 **Edit times** also makes each item's own Started and Ended editable. An item
 that recorded wrong — a pre-roll that reads eleven minutes because the plan was
@@ -559,10 +650,36 @@ the top.
 **Rebuild from raw**, in the header's action group, discards a recording's stored
 summaries and derives them again from the rows in the
 [data archive](../data-archive.md): item timings from the plan-item event rows,
-sound levels from the SPL samples, attendance from the record's own samples. For
-a capture the recorder got wrong — the raw rows are append-only and keep the
-evening as it happened. Item time corrections survive it: they are an overlay
-over the rebuilt run, not a change to it.
+sound levels from the SPL samples, attendance from the record's own samples, and
+baptism sessions from `baptism.csv`. For a capture the recorder got wrong — the
+raw rows are append-only and keep the evening as it happened. Item time
+corrections survive it: they are an overlay over the rebuilt run, not a change
+to it. Baptisms are the one exception to "rebuild replaces": the sessions it
+reconstructs are merged into what is already stored rather than replacing it,
+so a session the rows cannot reproduce is left alone rather than deleted, and
+one already stored that the rows have nothing to say about is kept exactly as
+it is — a rebuild never deletes or evicts a baptism session to make room for
+another. See
+[Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
+for the full rule.
+
+The result says what was **rebuilt** — a count per leg, baptisms as "N added"
+and "M updated" when the merge actually wrote something — then, separately,
+what was **left alone** and why: for the other three legs, a leg the raw
+layer had nothing for; for baptisms, sessions the merge matched but found
+newer in the store already, disagreeing with the rows, unreadable, or not in
+the raw rows at all. A session the rows reproduced exactly needed nothing
+said about it, so **unchanged** is the one category never named in this
+sentence — it counts toward neither what was rebuilt nor what was left alone.
+If the store was already at its cap when new sessions were found, a closing
+clause says how many could not be added. A leg that failed to save says so by
+name rather than being folded into either list.
+
+Rebuilding here also clears a save-failure line on the **Baptisms** tab, and
+the Timer card's own note beside it, for any session the merge just added or
+updated — the same clearing a rebuild started from either of those two places
+already does. See [Recovery](scriptview-and-baptisms.md#recovery) for what
+that note shows and exactly when a line clears.
 
 While a service is recording, **Reset pacing** (in the live service's detail
 here, and beside the Previous/Next controls wherever the console offers them)
@@ -591,7 +708,9 @@ read that one figure.
 Available on dashboards and custom layouts: in-room now, peak, low, per-service,
 day total, percent of capacity, and versus average. The layout objects are a
 people counter, a people summary with individually toggleable metrics, and a
-people graph that shows either a live rolling window or a recorded service.
+people graph that shows either a live rolling window or a recorded service. A
+recorded service whose samples cannot be read shows *couldn't load the recorded
+service*, not *no recorded data*, with the reason on a `[history]` line.
 
 A gap of more than three minutes in the samples renders as a break in the curve
 rather than a straight line, since missing samples mean the counter was
@@ -642,11 +761,17 @@ the day you exported.
 | `SPL` | one row per plan item, every metric side by side |
 | `SPL data` | one row per item per metric — the shape a PivotTable wants |
 | `Attendance` | per service |
-| `Baptisms` | one row per person, with testimony and baptism splits |
+| `Baptisms` | one row per person: testimony and baptism splits, whether they were baptized, the session's wall-clock length, and a link to that service's read-only History page |
 
 Both SPL sheets are real tables, so *Insert → PivotTable* opens with the range
 already filled in. A `Service time` column distinguishes a 9am from an 11am on the
 same date.
+
+The Baptisms sheet's `History` link is absolute — built from the host you exported
+from — and always points at the read-only `/history` page, never
+`/history/manage`, so a copy handed to someone outside Production never opens
+into the operator app. It is blank on a session recorded before `serviceKey` was
+captured.
 
 Blank metric cells are normal: columns are the union across everything exported,
 so a service whose meter reported fewer metrics leaves the rest empty. Services

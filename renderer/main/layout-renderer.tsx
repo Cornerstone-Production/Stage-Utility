@@ -10,6 +10,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useServerClock } from "@renderer/lib/server-clock";
 import { invoke } from "../lib/api";
+import { logReadFailure } from "../lib/client-log";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
@@ -111,6 +112,11 @@ export interface LayoutRenderCtx {
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
   interactive: boolean;
+  /** True only inside the layout editor's own canvas (layout-editor.tsx's
+   *  `fullCtx`) — never on a live display, a preview, or a kiosk route. An
+   *  editor-only affordance (an action button's "Needs setup" marker) reads
+   *  this rather than `interactive`, which is false in the editor too. */
+  editing?: boolean;
   /** Pixel placements when the layout is rendering responsively; absent when it
    *  is letterboxed, in which case objects position by percentage as before. */
   placed?: Map<string, PlacedObject>;
@@ -1069,6 +1075,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             maxLines={c.maxLines}
             showLabels
             colorOverrides={ctx.state.captionChannelColors}
+            followProdcom={ctx.state.followProdcomColors}
             textStyle={{ ...ts, textAlign: "left" }}
             gapClassName="gap-[0.3em]"
             className="w-full h-full"
@@ -1078,7 +1085,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const last = lines[lines.length - 1];
       const speaker = channelLabel(last);
       return (
-        <span style={{ ...ts, color: lineColor(last, ctx.state.captionChannelColors), opacity: last.isFinal ? 1 : 0.55 }}>
+        <span
+          style={{
+            ...ts,
+            color: lineColor(last, ctx.state.captionChannelColors, ctx.state.followProdcomColors),
+            opacity: last.isFinal ? 1 : 0.55,
+          }}
+        >
           {speaker ? `${speaker}: ${last.text}` : last.text}
         </span>
       );
@@ -1338,7 +1351,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     case "action-button":
-      return <ActionButton config={c} interactive={ctx.interactive} ts={ts} />;
+      return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
       return <CueButton config={c} cues={ctx.cues} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":
@@ -1572,7 +1585,7 @@ function niceStepInt(target: number): number {
 /** Fetch a recorded service's per-service curve + PCO markers for the people-graph
  *  "recorded" mode. serviceKey null → most recent finished service. */
 function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
-  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null } | null>(null);
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null; failed: boolean } | null>(null);
   useResyncOn([enabled], () => {
     if (!enabled) setData(null);
   });
@@ -1580,21 +1593,32 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
     if (!enabled) return;
     let cancelled = false;
     void (async () => {
+      // A read that fails is not a service with no curve, which is what an
+      // empty answer drew: "no recorded data". `failed` puts it on the display
+      // instead. The markers read is the exception, on purpose: without it the
+      // curve still draws and says nothing false, so its failure is logged and
+      // then taken as no markers.
+      let failed = false;
+      const unread = (what: string, starvesCurve: boolean) => (err: unknown): null => {
+        if (starvesCurve) failed = true;
+        if (!cancelled) logReadFailure("history", `the people graph's ${what}`, err);
+        return null;
+      };
       let key = serviceKey ?? null;
       if (!key) {
-        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
+        const list = await invoke<ServiceAttendanceSummary[]>("attendance:listSummaries").catch(unread("the recorded services", true));
         key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
       }
-      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null }); return; }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null, failed }); return; }
       const [att, tl] = await Promise.all([
-        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
-        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
+        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(unread(`the attendance for ${key}`, true)),
+        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(unread(`the plan items for ${key}`, false)),
       ]);
       if (cancelled) return;
       const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
       const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
       const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
-      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null });
+      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null, failed });
     })();
     return () => { cancelled = true; };
   }, [enabled, serviceKey]);
@@ -1622,6 +1646,7 @@ function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: 
       H={ctx.H}
       serviceStartedAt={mode === "recorded" ? (recorded?.serviceStartedAt ?? null) : null}
       serviceEndedAt={mode === "recorded" ? (recorded?.serviceEndedAt ?? null) : null}
+      unread={mode === "recorded" && !!recorded?.failed}
       toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
     />
   );
@@ -1638,6 +1663,7 @@ function PeopleGraph({
   H,
   serviceStartedAt = null,
   serviceEndedAt = null,
+  unread = false,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
@@ -1650,6 +1676,8 @@ function PeopleGraph({
   /** Service-proper window (recorded mode) — dims the arrival ramp / emptying-room taper. */
   serviceStartedAt?: string | null;
   serviceEndedAt?: string | null;
+  /** The recorded curve could not be read, which is not a service with none. */
+  unread?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -1657,7 +1685,13 @@ function PeopleGraph({
   if (vals.length < 2) {
     return (
       <div style={{ position: "relative", width: "100%", height: "100%" }}>
-        <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        {unread ? (
+          // In the object's own type rather than an ErrorNote banner: this is
+          // drawn on a wall, sized to the box it was given.
+          <span role="alert" style={{ ...ts, opacity: 0.6 }}>couldn't load the recorded service</span>
+        ) : (
+          <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        )}
         {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={ts.color ?? "#fff"} H={H} />}
       </div>
     );
@@ -2018,6 +2052,11 @@ function BaptismTimer({
       // the held value rather than freezing at whatever it last happened to render.
       value = fmtClock(segmentElapsedMs(state, now));
       if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
+      // Armed reads identically to a just-started baptism otherwise — 0:00 over
+      // "Baptism 1" — which is exactly the ambiguity the operator panel's own
+      // "armed" readout exists to rule out. Same word, kept short for a wall
+      // rather than the panel's full sentence.
+      else if (state.armed) fallback = "armed";
       else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
     } else {
       value = "0:00";
@@ -2033,9 +2072,68 @@ function BaptismTimer({
     value = sum.count ? fmtClock(sum.avgPersonMs) : "—";
     fallback = "avg per person";
   } else if (field === "last") {
-    const last = state?.people[state.people.length - 1];
+    // NOT the last entry in `people` — in grouped mode every testimony is
+    // pushed up front with `baptizeMs: 0`, so the last entry is the last person
+    // who TESTIFIED, not the last one baptized (they agree only on the final
+    // baptism of the session). "Last person" on a stage display has to mean
+    // the last one actually baptized, same rule as `count`'s source.
+    const baptized = state?.people.filter((p) => p.baptizeMs > 0) ?? [];
+    const last = baptized[baptized.length - 1];
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
+  } else if (field === "testimony") {
+    // This person's own testimony, once banked — NOT the live segment clock,
+    // which is `live`'s job. While their testimony is still running there is
+    // nothing banked yet, so this ticks the same running value `live` shows;
+    // once the phase moves on to baptizing them it holds at what was banked,
+    // independent of however long the baptism itself then runs.
+    if (!state || state.phase === "idle") {
+      value = "—";
+    } else if (state.phase === "testimony") {
+      value = fmtClock(segmentElapsedMs(state, now));
+    } else {
+      const bankedMs =
+        state.mode === "per-person" ? (state.pendingTestimonyMs ?? 0) : (state.people[state.baptismIndex]?.testimonyMs ?? 0);
+      value = fmtClock(bankedMs);
+    }
+    fallback = "testimony";
+  } else if (field === "session") {
+    // Wall clock since the session started — never paused, unlike the segment:
+    // a session that pauses through a long prayer still reads that time as part
+    // of the session. Freezes at the finished length once the session ends,
+    // rather than continuing to climb while idle before the next one starts.
+    if (!state?.sessionStartedAt) {
+      value = "—";
+    } else {
+      const started = Date.parse(state.sessionStartedAt);
+      const endedMs = state.finishedAt ? Date.parse(state.finishedAt) : now;
+      value = Number.isFinite(started) ? fmtClock(Math.max(0, endedMs - started)) : "—";
+    }
+    fallback = "session";
+  } else if (field === "phase") {
+    // The word, for a stage readout — armed reads as its own word rather than
+    // "baptism", the same distinction `live`'s fallback already draws: armed
+    // has no clock running, and saying "baptism" here would claim one does.
+    value = !state ? "—" : state.armed ? "armed" : state.phase;
+    fallback = "phase";
+  } else if (field === "person") {
+    // In grouped mode `personNumber` is the TESTIMONY counter and freezes once
+    // the baptism section arms — it is not who is being baptized. The person
+    // being baptized is `baptismIndex` (0-based) of `people.length`, which is
+    // only known once the testimony pass has filled `people`. Per-person mode
+    // never has a total, so it is always "Person N". Armed says so rather than
+    // "1 of 7" — indistinguishable from person 1 already being baptized, the
+    // same ambiguity `live`'s armed case already guards against.
+    if (!state || state.phase === "idle") {
+      value = "—";
+    } else if (state.armed) {
+      value = "armed";
+    } else if (state.phase === "testimony" || state.mode === "per-person") {
+      value = `Person ${state.personNumber}`;
+    } else {
+      value = `${state.baptismIndex + 1} of ${state.people.length}`;
+    }
+    fallback = "person";
   }
   // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
   // measured sweep, because the label rode on the end of the value and the pair

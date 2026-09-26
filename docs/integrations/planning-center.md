@@ -161,8 +161,8 @@ categories, teams, or both. A note matching *either* is included. Nothing chosen
 means no checklist — it never fills itself with every note on the plan.
 
 **How a note becomes rows:** if any line in the note starts with a bullet (`-`,
-`*`, `[ ]`), the bulleted lines are the rows and the rest is context. If no line
-is bulleted, every non-blank line is a row.
+`*`, `•`, `·`, `[ ]`), the bulleted lines are the rows and the rest is context.
+If no line is bulleted, every non-blank line is a row.
 
 ```
 Doors at 8, band on stage 8:30.      <- context, not a row

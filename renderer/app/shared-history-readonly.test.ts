@@ -19,8 +19,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
 import { settle, unmountAndTeardown } from "../test-dom.js";
+import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
 
 // Without this React neither act-wraps a render nor warns about an update
 // outside act — which is why this file reported no undrained work while
@@ -158,7 +158,7 @@ describe("the shared /history link", () => {
         const url = String(input);
         const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
         if (url === "/api/service-timeline") return ok([rec]);
-        if (url === "/api/attendance/history") return ok([]);
+        if (url === "/api/attendance/history?summary=1") return ok([]);
         if (url === "/api/spl/summary") return ok([]);
         if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
         if (url === "/api/baptism/sessions") return ok([]);
@@ -204,6 +204,111 @@ describe("the shared /history link", () => {
         [],
         "the shared link's list must carry nothing that deletes a recording",
       );
+    } finally {
+      await unmountAndTeardown(cleanup, teardown);
+    }
+  });
+
+  it("a service's Baptisms card offers no way into the operator app, read-only or not", async () => {
+    // docs/display-urls.md's own contract for this link: handed to people
+    // outside Production, and "shows nothing else of the app". The card's own
+    // "Open in Baptisms" link is real navigation INTO the operator app — the
+    // live timer's Start testimonies, Undo, Reset, Rebuild from raw and the
+    // Workflow toggle — which the shared page must never offer a way to.
+    const { installDom } = await import("../test-dom.js");
+    const teardown = installDom();
+    const { render, cleanup } = await import("@testing-library/react");
+    try {
+      (globalThis as unknown as { EventSource: unknown }).EventSource = class {
+        readyState = 1;
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        close(): void {}
+      };
+      const day = "2026-09-17";
+      const rec = {
+        serviceKey: "salt:plan-1:evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        planTitle: "Evening",
+        seriesTitle: null,
+        serviceDate: day,
+        serviceTimeId: "evening",
+        serviceTimeStartsAt: `${day}T20:15:00.000Z`,
+        startedAt: `${day}T20:15:00.000Z`,
+        endedAt: `${day}T21:45:00.000Z`,
+        items: [],
+      };
+      const session = {
+        id: "b1",
+        startedAt: `${day}T20:45:00.000Z`,
+        finishedAt: `${day}T20:52:00.000Z`,
+        title: "Evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        serviceKey: rec.serviceKey,
+        people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
+      };
+      (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+        const url = String(input);
+        const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
+        if (url === "/api/service-timeline") return ok([rec]);
+        if (url === "/api/attendance/history?summary=1") return ok([]);
+        if (url === "/api/spl/summary") return ok([]);
+        if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+        if (url === "/api/baptism/sessions") return ok([session]);
+        if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
+        if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(rec);
+        if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(null);
+        if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(null);
+        return ok(null);
+      };
+      const React = (await import("react")).default;
+      const { TooltipProvider } = await import("../components/ui/index.js");
+      const { ServiceHistorySection } = await import("../settings/sections/service-history-section.js");
+      const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
+        await import("@tanstack/react-router");
+
+      // A real router, the way history-service-page.test.tsx's own
+      // routerWithBaptismDestination does: without one, a dropped readOnly
+      // gate crashes rendering the real "Open in Baptisms" link
+      // (useLinkProps reading buildLocation off a null router context)
+      // rather than actually rendering it for the assertion below to catch.
+      const rootRoute = createRootRoute({});
+      const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history", component: () => null });
+      const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
+      const router = createRouter({
+        routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
+        history: createMemoryHistory({ initialEntries: ["/history"] }),
+      });
+
+      const view = render(
+        React.createElement(RouterContextProvider, {
+          router,
+          children: React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly: true }),
+          ),
+        }),
+      );
+      for (let i = 0; i < 4; i++) await settle();
+      const row = [...view.container.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Evening"));
+      assert.ok(row, "the service row never rendered");
+      row!.click();
+      for (let i = 0; i < 4; i++) await settle();
+
+      const card = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms");
+      assert.ok(card, "expected the Baptisms card to render for a linked session even read-only");
+      // Never a DOM node as an assert operand — see timer-card.test.tsx's own
+      // note: node:assert inspecting a live jsdom element to build a failure
+      // message does not finish in any useful time.
+      assert.equal(
+        !!view.container.querySelector('a[href="/baptism"]'),
+        false,
+        "the shared read-only page must not link into the operator app",
+      );
+      cleanup();
     } finally {
       await unmountAndTeardown(cleanup, teardown);
     }

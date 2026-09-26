@@ -1,5 +1,7 @@
 import type { BaptismSession, ServiceTimeline } from "@main/types/stage.js";
 
+import { reduceBaptismPeople } from "./baptism-people.js";
+
 /**
  * Which baptism sessions belong to a service.
  *
@@ -38,11 +40,18 @@ export function linkBaptisms(all: readonly BaptismSession[], tl: ServiceTimeline
 
 /** What a service's baptisms amounted to, in seconds. */
 export interface BaptismStats {
+  /** People actually baptized — the "Baptized" figure both callers label it.
+   *  A grouped session's `people` array fills during the testimony pass, before
+   *  anyone is baptized, and a session finished mid-testimony leaves an entry
+   *  with `baptizeMs: 0` behind permanently; neither counts here. */
   people: number;
   totalSec: number;
   testimonySec: number;
   baptismSec: number;
-  /** Per person, not per session — the person is the unit worth comparing. */
+  /** Per person who testified, not per session — the person is the unit worth
+   *  comparing. Baptism time, unlike testimony time, only exists for people
+   *  actually baptized, so `avgBaptismSec` divides by `people` above rather
+   *  than by everyone who testified. */
   avgTestimonySec: number;
   avgBaptismSec: number;
 }
@@ -56,24 +65,15 @@ export interface BaptismStats {
  * than NaN, so an empty set renders as dashes instead of blanks.
  */
 export function baptismStats(sessions: readonly BaptismSession[]): BaptismStats {
-  let people = 0;
-  let testimonyMs = 0;
-  let baptismMs = 0;
-  for (const s of sessions) {
-    for (const p of s.people) {
-      people += 1;
-      testimonyMs += p.testimonyMs;
-      baptismMs += p.baptizeMs;
-    }
-  }
-  const testimonySec = testimonyMs / 1000;
-  const baptismSec = baptismMs / 1000;
+  const r = reduceBaptismPeople(sessions.flatMap((s) => s.people));
+  const testimonySec = r.totalTestimonyMs / 1000;
+  const baptismSec = r.totalBaptizeMs / 1000;
   return {
-    people,
+    people: r.baptized,
     totalSec: testimonySec + baptismSec,
     testimonySec,
     baptismSec,
-    avgTestimonySec: people ? testimonySec / people : 0,
-    avgBaptismSec: people ? baptismSec / people : 0,
+    avgTestimonySec: r.testified ? testimonySec / r.testified : 0,
+    avgBaptismSec: r.baptized ? baptismSec / r.baptized : 0,
   };
 }

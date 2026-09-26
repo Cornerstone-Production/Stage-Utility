@@ -115,6 +115,18 @@ const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
 };
 
 /**
+ * Figures for a service whose sound record could not be READ.
+ *
+ * The level says "sound unavailable", the Trends card's words for the same case,
+ * never "no sound recorded": that is a claim about the service, and a server
+ * that did not answer has made none. The header and the All services row both
+ * say it through here.
+ */
+export function markSoundUnavailable<F extends StatFigure & { sub?: string }>(figures: F[]): F[] {
+  return figures.map((f) => (f.key === "level" ? { ...f, sub: "sound unavailable" } : f));
+}
+
+/**
  * Everything derived from one recording that a figure about it can be built
  * from — the header's six KPIs and the All services row's four alike.
  *
@@ -153,7 +165,7 @@ function serviceFigureParts(timeline: ServiceTimeline, spl: ServiceSplHistory | 
  */
 export function serviceKpis(
   timeline: ServiceTimeline,
-  attendance: ServiceAttendance | null,
+  attendance: ServiceAttendanceSummary | null,
   spl: ServiceSplHistory | null,
   now?: number,
 ): (StatFigure & { sub?: string })[] {
@@ -164,7 +176,7 @@ export function serviceKpis(
  *  both the figures and a raw part does not derive everything twice. */
 function serviceKpisFrom(
   parts: ReturnType<typeof serviceFigureParts>,
-  attendance: ServiceAttendance | null,
+  attendance: ServiceAttendanceSummary | null,
 ): (StatFigure & { sub?: string })[] {
   const { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel } = parts;
   return [
@@ -277,7 +289,7 @@ function serviceKpisFrom(
  */
 export function serviceRowFigures(
   timeline: ServiceTimeline,
-  attendance: ServiceAttendance | null,
+  attendance: ServiceAttendanceSummary | null,
   spl: ServiceSplHistory | null,
   now?: number,
 ): { started: StatFigure & { sub?: string }; figures: (StatFigure & { sub?: string })[] } {
@@ -391,80 +403,38 @@ export function useSectionNav(ids: readonly string[], headerBottom = 150): strin
  */
 export const HEADER_INSET_VAR = "--su-history-header-inset";
 
-export interface ServiceHeaderProps {
-  timeline: ServiceTimeline;
-  attendance: ServiceAttendance | null;
-  spl: ServiceSplHistory | null;
-  /** Ticks every second while the record is open, so Actual counts up. */
-  now?: number;
-  readOnly?: boolean;
-  /** Muted meta line: series · service type · date · time. Already formatted. */
-  meta: string;
-  onBack: () => void;
-  onEditTimes: () => void;
-  onCopyReport: () => void;
-  /** Absent when there is no other recording that day to merge into. */
-  onMerge?: () => void;
-  onRebuild: () => void;
-  onDelete: () => void;
-  /** Live only — items before now stop counting toward the pacing readout. */
-  onResetPacing: () => void;
-}
-
-export function ServiceHeader({
-  timeline,
-  attendance,
-  spl,
-  now,
-  readOnly = false,
-  meta,
-  onBack,
-  onEditTimes,
-  onCopyReport,
-  onMerge,
-  onRebuild,
-  onDelete,
-  onResetPacing,
-}: ServiceHeaderProps) {
-  const live = timeline.endedAt == null;
-  // `serviceKpis` reads the Smaart metric selection through `servicePeakLevel`,
-  // and that selection is owned by the Sound card's Customize — a different
-  // component, whose write React knows nothing about. Without this in the
-  // dependency list the memo held, and switching metric relabelled the card
-  // while the header went on quoting the old metric's level.
-  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
-  const kpis = useMemo(
-    () => {
-      // Read so the dependency is a real one and not "unnecessary" to the
-      // linter: the value is never used, the CHANGE is the whole point.
-      void metricsVersion;
-      return serviceKpis(timeline, attendance, spl, live ? now : undefined);
-    },
-    [timeline, attendance, spl, live, now, metricsVersion],
-  );
-
-  /**
-   * The header's own geometry, measured.
-   *
-   * Two consumers, one measurement: the scrolling pane's `scroll-padding-top`
-   * (published as a custom property, because it has to reach an element this
-   * component does not render) and the section nav's `rootMargin`. Both were
-   * fixed numbers first and both were wrong in a real browser — the header is
-   * 184px tall at 1280 and 220px at 600, against a 160px margin and a 150px
-   * root inset, so an anchor jump parked a card's heading behind the header and
-   * the nav named Attendance while Sound filled the screen.
-   *
-   * The INSET is measured against the pane rather than taken as the header's
-   * height, because a sticky element in this pane pins below the pane's own top
-   * padding — see HEADER_INSET_VAR. `rootMargin` wants the viewport-relative
-   * bottom, which is the same edge read against a different origin.
-   *
-   * A ResizeObserver rather than a one-shot measure: the action group wraps to
-   * a second line on a narrow window, and the KPI sub-lines come and go with
-   * the record, so the height the header settles at is not the one it first
-   * renders at.
-   */
-  const ref = useRef<HTMLElement | null>(null);
+/**
+ * A sticky header's own geometry, measured against the app's one scroller.
+ *
+ * Two consumers, one measurement: the scrolling pane's `scroll-padding-top`
+ * (published as a custom property, because it has to reach an element this
+ * hook does not render) and a section nav's `rootMargin` (the return value).
+ * Both were fixed numbers first and both were wrong in a real browser — a
+ * header's actual height varies by page, content and width (184px tall at
+ * 1280 and 220px at 600 for History's own), against a 160px margin and a
+ * 150px root inset, so an anchor jump parked a card's heading behind the
+ * header and the nav named the wrong section while a different one filled
+ * the screen.
+ *
+ * The INSET is measured against the pane rather than taken as the header's
+ * height, because a sticky element in this pane pins below the pane's own top
+ * padding. `rootMargin` (this hook's return value) wants the viewport-relative
+ * bottom, which is the same edge read against a different origin.
+ *
+ * A ResizeObserver rather than a one-shot measure: an action group can wrap to
+ * a second line on a narrow window, and other content comes and goes with
+ * what the header is showing, so the height it settles at is not the one it
+ * first renders at.
+ *
+ * Shared by History's own ServiceHeader and the Baptisms tab's BaptismHeader
+ * — the same sticky-header-over-one-scroller problem, so a second,
+ * differently-behaving fix here would only teach an operator that "sections
+ * of a page" work differently on two tabs for no reason.
+ *
+ * jsdom reports every geometry as 0 and could not have caught any of this —
+ * driven in a real browser instead, on both tabs that use it.
+ */
+export function useHeaderInset(ref: React.RefObject<HTMLElement | null>): number {
   const [bottom, setBottom] = useState(150);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -491,9 +461,86 @@ export function ServiceHeader({
       obs.disconnect();
       drop();
     };
-  }, []);
+    // `ref` is a parameter here (unlike the component-local useRef() this
+    // effect used to close over before the extraction), so exhaustive-deps
+    // cannot assume it is stable the way it does a hook's own useRef() — it
+    // is, for both of this hook's callers, so this changes nothing at
+    // runtime, only what the linter can see.
+  }, [ref]);
+  return bottom;
+}
 
-  const active = useSectionNav(SERVICE_SECTIONS.map((s) => s.id), bottom);
+export interface ServiceHeaderProps {
+  timeline: ServiceTimeline;
+  attendance: ServiceAttendance | null;
+  spl: ServiceSplHistory | null;
+  /** The sound record could not be read. Its absence then means nothing about
+   *  the service, so the level figure must not say "no sound recorded". */
+  soundUnavailable?: boolean;
+  /** Ticks every second while the record is open, so Actual counts up. */
+  now?: number;
+  readOnly?: boolean;
+  /** Muted meta line: series · service type · date · time. Already formatted. */
+  meta: string;
+  onBack: () => void;
+  onEditTimes: () => void;
+  onCopyReport: () => void;
+  /** Absent when there is no other recording that day to merge into. */
+  onMerge?: () => void;
+  onRebuild: () => void;
+  onDelete: () => void;
+  /** Live only — items before now stop counting toward the pacing readout. */
+  onResetPacing: () => void;
+  /** The nav's own list — SERVICE_SECTIONS by default. The caller passes a
+   *  longer one for a service the Baptisms card applies to: the header must
+   *  not hold a second, competing const of its own, since the two could
+   *  drift on which sections exist at all. */
+  sections?: readonly { id: string; label: string }[];
+}
+
+export function ServiceHeader({
+  timeline,
+  attendance,
+  spl,
+  soundUnavailable = false,
+  now,
+  readOnly = false,
+  meta,
+  onBack,
+  onEditTimes,
+  onCopyReport,
+  onMerge,
+  onRebuild,
+  onDelete,
+  onResetPacing,
+  sections = SERVICE_SECTIONS,
+}: ServiceHeaderProps) {
+  const live = timeline.endedAt == null;
+  // `serviceKpis` reads the Smaart metric selection through `servicePeakLevel`,
+  // and that selection is owned by the Sound card's Customize — a different
+  // component, whose write React knows nothing about. Without this in the
+  // dependency list the memo held, and switching metric relabelled the card
+  // while the header went on quoting the old metric's level.
+  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+  const kpis = useMemo(
+    () => {
+      // Read so the dependency is a real one and not "unnecessary" to the
+      // linter: the value is never used, the CHANGE is the whole point.
+      void metricsVersion;
+      const figures = serviceKpis(timeline, attendance, spl, live ? now : undefined);
+      return soundUnavailable && !spl ? markSoundUnavailable(figures) : figures;
+    },
+    [timeline, attendance, spl, soundUnavailable, live, now, metricsVersion],
+  );
+
+  // Geometry: see useHeaderInset's own doc comment — 184px tall at 1280 and
+  // 220px at 600 for THIS header specifically, against a fixed 160px margin
+  // and 150px root inset that both shipped first and were both wrong (an
+  // anchor jump parked a card's heading behind the header, and the nav named
+  // Attendance while Sound filled the screen).
+  const ref = useRef<HTMLElement | null>(null);
+  const bottom = useHeaderInset(ref);
+  const active = useSectionNav(sections.map((s) => s.id), bottom);
 
   return (
     <header
@@ -503,7 +550,7 @@ export function ServiceHeader({
         // The app has exactly one scroller — the shell's <main> — and this is
         // rendered directly inside it, so `sticky top-0` pins to the top of the
         // pane, immediately under the context bar.
-        "sticky top-0 z-20 -mx-1 flex flex-col gap-3 bg-bg px-1 pb-2 pt-1",
+        "@container sticky top-0 z-20 -mx-1 flex flex-col gap-3 bg-bg px-1 pb-2 pt-1",
         "border-b border-line",
         // The pane carries its own top padding and `sticky top-0` pins BELOW
         // it, leaving a strip the page scrolls through above the header. This
@@ -516,7 +563,10 @@ export function ServiceHeader({
         ← All services
       </button>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      {/* Title beside the actions once the HEADER has room for both, not the
+          viewport: beside the rail at 640px the actions would not shrink and
+          scrolled the page sideways. */}
+      <div className="flex flex-col gap-3 @min-[44rem]:flex-row @min-[44rem]:items-start @min-[44rem]:justify-between">
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-title3 font-semibold text-fg">
             {timeline.planTitle ?? timeline.serviceKey}
@@ -529,7 +579,7 @@ export function ServiceHeader({
 
         {/* One group, in the order an operator reaches for them, with Delete
             pushed past a hairline because it is the one that cannot be undone. */}
-        <div data-testid="history-actions" className="flex flex-wrap items-center gap-2 sm:shrink-0">
+        <div data-testid="history-actions" className="flex flex-wrap items-center gap-2 @min-[44rem]:shrink-0">
           {!readOnly && live && (
             <Button
               variant="filled"
@@ -568,7 +618,7 @@ export function ServiceHeader({
               variant="filled"
               size="small"
               onClick={onRebuild}
-              tooltip="Recompute all three records from the raw rows in the data archive — your per-item time corrections are kept"
+              tooltip="Recompute timing, sound and attendance from the raw rows, and merge in this service's baptism sessions — your per-item time corrections are kept"
             >
               <WrenchIcon className="size-3.5 text-fg-muted" /> Rebuild from raw
             </Button>
@@ -598,7 +648,7 @@ export function ServiceHeader({
       </div>
 
       <nav aria-label="Sections of this service" className="flex items-center gap-1 text-caption1">
-        {SERVICE_SECTIONS.map((s) => (
+        {sections.map((s) => (
           <a
             key={s.id}
             href={`#${s.id}`}

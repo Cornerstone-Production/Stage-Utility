@@ -2,38 +2,42 @@ import { useState } from "react";
 import { invoke } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useTranscript } from "../main/use-transcript";
-import { channelColor } from "../main/channel-color";
+import { useProdcomChannels } from "../main/use-prodcom-channels";
+import { resolveChannelColor, mergeChannels } from "../main/channel-color";
 import { Button, InfoHint, toast } from "./ui";
 import { ColorField } from "./ui/color-field";
+import { Switch } from "./ui/switch";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
 // Collapsible "Transcription colors" disclosure shown under the ProdCom integration.
-// Lists every channel seen in the transcript (plus any already assigned) and lets
-// the user pick a color per channel. ProdCom doesn't send colors, so this is the
-// way to control them; a pick overrides the otherwise-automatic per-channel color.
+// Lists every channel ProdCom has, whether or not it has spoken, and lets the
+// operator pick a color per channel or follow ProdCom's own. A custom pick always
+// wins; failing that, ProdCom's own color is used only while "Follow ProdCom's
+// channel colors" is on (off by default — ProdCom repeats colors across channels).
 export function CaptionColorsPanel() {
   const [open, setOpen] = useState(false);
   const { state } = useStageState();
   const lines = useTranscript();
+  const channels = useProdcomChannels();
   const saved = state?.captionChannelColors ?? {};
+  const following = state?.followProdcomColors ?? false;
 
-  // Channel label → a channel id for the deterministic fallback color. Labels come
-  // from the live transcript, unioned with any already-assigned (so they persist
-  // even when that channel isn't currently talking).
-  const seen = new Map<string, string | null>();
-  for (const l of lines) {
-    const label = l.channelName ?? l.channel;
-    if (label) seen.set(label, l.channel);
-  }
-  for (const k of Object.keys(saved)) if (!seen.has(k)) seen.set(k, null);
-  const labels = [...seen.keys()].sort((a, b) => a.localeCompare(b));
+  const rows = mergeChannels(channels, lines, saved);
 
   async function save(channel: string, color: string | null) {
     try {
       await invoke("captions:setChannelColor", { channel, color });
     } catch (err) {
       toast.error(`Failed to save color: ${String(err)}`);
+    }
+  }
+
+  async function setFollowing(on: boolean) {
+    try {
+      await invoke("captions:setFollowProdcomColors", { on });
+    } catch (err) {
+      toast.error(`Failed to save setting: ${String(err)}`);
     }
   }
 
@@ -50,49 +54,66 @@ export function CaptionColorsPanel() {
           Transcription colors
         </button>
         <InfoHint>
-          Override the auto-assigned color for each transcription channel (speaker/mic). ProdCom doesn't
-          send colors, so this is where you set them; leave a channel on "auto" to keep its default.
+          Override the color for each transcription channel (speaker/mic). A custom pick always wins;
+          otherwise a channel uses either a distinct auto color or ProdCom's own, per the switch below.
         </InfoHint>
       </div>
 
       {open && (
-        <div className="mt-1.5 flex flex-col gap-1.5">
-          {labels.length === 0 ? (
+        <div className="mt-1.5 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <Switch checked={following} onCheckedChange={(v: boolean) => void setFollowing(v)} />
+            <span className="text-caption1 text-gray-12">Follow ProdCom's channel colors</span>
+            <InfoHint>
+              When on, a channel with no custom pick above uses the color ProdCom assigns it, instead
+              of a distinct auto color. ProdCom often repeats one color across several channels, which
+              is why the distinct auto color is the default.
+            </InfoHint>
+          </div>
+
+          {rows.length === 0 ? (
             <p className="text-caption1 text-gray-9">
-              No channels seen yet — colors appear here as ProdCom sends transcript lines.
+              No channels yet — this fills in once ProdCom's channel list loads.
             </p>
           ) : (
-            labels.map((label) => {
-              const channel = seen.get(label) ?? label;
-              const custom = saved[label];
-              const value = custom ?? channelColor(channel);
-              return (
-                <div key={label} className="flex items-center gap-2">
-                  <ColorField
-                    label={`Color for ${label}`}
-                    allowAlpha={false}
-                    value={value}
-                    onChange={(v: string) => save(label, v)}
-                    className="shrink-0"
-                  />
-                  <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{label}</span>
-                  {custom ? (
-                    <Button
-                      variant="transparent"
-                      size="small"
-                      iconOnly
-                      onClick={() => save(label, null)}
-                      aria-label={`Reset ${label} to automatic color`}
-                      tooltip="Reset to automatic"
-                    >
-                      <RotateCcwIcon className="size-3.5 text-gray-9" />
-                    </Button>
-                  ) : (
-                    <span className="text-caption2 text-gray-9 pr-1">auto</span>
-                  )}
-                </div>
-              );
-            })
+            <div className="flex flex-col gap-1.5">
+              {rows.map((row) => {
+                const custom = saved[row.label];
+                const value = resolveChannelColor({
+                  channel: row.channelId,
+                  label: row.label,
+                  prodcomColor: row.prodcomColor,
+                  followProdcom: following,
+                  customColors: saved,
+                });
+                return (
+                  <div key={row.label} className="flex items-center gap-2">
+                    <ColorField
+                      label={`Color for ${row.label}`}
+                      allowAlpha={false}
+                      value={value}
+                      onChange={(v: string) => save(row.label, v)}
+                      className="shrink-0"
+                    />
+                    <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{row.label}</span>
+                    {custom ? (
+                      <Button
+                        variant="transparent"
+                        size="small"
+                        iconOnly
+                        onClick={() => save(row.label, null)}
+                        aria-label={`Reset ${row.label} to automatic color`}
+                        tooltip="Reset to automatic"
+                      >
+                        <RotateCcwIcon className="size-3.5 text-gray-9" />
+                      </Button>
+                    ) : (
+                      <span className="text-caption2 text-gray-9 pr-1">auto</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

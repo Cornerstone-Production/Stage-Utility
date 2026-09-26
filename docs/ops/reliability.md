@@ -22,17 +22,21 @@ Built for a room full of always-on screens.
 ## Winding down between services
 
 Integrations do not retry at full speed all week. Rehearsal and service windows are
-derived from Planning Center — the earliest plan time minus a lead (default 2 h)
-through the last plus a tail (default 1 h) — and connections back off toward a
-dormant ceiling outside them. The Planning Center poll stretches from 4 seconds to
-5 minutes.
+derived from Planning Center — the earliest plan time minus a lead (**Lead time
+before rehearsal**, default 120 minutes) through the last plus a tail (**Keep
+active after service ends**, default 60 minutes) — and connections back off
+toward a dormant ceiling outside them (**Idle retry interval**, default 30
+minutes). The Planning Center poll stretches from 4 seconds to 5 minutes.
 
 Windows are recomputed on boot, hourly with the plan refresh, and when the schedule
 settings change. Two safeguards: nothing sleeps past the moment the next window
-opens, and if the schedule cannot be worked out — no credentials, a failed fetch,
-the feature off — everything stays at its active cadence rather than going quiet.
+opens, and while no window is still to come — no credentials, a fetch that failed,
+nothing planned — the schedule counts as unknown, so reconnects keep the 2-minute
+cap and the Planning Center poll stays at 4 seconds rather than going quiet. The
+switch into and out of that mode is logged on the `[reconnect]` tag.
 
-Tunable under **Settings → Advanced → Server**.
+Tunable under **Settings → Advanced → Server**, where switching **Wake around service
+times** off gives every integration a fixed 2-minute retry instead.
 
 ## Where your data lives
 

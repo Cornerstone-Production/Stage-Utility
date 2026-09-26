@@ -10,7 +10,7 @@
 // loudest of them, because decibels do not add. See DAY_FIGURE in trends.ts.
 //
 // EVERYTHING HERE IS COMPUTED FROM RECORDS THE PAGE ALREADY HOLDS. The list
-// loads `serviceTimeline:list` and `attendance:listHistory` to draw the calendar
+// loads `serviceTimeline:list` and `attendance:listSummaries` to draw the calendar
 // and the day rows; a trend is those same records grouped differently. The one
 // thing fetched is the operator's milestone list, which is not a recording and
 // which nothing else on the page reads.
@@ -36,7 +36,7 @@ import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
 import { HistoryChart, useStoredKeys, type ChartMilestone, type StripHover } from "../history-chart";
-import { toast } from "../../../components/ui";
+import { Skeleton, toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
 import { ContextMenu, type ContextMenuItem } from "../../../components/ui/context-menu";
@@ -229,6 +229,21 @@ export function pctLabel(pct: number, dp: number): string {
   return `${v > 0 ? "+" : "−"}${body}%`;
 }
 
+/**
+ * "prior window averaged 0" when a real prior value exists but the change
+ * figure still came out null (pctChange's basis rounded to zero or below),
+ * "no prior window yet" when there is no prior value at all — two different
+ * facts a caller's own null-change fallback must not collapse into one
+ * caption. Shared because the SAME shape lives in two Trends cards: this
+ * one's own tiles below, and baptisms/trends-card.tsx's four. Each caller
+ * still decides its own wording for "no LATEST value either" — that part is
+ * not the same shape (this card names which measure is missing; the
+ * Baptisms one has only one measure to be missing).
+ */
+export function noPriorCaption(hasPrior: boolean): string {
+  return hasPrior ? "prior window averaged 0" : "no prior window yet";
+}
+
 export function TrendsCard({
   recordings,
   /**
@@ -245,10 +260,15 @@ export function TrendsCard({
    *  sound measure reads "No sound recorded yet" at a church that records it
    *  every week. */
   soundUnavailable = false,
+  /** The page's lists have not all arrived yet. Without this the card answers
+   *  "No recordings in this range" before it has read a single recording,
+   *  which on a slow link is most of the wait. */
+  loading = false,
 }: {
   recordings: TrendRecording[];
   clock?: TrendClock | null;
   soundUnavailable?: boolean;
+  loading?: boolean;
 }) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
   /** Attendance or sound. Attendance by default: it is the question the tab is
@@ -612,7 +632,17 @@ export function TrendsCard({
         )}
       </p>
 
-      {tiles.length === 0 ? (
+      {loading ? (
+        // The shape of what is coming, at its size, so the card does not jump
+        // when the tiles and the plot arrive.
+        <div data-trends-loading aria-busy="true" className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Skeleton className="h-[72px]" />
+          </div>
+          <Skeleton className="h-[190px] w-full" />
+          <span className="sr-only">Loading the history</span>
+        </div>
+      ) : tiles.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-caption1 text-fg-muted">
           {sound && soundUnavailable
             ? "The sound summary could not be read — see the server log for the reason."
@@ -698,10 +728,15 @@ export function TrendsCard({
                         {/* A type with nothing under THIS measure keeps its tile
                             and says so, rather than vanishing when you switch —
                             which reads as the service type having disappeared.
-                            The same fallback also covers a basis `pctChange`
-                            refused to divide by — see its own comment. */}
+                            noPriorCaption splits the OTHER reason pct can be
+                            null: a real prior window that pctChange refused to
+                            divide by is not the same fact as no prior window
+                            existing at all — currently unreachable here (every
+                            basis that reaches this tile already cleared
+                            COMPARABLE_ABOVE in trends.ts), landed anyway so
+                            the two Trends cards cannot drift apart. */}
                         {t.latest != null
-                          ? "no prior window yet"
+                          ? noPriorCaption(t.priorAverage != null)
                           // A tile with no level because the SUMMARY would not
                           // load is not a service type that recorded no sound.
                           // Same lie as the empty plot's, one level down.
