@@ -313,9 +313,11 @@ clean restart), or — in a grouped baptism section nobody had stepped into yet
 ## Recovery
 
 Every press on the timer appends a row to `baptism.csv`, the same append-only
-file the rest of the archive uses. A session that `baptism.json` loses — a
-corrupt file, or a crash between the debounced save and the next write — is not
-gone: **Rebuild from raw**, in this tab's own header or in History's, replays
+file the rest of the archive uses. The in-progress state is saved to
+`baptism.json` up to 800ms after a press, and a clean stop, an update's restart
+included, saves it first. A session that `baptism.json` loses — a corrupt file,
+or a crash between a press and its save — is not gone: **Rebuild from raw**, in
+this tab's own header or in History's, replays
 it from those rows. The header targets the session it is showing, or the most
 recent past one if none is; it is disabled, with a reason, while that service
 is still recording. The derived record is a cache of what the presses already
@@ -379,6 +381,9 @@ timer:
   state to `baptism.json` failed; nothing reaches the screen for it, since the
   state in memory is still correct — only a restart before a later save
   succeeds would resume from an older point than the last press.
+- `[baptism-timer] state not saved before shutdown: …` — a stop could not save
+  the in-progress state first, so the restart resumes from the last save that
+  succeeded.
 - `[baptism-timer] session save failed: …` — Finish could not write the session
   to `baptism.json`. The Timer card says so as well (see Recovery, above).
 - `[baptism-timer] save failure dismissed: …` — the operator dismissed that

@@ -254,6 +254,21 @@ class BaptismTimerService {
     return this.commit();
   }
 
+  /**
+   * Write the current state now, and cancel commit()'s pending write.
+   *
+   * commit() saves up to 800ms after a press, so a stop inside that window lost
+   * the press: a restart came back to the state before it. Shutdown awaits this.
+   * So does a test that writes a record of its own, since the pending write
+   * would otherwise land on top of it. Rejects when the write fails; the caller
+   * decides what to say.
+   */
+  async flush(): Promise<void> {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    await baptismStore.saveCurrent(this.state);
+  }
+
   private commit(): BaptismState {
     broadcast("baptism:state", this.state);
     if (!this.persistTimer) {
