@@ -67,6 +67,13 @@ from, so the decision is made once, in the machinery all three recorders
 share, and the item id travels on the record itself — surviving a restart mid-
 hold the same way the rest of the record does.
 
+The "opening item" is never one already on air before the record itself opened —
+a rehearsal leftover still live in Planning Center, or this same service's own
+overrun closing item, carried into the record the ten-minute rule just split to.
+Either would otherwise be adopted as the opener and then split the hold at its
+own later, genuine run. The next item to go live becomes the opener instead; if
+none does before the hold ends, it falls back to the ten-minute rule alone.
+
 Inside a record, a plan item that goes live again more than ten minutes after its
 last run ended is recorded as a second entry rather than reopening the first, so a
 re-run never rewrites what already happened. Both the timeline and the SPL

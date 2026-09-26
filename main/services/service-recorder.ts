@@ -50,6 +50,17 @@ import { stageController } from "./stage-controller.js";
  */
 export const SERVICE_GAP_MS = 10 * 60_000;
 
+/**
+ * One airing of a plan item: its id, and Planning Center's own `live_start_at`
+ * for it. Two ticks naming the same airing are the item staying on air, not
+ * going live again — compared PCO time to PCO time, so this host's clock never
+ * enters into it.
+ */
+interface Airing {
+  itemId: string;
+  liveStartAt: string | null;
+}
+
 /** One entry in a record's per-item list, as the lookups below need to see it. */
 export interface RecordedItem {
   itemId: string;
@@ -181,6 +192,15 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    *  decision is announced once and not on every tick for the length of an
    *  overrun. Cleared when a record is established. */
   private loggedServiceTimeChange: string | null = null;
+  /** The item captureOpeningItem last declined as already on air, so the skip
+   *  is announced once rather than on every tick it stays live. Cleared when a
+   *  record is established. */
+  private loggedSkippedOpener: string | null = null;
+  /** The airing on the last tick this recorder handled. */
+  private lastAiring: Airing | null = null;
+  /** The airing already on when the current record was established — see
+   *  captureOpeningItem. */
+  private inheritedAiring: Airing | null = null;
 
   protected abstract readonly label: string;
   protected abstract readonly store: RecorderStore<T>;
@@ -389,11 +409,34 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * the same value the other two captured, because this is the one place any
    * of the three ever sets it. Never overwritten once set, so a resumed or
    * reopened record keeps the value it was created with.
+   *
+   * Skips an item that was already on air before this record opened, which
+   * never was its first item: the airing the tick before the record was
+   * established was already showing (the previous service's overrun closing
+   * item, carried across the ten-minute split), or one live for longer than
+   * SERVICE_GAP_MS before the record opened (a rehearsal leftover, seen first
+   * after a restart). Adopting either let a hold split at that item's own later,
+   * genuine run. The next item to go live becomes the opener; if none does, the
+   * hold falls back to the ten-minute rule alone, the v1.23.0 behaviour. A late
+   * first tick for a genuine opener is not a skip: the airing test is PCO time
+   * against PCO time, and the fallback allows the whole service gap.
    */
   private captureOpeningItem(live: PcoLiveDTO): void {
-    if (this.current && this.current.openingItemId == null && live.currentItemId) {
-      this.current.openingItemId = live.currentItemId;
+    if (!this.current || this.current.openingItemId != null || !live.currentItemId) return;
+    const inherited =
+      this.inheritedAiring?.itemId === live.currentItemId && this.inheritedAiring.liveStartAt === live.liveStartAt;
+    const opened = Date.parse(this.current.startedAt);
+    const longBefore = Number.isFinite(opened) && opened - itemLiveSinceMs(live) > SERVICE_GAP_MS;
+    if (inherited || longBefore) {
+      if (this.loggedSkippedOpener !== live.currentItemId) {
+        this.loggedSkippedOpener = live.currentItemId;
+        console.log(
+          `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId)}" was already on air before this record opened — not treating it as the opening item`,
+        );
+      }
+      return;
     }
+    this.current.openingItemId = live.currentItemId;
   }
 
   /**
@@ -411,6 +454,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // while this waits on the store abandons the work rather than re-assigning
     // this.current and writing the deleted record straight back.
     const gen = this.generation;
+    const priorAiring = this.lastAiring;
+    this.lastAiring = live.currentItemId ? { itemId: live.currentItemId, liveStartAt: live.liveStartAt } : null;
 
     const st = stageController.getState();
     const serviceTypeId = st.serviceTypeId;
@@ -481,6 +526,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     }
     this.currentKey = key;
     this.loggedServiceTimeChange = null; // the next transition out of THIS record is news again
+    this.loggedSkippedOpener = null;
+    this.inheritedAiring = priorAiring;
     this.captureOpeningItem(live);
     this.onRecordEstablished();
   }
