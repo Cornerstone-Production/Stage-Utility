@@ -176,9 +176,9 @@ and go quiet on it even after working, it gets the same widened re-test cadence
 as a box that never delivered at all, and the card reads `Fallback stream — the
 websocket carried no transcript`, same as a box that failed probation. A
 promoted socket that instead dies outright (closes, or misses three
-heartbeats) falls back the same way but is **not** latched silent — it just
-proved itself, so a fresh attempt earns its way back to promotion like any
-other.
+heartbeats) falls back the same way but is **not** latched silent, and the card
+reads the ordinary `Streaming from host:port` — it just proved itself, so a
+fresh attempt earns its way back to promotion like any other.
 
 ### Retrying the WebSocket while it stays unproven
 

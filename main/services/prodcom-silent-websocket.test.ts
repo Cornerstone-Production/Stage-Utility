@@ -960,6 +960,30 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     );
   });
 
+  it("does not blame silence when a re-test socket that delivered then merely drops", async (t) => {
+    // The socket proved itself — it carried the transcript until the network
+    // blipped — so the card must not go back to saying it carried nothing.
+    const { stub, svc } = await silenced(t);
+    await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
+    stub.wsTranscript(spoken("the-box-was-fixed"));
+    await eventually(() => svc.onWebSocketNow, "the re-test to be promoted");
+    const mark = svc.reports.length;
+
+    stub.wsDropAll(); // a plain drop, not a verdict
+    await eventually(
+      () => !svc.onWebSocketNow && svc.reports.slice(mark).some((r) => r.state === "connected"),
+      "SSE to take over again",
+    );
+    const said = svc.reports
+      .slice(mark)
+      .filter((r) => r.state === "connected")
+      .map((r) => r.message);
+    assert.ok(
+      !said.includes(FALLBACK_CARD_MESSAGE),
+      `the card blamed silence for a socket that had just delivered and then dropped: ${JSON.stringify(said)}`,
+    );
+  });
+
   it("forgets everything it learned when the integration is reconfigured", async (t) => {
     // A different box, a different key, or an operator who has just upgraded
     // ProdCom is on the other end now. configure() runs on enable too, so this

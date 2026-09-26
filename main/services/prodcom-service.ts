@@ -728,8 +728,9 @@ export class ProdComService extends ConnectionLifecycle {
    * `wsSilentBox` directly, so an SSE reconnect after a known-silent box
    * started refusing the upgrade kept blaming the old silence instead of
    * matching what giveUpOnUnprovenWebSocket had just reported about THIS
-   * attempt. Reset by configure(); not read while promoted, since SSE is not
-   * running then.
+   * attempt. Reset by configure() and by a socket's first delivery — a socket
+   * that carried the transcript and then merely dropped did not end for lack
+   * of it. Not read while promoted, since SSE is not running then.
    */
   private wsLastGiveUpWasSilence = false;
 
@@ -1226,6 +1227,11 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsDeliveredThisWindow = true;
     if (this.wsDelivered) return;
     this.wsDelivered = true;
+    // The last attempt's silence is disproved by this one. Left set, the next
+    // SSE 200 after this socket merely drops would read "the websocket carried
+    // no transcript" on the card. runPromotedSilenceCheck sets it again when a
+    // promoted socket really does go quiet.
+    this.wsLastGiveUpWasSilence = false;
     // Housekeeping, not the guard: this just saves the wake-up for a check
     // that is about to be re-armed in promoteWebSocket() anyway.
     this.clearSilenceCheck();
