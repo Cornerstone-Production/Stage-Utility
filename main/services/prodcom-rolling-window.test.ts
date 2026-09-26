@@ -143,7 +143,11 @@ describe("the silence check on a box whose transcript is already a full rolling 
     await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 3000);
 
     // Added AFTER the reopened socket's own baseline settles — otherwise it
-    // is old news to THIS socket, not evidence it missed anything.
+    // is old news to THIS socket, not evidence it missed anything. The stub
+    // counts an upgrade before the client's onopen has run, and until it does
+    // wsSettled() is still the old socket's settled priming; the old socket was
+    // closed first, so wsOpenNow is what says the new one is up.
+    await eventually(() => svc.wsOpenNow, "the reopened socket to open");
     await svc.wsSettled();
     stub.addEntry(spoken("said-while-unsubscribed", 20_000));
 
