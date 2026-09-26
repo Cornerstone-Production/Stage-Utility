@@ -2698,17 +2698,18 @@ export class ProdComService extends ConnectionLifecycle {
       this.partials.delete(ch);
       this.syncPartialSweep();
       const changed = this.addFinal(line);
-      // Suppressing an unchanged final is only correct while a SECOND transport
-      // is genuinely in the picture (`wsOpen`: an unproven WebSocket open beside
-      // SSE) — that is the one window where "identical to what's already
-      // stored" really does mean "the other transport just delivered this".
-      // Outside it, an unchanged final still broadcasts: a consumer that
+      // Suppressing an unchanged final is only correct once the websocket has
+      // taken over (`onWebSocket`): its copy of a line SSE already carried is
+      // the one case where "identical to what's already stored" really does
+      // mean "the other transport just delivered this". Merely OPEN is not
+      // that — until the socket's first entry every line came over SSE alone —
+      // and outside it an unchanged final still broadcasts: a consumer that
       // subscribed between two otherwise-identical deliveries (a freshly
       // enabled automation rule, a display that just mounted) has seen NEITHER
       // of them, and "the content matches what was already stored" says
-      // nothing about what THAT listener has seen. The single-transport case
-      // in prodcom-duplicate-broadcast.test.ts pins this.
-      if (changed || !this.wsOpen) {
+      // nothing about what THAT listener has seen. The single-transport cases
+      // in prodcom-duplicate-broadcast.test.ts pin this.
+      if (changed || !this.onWebSocket) {
         this.flushTranscript(); // finals land immediately
       } else {
         this.noteDuplicateFinalSuppressed();
@@ -2730,14 +2731,15 @@ export class ProdComService extends ConnectionLifecycle {
       // under too — it re-arrives as an unchanged re-send and is coalesced by
       // scheduleTranscript()'s throttle below rather than broadcast twice.
       const existing = this.partials.get(ch);
-      // A same-id partial SHORTER than what is on screen is a straggler while a
-      // WebSocket attempt is open (`wsOpen`, the duplicate-final rule's window
-      // above): the two transports do not share a clock, so a slower copy of
-      // the same utterance can land after a faster one that is further along,
-      // and applying it would visibly rewind the caption. On SSE alone
-      // partials arrive in order, so every revision applies, including one the
-      // recogniser shortened.
-      if (this.wsOpen && existing && existing.line.id === line.id && line.text.length < existing.line.text.length) {
+      // A same-id partial SHORTER than what is on screen is a straggler once
+      // the websocket has taken over (`onWebSocket`, the duplicate-final
+      // rule's window above): the two transports do not share a clock, so the
+      // socket's slower copy of an utterance SSE already carried further along
+      // can land after it, and applying it would visibly rewind the caption.
+      // Before that — SSE alone, or SSE beside a socket that has delivered
+      // nothing — partials arrive in order, so every revision applies,
+      // including one the recogniser shortened.
+      if (this.onWebSocket && existing && existing.line.id === line.id && line.text.length < existing.line.text.length) {
         return;
       }
       const unchanged = !!existing && existing.line.id === line.id && existing.line.text === line.text;
@@ -2758,15 +2760,14 @@ export class ProdComService extends ConnectionLifecycle {
   /** One line per connection, the first time an unchanged repeat of a finished
    *  line is suppressed rather than broadcast twice.
    *
-   * Worded without naming which transport: this fires whenever a second
-   * transport was open (wsOpen), but ingest() has no record of which of the
-   * two calls that produced the repeat came from which — an unproven
-   * WebSocket open beside SSE while SSE itself repeats a keepalive looks
-   * identical from here to the same line genuinely arriving on both. */
+   * Fires only once the websocket has taken over (onWebSocket), so the repeat
+   * came over the socket. Where the first copy came from is not recorded —
+   * SSE's, from before the hand-over, looks identical from here to the
+   * socket repeating itself — so the line does not claim which. */
   private noteDuplicateFinalSuppressed(): void {
     if (this.duplicateFinalLogged) return;
     this.duplicateFinalLogged = true;
-    console.log(`[prodcom] a finished line repeated while a second transport was open — duplicate suppressed`);
+    console.log(`[prodcom] a finished line repeated after the websocket took over — duplicate suppressed`);
   }
 
   private flushTranscript(): void {

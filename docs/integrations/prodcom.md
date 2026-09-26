@@ -28,8 +28,11 @@ Either way, each entry is normalised into a `TranscriptLineDTO`, kept in a
 rolling buffer (up to 100 lines from the last four hours), and re-broadcast on
 the `prodcom:transcript` channel. Entries carry ProdCom's own `id`; a line is
 revised in place under that id until `inProgress` is false, so a line that
-arrives on both transports while the WebSocket attempt is open is applied and
-broadcast once, not twice.
+arrives on both transports as the WebSocket takes over is applied and broadcast
+once, not twice — and a partial the socket delivers late, shorter than what SSE
+already showed for the same id, does not rewind the caption. Before the socket
+has delivered anything every line came over SSE alone, so there an identical
+re-send still broadcasts and a shortened revision still applies.
 
 The SSE connection reconnects 4 s after it drops, then doubles that for each
 further failure in a row, clamped by the service window the way every other
@@ -327,13 +330,11 @@ The `/log` page has the evidence when something looks wrong:
   final lands on a channel that has no partial while others do (the renamed
   channel case), and `[prodcom] transcript cleared by operator` naming every live
   partial and its age when the clear button is pressed
-- `[prodcom] a finished line repeated while a second transport was open —
+- `[prodcom] a finished line repeated after the websocket took over —
   duplicate suppressed`, once per connection, the first time an unchanged
-  repeat of a finished line is applied once rather than broadcast twice. Worded
-  without naming which transport: this fires whenever a WebSocket attempt was
-  open at the time, and there is no way to tell a line genuinely delivered by
-  both transports from SSE alone re-sending something while an unrelated
-  WebSocket attempt happened to be open beside it
+  repeat of a finished line is applied once rather than broadcast twice. The
+  repeat came over the socket; whether the first copy was SSE's from before the
+  hand-over or the socket's own is not recorded, so the line does not say
 
 Text is never logged, only its length, and neither is any keyword — only counts.
 `PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how
