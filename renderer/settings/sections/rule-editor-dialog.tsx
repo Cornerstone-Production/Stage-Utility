@@ -201,6 +201,12 @@ function FieldIssue({ message }: { message: string }) {
   );
 }
 
+/** A field's className with the danger-toned border a validation issue adds —
+ *  every control below shares this exact treatment. */
+function invalidClass(base: string, invalid: boolean | undefined): string {
+  return invalid ? `${base} border-danger-9` : base;
+}
+
 function KeyValueField({
   spec,
   value,
@@ -265,7 +271,7 @@ function KeyValueField({
               <Input
                 value={k}
                 onChange={(e) => write(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
-                className={keyBad ? "h-7 w-20 border-danger-9 text-footnote" : "h-7 w-20 text-footnote"}
+                className={invalidClass("h-7 w-20 text-footnote", keyBad)}
                 aria-label={spec.keyLabel ?? "Key"}
                 aria-invalid={keyBad || undefined}
                 placeholder={spec.keyLabel ?? "Key"}
@@ -373,7 +379,7 @@ export function ParamField({
             min={spec.min}
             max={spec.max}
             onChange={(n) => onChange(n)}
-            className={invalid ? "h-7 border-danger-9 text-footnote" : "h-7 text-footnote"}
+            className={invalidClass("h-7 text-footnote", invalid)}
           />
           {fieldIssue}
         </>
@@ -391,7 +397,7 @@ export function ParamField({
             rather than rendering blank — see missingValue in select.tsx. */}
         <>
           <Select value={current} onValueChange={onChange}>
-            <SelectTrigger className={invalid ? "w-full border-danger-9" : "w-full"}><SelectValue /></SelectTrigger>
+            <SelectTrigger className={invalidClass("w-full", invalid)}><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
               {options.map((o) => (
@@ -419,7 +425,7 @@ export function ParamField({
             value={String(value ?? "")}
             list={hasList ? listId : undefined}
             onChange={(e) => onChange(e.target.value)}
-            className={invalid ? "h-7 border-danger-9 text-footnote" : "h-7 text-footnote"}
+            className={invalidClass("h-7 text-footnote", invalid)}
           />
           {hasList && (
             <datalist id={listId}>
@@ -440,7 +446,7 @@ export function ParamField({
         <Input
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
-          className={invalid ? "h-7 border-danger-9 text-footnote" : "h-7 text-footnote"}
+          className={invalidClass("h-7 text-footnote", invalid)}
         />
         {fieldIssue}
       </>
