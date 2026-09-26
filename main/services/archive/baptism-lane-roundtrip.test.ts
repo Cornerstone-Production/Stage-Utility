@@ -782,6 +782,9 @@ describe("the clock undo()'s fallback starts for a record saved before finishedF
   async function restoreAsSavedBeforeFinishedFrom(): Promise<void> {
     const { finishedFrom: _notYetInvented, ...legacy } = timer.getState();
     void _notYetInvented;
+    // The presses above left commit()'s debounced save pending; landing after
+    // this one, it put finishedFrom back before init() read the record.
+    await timer.flush();
     await baptismStore.saveCurrent(legacy);
     await timer.init();
     assert.equal(timer.getState().finishedFrom ?? null, null, "sanity: restored with no finishedFrom");

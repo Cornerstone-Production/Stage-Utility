@@ -309,7 +309,7 @@ describe("a session save that fails reaches the operator", () => {
     assert.equal(before.saveErrors?.length, 1, "sanity: the failed session's entry was captured");
     assert.equal(before.saveErrors?.[0]?.serviceKey, "st1:plan1:save-error-persist", "sanity: and its serviceKey");
 
-    await sleep(850); // past commit()'s 800ms persist debounce
+    await timer.flush(); // what shutdown does before a restart
     await timer.init(); // simulates a restart: reads back whatever was actually written
     const after = timer.getState();
     assert.deepEqual(after.saveErrors, before.saveErrors, "the entry survives a restart — reason, id and serviceKey alike");
