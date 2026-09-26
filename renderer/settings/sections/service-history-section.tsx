@@ -29,6 +29,7 @@ import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-char
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
 import { TrendsCard } from "./history-trends/trends-card";
+import { useHistoryShown, type RowSpl } from "./history-shown";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
   summarize,
@@ -520,7 +521,10 @@ function useSelectedServiceKey(): [string | null, (key: string | null) => void] 
 }
 
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
-  const [list, setList] = useState<ServiceTimeline[] | null>(null);
+  // What this page showed last time it was open, drawn from at once and
+  // replaced when the reads below land. See history-shown.tsx.
+  const shown = useHistoryShown();
+  const [list, setList] = useState<ServiceTimeline[] | null>(() => shown?.last.timeline ?? null);
   const [selectedKey, setSelectedKey] = useSelectedServiceKey();
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
@@ -534,15 +538,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
   // Attendance records for all services — the day rows and the Trends card are
   // both built from these.
-  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>([]);
+  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>(() => shown?.last.attendance ?? []);
   // Whether the attendance list and the SPL summary have come back at all, well
   // or not: an empty array cannot tell "none recorded" from "not read yet", and
   // the Trends card must not say the first while it is the second.
-  const [attSettled, setAttSettled] = useState(false);
-  const [splSettled, setSplSettled] = useState(false);
+  const [attSettled, setAttSettled] = useState(() => shown?.last.attendance != null);
+  const [splSettled, setSplSettled] = useState(() => shown?.last.spl != null);
   /** One level per service — the sound measure on Trends, and each day row's
    *  peak. A summary, not the archive: see splHistoryStore.summary(). */
-  const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  const [splList, setSplList] = useState<SplServiceSummary[]>(() => shown?.last.spl ?? []);
 
   /**
    * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
@@ -562,8 +566,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * the operator their meter had not been recording. `"error"` is its own
    * state, the row says "sound unavailable", and the reason is logged per key.
    */
-  type RowSpl = ServiceSplHistory | null | "error";
-  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
+  const [splByKey, setSplByKey] = useState<ReadonlyMap<string, RowSpl>>(() => shown?.last.rowSpl ?? new Map());
 
   // A live-updating mirror of selectedKey for the service-timeline:history
   // handler below, which subscribes once (empty deps) and would otherwise only
@@ -663,6 +666,20 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       })
       .finally(() => setSplSettled(true));
   }, [reload, noteFailure, noteLoaded]);
+
+  // Keep what the page shows for its next visit: the lists as they stand, so
+  // a live push or a delete on this page is what the next visit draws, not the
+  // answer it replaced. A list whose read failed is forgotten rather than kept
+  // as the empty one drawn in its place, which the next visit would show as a
+  // history with nothing in it.
+  useEffect(() => {
+    shown?.keep({
+      timeline: loadFailed.has("timeline") ? null : list,
+      attendance: attSettled && !loadFailed.has("attendance") ? attList : null,
+      spl: splSettled && !loadFailed.has("spl") ? splList : null,
+      rowSpl: splByKey,
+    });
+  }, [shown, list, attList, attSettled, splList, splSettled, splByKey, loadFailed]);
 
   // Live updates while a service is recording — refresh the open detail/list, the
   // attendance chart (samples), and SPL, all without a page reload.
