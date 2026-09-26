@@ -14,6 +14,7 @@
 
 import type { RossTalkCommand, RossTalkFamily, RossTalkParam } from "../types/rosstalk.js";
 import { externKeyed } from "../types/extern-keyed.js";
+import { numberParamDefault } from "./automation-param-validation.js";
 
 /** ME source values Carbonite accepts. Ultra names its MEs differently (ME 2, ME 1, P/P). */
 const ME_SOURCES = ["ME", "MEM", "PP"];
@@ -32,6 +33,14 @@ const en = (key: string, label: string, options: string[], extra: Partial<RossTa
 function coerce(p: RossTalkParam, raw: unknown): string | null {
   if (raw === undefined || raw === null || raw === "") {
     if (p.optional) return null;
+    // A button saved before number params were seeded on pick still stores {}
+    // for every one of them — the inspector shows it at numberParamDefault(p)
+    // regardless (RowNumber's own `?? numberParamDefault(p)` fallback), so a
+    // press must run with the exact value already on screen rather than
+    // refusing it as missing. String and enum params have no such displayed
+    // default — inspector.tsx shows those blank when unset — so they still
+    // refuse here, same as before.
+    if (p.type === "number") return coerce(p, numberParamDefault(p));
     throw new Error(`Missing required parameter "${p.key}"`);
   }
   if (p.type === "number") {

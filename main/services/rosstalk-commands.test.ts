@@ -138,8 +138,23 @@ describe("validation", () => {
     assert.throws(() => formatCommand("nope", {}), /unknown command/i);
   });
 
-  test("a missing required param throws", () => {
-    assert.throws(() => formatCommand("cc", { bank: 1 }), /cc/i);
+  test("a missing required STRING param still throws — inspector.tsx shows it blank, not a default", () => {
+    assert.throws(() => formatCommand("clipload", {}), /clip/i);
+  });
+
+  // A button saved before number params were seeded on pick (seedNumberDefaults,
+  // inspector.tsx's onChange for Command) still stores {} for every one of them.
+  // inspector.tsx's own RowNumber shows Bank 1 / Custom control 1 for it
+  // regardless (`Number(c.params[p.key] ?? numberParamDefault(p))`) — a press
+  // must run with the exact values already on screen, not throw "missing".
+  test("a missing NUMBER param heals to the same default the inspector shows", () => {
+    // bank's range is 1-9, cc's is 1-99 padded to 2 — numberParamDefault
+    // clamps 0 up to each floor, same as the inspector's own fallback.
+    assert.equal(formatCommand("cc", {}), "CC 1:01");
+  });
+
+  test("healing one missing number param does not touch a sibling the operator DID provide", () => {
+    assert.equal(formatCommand("cc", { bank: 5 }), "CC 5:01");
   });
 
   test("a number outside its range throws", () => {
