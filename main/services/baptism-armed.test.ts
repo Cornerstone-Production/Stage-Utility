@@ -37,6 +37,8 @@ describe("default workflow", () => {
       serviceTypeId: null,
       planId: null,
     };
+    // So no debounced save can land on the record before init() reads it.
+    await baptismTimerService.flush();
     await baptismStore.saveCurrent(resumedSession);
     try {
       await baptismTimerService.init();

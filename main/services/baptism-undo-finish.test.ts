@@ -140,9 +140,9 @@ describe("grouped: Undo after Finish reopens the baptism Finish closed", () => {
 
   it("a record finished before finishedFrom existed reopens a baptism at the index Finish left", async () => {
     // Drives the real store and init(): only a PERSISTED record can lack the
-    // field. The 900ms drains commit()'s 800ms persist debounce from the tests
-    // above, so their write cannot land on top of this one.
-    await sleep(900);
+    // field. Flushed first, so the debounced save the tests above left pending
+    // cannot land on top of this one.
+    await timer.flush();
     const legacy = {
       mode: "grouped",
       phase: "idle",
@@ -182,7 +182,7 @@ describe("grouped: Undo after Finish reopens the baptism Finish closed", () => {
     // and next() reads people[baptismIndex] — out of range, that is a TypeError
     // out of POST /api/baptism/next.
     for (const [stored, expected] of [[5, 1], [-1, 0]] as const) {
-      await sleep(900); // drain the previous persist, as above
+      await timer.flush(); // as above
       await baptismStore.saveCurrent({
         mode: "grouped",
         phase: "idle",

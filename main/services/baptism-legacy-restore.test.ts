@@ -4,13 +4,10 @@
 // empty people list, since person 1's testimony then lived in
 // pendingTestimonyMs, not in `people`.
 //
-// Split out of baptism-armed.test.ts (node:test gives each file its own fresh
-// module graph): these four tests were the only ones in that file needing a
-// long sleep to drain commit()'s 800ms persist debounce from whichever test
-// ran before them, so a stale pending write could not land on top of the
-// legacy record each test saves before init() reads it back. Isolated here,
-// that sleep no longer taxes the other tests that used to share the file
-// with it.
+// Each test saves a legacy record and reads it back through init(), so each
+// first flushes the timer: a press from the test before leaves commit()'s
+// debounced save pending, and landing on top of the legacy record it would be
+// what init() reads back.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -64,8 +61,6 @@ describe("undo() survives a restored record that has no people to step back into
     // `.testimonyMs` off undefined — a TypeError out of undo(), a 500 from
     // POST /api/baptism/undo, and no Undo for the rest of the service.
     //
-    // No debounce-drain wait here: this is the first test in this file's own
-    // module graph, so nothing scheduled a persist before it ran.
     const legacy = {
       phase: "baptism",
       personNumber: 1,
@@ -78,6 +73,7 @@ describe("undo() survives a restored record that has no people to step back into
       serviceTypeId: null,
       planId: null,
     } as unknown as BaptismState;
+    await baptismTimerService.flush();
     await baptismStore.saveCurrent(legacy);
     await baptismTimerService.init();
 
@@ -130,15 +126,11 @@ describe("next(), advance() and finish() survive the same restored record undo()
     planId: null,
   } as unknown as BaptismState;
 
-  /** Drains the previous test's 800ms persist debounce before this test's own
-   *  saveCurrent() runs, so a pending write from the test before cannot land on
-   *  top of the record this test saves before init() reads it back — same
-   *  reasoning as the sibling undo() guard above. Still needed here even in
-   *  this file's own module graph: each test in this describe drives
-   *  undo()/next()/advance()/finish(), which schedules its own commit()
-   *  persist that the NEXT test's saveCurrent() must outlast. */
+  /** Flushes first: each test in this describe drives undo()/next()/advance()/
+   *  finish(), whose debounced save would otherwise land on the next test's
+   *  legacy record. See the file header. */
   async function restoreLegacy(): Promise<void> {
-    await new Promise((r) => setTimeout(r, 900));
+    await baptismTimerService.flush();
     await baptismStore.saveCurrent(legacy);
     await baptismTimerService.init();
   }

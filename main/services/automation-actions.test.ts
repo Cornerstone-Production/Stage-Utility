@@ -272,7 +272,9 @@ describe("baptism actions", () => {
 
     it("reports failure rather than false success against a restored, corrupted record", async () => {
       // Loaded through baptismStore + init(), the way a real restored record
-      // arrives, not by reaching into the service's private state.
+      // arrives, not by reaching into the service's private state. Flushed
+      // first, so a debounced save still pending cannot land on the record.
+      await baptismTimerService.flush();
       await baptismStore.saveCurrent(corruptedGroupedBaptismRecord());
       await baptismTimerService.init();
       const before = baptismTimerService.getState();
@@ -286,6 +288,7 @@ describe("baptism actions", () => {
     });
 
     it("simulate against a refusing state reports the SAME refusal a real press would, not a blanket 'would advance'", async () => {
+      await baptismTimerService.flush();
       await baptismStore.saveCurrent(corruptedGroupedBaptismRecord());
       await baptismTimerService.init();
       const before = baptismTimerService.getState();

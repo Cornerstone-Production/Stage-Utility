@@ -159,8 +159,19 @@ async function shutdown(signal: string): Promise<void> {
   sensourceService.stop();
   tslService.stop();
   oscManager.stop();
-  await remoteServer.stop();
-  await deviceManager.stop();
+  try {
+    await remoteServer.stop();
+    await deviceManager.stop();
+  } finally {
+    // A press in the last 800ms is still waiting on the timer's debounced save.
+    // Last, once nothing can press anything, and even if a stop above threw. A
+    // deliberate exception to the catch-rethrows-or-returns rule, like the
+    // timer's own emitRaw(): shutdown has to reach process.exit, so the failure
+    // is said on /log and shutdown carries on.
+    await baptismTimerService.flush().catch((err) => {
+      console.error("[baptism-timer] state not saved before shutdown:", err);
+    });
+  }
   console.log("[server] shutdown complete");
   process.exit(0);
 }
