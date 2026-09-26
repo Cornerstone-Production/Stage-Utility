@@ -153,6 +153,101 @@ Timestamps are drawn in the **app time zone** (Settings → Advanced), which the
 header names. Not the server's UTC and not the viewer's browser zone: a log is
 read against a service that happened at a wall-clock time in the building.
 
+### Log tags
+
+A tag is the `[name]` every line opens with — what the source dropdown filters
+on. Server code writes its own tag straight into `console.log`/`warn`/`error`.
+Browser code carries one too: a failed read or action calls `logToServer(tag,
+message)` (or the `useFailedReads` hook that wraps it), and the line reaches
+`/log` exactly like a server line, `[tag] message`. A tag whose only work is a
+subsystem's own bookkeeping — nothing an operator would search for — is marked
+as such rather than given a doc link it doesn't need.
+
+| Tag | What writes it |
+|---|---|
+| `[action]` | A control's or Companion press refused by the action registry, and why: [Actions](../automation.md#actions) |
+| `[app-paths]` | Recovering (or failing to recover) config from a legacy data-directory name across an upgrade |
+| `[app-root]` | An ignored or unusable `STAGE_UTILITY_ROOT` override: [Environment](install-and-config.md#environment) |
+| `[archive]` | A data-archive read, write or import failure: [Data archive](../data-archive.md) |
+| `[attachment-cache]` | Plan attachments cached from Planning Center: prunes, and fetch/redirect/size refusals: [Planning Center](../integrations/planning-center.md) |
+| `[attendance-recorder]` | The attendance-trend recorder's debounced save failing to persist |
+| `[automation]` | Rules added, changed, removed, saved with issues, or failing to fire; on the browser, the rule list failing to load: [Automation](../automation.md) |
+| `[automation-log]` | The Activity log itself failing to persist an entry to disk |
+| `[backup]` | The scheduled automatic backup writing, or failing: [Automatic backups](reliability.md#automatic-backups) |
+| `[baptism]` | Session-store eviction at the cap, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/scriptview-and-baptisms.md#logging) |
+| `[baptism-lane]` | The Session chart's server-side span data dropping a span with an unreadable boundary timestamp: [The Session chart](../features/scriptview-and-baptisms.md#the-session-chart) |
+| `[baptism-replay]` | A data-archive rebuild skipping baptism rows it could not place, and why: [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced) |
+| `[baptism-timer]` | The live timer's own persistence: debounced save failures, a save that failed at shutdown, a dismissed save-failure notice |
+| `[bar-config]` | The context bar's one-time migration splitting service type out of a plan item, on the one start that needed it: [The context bar](../features/context-bar.md) |
+| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`: [Branding](../features/operator-app.md#branding) |
+| `[broadcaster]` | A subscriber's own callback throwing while handling a broadcast — internal plumbing, not an operator signal |
+| `[cache-maintenance]` | The daily disk-cache prune (photos, attachments, layout images) failing outright: [Under load](reliability.md#under-load) |
+| `[calendar]` | The pushed month-grid view folding or failing a refresh: [Calendar](../integrations/planning-center.md#calendar) |
+| `[checklist]` | A pre-service checklist tick failing to save: [Plan notes as a checklist](../integrations/planning-center.md#plan-notes-as-a-checklist) |
+| `[clock]` | Browser-side: the on-screen clock's own drift correction reporting a failure |
+| `[companion]` | A Companion button press or export fetch, and its result: [Companion](../integrations/companion.md) |
+| `[config-snapshot]` | Building or restoring a config snapshot: unreadable settings, id floors that could not carry forward, stores that could not be quieted: [Backups](reliability.md#backups) |
+| `[cues]` | Cue-to-Companion-button pairing and state-source inference, and built-in cues: [Cues](../automation.md#cues) |
+| `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh: [Under load](reliability.md#under-load) |
+| `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
+| `[devices]` | Kiosk device enrollment cleanup after a failed claim: [Kiosk devices](../kiosk-devices.md) |
+| `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
+| `[encryption]` | The encryption key generated on first run, or rejected as the wrong length: [When credentials all read as "not configured"](reliability.md#when-credentials-all-read-as-not-configured) |
+| `[events]` | SSE and poll-transport clients connecting, closing, or expiring: [Polling transport](../display-urls.md#polling-transport) |
+| `[history]` | A time correction refused, a rebuild's outcome; on the browser, History or Home cards failing to load: [Attendance and service history](../features/attendance-and-history.md) |
+| `[history-edit]` | Merging one recorded service into another: [The service page](../features/attendance-and-history.md#the-service-page) |
+| `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |
+| `[kiosk-responder]` | The UDP discovery responder starting, or a socket/reply error: [Discovery](../kiosk-devices.md#discovery) |
+| `[layout-defaults]` | A one-time cleanup of an old layout object's card-ground styling — internal plumbing, not an operator signal |
+| `[layout-editor]` | Browser-side: the layout editor's own reads (targets, commands, services, files, saved groups) failing |
+| `[layout-images]` | Orphaned uploaded layout images pruned: [Under load](reliability.md#under-load) |
+| `[live-poller]` | The live-service tick failing for one integration, and the poller starting: [Winding down between services](reliability.md#winding-down-between-services) |
+| `[obs]` | Connection state, and recording/streaming/virtual-camera transitions: [OBS](../integrations/obs.md) |
+| `[osc]` | Target init, hostname resolution, and send-socket errors: [OSC](../integrations/osc.md) |
+| `[patch]` | Browser-side: the patch sheet or its weekly variant failing to load |
+| `[pco]` | Planning Center rate-limit headroom, refused unsafe URLs, and (under `STAGE_UTILITY_DEBUG`) every request: [Planning Center](../integrations/planning-center.md) |
+| `[pco-calendar]` | Calendar instances with no start time, left undrawn: [Calendar](../integrations/planning-center.md#calendar) |
+| `[photo-cache]` | Person photos cached from Planning Center: prunes, and fetch/redirect/size refusals: [Planning Center](../integrations/planning-center.md) |
+| `[plan-export]` | A view bundle built for export to another install, and its counts: [Moving a view between installs](../moving-a-view.md) |
+| `[plans]` | The upcoming-plans list refreshing or failing, and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
+| `[prodcom]` | Connection state, transcript source (websocket vs. SSE fallback), and idle/heartbeat timeouts: [ProdCom](../integrations/prodcom.md) |
+| `[propresenter]` | Macro triggers and their failures, and unsupported status endpoints: [ProPresenter](../integrations/propresenter.md) |
+| `[pvp]` | Polling state, and playlist-tree fetch failures: [ProVideoPlayer](../integrations/provideoplayer.md) |
+| `[reaper]` | Polling state, and transport command results: [Reaper](../integrations/reaper.md) |
+| `[reconcile]` | Orphaned open recordings (attendance, SPL, service timeline) closed at boot: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
+| `[reconnect]` | The switch into or out of service-window-aware backoff: [Winding down between services](reliability.md#winding-down-between-services) |
+| `[relaunch]` | The update flow exiting for the service manager to restart the server, as described above |
+| `[remote-server]` | The HTTP/SSE server listening, a port conflict and its retries, kiosk discovery failing to start, and (under `STAGE_UTILITY_DEBUG`) every request |
+| `[resi]` | Encoder status polling, and broadcast-list availability for encoder names: [Resi](../integrations/resi.md) |
+| `[rosstalk]` | Connection state to a Carbonite or Ultrix device: [RossTalk](../integrations/rosstalk.md) |
+| `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
+| `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
+| `[scriptview]` | Browser-side: ScriptView's settings, types, note categories or rundown failing to load |
+| `[scriptview-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/scriptview-and-baptisms.md#category-roles) |
+| `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
+| `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
+| `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller: [SenSource](../integrations/sensource.md) |
+| `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions |
+| `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
+| `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
+| `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist |
+| `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
+| `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
+| `[slots-store]` | Slot-set migration, and copying or removing a display's slots: [Mic slots](../slots.md) |
+| `[slug-migration]` | A display renamed off a URL now reserved by `/log` or `/logs`: [Friendly URLs](../display-urls.md#friendly-urls) |
+| `[smaart]` | Connection state to a Smaart measurement server: [Smaart](../integrations/smaart.md) |
+| `[spectera]` | A Sennheiser Spectera wireless connection's protocol trace, only under `SPECTERA_DEBUG` (an SSE buffer-overflow resync always shows): [Wireless](../integrations/wireless.md) |
+| `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels) |
+| `[spl-series]` | A raw SPL sample series failing to read: [Sound levels](../features/attendance-and-history.md#sound-levels) |
+| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal |
+| `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
+| `[surface-migration]` | A one-time internal layout-surface migration — internal plumbing, not an operator signal |
+| `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
+| `[updater]` | The update flow described above, and (browser side) the update lock failing to read |
+| `[view-import]` | Importing a view: plan retyping, patch variants, and preset counts: [Moving a view between installs](../moving-a-view.md) |
+| `[wireless]` | Connection setup, credential migration, and meter-rate changes: [Wireless](../integrations/wireless.md) |
+| `[youtube]` | The device-code connect flow: code issued, approved, or refused: [YouTube](../integrations/youtube.md) |
+
 ### Why a value on the page can read `\n`
 
 One record per line is what makes the page readable, and plenty of what gets
