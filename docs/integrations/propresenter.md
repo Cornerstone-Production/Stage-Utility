@@ -91,7 +91,8 @@ rather than once per slide advance; the buffer line is said once per overrun.
 
 **A stream that keeps dropping re-dials more slowly each time; one that holds
 puts it back to 5 s.** The reconnect back-off doubles from 5 s and is capped at
-2 minutes while a service window is open or a display is watching. What clears
+2 minutes while a service window is open, a display is watching, or no service
+window is known (see [reliability](../ops/reliability.md#winding-down-between-services)). What clears
 it is a stream that LASTS — 30 to 45 seconds, two to three heartbeat windows —
 not one that merely opens, because a machine that accepts the subscription and
 hangs up delivers its snapshot every single time. The "stream ended" line is
