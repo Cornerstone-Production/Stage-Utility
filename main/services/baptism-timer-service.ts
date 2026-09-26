@@ -110,7 +110,23 @@ class BaptismTimerService {
     return this.state;
   }
 
+  /**
+   * Every finished session, waiting first for any write already queued
+   * against the store to land.
+   *
+   * finalize() below broadcasts baptism:state before its own addSession call
+   * settles — a Baptisms tab or History page reloads on exactly that push
+   * (reload-on-baptism-change.ts), and answering this call straight from the
+   * store's cache could read whatever the queue held before addSession's own
+   * turn came up, one write short. See baptismStore.flush()'s own doc
+   * comment. This does delay the answer by however long a write already in
+   * flight takes to land — milliseconds, and the same wait GET
+   * /api/baptism/lane already puts a Baptisms tab through for the identical
+   * reason (sampleArchive.flush()) — never the live baptism:state push
+   * itself, which still goes out unconditionally and un-delayed.
+   */
   async listSessions(): Promise<BaptismSession[]> {
+    await baptismStore.flush();
     return baptismStore.listSessions();
   }
 

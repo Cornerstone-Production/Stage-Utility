@@ -35,6 +35,24 @@ class BaptismStore {
     return (await this.store.load()).current;
   }
 
+  /**
+   * Settle every write already queued against this store.
+   *
+   * addSession and saveCurrent both queue their write (DataStore.update, over
+   * the store's own WriteQueue) and return before it lands. finalize()
+   * (baptism-timer-service.ts) broadcasts baptism:state the instant it CALLS
+   * addSession, not once that write settles — a Baptisms tab or History page
+   * open elsewhere reloads its sessions on exactly that push
+   * (reload-on-baptism-change.ts), and a read answered from a call still
+   * queued behind addSession's own write (a saveCurrent in flight, say) came
+   * back a session short. A no-op mutator (`f => f`) queues behind whatever
+   * is already there and writes nothing itself — same pattern, same reason,
+   * as sampleArchive.flush() for GET /api/baptism/lane.
+   */
+  async flush(): Promise<void> {
+    await this.store.update((f) => f);
+  }
+
   /** The duplicate count listSessions last logged — see its doc comment. */
   private loggedDuplicateIds = 0;
 
