@@ -749,6 +749,9 @@ export class ProdComService extends ConnectionLifecycle {
    *  socket with it rather than leaving it reading from a box the operator has
    *  just disconnected from. */
   private wsProbeRequest: http.ClientRequest | null = null;
+  /** Bumped by every connectWebSocket(), so an answer about one attempt can
+   *  tell that another has started since — see probeThenGiveUp. */
+  private wsAttempts = 0;
   /** Bumped by teardown(), so work that was in flight when a stop() or a
    *  configure() landed can tell that it no longer speaks for this service. */
   private connectionEpoch = 0;
@@ -1463,6 +1466,14 @@ export class ProdComService extends ConnectionLifecycle {
     const epoch = this.connectionEpoch;
     const page = await this.readNewestPage(host, port);
     if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
+    // The same socket, but no longer the unproven one this read was about: its
+    // first entry landed while REST was out, and promotion has already closed
+    // SSE and armed the promoted check. Acting on this answer would close the
+    // only transport left through the unproven give-up, which never clears
+    // onWebSocket — no socket, no SSE, a retry timer that bails while
+    // "promoted", and a card still reading "Streaming". See
+    // prodcom-promotion-race.test.ts.
+    if (this.wsDelivered) return;
 
     // "No lines" and "could not ask" are indistinguishable from here, and
     // acting on the second is how a transport that is working gets torn down —
@@ -1973,6 +1984,7 @@ export class ProdComService extends ConnectionLifecycle {
     // states — close before you replace — is the same one closeSocket() itself
     // follows.
     this.closeSocket();
+    this.wsAttempts += 1;
     const url = `ws://${host}:${port}/api/v1/ws`;
     let ws: WebSocket;
     try {
@@ -2088,11 +2100,26 @@ export class ProdComService extends ConnectionLifecycle {
    * then would be acting on an answer about a box this service has already let
    * go — the same reason ensureRecord in service-recorder.ts captures a
    * generation.
+   *
+   * `attempt` is the same rule for the attempt rather than the connection. An
+   * SSE reconnect does not bump the epoch, and it opens the next socket
+   * (connect() sees `useWebSocket` still true and no socket) while this probe
+   * is still out. Giving up once the answer lands would close THAT socket —
+   * promoted, by then, if it delivered — which is the same end state
+   * runSilenceCheck's own `wsDelivered` re-check exists to prevent. The newer
+   * attempt owns the retry state now, whichever way it ends.
    */
   private async probeThenGiveUp(host: string, port: number, bare: string): Promise<void> {
     const epoch = this.connectionEpoch;
+    const attempt = this.wsAttempts;
     const probe = await this.probeUpgrade(host, port, bare);
     if (epoch !== this.connectionEpoch) return;
+    if (attempt !== this.wsAttempts) {
+      console.debug(
+        `[prodcom] dropped a refused-upgrade probe (${scrub(probe?.reason ?? bare)}) that answered after a newer websocket attempt started`,
+      );
+      return;
+    }
     this.giveUpOnUnprovenWebSocket(probe?.reason ?? bare, probe?.detail ?? null);
   }
 
