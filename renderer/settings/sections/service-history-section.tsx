@@ -552,8 +552,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * carries a service-level Leq per metric and no PEAK at all, so a row built
    * from it would be labelled "Peak" and be showing an energy average. The
    * full record is the only thing that has the peak, and a month is a dozen or
-   * so of them — not a year of them. Fetched below, once per month; kept
-   * current between fetches by the `spl:history` live push handler, which
+   * so of them — not a year of them. Fetched below, once per key as the
+   * month's rows appear; kept current by the `spl:history` live push handler, which
    * writes the SAME shape straight into this map — see the handler's comment.
    *
    * A FAILED read and a service that recorded no sound are told apart. Both
@@ -709,7 +709,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (!rec) return;
       setSpl((s) => (s ? (s.serviceKey === rec.serviceKey ? rec : s) : selectedKeyRef.current === rec.serviceKey ? rec : s));
       // The list's own row reads splByKey (see its declaration above), fetched
-      // once per month by key. A record opened after that fetch ran — or one
+      // once per key. A record opened after that fetch ran — or one
       // whose first disk write lands after the fetch raced it — has no entry
       // there and its row reads "no sound recorded" forever, since nothing
       // else invalidates that cache. The push already carries the exact shape
@@ -1075,13 +1075,23 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // The key list, as a stable string: `monthServices` is a fresh array every
   // render and would refetch the month's SPL on each one.
   const monthKeys = monthServices.map((s) => s.serviceKey).join("|");
+  // The keys asked for since the last reload. The month's key list grows as
+  // the page's reads land — the timeline list's rows, then the attendance
+  // list's own — and asking for the whole month each time it did fetched
+  // every record on it twice. A reload (a rebuild or merge on this page) asks
+  // again for everything; a key whose read failed is asked again the next
+  // time the list changes, as paging to another month and back always did.
+  const splAsked = useRef({ reloadKey, keys: new Set<string>() });
   useEffect(() => {
-    const keys = monthKeys ? monthKeys.split("|") : [];
-    // Nothing to fetch, and nothing to clear: every lookup is by serviceKey, so
-    // a map left over from the previous day can only ever miss. Clearing it here
-    // would be a setState in an effect body — a cascading render — to no end.
+    if (splAsked.current.reloadKey !== reloadKey) splAsked.current = { reloadKey, keys: new Set() };
+    const asked = splAsked.current;
+    const keys = (monthKeys ? monthKeys.split("|") : []).filter((k) => !asked.keys.has(k));
+    // Nothing new to fetch, and nothing to clear: every lookup is by
+    // serviceKey, so an entry left over from another month can only ever miss.
     if (!keys.length) return;
-    let cancelled = false;
+    for (const k of keys) asked.keys.add(k);
+    // Not cancelled when the list changes again before it lands: its keys are
+    // marked asked, so dropping the answer would leave those rows unread.
     Promise.all(
       keys.map((key) =>
         invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: key })
@@ -1095,11 +1105,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           }),
       ),
     ).then((pairs) => {
-      if (!cancelled) setSplByKey(new Map(pairs));
+      // A reload since this was sent has asked again; this answer is older.
+      if (splAsked.current !== asked) return;
+      for (const [k, v] of pairs) if (v === "error") asked.keys.delete(k);
+      setSplByKey((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of pairs) next.set(k, v);
+        return next;
+      });
     });
-    return () => {
-      cancelled = true;
-    };
   }, [monthKeys, reloadKey]);
 
   // Per-day service counts for the calendar (respects the type filter).
