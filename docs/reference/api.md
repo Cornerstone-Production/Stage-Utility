@@ -7,7 +7,9 @@ Most endpoints are under `/api`; the exceptions are listed under
 by polling. What a state-changing route answers with depends on what it changed:
 the plan, view, output and slot routes return the updated `StageState`, while the
 rest return the collection they touched (`{targets}`, `{rules}`, `{presets}`) or
-an outcome (`{ok, …}`). Creating something answers `201`.
+an outcome (`{ok, …}`). Creating something answers `201`. A JSON reply of 8 KB
+or more is gzipped when the request sends `Accept-Encoding: gzip`, as every
+browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
 for a body or query the caller got wrong, `409` for something the server cannot
