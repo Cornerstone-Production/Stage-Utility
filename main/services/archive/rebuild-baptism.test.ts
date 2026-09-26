@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { rebuildBaptismSessions, type BaptismRow } from "./rebuild-baptism.js";
+import { captureWarnings } from "../baptism-save-harness.js";
 
 const ID = {
   serviceKey: "st1:p1:t1",
@@ -43,23 +44,6 @@ const row = (t: number, over: Partial<BaptismRow>): BaptismRow => ({
 });
 
 const startedAtId = (t: number) => `bap-${Date.UTC(2026, 8, 27, 11, 0, t)}`;
-
-/** Silence the one [baptism-replay] summary line a damaged fixture prints, and
- *  hand back what it said so the test can assert the operator has something to
- *  read. */
-function captureWarnings<T>(fn: () => T): { value: T; warnings: string[] } {
-  const warnings: string[] = [];
-  const original = console.warn;
-  console.warn = (...args: unknown[]) => {
-    if (typeof args[0] === "string" && args[0].startsWith("[baptism-replay]")) warnings.push(args[0]);
-    else original(...args);
-  };
-  try {
-    return { value: fn(), warnings };
-  } finally {
-    console.warn = original;
-  }
-}
 
 describe("rebuildBaptismSessions: a grouped session", () => {
   it("replays into the same people the presses produced", () => {
@@ -415,7 +399,7 @@ describe("rebuildBaptismSessions: session boundaries", () => {
       row(80, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "10000" }),
       row(81, { event: "finish", phase: "idle", detail: "people=2" }),
     ];
-    const { value: sessions, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { value: sessions, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.equal(sessions.length, 1, "only the session that finished before the reset is logged");
     assert.equal(sessions[0]!.id, startedAtId(0));
     assert.deepEqual(sessions[0]!.people, [{ testimonyMs: 20000, baptizeMs: 5000 }]);
@@ -435,7 +419,7 @@ describe("rebuildBaptismSessions: session boundaries", () => {
       row(30, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "17000" }),
       row(31, { event: "finish", phase: "idle", detail: "people=2" }),
     ];
-    const { value: sessions, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { value: sessions, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.deepEqual(sessions, [], "the reset threw the session away; nothing after it rebuilds one");
     assert.match(warnings[0]!, /2 row\(s\) belonging to no started session/);
   });
@@ -488,7 +472,7 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
       row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "20000" }),
       row(21, { event: "finish", phase: "idle", detail: "people=1" }),
     ];
-    const { value, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { value, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.deepEqual(value, [], "no startedAt means no id, and bap-NaN would duplicate on every rebuild");
     assert.equal(warnings.length, 1, "an operator has one line to read, not one per row");
     assert.match(warnings[0]!, /unreadable timestamp/);
@@ -502,7 +486,7 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
       row(26, { event: "person-complete", phase: "baptism", personNumber: "1", baptismIndex: "4", segmentMs: "5000" }),
       row(26, { event: "finish", phase: "idle", detail: "people=1" }),
     ];
-    const { value, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { value, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.deepEqual(value[0]!.people, [{ testimonyMs: 20000, baptizeMs: 0 }]);
     assert.match(warnings[0]!, /nobody at it/);
   });
@@ -515,7 +499,7 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
       row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "10000" }),
       row(21, { event: "finish", phase: "idle", detail: "people=1" }),
     ];
-    const { value, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { value, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.deepEqual(value, []);
     assert.match(warnings[0]!, /3 row\(s\) belonging to no started session/);
   });
@@ -528,7 +512,7 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
       row(0, { event: "start", phase: "testimony", personNumber: "1" }),
       row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "20000" }),
     ];
-    const { value, warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { value, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.deepEqual(value, [], "a session with no finish row has nothing to reconstruct");
     assert.match(warnings[0]!, /presses recorded but no finish row to close them/);
   });
@@ -540,7 +524,7 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
       row(20, { event: "baptisms-armed", phase: "baptism", personNumber: "1", segmentMs: "19000" }),
       row(21, { event: "finish", phase: "idle", detail: "people=1" }),
     ];
-    const { warnings } = captureWarnings(() => rebuildBaptismSessions(rows, ID));
+    const { warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
     assert.deepEqual(warnings, [], "a leading reset row is ordinary, not a defect worth a log line");
   });
 });

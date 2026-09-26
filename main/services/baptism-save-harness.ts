@@ -83,3 +83,23 @@ export function captureLog(prefix: string): { lines: string[]; release: () => vo
     },
   };
 }
+
+/** Silence the one line a damaged fixture prints starting with `prefix`, and
+ *  hand back what it said so the test can assert the operator has something
+ *  to read. Shared for the same reason as captureLog above:
+ *  baptism-lane.test.ts and rebuild-baptism.test.ts each kept an identical
+ *  copy, hardcoding their own tag ("[baptism-lane]" / "[baptism-replay]") in
+ *  place of this `prefix` parameter. */
+export function captureWarnings<T>(prefix: string, fn: () => T): { value: T; warnings: string[] } {
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && args[0].startsWith(prefix)) warnings.push(args[0]);
+    else original(...args);
+  };
+  try {
+    return { value: fn(), warnings };
+  } finally {
+    console.warn = original;
+  }
+}
