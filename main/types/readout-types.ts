@@ -146,6 +146,11 @@ export const LEGACY_TRANSLUCENT_GROUNDS: Readonly<Record<string, string>> = exte
   "rgba(255,255,255,0.06)": "#191919",
 });
 
+/** The hairline every card wears. The object registry, the layout templates and
+ *  the load-time card migrations all read this one value, so a card created
+ *  today and one a migration folded in cannot wear two different borders. */
+export const CARD_HAIRLINE = "rgba(255,255,255,0.1)";
+
 /** The opaque ground that replaces a never-chosen translucent one, or null when
  *  the background is anything else — including one the operator chose. */
 export function opaqueGroundFor(background: string | null | undefined): string | null {

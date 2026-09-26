@@ -73,6 +73,7 @@ describe("what the operator set is still there after a restart", () => {
       "autoUpdate",
       "baptismAutoStart",
       "captionChannelColors",
+      "cardHairlineRaised",
       "checklistNoteCategories",
       "checklistNoteTeams",
       "followProdcomColors",

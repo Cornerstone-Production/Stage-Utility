@@ -155,6 +155,13 @@ export interface SettingsData {
    */
   layoutDefaultsCleaned?: boolean;
   /**
+   * Whether the one pass raising every 8% card hairline to the registry's has
+   * run (never-chosen-defaults.ts, migrateCardHairline). Separate from
+   * layoutDefaultsCleaned because installs that had already run that pass
+   * still need this one. Absent means never run.
+   */
+  cardHairlineRaised?: boolean;
+  /**
    * Which of a plan's notes become the pre-service checklist.
    *
    * Names, not ids. A plan note carries `category_name` on its own attributes

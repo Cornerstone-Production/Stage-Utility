@@ -4,7 +4,7 @@
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
-import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
+import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { checklistTicksStore } from "./checklist-ticks-store.js";
@@ -632,12 +632,21 @@ export class StageController {
     // took the operator's centre away on every restart — which is every update.
     // That half is gone (see never-chosen-defaults.ts); this half stops after
     // its one pass.
-    const alreadyCleaned = (await settingsStore.get()).layoutDefaultsCleaned === true;
+    const done = await settingsStore.get();
+    const alreadyCleaned = done.layoutDefaultsCleaned === true;
     const cleaned = alreadyCleaned ? (seeded as View[]) : migrateNeverChosenDefaults(seeded as View[]);
     const cleanedCount = alreadyCleaned ? 0 : countNeverChosen(seeded as View[]);
-    // Recorded even when it found nothing: a fresh install has nothing to clean,
-    // and must still never run it again.
-    if (!alreadyCleaned) await settingsStore.patch({ layoutDefaultsCleaned: true });
+    // The 8% card hairline raised to the registry's, once, with its own flag:
+    // installs that ran the pass above before it folded to the right border
+    // still need this one.
+    const alreadyRaised = done.cardHairlineRaised === true;
+    const raised = alreadyRaised ? cleaned : migrateCardHairline(cleaned);
+    const raisedCount = alreadyRaised ? 0 : countFaintHairlines(cleaned);
+    // Recorded even when they found nothing: a fresh install has nothing to
+    // clean, and must still never run either again.
+    if (!alreadyCleaned || !alreadyRaised) {
+      await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true });
+    }
     if (cleanedCount > 0) {
       console.log(
         `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
@@ -646,7 +655,13 @@ export class StageController {
           "with the current opaque card, once. Still editable per object in the layout editor.",
       );
     }
-    const result = migrateSurfaces(cleaned, outputs);
+    if (raisedCount > 0) {
+      console.log(
+        `[layout-defaults] ${scrub(raisedCount)} object${scrub(raisedCount === 1 ? "" : "s")} wore the older 8% card ` +
+          "border; raised to the 10% one every card now gets, once. Still editable per object in the layout editor.",
+      );
+    }
+    const result = migrateSurfaces(raised, outputs);
     // A stored slug is only ever checked on the way IN, so a path the app claims
     // for itself later silently shadows the screen holding it. Re-checked here,
     // on both load paths, for the same reason the surface migration is.

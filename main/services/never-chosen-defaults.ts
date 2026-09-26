@@ -24,16 +24,21 @@
 //
 //  2. the ELEVATED card. Objects created before the surface list was cut down
 //     wear #191919 with a 10% hairline, while everything created since wears
-//     #141414 with an 8% one. Both are cards; they are just cards from two
-//     different years, and a layout built across both reads as some widgets
-//     having a border and others not. Reported exactly that way. Folded into the
-//     current card so a row of widgets looks like a row of widgets.
+//     #141414. Both are cards; they are just cards from two different years, and
+//     a layout built across both reads as some widgets having a border and
+//     others not. Reported exactly that way. Folded into the current card —
+//     #141414 and CARD_HAIRLINE, the registry's own — so a row of widgets looks
+//     like a row of widgets.
+//
+// A second pass, with its own once-flag, moves every 8% hairline to
+// CARD_HAIRLINE: the registry and the templates wrote 8% for a while, and so did
+// the first pass above, into every card it folded. See migrateCardHairline.
 //
 // Deliberately narrow, because this edits the operator's layouts: only the exact
 // strings the registry wrote. A background an operator picked themselves is left
 // alone.
 
-import { opaqueGroundFor } from "../types/readout-types.js";
+import { CARD_HAIRLINE, opaqueGroundFor } from "../types/readout-types.js";
 import type { LayoutObject, View } from "../types/views.js";
 
 /**
@@ -44,7 +49,7 @@ import type { LayoutObject, View } from "../types/views.js";
  * else, is not touched.
  */
 const LEGACY_CARD = { background: "#191919", borderColor: "rgba(255,255,255,0.10)" } as const;
-const CURRENT_CARD = { background: "#141414", borderColor: "rgba(255,255,255,0.08)" } as const;
+const CURRENT_CARD = { background: "#141414", borderColor: CARD_HAIRLINE } as const;
 
 function isLegacyCard(style: LayoutObject["style"]): boolean {
   return (
@@ -102,6 +107,56 @@ export function countNeverChosen(views: readonly View[]): number {
   const walk = (objs: readonly LayoutObject[] | undefined) => {
     for (const o of objs ?? []) {
       if (opaqueGroundFor(o.style?.background) || isLegacyCard(o.style)) n++;
+      walk(o.children);
+    }
+  };
+  for (const v of views) walk(v.layout?.objects);
+  return n;
+}
+
+/** The hairline the registry, the templates and the first pass above wrote
+ *  before every card border became CARD_HAIRLINE. */
+const FAINT_HAIRLINE = "rgba(255,255,255,0.08)";
+
+function hasFaintHairline(style: LayoutObject["style"]): boolean {
+  return (style?.borderColor ?? "").replace(/\s+/g, "").toLowerCase() === FAINT_HAIRLINE;
+}
+
+/** One object and its children with any 8% hairline raised to CARD_HAIRLINE.
+ *  Returns the SAME object when nothing changed. */
+function raiseHairline(o: LayoutObject): LayoutObject {
+  const kids = o.children?.map(raiseHairline);
+  const kidsChanged = kids != null && kids.some((k, i) => k !== o.children![i]);
+  if (!hasFaintHairline(o.style)) return kidsChanged ? { ...o, children: kids } : o;
+  return { ...o, style: { ...o.style, borderColor: CARD_HAIRLINE }, ...(kidsChanged ? { children: kids } : null) };
+}
+
+/**
+ * Give every object wearing the old 8% hairline the card border new widgets
+ * get, on any ground. Runs once, like the pass above, and for the same reason:
+ * after it has run, an 8% border is one the operator picked.
+ *
+ * Returns the views array BY REFERENCE when nothing changed.
+ */
+export function migrateCardHairline(views: readonly View[]): View[] {
+  let changed = false;
+  const out = views.map((v) => {
+    const objects = v.layout?.objects;
+    if (!objects?.length) return v;
+    const raised = objects.map(raiseHairline);
+    if (!raised.some((o, i) => o !== objects[i])) return v;
+    changed = true;
+    return { ...v, layout: { ...v.layout!, objects: raised } };
+  });
+  return changed ? out : (views as View[]);
+}
+
+/** How many objects migrateCardHairline would change, for its log line. */
+export function countFaintHairlines(views: readonly View[]): number {
+  let n = 0;
+  const walk = (objs: readonly LayoutObject[] | undefined) => {
+    for (const o of objs ?? []) {
+      if (hasFaintHairline(o.style)) n++;
       walk(o.children);
     }
   };
