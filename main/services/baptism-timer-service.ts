@@ -46,6 +46,13 @@ function idleState(mode: BaptismMode): BaptismState {
   };
 }
 
+/** The `detail` text every `person-complete` row carries, shared by the four
+ *  call sites (next()'s per-person and grouped-baptism branches, finish()'s
+ *  matching two) so the format cannot drift between them. */
+function personCompleteDetail(p: Pick<BaptismPerson, "testimonyMs" | "baptizeMs">): string {
+  return `t=${p.testimonyMs} b=${p.baptizeMs}`;
+}
+
 /** `list` with `entry` appended, or substituted in place for an entry that
  *  already names the same session — a session that fails to save twice (a
  *  retry that fails again) updates its own reason rather than appending a
@@ -476,7 +483,7 @@ class BaptismTimerService {
       const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
       // Emitted BEFORE personNumber advances, so the row names the person who was
       // just baptized rather than the one about to start their testimony.
-      this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
+      this.emitRaw("person-complete", person.baptizeMs, personCompleteDetail(person));
       this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, ...this.startSegment(0) };
       return this.commit();
     }
@@ -528,11 +535,7 @@ class BaptismTimerService {
       // was folded into baptisms-armed, for whoever arms last), correctly
       // carrying baptizeMs: 0 until a real press updates it.
       if (!this.state.armed) {
-        this.emitRaw(
-          "person-complete",
-          justBaptized.baptizeMs,
-          `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
-        );
+        this.emitRaw("person-complete", justBaptized.baptizeMs, personCompleteDetail(justBaptized));
       }
       if (this.state.baptismIndex + 1 < people.length) {
         const fromArmed = this.state.armed === true; // read before startSegment() clears it
@@ -576,7 +579,7 @@ class BaptismTimerService {
       if (this.state.phase === "baptism") {
         const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
         people.push(person);
-        this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
+        this.emitRaw("person-complete", person.baptizeMs, personCompleteDetail(person));
       } else if (this.state.phase === "testimony") {
         const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
         people.push(person);
@@ -603,11 +606,7 @@ class BaptismTimerService {
       // per-person mode never sets `armed`, so this can only suppress the
       // grouped case, and per-person's own row above is unaffected.
       if (!this.state.armed) {
-        this.emitRaw(
-          "person-complete",
-          justBaptized.baptizeMs,
-          `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
-        );
+        this.emitRaw("person-complete", justBaptized.baptizeMs, personCompleteDetail(justBaptized));
       }
     } else if (this.state.phase === "baptism") {
       // finalize() below runs unconditionally and archives a "finish" row
