@@ -231,6 +231,15 @@ class BaptismStore {
         next.push(s);
       }
       if (!changed) return file;
+      // Newest-first, like addSessions' own merge — never a bare push. addSession's
+      // cap eviction (see its own doc comment) trusts file.sessions to already be in
+      // that order and evicts from the tail without re-sorting; a session this
+      // pushed onto the end regardless of its own startedAt landed in the "oldest"
+      // storage position even when it was the newest thing in the store, so the very
+      // next live Finish evicted the session a rebuild had just restored instead of
+      // one genuinely old. Unreachable below MAX_SESSIONS, so this is for
+      // consistency with the store's own ordering contract, not a live risk today.
+      next.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
       return { ...file, sessions: next };
     });
     return { added: addedIds.size, addedIds, updated: updatedIds.size, updatedIds, full };

@@ -326,3 +326,58 @@ describe("mergeRebuilt never evicts, even at the cap", () => {
     }
   });
 });
+
+// mergeRebuilt's own eviction contract (see its doc
+// comment) never evicts, but addSession's DOES, at the cap — and addSession
+// reads file.sessions directly rather than a freshly-sorted view, trusting
+// every earlier append to have kept it newest-first. mergeRebuilt broke that:
+// it pushed a restored session at the tail of the array regardless of its
+// own startedAt, so a session restored from last Sunday landed in the
+// "oldest" storage position even though it was the newest thing in the
+// store. The very next live Finish then evicted THAT session instead of one
+// genuinely years old.
+describe("mergeRebuilt keeps storage newest-first, so eviction takes the oldest", () => {
+  it("a session a rebuild restores is not the one the next live Finish evicts at the cap", async () => {
+    const before = await baptismStore.listSessions();
+    const fillerCount = Math.max(0, MAX_SESSIONS - 1 - before.length);
+    const base = Date.UTC(2020, 0, 1);
+    const filler: BaptismSession[] = Array.from({ length: fillerCount }, (_, i) => ({
+      id: `bap-evict-filler-${i}`,
+      startedAt: new Date(base + i * 86_400_000).toISOString(),
+      finishedAt: new Date(base + i * 86_400_000 + 60_000).toISOString(),
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+    }) as unknown as BaptismSession);
+    await baptismStore.addSessions(filler);
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS - 1, "precondition: exactly one slot free before the restore");
+
+    const restoredId = "bap-evict-restored";
+    const restored = {
+      id: restoredId,
+      startedAt: new Date(Date.UTC(2026, 8, 20, 15)).toISOString(), // last Sunday
+      finishedAt: new Date(Date.UTC(2026, 8, 20, 16)).toISOString(),
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+    } as unknown as BaptismSession;
+
+    const liveId = "bap-evict-live";
+    try {
+      const r = await baptismStore.mergeRebuilt([restored]);
+      assert.equal(r.added, 1, "precondition: the restore landed");
+
+      // Tomorrow's live Finish, arriving at the cap.
+      await baptismStore.addSession({
+        id: liveId,
+        startedAt: new Date(Date.UTC(2026, 8, 27, 15)).toISOString(),
+        finishedAt: new Date(Date.UTC(2026, 8, 27, 16)).toISOString(),
+        people: [{ testimonyMs: 1, baptizeMs: 1 }],
+      } as unknown as BaptismSession);
+
+      const ids = new Set((await baptismStore.listSessions()).map((s) => s.id));
+      assert.ok(ids.has(restoredId), `the just-restored ${restoredId} was evicted while sessions from 2020 were kept`);
+      assert.ok(!ids.has(filler[0]!.id), "the oldest filler session (2020-01-01) should be the one evicted instead");
+    } finally {
+      for (const f of filler) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(restoredId);
+      await baptismStore.deleteSession(liveId);
+    }
+  });
+});
