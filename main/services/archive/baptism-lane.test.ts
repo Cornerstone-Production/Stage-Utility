@@ -496,10 +496,14 @@ describe("baptismLaneSpans: session boundaries", () => {
 });
 
 describe("baptismLaneSpans: a clock started from armed with no row of its own", () => {
-  it("opens it on the baptisms-start that next() writes, at the person that row names", () => {
-    // The file as the emitter writes it: no row for person 1 (nobody's clock
-    // ran), and baptisms-start for person 2's — the row advance() writes for
-    // person 1's, one index further in.
+  it("opens it on a baptisms-start row at whatever person it names", () => {
+    // A file from before next() was fixed: a direct
+    // POST /api/baptism/next while armed used to skip person 1 (no row,
+    // nobody's clock ran) and start person 2's, writing baptisms-start one
+    // index further in than advance() ever does. The lane reads whatever
+    // index the row names — it does not assume 0 — so an already-recorded
+    // file with this shape still replays correctly; no current press produces
+    // it anymore.
     assert.deepEqual(lane([
       row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
       row(23, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "23000" }),

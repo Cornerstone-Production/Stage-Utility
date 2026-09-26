@@ -282,6 +282,11 @@ next — the walk-up, the words spoken over them, the dunk, and getting out, nev
 the moment of submersion by itself. There is nothing to pause while armed, so
 that button is hidden until the first press.
 
+Every route that steps the timer forward while armed — the panel, a Companion
+action, an automation cue — starts "First person in" the same way; none of
+them skips person 1. Finish while armed still ends the session with nobody
+baptized, which is what it is for.
+
 Undo takes back these presses one at a time, latest first. After "First person
 in" it returns to armed: person 1's clock is thrown away and everyone who
 testified is still waiting, so the next press starts person 1 over. While armed,

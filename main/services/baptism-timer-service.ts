@@ -425,6 +425,20 @@ class BaptismTimerService {
     return this.commit();
   }
 
+  /** "First person in": begin the person waiting at `baptismIndex` without
+   *  banking the armed stretch, and without closing anyone. Shared by
+   *  advance() and next() — both reach this exact press while armed, and
+   *  once wrote it out separately: next() used to special-case armed
+   *  into skipping the waiting person (baptizeMs stuck at 0, never baptized)
+   *  and starting the NEXT one's clock instead, which is how a Companion
+   *  "Next" press or a panel press racing the auto-arm closed person 1 having
+   *  never run a clock for them. */
+  private beginFirstPerson(): BaptismState {
+    this.state = { ...this.state, ...this.startSegment(0) };
+    this.emitRaw("baptisms-start", 0);
+    return this.commit();
+  }
+
   /**
    * The phase-aware primary press — dispatches to whichever action is legal
    * for the CURRENT phase, so a caller that does not track phase (Companion,
@@ -436,12 +450,7 @@ class BaptismTimerService {
    */
   advance(): BaptismState {
     if (this.state.phase === "idle") return this.start();
-    if (this.state.armed) {
-      // "First person in": begin person 1 without banking the armed stretch.
-      this.state = { ...this.state, ...this.startSegment(0) };
-      this.emitRaw("baptisms-start", 0);
-      return this.commit();
-    }
+    if (this.state.armed) return this.beginFirstPerson();
     if (this.state.phase === "testimony") {
       return this.state.mode === "grouped" ? this.next() : this.baptized();
     }
@@ -507,9 +516,17 @@ class BaptismTimerService {
       // armed is cleared). With nobody at this index there is nothing to step
       // forward from, so this is a no-op rather than inventing a person.
       //
-      // `armed` may still be true here — /api/baptism/next is a documented route,
-      // reachable directly (bypassing advance()) while the phase is armed — so
-      // startSegment() clearing it is load-bearing, not just tidy.
+      // Armed is handled FIRST, taking the exact "First person in" branch
+      // advance() takes — beginFirstPerson() starts whoever is waiting at
+      // baptismIndex, closing nobody. `/api/baptism/next` is a documented
+      // route, reachable directly (bypassing advance()) while the phase is
+      // armed — Companion's "Next" action does exactly this, and so does a
+      // panel press racing the auto-arm. Until this fix next() treated armed
+      // as "skip the waiting person and start the following one's clock
+      // instead" — closing them with `baptizeMs: 0` though nobody's clock had
+      // run, and ending a one-person session with nobody baptized at all.
+      if (this.state.armed) return this.beginFirstPerson();
+
       const people = this.state.people.map((p, i) => (i === this.state.baptismIndex ? { ...p, baptizeMs: this.elapsedMs() } : p));
       const justBaptized = people[this.state.baptismIndex]!;
       // Emitted against THIS state — mode/phase/baptismIndex still name the
@@ -523,29 +540,9 @@ class BaptismTimerService {
       // person in a grouped session auto-finishes straight into finalize()
       // rather than reaching a `return this.commit()` of its own, so this call
       // is the only chance to record their completion at all.
-      //
-      // Guarded on `!armed`: /api/baptism/next is a documented route reachable
-      // directly while armed (see the comment above), and calling it there
-      // closes person 0 having never run a clock — segmentStartedAt is null
-      // and segmentAccumMs is 0, so elapsedMs() reads 0 the same as it would
-      // for a genuine instant baptism. A person-complete row cannot tell those
-      // apart, and a replay reading "a person-complete row exists" as "this
-      // person was baptized" would invent one that never happened. Nothing is
-      // lost by skipping it: this person already has a testimony-end row (or
-      // was folded into baptisms-armed, for whoever arms last), correctly
-      // carrying baptizeMs: 0 until a real press updates it.
-      if (!this.state.armed) {
-        this.emitRaw("person-complete", justBaptized.baptizeMs, personCompleteDetail(justBaptized));
-      }
+      this.emitRaw("person-complete", justBaptized.baptizeMs, personCompleteDetail(justBaptized));
       if (this.state.baptismIndex + 1 < people.length) {
-        const fromArmed = this.state.armed === true; // read before startSegment() clears it
         this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment(0) };
-        // A clock started from armed writes the row advance()'s armed branch
-        // writes, and at the same point: after the state moves, so it names the
-        // person whose clock this is. Without it this was the one clock start
-        // the raw log never recorded — the person-complete above is suppressed
-        // while armed, rightly, and nothing else stood in for it.
-        if (fromArmed) this.emitRaw("baptisms-start", 0);
         return this.commit();
       }
       // last person baptized → close the session.

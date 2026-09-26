@@ -291,9 +291,11 @@ describe("armed is contained — it cannot survive the action that ends it", () 
     assert.equal(armedAt.people.length, 2);
 
     // /api/baptism/next is a documented, reachable route — this is not a
-    // hypothetical misuse.
+    // hypothetical misuse. next() while armed takes the same "First person
+    // in" branch advance() does: it starts person 0's clock rather than
+    // closing them with baptizeMs 0 and jumping to person 1.
     const after = baptismTimerService.next();
-    assert.equal(after.baptismIndex, 1, "moved to the next person");
+    assert.equal(after.baptismIndex, 0, "still waiting on person 0 — next() no longer skips them");
     assert.notEqual(after.segmentStartedAt, null, "a clock is now running");
     assert.equal(after.armed ?? false, false, "armed must not survive next() while it was true");
     // No assertArmedImpliesNoClock call here: armed is already known false, so
