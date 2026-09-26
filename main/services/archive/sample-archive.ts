@@ -18,7 +18,7 @@ import * as path from "node:path";
 import type { BaptismRawFields } from "../../types/stage.js";
 import { atomicWrite } from "../write-queue.js";
 import { serviceDirPath } from "./archive-paths.js";
-import { readArchiveRows, rolledFiles, type ArchiveRow } from "./archive-rows.js";
+import { readArchiveRows, rolledFiles, rowsByTime, type ArchiveRow } from "./archive-rows.js";
 import { CsvAppender } from "./csv-appender.js";
 import { encodeRow } from "../csv.js";
 
@@ -243,7 +243,7 @@ class SampleArchive {
       if (!srcRows || srcRows.length === 0) continue;
       const tgtRows = (await readArchiveRows(tgtDir, base)) ?? [];
 
-      const all = sortByTime([...tgtRows, ...srcRows]);
+      const all = rowsByTime([...tgtRows, ...srcRows]);
       const header = unionHeader(all);
       await fs.mkdir(tgtDir, { recursive: true });
       const body = [encodeRow(header), ...all.map((r) => encodeRow(header.map((h) => r[h] ?? "")))].join("");
@@ -286,18 +286,6 @@ class SampleArchive {
   closeService(serviceKey: string): void {
     this.services.delete(serviceKey);
   }
-}
-
-/** Chronological, with unparseable timestamps left where they were — sort is
- *  stable, so returning 0 for a bad `at` keeps it beside its neighbours rather
- *  than herding every damaged row to one end. */
-function sortByTime(rows: ArchiveRow[]): ArchiveRow[] {
-  return rows.sort((a, b) => {
-    const ta = Date.parse(a.at ?? "");
-    const tb = Date.parse(b.at ?? "");
-    if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
-    return ta - tb;
-  });
 }
 
 /** Every column across the rows, `at` first, then first-seen order. */
