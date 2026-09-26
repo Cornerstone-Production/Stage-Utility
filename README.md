@@ -60,14 +60,13 @@ screens at it as you like; change the view and every screen follows. A
 phone-friendly remote runs on the same network, so someone on the floor can
 reassign a mic or switch plans without going back to the booth.
 
-```
-Planning Center ─┐                        ┌─ Displays      /display-1, /display-2 …
-   plan, people  │    ┌──────────────┐    │
-Wireless, audio ─┼───▶│  Node server │───▶├─ Settings      /settings
-   and video gear│    │    :8788     │    │
-                 │    └──────────────┘    ├─ Phone remote
-                 │                        │
-                 └── on your network ─────┴─ REST /api/*  ·  SSE /api/events
+```mermaid
+flowchart LR
+  pco["Planning Center<br/>plan, people, live timer"] --> server
+  gear["Your gear<br/>wireless, audio, video, control"] <--> server
+  server["Stage Utility<br/>a small server on your network"]
+  server --> displays["Displays<br/>any screen with a browser"]
+  server <--> app["Operator app<br/>any browser, phone included"]
 ```
 
 The server holds the connections to your gear, resolves the current plan into

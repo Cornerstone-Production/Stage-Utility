@@ -421,8 +421,8 @@ and average are building-only — the zone endpoint does not report them. See
 
 **Mode** picks **Latest**, one line that replaces itself as new words arrive, or
 **Rolling**, a scrolling multi-line feed like the Captions display. In Rolling,
-**Lines** caps how many show, 1 to 10; a widget whose cap was never set shows as
-many as fit. **Channels shown** hides any channel from this widget, and lists
+**Lines** caps how many show, 1 to 10; left blank it reads **Fit** and shows as
+many as the widget holds. **Channels shown** hides any channel from this widget, and lists
 the channels once captions have arrived.
 
 ## Baptisms

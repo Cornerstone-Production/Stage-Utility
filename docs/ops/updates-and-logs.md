@@ -198,7 +198,7 @@ as such rather than given a doc link it doesn't need.
 | `[history-edit]` | Merging one recorded service into another: [The service page](../features/attendance-and-history.md#the-service-page) |
 | `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |
 | `[kiosk-responder]` | The UDP discovery responder starting, or a socket/reply error: [Discovery](../kiosk-devices.md#discovery) |
-| `[layout-defaults]` | A one-time cleanup of an old layout object's card-ground styling — internal plumbing, not an operator signal |
+| `[layout-defaults]` | The one-time card cleanups on load, with a count: a translucent or older card ground folded to the current card, and an 8% card border raised to 10%: [Layout editor](../reference/layout-editor.md) |
 | `[layout-editor]` | Browser-side: the layout editor's own reads (targets, commands, services, files, saved groups) failing |
 | `[layout-images]` | Orphaned uploaded layout images pruned: [Under load](reliability.md#under-load) |
 | `[live-poller]` | The live-service tick failing for one integration, and the poller starting: [Winding down between services](reliability.md#winding-down-between-services) |
