@@ -151,7 +151,12 @@ function stubFetch(
         if (a?.code) errBody.code = a.code;
         return ok(errBody, opts.rebuildStatus);
       }
-      return ok(opts.rebuildAnswer ?? { rows: 3, sessions: 1, updated: 1, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
+      // restoredIds is a REQUIRED field on the real BaptismRebuildOutcome
+      // (history-edit.ts) — omitting it here used to go unnoticed because
+      // runBaptismRebuild called onRebuilt() before ever reading it; now that
+      // it decides whether to call onRebuilt() at all, an outcome missing it
+      // threw and read as "Rebuild failed" instead of the intended default.
+      return ok(opts.rebuildAnswer ?? { rows: 3, sessions: 1, updated: 1, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: [] });
     }
     return ok({});
   }) as unknown as typeof fetch;
@@ -309,18 +314,38 @@ test("cancelling the confirm reaches neither the server nor onRebuilt", async ()
   }
 });
 
-test("confirming calls onRebuilt so Past sessions and Trends can refresh", async () => {
+// A rebuild that restored something also brings the server's own
+// "baptism:rebuilt" push, but onRebuilt still fires from the answer itself:
+// a push lost to an SSE reconnect must not leave Past sessions stale.
+test("confirming a rebuild that restored something calls onRebuilt from its own answer", async () => {
   const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
   const { view, rebuiltCount, restore } = await mount(state, [], {
     live: false,
-    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 },
+    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: ["restored-1"] },
   });
   try {
     fireEvent.click(rebuildButton(view.container));
     await settle();
     fireEvent.click(findButton(document.body, "Rebuild")!);
     await settle();
-    assert.equal(rebuiltCount(), 1, "onRebuilt must fire exactly once after a successful rebuild");
+    assert.equal(rebuiltCount(), 1, "onRebuilt must fire so Past sessions/Trends reload, push or no push");
+  } finally {
+    restore();
+  }
+});
+
+test("confirming a NO-OP rebuild (nothing restored) calls onRebuilt directly — no push will ever follow it", async () => {
+  const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
+  const { view, rebuiltCount, restore } = await mount(state, [], {
+    live: false,
+    rebuildAnswer: { rows: 5, sessions: 2, updated: 0, added: 0, unchanged: 2, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: [] },
+  });
+  try {
+    fireEvent.click(rebuildButton(view.container));
+    await settle();
+    fireEvent.click(findButton(document.body, "Rebuild")!);
+    await settle();
+    assert.equal(rebuiltCount(), 1, "a no-op rebuild's onRebuilt is the ONLY reload it gets — history-edit.ts never broadcasts for it");
   } finally {
     restore();
   }
@@ -647,7 +672,7 @@ test("a successful rebuild toasts what changed", async () => {
   const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
   const { view, restore } = await mount(state, [], {
     live: false,
-    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 },
+    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: ["restored-1"] },
   });
   try {
     fireEvent.click(rebuildButton(view.container));

@@ -139,6 +139,9 @@ export async function runBaptismRebuild(args: {
   }
   try {
     const out = await invoke<BaptismRebuildOutcome>("baptism:rebuild", { serviceKey: args.serviceKey });
+    // Always, even when the server's own "baptism:rebuilt" push will reload
+    // the same list: the operator just pressed Rebuild, and a push lost to an
+    // SSE reconnect must not leave Past sessions showing the old list.
     args.onRebuilt();
     if (args.sessionId && !out.restoredIds.includes(args.sessionId)) {
       toast.error("The raw rows hold no finished copy of this session — copy the report now");

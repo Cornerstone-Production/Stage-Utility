@@ -224,8 +224,10 @@ function stubRebuildFetch(
         if (a?.code) errBody.code = a.code;
         return ok(errBody, opts.rebuildStatus);
       }
+      // restoredIds is a REQUIRED field on the real BaptismRebuildOutcome
+      // (history-edit.ts), and runBaptismRebuild reads it.
       return ok(
-        opts.rebuildAnswer ?? { rows: 1, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0 },
+        opts.rebuildAnswer ?? { rows: 1, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: [] },
       );
     }
     return ok({});
@@ -326,13 +328,19 @@ test("clicking an entry's Rebuild confirms, then posts for THAT entry's serviceK
   // state.serviceKey names the NEXT session once one has started (see
   // baptismSubline) — exactly what this must NOT target.
   const entryStartedAt = "2026-09-13T15:00:00.000Z";
+  const sessionId = baptismSessionId(entryStartedAt);
   const { root, calls, rebuiltCount, restore } = await mountWithRebuild(
     {
       ...FINISHED,
       serviceKey: "svc-next-session",
-      saveErrors: [{ sessionId: baptismSessionId(entryStartedAt), serviceKey: "svc-failed", reason: DISK }],
+      saveErrors: [{ sessionId, serviceKey: "svc-failed", reason: DISK }],
     },
-    { live: false },
+    {
+      live: false,
+      // This entry's OWN session came back — restoredIds names it, so this
+      // does not also trip the "no finished copy of this session" warning.
+      rebuildAnswer: { rows: 1, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: [sessionId] },
+    },
   );
   try {
     const [btn] = rebuildButtonsIn(root);
@@ -347,6 +355,32 @@ test("clicking an entry's Rebuild confirms, then posts for THAT entry's serviceK
     assert.ok(rebuild, "expected a POST to /api/baptism/rebuild");
     assert.deepEqual(rebuild!.body, { serviceKey: "svc-failed" }, "must target the FAILED entry's own serviceKey");
     assert.equal(rebuiltCount(), 1, "onRebuilt must fire so Past sessions/Trends can reload");
+  } finally {
+    restore();
+  }
+});
+
+test("a NO-OP entry rebuild (nothing restored) calls onRebuilt directly — no push will ever follow it", async () => {
+  const entryStartedAt = "2026-09-06T15:00:00.000Z";
+  const { root, rebuiltCount, restore } = await mountWithRebuild(
+    {
+      ...FINISHED,
+      serviceKey: "svc-next-session",
+      saveErrors: [{ sessionId: baptismSessionId(entryStartedAt), serviceKey: "svc-noop", reason: DISK }],
+    },
+    {
+      live: false,
+      rebuildAnswer: { rows: 1, sessions: 1, updated: 0, added: 0, unchanged: 1, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: [] },
+    },
+  );
+  try {
+    const [btn] = rebuildButtonsIn(root);
+    fireEvent.click(btn!);
+    await settle();
+    fireEvent.click(findInBody("Rebuild")!);
+    await settle();
+    await settle();
+    assert.equal(rebuiltCount(), 1, "a no-op rebuild's onRebuilt is the ONLY reload it gets");
   } finally {
     restore();
   }
