@@ -45,13 +45,18 @@ function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
   };
 }
 
+/** A minimal ok `fetch()` response — shared by every stub below, which used
+ *  to each define this same one-liner themselves. */
+function okResponse(json: unknown) {
+  return { ok: true, status: 200, json: async () => json, text: async () => "" };
+}
+
 function stubFetch(lane: { spans: unknown[] }) {
   return (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
-    if (url.includes("/api/baptism/lane")) return ok(lane);
-    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
-    return ok({});
+    if (url.includes("/api/baptism/lane")) return okResponse(lane);
+    if (url.includes("/api/service-timeline/")) return okResponse({ items: [] });
+    return okResponse({});
   }) as unknown as typeof fetch;
 }
 
@@ -230,12 +235,11 @@ test("a load failure shows its own error note, distinct from 'no timeline was re
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
-    if (url.includes("/api/log/client")) return ok({});
+    if (url.includes("/api/log/client")) return okResponse({});
     if (url.includes("/api/baptism/lane")) throw new Error("network down");
-    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
+    if (url.includes("/api/service-timeline/")) return okResponse({ items: [] });
     void init;
-    return ok({});
+    return okResponse({});
   }) as unknown as typeof fetch;
   try {
     render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()] }));
@@ -280,17 +284,16 @@ test("the host is observed from the very first render, before the lane even load
   // component's FIRST render genuinely has `loaded === false`.
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     await new Promise((r) => setTimeout(r, 0));
     if (url.includes("/api/baptism/lane")) {
-      return ok({
+      return okResponse({
         spans: [
           { kind: "testimony", person: 1, startedAt: "2026-09-20T15:00:00.000Z", endedAt: "2026-09-20T15:02:00.000Z" },
         ],
       });
     }
-    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
-    return ok({});
+    if (url.includes("/api/service-timeline/")) return okResponse({ items: [] });
+    return okResponse({});
   }) as unknown as typeof fetch;
   try {
     render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()] }));

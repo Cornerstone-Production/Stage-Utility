@@ -63,16 +63,21 @@ const IDLE_NO_KEY: BaptismState = {
   people: [], pendingTestimonyMs: null, serviceTitle: null, serviceTypeId: null, planId: null, serviceKey: null,
 };
 
+/** A minimal ok `fetch()` response — shared by every stub below, which used to
+ *  each define this same one-liner themselves. */
+function okResponse(json: unknown) {
+  return { ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) };
+}
+
 function stubFetch(sessionsOk: boolean) {
   return (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) });
-    if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
+    if (url.endsWith("/api/baptism")) return okResponse(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
-      if (sessionsOk) return ok([]);
+      if (sessionsOk) return okResponse([]);
       return { ok: false, status: 500, json: async () => ({ error: "boom" }), text: async () => '{"error":"boom"}' };
     }
-    return ok({});
+    return okResponse({});
   }) as unknown as typeof fetch;
 }
 
@@ -129,13 +134,12 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) });
-    if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
+    if (url.endsWith("/api/baptism")) return okResponse(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
       sessionCalls += 1;
-      return ok([]);
+      return okResponse([]);
     }
-    return ok({});
+    return okResponse({});
   }) as unknown as typeof fetch;
   try {
     render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
@@ -183,18 +187,17 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) });
-    if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
+    if (url.endsWith("/api/baptism")) return okResponse(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
       sessionCalls += 1;
-      return ok([PAST_SESSION]);
+      return okResponse([PAST_SESSION]);
     }
-    if (url.includes("/api/history/live")) return ok({ live: false });
+    if (url.includes("/api/history/live")) return okResponse({ live: false });
     if (url.includes("/api/baptism/rebuild")) {
       void init;
-      return ok({ rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: ["bap-past-1"] });
+      return okResponse({ rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: ["bap-past-1"] });
     }
-    return ok({});
+    return okResponse({});
   }) as unknown as typeof fetch;
   try {
     const rootRoute = createRootRoute({});
