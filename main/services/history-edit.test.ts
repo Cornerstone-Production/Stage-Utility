@@ -29,6 +29,10 @@ const { baptismStore } = await import("./baptism-store.js");
 const { deleteServiceRecords, editServiceWindow, mergeServiceRecords, recalcAttendance, ServiceIsLiveError } =
   await import("./history-edit.js");
 const { applyItemTimeEdits } = await import("./history-item-times.js");
+const { addBroadcastListener } = await import("./broadcaster.js");
+
+const broadcasts: { channel: string; payload: unknown }[] = [];
+addBroadcastListener((channel, payload) => broadcasts.push({ channel, payload }));
 
 const T0 = Date.parse("2026-08-09T14:00:00.000Z");
 
@@ -530,6 +534,49 @@ describe("merging when only one side has a record in a store", () => {
     assert.ok(outcome.moved.includes("baptism sessions"), "the merge must report the re-key");
     const all = await baptismStore.listSessions();
     assert.equal(all.find((s) => s.id === "bap-merge-1")?.serviceKey, "tgt", "the session must follow the archive it belongs to");
+  });
+
+  // Re-keying the store (above) is silent to everything BUT the next fetch of
+  // it. A Baptisms tab or History page already open on the target — or on the
+  // source, before it disappears from the list — keeps showing what it last
+  // fetched until something tells it to reload. reload-on-baptism-change.ts
+  // (shared by both pages) reloads unconditionally on `baptism:rebuilt`, the
+  // same channel a rebuild's own restoredIds push already uses.
+  it("announces the re-key on baptism:rebuilt, so an open Baptisms tab or History page reloads", async () => {
+    await attendanceStore.upsert(record("tgt", 100, [100], 0));
+    await attendanceStore.upsert(record("src", 200, [200], 30));
+    const session2 = {
+      id: "bap-merge-2",
+      startedAt: new Date(T0).toISOString(),
+      finishedAt: new Date(T0 + 60_000).toISOString(),
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+      serviceKey: "src",
+    } as never;
+    await baptismStore.addSession(session2);
+
+    broadcasts.length = 0;
+    await mergeServiceRecords("src", "tgt");
+
+    const push = broadcasts.find((p) => p.channel === "baptism:rebuilt");
+    assert.ok(push, `expected a baptism:rebuilt push once a session actually re-keyed, got: ${JSON.stringify(broadcasts.map((p) => p.channel))}`);
+    assert.deepEqual(push?.payload, { serviceKey: "tgt", ids: ["bap-merge-2"] });
+  });
+
+  it("does not announce baptism:rebuilt when nothing was re-keyed", async () => {
+    await attendanceStore.upsert(record("tgt", 100, [100], 0));
+    await attendanceStore.upsert(record("src", 200, [200], 30));
+
+    broadcasts.length = 0;
+    await mergeServiceRecords("src", "tgt");
+
+    assert.equal(
+      broadcasts.some((p) => p.channel === "baptism:rebuilt"),
+      false,
+      "no baptism session moved, so baptism:rebuilt must not fire",
+    );
   });
 });
 

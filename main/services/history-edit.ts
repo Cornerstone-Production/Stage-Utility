@@ -1630,7 +1630,16 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
   // now-deleted serviceKey — GET /api/baptism/lane?serviceKey=<target>
   // answered [] for it, and it linked to no service at all.
   const rekeyedSessions = await baptismStore.rekeyServiceKey(sourceKey, targetKey);
-  if (rekeyedSessions > 0) outcome.moved.push("baptism sessions");
+  if (rekeyedSessions.size > 0) {
+    outcome.moved.push("baptism sessions");
+    // Nothing above reloads a session list on its own — a Baptisms tab or
+    // History page open elsewhere still holds the source's own sessions
+    // under the source key until something tells it to refetch.
+    // `baptism:rebuilt` is the one channel reload-on-baptism-change.ts
+    // already reloads on unconditionally, same shape as a rebuild's own
+    // `restoredIds` push above.
+    broadcast("baptism:rebuilt", { serviceKey: targetKey, ids: [...rekeyedSessions] });
+  }
 
   console.log(
     `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: ` +

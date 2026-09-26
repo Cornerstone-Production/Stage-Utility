@@ -462,13 +462,14 @@ describe("rekeyServiceKey", () => {
     await baptismStore.addSessions([moved1, moved2, untouched]);
     try {
       const moved = await baptismStore.rekeyServiceKey("src-key", "tgt-key");
-      assert.equal(moved, 2, "exactly the two sessions under the source key must move");
+      assert.equal(moved.size, 2, "exactly the two sessions under the source key must move");
+      assert.deepEqual([...moved].sort(), [moved1.id, moved2.id].sort(), "the ids returned must be the ones that actually moved");
 
       const all = await baptismStore.listSessions();
       assert.equal(all.find((s) => s.id === moved1.id)?.serviceKey, "tgt-key");
       assert.equal(all.find((s) => s.id === moved2.id)?.serviceKey, "tgt-key");
       assert.equal(all.find((s) => s.id === untouched.id)?.serviceKey, "other-key", "an unrelated session's key must not change");
-      assert.equal((await baptismStore.rekeyServiceKey("src-key", "tgt-key")).valueOf(), 0, "nothing left under the source key on a second call");
+      assert.equal((await baptismStore.rekeyServiceKey("src-key", "tgt-key")).size, 0, "nothing left under the source key on a second call");
     } finally {
       await baptismStore.deleteSession(moved1.id);
       await baptismStore.deleteSession(moved2.id);
@@ -479,10 +480,10 @@ describe("rekeyServiceKey", () => {
   it("is a no-op for an empty, missing or identical key, and does not write", async () => {
     const spy = spyOnWrite();
     try {
-      assert.equal(await baptismStore.rekeyServiceKey("", "tgt"), 0);
-      assert.equal(await baptismStore.rekeyServiceKey("src", ""), 0);
-      assert.equal(await baptismStore.rekeyServiceKey("same", "same"), 0);
-      assert.equal(await baptismStore.rekeyServiceKey("nothing-recorded-under-this-key", "tgt"), 0);
+      assert.equal((await baptismStore.rekeyServiceKey("", "tgt")).size, 0);
+      assert.equal((await baptismStore.rekeyServiceKey("src", "")).size, 0);
+      assert.equal((await baptismStore.rekeyServiceKey("same", "same")).size, 0);
+      assert.equal((await baptismStore.rekeyServiceKey("nothing-recorded-under-this-key", "tgt")).size, 0);
       assert.equal(spy.calls(), 0, "no session moved, so nothing should reach the underlying write");
     } finally {
       spy.restore();

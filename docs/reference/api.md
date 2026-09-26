@@ -574,7 +574,8 @@ something to change:
 
 `baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
 save-failure note's, or History's whole-service rebuild — actually writes a
-session: `{serviceKey, ids}`, `ids` naming the sessions it added or updated.
+session, and when a History merge moves sessions onto the service it keeps:
+`{serviceKey, ids}`, `ids` naming the sessions added, updated or moved.
 
 Every status snapshot carries a `rev` counter so a hydrate read cannot overwrite
 a newer push — see [Integrations](../integrations/README.md#the-snapshot-version).

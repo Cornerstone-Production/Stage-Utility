@@ -302,24 +302,26 @@ class BaptismStore {
    * source key does not follow it on its own: `GET
    * /api/baptism/lane?serviceKey=<target>` answered `[]` for it, and the
    * source's own service record having just been deleted by the merge, it
-   * would link to nothing at all. Returns how many sessions moved, so the
-   * caller can log it only when it actually did something.
+   * would link to nothing at all. Returns the ids that moved, so the caller
+   * can log or broadcast only when it actually did something — the same
+   * shape a rebuild's own `restoredIds` carries into its own
+   * `baptism:rebuilt` push.
    */
-  async rekeyServiceKey(from: string, to: string): Promise<number> {
-    if (!from || !to || from === to) return 0;
-    let moved = 0;
+  async rekeyServiceKey(from: string, to: string): Promise<Set<string>> {
+    const movedIds = new Set<string>();
+    if (!from || !to || from === to) return movedIds;
     await this.store.update((file) => {
       let changed = false;
       const sessions = file.sessions.map((s) => {
         if (s.serviceKey !== from) return s;
         changed = true;
-        moved += 1;
+        movedIds.add(s.id);
         return { ...s, serviceKey: to };
       });
       if (!changed) return file;
       return { ...file, sessions };
     });
-    return moved;
+    return movedIds;
   }
 }
 
