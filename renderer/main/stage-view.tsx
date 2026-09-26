@@ -273,7 +273,7 @@ function KioskEmpty({ state, screen }: { state: StageState; screen: ScreenChrome
         <p className="text-title3 text-fg font-semibold">
           {state.planTitle ? state.planTitle : "No plan selected"}
         </p>
-        <p className="text-body text-fg-muted">No mic slots assigned yet. Add slots in Settings.</p>
+        <p className="text-body text-fg-muted">No mic slots assigned yet. Add them on this view's page under Screens.</p>
       </div>
     </div>
   );
