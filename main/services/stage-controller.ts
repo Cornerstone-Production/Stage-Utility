@@ -643,10 +643,11 @@ export class StageController {
     const raised = alreadyRaised ? cleaned : migrateCardHairline(cleaned);
     const raisedCount = alreadyRaised ? 0 : countFaintHairlines(cleaned);
     // Recorded even when they found nothing: a fresh install has nothing to
-    // clean, and must still never run either again.
-    if (!alreadyCleaned || !alreadyRaised) {
-      await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true });
-    }
+    // clean, and must still never run either again. NOT patched here, though:
+    // see needsFlagPatch below — a crash between this and viewsStore.save()
+    // left settings.json saying the pass ran while views.json still carried
+    // the pre-migration data, and it never got another chance to.
+    const needsFlagPatch = !alreadyCleaned || !alreadyRaised;
     if (cleanedCount > 0) {
       console.log(
         `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
@@ -669,10 +670,18 @@ export class StageController {
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged =
       slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
-    if (!viewsChanged && !outputsChanged) return { views, outputs };
+    if (!viewsChanged && !outputsChanged) {
+      // Nothing left to save this pass, so recording the flags here cannot
+      // outrun a write that isn't happening.
+      if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true });
+      return { views, outputs };
+    }
 
     if (viewsChanged) await viewsStore.save(result.views);
     if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
+    // AFTER the saves above, not before: a crash here at worst repeats an
+    // idempotent pass on the next boot, rather than skipping it for good.
+    if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true });
 
     // Logged in full, and this one is not optional: the operator's screen has a
     // different URL than it did yesterday, and the only way they learn that is
