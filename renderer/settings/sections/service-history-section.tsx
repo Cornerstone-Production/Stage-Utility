@@ -28,6 +28,7 @@ import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSound
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
+import { reloadOnBaptismChange } from "./baptisms/reload-on-baptism-change";
 import { TrendsCard } from "./history-trends/trends-card";
 import { useHistoryShown, type RowSpl } from "./history-shown";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
@@ -962,14 +963,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // selectedKey changing (opening a service is exactly the moment its own
   // just-finished session needs to be current — a page left open through a
   // live baptism session used to show it only after a full reload, since the
-  // fetch ran once and never again), and on a live, non-replayed
-  // "baptism:state" push whose own finishedAt or saveErrors actually changed
-  // (a session finishing, or a save-failure clearing via a Rebuild done
-  // somewhere ELSE — the Baptisms tab's own header or note — while this page
-  // stays open with no selection change at all). A REPLAYED push is the
-  // connect-time cache of whatever is already true, never a new event; the
-  // signature check on top of that means an unrelated push (a tick, a
-  // workflow toggle) does not refetch the whole session list for nothing.
+  // fetch ran once and never again), and on a session finishing or a Rebuild
+  // changing the store from anywhere ELSE — a second tab, the Baptisms tab's
+  // own header or note, the display's operator panel, or Companion's
+  // baptism.advance/baptism.finish actions — while this page stays open with
+  // no selection change at all. That last part is reloadOnBaptismChange,
+  // shared with baptism-operator.tsx's identical need: see its own comment
+  // for why a replayed push and an unrelated one are both ignored.
   //
   // A failure is not a baptism-free month. This used to `.catch(() =>
   // setBaptisms([]))`, the exact lie the OTHER three loads on this page were
@@ -993,27 +993,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         });
     }
     fetchBaptisms();
-    let lastSignature: string | null = null;
-    const offState = onNotification("baptism:state", (payload, replayed) => {
-      if (replayed) return;
-      const state = payload as BaptismState;
-      const signature = JSON.stringify([state.finishedAt, state.saveErrors ?? null]);
-      if (signature === lastSignature) return;
-      lastSignature = signature;
-      fetchBaptisms();
-    });
-    // A rebuild that adds or updates a session with no save-failure entry to
-    // clear (an operator picking up an older correction, say) never touches
-    // baptism:state at all — this is the store itself changing, from any of
-    // the three routes into applyBaptismRebuild, not a live timer event.
-    const offRebuilt = onNotification("baptism:rebuilt", (_payload, replayed) => {
-      if (replayed) return;
-      fetchBaptisms();
-    });
+    // Shared with baptism-operator.tsx's identical need to react to a session
+    // finishing or a Rebuild done anywhere else — see reload-on-baptism-change.ts.
+    const unsubscribe = reloadOnBaptismChange(fetchBaptisms);
     return () => {
       cancelled = true;
-      offState();
-      offRebuilt();
+      unsubscribe();
     };
   }, [reloadKey, selectedKey, noteFailure, noteLoaded]);
 

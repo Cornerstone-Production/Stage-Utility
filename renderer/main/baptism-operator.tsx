@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
 import { logToServer } from "../lib/client-log";
 import { toast } from "../components/ui";
 import { useBaptismState } from "./use-baptism-state";
@@ -11,6 +11,7 @@ import { TimerCard } from "../settings/sections/baptisms/timer-card";
 import { PeopleCard } from "../settings/sections/baptisms/people-table";
 import { PastSessionsCard } from "../settings/sections/baptisms/past-sessions";
 import { TrendsCard } from "../settings/sections/baptisms/trends-card";
+import { reloadOnBaptismChange } from "../settings/sections/baptisms/reload-on-baptism-change";
 import type { StatFigure } from "../settings/sections/history-chart";
 
 /**
@@ -61,15 +62,16 @@ export function BaptismOperator() {
 
   useEffect(() => {
     reloadSessions();
-    // The header's and the Timer card's own onRebuilt cover a rebuild
-    // started FROM this page; this page can just as easily be open while a
-    // rebuild runs from History instead (the third of the three routes into
-    // applyBaptismRebuild), which never touches either of those props at
-    // all — only the server-side broadcast reaches this tab in that case.
-    return onNotification("baptism:rebuilt", (_payload, replayed) => {
-      if (replayed) return;
-      reloadSessions();
-    });
+    // The header's and the Timer card's own onRebuilt cover a rebuild (or a
+    // Finish) done FROM this page; this page can just as easily be open while
+    // a session finishes or a Rebuild runs somewhere ELSE — a second tab, the
+    // display's operator panel, or Companion's baptism.advance/baptism.finish
+    // actions, whose own help text says "one button runs the whole service".
+    // Only the server-side push reaches this tab in that case, so it is
+    // subscribed unconditionally, not only via those props. Shared with
+    // service-history-section.tsx's identical need — see
+    // reload-on-baptism-change.ts.
+    return reloadOnBaptismChange(reloadSessions);
   }, [reloadSessions]);
 
   async function deleteSession(id: string) {

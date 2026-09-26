@@ -235,3 +235,61 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
     globalThis.fetch = realFetch;
   }
 });
+
+// The only reload triggers used to be mount, baptism:rebuilt, and this page's
+// OWN Finish button (Timer card onFinished) — so a Finish that happens
+// anywhere else left Past sessions and Trends stale until a full page
+// reload. That is now the ordinary path: Companion's baptism.advance/
+// baptism.finish automation actions finalize on the last person with no
+// button press on this page at all, and a second tab or the display's
+// operator panel can finish it too.
+test("a Finish pushed from elsewhere (Companion, a second tab, the display) reloads this page's own sessions", async () => {
+  const LIVE: BaptismState = {
+    mode: "grouped", phase: "baptism", personNumber: 1, baptismIndex: 0, armed: false,
+    segmentStartedAt: "2026-09-27T15:10:00.000Z", segmentAccumMs: 0, sessionStartedAt: "2026-09-27T15:00:00.000Z",
+    finishedAt: null, people: [{ testimonyMs: 60_000, baptizeMs: 0 }], pendingTestimonyMs: null,
+    serviceTitle: "Sunday", serviceTypeId: "st1", planId: "p1", serviceKey: "svc-1",
+  };
+  const FINISHED: BaptismState = {
+    ...LIVE,
+    phase: "idle",
+    segmentStartedAt: null,
+    finishedAt: "2026-09-27T15:11:00.000Z",
+    people: [{ testimonyMs: 60_000, baptizeMs: 60_000 }],
+  };
+  let sessionCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.endsWith("/api/baptism")) return okResponse(LIVE);
+    if (url.endsWith("/api/baptism/sessions")) {
+      sessionCalls += 1;
+      return okResponse([]);
+    }
+    if (url.includes("/api/history/live")) return okResponse({ live: true });
+    if (url.includes("/api/baptism/lane")) return okResponse({ spans: [] });
+    return okResponse({});
+  }) as unknown as typeof fetch;
+  try {
+    const view = render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
+    await settle();
+    await settle();
+    await settle();
+    const mountCalls = sessionCalls;
+    // The server finalizes (a Companion key bound to baptism.advance on the
+    // last person, say) and broadcasts the finished state. Nothing on THIS
+    // page pressed Finish.
+    FakeEventSource.last!.push("baptism:state", FINISHED);
+    await act(async () => {
+      await settle();
+      await settle();
+    });
+    assert.match(view.container.textContent ?? "", /Finished/, "sanity: the pushed finished state reached the page");
+    assert.ok(
+      sessionCalls > mountCalls,
+      `a finish pushed from elsewhere never refetched sessions (calls stayed at ${sessionCalls}); Past sessions and Trends stay stale`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
