@@ -364,6 +364,103 @@ describe("the History service page", () => {
     assert.equal(figure("Vs plan").sub, "9:00 planned");
   });
 
+  // The page passes its OWN det.items into HistorySessionChart — session-chart.tsx
+  // takes them as a prop rather than fetching its own copy (see that file's own
+  // "used to fetch its own plan items once per serviceKey" test), so nothing here
+  // proves the wiring unless it goes through THIS page's state, edited through
+  // the page's own Edit times flow, not a component rerender the page never
+  // triggers on its own.
+  test("the Baptisms card's chart plan lane draws this page's own items, and follows an item-time edit", async (t) => {
+    // A tailored fixture: the shared timeline()/baptisms() pair's session and
+    // item windows never overlap at all (see the six-figures test's own
+    // comment above), so neither would put anything in the plan lane.
+    let tl = {
+      ...timeline(),
+      items: [
+        { itemId: "song", title: "Baptism Song", sequence: 0, plannedLengthSec: 300, startedAt: iso("20:41:00"), endedAt: iso("20:46:00"), actualDurationSec: 300, counted: true },
+      ],
+    };
+    const laneSession = {
+      id: "b-plan-lane",
+      startedAt: iso("20:41:00"),
+      finishedAt: iso("20:49:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
+    };
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string; body?: unknown }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method === "POST" && url === "/api/history/item-times") {
+        const body = JSON.parse(String(init?.body)) as { itemId: string; startedAt?: string | null; endedAt?: string | null };
+        tl = {
+          ...tl,
+          items: tl.items.map((it) =>
+            it.itemId === body.itemId
+              ? {
+                  ...it,
+                  startedAt: typeof body.startedAt === "string" ? body.startedAt : it.startedAt,
+                  endedAt: typeof body.endedAt === "string" ? body.endedAt : it.endedAt,
+                }
+              : it,
+          ),
+        };
+        return ok(tl);
+      }
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([laneSession]);
+      if (/^\/api\/baptism\/lane\?/.test(url)) {
+        // One raw span inside the session's own window — with none at all,
+        // hasChart is false and the card shows the empty note instead of a
+        // chart at all (session-chart.tsx's own gate on sessionOnlySpans).
+        return ok({ spans: [{ kind: "testimony", person: 1, startedAt: iso("20:41:30"), endedAt: iso("20:43:00") }] });
+      }
+      if (url === "/api/service-timeline") return ok([tl]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    assert.ok(bap, "expected the Baptisms card to render");
+    const rectX = () => bap.querySelector("[data-plan-segment] rect")?.getAttribute("x");
+    const before = rectX();
+    assert.ok(before, "expected the page's own item to draw a plan segment in the chart, not an empty items=[] wiring");
+
+    const editBtn = [...view.container.querySelectorAll('[data-testid="history-actions"] button')].find((b) => text(b) === "Edit times")!;
+    assert.ok(editBtn, "expected the Edit times action");
+    fireEvent.click(editBtn);
+    await settle();
+
+    const started = view.container.querySelector('input[aria-label="Started — Baptism Song"]') as HTMLInputElement | null;
+    assert.ok(started, "expected the item's own Started field once Edit times is on");
+    fireEvent.change(started!, { target: { value: "20:44:00" } });
+    await settle();
+
+    const saveItemBtn = [...view.container.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Save times — Baptism Song");
+    assert.ok(saveItemBtn, "expected the item's own Save button once its field is dirty");
+    fireEvent.click(saveItemBtn!);
+    await settle();
+    await settle();
+
+    assert.notEqual(
+      rectX(),
+      before,
+      "the Baptisms card's chart must move its plan lane to the edited item time immediately, without a reload",
+    );
+  });
+
   test("Vs plan says the plan has no lengths rather than pretending they are zero", async (t) => {
     const tlItems = [
       { itemId: "a", title: "Baptism Stories", sequence: 0, plannedLengthSec: null, startedAt: iso("20:40:00"), endedAt: iso("20:50:00"), actualDurationSec: 600, counted: true },
