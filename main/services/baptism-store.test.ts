@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { BaptismSession } from "../types/stage.js";
+import { captureLog } from "./baptism-save-harness.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-store-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -27,24 +28,6 @@ const session = (n: number): BaptismSession =>
     finishedAt: null,
     people: [],
   }) as unknown as BaptismSession;
-
-/** Capture console.log lines starting with `prefix`, the same technique
- *  baptism-legacy-restore.test.ts uses — a guard on a log line has to watch
- *  the real call, not trust that the code makes it. Restore with release()
- *  even on assertion failure. */
-function captureLog(prefix: string): { lines: string[]; release: () => void } {
-  const lines: string[] = [];
-  const original = console.log;
-  console.log = (...args: unknown[]) => {
-    if (typeof args[0] === "string" && args[0].startsWith(prefix)) lines.push(args[0]);
-  };
-  return {
-    lines,
-    release: () => {
-      console.log = original;
-    },
-  };
-}
 
 describe("baptism sessions", () => {
   beforeEach(async () => {

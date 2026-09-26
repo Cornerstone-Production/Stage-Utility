@@ -20,6 +20,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../types/stage.js";
+import { captureLog } from "./baptism-save-harness.js";
 
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
@@ -28,23 +29,6 @@ const { sampleArchive } = await import("./archive/sample-archive.js");
 
 type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
 const rec = () => serviceTimelineRecorder as unknown as Held;
-
-/** Spies on console.log for lines starting with `prefix`, so a silent no-op
- *  guard can be proven to say why it did nothing rather than just that it
- *  didn't throw. Restore with release() even on assertion failure. */
-function captureLog(prefix: string): { lines: string[]; release: () => void } {
-  const lines: string[] = [];
-  const original = console.log;
-  console.log = (...args: unknown[]) => {
-    if (typeof args[0] === "string" && args[0].startsWith(prefix)) lines.push(args[0]);
-  };
-  return {
-    lines,
-    release: () => {
-      console.log = original;
-    },
-  };
-}
 
 describe("undo() survives a restored record that has no people to step back into", () => {
   it("does not throw when a pre-mode record restores as grouped/baptism with an empty people list", async () => {

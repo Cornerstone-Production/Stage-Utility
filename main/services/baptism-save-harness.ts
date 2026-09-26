@@ -1,4 +1,5 @@
-// baptism-save-harness.ts — intercept baptismStore.addSession for a test.
+// baptism-save-harness.ts — intercept baptismStore.addSession for a test, plus
+// the small polling/logging utilities several baptism test files need.
 //
 // NOT shipped code and not a test file: shared by the test files that need a
 // Finish's session save to fail, or need to know when it has settled, the way
@@ -63,3 +64,22 @@ export function interceptAddSession(store: { addSession: AddSession }, impl?: Ad
  *  this module touches no store, so it carries none of the ordering risk
  *  interceptAddSession's own doc comment warns about. */
 export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Spies on console.log for lines starting with `prefix`, so a silent no-op
+ *  guard can be proven to say why it did nothing rather than just that it
+ *  didn't throw. Restore with release() even on assertion failure. Shared for
+ *  the same reason as sleep above: baptism-legacy-restore.test.ts and
+ *  baptism-store.test.ts each kept an identical copy. */
+export function captureLog(prefix: string): { lines: string[]; release: () => void } {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && args[0].startsWith(prefix)) lines.push(args[0]);
+  };
+  return {
+    lines,
+    release: () => {
+      console.log = original;
+    },
+  };
+}
