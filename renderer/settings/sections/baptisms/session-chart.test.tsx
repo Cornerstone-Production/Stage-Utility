@@ -28,6 +28,31 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
   },
 });
 
+/** A fake EventSource that hands the test its channel listeners to fire —
+ *  the same shape session-chart-refetch.test.tsx's own FakeEventSource uses,
+ *  copied rather than shared per this repo's per-file convention. */
+class FakeEventSource {
+  static last: FakeEventSource | null = null;
+  readyState = 1;
+  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
+  constructor() {
+    FakeEventSource.last = this;
+  }
+  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
+    let set = this.listeners.get(name);
+    if (!set) this.listeners.set(name, (set = new Set()));
+    set.add(fn);
+  }
+  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
+    this.listeners.get(name)?.delete(fn);
+  }
+  close(): void {}
+  push(channel: string, payload: unknown): void {
+    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+}
+(globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
+
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { SessionChart, SESSION_LANES_STORAGE_KEY } = await import("./session-chart.js");
@@ -621,6 +646,83 @@ test("hovering the running segment keeps moving, not frozen at whatever duration
       laterPhase!.value,
       firstPhase!.value,
       `hover duration froze at ${firstPhase!.value} through 5 seconds of a still-running segment`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// The window's own live end (win.endMs) was `now` alone — a once-a-second
+// sample (useServerNow) that can be up to a second stale. A press stamps its
+// OWN new span's startedAt at the instant it happens, and the push-triggered
+// lane refetch that follows every press resolves well inside that second —
+// so the fresh span's startedAt can land AFTER the stale `now`, and
+// sessionSpans (session-lane.ts) drops it from the window entirely until the
+// next tick catches up.
+test("a press's own new span draws immediately, even before the next second's clock tick", async (t) => {
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const T0 = Date.parse("2026-09-27T15:00:00.000Z");
+  mock.timers.setTime(T0);
+  t.after(() => mock.timers.reset());
+
+  const T0_ISO = new Date(T0).toISOString();
+  // The press happens 300ms into the same second `now` was last sampled at —
+  // AFTER the stale `now`, but still well before the next 1s tick.
+  const PRESS_ISO = new Date(T0 + 300).toISOString();
+
+  let lane = { spans: [{ kind: "testimony", person: 1, startedAt: T0_ISO, endedAt: null as string | null }] };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/api/baptism/lane")) return okResponse(lane);
+    if (url.includes("/api/service-timeline/current")) return okResponse(null);
+    if (url.includes("/api/service-timeline/")) return okResponse(null);
+    return okResponse({});
+  }) as unknown as typeof fetch;
+
+  try {
+    await act(async () => {
+      render(
+        React.createElement(SessionChart, {
+          state: {
+            ...BASE,
+            phase: "testimony",
+            personNumber: 1,
+            serviceKey: "svc-press-drop",
+            sessionStartedAt: T0_ISO,
+            segmentStartedAt: T0_ISO,
+          },
+        }),
+      );
+      await settle();
+      await settle();
+    });
+
+    assert.equal(
+      document.querySelectorAll("[data-timer-segment]").length,
+      1,
+      "sanity: the first (open) segment drew before the press",
+    );
+
+    // The operator presses "Next person in": person 1's testimony closes at
+    // the press instant, and person 1's baptism opens there — a real push
+    // the server sends on every press, well before `now`'s next 1s tick.
+    lane = {
+      spans: [
+        { kind: "testimony", person: 1, startedAt: T0_ISO, endedAt: PRESS_ISO },
+        { kind: "baptism", person: 1, startedAt: PRESS_ISO, endedAt: null },
+      ],
+    };
+    await act(async () => {
+      FakeEventSource.last!.push("baptism:state", { phase: "baptism", personNumber: 1, serviceKey: "svc-press-drop" });
+      await settle();
+      await settle();
+    });
+
+    assert.equal(
+      document.querySelectorAll("[data-timer-segment]").length,
+      2,
+      "the span the press just started must draw immediately, not wait for the next second's tick",
     );
   } finally {
     globalThis.fetch = realFetch;

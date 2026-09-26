@@ -444,7 +444,18 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
   // The window is THIS session's own start/finish, never derived from spans
   // or plan items — see sessionWindow's own comment for the bug that was.
-  const win = sessionWindow(state.sessionStartedAt, state.finishedAt, { live, nowMs: now });
+  //
+  // `now` is only a once-a-second sample (useServerNow above), but a press
+  // stamps its own new span's startedAt at the exact instant it happens —
+  // which can be (briefly) LATER than the last sample, since the
+  // push-triggered lane refetch that follows every press resolves well
+  // inside that second. Without folding in the latest span's own start,
+  // `sessionSpans` below would filter the very span the press just opened
+  // back out (and clip the span it closed right at the plot's edge) for up
+  // to a second, until the next tick caught up.
+  const latestSpanStartMs = spans.length ? Date.parse(spans[spans.length - 1]!.startedAt) : NaN;
+  const liveNowMs = live && Number.isFinite(latestSpanStartMs) ? Math.max(now, latestSpanStartMs) : now;
+  const win = sessionWindow(state.sessionStartedAt, state.finishedAt, { live, nowMs: liveNowMs });
   // Plain calls, not useMemo: both are a single small array map (a session
   // has tens of spans and items at most), so memoizing them buys nothing and
   // `rawPlanItems`, computed fresh above from two hook results, would just
