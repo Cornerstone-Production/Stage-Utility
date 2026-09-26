@@ -517,6 +517,29 @@ describe("rebuildBaptismSessions: a damaged file says what it dropped", () => {
     assert.match(warnings[0]!, /presses recorded but no finish row to close them/);
   });
 
+  it("counts a session left open with people banked even when ANOTHER session follows it in the file", () => {
+    // The `start` branch overwrote `open` for the next
+    // session without checking whether the one it replaced still had unlogged
+    // presses banked — so the exact same defect as the test above (a finish
+    // row lost to a full disk, or the service record closed at that instant)
+    // was counted only when the dropped session happened to be the LAST one
+    // in the file. Followed by a normal session, it was silently ignored:
+    // neverFinished stayed 0 and nothing said why the count came up short.
+    const rows: BaptismRow[] = [
+      row(0, { event: "start", phase: "testimony", personNumber: "1" }),
+      row(60, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "60000" }),
+      row(120, { event: "baptisms-armed", phase: "baptism", personNumber: "2", segmentMs: "60000" }),
+      // finish row lost here — this session never closes
+      row(1800, { event: "start", phase: "testimony", personNumber: "1" }),
+      row(1860, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "60000" }),
+      row(1920, { event: "finish", phase: "idle", detail: "people=1" }),
+    ];
+    const { value, warnings } = captureWarnings("[baptism-replay]", () => rebuildBaptismSessions(rows, ID));
+    assert.equal(value.length, 1, "only the closed second session is reconstructed");
+    assert.equal(warnings.length, 1, "the lost first session must still be named, not silently dropped because another session follows it");
+    assert.match(warnings[0]!, /1 session\(s\) with presses recorded but no finish row to close them/);
+  });
+
   it("says nothing at all about an undamaged file", () => {
     const rows: BaptismRow[] = [
       row(0, { event: "reset", phase: "idle" }),
