@@ -74,7 +74,10 @@ table: without the layouts it shows all columns, and without the roles it shows
 no note columns, until they load. A display keeps the last layouts it read
 through a later failure and says nothing, since what it shows is still right.
 The plan works the same way: one that cannot be read says so while there is
-nothing to show yet, and a later failure keeps the last plan on screen. Each
+nothing to show yet, and a later failure keeps the last plan on screen — as
+long as it is still the plan being asked for. Switching service type or plan
+drops the previous one immediately, so a failed read for the new one shows the
+failure rather than the old plan under a title that no longer matches it. Each
 failure is on a `[scriptview]` line on the server log.
 
 ## Category roles

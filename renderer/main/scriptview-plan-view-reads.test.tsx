@@ -284,6 +284,46 @@ test("a plan that cannot be read says so, and reaches the log", async () => {
   }
 });
 
+test("a slug switch whose new rundown fails to load drops the stale plan, rather than keeping it on screen", async () => {
+  // Weekend resolves and loads; the page then navigates (a rerender with new
+  // props, same instance — the shape a client-side route change takes) to
+  // Youth, whose rundown fails.
+  const RUNDOWN_WEEKEND = { ...RUNDOWN, serviceTypeId: "st1", planTitle: "Sunday service" };
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }, { id: "st2", name: "Youth" }]);
+    if (url.includes("/api/scriptview/layouts")) return ok([]);
+    if (url.includes("/api/scriptview/roles")) return ok([]);
+    if (url.includes("/api/scriptview/rundown")) {
+      const typeId = new URL(url, "http://x").searchParams.get("serviceTypeId");
+      return typeId === "st2" ? reply(500, { error: "boom" }) : ok(RUNDOWN_WEEKEND);
+    }
+    if (url.includes("/api/pco/live")) return ok(null);
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    return ok({});
+  });
+  try {
+    const el = (serviceTypeParam: string) =>
+      React.createElement(TooltipProvider, null, React.createElement(ScriptViewPlan, { serviceTypeParam, layoutParam: "audio" }));
+    const view = render(el("weekend"));
+    await settle();
+    await settle();
+    await settle();
+    assert.equal(document.body.textContent?.includes("Sunday service"), true, "Weekend's plan is on screen");
+    view.rerender(el("youth"));
+    await settle();
+    await settle();
+    await settle();
+    assert.equal(
+      document.body.textContent?.includes("Sunday service"),
+      false,
+      "Weekend's plan must not still read as current once the page has moved to Youth",
+    );
+    assert.notEqual(alerts(), "", "the failure is shown, since there is nothing good left to fall back on");
+  } finally {
+    f.restore();
+  }
+});
+
 test("control: every read loads, the plan's own empty state shows, nothing alerts", async () => {
   const f = stubFetch(null);
   try {

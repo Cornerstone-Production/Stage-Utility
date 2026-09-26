@@ -103,6 +103,19 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const bodyError =
     error ?? (!resolvedTypeId && failed.has("types") ? "Couldn't load the service types, so this page can't find its plan." : null);
 
+  // Dropped in the same render the resolved type changes (a different slug in
+  // the URL, or the type list finishing a slug's resolution) — not just on a
+  // FAILED read for the new one. Left in place, a stale rundown drew as though
+  // it were current: `showError` (scriptview-body.tsx) only fires when there
+  // is no rundown to fall back on, so the previous type's plan stayed on
+  // screen with nothing to say it no longer matched the URL. A poll that
+  // refetches the SAME type never runs this, so a failed retry still keeps
+  // the last good rundown exactly as intended below.
+  useResyncOn([resolvedTypeId], () => {
+    setRundown(null);
+    clear("rundown");
+  });
+
   // Rundown items change rarely; refetch on a slow timer. Live position arrives
   // separately via the SSE-backed dashboard state (pcoLive). A failure keeps the
   // last good rundown on screen (see ScriptViewBody) and is logged once.
