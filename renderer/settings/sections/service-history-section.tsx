@@ -1307,6 +1307,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         setMergeTarget("");
         setSelectedKey(mergeTarget); // jump to the record we merged into
         reload(); // drop the now-deleted source from the list (avoid a dead row)
+        // mergeServiceRecords deletes the source's attendance record too (same
+        // serviceKey the timeline's own reload() above just dropped), with no
+        // push naming the deletion — only the TARGET's own merged record is
+        // broadcast (attendance:history), which the live-push handler below
+        // already merges into attList by key. Left uncleared, the source's own
+        // stale entry in attList resurrects itself the instant `rows`
+        // recomputes: an attendance-only "no items recorded" row and an extra
+        // Trends point (rows/Trends both derive from list + attList), until
+        // the page is reopened and attList's own one-shot fetch runs again.
+        // Same fix, same reason, as deleteService's identical optimistic
+        // removal just above.
+        setAttList((prev) => prev.filter((a) => a.serviceKey !== det.serviceKey));
         setReloadKey((k) => k + 1);
         toast.success("Merged");
       } catch (e) {

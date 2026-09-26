@@ -752,6 +752,123 @@ describe("the History service page", () => {
     assert.equal(figs.find((f) => f.key === "testimony")?.sub, "avg 1:00");
   });
 
+  // Same code on main. mergeServiceRecords deletes the source's attendance record with no
+  // push naming the deletion — only the target's own merged record is
+  // broadcast — so doMerge calling only reload() (the timeline list) left the
+  // source's stale entry sitting in attList. It then resurrected itself as an
+  // attendance-only "no items recorded" row (and an extra Trends point) the
+  // instant `rows` recomputed, until the page was reopened.
+  test("merging a mis-split service clears the source's row everywhere, not just from the timeline list", async (t) => {
+    const SOURCE_KEY = "salt:plan-2:early";
+    const sourceTimeline = () => ({
+      serviceKey: SOURCE_KEY,
+      serviceTypeId: "salt",
+      serviceTypeName: "Weekend",
+      planId: "plan-2",
+      planTitle: "Early Service",
+      seriesTitle: "Kickoff",
+      serviceDate: DAY,
+      serviceTimeId: "early",
+      serviceTimeStartsAt: iso("18:00:00"),
+      startedAt: iso("18:00:00"),
+      endedAt: iso("18:30:00"),
+      items: [
+        { itemId: "x", title: "Welcome", sequence: 0, plannedLengthSec: 300, startedAt: iso("18:00:00"), endedAt: iso("18:05:00"), actualDurationSec: 300 },
+      ],
+    });
+    const sourceAttendance = () => ({
+      serviceKey: SOURCE_KEY, serviceTypeId: "salt", serviceDate: DAY, planTitle: "Early Service",
+      startedAt: iso("18:00:00"), endedAt: iso("18:30:00"),
+      peakAttendance: 50, peakOccupancy: 40, minOccupancy: 10, totalAttendance: 50,
+      lastAttendance: 50, lastOccupancy: 10, attendanceBaseline: 0,
+      samples: [{ t: iso("18:05:00"), attendance: 50, occupancy: 40 }],
+    });
+
+    let merged = false;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method === "POST" && url === "/api/history/merge") {
+        merged = true;
+        return ok({ ok: true });
+      }
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([]);
+      // The timeline LIST reflects the merge (reload() re-fetches it) — the
+      // source is gone from here either way. The bug is entirely about the
+      // OTHER list, attList, below.
+      if (url === "/api/service-timeline") return ok(merged ? [timeline()] : [timeline(), sourceTimeline()]);
+      // attList is never re-fetched by doMerge at all — this always answers
+      // with BOTH records, exactly as a real server would if nothing ever
+      // asked it again (matching the bug's own "until the page is reopened").
+      if (url === "/api/attendance/history?summary=1") return ok([attendance(), sourceAttendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (url === `/api/service-timeline/${encodeURIComponent(SOURCE_KEY)}`) return ok(sourceTimeline());
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (url === `/api/attendance/history/${encodeURIComponent(SOURCE_KEY)}`) return ok(sourceAttendance());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    t.after(() => cleanup());
+
+    const view = render(
+      React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection), React.createElement(ConfirmHost)),
+    );
+    await settle();
+    await settle();
+    await settle();
+
+    const sourceRow = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Early Service"));
+    assert.ok(sourceRow, "sanity: the source service's own row must render before the merge");
+    fireEvent.click(sourceRow!);
+    await settle();
+    await settle();
+
+    const mergeBtn = [...document.body.querySelectorAll("button")].find((b) => text(b).includes("Merge…"));
+    assert.ok(mergeBtn, "expected the Merge action — two same-day recordings must offer it");
+    fireEvent.click(mergeBtn!);
+    await settle();
+
+    const select = document.querySelector("select") as HTMLSelectElement;
+    assert.ok(select, "expected the merge-target picker");
+    fireEvent.change(select, { target: { value: KEY } });
+    await settle();
+
+    const startMerge = [...document.body.querySelectorAll("button")].find((b) => text(b) === "Merge + delete this");
+    assert.ok(startMerge, "expected the panel's own Merge + delete this action");
+    fireEvent.click(startMerge!);
+    await settle();
+
+    const dialog = document.querySelector('[role="alertdialog"]');
+    assert.ok(dialog, "expected the shared confirm dialog to open");
+    const confirmBtn = [...dialog!.querySelectorAll("button")].find((b) => text(b) === "Merge + delete this");
+    assert.ok(confirmBtn, "expected the dialog's own confirm action");
+    fireEvent.click(confirmBtn!);
+    await settle();
+    await settle();
+    await settle();
+
+    // doMerge jumps straight to the TARGET's own detail view (setSelectedKey),
+    // which replaces the all-services list entirely — the ghost row lives in
+    // THAT list, not the detail page, so it can only be seen by going back to it.
+    const back = [...document.body.querySelectorAll("button")].find((b) => text(b).includes("All services"));
+    assert.ok(back, "expected the '← All services' back action after the merge lands on the target's page");
+    fireEvent.click(back!);
+    await settle();
+    await settle();
+
+    assert.equal(
+      [...document.body.querySelectorAll("button")].some((b) => text(b).includes("Early Service")),
+      false,
+      "the merged-away source must not resurrect itself as an attendance-only ghost row",
+    );
+  });
+
   test("the header's KPI row is not a live region; a chart strip is", async (t) => {
     installFetch();
     const view = await openTheService(ServiceHistorySection);
