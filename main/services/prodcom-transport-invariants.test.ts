@@ -192,8 +192,9 @@ describe("SSE recovers from both kinds of failure", () => {
     svc.configure("127.0.0.1", port, null);
     await eventually(() => svc.sseUpNow, "the first SSE stream to come up");
 
-    // The box drops off the network entirely — req.on('error') is the ONLY
-    // handler that ever fires for this, unlike a bad status or a clean end.
+    // The box drops off the network entirely. The open stream ends, and every
+    // reconnect after it fails at the connection, which only req.on('error')
+    // sees — unlike a bad status or a clean end.
     await stub.close();
     await eventually(
       () => svc.reports.some((r) => r.state === "error" && (r.message ?? "").includes("Can't reach")),
