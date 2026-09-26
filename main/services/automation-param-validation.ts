@@ -192,6 +192,24 @@ export interface RuleStepsLike {
   action: { id: string; params: Record<string, unknown> };
 }
 
+/** One trigger or action step's issues — the shape those two share, and the
+ *  reason they never need a label prefix: a rule has exactly one of each, so
+ *  there is nothing to disambiguate (unlike conditions, see ruleIssues). */
+function simpleStepIssues(
+  step: "trigger" | "action",
+  lookup: StepSpecLookup,
+  id: string,
+  params: Record<string, unknown>,
+): RuleIssue[] {
+  const spec = lookup(step, id);
+  if (!spec) return [];
+  return validateParams(spec.params, params).map((issue) => ({
+    ...issue,
+    step,
+    label: fieldLabel(spec.params, issue.key),
+  }));
+}
+
 /**
  * PURE. Every field across a rule's trigger, conditions and action that needs
  * setup before the rule should run.
@@ -204,12 +222,7 @@ export interface RuleStepsLike {
 export function ruleIssues(rule: RuleStepsLike, lookup: StepSpecLookup): RuleIssue[] {
   const out: RuleIssue[] = [];
 
-  const trigger = lookup("trigger", rule.trigger.id);
-  if (trigger) {
-    for (const issue of validateParams(trigger.params, rule.trigger.params)) {
-      out.push({ ...issue, step: "trigger", label: fieldLabel(trigger.params, issue.key) });
-    }
-  }
+  out.push(...simpleStepIssues("trigger", lookup, rule.trigger.id, rule.trigger.params));
 
   const multipleConditions = rule.conditions.length > 1;
   rule.conditions.forEach((c, index) => {
@@ -226,12 +239,7 @@ export function ruleIssues(rule: RuleStepsLike, lookup: StepSpecLookup): RuleIss
     }
   });
 
-  const action = lookup("action", rule.action.id);
-  if (action) {
-    for (const issue of validateParams(action.params, rule.action.params)) {
-      out.push({ ...issue, step: "action", label: fieldLabel(action.params, issue.key) });
-    }
-  }
+  out.push(...simpleStepIssues("action", lookup, rule.action.id, rule.action.params));
 
   return out;
 }
