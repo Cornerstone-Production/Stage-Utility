@@ -174,7 +174,7 @@ as such rather than given a doc link it doesn't need.
 | `[automation]` | Rules added, changed, removed, saved with issues, or failing to fire; on the browser, the rule list failing to load: [Automation](../automation.md) |
 | `[automation-log]` | The Activity log itself failing to persist an entry to disk |
 | `[backup]` | The scheduled automatic backup writing, or failing: [Automatic backups](reliability.md#automatic-backups) |
-| `[baptism]` | Session-store eviction at the cap, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/scriptview-and-baptisms.md#logging) |
+| `[baptism]` | Session-store eviction at the cap, sessions stored more than once under one id, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/scriptview-and-baptisms.md#logging) |
 | `[baptism-lane]` | The Session chart's server-side span data dropping a span with an unreadable boundary timestamp: [The Session chart](../features/scriptview-and-baptisms.md#the-session-chart) |
 | `[baptism-replay]` | A data-archive rebuild skipping baptism rows it could not place, and why: [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced) |
 | `[baptism-timer]` | The live timer's own persistence: debounced save failures, a save that failed at shutdown, a dismissed save-failure notice |
@@ -188,7 +188,7 @@ as such rather than given a doc link it doesn't need.
 | `[companion]` | A Companion button press or export fetch, and its result: [Companion](../integrations/companion.md) |
 | `[config-snapshot]` | Building or restoring a config snapshot: unreadable settings, id floors that could not carry forward, stores that could not be quieted: [Backups](reliability.md#backups) |
 | `[cues]` | Cue-to-Companion-button pairing and state-source inference, and built-in cues: [Cues](../automation.md#cues) |
-| `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh: [Under load](reliability.md#under-load) |
+| `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh, and rewriting a save that landed while it did: [Under load](reliability.md#under-load) |
 | `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
 | `[devices]` | Kiosk device enrollment cleanup after a failed claim: [Kiosk devices](../kiosk-devices.md) |
 | `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
@@ -222,13 +222,14 @@ as such rather than given a doc link it doesn't need.
 | `[rosstalk]` | Connection state to a Carbonite or Ultrix device: [RossTalk](../integrations/rosstalk.md) |
 | `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
 | `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
+| `[screens]` | Browser-side: the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
 | `[scriptview]` | Browser-side: ScriptView's settings, types, note categories or rundown failing to load |
 | `[scriptview-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/scriptview-and-baptisms.md#category-roles) |
 | `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
 | `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller: [SenSource](../integrations/sensource.md) |
 | `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions |
-| `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
+| `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why, and an item already on air before a record opened not taken as its opening item: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
 | `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
 | `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
