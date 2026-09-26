@@ -158,7 +158,7 @@ describe("the shared /history link", () => {
         const url = String(input);
         const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
         if (url === "/api/service-timeline") return ok([rec]);
-        if (url === "/api/attendance/history") return ok([]);
+        if (url === "/api/attendance/history?summary=1") return ok([]);
         if (url === "/api/spl/summary") return ok([]);
         if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
         if (url === "/api/baptism/sessions") return ok([]);
@@ -253,7 +253,7 @@ describe("the shared /history link", () => {
         const url = String(input);
         const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
         if (url === "/api/service-timeline") return ok([rec]);
-        if (url === "/api/attendance/history") return ok([]);
+        if (url === "/api/attendance/history?summary=1") return ok([]);
         if (url === "/api/spl/summary") return ok([]);
         if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
         if (url === "/api/baptism/sessions") return ok([session]);

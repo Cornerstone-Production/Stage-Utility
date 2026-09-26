@@ -138,7 +138,7 @@ function installFetch(opts: { extra?: ServiceTimeline[]; baptisms?: BaptismSessi
     const url = String(input);
     const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
     if (url === "/api/service-timeline") return ok([NINE, ELEVEN, ...(opts.extra ?? [])]);
-    if (url === "/api/attendance/history") return ok(ATT);
+    if (url === "/api/attendance/history?summary=1") return ok(ATT);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok(opts.baptisms ?? []);
@@ -547,7 +547,7 @@ describe("a history load that failed, rather than came back empty", () => {
     // three times: a server that was down read as "No service timings recorded
     // yet" and sent an operator to look at a recorder that was fine.
     const { view, warned } = await withFailures((url) =>
-      url === "/api/service-timeline" || url === "/api/attendance/history");
+      url === "/api/service-timeline" || url === "/api/attendance/history?summary=1");
     const txt = (view.container.textContent ?? "").replace(/\s+/g, " ");
     assert.ok(
       txt.includes("could not be read"),

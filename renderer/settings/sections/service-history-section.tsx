@@ -29,6 +29,7 @@ import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-char
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
 import { TrendsCard } from "./history-trends/trends-card";
+import { useHistoryShown, type RowSpl } from "./history-shown";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import {
   summarize,
@@ -414,7 +415,7 @@ interface HistoryRow {
   planTitle: string | null;
   startsAt: string | null;
   timeline: ServiceTimeline | null;
-  attendance: ServiceAttendance | null;
+  attendance: ServiceAttendanceSummary | null;
 }
 
 const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
@@ -520,7 +521,10 @@ function useSelectedServiceKey(): [string | null, (key: string | null) => void] 
 }
 
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
-  const [list, setList] = useState<ServiceTimeline[] | null>(null);
+  // What this page showed last time it was open, drawn from at once and
+  // replaced when the reads below land. See history-shown.tsx.
+  const shown = useHistoryShown();
+  const [list, setList] = useState<ServiceTimeline[] | null>(() => shown?.last.timeline ?? null);
   const [selectedKey, setSelectedKey] = useSelectedServiceKey();
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
@@ -534,10 +538,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
   // Attendance records for all services — the day rows and the Trends card are
   // both built from these.
-  const [attList, setAttList] = useState<ServiceAttendance[]>([]);
+  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>(() => shown?.last.attendance ?? []);
+  // Whether the attendance list and the SPL summary have come back at all, well
+  // or not: an empty array cannot tell "none recorded" from "not read yet", and
+  // the Trends card must not say the first while it is the second.
+  const [attSettled, setAttSettled] = useState(() => shown?.last.attendance != null);
+  const [splSettled, setSplSettled] = useState(() => shown?.last.spl != null);
   /** One level per service — the sound measure on Trends, and each day row's
    *  peak. A summary, not the archive: see splHistoryStore.summary(). */
-  const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  const [splList, setSplList] = useState<SplServiceSummary[]>(() => shown?.last.spl ?? []);
 
   /**
    * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
@@ -547,8 +556,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * carries a service-level Leq per metric and no PEAK at all, so a row built
    * from it would be labelled "Peak" and be showing an energy average. The
    * full record is the only thing that has the peak, and a month is a dozen or
-   * so of them — not a year of them. Fetched below, once per month; kept
-   * current between fetches by the `spl:history` live push handler, which
+   * so of them — not a year of them. Fetched below, once per key as the
+   * month's rows appear; kept current by the `spl:history` live push handler, which
    * writes the SAME shape straight into this map — see the handler's comment.
    *
    * A FAILED read and a service that recorded no sound are told apart. Both
@@ -557,8 +566,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * the operator their meter had not been recording. `"error"` is its own
    * state, the row says "sound unavailable", and the reason is logged per key.
    */
-  type RowSpl = ServiceSplHistory | null | "error";
-  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
+  const [splByKey, setSplByKey] = useState<ReadonlyMap<string, RowSpl>>(() => shown?.last.rowSpl ?? new Map());
+  /** How many `spl:history` pushes each key has had. A read sent before a push
+   *  answers with an older record than the push carried, so the fetch below
+   *  drops its answer for any key pushed since it asked. */
+  const splPushes = useRef(new Map<string, number>());
 
   // A live-updating mirror of selectedKey for the service-timeline:history
   // handler below, which subscribes once (empty deps) and would otherwise only
@@ -637,7 +649,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }, [noteFailure, noteLoaded]);
   useEffect(() => {
     reload();
-    invoke<ServiceAttendance[]>("attendance:listHistory")
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
       .then((a) => {
         setAttList(a ?? []);
         noteLoaded("attendance");
@@ -645,7 +657,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .catch((e) => {
         setAttList([]);
         noteFailure("attendance", "the attendance history", e);
-      });
+      })
+      .finally(() => setAttSettled(true));
     invoke<SplServiceSummary[]>("spl:getSummary")
       .then((r) => {
         setSplList(r ?? []);
@@ -654,8 +667,23 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .catch((e) => {
         setSplList([]);
         noteFailure("spl", "the sound summary", e);
-      });
+      })
+      .finally(() => setSplSettled(true));
   }, [reload, noteFailure, noteLoaded]);
+
+  // Keep what the page shows for its next visit: the lists as they stand, so
+  // a live push or a delete on this page is what the next visit draws, not the
+  // answer it replaced. A list whose read failed is forgotten rather than kept
+  // as the empty one drawn in its place, which the next visit would show as a
+  // history with nothing in it.
+  useEffect(() => {
+    shown?.keep({
+      timeline: loadFailed.has("timeline") ? null : list,
+      attendance: attSettled && !loadFailed.has("attendance") ? attList : null,
+      spl: splSettled && !loadFailed.has("spl") ? splList : null,
+      rowSpl: splByKey,
+    });
+  }, [shown, list, attList, attSettled, splList, splSettled, splByKey, loadFailed]);
 
   // Live updates while a service is recording — refresh the open detail/list, the
   // attendance chart (samples), and SPL, all without a page reload.
@@ -702,11 +730,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (!rec) return;
       setSpl((s) => (s ? (s.serviceKey === rec.serviceKey ? rec : s) : selectedKeyRef.current === rec.serviceKey ? rec : s));
       // The list's own row reads splByKey (see its declaration above), fetched
-      // once per month by key. A record opened after that fetch ran — or one
+      // once per key. A record opened after that fetch ran — or one
       // whose first disk write lands after the fetch raced it — has no entry
       // there and its row reads "no sound recorded" forever, since nothing
       // else invalidates that cache. The push already carries the exact shape
       // splByKey stores, so write it straight in.
+      splPushes.current.set(rec.serviceKey, (splPushes.current.get(rec.serviceKey) ?? 0) + 1);
       setSplByKey((prev) => {
         const next = new Map(prev);
         next.set(rec.serviceKey, rec);
@@ -1068,13 +1097,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // The key list, as a stable string: `monthServices` is a fresh array every
   // render and would refetch the month's SPL on each one.
   const monthKeys = monthServices.map((s) => s.serviceKey).join("|");
+  // The keys asked for since the last reload. The month's key list grows as
+  // the page's reads land — the timeline list's rows, then the attendance
+  // list's own — and asking for the whole month each time it did fetched
+  // every record on it twice. A reload (a rebuild or merge on this page) asks
+  // again for everything; a key whose read failed is asked again the next
+  // time the list changes, as paging to another month and back always did.
+  const splAsked = useRef({ reloadKey, keys: new Set<string>() });
   useEffect(() => {
-    const keys = monthKeys ? monthKeys.split("|") : [];
-    // Nothing to fetch, and nothing to clear: every lookup is by serviceKey, so
-    // a map left over from the previous day can only ever miss. Clearing it here
-    // would be a setState in an effect body — a cascading render — to no end.
+    if (splAsked.current.reloadKey !== reloadKey) splAsked.current = { reloadKey, keys: new Set() };
+    const asked = splAsked.current;
+    const keys = (monthKeys ? monthKeys.split("|") : []).filter((k) => !asked.keys.has(k));
+    // Nothing new to fetch, and nothing to clear: every lookup is by
+    // serviceKey, so an entry left over from another month can only ever miss.
     if (!keys.length) return;
-    let cancelled = false;
+    for (const k of keys) asked.keys.add(k);
+    const pushesWhenAsked = new Map(keys.map((k) => [k, splPushes.current.get(k) ?? 0]));
+    // Not cancelled when the list changes again before it lands: its keys are
+    // marked asked, so dropping the answer would leave those rows unread.
     Promise.all(
       keys.map((key) =>
         invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: key })
@@ -1088,11 +1128,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           }),
       ),
     ).then((pairs) => {
-      if (!cancelled) setSplByKey(new Map(pairs));
+      // A reload since this was sent has asked again; this answer is older.
+      if (splAsked.current !== asked) return;
+      // A key pushed while its read was out already holds the newer record.
+      const current = pairs.filter(([k]) => (splPushes.current.get(k) ?? 0) === pushesWhenAsked.get(k));
+      for (const [k, v] of current) if (v === "error") asked.keys.delete(k);
+      setSplByKey((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of current) next.set(k, v);
+        return next;
+      });
     });
-    return () => {
-      cancelled = true;
-    };
   }, [monthKeys, reloadKey]);
 
   // Per-day service counts for the calendar (respects the type filter).
@@ -1128,7 +1174,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // reads as a glitch, and the most likely reason for a refusal is one the
       // operator can act on: the service is still recording.
       reload();
-      invoke<ServiceAttendance[]>("attendance:listHistory")
+      invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
         .then((a) => setAttList(a ?? []))
         .catch(() => {
           /* the optimistic removal above just stays applied */
@@ -1748,7 +1794,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           length, overrun, peak, level — is on the service page's own KPI row
           against the service it belongs to, where it means something specific.
           Export moved into the Recorded services header; it is not removed. */}
-      <TrendsCard recordings={trendRecordings} clock={clock} soundUnavailable={loadFailed.has("spl")} />
+      <TrendsCard
+        recordings={trendRecordings}
+        clock={clock}
+        soundUnavailable={loadFailed.has("spl")}
+        loading={list === null || !attSettled || !splSettled}
+      />
 
       {/* Calendar (sticky) beside the month's services. The calendar decides
           which month both of them are about. There is no "Selected: …" summary
@@ -1854,7 +1905,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             if (!row.timeline) {
               const att = row.attendance!;
               const rowLive = att.endedAt == null;
-              const lastOccupancy = att.samples[att.samples.length - 1]?.occupancy ?? 0;
+              const lastOccupancy = att.samples?.at(-1)?.occupancy ?? 0;
               const caption = rowLive
                 ? `${fmtTime(row.startsAt)} · arriving · ${lastOccupancy.toLocaleString()} in the room`
                 : `${fmtTime(row.startsAt)} · no items recorded`;

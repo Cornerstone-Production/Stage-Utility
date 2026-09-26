@@ -117,7 +117,7 @@ export type IpcChannel =
   | "attendance:deleteHistory"
   | "attendance:getHistory"
   | "attendance:getHistoryCurrent"
-  | "attendance:listHistory"
+  | "attendance:listSummaries"
   | "automation:addRule"
   | "automation:clearLog"
   | "automation:importPairs"
@@ -554,8 +554,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "attendance:getHistoryCurrent":
       return apiFetch<T>("/api/attendance/history/current");
 
-    case "attendance:listHistory":
-      return apiFetch<T>("/api/attendance/history");
+    case "attendance:listSummaries":
+      return apiFetch<T>("/api/attendance/history?summary=1");
 
     case "attendance:getHistory": {
       const key = p.serviceKey as string;

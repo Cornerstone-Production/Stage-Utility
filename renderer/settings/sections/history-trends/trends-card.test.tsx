@@ -1044,6 +1044,25 @@ describe("right-clicking to hide a service type", () => {
   });
 });
 
+describe("while the page's history is still arriving", () => {
+  // The card is handed an empty list until the page's reads come back, and it
+  // used to answer that list: "No recordings in this range — try a longer one"
+  // on a church with a year of them, for as long as the download took.
+  const EMPTY = /No attendance recorded yet|No recordings in this range/;
+
+  test("it shows where the chart will be, and no empty answer", async () => {
+    const view = await renderCard([], { loading: true });
+    assert.ok(view.container.querySelector("[data-trends-loading]"), "no loading state");
+    assert.doesNotMatch(view.container.textContent ?? "", EMPTY);
+  });
+
+  test("once it has arrived, an empty history still says so", async () => {
+    const view = await renderCard([], { loading: false });
+    assert.equal(view.container.querySelector("[data-trends-loading]"), null);
+    assert.match(view.container.textContent ?? "", EMPTY);
+  });
+});
+
 describe("when the milestone list will not load", () => {
   test("the card says so, and the reason is logged", async () => {
     // Swallowed, the chart drew the derived series-change marks and simply
@@ -1096,7 +1115,7 @@ function alternating(): TrendRecording[] {
 
 async function renderCard(
   recordings: TrendRecording[],
-  opts: { milestones?: "fail"; clock?: TrendClock } = {},
+  opts: { milestones?: "fail"; clock?: TrendClock; loading?: boolean } = {},
 ) {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
     if (String(input) === "/api/history/milestones") {
@@ -1108,7 +1127,7 @@ async function renderCard(
   let view!: ReturnType<typeof render>;
   await act(async () => {
     view = render(
-      React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings, clock: opts.clock ?? null })),
+      React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings, clock: opts.clock ?? null, loading: opts.loading ?? false })),
     );
     for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0));
   });

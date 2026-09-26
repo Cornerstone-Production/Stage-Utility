@@ -6,6 +6,7 @@
 // server back (route modules stay a leaf of the dependency graph).
 
 import * as http from "http";
+import * as zlib from "node:zlib";
 
 import type { ViewKind } from "../../types/stage.js";
 import { scrub } from "../scrub.js";
@@ -42,6 +43,10 @@ export interface RouteCtx {
  */
 export type RouteModule = (c: RouteCtx) => Promise<void>;
 
+/** Below this a JSON body goes out as it is: the compressed form plus its header
+ *  saves nothing worth the work. */
+export const GZIP_MIN_BYTES = 8 * 1024;
+
 export function json(res: http.ServerResponse, data: unknown, status = 200): void {
   // A second reply is a BUG, but it must not be a fatal one.
   //
@@ -68,8 +73,21 @@ export function json(res: http.ServerResponse, data: unknown, status = 200): voi
     );
     return;
   }
+  const body = JSON.stringify(data);
+  // Compressed when the browser says it accepts gzip and the body is big enough
+  // to matter. A month of History is about 1 MB of repetitive numbers; level 4
+  // takes JSON like it to about an eighth for roughly 3 ms per MB here, and a
+  // phone on the building Wi-Fi was spending most of the page load downloading it.
+  // `res.req` is the request Node attached; a response built without one (a
+  // test's stand-in) is simply sent plain.
+  const accepts = /\bgzip\b/.test(String(res.req?.headers["accept-encoding"] ?? ""));
+  if (accepts && body.length >= GZIP_MIN_BYTES) {
+    res.writeHead(status, { "Content-Type": "application/json", "Content-Encoding": "gzip", Vary: "Accept-Encoding" });
+    res.end(zlib.gzipSync(body, { level: 4 }));
+    return;
+  }
   res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data));
+  res.end(body);
 }
 
 export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {

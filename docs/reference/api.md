@@ -7,7 +7,9 @@ Most endpoints are under `/api`; the exceptions are listed under
 by polling. What a state-changing route answers with depends on what it changed:
 the plan, view, output and slot routes return the updated `StageState`, while the
 rest return the collection they touched (`{targets}`, `{rules}`, `{presets}`) or
-an outcome (`{ok, …}`). Creating something answers `201`.
+an outcome (`{ok, …}`). Creating something answers `201`. A JSON reply of 8 KB
+or more is gzipped when the request sends `Accept-Encoding: gzip`, as every
+browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
 for a body or query the caller got wrong, `409` for something the server cannot
@@ -267,7 +269,7 @@ untouched by GET, by init, and by any write that does not go through this route
 |--------|------|---------|
 | GET | `/api/people/count` | Live building occupancy (SenSource) |
 | GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
-| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them |
 | GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
 | GET | `/api/obs/status` \| `/api/reaper/status` | Whether that recorder is rolling, and for how long |
 | GET | `/api/pvp/status` | ProVideoPlayer layer state — what is on each layer, and how far in |

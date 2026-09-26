@@ -92,7 +92,7 @@ function installFetch(calls: Call[], rebuild: () => { ok: boolean; body: unknown
         : { ok: false, status: 500, json: async () => payload, text: async () => JSON.stringify(payload) };
     }
     if (url === "/api/service-timeline") return ok([timeline()]);
-    if (url === "/api/attendance/history") return ok([]);
+    if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);

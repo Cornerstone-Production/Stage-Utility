@@ -50,7 +50,7 @@ function stubFetch(failing: Read | null, record: unknown = RECORD) {
       if (failing === name) throw new TypeError("fetch failed");
       return ok(json);
     };
-    if (url === "/api/attendance/history") return read("list", [RECORD]);
+    if (url === "/api/attendance/history?summary=1") return read("list", [RECORD]);
     if (url.startsWith("/api/attendance/history/")) return read("curve", record);
     if (url.startsWith("/api/service-timeline/")) return read("markers", { items: [] });
     return ok(null);

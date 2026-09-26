@@ -165,7 +165,7 @@ function serviceFigureParts(timeline: ServiceTimeline, spl: ServiceSplHistory | 
  */
 export function serviceKpis(
   timeline: ServiceTimeline,
-  attendance: ServiceAttendance | null,
+  attendance: ServiceAttendanceSummary | null,
   spl: ServiceSplHistory | null,
   now?: number,
 ): (StatFigure & { sub?: string })[] {
@@ -176,7 +176,7 @@ export function serviceKpis(
  *  both the figures and a raw part does not derive everything twice. */
 function serviceKpisFrom(
   parts: ReturnType<typeof serviceFigureParts>,
-  attendance: ServiceAttendance | null,
+  attendance: ServiceAttendanceSummary | null,
 ): (StatFigure & { sub?: string })[] {
   const { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel } = parts;
   return [
@@ -289,7 +289,7 @@ function serviceKpisFrom(
  */
 export function serviceRowFigures(
   timeline: ServiceTimeline,
-  attendance: ServiceAttendance | null,
+  attendance: ServiceAttendanceSummary | null,
   spl: ServiceSplHistory | null,
   now?: number,
 ): { started: StatFigure & { sub?: string }; figures: (StatFigure & { sub?: string })[] } {

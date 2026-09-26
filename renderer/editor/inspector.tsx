@@ -335,7 +335,7 @@ export function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectC
     // Cancelled on a source change: Recorded, Live and Recorded again must not
     // let the first read's late failure replace a picker the second one filled.
     let cancelled = false;
-    invoke<ServiceAttendance[]>("attendance:listHistory")
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
       .then((list) => {
         if (cancelled) return;
         setServices(

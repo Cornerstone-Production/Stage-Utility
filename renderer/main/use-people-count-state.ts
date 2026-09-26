@@ -24,7 +24,7 @@ export function useServiceAvgOccupancy(enabled: boolean): number | null {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    invoke<ServiceAttendance[]>("attendance:listHistory")
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
       .then((list) => {
         if (cancelled) return;
         const finished = (list ?? []).filter((s) => s.endedAt != null && s.peakOccupancy > 0);
