@@ -469,18 +469,16 @@ its file sizes suggest.
 
 ### Console sizing
 
-`LayoutCanvas.fit` already offers `"contain"` (letterbox the design aspect) and
-`"fill"` (reflow the fractional positions to the window). Positions are fractions
-of the canvas and font sizes are fractions of canvas height, so both scale.
+`LayoutCanvas.fit` offers `"contain"` (letterbox the design aspect) and
+`"responsive"` (reflow the fractional positions to the window, keeping each
+object's anchors and stacking into a column at a very different aspect ratio).
+`"fill"` is the old name for the second option and still parses from a stored
+layout. Positions are fractions of the canvas and font sizes are fractions of
+canvas height, so both scale.
 
-**Consoles default to `fill`**, using the whole content area rather than
+**Consoles default to `responsive`**, using the whole content area rather than
 pillar-boxing a 16:9 design into a laptop window. **Displays keep `contain`**,
 since a wall screen has a known aspect and the design should be honored exactly.
-
-`fill` reflows proportionally, so a layout designed at 16:9 distorts at a very
-different aspect ratio. It is not a responsive grid. This is acceptable for
-consoles on laptop-shaped windows; a responsive layout mode would be a separate
-later change, and nothing in this design blocks it.
 
 ---
 

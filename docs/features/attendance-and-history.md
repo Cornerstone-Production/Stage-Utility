@@ -350,6 +350,11 @@ title never repeats the count in words: the badge is what survives when the
 Service column has no room left, so the series title and item count keep
 theirs instead. A service with no linked session carries neither.
 
+A failed read of the baptism sessions is not a baptism-free month: rather than
+guessing per row, the list shows *Baptism counts could not be loaded* once,
+above the day groups, and the reason is on a `[history]` line on the server
+log.
+
 | | |
 |---|---|
 | In room | the most people in the room at once, captioned *peak in room*. Named for the figure rather than for the reduction, because the app also tracks the cumulative door count and "peak" alone names either |
@@ -472,7 +477,8 @@ for it — recorded before that raw layer existed, or matched to this service
 only by its start time rather than by a service key of its own — shows its
 splits with a plain line in place of the chart rather than one reading as an
 empty session. A **Open in Baptisms →** link beside the card's title returns
-to the live tab.
+to the live tab; the shared `/history` link never shows it, since it opens
+into the operator app.
 
 Two or more sessions recorded in one occurrence — an operator finishing,
 resetting and running the whole thing again, or two people baptized in

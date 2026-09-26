@@ -65,6 +65,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | POST | `/api/refresh` | Re-fetch from Planning Center |
 | POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
+| GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |
 | POST | `/api/allowed-service-types` | Set the allowlist |
 | POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
 | POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`) |
@@ -252,6 +253,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
+| GET / POST | `/api/spl/trend` | Whether History's attendance trend also draws the SPL trend line, and which metric it plots (`{shown, metric}`) |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
@@ -397,9 +399,10 @@ live timer: it replays that service's `baptism.csv` and MERGES the result into
 the stored sessions, never replacing them — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced).
 Answers `{ rows, sessions, updated, added, unchanged, newer, disagreeing,
-invalid, kept, full }` — see
+invalid, kept, full, restoredIds }` — see
 [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced)
-for what each of the eight outcome categories means. `400` for a body
+for what each of the eight outcome categories means; `restoredIds` names the
+sessions this call actually added or updated. `400` for a body
 with no `serviceKey`; `409` while that service is recording, and a DIFFERENT
 `409` when it has no `baptism.csv` at all (a session recorded before the raw
 layer existed has a timeline record but none) — both carry a body of
@@ -565,7 +568,11 @@ something to change:
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` ·
-`display:refresh` · `settings:allowedServiceTypeIds-changed`
+`display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt`
+
+`baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
+save-failure note's, or History's whole-service rebuild — actually writes a
+session: `{serviceKey, ids}`, `ids` naming the sessions it added or updated.
 
 Every status snapshot carries a `rev` counter so a hydrate read cannot overwrite
 a newer push — see [Integrations](../integrations/README.md#the-snapshot-version).
@@ -576,7 +583,7 @@ pair's device changes — or when it enters or leaves its
 [settle window](../integrations/companion.md#the-settle-window), which is a
 change in what the reading is worth — and `{type: "manifest", version}` when the
 rules change and
-[`/api/cues/manifest`](#cues) should be re-read. `id` is the pair's base, as in
+`/api/cues/manifest` should be re-read. `id` is the pair's base, as in
 the manifest, and only pairs the manifest lists are pushed — a pair whose
 **Home Assistant** switch is off is absent from this channel exactly as it is
 from the manifest, though `/api/cues/states` still carries it. While at least

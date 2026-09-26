@@ -279,7 +279,10 @@ The `/log` page has the evidence when something looks wrong:
   to reach this point), or `[prodcom] websocket unavailable (…) — falling back to
   the transcript SSE stream` when a **promoted** WebSocket dies (whether it closed
   outright or the post-promotion check demoted it) and the SSE stream is being
-  reopened. Either way it is once per outage, not once per retry,
+  reopened. If the SSE fallback is itself down at that moment, an unproven
+  attempt giving up instead reads `[prodcom] websocket unavailable (…) —
+  captions have no live transport until SSE reconnects`. Either way it is once
+  per outage, not once per retry,
   with a reminder carrying the attempt count every 15 minutes while it lasts, and
   `[prodcom] websocket is back …` when it recovers. The per-retry "retrying the
   websocket after N SSE reconnect(s)" is `console.debug`, so it is in the

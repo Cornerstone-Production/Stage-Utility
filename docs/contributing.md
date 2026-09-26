@@ -230,8 +230,7 @@ anything.
 npm run lint && npm run type-check && npm test && npm run build
 ```
 
-CI runs the same four. There is one long-standing lint warning
-(`patch-import.tsx:170`); anything beyond that is yours.
+CI runs the same four. Lint is clean; a new warning is yours to fix.
 
 Not every check runs on every pull request. The secret scan, the commit
 convention check and CodeQL run on all of them, and are required on `beta`.

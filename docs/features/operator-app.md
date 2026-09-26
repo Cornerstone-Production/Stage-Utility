@@ -36,7 +36,9 @@ done. Dismiss it and it stays dismissed.
 Consoles you have built get a row each, above the groups — see
 [Consoles](#consoles). The running version sits at the foot of the sidebar. Drag
 its right edge to resize it, or collapse it to icons; on a phone it becomes a
-drawer.
+drawer. Double-click the resize handle to reset the width — on a touch screen,
+tap and hold it for a **Reset sidebar width** item, since a finger has no
+double-click.
 
 **On a phone the hamburger is the only way in.** There is no swipe from the left
 edge of the screen — that edge belongs to the browser's own back gesture, and a
@@ -209,6 +211,23 @@ loses the clutter.
 
 This is a different setting from a screen's **Hide top bar**, which is set per
 screen and hides the *display's* bar on a wall, in a different page entirely.
+
+## Branding
+
+**Settings → Branding** controls how the app introduces itself, on every screen
+and in its own chrome.
+
+| | |
+|---|---|
+| **App name** | shown in the sidebar and the kiosk's top bar. Set it to your organization's name |
+| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name |
+| **Recolor to match theme** | for a single-color logo — recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
+| **Accent color** | the brand color for buttons, selection, links and focus, app-wide. Status colors (live / over / caution) are unaffected. Clear to use the built-in default |
+| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray |
+| **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
+
+The connect QR toggle lives on this page too — see
+[QR codes](../display-urls.md#qr-codes).
 
 ## Read-only links to hand out
 

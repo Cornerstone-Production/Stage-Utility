@@ -22,10 +22,11 @@ Built for a room full of always-on screens.
 ## Winding down between services
 
 Integrations do not retry at full speed all week. Rehearsal and service windows are
-derived from Planning Center — the earliest plan time minus a lead (default 2 h)
-through the last plus a tail (default 1 h) — and connections back off toward a
-dormant ceiling outside them. The Planning Center poll stretches from 4 seconds to
-5 minutes.
+derived from Planning Center — the earliest plan time minus a lead (**Lead time
+before rehearsal**, default 120 minutes) through the last plus a tail (**Keep
+active after service ends**, default 60 minutes) — and connections back off
+toward a dormant ceiling outside them (**Idle retry interval**, default 30
+minutes). The Planning Center poll stretches from 4 seconds to 5 minutes.
 
 Windows are recomputed on boot, hourly with the plan refresh, and when the schedule
 settings change. Two safeguards: nothing sleeps past the moment the next window

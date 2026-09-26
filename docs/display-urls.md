@@ -14,6 +14,9 @@ Nor is an id ever handed out twice: deleting a display retires its id for good, 
 a new one created afterwards cannot inherit the old one's slots or answer a
 bookmark meant for it. View ids work the same way.
 
+The root address also answers the legacy `/?display=<id>` query form. It still
+selects the display; `/<id>` is the one to use.
+
 ## Friendly URLs
 
 A display can also carry a **slug**: set `left-mic` on `display-1` and `/left-mic`
@@ -46,6 +49,16 @@ the screen's card shows.
 
 Where both exist, the id wins, so a display is always reachable at its permanent
 address.
+
+## Locking a display
+
+Append `?kiosk=1` to any display's address and its top bar drops the escape
+hatches — the QR/settings link and the clickable brand logo — while leaving
+the rest of the bar alone. It is the same effect as that screen's own **Lock
+display** toggle on Screens, as a link rather than a setting: use it for a
+one-off address handed to someone outside Production, so opening it can't lead
+to Settings or another display. Soft by design, like the toggle it matches —
+editing the URL undoes it — a guardrail, not access control.
 
 ## Operator pages
 
