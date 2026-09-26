@@ -949,6 +949,20 @@ interface BaptismRebuildPlan {
 }
 
 /**
+ * Rebuilt sessions that correspond to a session now in the store: `updated` +
+ * `added` (write-time counts, since the store can change between planning a
+ * rebuild and applying it) plus the plan's own `unchanged` + `newer` +
+ * `disagreeing` — everything except `invalid`. The ONE formula behind both
+ * applyBaptismRebuild's log line and BaptismRebuildOutcome.sessions, so a
+ * newer-only run cannot log "1 sessions" while the response it produced says
+ * `sessions:0`, or the reverse — see applyBaptismRebuild's own doc comment
+ * for the two-separately-written-copies bug this replaces.
+ */
+function baptismSessionsWritten(plan: BaptismRebuildPlan, updated: number, added: number): number {
+  return updated + added + plan.unchanged + plan.newer + plan.disagreeing;
+}
+
+/**
  * Derive this service's baptism sessions from `baptism.csv` and work out what
  * merging them into the store would do.
  *
@@ -1159,7 +1173,7 @@ async function applyBaptismRebuild(
   // rebuilt row that corresponds to a session now in the store, not only the
   // ones this call actually wrote — so a newer-only run logs "1 sessions"
   // rather than "0 sessions" while the response it produced says `sessions:1`.
-  const correspond = (u: number, a: number) => u + a + plan.unchanged + plan.newer + plan.disagreeing;
+  // See baptismSessionsWritten, the one formula behind both.
 
   // Computed once, then logged and returned in ONE place at the foot of this
   // function — regardless of which branch below produced them — so the log
@@ -1233,7 +1247,7 @@ async function applyBaptismRebuild(
   if (restoredIds.size > 0) broadcast("baptism:rebuilt", { serviceKey, ids: [...restoredIds] });
 
   console.log(
-    `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
+    `[baptism] rebuild: ${scrub(baptismSessionsWritten(plan, updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
       `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail)}`,
   );
   return { updated, added, full, restoredIds };
@@ -1343,7 +1357,7 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
   // counted before the write ran — is still exactly right afterward.
   return {
     rows: plan.rows.length,
-    sessions: updated + added + plan.unchanged + plan.newer + plan.disagreeing,
+    sessions: baptismSessionsWritten(plan, updated, added),
     updated,
     added,
     unchanged: plan.unchanged,
