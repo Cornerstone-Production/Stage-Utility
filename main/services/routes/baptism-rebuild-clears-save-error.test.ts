@@ -14,7 +14,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { interceptAddSession, type AddSession } from "../baptism-save-harness.js";
+import { interceptAddSession, sleep, type AddSession } from "../baptism-save-harness.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-rebuild-clears-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -37,8 +37,6 @@ const pushes: BaptismState[] = [];
 addBroadcastListener((channel, payload) => {
   if (channel === "baptism:state") pushes.push(payload as BaptismState);
 });
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The first push after index `from` that satisfies `test` — polled, like
  *  baptism-save-error.test.ts's own helper, since the save settles on the

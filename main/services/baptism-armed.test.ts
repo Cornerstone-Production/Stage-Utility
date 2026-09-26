@@ -9,12 +9,11 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../types/stage.js";
+import { sleep } from "./baptism-save-harness.js";
 
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
 const { segmentElapsedMs } = await import("./baptism-elapsed.js");
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("default workflow", () => {
   it("starts grouped, because that is how a baptism is run here", async () => {

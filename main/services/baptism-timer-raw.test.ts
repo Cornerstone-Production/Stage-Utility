@@ -43,6 +43,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { sleep } from "./baptism-save-harness.js";
+
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-raw-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
@@ -89,8 +91,6 @@ function cols(rows: string[][]) {
     idx: at,
   };
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("the raw layer records the last grouped person, not just phase 0..n-1", () => {
   it("keeps the last person's baptism time when the session auto-finishes", async () => {

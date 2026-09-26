@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { BaptismSpan } from "../archive/baptism-lane.js";
+import { sleep } from "../baptism-save-harness.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-lane-route-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -33,8 +34,6 @@ const DATE = "2026-09-20";
 
 type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
 const recorder = serviceTimelineRecorder as unknown as Held;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function timeline(serviceKey: string) {
   return {

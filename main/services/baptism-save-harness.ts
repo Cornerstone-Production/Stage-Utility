@@ -55,3 +55,11 @@ export function interceptAddSession(store: { addSession: AddSession }, impl?: Ad
     },
   };
 }
+
+/** Resolves after `ms` — a poll's own step delay, not a fixed wait for the
+ *  thing being polled. Shared here, like interceptAddSession above, so the
+ *  baptism test files polling a debounced save or a queued write are not each
+ *  keeping their own copy of the same one-liner. Safe to import statically:
+ *  this module touches no store, so it carries none of the ordering risk
+ *  interceptAddSession's own doc comment warns about. */
+export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
