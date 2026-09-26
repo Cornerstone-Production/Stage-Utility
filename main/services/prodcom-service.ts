@@ -1073,9 +1073,7 @@ export class ProdComService extends ConnectionLifecycle {
       const wasPromoted = this.onWebSocket;
       this.closeSocket();
       if (wasPromoted) {
-        this.onWebSocket = false;
-        this.report("disconnected", null);
-        this.demoteToSse("the websocket stopped answering (heartbeat missed)");
+        this.demoteFromPromoted("the websocket stopped answering (heartbeat missed)");
       } else {
         this.giveUpOnUnprovenWebSocket("the websocket stopped answering (heartbeat missed)");
       }
@@ -1369,6 +1367,46 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   /**
+   * The tail both silence-check modes share once a page has already been read
+   * and is still about the right connection: turn a REST failure into an
+   * OutageLog line and re-arm (identical tolerance in both modes — "no lines"
+   * and "could not ask" must never be confused, or an unreachable REST
+   * endpoint under a socket that is genuinely fine tears down a transport
+   * that works), or else compute what this socket missed against `baseline`
+   * and move the baseline past this page.
+   *
+   * Returns null once the caller has nothing left to do this round — the
+   * failure branch above already re-armed the check itself. `promoted` only
+   * changes the wording of the failure line, to match which mode is asking.
+   */
+  private resolveMissedAgainstBaseline(
+    page: { ok: true; rows: PageRow[] } | { ok: false; error: string },
+    baseline: ReadonlySet<string>,
+    quiet: string,
+    promoted: boolean,
+  ): PageRow[] | null {
+    if (!page.ok) {
+      const out = this.wsOutages.fail("silence-check", page.error, this.now());
+      if (out.log) {
+        console.warn(
+          `[prodcom] could not check whether the ${promoted ? "promoted " : ""}websocket is missing transcript ` +
+            `lines (${scrub(page.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
+        );
+      }
+      this.armSilenceCheck();
+      return null;
+    }
+    const askable = this.wsOutages.ok("silence-check", this.now());
+    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
+
+    const missed = this.missedSpokenRows(page.rows, baseline);
+    // Move past whatever this check just read, whether or not it found
+    // anything — a check must never re-judge a row it has already seen.
+    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+    return missed;
+  }
+
+  /**
    * The check itself. Three outcomes, and the two that do nothing matter most.
    *
    * Every log line here is one an operator reads at 9am on a Sunday to answer
@@ -1426,32 +1464,16 @@ export class ProdComService extends ConnectionLifecycle {
     const page = await this.readNewestPage(host, port);
     if (epoch !== this.connectionEpoch || !this.silenceCheckStillOpen(ws)) return;
 
-    if (!page.ok) {
-      // "No lines" and "could not ask" are indistinguishable from here, and
-      // acting on the second is how a transport that is working gets torn down.
-      //
-      // Through OutageLog, like every other repeated failure in this file: the
-      // check re-arms every interval, so an unreachable REST endpoint under a
-      // socket that is up wrote this line 1440 times a day into a 10,000-line
-      // ring. First failure, a reminder every fifteen minutes carrying the
-      // count, and one line when it comes back.
-      const out = this.wsOutages.fail("silence-check", page.error, this.now());
-      if (out.log) {
-        console.warn(
-          `[prodcom] could not check whether the websocket is missing transcript lines ` +
-            `(${scrub(page.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
-        );
-      }
-      this.armSilenceCheck();
-      return;
-    }
-    const askable = this.wsOutages.ok("silence-check", this.now());
-    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
-
-    const missed = this.missedSpokenRows(page.rows, baseline);
-    // Move past whatever this check just read, whether or not it found
-    // anything — a check must never re-judge a row it has already seen.
-    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+    // "No lines" and "could not ask" are indistinguishable from here, and
+    // acting on the second is how a transport that is working gets torn down —
+    // resolveMissedAgainstBaseline() is what draws that line, through OutageLog
+    // like every other repeated failure in this file: the check re-arms every
+    // interval, so an unreachable REST endpoint under a socket that is up wrote
+    // this line 1440 times a day into a 10,000-line ring. First failure, a
+    // reminder every fifteen minutes carrying the count, and one line when it
+    // comes back.
+    const missed = this.resolveMissedAgainstBaseline(page, baseline, quiet, false);
+    if (missed === null) return;
 
     if (missed.length === 0) {
       // Nothing was said on the newest page. debug, not log: a quiet room is
@@ -1535,25 +1557,12 @@ export class ProdComService extends ConnectionLifecycle {
       return;
     }
 
-    if (!page.ok) {
-      // Exactly probation's tolerance: "no lines" and "could not ask" must
-      // not be confused, or an unreachable REST endpoint under a socket that
-      // is genuinely still working tears down a transport that was fine.
-      const out = this.wsOutages.fail("silence-check", page.error, this.now());
-      if (out.log) {
-        console.warn(
-          `[prodcom] could not check whether the promoted websocket is missing transcript lines ` +
-            `(${scrub(page.error)}) — leaving it alone and asking again in ${quiet}${out.note}`,
-        );
-      }
-      this.armSilenceCheck();
-      return;
-    }
-    const askable = this.wsOutages.ok("silence-check", this.now());
-    if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
-
-    const missed = this.missedSpokenRows(page.rows, baseline);
-    this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+    // Exactly probation's tolerance (resolveMissedAgainstBaseline): "no lines"
+    // and "could not ask" must not be confused, or an unreachable REST
+    // endpoint under a socket that is genuinely still working tears down a
+    // transport that was fine.
+    const missed = this.resolveMissedAgainstBaseline(page, baseline, quiet, true);
+    if (missed === null) return;
 
     if (missed.length === 0) {
       // Quiet room, not a silent socket.
@@ -1574,9 +1583,7 @@ export class ProdComService extends ConnectionLifecycle {
         `${everyMs(this.wsRetryIntervalMs)} from here`,
     );
     this.closeSocket();
-    this.onWebSocket = false;
-    this.report("disconnected", null);
-    this.demoteToSse("stopped delivering while promoted — ProdCom shows spoken lines it never carried");
+    this.demoteFromPromoted("stopped delivering while promoted — ProdCom shows spoken lines it never carried");
   }
 
   /**
@@ -2052,9 +2059,7 @@ export class ProdComService extends ConnectionLifecycle {
       if (this.onWebSocket) {
         // It was PROMOTED and went away: captions fall straight back to SSE,
         // with backfill covering whatever gap this leaves.
-        this.onWebSocket = false;
-        this.report("disconnected", null);
-        this.demoteToSse(`the websocket dropped (${ev.reason || `code ${ev.code}`})`);
+        this.demoteFromPromoted(`the websocket dropped (${ev.reason || `code ${ev.code}`})`);
         return;
       }
       if (wasOpen) {
@@ -2258,6 +2263,22 @@ export class ProdComService extends ConnectionLifecycle {
       );
     }
     this.armWebSocketRetry();
+  }
+
+  /**
+   * A PROMOTED WebSocket has stopped carrying the transcript — whichever of the
+   * three ways that shows up: closed outright (ws.onclose), missed its
+   * heartbeat (armWsHeartbeatWatchdog), or was shown silent again by the check
+   * above. The caller must have already dealt with the socket itself first —
+   * closeSocket(), or (ws.onclose) the equivalent it already did inline,
+   * because that handler's own close already fired and closeSocket() would
+   * fire a second one over the top of it. This only clears the promoted flag,
+   * reports the drop, and hands off to demoteToSse().
+   */
+  private demoteFromPromoted(reason: string): void {
+    this.onWebSocket = false;
+    this.report("disconnected", null);
+    this.demoteToSse(reason);
   }
 
   /**
