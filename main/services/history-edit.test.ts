@@ -25,6 +25,7 @@ const { serviceTimelineStore } = await import("./service-timeline-store.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
+const { baptismStore } = await import("./baptism-store.js");
 const { deleteServiceRecords, editServiceWindow, mergeServiceRecords, recalcAttendance, ServiceIsLiveError } =
   await import("./history-edit.js");
 const { applyItemTimeEdits } = await import("./history-item-times.js");
@@ -453,6 +454,9 @@ describe("merging when only one side has a record in a store", () => {
       await splHistoryStore.delete(k);
       await serviceTimelineStore.delete(k);
     }
+    for (const s of await baptismStore.listSessions()) {
+      if (s.serviceKey === "src" || s.serviceKey === "tgt") await baptismStore.deleteSession(s.id);
+    }
   });
 
   it("re-keys a source-only record onto the target instead of orphaning it", async () => {
@@ -499,6 +503,33 @@ describe("merging when only one side has a record in a store", () => {
       "merging into nothing must fail loudly, not move an archive under a record that is not there",
     );
     assert.ok(await attendanceStore.get("src"), "the source must be untouched");
+  });
+
+  // Pre-existing (not new in this release): mergeArchives moves baptism.csv to
+  // the target's archive directory, but the STORED sessions (baptismStore
+  // holds them in one flat list, not per-serviceKey like the stores above)
+  // kept the source's serviceKey — orphaned the moment this same merge
+  // deletes the source's own service record.
+  it("re-keys stored baptism sessions onto the target instead of orphaning them", async () => {
+    await attendanceStore.upsert(record("tgt", 100, [100], 0));
+    await attendanceStore.upsert(record("src", 200, [200], 30));
+    const session1 = {
+      id: "bap-merge-1",
+      startedAt: new Date(T0).toISOString(),
+      finishedAt: new Date(T0 + 60_000).toISOString(),
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+      serviceKey: "src",
+    } as never;
+    await baptismStore.addSession(session1);
+
+    const outcome = await mergeServiceRecords("src", "tgt");
+
+    assert.ok(outcome.moved.includes("baptism sessions"), "the merge must report the re-key");
+    const all = await baptismStore.listSessions();
+    assert.equal(all.find((s) => s.id === "bap-merge-1")?.serviceKey, "tgt", "the session must follow the archive it belongs to");
   });
 });
 

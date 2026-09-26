@@ -449,3 +449,43 @@ describe("listSessions dedupes a session stored twice under one id", () => {
     }
   });
 });
+
+// Pre-existing (not new in this release): a history merge moves baptism.csv
+// to the target's archive directory (mergeArchives, history-edit.ts) but
+// never re-keyed the stored sessions, which kept the source's serviceKey —
+// orphaned once the merge deletes the source's own service record.
+describe("rekeyServiceKey", () => {
+  it("moves every session recorded under the source key onto the target, leaving others alone", async () => {
+    const moved1 = { ...session(900), serviceKey: "src-key" } as BaptismSession;
+    const moved2 = { ...session(901), serviceKey: "src-key" } as BaptismSession;
+    const untouched = { ...session(902), serviceKey: "other-key" } as BaptismSession;
+    await baptismStore.addSessions([moved1, moved2, untouched]);
+    try {
+      const moved = await baptismStore.rekeyServiceKey("src-key", "tgt-key");
+      assert.equal(moved, 2, "exactly the two sessions under the source key must move");
+
+      const all = await baptismStore.listSessions();
+      assert.equal(all.find((s) => s.id === moved1.id)?.serviceKey, "tgt-key");
+      assert.equal(all.find((s) => s.id === moved2.id)?.serviceKey, "tgt-key");
+      assert.equal(all.find((s) => s.id === untouched.id)?.serviceKey, "other-key", "an unrelated session's key must not change");
+      assert.equal((await baptismStore.rekeyServiceKey("src-key", "tgt-key")).valueOf(), 0, "nothing left under the source key on a second call");
+    } finally {
+      await baptismStore.deleteSession(moved1.id);
+      await baptismStore.deleteSession(moved2.id);
+      await baptismStore.deleteSession(untouched.id);
+    }
+  });
+
+  it("is a no-op for an empty, missing or identical key, and does not write", async () => {
+    const spy = spyOnWrite();
+    try {
+      assert.equal(await baptismStore.rekeyServiceKey("", "tgt"), 0);
+      assert.equal(await baptismStore.rekeyServiceKey("src", ""), 0);
+      assert.equal(await baptismStore.rekeyServiceKey("same", "same"), 0);
+      assert.equal(await baptismStore.rekeyServiceKey("nothing-recorded-under-this-key", "tgt"), 0);
+      assert.equal(spy.calls(), 0, "no session moved, so nothing should reach the underlying write");
+    } finally {
+      spy.restore();
+    }
+  });
+});

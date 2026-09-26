@@ -1620,6 +1620,18 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     outcome.moved.push("spl");
   }
 
+  // ── Baptism sessions ──
+  // Not a per-key record like the three stores above — baptismStore holds
+  // every service's sessions in one flat list, each carrying its own
+  // serviceKey field, so there is no "both sides recorded one" case to
+  // reconcile: every session already saved under the source key just gets
+  // re-tagged onto the target. mergeArchives above already moved baptism.csv
+  // itself; without this, a session saved before the merge kept the source's
+  // now-deleted serviceKey — GET /api/baptism/lane?serviceKey=<target>
+  // answered [] for it, and it linked to no service at all.
+  const rekeyedSessions = await baptismStore.rekeyServiceKey(sourceKey, targetKey);
+  if (rekeyedSessions > 0) outcome.moved.push("baptism sessions");
+
   console.log(
     `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: ` +
       `merged [${scrub(outcome.merged.join(", ") || "none")}], ` +

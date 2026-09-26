@@ -290,6 +290,37 @@ class BaptismStore {
     });
     return existed;
   }
+
+  /**
+   * Re-key every session recorded under `from` onto `to`.
+   *
+   * Not a per-serviceKey record like the timeline/attendance/SPL stores
+   * mergeServiceRecords (history-edit.ts) also touches — this store holds every
+   * service's sessions in one flat list, each carrying its own `serviceKey`
+   * field. A history merge moves `baptism.csv` to the target's archive
+   * directory (see mergeArchives), but a session already SAVED under the
+   * source key does not follow it on its own: `GET
+   * /api/baptism/lane?serviceKey=<target>` answered `[]` for it, and the
+   * source's own service record having just been deleted by the merge, it
+   * would link to nothing at all. Returns how many sessions moved, so the
+   * caller can log it only when it actually did something.
+   */
+  async rekeyServiceKey(from: string, to: string): Promise<number> {
+    if (!from || !to || from === to) return 0;
+    let moved = 0;
+    await this.store.update((file) => {
+      let changed = false;
+      const sessions = file.sessions.map((s) => {
+        if (s.serviceKey !== from) return s;
+        changed = true;
+        moved += 1;
+        return { ...s, serviceKey: to };
+      });
+      if (!changed) return file;
+      return { ...file, sessions };
+    });
+    return moved;
+  }
 }
 
 export const baptismStore = new BaptismStore();
