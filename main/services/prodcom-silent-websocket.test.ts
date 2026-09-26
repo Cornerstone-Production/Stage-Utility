@@ -423,6 +423,9 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       // for the transcript stream.
       c.stub.wsTranscript(spoken("swallowed-by-the-filter"));
       await eventually(() => stub!.wsUpgrades >= 2, "the socket to be reopened");
+      // The stub counts the upgrade before the client's onopen; wsSettled() is
+      // the new socket's only once it has opened.
+      await eventually(() => c.svc.wsOpenNow, "the reopened socket to open");
       await c.svc.wsSettled();
       // The reopened socket sent no subscribe frame, so the stub delivers to it.
       c.stub.wsTranscript(spoken("arrived-with-no-filter"));
