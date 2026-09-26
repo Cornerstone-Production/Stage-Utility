@@ -225,11 +225,14 @@ a broken link. Delete removes a session after confirming — its raw rows in
 `baptism.csv` are untouched, so **Rebuild from raw** can bring it back (see
 Recovery, below).
 
-A **Trends** card averages the last eight sessions against the eight before
+A **Trends** card averages the last eight services against the eight before
 them, across four figures: baptized per service, average testimony, average
 baptism, and the whole segment's wall-clock length — what a planner budgets
 for next week, since it includes the walk to the water and every gap the
-timer lane draws as "not counted". Below three prior sessions to compare
+timer lane draws as "not counted". Sessions sharing the same service (a
+reset-and-restart, or a kids' group and an adults' group both finished the
+same Sunday) count as one service, not two, so a service's own total is never
+split across two half-weighted points. Below three prior services to compare
 against, a tile shows its figure with no change against it, rather than a
 percentage or a delta computed from too little history to mean anything.
 

@@ -3,13 +3,17 @@
 // reason: what a window averages and what it is compared against are tested as
 // arithmetic, not through a render jsdom cannot lay out.
 //
-// A baptism trend needs none of history-trends' day-grouping machinery. A
-// baptism SESSION already IS one service's occurrence — an operator starts and
-// finishes exactly one per service — so there is no day that can hold several
-// of them to add up or take the loudest of, and no "day still running" state.
-// TREND_WINDOW and MIN_PRIOR_DAYS carry over UNCHANGED: the last eight sessions
-// against the eight before, and fewer than three prior sessions means no
-// change figure rather than a misleading one.
+// A baptism trend needs none of history-trends' day-grouping machinery, but a
+// baptism SESSION is not always one service's occurrence — a reset-and-
+// restart, or a kids' group then an adults' group both finished in the same
+// grouped service, are two sessions sharing one `serviceKey`. By the time a
+// BaptismTrendPoint reaches this module it is already one point per SERVICE:
+// trends-card.tsx's groupSessionsByService groups sessions by that key before
+// baptismTrendPoint reduces each group to a point. So there is no day that
+// can hold several points to add up or take the loudest of, and no "day
+// still running" state. TREND_WINDOW and MIN_PRIOR_DAYS carry over UNCHANGED:
+// the last eight services against the eight before, and fewer than three
+// prior services means no change figure rather than a misleading one.
 //
 // COMPARABLE_ABOVE does NOT carry over. It is typed Record<TrendMeasure,
 // number>, and TrendMeasure is "attendance" | "sound" — neither is a baptism.
