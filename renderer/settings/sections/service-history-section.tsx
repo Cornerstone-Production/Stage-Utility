@@ -1402,13 +1402,22 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       }
     }
     // The include/exclude checkbox column only shows while editing times.
-    // Mobile drops #, Plan, Started and Ended (see the max-sm:hidden cells) so the
-    // item name isn't crushed; sm+ shows the full grid. Templates must match the
-    // visible cells. Started and Ended are wider in edit mode because they hold an
-    // HH:MM:SS field there rather than a formatted time.
-    const gridCols = editingTimes
-      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]"
-      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]";
+    // A narrow table drops #, Plan, Started and Ended (the `wideOnly` cells) so
+    // the item name isn't crushed. Keyed to the TABLE's width (`@container` on
+    // it), not the viewport's: beside the rail at 640px the full grid needed more
+    // than the table had, and its overflow-hidden clipped Started and Ended away.
+    // Templates must match the visible cells. Started and Ended are wider in edit
+    // mode because they hold an HH:MM:SS field there, so edit mode needs 42rem of
+    // table where reading needs 35.
+    const { gridCols, wideOnly } = editingTimes
+      ? {
+          gridCols: "grid-cols-[1.4rem_1fr_3.5rem_3rem] @min-[42rem]:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]",
+          wideOnly: "@max-[42rem]:hidden",
+        }
+      : {
+          gridCols: "grid-cols-[1fr_3.5rem_3rem] @min-[35rem]:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]",
+          wideOnly: "@max-[35rem]:hidden",
+        };
     // Series · service type · date · time, in one muted line. Blank parts drop
     // out rather than leaving a dangling separator.
     const metaLine = [
@@ -1490,7 +1499,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             down the page. The marks — live, not counted, edited — and the two
             row buttons were each on a bespoke 10px; they are on the scale's
             11px caption now. Nothing about what the table DOES changed. */}
-        <div className="flex flex-col overflow-hidden rounded-lg border border-line">
+        <div className="@container flex flex-col overflow-hidden rounded-lg border border-line">
           <div
             data-testid="rundown-header"
             className={`grid ${gridCols} gap-2 border-b border-line bg-fill px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle`}
@@ -1500,7 +1509,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 <span className="text-center">✓</span>
               </Tooltip>
             )}
-            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Started</span><span className="text-right max-sm:hidden">Ended</span>
+            <span className={cn("", wideOnly)}>#</span><span>Item</span><span className={cn("text-right", wideOnly)}>Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className={cn("text-right", wideOnly)}>Started</span><span className={cn("text-right", wideOnly)}>Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
@@ -1530,7 +1539,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     />
                   </Tooltip>
                 )}
-                <span className="font-mono tabular-nums text-fg-subtle max-sm:hidden">{i + 1}</span>
+                <span className={cn("font-mono tabular-nums text-fg-subtle", wideOnly)}>{i + 1}</span>
                 <span className="truncate text-fg">
                   {it.title || "—"}
                   {itemLive && <span className="ml-1.5 text-caption2 text-live-11">live</span>}
@@ -1542,7 +1551,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   )}
                   {editingTimes && dirty && (
                     <button
-                      className="ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10 max-sm:hidden"
+                      className={cn("ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10", wideOnly)}
                       disabled={saving}
                       aria-label={`Save times — ${it.title || "item"}`}
                       onClick={() => void saveItemTimes(it)}
@@ -1557,7 +1566,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       wanted. Reset discards the draft along with the override. */}
                   {editingTimes && edited && (
                     <button
-                      className="ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill max-sm:hidden"
+                      className={cn("ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill", wideOnly)}
                       aria-label={`Reset times — ${it.title || "item"}`}
                       onClick={() => void resetItemTimes(it)}
                     >
@@ -1565,7 +1574,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     </button>
                   )}
                 </span>
-                <span className="text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
+                <span className={cn("text-right font-mono tabular-nums text-fg-muted", wideOnly)}>{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
                 <span className="text-right font-mono tabular-nums text-fg">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
                 <span className={`text-right font-mono tabular-nums ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
                 {editingTimes ? (
@@ -1583,7 +1592,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded start"
                       value={draft.start}
                       onChange={(e) => setDraft(it, { start: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
+                      className={cn("rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg", wideOnly)}
                     />
                     <input
                       type="time"
@@ -1593,13 +1602,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded end"
                       value={draft.end}
                       onChange={(e) => setDraft(it, { end: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
+                      className={cn("rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg", wideOnly)}
                     />
                   </>
                 ) : (
                   <>
-                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
-                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                    <span className={cn("whitespace-nowrap text-right font-mono tabular-nums text-fg-muted", wideOnly)}>{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
+                    <span className={cn("whitespace-nowrap text-right font-mono tabular-nums text-fg-muted", wideOnly)}>{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
                   </>
                 )}
               </div>

@@ -440,8 +440,9 @@ bottom:
   the keyboard and with middle-click, and the one you are looking at is
   highlighted as you scroll.
 
-On a phone the header stacks and the six figures scroll sideways in their own
-row; the page itself never scrolls sideways.
+When the page is too narrow for the title beside the actions, the header stacks
+them, and the six figures scroll sideways in their own row; the page itself never
+scrolls sideways.
 
 On a weekend a baptism session links to, a fourth **Baptisms** card appears
 between Rundown and Attendance, and the nav gains an entry for it in the same
@@ -620,9 +621,10 @@ Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
 The rundown itself is a table of every item as it ran: number, title, planned
-length, actual, the difference, and the times it started and ended. An item
-excluded from the timers is marked **not counted** and dimmed; one whose times
-were corrected is marked **edited**.
+length, actual, the difference, and the times it started and ended. A table too
+narrow for all of them keeps the title, actual and difference. An item excluded
+from the timers is marked **not counted** and dimmed; one whose times were
+corrected is marked **edited**.
 
 **Edit times** also makes each item's own Started and Ended editable. An item
 that recorded wrong — a pre-roll that reads eleven minutes because the plan was
