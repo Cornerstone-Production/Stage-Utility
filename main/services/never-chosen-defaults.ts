@@ -58,60 +58,85 @@ function isLegacyCard(style: LayoutObject["style"]): boolean {
   );
 }
 
-/** Strip every never-chosen default from one object and its children.
- *  Returns the SAME object when nothing changed, so the caller can tell. */
-function cleanObject(o: LayoutObject): LayoutObject {
-  const kids = o.children?.map(cleanObject);
+/**
+ * Walk one object and its children bottom-up, asking `transformStyle` for each
+ * one's replacement style. `null` means "leave this object's style alone".
+ *
+ * Shared by both passes below so the reference-preserving walk — the part a
+ * test asserts on directly — exists once rather than twice in a file that is
+ * already explicit about not wanting two walks over the same tree.
+ *
+ * Returns the SAME object when nothing in it or its children changed.
+ */
+function mapObjectStyle(
+  o: LayoutObject,
+  transformStyle: (style: LayoutObject["style"]) => LayoutObject["style"] | null,
+): LayoutObject {
+  const kids = o.children?.map((k) => mapObjectStyle(k, transformStyle));
   const kidsChanged = kids != null && kids.some((k, i) => k !== o.children![i]);
-
-  const opaque = opaqueGroundFor(o.style?.background);
-  const oldCard = isLegacyCard(o.style);
-  if (!opaque && !oldCard) {
-    return kidsChanged ? { ...o, children: kids } : o;
-  }
-  const style = { ...o.style };
-  if (opaque) style.background = opaque;
-  if (oldCard) {
-    style.background = CURRENT_CARD.background;
-    style.borderColor = CURRENT_CARD.borderColor;
-  }
+  const style = transformStyle(o.style);
+  if (style == null) return kidsChanged ? { ...o, children: kids } : o;
   return { ...o, style, ...(kidsChanged ? { children: kids } : null) };
 }
 
+/** Strip every never-chosen default from one object and its children. */
+function cleanObject(o: LayoutObject): LayoutObject {
+  return mapObjectStyle(o, (style) => {
+    const opaque = opaqueGroundFor(style?.background);
+    const oldCard = isLegacyCard(style);
+    if (!opaque && !oldCard) return null;
+    const next = { ...style };
+    if (opaque) next.background = opaque;
+    if (oldCard) {
+      next.background = CURRENT_CARD.background;
+      next.borderColor = CURRENT_CARD.borderColor;
+    }
+    return next;
+  });
+}
+
 /**
- * Run the migration over every view.
+ * Run an object-level migration over every view.
  *
- * Returns the views array BY REFERENCE when nothing changed, so a load that has
- * already been migrated skips the write entirely — a fresh array every launch is
- * a file rewrite for nothing, and this runs beside two other migrations that
- * share the same file.
+ * Shared by both passes below. Returns the views array BY REFERENCE when
+ * nothing changed, so a load that has already been migrated skips the write
+ * entirely — a fresh array every launch is a file rewrite for nothing, and
+ * this runs beside another migration that shares the same file.
  */
-export function migrateNeverChosenDefaults(views: readonly View[]): View[] {
+function migrateViews(views: readonly View[], transformObject: (o: LayoutObject) => LayoutObject): View[] {
   let changed = false;
   const out = views.map((v) => {
     const objects = v.layout?.objects;
     if (!objects?.length) return v;
-    const cleaned = objects.map(cleanObject);
-    if (!cleaned.some((o, i) => o !== objects[i])) return v;
+    const transformed = objects.map(transformObject);
+    if (!transformed.some((o, i) => o !== objects[i])) return v;
     changed = true;
-    return { ...v, layout: { ...v.layout!, objects: cleaned } };
+    return { ...v, layout: { ...v.layout!, objects: transformed } };
   });
   return changed ? out : (views as View[]);
 }
 
-/** How many objects the migration would touch — for the load-time log line, so
- *  an operator whose layouts moved can find out why rather than guessing.
+/** How many objects in a view tree match `matches` — for a load-time log line,
+ *  so an operator whose layouts moved can find out why rather than guessing.
  *  Counts an object ONCE however many of its defaults are being replaced. */
-export function countNeverChosen(views: readonly View[]): number {
+function countMatching(views: readonly View[], matches: (style: LayoutObject["style"]) => boolean): number {
   let n = 0;
   const walk = (objs: readonly LayoutObject[] | undefined) => {
     for (const o of objs ?? []) {
-      if (opaqueGroundFor(o.style?.background) || isLegacyCard(o.style)) n++;
+      if (matches(o.style)) n++;
       walk(o.children);
     }
   };
   for (const v of views) walk(v.layout?.objects);
   return n;
+}
+
+export function migrateNeverChosenDefaults(views: readonly View[]): View[] {
+  return migrateViews(views, cleanObject);
+}
+
+export function countNeverChosen(views: readonly View[]): number {
+  return countMatching(views, (style) => Boolean(opaqueGroundFor(style?.background) || isLegacyCard(style)));
 }
 
 /** The hairline the registry, the templates and the first pass above wrote
@@ -122,44 +147,18 @@ function hasFaintHairline(style: LayoutObject["style"]): boolean {
   return (style?.borderColor ?? "").replace(/\s+/g, "").toLowerCase() === FAINT_HAIRLINE;
 }
 
-/** One object and its children with any 8% hairline raised to CARD_HAIRLINE.
- *  Returns the SAME object when nothing changed. */
-function raiseHairline(o: LayoutObject): LayoutObject {
-  const kids = o.children?.map(raiseHairline);
-  const kidsChanged = kids != null && kids.some((k, i) => k !== o.children![i]);
-  if (!hasFaintHairline(o.style)) return kidsChanged ? { ...o, children: kids } : o;
-  return { ...o, style: { ...o.style, borderColor: CARD_HAIRLINE }, ...(kidsChanged ? { children: kids } : null) };
-}
-
 /**
  * Give every object wearing the old 8% hairline the card border new widgets
  * get, on any ground. Runs once, like the pass above, and for the same reason:
  * after it has run, an 8% border is one the operator picked.
- *
- * Returns the views array BY REFERENCE when nothing changed.
  */
 export function migrateCardHairline(views: readonly View[]): View[] {
-  let changed = false;
-  const out = views.map((v) => {
-    const objects = v.layout?.objects;
-    if (!objects?.length) return v;
-    const raised = objects.map(raiseHairline);
-    if (!raised.some((o, i) => o !== objects[i])) return v;
-    changed = true;
-    return { ...v, layout: { ...v.layout!, objects: raised } };
-  });
-  return changed ? out : (views as View[]);
+  return migrateViews(views, (o) =>
+    mapObjectStyle(o, (style) => (hasFaintHairline(style) ? { ...style, borderColor: CARD_HAIRLINE } : null)),
+  );
 }
 
 /** How many objects migrateCardHairline would change, for its log line. */
 export function countFaintHairlines(views: readonly View[]): number {
-  let n = 0;
-  const walk = (objs: readonly LayoutObject[] | undefined) => {
-    for (const o of objs ?? []) {
-      if (hasFaintHairline(o.style)) n++;
-      walk(o.children);
-    }
-  };
-  for (const v of views) walk(v.layout?.objects);
-  return n;
+  return countMatching(views, hasFaintHairline);
 }
