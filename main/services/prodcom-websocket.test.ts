@@ -32,7 +32,13 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
-import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
+import {
+  eventually,
+  startProdComStub,
+  type ProdComStub,
+  type StubEntry,
+  type StubOptions,
+} from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-11T12:00:00Z");
 
@@ -113,15 +119,6 @@ async function withLogs(fn: () => Promise<void>): Promise<string[]> {
 
 /** Poll until `ready()` or give up — for the handful of assertions that observe
  *  the SERVICE rather than the stub and so have nothing to await on. */
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
 describe("the transcript comes over the websocket", () => {
   it("upgrades, subscribes to the transcript stream, and carries the pre-shared key in the documented header", async (t) => {
     const { stub } = await connected(t, { requireBearer: "s3cret" }, "s3cret");

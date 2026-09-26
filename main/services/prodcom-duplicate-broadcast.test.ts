@@ -17,7 +17,13 @@ import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
 import { addBroadcastListener } from "./broadcaster.js";
-import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
+import {
+  eventually,
+  startProdComStub,
+  type ProdComStub,
+  type StubEntry,
+  type StubOptions,
+} from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 
@@ -68,15 +74,6 @@ function spyOnTranscriptBroadcasts(): unknown[] {
     if (channel === "prodcom:transcript") seen.push(payload);
   });
   return seen;
-}
-
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
 }
 
 describe("a line delivered on both transports broadcasts once, not twice", () => {

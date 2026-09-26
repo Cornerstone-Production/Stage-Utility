@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-24T12:00:00Z");
 
@@ -53,19 +53,6 @@ const spoken = (id: string, offsetMs = 0): StubEntry => ({
 });
 
 const CHANNELS_B = [{ id: "CH-A", name: "Box B Channel", color: "#00F900" }];
-
-async function eventually(
-  ready: () => boolean,
-  what: string | (() => string),
-  timeoutMs = 3000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 
@@ -49,15 +49,6 @@ const spoken = (id: string): StubEntry => ({
   inProgress: false,
   date: new Date(NOW).toISOString(),
 });
-
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
 
 describe("a websocket attempt's baseline", () => {
   it("is not overwritten by a late read from the attempt it replaced", async (t) => {

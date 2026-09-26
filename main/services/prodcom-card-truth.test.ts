@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
@@ -54,15 +54,6 @@ class TestProdCom extends ProdComService {
 }
 
 const CHANNELS = [{ id: "CH-A", name: "Lead TB", color: "#00F900" }];
-
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
 
 function everReportedConnected(svc: TestProdCom): boolean {
   return svc.reports.some((r) => r.state === "connected");

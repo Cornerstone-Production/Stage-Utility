@@ -32,7 +32,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
 
 const NOW = Date.parse("2026-09-24T21:08:00Z");
@@ -104,19 +104,6 @@ const typed = (id: string, offsetMs = 0): StubEntry => ({ ...spoken(id, offsetMs
 /** A box already holding exactly `cap` historical rows — a full rolling
  *  window from the moment this service ever connects to it. */
 const fullHistory = (cap: number): StubEntry[] => Array.from({ length: cap }, (_, i) => typed(`history-${i}`, i * 1000));
-
-async function eventually(
-  ready: () => boolean,
-  what: string | (() => string),
-  timeoutMs = 3000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 

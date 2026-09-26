@@ -28,6 +28,7 @@
 // this repo has no `ws` dependency. Only what a test needs is implemented: text
 // and close frames, no fragmentation, no extensions, no compression.
 
+import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
 import * as http from "node:http";
 import type { Duplex } from "node:stream";
@@ -316,6 +317,28 @@ function clientFrameType(text: string): string | null {
   if (!parsed || typeof parsed !== "object") return null;
   const type = (parsed as { type?: unknown }).type;
   return typeof type === "string" ? type : null;
+}
+
+/**
+ * Poll `ready` every 5ms until it's true, or fail the test after `timeoutMs`.
+ *
+ * Shared by the ProdCom test suites that drive the real client against this
+ * stub: each one waits on a condition of the SERVICE (a socket open, a line on
+ * the buffer, a report pushed), which the stub has no way to notify on — unlike
+ * `until()` above, which is this file's own internal wait for its OWN state and
+ * stays private to startProdComStub().
+ */
+export async function eventually(
+  ready: () => boolean,
+  what: string | (() => string),
+  timeoutMs = 3000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ready()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
 }
 
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
