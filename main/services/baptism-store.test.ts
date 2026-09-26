@@ -381,3 +381,71 @@ describe("mergeRebuilt keeps storage newest-first, so eviction takes the oldest"
     }
   });
 });
+
+/** Reach into the store's own internals to write a shape no CURRENT write path
+ *  can produce — v1.23.0's addSession prepended rather than replacing by id,
+ *  so finish, undo, finish left TWO rows sharing one id on an upgraded box.
+ *  This is what is already sitting in such a box's baptism.json, not
+ *  something addSession/addSessions/mergeRebuilt (all id-aware now) could
+ *  ever write. Goes straight through the store's own update() so the
+ *  in-process cache stays consistent with what a later listSessions() reads —
+ *  a raw fs.writeFile here would leave the cache stale. */
+type RawBaptismFile = { current: unknown; sessions: BaptismSession[] };
+type RawStore = { update: (f: (c: RawBaptismFile) => RawBaptismFile) => Promise<RawBaptismFile> };
+function internalsOf(): RawStore {
+  return (baptismStore as unknown as { store: RawStore }).store;
+}
+
+// Pre-existing (not new in this release): sessions v1.23.0 saved twice under
+// one id were counted twice by every reader of listSessions() — the route,
+// and linkBaptisms downstream of it in History.
+describe("listSessions dedupes a session stored twice under one id", () => {
+  it("counts it once, keeping the later finish, and logs once — without touching the file", async () => {
+    const id = "bap-dup-v1230";
+    const earlier = {
+      id,
+      startedAt: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+      finishedAt: new Date(Date.UTC(2026, 0, 1, 0, 10)).toISOString(),
+      people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+    } as unknown as BaptismSession;
+    const later = {
+      ...earlier,
+      finishedAt: new Date(Date.UTC(2026, 0, 1, 0, 20)).toISOString(),
+      people: [{ testimonyMs: 90_000, baptizeMs: 45_000 }],
+    } as unknown as BaptismSession;
+
+    const internals = internalsOf();
+    const warnLines: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("[baptism]") && args[0].includes("more than once")) {
+        warnLines.push(args[0]);
+      } else {
+        (originalWarn as (...a: unknown[]) => void)(...args);
+      }
+    };
+    try {
+      await internals.update((file) => ({ ...file, sessions: [earlier, later] }));
+
+      const all = await baptismStore.listSessions();
+      const mine = all.filter((s) => s.id === id);
+      assert.equal(mine.length, 1, "GET /api/baptism/sessions must count this id once, not twice");
+      assert.equal(mine[0]!.finishedAt, later.finishedAt, "the later finish wins");
+      assert.equal(warnLines.length, 1, "a stored duplicate must be logged on a tagged line");
+      // Every History and Baptisms read goes through listSessions(): the same
+      // duplicates are announced once, not on every read.
+      await baptismStore.listSessions();
+      assert.equal(warnLines.length, 1, "the same duplicates were logged again on the next read");
+
+      // Read-side only: the raw storage this test wrote is unchanged by that read.
+      const raw = (await internals.update((file) => file)) as { sessions: BaptismSession[] };
+      assert.equal(raw.sessions.filter((s) => s.id === id).length, 2, "listSessions() must not rewrite or prune the file");
+    } finally {
+      console.warn = originalWarn;
+      await internals.update((file) => ({ ...file, sessions: file.sessions.filter((s) => s.id !== id) }));
+    }
+  });
+});

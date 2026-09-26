@@ -35,10 +35,47 @@ class BaptismStore {
     return (await this.store.load()).current;
   }
 
-  /** Finished sessions, newest first. */
+  /** The duplicate count listSessions last logged — see its doc comment. */
+  private loggedDuplicateIds = 0;
+
+  /**
+   * Finished sessions, newest first — one per id, even when the FILE holds
+   * more than one.
+   *
+   * v1.23.0's addSession prepended rather than replacing by id (see
+   * addSession's own doc comment above), so finish, undo, finish left TWO
+   * rows sharing an id in a box's baptism.json. This release stops writing new
+   * ones, but an upgraded box's already-written file keeps its old pair, and
+   * every caller of this method — the API, and linkBaptisms downstream of it —
+   * counted that session's people twice.
+   *
+   * Fixed here, on the READ side, deliberately: the operator's file is never
+   * rewritten or pruned to fix this, only what the server SERVES from it. The
+   * later `finishedAt` wins, the same preference addSession's own replace-by-id
+   * already gives a corrected re-finish. Logged on a tagged line when
+   * duplicates are present, once per distinct count rather than on every read.
+   */
   async listSessions(): Promise<BaptismSession[]> {
     const file = await this.store.load();
-    return file.sessions.slice().sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+    const byId = new Map<string, BaptismSession>();
+    let duplicateIds = 0;
+    for (const s of file.sessions) {
+      const existing = byId.get(s.id);
+      if (!existing) {
+        byId.set(s.id, s);
+        continue;
+      }
+      duplicateIds += 1;
+      if (Date.parse(s.finishedAt) > Date.parse(existing.finishedAt)) byId.set(s.id, s);
+    }
+    if (duplicateIds > 0 && duplicateIds !== this.loggedDuplicateIds) {
+      this.loggedDuplicateIds = duplicateIds;
+      console.warn(
+        `[baptism] ${duplicateIds} session id(s) stored more than once — keeping the later finish of each ` +
+          "(the file on disk is unchanged)",
+      );
+    }
+    return [...byId.values()].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
   }
 
   async saveCurrent(state: BaptismState | null): Promise<void> {
