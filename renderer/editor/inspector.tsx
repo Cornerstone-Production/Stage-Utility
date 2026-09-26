@@ -407,6 +407,32 @@ export function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectC
  * "fit box to file" action. All framing acts on the rendered image, not the source
  * file in Planning Center. Exported for inspector-reads.test.tsx.
  */
+/**
+ * The Rolling feed's line cap. Blank is a real setting, not a missing one: an
+ * unset cap shows as many lines as the widget holds, which is what the renderer
+ * does with it, so the field says "Fit" rather than a number it does not use.
+ */
+export function TranscriptLinesRow({
+  c,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "transcript-strip" }>;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  return (
+    <RowNumber
+      label="Lines"
+      value={c.maxLines ?? null}
+      placeholder="Fit"
+      step={1}
+      min={1}
+      max={10}
+      onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })}
+      onUnset={() => onConfig({ ...c, maxLines: undefined })}
+    />
+  );
+}
+
 export function PlanAttachmentConfig({
   c,
   onConfig,
@@ -923,7 +949,7 @@ export function Inspector({
             onChange={(v) => onConfig({ ...c, mode: v })}
           />
           {c.mode === "rolling" && (
-            <RowNumber label="Lines" value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} />
+            <TranscriptLinesRow c={c} onConfig={onConfig} />
           )}
           {captionChannels.length === 0 ? (
             <span className="text-caption2 text-fg-muted">Channels appear here once captions arrive — toggle any to hide.</span>
