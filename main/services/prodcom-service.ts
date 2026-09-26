@@ -842,6 +842,20 @@ export class ProdComService extends ConnectionLifecycle {
    *  whether an entry has gone stale, which must not depend on a peer's clock. */
   private finals: FinalEntry[] = [];
   private partials = new Map<string, PartialEntry>();
+  /**
+   * The ids of every final on screen when the operator last pressed Clear —
+   * backfill's horizon, so a reconnect does not re-import what was cleared.
+   *
+   * Every (re)connect backfills the last four hours, including the 15-minute
+   * idle reconnect a quiet SSE stream takes, so the clear used to last only
+   * until the next one. Ids rather than a time: backfill rows arrive oldest
+   * first, so "everything up to the newest cleared id" is decided in
+   * ProdCom's own order, where a timestamp would be decided between two
+   * clocks (see wsBaselineIds). Kept across reconnects and cleared by
+   * configure(); not persisted, so a restart of this server backfills
+   * normally.
+   */
+  private clearedIds = new Set<string>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   /** Channel keys already logged as "final with no matching partial" since the
    *  current connection started — one log per key per connection, not one per
@@ -973,6 +987,8 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsSubscribeFilterSuspect = false;
     this.wsSilentBox = false;
     this.wsLastGiveUpWasSilence = false;
+    // Ids from the old box mean nothing on a new one.
+    this.clearedIds.clear();
     this.resetReport();
     this.restart();
   }
@@ -1790,6 +1806,10 @@ export class ProdComService extends ConnectionLifecycle {
    * is the only cure for the stuck-line bug this file guards against, so the
    * moment it's pressed is the moment to record which channel was stuck, for
    * how long, and how it behaved, in case it happens again.
+   *
+   * Records what was on screen as backfill's horizon (clearedIds), added to
+   * rather than replaced: a second clear with nothing new on screen must not
+   * forget the first.
    */
   clearTranscript(): void {
     const now = this.now();
@@ -1800,6 +1820,7 @@ export class ProdComService extends ConnectionLifecycle {
           `partial ch=${scrub(ch)} age=${age}s unchanged-resends=${entry.resendsUnchanged} text-changes=${entry.textChanges}`,
       );
     }
+    for (const e of this.finals) this.clearedIds.add(e.line.id);
     this.finals = [];
     this.partials.clear();
     this.syncPartialSweep();
@@ -3305,12 +3326,30 @@ export class ProdComService extends ConnectionLifecycle {
    * This filter is what stops Thursday's sermon reaching a display on Sunday in
    * every one of those cases. Protected (not private) so a test can drive it
    * directly without a real ProdCom host.
+   *
+   * Rows up to and including the newest one the operator cleared are skipped
+   * too (see clearedIds). Rows arrive oldest first, so everything before that
+   * row was said before the clear, whether or not it was still on screen.
    */
   protected applyBackfillRows(rows: unknown[]): { added: number; skipped: number } {
     const cutoff = this.now() - LINE_MAX_AGE_MS;
     let added = 0;
     let skipped = 0;
-    for (const row of rows) {
+    let from = 0;
+    if (this.clearedIds.size > 0) {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const entry = asRecord(rows[i]);
+        const id = entry && str(entry, "id");
+        if (id && this.clearedIds.has(id)) {
+          from = i + 1;
+          break;
+        }
+      }
+    }
+    if (from > 0) {
+      console.log(`[prodcom] backfill skipped ${from} line(s) from before the operator cleared the transcript`);
+    }
+    for (const row of rows.slice(from)) {
       const entry = asRecord(row);
       if (!entry) continue;
       const line = this.normalizeLine(entry);

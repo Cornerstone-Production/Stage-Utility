@@ -78,6 +78,14 @@ older than that horizon are skipped on backfill even when the server returned
 them. So a reconnect cannot re-import a service from days ago just because
 ProdCom's own history still holds it.
 
+**Clear transcript** (Settings → Integrations → **ProdCom**) empties every
+display at once. A later reconnect's backfill skips every row up to the newest
+line that was on screen at the clear — decided by position in ProdCom's own
+oldest-first order, not by timestamp — so the cleared lines stay cleared, while
+anything said after the clear still backfills. Reconfiguring the integration
+forgets the clear, and so does a restart of this server, which backfills the
+last four hours as usual.
+
 A WebSocket attempt does not repeat any of this priming — the SSE stream already
 owns keeping channels, keywords and the buffer current for as long as any
 WebSocket attempt is unproven, so a re-test costs only the silence check's own
@@ -332,7 +340,9 @@ The `/log` page has the evidence when something looks wrong:
   five after, `[prodcom] final on channel … with no partial in flight` when a
   final lands on a channel that has no partial while others do (the renamed
   channel case), and `[prodcom] transcript cleared by operator` naming every live
-  partial and its age when the clear button is pressed
+  partial and its age when the clear button is pressed; `[prodcom] backfill
+  skipped N line(s) from before the operator cleared the transcript` on each
+  backfill after it
 - `[prodcom] a finished line repeated after the websocket took over —
   duplicate suppressed`, once per connection, the first time an unchanged
   repeat of a finished line is applied once rather than broadcast twice. The
