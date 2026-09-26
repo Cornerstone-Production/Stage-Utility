@@ -131,8 +131,10 @@ reason a row count also avoided one: a ProdCom is an appliance whose clock is it
 own, and a box running fast or slow would either condemn a healthy socket or hide
 the very failure this check exists to catch.
 
-If the newest page cannot be read the check does nothing at all for that attempt,
-and says so when it opens.
+If the newest page cannot be read when a socket opens, the log says so and the
+check reads it at its next window instead, judging nothing until it has one — a
+socket that carries nothing is then noticed a window later than usual, not
+never. The same holds after promotion.
 
 - **Nothing spoken** — nothing was missed. The question is asked again a minute
   later.
@@ -253,7 +255,8 @@ The `/log` page has the evidence when something looks wrong:
   this box has failed that test before …` is a later re-test being dropped, and
   `[prodcom] the websocket is carrying the transcript again …` is one that came
   good. `[prodcom] could not read the transcript's newest page (…)` on open means
-  this attempt has no baseline and the check will not run at all for it.
+  this attempt has no baseline yet: the check reads one at its next window and
+  judges from the window after.
   `[prodcom] could not check whether the websocket is missing transcript
   lines (…)` means REST did not answer and nothing was changed — once per outage
   with a reminder every 15 minutes, not once per check, and

@@ -60,6 +60,9 @@ class TestProdCom extends ProdComService {
   public get knownSilent(): boolean {
     return this.boxKnownSilent;
   }
+  public get baselineNow(): ReadonlySet<string> | null {
+    return this.wsBaseline;
+  }
   public texts(): string[] {
     return this.getBuffer().map((l) => l.text);
   }
@@ -132,5 +135,46 @@ describe("a promoted websocket that stops delivering demotes rather than staying
       () => svc.reports.some((r) => r.state === "connected" && r.message === FALLBACK_CARD_MESSAGE),
       "the card to say the fallback is carrying captions because the websocket did not",
     );
+  });
+
+  it("still demotes a quiet promoted socket when every read before it failed", async (t: TestContext) => {
+    // No baseline at all: the open-time read failed, and so did the first
+    // promoted window's. The check used to re-arm on a missing baseline for the
+    // rest of the socket's life without asking again, so a socket that then
+    // went quiet was trusted for good — SSE closed, captions stopped, card
+    // green. A transient REST failure at the wrong minute was enough.
+    const stub = await startProdComStub({ channels: CHANNELS, failTranscript: true });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    const checkReads = (): number =>
+      stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && !r.url.includes("since=")).length;
+    const beforePromotion = checkReads();
+    stub.wsTranscript(spoken("first-line"));
+    await eventually(() => svc.onWebSocketNow, "promotion");
+    // The first promoted window's read goes out, and fails.
+    await eventually(() => checkReads() > beforePromotion, "the first promoted window to ask REST");
+    await sleep(20);
+    assert.equal(svc.baselineNow, null, "precondition: no read has ever given this socket a baseline");
+
+    // REST is healthy from here. The socket goes quiet — heartbeats only —
+    // while ProdCom goes on recording what is said.
+    stub.setFailTranscript(false);
+    for (let i = 0; i < 8 && svc.onWebSocketNow; i++) {
+      stub.addEntry(spoken(`missed-${i}`));
+      stub.wsPing();
+      await sleep(80);
+    }
+    await eventually(
+      () => svc.onWebSocketNow === false,
+      () => `the quiet promoted socket to be demoted; buffer ${JSON.stringify(svc.texts())}`,
+      2000,
+    );
+    await eventually(() => svc.texts().includes("missed-0"), "the missed lines to be backfilled once SSE reopens");
   });
 });

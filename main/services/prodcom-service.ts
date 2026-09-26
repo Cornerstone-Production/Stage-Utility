@@ -1378,13 +1378,20 @@ export class ProdComService extends ConnectionLifecycle {
    * that works), or else compute what this socket missed against `baseline`
    * and move the baseline past this page.
    *
+   * A null `baseline` — the socket's open-time read failed, or a known-silent
+   * box's re-test skipped it — makes this page the baseline and judges
+   * nothing this round: every row on it predates the moment the check could
+   * first see, so none of them can be called missed. It used to be a return
+   * without a read, re-armed for the socket's whole life, which left a socket
+   * that carried nothing trusted for good after one failed read.
+   *
    * Returns null once the caller has nothing left to do this round — the
    * failure branch above already re-armed the check itself. `promoted` only
    * changes the wording of the failure line, to match which mode is asking.
    */
   private resolveMissedAgainstBaseline(
     page: { ok: true; rows: PageRow[] } | { ok: false; error: string },
-    baseline: ReadonlySet<string>,
+    baseline: ReadonlySet<string> | null,
     quiet: string,
     promoted: boolean,
   ): PageRow[] | null {
@@ -1402,10 +1409,13 @@ export class ProdComService extends ConnectionLifecycle {
     const askable = this.wsOutages.ok("silence-check", this.now());
     if (askable.log) console.log(`[prodcom] the silent-socket check can reach ProdCom again${askable.note}`);
 
-    const missed = this.missedSpokenRows(page.rows, baseline);
+    const missed = baseline === null ? [] : this.missedSpokenRows(page.rows, baseline);
     // Move past whatever this check just read, whether or not it found
     // anything — a check must never re-judge a row it has already seen.
     this.wsBaselineIds = new Set(page.rows.map((r) => r.id));
+    if (baseline === null) {
+      console.debug(`[prodcom] the ${promoted ? "promoted " : ""}websocket's silence check read its baseline — judging from the next window`);
+    }
     return missed;
   }
 
@@ -1449,16 +1459,9 @@ export class ProdComService extends ConnectionLifecycle {
       return;
     }
 
-    // Without a baseline there is no question to ask. primeWsBaseline has
-    // already said so once, at connect, on the line that explains the
-    // consequence; repeating it every minute for the life of the connection
-    // would bury the rest of the log.
+    // Null when the open-time read failed: this round reads it instead, and
+    // judges nothing until the next (see resolveMissedAgainstBaseline).
     const baseline = this.wsBaselineIds;
-    if (baseline === null) {
-      console.debug(`[prodcom] websocket quiet for ${quiet}, but this connection has no transcript baseline`);
-      this.armSilenceCheck();
-      return;
-    }
 
     // Captured before the await, the same way probeThenGiveUp does: a stop()
     // or a configure() landing while REST is out means this answer is about a
@@ -1489,7 +1492,9 @@ export class ProdComService extends ConnectionLifecycle {
     if (missed.length === 0) {
       // Nothing was said on the newest page. debug, not log: a quiet room is
       // not an event, and this repeats for as long as the room stays quiet.
-      console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
+      if (baseline !== null) {
+        console.debug(`[prodcom] websocket quiet for ${quiet}, and ProdCom has no spoken lines since it opened`);
+      }
       this.armSilenceCheck();
       return;
     }
@@ -1550,12 +1555,9 @@ export class ProdComService extends ConnectionLifecycle {
       return;
     }
 
+    // Null when every read so far failed: this round reads it instead, and
+    // judges nothing until the next (see resolveMissedAgainstBaseline).
     const baseline = this.wsBaselineIds;
-    if (baseline === null) {
-      console.debug(`[prodcom] promoted websocket quiet for ${quiet}, but this connection has no transcript baseline`);
-      this.armSilenceCheck();
-      return;
-    }
 
     const epoch = this.connectionEpoch;
     const page = await this.readNewestPage(host, port);
@@ -1577,7 +1579,9 @@ export class ProdComService extends ConnectionLifecycle {
 
     if (missed.length === 0) {
       // Quiet room, not a silent socket.
-      console.debug(`[prodcom] promoted websocket quiet for ${quiet}, and ProdCom has no spoken lines since`);
+      if (baseline !== null) {
+        console.debug(`[prodcom] promoted websocket quiet for ${quiet}, and ProdCom has no spoken lines since`);
+      }
       this.armSilenceCheck();
       return;
     }
@@ -2866,7 +2870,9 @@ export class ProdComService extends ConnectionLifecycle {
    * Logs a failure here, unlike a later check's own REST failures: a fresh
    * attempt that cannot read a baseline at all is worth an operator seeing the
    * moment it happens, where a check that later fails to reach the same
-   * endpoint is repeated and goes through OutageLog instead.
+   * endpoint is repeated and goes through OutageLog instead. The check itself
+   * reads the baseline at its first window when this one failed, so a failure
+   * here costs one window, not the socket's whole life.
    */
   private async primeWsBaseline(host: string, port: number, ws: WebSocket): Promise<void> {
     const page = await this.readNewestPage(host, port);
@@ -2887,7 +2893,8 @@ export class ProdComService extends ConnectionLifecycle {
     if (!page.ok) {
       console.warn(
         `[prodcom] could not read the transcript's newest page (${scrub(page.error)}) — ` +
-          `this connection has no baseline, so a websocket that delivers nothing will not be noticed`,
+          `the silence check reads it at its first window instead, so a websocket that delivers nothing ` +
+          `is noticed a window later than usual`,
       );
       return;
     }

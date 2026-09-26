@@ -126,6 +126,10 @@ class TestProdCom extends ProdComService {
   public get sseUpNow(): boolean {
     return this.sseStreamUp;
   }
+  /** The entry-id baseline the check measures the current socket against. */
+  public get baselineNow(): ReadonlySet<string> | null {
+    return this.wsBaseline;
+  }
   /** The SSE stream's own priming (channels, keywords, backfill). */
   public settled(): Promise<void> {
     return this.priming;
@@ -554,6 +558,24 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       1,
       `the could-not-ask line repeats per check rather than per outage: ${JSON.stringify(couldNotAsk)}`,
     );
+  });
+
+  it("reads a baseline it could not read on open, then catches a socket that carries nothing", async (t) => {
+    // The newest page failed to load when the socket opened, so the check had
+    // nothing to measure against — and used to re-arm on that for the socket's
+    // whole life without ever asking again. One transient 500 at the wrong
+    // moment was enough to trust a socket that carries nothing indefinitely.
+    const { stub, svc } = await running(t, { subscribeFilterBroken: true, failTranscript: true });
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+    assert.equal(svc.baselineNow, null, "precondition: the open-time read failed, so there is no baseline");
+
+    // REST recovers. The next check has to read the baseline itself, and the
+    // line said after THAT read is one this socket never delivers.
+    stub.setFailTranscript(false);
+    await eventually(() => svc.baselineNow !== null, "the check to read the baseline it never had", 2000);
+    stub.addEntry(spoken("said-after-the-baseline-was-read"));
+    await eventually(() => stub.wsUpgrades >= 2, "the silent socket to be reopened without the subscribe frame", 2000);
   });
 
   it("broadcasts a line spoken during the websocket's probation minute immediately, via SSE", async (t) => {
