@@ -8,6 +8,7 @@
 
 import { useEffect, useState, type ChangeEvent } from "react";
 import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
+import { errorMessage } from "@main/services/errors";
 import { cn } from "../../lib/cn";
 import {
   Button,
@@ -21,6 +22,7 @@ import {
   Separator,
   UnsavedBanner,
   confirm,
+  toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
@@ -202,7 +204,10 @@ export function ViewDetail({
                 ? "Showing the app's bars. Hiding them gives a phone back 89px."
                 : "Hide the app's bars on this console — the top bar and the context bar, at every width. A floating menu button stays."
             }
-            onClick={() => void invoke("views:setHideChrome", { id: view.id, hideChrome: !view.hideChrome })}
+            onClick={() =>
+              void invoke("views:setHideChrome", { id: view.id, hideChrome: !view.hideChrome })
+                .catch((e: unknown) => toast.error(`Could not change this console's chrome: ${errorMessage(e)}`))
+            }
           >
             {view.hideChrome
               ? <PanelTopDashedIcon className="size-3.5 text-accent" />
@@ -364,7 +369,7 @@ export function ViewDetail({
                   void invoke("views:setScriptViewLayout", {
                     id: view.id,
                     scriptViewLayoutId: v === ALL_COLUMNS ? null : v,
-                  })
+                  }).catch((e: unknown) => toast.error(`Could not change this view's columns: ${errorMessage(e)}`))
                 }
               >
                 <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
