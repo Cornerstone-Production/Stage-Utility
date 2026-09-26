@@ -1172,8 +1172,8 @@ export function AdvancedSection({
                       Center; outside them connections back off toward the idle interval below,
                       and the Planning Center poll slows too. Nothing ever sleeps past the moment
                       the next window opens, and if the schedule cannot be worked out — no
-                      credentials, a failed fetch — everything stays at full speed rather than
-                      going quiet.
+                      credentials, a failed fetch, nothing planned — everything stays at full
+                      speed rather than going quiet.
                     </InfoHint>
                   </FieldLabel>
                   <FieldDescription>
