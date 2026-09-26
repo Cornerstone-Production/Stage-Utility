@@ -124,12 +124,9 @@ Both routes, and every option, are in
 **Planning Center Services** is the one requirement — it supplies the plan, the
 people, their photos and the live service countdown.
 
-Everything else is optional and independently enabled: Shure and Sennheiser
-wireless, ProPresenter, ProVideoPlayer, Smaart (SPL), SenSource (people
-counting), OBS, REAPER, Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom
-transcription, and Bitfocus Companion.
-
-Setup and behaviour for each is in [integrations](docs/integrations/README.md).
+Everything else — wireless, video and control gear, SPL and people-counting
+hardware, streaming and transcription — is optional and independently enabled;
+see [integrations](docs/integrations/README.md) for the full list and setup.
 
 ## Branches and releases
 
