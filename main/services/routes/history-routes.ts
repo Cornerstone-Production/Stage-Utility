@@ -301,7 +301,13 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "GET" && pathname === "/api/attendance/history") {
-      json(res, await attendanceStore.list());
+      const all = await attendanceStore.list();
+      // `?summary=1` leaves a finished record's samples out: History, Trends
+      // and Home read only its stored figures, and the samples are nearly all
+      // of the bytes. A record still recording keeps them (see
+      // ServiceAttendanceSummary). Without it the records go out whole.
+      const summary = c.url.searchParams.get("summary") === "1";
+      json(res, summary ? all.map((r) => (r.endedAt == null ? r : { ...r, samples: undefined })) : all);
       return;
     }
     {

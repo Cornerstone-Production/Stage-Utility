@@ -182,6 +182,17 @@ export interface ServiceAttendance {
   lastOccupancy: number;
 }
 
+/** A ServiceAttendance as a list page reads it
+ *  (`GET /api/attendance/history?summary=1`): a finished record without its raw
+ *  samples. Every figure a History row, the Trends chart or Home shows of one is
+ *  a stored field, and the samples are about 97% of the bytes. A record still
+ *  recording keeps them, since the arriving row reads its latest sample and
+ *  `lastOccupancy` only moves in the service proper. Typed apart so a list page
+ *  cannot read samples a finished record was never sent. */
+export type ServiceAttendanceSummary = Omit<ServiceAttendance, "samples"> & {
+  samples?: AttendanceSample[];
+};
+
 /** One plan item's planned-vs-actual timing within a recorded service. */
 export interface ServiceTimelineItem {
   itemId: string;

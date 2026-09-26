@@ -10,7 +10,7 @@
 // loudest of them, because decibels do not add. See DAY_FIGURE in trends.ts.
 //
 // EVERYTHING HERE IS COMPUTED FROM RECORDS THE PAGE ALREADY HOLDS. The list
-// loads `serviceTimeline:list` and `attendance:listHistory` to draw the calendar
+// loads `serviceTimeline:list` and `attendance:listSummaries` to draw the calendar
 // and the day rows; a trend is those same records grouped differently. The one
 // thing fetched is the operator's milestone list, which is not a recording and
 // which nothing else on the page reads.

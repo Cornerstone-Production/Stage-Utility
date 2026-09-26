@@ -269,7 +269,7 @@ untouched by GET, by init, and by any write that does not go through this route
 |--------|------|---------|
 | GET | `/api/people/count` | Live building occupancy (SenSource) |
 | GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
-| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them |
 | GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
 | GET | `/api/obs/status` \| `/api/reaper/status` | Whether that recorder is rolling, and for how long |
 | GET | `/api/pvp/status` | ProVideoPlayer layer state — what is on each layer, and how far in |

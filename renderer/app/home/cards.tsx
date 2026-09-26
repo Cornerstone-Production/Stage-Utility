@@ -258,7 +258,7 @@ export function Stat({
  */
 function useHistoryRecords(wantSpl = false) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
-  const [attList, setAttList] = useState<ServiceAttendance[]>([]);
+  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>([]);
   /** One level per service. Fetched only when a card is actually drawing the
    *  line — Home is the page every operator lands on, and this is a read nobody
    *  who leaves the setting off should ever pay for. */
@@ -298,7 +298,7 @@ function useHistoryRecords(wantSpl = false) {
         setList([]);
         fail("timeline", "the service timings", err);
       });
-    invoke<ServiceAttendance[]>("attendance:listHistory")
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
       .then((a) => {
         if (!alive) return;
         setAttList(a ?? []);

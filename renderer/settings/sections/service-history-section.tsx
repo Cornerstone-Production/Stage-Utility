@@ -414,7 +414,7 @@ interface HistoryRow {
   planTitle: string | null;
   startsAt: string | null;
   timeline: ServiceTimeline | null;
-  attendance: ServiceAttendance | null;
+  attendance: ServiceAttendanceSummary | null;
 }
 
 const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
@@ -534,7 +534,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
   // Attendance records for all services — the day rows and the Trends card are
   // both built from these.
-  const [attList, setAttList] = useState<ServiceAttendance[]>([]);
+  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>([]);
   /** One level per service — the sound measure on Trends, and each day row's
    *  peak. A summary, not the archive: see splHistoryStore.summary(). */
   const [splList, setSplList] = useState<SplServiceSummary[]>([]);
@@ -637,7 +637,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }, [noteFailure, noteLoaded]);
   useEffect(() => {
     reload();
-    invoke<ServiceAttendance[]>("attendance:listHistory")
+    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
       .then((a) => {
         setAttList(a ?? []);
         noteLoaded("attendance");
@@ -1128,7 +1128,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // reads as a glitch, and the most likely reason for a refusal is one the
       // operator can act on: the service is still recording.
       reload();
-      invoke<ServiceAttendance[]>("attendance:listHistory")
+      invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
         .then((a) => setAttList(a ?? []))
         .catch(() => {
           /* the optimistic removal above just stays applied */
@@ -1854,7 +1854,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             if (!row.timeline) {
               const att = row.attendance!;
               const rowLive = att.endedAt == null;
-              const lastOccupancy = att.samples[att.samples.length - 1]?.occupancy ?? 0;
+              const lastOccupancy = att.samples?.at(-1)?.occupancy ?? 0;
               const caption = rowLive
                 ? `${fmtTime(row.startsAt)} · arriving · ${lastOccupancy.toLocaleString()} in the room`
                 : `${fmtTime(row.startsAt)} · no items recorded`;

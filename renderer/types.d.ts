@@ -84,6 +84,7 @@ declare global {
   type ScriptViewLayout = Stage.ScriptViewLayout;
   type ScriptViewRundownDTO = Stage.ScriptViewRundownDTO;
   type ServiceAttendance = Stage.ServiceAttendance;
+  type ServiceAttendanceSummary = Stage.ServiceAttendanceSummary;
   type ServiceSplHistory = Stage.ServiceSplHistory;
   type ServiceTimeline = Stage.ServiceTimeline;
   type ServiceTimelineItem = Stage.ServiceTimelineItem;

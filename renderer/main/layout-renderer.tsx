@@ -1606,7 +1606,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
       };
       let key = serviceKey ?? null;
       if (!key) {
-        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(unread("the recorded services", true));
+        const list = await invoke<ServiceAttendanceSummary[]>("attendance:listSummaries").catch(unread("the recorded services", true));
         key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
       }
       if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null, failed }); return; }

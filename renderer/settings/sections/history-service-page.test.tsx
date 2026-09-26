@@ -148,7 +148,7 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
     if (url === "/api/baptism/sessions") return ok(opts.baptisms ? baptisms() : []);
     if (/^\/api\/baptism\/lane\?/.test(url)) return ok(opts.baptisms ? baptismLane() : { spans: [] });
     if (url === "/api/service-timeline") return ok(opts.timelineRecords ?? [timeline()]);
-    if (url === "/api/attendance/history") return ok([attendance()]);
+    if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -355,7 +355,7 @@ describe("the History service page", () => {
       if (url === "/api/baptism/sessions") return ok([session]);
       if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
       if (url === "/api/service-timeline") return ok([tl]);
-      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
       if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -415,7 +415,7 @@ describe("the History service page", () => {
       if (url === "/api/baptism/sessions") return ok([session]);
       if (/^\/api\/baptism\/lane\?/.test(url)) return ok({ spans: [] });
       if (url === "/api/service-timeline") return ok([tl]);
-      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
       if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -465,7 +465,7 @@ describe("the History service page", () => {
       }
       if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
       if (url === "/api/service-timeline") return ok([timeline()]);
-      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
       if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -499,7 +499,7 @@ describe("the History service page", () => {
       }
       if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
       if (url === "/api/service-timeline") return ok([timeline()]);
-      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
       if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -533,7 +533,7 @@ describe("the History service page", () => {
       }
       if (/^\/api\/baptism\/lane\?/.test(url)) return ok(baptismLane());
       if (url === "/api/service-timeline") return ok([timeline()]);
-      if (url === "/api/attendance/history") return ok([attendance()]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
       if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
@@ -596,7 +596,7 @@ describe("the History service page", () => {
     (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: unknown) => {
       const url = String(input);
       const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
-      if (url === "/api/attendance/history") return ok([open]);
+      if (url === "/api/attendance/history?summary=1") return ok([open]);
       if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(open);
       return realFetch(input, init);
     };
