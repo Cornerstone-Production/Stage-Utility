@@ -172,16 +172,20 @@ on a Pi 5 or a computer.
 ### Configuration
 
 - **The API listens on 127.0.0.1 only.** Nothing on the network can reconfigure
-  the relay. Metrics, pprof, the playback server, RTSPS, RTMPS and **MoQ** stay
-  off. MoQ matters: v1.21.1 turns it on by default and binds `:8892` and `:8893`
-  on every interface, so the generated config must say `moq: false` explicitly.
-  Every listener the app does not use is switched off by name, not left to the
-  default.
-- **HTTP playback listeners (WebRTC signalling, HLS) listen on 127.0.0.1 only**;
-  browsers reach them through Stage Utility (below).
-- **Inputs listen on the LAN:** RTSP 8554, RTMP 1935, SRT 8890, WebRTC media UDP
-  8189. The relay advertises the server's LAN address for ICE. Ports are editable
-  under Advanced; a taken port is reported with the program holding it, through
+  the relay. Metrics, pprof, the playback server, the RTSP server, RTSPS, RTMPS
+  and **MoQ** stay off. MoQ matters: v1.21.1 turns it on by default and binds
+  `:8892` and `:8893` on every interface, so the generated config must say
+  `moq: false` explicitly. Every listener the app does not use is switched off by
+  name, not left to the default. RTSPS and RTMPS are `rtspEncryption: "no"` and
+  `rtmpEncryption: "no"`; there is no `rtsps` key, and an unknown key stops
+  MediaMTX at startup.
+- **HTTP listeners (WebRTC signalling, HLS) listen on 127.0.0.1 only**; browsers
+  and OBS's WHIP reach them through Stage Utility (below).
+- **Inputs listen on the LAN:** RTMP 1935, SRT 8890 (UDP), WebRTC media UDP 8189.
+  No push kind uses RTSP, and pulling RTSP uses the relay's RTSP client, so the
+  RTSP server is off. The relay advertises the server's LAN address for ICE.
+  Ports are editable in a new Video relay card in Advanced (Advanced has no port
+  settings today); a taken port is reported with the program holding it, through
   the existing `port-holder.ts`.
 - **`pull` paths fetch on demand** (`sourceOnDemand`), closing a few seconds
   after the last viewer leaves. An unwatched feed costs no traffic.
@@ -192,6 +196,11 @@ on a Pi 5 or a computer.
   carries the credentials: SRT in the `streamid`
   (`publish:<path>:<user>:<pass>`), RTMP as `?user=&pass=`, and OBS's WHIP
   "Bearer Token" field as `user:pass`, which MediaMTX accepts for exactly this.
+  Every push feed's user is `video`; the password is per feed (probed: several
+  users may share a name, each allowed one path).
+- **A new password applies at once.** Changing the publish users through the API
+  keeps every live session (probed), so New password also kicks the device
+  currently sending; its next connection needs the new password.
 
 ### Playback goes through Stage Utility
 
@@ -201,6 +210,9 @@ Browsers talk only to Stage Utility's own origin, on 8788 and on port 80:
   session), proxied to the relay. The WebRTC media itself then flows from the
   relay to the screen over UDP 8189; that part cannot go through a web server.
 - `/video/<feedId>/index.m3u8` and its segments — HLS, proxied and streamed.
+- `/video/<feedId>/whip` — WHIP signalling for a `push` feed set to WHIP, with
+  OBS's Authorization header passed through. The relay's HTTP listener is
+  loopback-only, so OBS publishes through Stage Utility too.
 - Only existing feeds of the `pull` and `push` kinds are served; any other id is
   404.
 - **B-frames are detected from the relay's own log, not the WHEP answer.**
@@ -225,8 +237,10 @@ Browsers talk only to Stage Utility's own origin, on 8788 and on port 80:
   server reads the relay's path list every few seconds and publishes the result
   on a new hydrated SSE channel. Nothing polls otherwise.
 - Feed states: `live`, `delayed` (plays over HLS only, with the reason),
-  `waiting` (a push feed nothing has sent to yet), `offline` (was live, source
-  gone; shows when last seen), and `embed` (a player the relay does not see).
+  `standby` (a pull feed nothing is watching: it connects only when watched, so
+  the relay cannot know the source is up until something looks), `waiting` (a
+  push feed nothing has sent to yet), `offline` (was live, source gone; shows
+  when last seen), and `embed` (a player the relay does not see).
   An `external` feed has no state: Stage Utility cannot see it, and the page
   says so.
 - Relay states: running (with version), starting, failing (with the reason and
@@ -241,8 +255,8 @@ Built as the mockup shows:
 - **Its own sidebar entry, under Screens, below Screens.** It owns the on/off
   switch, the relay's status line and every feed.
 - **Integrations gets a small Video feeds card** that links to the page, so
-  anyone looking where the other devices live finds it. Ports stay in Advanced
-  with the app's other ports.
+  anyone looking where the other devices live finds it. Ports are set in a Video
+  relay card in Advanced, which the page's status line links to.
 - **The feed list** shows each feed's name, source line, status pill, how it
   plays and on how many screens, and a one-line fix when it plays delayed.
 - **The editor** shows the feed's live picture, the name, the **Source**
@@ -302,8 +316,10 @@ with it.
   peer connection's stats and over HLS from the video element's playback
   quality: frames decoded, frames dropped, stalls, the picture's resolution,
   and which path it is on.
-- Each screen sends these every few seconds with the display-presence heartbeat
-  it already sends. No new connection.
+- Each screen sends these with the display-presence heartbeat it already sends,
+  which runs every 10 s while a Video widget plays (otherwise 20 s near a
+  service and 60 s away from one, as now; at 60 s the window would hold one
+  sample). No new connection.
 - The server keeps a 60 s rolling window per screen and feed, and marks the
   pair **struggling** when more than 5% of decoded frames were dropped or there
   were 3 or more stalls in the window; it clears after 60 s under both. These
@@ -389,6 +405,9 @@ sandbox. Run on the beta server after PR 2:
    displays sit on another one).
 5. OBS pushing over WHIP, first with its default settings (expect delayed and the
    B-frame hint), then with B-frames off (expect under a second).
+6. The church's YouTube channel as a channel embed during a live stream, and a
+   Resi embed, each autoplaying muted on a lobby screen. Neither player's
+   autoplay parameters have been run here.
 
 ## Risks
 
