@@ -174,4 +174,29 @@ describe("onNotification on the shared-worker path", () => {
 
     offB();
   });
+
+  test("two subscribers joining in the same render after a drop to zero both skip the stale cache", async () => {
+    // Home's Screens card and its readiness check both listen on
+    // displays:presence and mount together. Asking "was the channel already
+    // held when you joined?" let the SECOND one find the first holding it and
+    // be handed the stale copy; forgetting the cache at zero does not.
+    const ch = "displays:presence";
+    const worker = FakeSharedWorker.instances.at(-1)!;
+    const offA = onNotification(ch, () => {});
+    worker.port.deliver({ channel: ch, data: { connected: ["out-1"], rev: 1 }, replay: false });
+    offA(); // drop to zero; the value then changes unheard
+
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+    const offFirst = onNotification(ch, (p) => first.push(p));
+    const offSecond = onNotification(ch, (p) => second.push(p));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    assert.deepEqual([first, second], [[], []], "a same-render subscriber was handed the stale cached value");
+
+    worker.port.deliver({ channel: ch, data: { connected: [], rev: 2 }, replay: true });
+    assert.deepEqual([first, second], [[{ connected: [], rev: 2 }], [{ connected: [], rev: 2 }]]);
+
+    offFirst();
+    offSecond();
+  });
 });
