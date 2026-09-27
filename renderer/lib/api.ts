@@ -1937,6 +1937,30 @@ export function onNotification(
   channel: string,
   cb: (payload: unknown, replayed: boolean) => void,
 ): () => void {
+  // Replay THIS process's own cached snapshot to the new callback, on either
+  // transport. `lastPayload` is written by `fanOut`, which runs for every frame
+  // this tab receives regardless of whether it arrived over the worker or the
+  // direct EventSource — so it is warm the instant ANY subscriber in this tab
+  // has ever seen the channel, not only the one that is subscribing now.
+  //
+  // That "any subscriber" case is exactly the one the worker path used to miss:
+  // its own replay is keyed to the TAB's reported channel SET (see workerReport
+  // below), which is a union across every local callback. The context bar holds
+  // a `pco:live` (and obs/reaper/scores/…) subscription open for the life of the
+  // tab, so by the time Home mounts on a return visit the channel was already
+  // "wanted" — nothing about the set changed, so the worker's own
+  // previous-vs-wanted diff never counted Home's new callback as newly added,
+  // and it got no replay at all: silence until the next live push, which on a
+  // quiet channel is minutes away. Home drew nothing until its own GET answered.
+  // Deferred to a microtask so a caller cannot receive it synchronously during
+  // its own render, same as the direct path always has.
+  const replayCached = () => {
+    if (hydratedSet.has(channel) && lastPayload.has(channel)) {
+      const cached = lastPayload.get(channel);
+      queueMicrotask(() => cb(cached, true));
+    }
+  };
+
   // Shared-worker path: register the callback and let the worker deliver parsed
   // payloads. Falls through to the direct path if the worker can't be created.
   if (sharedSse && ensureWorker()) {
@@ -1947,6 +1971,7 @@ export function onNotification(
     }
     set.add(cb);
     workerReport();
+    replayCached();
     return () => {
       set!.delete(cb);
       if (set!.size === 0) workerHandlers.delete(channel);
@@ -1993,12 +2018,8 @@ export function onNotification(
     es.addEventListener(channel, handler);
   }
 
-  // Replay the connect-time snapshot this subscriber was too late for. Deferred
-  // so a caller cannot receive it synchronously during its own render.
-  if (hydratedSet.has(channel) && lastPayload.has(channel)) {
-    const cached = lastPayload.get(channel);
-    queueMicrotask(() => cb(cached, true));
-  }
+  // Replay the connect-time snapshot this subscriber was too late for.
+  replayCached();
 
   reportChannels(); // our channel set grew — tell the server
 
