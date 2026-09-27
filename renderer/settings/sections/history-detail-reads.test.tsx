@@ -45,7 +45,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ServiceHistorySection } = await import("./service-history-section.js");
-const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
+const { TooltipProvider, ConfirmHost, Toaster } = await import("../../components/ui/index.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -262,6 +262,56 @@ test("a service the row already read the sound of does not wait on the page's ow
     assert.equal(!!screen.queryByText(/No sound recorded/i), false);
   } finally {
     f.restore();
+  }
+});
+
+test("Copy report waits for the attendance rather than copying a report without it", async () => {
+  // The page opens before its attendance is read, and the report's attendance
+  // line needs the full record. Copied in that window, it left the line out
+  // and said "Report copied".
+  const writes: string[] = [];
+  const nav = navigator as unknown as { clipboard?: unknown };
+  const win = window as unknown as { isSecureContext: boolean };
+  const hadClipboard = Object.getOwnPropertyDescriptor(nav, "clipboard");
+  const wasSecure = win.isSecureContext;
+  Object.defineProperty(nav, "clipboard", {
+    configurable: true,
+    value: { writeText: async (t: string) => void writes.push(t) },
+  });
+  win.isSecureContext = true;
+  const attendance = held<unknown>();
+  const f = stubFetch({
+    attendanceFor: (key) => (key === A.key ? attendance.promise.then(ok) : ok(B.attendance)),
+  });
+  try {
+    const view = render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ServiceHistorySection),
+        React.createElement(ConfirmHost),
+        React.createElement(Toaster),
+      ),
+    );
+    await settle();
+    await settle();
+    await open(view.container, "Evening");
+    fireEvent.click(screen.getByRole("button", { name: /Copy report/ }));
+    await settle();
+    assert.deepEqual(writes, [], "nothing is copied while the attendance is in flight");
+    assert.equal(!!screen.queryByText(/still loading/i), true, "and it says why");
+
+    await act(async () => attendance.answer(A.attendance));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /Copy report/ }));
+    await settle();
+    assert.equal(writes.length, 1);
+    assert.match(writes[0]!, /Peak attendance 1,196/);
+  } finally {
+    f.restore();
+    if (hadClipboard) Object.defineProperty(nav, "clipboard", hadClipboard);
+    else delete nav.clipboard;
+    win.isSecureContext = wasSecure;
   }
 });
 

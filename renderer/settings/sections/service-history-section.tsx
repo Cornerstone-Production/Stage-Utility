@@ -1264,6 +1264,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       ? [SERVICE_SECTIONS[0], { id: "history-baptisms", label: "Baptisms" }, ...SERVICE_SECTIONS.slice(1)]
       : SERVICE_SECTIONS;
     async function copyReport() {
+      // The page opens before the attendance and sound are read, and a report
+      // copied then would leave them out without saying so.
+      if (reading("attendance") || splPending) {
+        toast.info("This service is still loading — copy the report once its charts appear");
+        return;
+      }
       const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
       if (ok) toast.success("Report copied to clipboard");
       else toast.error("Couldn't copy the report");
