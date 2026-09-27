@@ -227,4 +227,24 @@ describe("useStatusChannel publish ordering", () => {
       "the read is what corrects a stale replay — a replayed frame must not veto it",
     );
   });
+
+  test("a read that genuinely resolves null still settles the window as known", async () => {
+    // `known` is about whether the window has SETTLED, not about what it
+    // settled to — a read resolving null (nothing configured) is every bit
+    // as much an answer as one resolving a real value. Falling through the
+    // `!s` guard without setting `known` first is how a channel that is
+    // legitimately never configured would sit "unknown" forever: nothing
+    // else would ever mark it answered, since the read is the only thing
+    // that ever runs for a channel with no push coming.
+    const read = deferred<Dto | null>();
+    const seen = mount(() => read.promise, "wireless:connections-changed");
+    await settle();
+    assert.equal(seen.known, false, "not yet answered");
+
+    read.resolve(null);
+    await settle();
+
+    assert.equal(seen.known, true, "a null read is still a settled answer, not a forever-pending one");
+    assert.equal(seen.value, null, "and the null itself must still be exactly that — no value was ever set");
+  });
 });
