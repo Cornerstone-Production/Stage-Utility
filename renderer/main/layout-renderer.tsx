@@ -3132,10 +3132,18 @@ export function LayoutRenderer({
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
+  //
+  // Measured in a LAYOUT effect, and no object is drawn until it has run. Drawn
+  // straight away, every object mounted inside a canvas still at scale(1), so
+  // anything that measures itself on mount saw the unscaled size: a slot photo
+  // asked for pixels for the design canvas rather than the screen, and a size
+  // that only grows never came back down. `measured` rather than a non-zero
+  // size, so a box with no layout yet (hidden, or jsdom) still draws.
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  useEffect(() => {
+  const [measured, setMeasured] = useState(false);
+  useLayoutEffect(() => {
     if (!box) return;
     const measure = () => {
       const cw = box.clientWidth;
@@ -3144,6 +3152,7 @@ export function LayoutRenderer({
         setScale(Math.min(cw / layout.canvas.width, ch / layout.canvas.height));
         setDims({ w: cw, h: ch });
       }
+      setMeasured(true);
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -3251,7 +3260,7 @@ export function LayoutRenderer({
               }
         }
       >
-        {objects.map((o) => (
+        {measured && objects.map((o) => (
           <RenderObject key={o.id} o={o} ctx={ctx} />
         ))}
       </div>

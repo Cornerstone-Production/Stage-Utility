@@ -82,7 +82,9 @@ Two sides choose the size:
 
 A slot's size only grows. It is measured again when its box resizes, and a photo
 that loads stretched — a transform applied after the slot mounted, a landscape
-photo in a tall box — asks for a size that covers its box.
+photo in a tall box — asks for a size that covers its box. A letterboxed custom
+layout draws no object until its canvas scale is known, so a photo on it measures
+at the size it is shown.
 
 Each size is its own cache entry, on disk and in the browser, and is served
 `immutable` for a year. PCO gets 1.5 s to deliver a small copy. After that the
