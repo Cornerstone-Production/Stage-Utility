@@ -118,9 +118,10 @@ rather than *up to date*. A branch with no tags falls back to following its tip.
 A packaged install discovers releases from the GitHub API — the paged list plus
 `releases/latest`, because the list is newest-first regardless of prerelease flag
 and a long run of betas can push the newest stable off the first page. The track
-it follows is recorded in the data directory on every update (falling back to
-the Homebrew formula name, then to whether the version is a prerelease), so a
-beta box that takes a stable release stays on beta.
+it follows is the Homebrew formula name where the install has one, otherwise
+whatever was recorded in the data directory on the last update, otherwise
+whether the version is a prerelease, so a beta box that takes a stable release
+stays on beta.
 
 A packaged install keeps each release in its own directory and moves a pointer:
 

@@ -1,14 +1,16 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { AlertCircleIcon } from "lucide-react";
 
+import { errorMessage } from "@main/services/errors";
+
 // ── Shared UI ──────────────────────────────────────────────────────────────────
 
-function ErrorDisplay({ error, reset }: { error: Error; reset?: () => void }) {
+function ErrorDisplay({ error, reset }: { error: unknown; reset?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
       <AlertCircleIcon className="size-8 text-red-10" />
       <p className="text-body font-semibold text-fg">Something went wrong</p>
-      <p className="text-footnote text-gray-9 max-w-md">{error.message}</p>
+      <p className="text-footnote text-gray-9 max-w-md">{errorMessage(error)}</p>
       {reset && (
         <button
           onClick={reset}
@@ -25,8 +27,10 @@ function ErrorDisplay({ error, reset }: { error: Error; reset?: () => void }) {
 //
 // Used as:  errorComponent={ErrorBoundaryView}
 // TanStack Router catches the error and passes { error, reset } as props.
+// `error` is whatever the route threw, not necessarily an Error: a loader can
+// reject with a string.
 
-export function ErrorBoundaryView({ error, reset }: { error: Error; reset: () => void }) {
+export function ErrorBoundaryView({ error, reset }: { error: unknown; reset: () => void }) {
   return <ErrorDisplay error={error} reset={reset} />;
 }
 

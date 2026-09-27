@@ -203,7 +203,7 @@ export function ChecklistObject({
               ? `Could not read the plan's notes: ${plan.error}`
               : "Plan notes unavailable"
             : editable
-              ? "No plan notes chosen — Settings, Plan"
+              ? "No plan notes chosen — pick them on the Plan page, under Pre-service checklist"
               : "Empty"}
         </div>
       )}

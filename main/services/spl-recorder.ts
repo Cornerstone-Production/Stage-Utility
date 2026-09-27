@@ -78,6 +78,11 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
     return { ...ctx, meterId: null, metricKey: null, endedAt: null, items: [] };
   }
 
+  /** Told by ensureRecord's split — see publishClosed's doc on the base class. */
+  protected override publishClosed(record: ServiceSplHistory): void {
+    broadcast("spl:history", record);
+  }
+
   /**
    * Rebuild from the raw archive rather than resuming the stored record.
    *

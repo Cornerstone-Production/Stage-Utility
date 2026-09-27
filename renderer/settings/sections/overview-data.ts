@@ -287,7 +287,7 @@ function longestWindow(keys: readonly string[], family: RegExp): string | null {
  */
 export function computeOverview(
   list: ServiceTimeline[] | null,
-  attList: ServiceAttendance[],
+  attList: ServiceAttendanceSummary[],
   day: string | null,
   activeType: string | null,
   activeTypeName: string | null,
@@ -393,7 +393,7 @@ export function computeOverview(
   // carries a per-service breakdown, a live flag and an SPL reading that a trend
   // day does not, so the sum lives in two places and they have to move together:
   // change what a day is worth here and the History tab keeps the old answer.
-  const byDate = new Map<string, ServiceAttendance[]>();
+  const byDate = new Map<string, ServiceAttendanceSummary[]>();
   for (const a of [...occ].sort((x, y) => Date.parse(x.startedAt) - Date.parse(y.startedAt))) {
     const arr = byDate.get(a.serviceDate);
     if (arr) arr.push(a);

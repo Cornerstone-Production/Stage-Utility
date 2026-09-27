@@ -14,6 +14,9 @@ Nor is an id ever handed out twice: deleting a display retires its id for good, 
 a new one created afterwards cannot inherit the old one's slots or answer a
 bookmark meant for it. View ids work the same way.
 
+The root address also answers the legacy `/?display=<id>` query form. It still
+selects the display; `/<id>` is the one to use.
+
 ## Friendly URLs
 
 A display can also carry a **slug**: set `left-mic` on `display-1` and `/left-mic`
@@ -46,6 +49,16 @@ the screen's card shows.
 
 Where both exist, the id wins, so a display is always reachable at its permanent
 address.
+
+## Locking a display
+
+Append `?kiosk=1` to any display's address and its top bar drops the escape
+hatches — the QR/settings link and the clickable brand logo — while leaving
+the rest of the bar alone. It is the same effect as that screen's own **Lock
+display** toggle on Screens, as a link rather than a setting: use it for a
+one-off address handed to someone outside Production, so opening it can't lead
+to Settings or another display. Soft by design, like the toggle it matches —
+editing the URL undoes it — a guardrail, not access control.
 
 ## Operator pages
 
@@ -92,6 +105,11 @@ the app's sidebar and header — just the record and its own "History" heading �
 the link shows nothing else of the app. The operator's own history — edit
 recorded times, merge a split service, delete one — is `/history/manage`, in the
 sidebar under Services, with the app's usual chrome.
+
+Either one opens a single service directly at `?service=<serviceKey>` — a link
+into a specific recording, rather than the day list. A reload or a copied link
+lands on that same service, and an unknown or missing key falls back to the
+list instead of an empty page.
 
 `/scriptview` works the same way: the rundown launcher with its own "ScriptView"
 heading and no sidebar or header, for a stage tablet or a producer's second

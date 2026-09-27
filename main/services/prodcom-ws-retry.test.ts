@@ -38,8 +38,13 @@ class TestProdCom extends ProdComService {
   public get retryArmed(): boolean {
     return this.wsRetryArmed;
   }
+  /** Whether the WebSocket has been PROMOTED (proven, SSE fallback closed). */
   public get onWebSocketNow(): boolean {
     return this.onWebSocketTransport;
+  }
+  /** Whether a WebSocket attempt is currently open, proven or not. */
+  public get wsOpenNow(): boolean {
+    return this.wsAttemptOpen;
   }
   public settled(): Promise<void> {
     return this.priming;
@@ -152,8 +157,10 @@ describe("the fallback retries the websocket on a timer", () => {
   it("does not arm the retry while the websocket is up", async (t) => {
     const { stub, svc } = await connected(t);
     // waitForUpgrades resolves when the SERVER accepted; the client's onopen is
-    // what makes the WebSocket the live transport.
-    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    // what makes an attempt count as OPEN, whether or not it goes on to prove
+    // itself — either way there is already one in flight, so the clock has
+    // nothing to do.
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
     await svc.settled();
     assert.equal(svc.retryArmed, false, "a retry timer is ticking while the websocket is already up");
 
@@ -175,7 +182,7 @@ describe("the fallback retries the websocket on a timer", () => {
     await eventually(() => stub.sseOpens === 1, "the fallback stream to open");
 
     stub.setRefuseWebSocket(false); // ProdCom is back
-    await eventually(() => svc.onWebSocketNow, "the websocket to become the live transport");
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
     assert.equal(svc.retryArmed, false, "the retry must be disarmed once the websocket is up");
   });
 

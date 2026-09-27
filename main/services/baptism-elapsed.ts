@@ -19,8 +19,13 @@
 export interface Segment {
   /** Milliseconds banked by earlier runs of this segment. */
   segmentAccumMs?: number;
-  /** When the current run began, or null while paused. */
+  /** When the current run began, or null while paused (or armed — see below). */
   segmentStartedAt?: string | null;
+  /** Grouped baptisms only: the phase has begun but no clock has ever run for it.
+   *  Looks identical to a pause (null start, nothing banked) except for this flag —
+   *  distinguish them, since a paused segment has time to resume and an armed one
+   *  does not. */
+  armed?: boolean;
 }
 
 /** Elapsed milliseconds for a segment, paused or running. */
@@ -32,7 +37,9 @@ export function segmentElapsedMs(seg: Segment, now = Date.now()): number {
   return banked + Math.max(0, now - started);
 }
 
-/** True when the segment exists but is not currently counting. */
+/** True when the segment exists, is not currently counting, and has time banked
+ *  to resume — an armed segment is also not counting but has nothing to resume,
+ *  so it must not read as paused. */
 export function isPaused(seg: Segment, phase: string): boolean {
-  return phase !== "idle" && !seg.segmentStartedAt;
+  return phase !== "idle" && !seg.armed && !seg.segmentStartedAt;
 }

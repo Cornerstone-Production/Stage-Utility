@@ -18,8 +18,10 @@ import { PlusIcon, Trash2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../lib/api";
+import { useFailedReads } from "../../lib/use-failed-reads";
 import {
   Button,
+  ErrorNote,
   Input,
   Select,
   SelectContent,
@@ -32,8 +34,9 @@ import {
 import type { StoredMilestone } from "./history-trends/trends";
 
 /** Every service type that has ever recorded, for the optional scope picker. */
-function useServiceTypes(): { id: string; name: string }[] {
+function useServiceTypes(): { types: { id: string; name: string }[]; unread: boolean } {
   const [types, setTypes] = useState<{ id: string; name: string }[]>([]);
+  const { failed, fail } = useFailedReads<"types">("history");
   useEffect(() => {
     let cancelled = false;
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -45,15 +48,19 @@ function useServiceTypes(): { id: string; name: string }[] {
         }
         setTypes([...seen].map(([id, name]) => ({ id, name })));
       })
-      .catch(() => {
-        // The picker offers "Every service type" alone. A milestone that applies
-        // to everything is the common case and is still reachable.
+      .catch((err: unknown) => {
+        // The picker still offers "Every service type": a milestone that applies
+        // to everything is the common case, and still reachable. What is lost is
+        // every other name, so the panel says so — a milestone scoped to one type
+        // shows that type's id until the names can be read, and the note is what
+        // says why.
+        if (!cancelled) fail("types", "the service types for the milestones", err);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
-  return types;
+  }, [fail]);
+  return { types, unread: failed.has("types") };
 }
 
 /** The value the Select carries for "no service type" — Radix treats "" as
@@ -66,17 +73,23 @@ export function HistoryMilestonesPanel() {
   const [label, setLabel] = useState("");
   const [typeId, setTypeId] = useState(EVERY_TYPE);
   const [saving, setSaving] = useState(false);
-  const types = useServiceTypes();
+  const { types, unread: typesUnread } = useServiceTypes();
+  // A failed read is not "No milestones yet". It used to toast once and then
+  // say exactly that for as long as the panel was open. A save or a delete
+  // answers with the whole list, which settles it either way.
+  const { failed, fail, clear } = useFailedReads<"list">("history");
 
   useEffect(() => {
     let cancelled = false;
     invoke<StoredMilestone[]>("history:listMilestones")
       .then((l) => !cancelled && setList(l ?? []))
-      .catch((e) => !cancelled && toast.error(`Couldn't read the milestones: ${errorMessage(e)}`));
+      .catch((err: unknown) => {
+        if (!cancelled) fail("list", "the milestones", err);
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fail]);
 
   async function add() {
     if (!date || !label.trim()) return;
@@ -87,6 +100,7 @@ export function HistoryMilestonesPanel() {
         label: label.trim(),
         serviceTypeId: typeId === EVERY_TYPE ? null : typeId,
       }));
+      clear("list");
       setDate("");
       setLabel("");
       setTypeId(EVERY_TYPE);
@@ -106,6 +120,7 @@ export function HistoryMilestonesPanel() {
     }))) return;
     try {
       setList(await invoke<StoredMilestone[]>("history:deleteMilestone", { id: m.id }));
+      clear("list");
     } catch (e) {
       toast.error(`Couldn't delete that milestone: ${errorMessage(e)}`);
     }
@@ -137,8 +152,15 @@ export function HistoryMilestonesPanel() {
             </Button>
           </div>
         ))}
-        {list.length === 0 && <p className="text-caption2 text-fg-subtle">No milestones yet.</p>}
+        {failed.has("list") ? (
+          <ErrorNote>Couldn't load the milestones.</ErrorNote>
+        ) : (
+          list.length === 0 && <p className="text-caption2 text-fg-subtle">No milestones yet.</p>
+        )}
       </div>
+      {typesUnread && (
+        <ErrorNote>Couldn't load the service type names, so only Every service type can be picked.</ErrorNote>
+      )}
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">

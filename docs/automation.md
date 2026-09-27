@@ -23,6 +23,47 @@ every poll — so a trigger compares the previous snapshot with the new one.
 *People count rises above 50* fires on the poll where it crossed, not on every
 poll after.
 
+## Needs setup
+
+A trigger, condition or action can declare a param **required** — a RossTalk
+command needs a target, an SPL trigger needs a meter key. The editor checks
+every param against the current build's registry the moment you press **Save**,
+marking each bad field and putting the count in the footer.
+
+Saving with a problem still saves — turned off, with a note that it runs once the
+field is fixed. It is never refused outright, so a rule half set up is never lost
+because the dialog would not let go of it. Fix the field and save again and, **if
+the Enabled switch still reads on**, it turns back on. A rule you switched off
+yourself, or one that was never turned on in the first place, stays off — fixing
+the field only clears the badge, and the switch in front of you is always the
+last word on whether the rule runs.
+
+The rules list marks a rule with a problem **Needs setup: N fields**, naming
+them, and its switch will not turn it on — turning ON a rule that still has a
+problem is the one thing this refuses, both in the editor and from the list,
+because that is the one action asking the rule to actually run. A pair's row
+carries one badge over both halves, the same as its **any time** badge below —
+either half needing setup is the pair needing setup.
+
+**A rule already enabled with a problem — from before this build, or a restored
+config — keeps running exactly as it did.** Loading it, restoring it, or a
+background pass (the Companion reconcile, learning a state source) touching an
+unrelated field never turns it off. The list still shows the badge; the switch
+still refuses to re-enable it if you turn it off yourself. It is enforced the
+next time *you* save or enable it, not the moment this build starts.
+
+The layout editor's action-button object follows the same check, live as you
+edit — there is no Save step there. A button needing setup is marked in the
+editor's canvas only, never on a live display; pressing it on a display or a
+console keeps refusing exactly as it always has (`action-invoke.ts`) if nothing
+is configured.
+
+An **optional** field is never a problem when it is empty. A field naming a
+runtime list — a RossTalk target, a ProPresenter macro — is never a problem
+just because that list came back short or without the stored value; the field
+shows an amber note instead and saves as it is, because the machine it names may
+simply be off right now.
+
 ## Triggers
 
 | | Fires when |
@@ -42,7 +83,7 @@ poll after.
 | OBS starts / stops streaming | the stream output starts or stops |
 | OBS starts / stops the virtual camera | the virtual camera output starts or stops |
 | An OSC message arrives | a value at an OSC address changes to equal, or crosses, what you name — see [Inbound OSC](#inbound-osc) |
-| A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only. It reads the line as displays receive it, so a phrase that is also a ProdCom keyword marked sensitive will not match while [redaction](integrations/prodcom.md#sensitive-keywords) is on |
+| A phrase is said on ProdCom | your text newly appears in a transcript line, optionally on one channel only — including a later partial or the final revising a line already seen, since ProdCom keeps one line id for a whole utterance. A revision that still contains it does not fire again; one that drops the phrase and a later one that brings it back can. It reads the line as displays receive it, so a phrase that is also a ProdCom keyword marked sensitive will not match while [redaction](integrations/prodcom.md#sensitive-keywords) is on |
 | Baptism timer starts | the timer leaves idle |
 | Baptism moves to another phase | testimony to baptism, or either back to idle |
 | Baptism timer finishes | it returns to idle |
@@ -180,6 +221,11 @@ for "idle", because before it runs we do not know that it is idle.
 | Hide / unhide a ProVideoPlayer layer | the layer's hidden flag |
 | Mute / unmute a ProVideoPlayer layer | the layer's mute flag |
 | Set a ProVideoPlayer layer's opacity | 0 is invisible, 100 is fully opaque |
+| Start a baptism session | begins a session at person 1's testimony; does nothing while one is already running |
+| Advance the baptism timer | the phase-aware primary press — see below |
+| Step the baptism timer back | undoes the last press without losing the session |
+| Pause or resume the baptism timer | toggles the running clock; says so when nothing is running to pause |
+| Finish the baptism session | closes the in-progress person, freezes the session, and logs it |
 
 > ProVideoPlayer answers every command with "OK" whether or not it acted on it, so
 > every ProVideoPlayer action above reads PVP's state back to confirm what it did.
@@ -229,6 +275,13 @@ for "idle", because before it runs we do not know that it is idle.
 >
 > A rule whose ProPresenter is **switched off** triggers nothing and says so —
 > `MA is switched off` — rather than dialling the last address the card held.
+
+> **Advance the baptism timer** is one action, not four. It does whatever the
+> [baptism timer's](features/scriptview-and-baptisms.md) own operator panel
+> would do right now — start a session, begin person 1 once a grouped session
+> arms, close a testimony or a baptism, move to the next person — so a single
+> [action button](reference/widgets.md#control) or Companion key runs the whole
+> service and nobody has to know which press is legal in which phase.
 
 ## Cues
 
@@ -498,7 +551,8 @@ will tell you.
 - *The item's own time* — when that item is scheduled.
 - *The service start* — the service time, ignoring where the item sits.
 
-A negative offset fires early, positive late.
+A negative offset fires early, positive late. Left untouched it is **0** — right
+at the moment itself.
 
 ### How an item gets a time
 
@@ -557,6 +611,10 @@ time. The cooldown stops one flapping sensor firing repeatedly.
 **Restart seeding** — the first snapshot on each channel after startup establishes a
 baseline and is never evaluated, so an update or crash mid-service cannot read it as
 a change and fire everything at once.
+
+**A rule with a missing or invalid param** — see [Needs setup](#needs-setup)
+above; a rule saved with a problem runs turned off rather than with a param the
+action cannot use.
 
 **A rule this build does not understand** — `automation-rules.json` travels: it is
 exported, restored onto other machines and hand-edited. A rule naming a trigger,

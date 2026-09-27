@@ -443,7 +443,9 @@ export interface TypeTrend {
   priorServiceCount: number;
 }
 
-function mean(values: number[]): number | null {
+/** `null` for an empty array, never NaN. Exported for baptisms/trends.ts's
+ *  own tile(), which shares this same average-with-no-data rule. */
+export function mean(values: number[]): number | null {
   if (!values.length) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;
 }

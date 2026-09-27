@@ -11,17 +11,13 @@ import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
 import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 // React only act-wraps a render, and only warns when an update escapes one,
 // once it is told it is in a test environment. Without this the file reads
 // as clean while 8 updates land outside act.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");

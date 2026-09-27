@@ -64,7 +64,7 @@ let OSC_BODY: unknown = [
   let body: unknown = {};
   if (url.includes("/api/automation/registry")) body = REGISTRY;
   else if (url.includes("/api/automation/rules")) {
-    body = { rules: RULES, settings: { simulate: true, disarmed: false } };
+    body = { rules: RULES.map((r) => ({ ...r, issues: [] })), settings: { simulate: true, disarmed: false } };
   } else if (url.includes("/api/automation/log")) body = { entries: [] };
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/automation/propresenter-instances")) body = { items: [] };

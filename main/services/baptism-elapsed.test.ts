@@ -64,6 +64,14 @@ describe("isPaused", () => {
   test("idle is not paused — there is nothing to resume", () => {
     assert.equal(isPaused({ segmentStartedAt: null }, "idle"), false);
   });
+
+  test("armed is not paused — there is nothing banked to resume from", () => {
+    // Grouped baptisms open in "baptism" phase with no clock running and nothing
+    // accumulated. That shape is identical to a paused segment except for the
+    // `armed` flag, so a helper that ignores it would tell the operator to
+    // "resume" a person who has not started.
+    assert.equal(isPaused({ segmentAccumMs: 0, segmentStartedAt: null, armed: true }, "baptism"), false);
+  });
 });
 
 describe("the resume bug this nearly shipped with", () => {

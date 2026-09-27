@@ -6,9 +6,9 @@
 // powered off). The properties pinned below are the ones the services rely on.
 
 import assert from "node:assert/strict";
-import { test, describe, beforeEach } from "node:test";
+import { test, describe, beforeEach, afterEach } from "node:test";
 
-import { addBroadcastListener } from "./broadcaster.js";
+import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { StatusIntegration, type ConnState } from "./integration-base.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 
@@ -43,6 +43,7 @@ class Fake extends StatusIntegration<Dto> {
   // Surface protected bits the tests need to observe.
   get attemptCount(): number { return this.attempt; }
   callScheduleIn(ms: number): void { this.scheduleIn(ms); }
+  nextDelay(): number { return this.nextReconnectDelayMs(); }
   stopTimers(): void { this.clearReconnect(); }
 }
 
@@ -153,6 +154,44 @@ describe("ConnectionLifecycle", () => {
     await new Promise((r) => setTimeout(r, 30));
     assert.deepEqual(seen, ["connected", "error"]);
     f.stop();
+  });
+});
+
+// What every integration's retries grow to, through the real scheduler, with no
+// browser watching: the path a ProdCom box at an event Planning Center does not
+// know about takes after it drops.
+describe("the reconnect back-off an integration settles at", () => {
+  beforeEach(() => {
+    serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+    // Nobody watching. Unset, the check assumes a browser is, which forces the
+    // 2-minute cap and would pass every case below for the wrong reason.
+    setSubscriberCheck(() => false);
+  });
+  afterEach(() => setSubscriberCheck(() => true));
+
+  /** The delay after forty failures in a row, long past any ramp. */
+  const settled = (f: Fake) => {
+    let d = 0;
+    for (let i = 0; i < 40; i++) d = f.nextDelay();
+    return d;
+  };
+
+  test("is 2 minutes with no service window known", () => {
+    serviceWindow.setWindows([]);
+    assert.equal(settled(new Fake()), 120_000);
+  });
+
+  test("is the idle ceiling when the next service is a day off", () => {
+    const now = Date.now();
+    serviceWindow.setWindows([{ open: now + 24 * 3600_000, close: now + 25 * 3600_000 }]);
+    assert.equal(settled(new Fake()), 30 * 60_000);
+  });
+
+  test("is 2 minutes when the next service is a day off but a browser is watching", () => {
+    const now = Date.now();
+    serviceWindow.setWindows([{ open: now + 24 * 3600_000, close: now + 25 * 3600_000 }]);
+    setSubscriberCheck((channel) => channel === "fake:status");
+    assert.equal(settled(new Fake()), 120_000);
   });
 });
 

@@ -63,4 +63,15 @@ export default [
       ],
     },
   },
+  {
+    // A method-syntax signature takes its parameters bivariantly, so
+    // `send(channel: string)` accepts a function that only handles IpcChannel,
+    // carrying an unwired channel past invoke()'s type without a cast. The
+    // property form is checked strictly. Class and object-literal methods and
+    // constructors are bivariant too and out of this rule's reach;
+    // api-channels.test.ts refuses a forwarder, or an object holding one, handed
+    // on as a value. See IpcChannel in renderer/lib/api.ts.
+    files: ["renderer/**/*.{ts,tsx}"],
+    rules: { "@typescript-eslint/method-signature-style": ["error", "property"] },
+  },
 ];

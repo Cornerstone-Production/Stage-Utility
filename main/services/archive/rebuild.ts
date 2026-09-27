@@ -24,7 +24,7 @@ import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder
 import { scrub } from "../scrub.js";
 import { carryItemTimeEdits, logOrphanedItemTimeEdits } from "../history-item-times.js";
 import { serviceDirPath } from "./archive-paths.js";
-import { readArchiveRows, type ArchiveRow } from "./archive-rows.js";
+import { readArchiveRows, rowsByTime, type ArchiveRow } from "./archive-rows.js";
 
 /** How many SPL sample rows a service has archived, or 0 if none. */
 export async function archivedSampleCount(serviceKey: string, serviceDate: string): Promise<number> {
@@ -185,17 +185,6 @@ function titleSlug(title: string, run = 0): string {
   return run === 0 ? slug : `${slug}-${run + 1}`;
 }
 
-/** Chronological, leaving an unparseable stamp beside its neighbours (the sort
- *  is stable, so returning 0 does not herd damaged rows to one end). */
-function byTime(rows: EventRow[]): EventRow[] {
-  return [...rows].sort((a, b) => {
-    const ta = Date.parse(a.at ?? "");
-    const tb = Date.parse(b.at ?? "");
-    if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
-    return ta - tb;
-  });
-}
-
 function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
   entry.endedAt = endedAt;
   const startMs = Date.parse(entry.startedAt);
@@ -263,7 +252,7 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   };
 
   let skipped = 0;
-  for (const row of byTime(rows)) {
+  for (const row of rowsByTime(rows)) {
     if (row.kind !== "item") continue;
     const at = row.at ?? "";
     const atMs = Date.parse(at);

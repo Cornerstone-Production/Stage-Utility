@@ -81,7 +81,8 @@ REAPER is the cleanest end-to-end template for a polling integration — see
 3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
    from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
    `RevisionedStatus`.
-4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; `api.ts` invoke case.
+4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; in `api.ts`, an
+   `invoke` case and its `IpcChannel` member (skip either and `tsc` fails).
 5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;
    layout object render case + inspector; `object-integration.ts` mapping; a place
    in `CATEGORY_ORDER` in `integrations-panel.tsx`.
@@ -94,12 +95,16 @@ the URL, so a link opens straight onto one and Back closes it. `CATEGORY_ORDER`
 sets the order cards are laid out in; it draws no headings.
 
 Most integrations describe their settings as `ConfigField`s and the dialog renders
-them. Five do not: Live scores' only setting is WHICH TEAMS, and a two-step
+them. Four do not: Live scores' only setting is WHICH TEAMS, and a two-step
 sport-then-team picker over ~2,000 clubs is not a config field, so its descriptor
 carries an empty schema and `integrations-panel.tsx` renders a panel of its own
-for it — as it does for Wireless Gear, OSC, RossTalk and Companion. Reach for that
+for it — as it does for Wireless Gear, OSC and RossTalk. Reach for that
 only when the setting genuinely cannot be a field: a bespoke panel is a second
 place for a settings page to drift.
+
+Companion is different again: its host/port are ordinary `ConfigField`s, and
+`integrations-panel.tsx` renders a separate panel *above* that form for the
+inbound half (the connected-client count) rather than replacing it.
 
 A panel holding a repeater row that cannot wrap marks its root with
 `WIDE_PANEL_ATTR` (`integration-dialog-size.ts`), which puts its dialog in the

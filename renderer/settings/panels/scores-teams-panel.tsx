@@ -49,13 +49,9 @@ import {
 
 import { LEAGUES, type LeagueId } from "@main/types/scores";
 import { errorMessage } from "@main/services/errors";
-import { invoke } from "../../lib/api";
+import { invoke as ipc } from "../../lib/api";
 import { toast } from "../../components/ui";
 import { cn } from "../../lib/cn";
-
-function ipc<T>(channel: string, payload?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(channel, payload);
-}
 
 /** The identity of a favourite. League AND id: ESPN's ids are unique per league. */
 const keyOf = (f: { league: string; teamId: string }): string => `${f.league}:${f.teamId}`;

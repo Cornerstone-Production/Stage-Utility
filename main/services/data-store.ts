@@ -79,11 +79,19 @@ export class DataStore<T> {
   async load(): Promise<T> {
     if (this.cache !== null) return this.cache;
     const filePath = await this.getFilePath();
-    let raw: string;
+    let raw: string | null = null;
     try {
       raw = await fs.readFile(filePath, "utf-8");
     } catch {
       // File doesn't exist yet (first run) — safe to start from defaults.
+    }
+    // A save that ran while this read was in flight has already set the cache,
+    // and what it set is newer than the bytes just read. writeRaw assigning
+    // first only protects a read that STARTS after it; one already waiting on
+    // the disk used to finish by installing the old bytes over the save, and
+    // the next save — built on that stale cache — erased the first from disk.
+    if (this.cache !== null) return this.cache;
+    if (raw === null) {
       this.cache = this.defaultValue;
       return this.cache;
     }
@@ -95,6 +103,10 @@ export class DataStore<T> {
       // crash). Do NOT silently fall back to defaults and then overwrite it, which
       // would destroy the data permanently. Preserve the bytes for recovery and log
       // loudly before continuing from defaults. (Atomic writes above make this rare.)
+      //
+      // Defaults are installed BEFORE the rename's await, for the reason above:
+      // a save landing during the rename must win, not be overwritten after it.
+      this.cache = this.defaultValue;
       try {
         await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`);
       } catch {
@@ -104,8 +116,29 @@ export class DataStore<T> {
         `[data-store] ${this.filename} could not be parsed (corrupt). Backed up to ${this.filename}.corrupt-* and starting fresh — recover history from that copy.`,
         err,
       );
-      this.cache = this.defaultValue;
-      return this.cache;
+      // A save's whole write-plus-rename can complete between the defaults being
+      // installed above and the quarantine rename actually running: it is the
+      // SAVED file, not the corrupt one, that sits at `filePath` by then, and the
+      // rename moves that aside instead — disk ends up with no store file at
+      // all, though memory still serves the save correctly. If the cache no
+      // longer holds the defaults this load just installed, that is what
+      // happened: rewrite the live cache so the file exists again. Null is not
+      // a save (reload() empties the cache). Awaiting the queue here cannot
+      // wait on itself: a save only lands during the rename when the queue is
+      // free to run it, so a load running inside the queue never gets here.
+      if (this.cache !== null && this.cache !== this.defaultValue) {
+        const rescued = this.cache;
+        await this.enqueue(() => this.writeRaw(rescued)).catch((rescueErr: unknown) => {
+          console.error(
+            "[data-store] could not rewrite the save that landed during the corrupt-file quarantine; it is still correct in memory but missing on disk until the next save:",
+            this.filename,
+            rescueErr,
+          );
+        });
+      }
+      // reload() empties the cache, and can do it while this waited on the
+      // rename. What this load found is still the defaults, not nothing.
+      return this.cache ?? this.defaultValue;
     }
   }
 

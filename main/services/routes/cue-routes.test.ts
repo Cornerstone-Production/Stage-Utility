@@ -1255,6 +1255,36 @@ describe("the token gate on /api/action/invoke", () => {
     assert.equal(r.status, 200);
     assert.equal((r.json as { ok: boolean }).ok, true);
   });
+
+  // Before this, a same-origin operator pressing a refused layout button saw a
+  // toast and nothing else: this route only ever logged a bearer-token caller,
+  // and only who they were — never whether the press did anything. Both
+  // callers below must leave the SAME line, generic (log.message, not a
+  // baptism action), so the fix is not narrowed to the one feature that found it.
+  // Headers as thunks, not values: auth() reads TOKEN, minted in `before` —
+  // see the comment on auth() above this describe block.
+  for (const [who, headersOf] of [["a same-origin browser", () => browser], ["a bearer token", () => auth()]] as const) {
+    test(`${who} refused leaves a line on /log, not only a toast`, async () => {
+      const original = console.warn;
+      const lines: string[] = [];
+      console.warn = (...args: unknown[]) => {
+        if (typeof args[0] === "string" && args[0].startsWith("[action]")) lines.push(args[0]);
+      };
+      let r: Awaited<ReturnType<typeof callRoute>>;
+      try {
+        r = await callRoute(automationRoutes, "/api/action/invoke", {
+          method: "POST",
+          headers: headersOf(),
+          body: { actionId: "nope.not.a.real.action" },
+        });
+      } finally {
+        console.warn = original;
+      }
+      assert.equal((r.json as { ok: boolean }).ok, false);
+      assert.equal(lines.length, 1, `expected exactly one [action] line, saw ${lines.length}`);
+      assert.match(lines[0]!, /^\[action\] nope\.not\.a\.real\.action refused:/);
+    });
+  }
 });
 
 // ── Tokens ────────────────────────────────────────────────────────────────────

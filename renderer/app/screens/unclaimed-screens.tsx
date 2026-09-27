@@ -15,7 +15,9 @@ import { useEffect, useState } from "react";
 import { errorMessage } from "@main/services/errors";
 
 import { invoke } from "../../lib/api";
+import { logToServer } from "../../lib/client-log";
 import { Button } from "../../components/ui/button";
+import { ErrorNote } from "../../components/ui/error-note";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
@@ -29,18 +31,36 @@ export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
   const data = useDevices();
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // An action this section took, or a background refresh that failed. Both are
-  // "the list you are looking at may be wrong", so both go in the same banner.
-  const error = actionError ?? data.error?.message ?? null;
+  const [scanError, setScanError] = useState<string | null>(null);
+  // An action this section took, a scan that could not start, or a background
+  // refresh that failed. All are "the list you are looking at may be wrong", so
+  // all go in the same banner.
+  const error = actionError ?? scanError ?? data.error?.message ?? null;
 
   useEffect(() => {
-    void invoke("devices:scan", { holder: HOLDER }).then(() => refreshDevices());
+    let cancelled = false;
+    // Unanswered, this section stays empty, which reads exactly like a network
+    // with nothing on it — so a failed scan goes on screen and to /log.
+    const scan = () =>
+      invoke("devices:scan", { holder: HOLDER })
+        .then(() => {
+          if (!cancelled) setScanError(null);
+        })
+        .catch((err: unknown) => {
+          logToServer("screens", `the device scan failed: ${errorMessage(err)}`);
+          if (!cancelled) setScanError(`Couldn't look for screens on the network: ${errorMessage(err)}`);
+        });
+    void scan().then(() => refreshDevices());
     // The scan expires on its own so a forgotten tab cannot leave the responder
     // answering forever; this renews it while the page is genuinely on screen.
-    const keepAlive = setInterval(() => void invoke("devices:scan", { holder: HOLDER }), 30_000);
+    const keepAlive = setInterval(() => void scan(), 30_000);
     return () => {
+      cancelled = true;
       clearInterval(keepAlive);
-      void invoke("devices:scan", { holder: HOLDER, stop: true });
+      // Nobody is left to tell, and the scan expires on its own regardless.
+      void invoke("devices:scan", { holder: HOLDER, stop: true }).catch((err: unknown) =>
+        logToServer("screens", `the device scan could not be stopped, it will expire on its own: ${errorMessage(err)}`),
+      );
     };
   }, []);
 
@@ -80,11 +100,7 @@ export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
         )}
       </header>
 
-      {error && (
-        <p className="mb-2 rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-          {error}
-        </p>
-      )}
+      {error && <ErrorNote className="mb-2">{error}</ErrorNote>}
 
       <div className="overflow-hidden rounded-xl border border-line bg-surface">
         {data.seen.map((d) => {

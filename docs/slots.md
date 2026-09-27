@@ -2,6 +2,7 @@
 
 A slot is one cell on the mic board. It links to a person, optionally binds a
 wireless mic and an IEM pack, and shows a name, photo and live telemetry.
+Slots are edited on a Mic Slots view's own page, opened from Screens.
 
 ## Linking a slot to a person
 

@@ -43,9 +43,9 @@ class TestProdCom extends ProdComService {
   protected override get probeDeadlineMs(): number {
     return 400;
   }
-  protected override noteWebSocketDown(reason: string, detail: string | null = null): void {
+  protected override noteWebSocketDown(reason: string, detail: string | null = null, stillOnFallback = false): void {
     this.downs.push({ reason, detail });
-    super.noteWebSocketDown(reason, detail);
+    super.noteWebSocketDown(reason, detail, stillOnFallback);
   }
   /** A reconnect, as scheduleReconnect() would run it. */
   public reconnectNow(): Promise<void> {
@@ -274,6 +274,14 @@ describe("a refused upgrade is diagnosed before falling back", () => {
   });
 
   it("stop() during a probe takes the probe's socket with it", async (t) => {
+    // The epoch check this pins (probeThenGiveUp's `if (epoch !== this.connectionEpoch)
+    // return;`) used to be observable through the SSE fallback: giving up on an
+    // unproven websocket USED to be what opened it. Now connect() opens the
+    // fallback unconditionally from the start, so giving up never touches SSE at
+    // all — an epoch check with no guard would never show up as "another stream
+    // opened" any more. What the check still has to prevent is a stopped
+    // service reporting a fresh down event (and the misleading log line that
+    // goes with it) about a probe from a connection it has already let go of.
     const server = await serverAnswering("trickle");
     const svc = new TestProdCom();
     t.after(async () => {
@@ -282,6 +290,7 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     });
     svc.configure("127.0.0.1", server.port, null);
     await eventually(() => probes(server) === 1, "the probe to go out");
+    assert.equal(svc.downs.length, 0, "a down event was reported before the probe ever answered");
 
     svc.stop();
     // Within a fraction of the probe's own deadline, which is 400 ms here: the
@@ -289,7 +298,15 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     // window would pass whether or not teardown() does anything. What is under
     // test is that STOPPING takes the socket with it.
     await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 150);
-    assert.equal(server.sseOpens(), 0, "a stopped service opened a fallback anyway");
+
+    // Comfortably past the probe's 400 ms deadline: a stale answer, unguarded,
+    // has had time to arrive and act.
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(
+      svc.downs.length,
+      0,
+      "a stopped service still reported a down event for a probe from the connection it let go of",
+    );
   });
 
   it("a second refusal while a probe is in flight does not start a second probe", async (t) => {
@@ -313,12 +330,20 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     assert.equal(probes(server), 1, "a second probe went out while one was already in flight");
   });
 
-  it("a probe from a previous connection does not open a fallback for the new one", async (t) => {
+  it("a probe from a previous connection does not act on the new one", async (t) => {
     // configure() to a different box while a probe is in flight. The probe's
-    // answer is about the OLD host, and acting on it would open a transcript
-    // stream against a box this service has already been pointed away from.
+    // answer is about the OLD host, and acting on it would break the NEW box's
+    // own, unrelated connection — the fallback opens unconditionally for both
+    // boxes now (see the sibling case above for why "did SSE open again" no
+    // longer distinguishes a guarded stale probe from an unguarded one).
+    //
+    // What a stale, unguarded probe DOES still do: giveUpOnUnprovenWebSocket()
+    // reads `this.host`/`this.port` — the CURRENT config, not the box the probe
+    // was actually about — so it would call closeSocket() on the NEW box's
+    // first socket and report a second, bogus down event keyed on a probe that
+    // was never about it.
     const old = await serverAnswering("trickle");
-    const next = await serverAnswering("refuse-426");
+    const next = await serverAnswering("refuse-426"); // answers fast, unlike old's trickle
     const svc = new TestProdCom();
     t.after(async () => {
       svc.stop();
@@ -328,28 +353,47 @@ describe("a refused upgrade is diagnosed before falling back", () => {
 
     svc.configure("127.0.0.1", old.port, null);
     await eventually(() => probes(old) === 1, "the probe against the old box");
-    svc.configure("127.0.0.1", next.port, null); // the operator repoints it
 
-    await eventually(() => next.sseOpens() > 0, "the NEW box's fallback to open", 3000);
-    assert.equal(old.sseOpens(), 0, "the old box's probe opened a stream against a box we have left");
+    svc.configure("127.0.0.1", next.port, null); // the operator repoints it
+    // next's own refusal is fast, so its down event lands well before old's
+    // trickle probe reaches its 400 ms deadline.
+    await eventually(() => svc.downs.length === 1, "the new box's own down event");
+    assert.equal(probes(next), 1, "the new box's first socket was not the one probed");
+
+    // Comfortably past old's 400 ms deadline: its stale answer, unguarded, has
+    // had time to arrive and act on `next`'s config.
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(
+      svc.downs.length,
+      1,
+      "the old box's stale probe answer reported a second down event, keyed on the box we have since left",
+    );
   });
 
-  it("does not probe when the WebSocket was up and dropped normally", async (t) => {
-    // The normal-drop path retries the same transport and never falls back, so
-    // there is nothing to diagnose — and a probe there would put an extra
-    // request on the box on every ordinary reconnect.
+  it("does not probe a socket that opened and dropped without ever delivering", async (t) => {
+    // A socket that completed the handshake is not a refusal, so it must never
+    // reach the probe — that diagnosis is for a socket that never opened at all,
+    // and probing this one would put an extra request on the box on every
+    // ordinary drop. It is still unproven, though (nothing here ever delivered a
+    // transcript entry), so it is worth ONE outage line same as a refusal would
+    // be — the SSE fallback carried captions the whole time regardless.
     const { stub, svc } = await onARealWebSocket(t);
-    await eventually(() => svc.onWebSocketNow, "the websocket to be the live transport");
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
     const before = stub.requests.filter((r) => r.headers["user-agent"] === PROBE_USER_AGENT).length;
     stub.wsDropAll();
-    await eventually(() => !svc.onWebSocketNow, "the drop to be noticed");
+    await eventually(() => !svc.wsOpenNow, "the drop to be noticed");
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(
       stub.requests.filter((r) => r.headers["user-agent"] === PROBE_USER_AGENT).length,
       before,
-      "a normal drop was diagnosed as a refusal",
+      "a socket that had opened was diagnosed with a refused-upgrade probe",
     );
-    assert.deepEqual(svc.downs, [], "a normal drop must not be reported as the websocket being unavailable");
+    assert.equal(svc.downs.length, 1, "an unproven socket dropping was not reported as the websocket being unavailable");
+    assert.doesNotMatch(
+      svc.downs[0]!.reason,
+      /closed before open/,
+      "a socket that had opened was described as one that never did",
+    );
   });
 });
 
@@ -368,7 +412,8 @@ async function onARealWebSocket(t: TestContext) {
 }
 
 class WsTestProdCom extends TestProdCom {
-  public get onWebSocketNow(): boolean {
-    return this.onWebSocketTransport;
+  /** Whether a WebSocket attempt is currently open, proven or not. */
+  public get wsOpenNow(): boolean {
+    return this.wsAttemptOpen;
   }
 }

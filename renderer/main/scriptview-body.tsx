@@ -113,6 +113,7 @@ export function ScriptViewBody({
   layout,
   render,
   error,
+  notice,
   textSizeClass,
   autoScroll,
 }: {
@@ -121,6 +122,9 @@ export function ScriptViewBody({
   layout: ScriptViewLayout | null;
   render: ScriptViewRender;
   error?: string | null;
+  /** Why there is no rundown when nothing FAILED — Planning Center not being
+   *  connected — said in the plan's own quiet voice rather than as an error. */
+  notice?: string | null;
   /** Row text sizing. Default is the page's viewport-relative clamp; pass "" to
    *  inherit the container's font-size instead, which is how a layout object
    *  gets a size that tracks the box it was given rather than the screen. */
@@ -140,7 +144,9 @@ export function ScriptViewBody({
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       {showError ? (
-        <div className="flex items-center justify-center h-full text-red-10 text-body px-6 text-center">{error}</div>
+        <div role="alert" className="flex items-center justify-center h-full text-red-10 text-body px-6 text-center">{error}</div>
+      ) : notice && !rundown ? (
+        <div className="flex items-center justify-center h-full text-fg-faint text-body px-6 text-center">{notice}</div>
       ) : !rundown ? (
         <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-fg-subtle animate-spin" /></div>
       ) : items.length === 0 ? (

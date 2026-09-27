@@ -3,18 +3,8 @@ import { useCallback } from "react";
 import { invoke } from "../lib/api";
 import { useStatusChannel } from "./use-status-channel";
 
-/**
- * Channel names as LITERALS, not built from the platform id.
- *
- * api-channels.test.ts scans the UI for the channels it dispatches, and a
- * template string is invisible to it — the same shape of hole that once hid
- * ninety call sites behind a local wrapper. Spelling them out costs four lines
- * and keeps the guard able to notice when a caller disappears.
- */
-const CHANNELS = {
-  resi: { get: "resi:getStatus", push: "resi:status" },
-  youtube: { get: "youtube:getStatus", push: "youtube:status" },
-} as const;
+/** The SSE channel carrying each platform's live frames. */
+const PUSH = { resi: "resi:status", youtube: "youtube:status" } as const;
 
 /** What each channel answers. YouTube's is the shared shape plus the two things
  *  only YouTube knows, so the map is what keeps the wider one from leaking onto
@@ -40,15 +30,26 @@ interface StreamDTOs {
  * display opened mid-service would otherwise sit blank until something moved.
  * Ordering between that hydrate and the first push is useStatusChannel's job —
  * see the note there for the staleness this used to have.
+ *
+ * The hydrate comes in as `read` rather than being looked up from the platform,
+ * so each platform's invoke call and its channel are written in the hook that
+ * sends it: api-channels.test.ts credits a channel only to a call that names
+ * it, and cannot tell which entry a table read through the platform sends.
  */
 export function useStreamState<P extends keyof StreamDTOs>(
   platform: P,
+  read: () => Promise<StreamDTOs[P]>,
   enabled = true,
 ): StreamDTOs[P] | null {
-  const { get, push } = CHANNELS[platform];
-  const read = useCallback(() => invoke<StreamDTOs[P]>(get), [get]);
-  return useStatusChannel<StreamDTOs[P]>(read, push, enabled);
+  return useStatusChannel<StreamDTOs[P]>(read, PUSH[platform], enabled);
 }
 
-export const useResiState = (enabled = true) => useStreamState("resi", enabled);
-export const useYouTubeState = (enabled = true) => useStreamState("youtube", enabled);
+export function useResiState(enabled = true) {
+  const read = useCallback(() => invoke<StreamDTOs["resi"]>("resi:getStatus"), []);
+  return useStreamState("resi", read, enabled);
+}
+
+export function useYouTubeState(enabled = true) {
+  const read = useCallback(() => invoke<StreamDTOs["youtube"]>("youtube:getStatus"), []);
+  return useStreamState("youtube", read, enabled);
+}

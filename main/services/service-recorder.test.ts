@@ -29,8 +29,12 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-back-to-back-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { setAppTimeZone } = await import("./app-timezone.js");
-setAppTimeZone("America/Chicago"); // a UTC box must not file these on two dates
+// Through the settings store, not setAppTimeZone: every settings read re-applies
+// the saved zone (null means the host's), so a recorder that reads settings on
+// its first tick silently put a UTC CI runner back on UTC and filed tonight's
+// two services on two dates. A UTC box must not file these on two dates.
+const { settingsStore } = await import("./settings-store.js");
+await settingsStore.patch({ timezone: "America/Chicago" });
 
 const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
@@ -178,6 +182,23 @@ describe("ServiceRecorder.ensureRecord: back-to-back services on one plan", () =
 
     assert.deepEqual(recorderLogs(), [
       "[service-recorder] service-timeline-recorder: service time occ-9am → occ-11am, holding the open record (next occurrence starts in 25 min)",
+    ]);
+  });
+
+  it("says so when a hold ends in a split, not only when it began", async () => {
+    // 24 Sep: the hold was logged 35 minutes before the 8:15 service, and the
+    // split it was holding for, ten minutes out, logged nothing.
+    const occ1Tick = { id: OCC_1, startsAt: OCC_1_STARTS };
+    const occ2 = { id: OCC_2, startsAt: OCC_2_STARTS }; // 01:15Z
+    await tick("2026-09-18T23:23:46.000Z", occ1Tick, { id: "doors", title: "Doors" });
+    await tick("2026-09-19T00:40:25.000Z", occ2, { id: "hosting", title: "HOSTING/BENNY" }); // 35 min out: hold
+    await tick("2026-09-19T00:50:00.000Z", occ2, { id: "hosting", title: "HOSTING/BENNY" }); // still holding
+    await tick("2026-09-19T01:05:00.000Z", occ2, { id: "hosting", title: "HOSTING/BENNY" }); // 10 min out: split
+
+    const key1 = `75953:${planId}:${OCC_1}`;
+    assert.deepEqual(recorderLogs(), [
+      `[service-recorder] service-timeline-recorder: service time ${OCC_1} → ${OCC_2}, holding the open record (next occurrence starts in 35 min)`,
+      `[service-recorder] service-timeline-recorder: service time ${OCC_1} → ${OCC_2} starts in 10 min, closing ${key1} and opening a new record`,
     ]);
   });
 

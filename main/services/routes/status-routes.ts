@@ -224,7 +224,8 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       if (histMatch && histMatch[1] !== "current") {
         const key = decodeURIComponent(histMatch[1]);
         if (method === "GET") {
-          json(res, await splHistoryStore.get(key));
+          // The recorder's own record when it is this service — see getRecord.
+          json(res, await splRecorder.getRecord(key));
           return;
         }
         if (method === "DELETE") {
@@ -266,7 +267,7 @@ async function splSeriesFor(
   metric: string,
   bucketSec: number,
 ): Promise<SplSeriesResponse | null> {
-  const record = await splHistoryStore.get(serviceKey);
+  const record = await splRecorder.getRecord(serviceKey);
   if (!record) return null;
   const dir = serviceDirPath(serviceKey, record.serviceDate);
   const rows = await readArchiveRows(dir, "spl");

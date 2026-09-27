@@ -3,7 +3,8 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { UploadIcon, PlusIcon, Trash2Icon, DownloadIcon, PrinterIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { Button, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { useFailedReads } from "../../lib/use-failed-reads";
+import { Button, ErrorNote, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { mergeOverrides, diffEndpoints } from "../../lib/patch-resolve";
 import { uid } from "../../lib/uid";
 import { PatchDeviceManager } from "./patch-device-manager";
@@ -12,10 +13,6 @@ import { PatchImport } from "./patch-import";
 import { PatchWeekly } from "./patch-weekly";
 
 const emptyAssignments = (): PatchAssignments => ({ byServiceType: {}, byPlan: {} });
-const EMPTY: PatchFile = {
-  sheets: [{ id: "analog", name: "Analog", kind: "analog", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() }],
-  updatedAt: "",
-};
 
 /**
  * Stage patch editor (Settings → Patch). The patch is a set of SHEETS (tabs) —
@@ -86,6 +83,7 @@ export function PatchSection() {
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [group, setGroup] = useState<"rack" | "device">("rack");
   const [plan, setPlan] = useState<{ serviceTypeId: string | null; planId: string | null; planTitle: string | null } | null>(null);
+  const { failed, fail } = useFailedReads<"patch" | "plan">("patch");
 
   const dirty = useMemo(() => (draft && saved ? JSON.stringify(draft) !== JSON.stringify(saved) : false), [draft, saved]);
   const dirtyRef = useLatestRef(dirty);
@@ -93,16 +91,25 @@ export function PatchSection() {
   useEffect(() => {
     invoke<PatchFile>("patch:get")
       .then((f) => { setSaved(f); setDraft(f); setActiveSheetId(f.sheets[0]?.id ?? ""); })
-      .catch(() => { setSaved(EMPTY); setDraft(EMPTY); setActiveSheetId(EMPTY.sheets[0].id); });
+      .catch((err: unknown) => {
+        // NOT an empty patch. This used to draw a blank default sheet, which
+        // looked like a new install and which Save would have written over the
+        // real patch. A `patch:updated` push still brings the editor up.
+        fail("patch", "the patch", err);
+      });
     invoke<StageState>("stage:getState")
       .then((s) => setPlan({ serviceTypeId: s.serviceTypeId, planId: s.planId, planTitle: s.planTitle }))
-      .catch(() => setPlan(null));
+      .catch((err: unknown) => {
+        // Not "no plan this week", which is what a null plan already says: it
+        // hides This week without a word.
+        fail("plan", "the current plan", err);
+      });
     return onNotification("patch:updated", (p) => {
       const f = p as PatchFile;
       setSaved(f);
       if (!dirtyRef.current) setDraft(f);
     });
-  }, [dirtyRef]);
+  }, [dirtyRef, fail]);
 
   async function save() {
     if (!draft) return;
@@ -122,7 +129,11 @@ export function PatchSection() {
   if (!draft) {
     return (
       <div className="py-6">
-        <SkeletonRows rows={4} />
+        {failed.has("patch") ? (
+          <ErrorNote>Couldn't load the patch. Nothing has been changed; reload the page to try again.</ErrorNote>
+        ) : (
+          <SkeletonRows rows={4} />
+        )}
       </div>
     );
   }
@@ -336,6 +347,10 @@ export function PatchSection() {
           ))}
         </div>
       </div>
+
+      {failed.has("plan") && (
+        <ErrorNote className="patch-print-hide">Couldn't load the current plan, so This week isn't offered.</ErrorNote>
+      )}
 
       {/* The only thing that belongs on paper. Everything above and below is
           editing chrome and is hidden by the print stylesheet. */}

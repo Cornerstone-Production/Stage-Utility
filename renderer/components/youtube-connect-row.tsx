@@ -14,7 +14,7 @@ import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import { useServerNow } from "../lib/server-clock";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "../lib/api";
+import { invoke, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { Button, Input } from "./ui";
 
@@ -76,7 +76,7 @@ export function YouTubeConnectRow({
   // shell, whose context bar feeds that clock on every page.
   const now = useServerNow(1000, state.status === "pending");
 
-  async function run(channel: string): Promise<void> {
+  async function run(channel: IpcChannel): Promise<void> {
     setBusy(true);
     try {
       const next = await invoke<ConnectStatus>(channel);

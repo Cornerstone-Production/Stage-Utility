@@ -60,8 +60,20 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * lines are scrubbed.
  */
 const REQUEST_FACING = [
+  // Its refusal line names the actionId, which arrives verbatim in the body of
+  // POST /api/action/invoke, and the detail can carry whatever a provider or an
+  // action's own guard said back. It logged nothing at all until a refused
+  // press started being surfaced on /log, which is when it acquired the
+  // exposure.
+  "action-invoke.ts",
+  // Its one warning names the serviceKey GET /api/baptism/lane was asked for,
+  // verbatim off the query string.
+  "archive/baptism-lane.ts",
   // Its title-fallback warning names a plan item TITLE read back out of the raw
   // archive, and POST /api/history/rebuild is what runs it.
+  // Its one summary line names the serviceKey the replay was given, which
+  // arrives verbatim in an HTTP body wherever a rebuild is triggered.
+  "archive/rebuild-baptism.ts",
   "archive/rebuild.ts",
   "automation-engine.ts",
   // Its suppression line names the STORED rule that owns a built-in's cue name
@@ -195,6 +207,13 @@ const NOT_SCANNED = new Map<string, string>([
     "logs its own save failures only (a filesystem error), never an entry's content; audited",
   ],
   ["backup-scheduler.ts", UNAUDITED],
+  [
+    "baptism-store.ts",
+    "logs one line, when a live append evicts a session to stay at the cap, and " +
+      "interpolates only a count this file computed itself (merged.length minus the " +
+      "kept length) — never a session id, a title or anything else a request could " +
+      "have put a newline into. Audited, not just excused.",
+  ],
   ["baptism-timer-service.ts", UNAUDITED],
   ["bar-config-store.ts", UNAUDITED],
   ["branding-image-store.ts", UNAUDITED],
@@ -230,6 +249,11 @@ const NOT_SCANNED = new Map<string, string>([
   ["secrets.ts", UNAUDITED],
   ["sensource-service.ts", DEVICE],
   ["service-recorder.ts", UNAUDITED],
+  [
+    "service-window.ts",
+    "logs two fixed sentences when the schedule becomes unknown or known again, and " +
+      "interpolates nothing. Audited, not just excused.",
+  ],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   ["stream-start-store.ts", UNAUDITED],
@@ -250,11 +274,20 @@ function requestFacingFiles(): string[] {
   // directly above the file it explains, so two branches adding different
   // files touch different lines and merge cleanly.
   const files = [
+    // Its refusal line names the actionId, which arrives verbatim in the body
+    // of POST /api/action/invoke, and the detail can carry whatever a provider
+    // or an action's own guard said back — both scrubbed at the logger. It
+    // logged nothing at all until a refused press started being surfaced on
+    // /log, which is when it acquired the exposure.
+    path.join(HERE, "action-invoke.ts"),
     // Rule names are typed into an HTTP body and action detail carries whatever a
     // provider or device said back, so the engine is request-facing in exactly the
     // sense this scan means. It logged nothing at all until a failed rule started
     // being surfaced on /log, which is when it acquired the exposure.
     path.join(HERE, "automation-engine.ts"),
+    // Its one warning — spans left out of a damaged baptism.csv — names the
+    // serviceKey GET /api/baptism/lane took off its query string, verbatim.
+    path.join(HERE, "archive/baptism-lane.ts"),
     // Same exposure as cue-tokens: the built-in it declines to offer is named
     // beside the stored rule that owns the name, and a rule name and a cue name
     // both arrive in an HTTP body.
@@ -313,6 +346,10 @@ function requestFacingFiles(): string[] {
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
+    // Its one summary line names the serviceKey the replay was handed, which
+    // arrives verbatim in an HTTP body wherever a baptism rebuild is triggered
+    // — the same exposure history-edit.ts carries.
+    path.join(HERE, "archive/rebuild-baptism.ts"),
     // The same exposure as the two recorders, from the other end: its
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.

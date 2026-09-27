@@ -64,6 +64,95 @@ describe("invokeAction", () => {
   });
 });
 
+describe("invokeAction — a refusal leaves a line on /log", () => {
+  // Filtered to this one tag: baptism-timer-service.ts and others already log
+  // their own "[baptism] …"/"[cues] …" lines through console.warn/console.log,
+  // and this suite must not mistake one of those for the line under test.
+  function captureActionWarnings() {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("[action]")) lines.push(args[0]);
+    };
+    return {
+      lines,
+      restore: () => {
+        console.warn = original;
+      },
+    };
+  }
+
+  it("logs an unknown id, generically — not a baptism action, on purpose: this must cover every action-button, not one", async () => {
+    const { lines, restore } = captureActionWarnings();
+    try {
+      await invokeAction("nope.not.an.action");
+    } finally {
+      restore();
+    }
+    assert.equal(lines.length, 1, "expected exactly one [action] line for one refused press");
+    assert.match(lines[0]!, /^\[action\] nope\.not\.an\.action refused: unknown action/);
+  });
+
+  it("logs a registered action's own refusal, not only an unknown id", async () => {
+    AUTOMATION_ACTIONS["test.refuse"] = {
+      id: "test.refuse",
+      label: "refuse",
+      params: [],
+      run: async () => ({ ok: false, detail: "nothing to do" }),
+    };
+    const { lines, restore } = captureActionWarnings();
+    try {
+      const r = await invokeAction("test.refuse");
+      assert.equal(r.ok, false);
+    } finally {
+      restore();
+      delete AUTOMATION_ACTIONS["test.refuse"];
+    }
+    assert.equal(lines.length, 1);
+    assert.match(lines[0]!, /^\[action\] test\.refuse refused: nothing to do/);
+  });
+
+  it("logs a provider that breaks the never-throw contract, same as an ordinary refusal", async () => {
+    AUTOMATION_ACTIONS["test.boom"] = {
+      id: "test.boom",
+      label: "boom",
+      params: [],
+      run: async () => { throw new Error("kaboom"); },
+    };
+    const { lines, restore } = captureActionWarnings();
+    try {
+      await invokeAction("test.boom");
+    } finally {
+      restore();
+      delete AUTOMATION_ACTIONS["test.boom"];
+    }
+    assert.equal(lines.length, 1);
+    assert.match(lines[0]!, /^\[action\] test\.boom refused: kaboom/);
+  });
+
+  it("says nothing at all when the press succeeds", async () => {
+    const { lines, restore } = captureActionWarnings();
+    try {
+      const r = await invokeAction("log.message", { message: "from a console button" });
+      assert.equal(r.ok, true);
+    } finally {
+      restore();
+    }
+    assert.deepEqual(lines, [], "a working press must not add a line to /log — only a refusal is worth an operator's attention");
+  });
+
+  it("scrubs a newline out of the id so a crafted actionId cannot forge a second log line", async () => {
+    const { lines, restore } = captureActionWarnings();
+    try {
+      await invokeAction("nope\n[action] forged: whatever you like");
+    } finally {
+      restore();
+    }
+    assert.equal(lines.length, 1, "one press must still produce exactly one log line, not two");
+    assert.doesNotMatch(lines[0]!, /\n/, "a raw newline would let the rest of the string masquerade as its own log line");
+  });
+});
+
 describe("invocableActions", () => {
   it("offers the registered actions, sorted for a picker", async () => {
     const list = invocableActions();

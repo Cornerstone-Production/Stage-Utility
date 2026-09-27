@@ -207,6 +207,75 @@ describe("backfill asks ProdCom for the window it actually wants", () => {
   });
 });
 
+describe("an operator's clear holds across a reconnect", () => {
+  it("does not bring back the lines the operator cleared, but does backfill what came after", async (t) => {
+    // Every reconnect re-runs backfill over the last four hours, including the
+    // 15-minute idle reconnect on a quiet SSE stream, so the Clear button used
+    // to last only until the next one.
+    const { stub, svc } = await connected(t, { entries: [row("nine-oclock-sermon", 1)], refuseWebSocket: true });
+    await stub.waitForRequest(isTranscriptPage);
+    await svc.settled();
+    assert.deepEqual(svc.captions().map((c) => c.text), ["nine-oclock-sermon"], "precondition: backfill landed");
+
+    svc.clearTranscript();
+    // Said after the clear, and missed by the stream while it was down — the
+    // one line backfill is for.
+    stub.addEntry(row("said-during-the-gap", 0));
+    stub.sseBreakAll();
+    await stub.waitForRequest(isTranscriptPage, 2, 5000);
+    await svc.settled();
+
+    assert.deepEqual(
+      svc.captions().map((c) => c.text),
+      ["said-during-the-gap"],
+      "the reconnect's backfill undid the operator's clear, or dropped what came after it",
+    );
+  });
+
+  it("skips everything up to the newest cleared line in ProdCom's order, and says so", async () => {
+    // Position, not time: rows arrive oldest first, and a ProdCom's clock is
+    // its own, so "dated before the clear" would be decided by two clocks.
+    const svc = new TestProdCom();
+    svc.backfillRows([row("before", 3), row("on-screen", 2)]);
+    svc.clearTranscript();
+    const lines = await withLogs(async () => {
+      svc.backfillRows([row("scrolled-off-earlier", 4), row("before", 3), row("on-screen", 2), row("after", 1)]);
+    });
+    assert.deepEqual(svc.captions().map((c) => c.text), ["after"]);
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("[prodcom] backfill skipped")),
+      ["[prodcom] backfill skipped 3 line(s) from before the operator cleared the transcript"],
+    );
+  });
+
+  it("does not hold across a reconfigure to a different box", async (t) => {
+    // configure() resets `clearedIds` — ids from the old box mean nothing on a
+    // new one. Box B's own history happens to carry a row with the SAME id
+    // that was cleared on box A (two ProdCom installs numbering their own rows
+    // independently), so this is also the strongest form of the "position, not
+    // time" test above: nothing about the OLD box's clear should be able to
+    // reach a connection this box never ran on.
+    const { stub: stubA, svc } = await connected(t, { entries: [row("nine-oclock-sermon", 1)], refuseWebSocket: true });
+    await stubA.waitForRequest(isTranscriptPage);
+    await svc.settled();
+    assert.deepEqual(svc.captions().map((c) => c.text), ["nine-oclock-sermon"], "precondition: backfill landed");
+
+    svc.clearTranscript();
+
+    const stubB = await startProdComStub({ channels: CHANNELS, entries: [row("nine-oclock-sermon", 1)], refuseWebSocket: true });
+    t.after(async () => stubB.close());
+    svc.configure("127.0.0.1", stubB.port, null);
+    await stubB.waitForRequest(isTranscriptPage);
+    await svc.settled();
+
+    assert.deepEqual(
+      svc.captions().map((c) => c.text),
+      ["nine-oclock-sermon"],
+      "a clear on the old box held across the reconfigure, hiding a row on the new one it never cleared",
+    );
+  });
+});
+
 describe("per-speaker colour comes from the channel list", () => {
   it("tints a line with its channel's colour, keyed by channel id", async (t) => {
     const { stub, svc } = await connected(t, {

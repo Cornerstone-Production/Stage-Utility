@@ -60,14 +60,13 @@ screens at it as you like; change the view and every screen follows. A
 phone-friendly remote runs on the same network, so someone on the floor can
 reassign a mic or switch plans without going back to the booth.
 
-```
-Planning Center ─┐                        ┌─ Displays      /display-1, /display-2 …
-   plan, people  │    ┌──────────────┐    │
-Wireless, audio ─┼───▶│  Node server │───▶├─ Settings      /settings
-   and video gear│    │    :8788     │    │
-                 │    └──────────────┘    ├─ Phone remote
-                 │                        │
-                 └── on your network ─────┴─ REST /api/*  ·  SSE /api/events
+```mermaid
+flowchart LR
+  pco["Planning Center<br/>plan, people, live timer"] --> server
+  gear["Your gear<br/>wireless, audio, video, control"] <--> server
+  server["Stage Utility<br/>a small server on your network"]
+  server --> displays["Displays<br/>any screen with a browser"]
+  server <--> app["Operator app<br/>any browser, phone included"]
 ```
 
 The server holds the connections to your gear, resolves the current plan into
@@ -124,12 +123,9 @@ Both routes, and every option, are in
 **Planning Center Services** is the one requirement — it supplies the plan, the
 people, their photos and the live service countdown.
 
-Everything else is optional and independently enabled: Shure and Sennheiser
-wireless, ProPresenter, ProVideoPlayer, Smaart (SPL), SenSource (people
-counting), OBS, REAPER, Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom
-transcription, and Bitfocus Companion.
-
-Setup and behaviour for each is in [integrations](docs/integrations/README.md).
+Everything else — wireless, video and control gear, SPL and people-counting
+hardware, streaming and transcription — is optional and independently enabled;
+see [integrations](docs/integrations/README.md) for the full list and setup.
 
 ## Branches and releases
 

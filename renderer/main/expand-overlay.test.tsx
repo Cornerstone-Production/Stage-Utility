@@ -68,6 +68,7 @@ const requests: string[] = [];
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { act } = await import("react");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { RenderObject } = await import("./layout-renderer.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
@@ -131,10 +132,20 @@ const objectFor = (kind: Kind) => ({
 
 /** Any object, in any context, through the real RenderObject — so the registry
  *  entry, the switch case and the component are all on the path. Takes the
- *  OBJECT rather than a kind, because the nested tests build their own. */
-const tree = (o: LayoutObject, ctx: LayoutRenderCtx) =>
-  React.createElement(TooltipProvider as never, null,
-    React.createElement(RenderObject, { o, ctx } as never));
+ *  OBJECT rather than a kind, because the nested tests build their own.
+ *
+ *  Wrapped in its own QueryClientProvider for the one nested object type that
+ *  needs one (action-button, see innerButtonObject below) — a fresh client
+ *  per call, since most call sites never touch it. */
+const tree = (o: LayoutObject, ctx: LayoutRenderCtx) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return React.createElement(
+    QueryClientProvider as never,
+    { client: qc },
+    React.createElement(TooltipProvider as never, null,
+      React.createElement(RenderObject, { o, ctx } as never)),
+  );
+};
 
 /** Mount a tree and let its effects settle. */
 async function draw(el: React.ReactElement) {

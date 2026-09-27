@@ -52,6 +52,11 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     return { ...ctx, endedAt: null, items: [] };
   }
 
+  /** Told by ensureRecord's split — see publishClosed's doc on the base class. */
+  protected override publishClosed(record: ServiceTimeline): void {
+    broadcastTimeline(record);
+  }
+
   protected override onRecordEstablished(): void {
     // Continue the stored sequence rather than restarting it — a resumed record
     // would otherwise reissue numbers already in use.

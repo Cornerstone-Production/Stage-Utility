@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { TooltipProvider } from "../components/ui/tooltip-provider";
 import { Toaster } from "../components/ui/toast";
 import { ConfirmHost } from "../components/ui/confirm-dialog";
+import { HistoryShownProvider } from "../settings/sections/history-shown";
 import { router, queryClient } from "./router";
 import "../styles.css";
 
@@ -17,7 +18,9 @@ ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <RouterProvider router={router} />
+        <HistoryShownProvider>
+          <RouterProvider router={router} />
+        </HistoryShownProvider>
       </TooltipProvider>
       <Toaster />
       <ConfirmHost />

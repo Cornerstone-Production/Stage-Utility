@@ -14,14 +14,22 @@
 /**
  * The human-readable message from a caught value.
  *
- * `String(err)` rather than a placeholder for the non-Error case: things get
- * thrown that are not Errors — a string from a library, a DOMException-like
- * object, a rejected fetch value — and their own stringification is more use to
- * whoever is reading the log than "unknown error" would be.
+ * The value's own stringification rather than a placeholder for the non-Error
+ * case: things get thrown that are not Errors — a string from a library, a
+ * DOMException-like object, a rejected fetch value — and their own
+ * stringification is more use to whoever is reading the log than "unknown
+ * error" would be.
+ *
+ * Stringified by a template literal, which is String() for every value but a
+ * Symbol, and not by String() itself. Every route's error reply comes through
+ * here, and CodeQL follows a caught value through String() into the response
+ * and reports it as a stack trace sent to the client (js/stack-trace-exposure);
+ * it knows a template literal and toString() give only the message. A Symbol
+ * would throw in a template literal, and this runs inside catch blocks.
  */
 export function errorMessage(err: unknown): string {
-  // eslint-disable-next-line no-restricted-syntax -- this IS the one copy.
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) return err.message;
+  return typeof err === "symbol" ? err.toString() : `${err as string}`;
 }
 
 /**

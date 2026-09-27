@@ -1,4 +1,4 @@
-import { invoke, onNotification } from "../lib/api";
+import { invoke as ipc, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,10 +21,6 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
-
-function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
-  return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
-}
 
 function TargetBadge({ connection, message }: { connection: ConnectionState; message: string | null }) {
   if (connection === "connected") {

@@ -15,7 +15,7 @@
 // exhaustiveness check so a type without a renderer is also a compile error.
 
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
-import { IDIOM_TYPES } from "@main/types/readout-types";
+import { CARD_HAIRLINE, IDIOM_TYPES } from "@main/types/readout-types";
 import { externKeyed } from "@main/types/extern-keyed";
 
 /** Palette sections, in the order the add-object dropdown shows them. */
@@ -148,7 +148,7 @@ export interface LayoutObjectSpec {
  * hairline means; a layout drawn at another size scales it with everything else
  * rather than going spindly against type that grew.
  */
-export const HAIRLINE_COLOR = "rgba(255,255,255,0.1)";
+export const HAIRLINE_COLOR = CARD_HAIRLINE;
 export const HAIRLINE = 1 / 1080;
 export const CARD_RADIUS = 0.0148;
 

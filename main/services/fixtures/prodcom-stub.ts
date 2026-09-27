@@ -28,6 +28,7 @@
 // this repo has no `ws` dependency. Only what a test needs is implemented: text
 // and close frames, no fragmentation, no extensions, no compression.
 
+import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
 import * as http from "node:http";
 import type { Duplex } from "node:stream";
@@ -108,6 +109,10 @@ export type StubOptions = {
   failKeywords?: boolean;
   /** Reply 500 to `GET /api/v1/transcript`. */
   failTranscript?: boolean;
+  /** Reply 500 to `GET /api/v1/transcript/stream` instead of opening it — a box
+   *  whose SSE fallback itself is unreachable, distinct from sseCloseImmediately
+   *  (which opens the stream and then ends it). */
+  failSseStream?: boolean;
   /** Open the SSE stream and immediately end it, so the client keeps
    *  reconnecting — a box whose transcript stream will not stay up. */
   sseCloseImmediately?: boolean;
@@ -147,6 +152,51 @@ export type StubOptions = {
    * is which.
    */
   delayTranscriptMs?: (url: URL) => number;
+  /**
+   * Like `delayTranscriptMs`, but the answer is COMPUTED on arrival and only
+   * sent late — what a real box does when it reads its history and the reply
+   * is slow getting back. `delayTranscriptMs` computes it when the hold ends,
+   * so anything added during the hold is in it; this one's answer describes
+   * the moment the request arrived.
+   */
+  delayTranscriptAnswerMs?: (url: URL) => number;
+  /**
+   * Like `delayTranscriptMs`, but applied to EVERY request before its own
+   * handler runs — channels, keywords, transcript, alike. Independent of
+   * `delayTranscriptMs`, which only ever covers `/api/v1/transcript`, so no
+   * existing test that sets one is affected by the other. Exists for the same
+   * reason: opening a window where a connection can be reconfigured or
+   * stopped while a REST read that is not the transcript is still in flight.
+   */
+  delayRequestMs?: (url: URL) => number;
+  /**
+   * How long to hold a WebSocket upgrade before answering it, decided per
+   * request from its headers. Return 0 for no delay.
+   *
+   * The client's refused-upgrade probe (see prodcom-service.ts's probeUpgrade)
+   * arrives on this same path, named by its User-Agent, and a real one can take
+   * seconds. Holding it is what opens the window where a newer attempt comes up
+   * while the probe about an older one is still out. Whether to refuse is
+   * decided when the request ARRIVES, so a held request is answered the way the
+   * box would have answered it then, whatever setRefuseWebSocket() says since.
+   */
+  delayUpgradeMs?: (headers: http.IncomingHttpHeaders) => number;
+  /** Bind to this exact port rather than an ephemeral one — so a test can close
+   *  one stub and start another on the same port, simulating a box that dropped
+   *  off the network and came back rather than one that changed address. */
+  port?: number;
+  /**
+   * Cap `GET /api/v1/transcript`'s history at this many rows: once it holds
+   * this many, appending one more drops the oldest, and `meta.totalCount`
+   * reports the capped size rather than growing — what the real box does.
+   *
+   * Measured on ProdCom 2.3.2 (24 Sep, 21:08–21:10Z): `totalCount` sat at 3001
+   * across a two-minute capture while new rows kept arriving at the top of the
+   * range and old ones dropped off the bottom. Off by default, so every
+   * existing case (an unbounded history) is unaffected. Applied to the seeded
+   * `entries` too, so a test can start a box already full.
+   */
+  rollingWindowCap?: number;
 };
 
 export type StubRequest = { method: string; url: string; headers: http.IncomingHttpHeaders };
@@ -162,8 +212,12 @@ export type ProdComStub = {
   /** How many of those sockets are still open. A client that stops reading a
    *  socket without closing it leaves this above zero. */
   openWebSockets: number;
-  /** How many SSE streams have been opened. */
+  /** How many SSE streams have been opened, total — never decrements. */
   sseOpens: number;
+  /** How many SSE streams are open RIGHT NOW. A client that drops one on
+   *  purpose (promotion) without destroying the request leaves this above
+   *  zero even though sseOpens stopped moving. */
+  openSseStreams: number;
   /** Start or stop failing the keyword endpoints AFTER the stub is running, so a
    *  test can drive "the list loaded, then a later read failed" — which is the
    *  only path on which the previously-loaded keywords can be wrongly dropped. */
@@ -185,6 +239,9 @@ export type ProdComStub = {
   /** Start or stop failing `GET /api/v1/transcript` AFTER the stub is running,
    *  so a test can let a connection prime and then break the endpoint under it. */
   setFailTranscript(fail: boolean): void;
+  /** Start or stop failing `GET /api/v1/transcript/stream` AFTER the stub is
+   *  running, so a test can drop a healthy SSE stream into a 500 loop. */
+  setFailSseStream(fail: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -195,6 +252,15 @@ export type ProdComStub = {
   sseSend(entry: StubEntry): void;
   /** Drop every open WebSocket without a close frame. */
   wsDropAll(): void;
+  /** Destroy every open SSE stream's underlying socket, AFTER its 200 and
+   *  whatever has already been sent — a mid-stream body error (client sees
+   *  `res.on("error")`, ECONNRESET), not the clean end `close()` sends. */
+  sseBreakAll(): void;
+  /** Reset every open SSE stream's TCP connection, AFTER its 200 — an RST, not
+   *  the FIN sseBreakAll sends. What a box that crashed, or a peer the
+   *  keepalive has given up on, looks like: Node reports it on the client's
+   *  REQUEST (`req.on("error")`, ECONNRESET), which sseBreakAll never reaches. */
+  sseResetAll(): void;
   /** Resolve once at least `n` WebSocket upgrades have been accepted. */
   waitForUpgrades(n: number, timeoutMs?: number): Promise<void>;
   /** Resolve once at least `n` SSE streams have been opened. */
@@ -278,9 +344,40 @@ function clientFrameType(text: string): string | null {
   return typeof type === "string" ? type : null;
 }
 
+/**
+ * Poll `ready` every 5ms until it's true, or fail the test after `timeoutMs`.
+ *
+ * Shared by the ProdCom test suites that drive the real client against this
+ * stub: each one waits on a condition of the SERVICE (a socket open, a line on
+ * the buffer, a report pushed), which the stub has no way to notify on — unlike
+ * `until()` above, which is this file's own internal wait for its OWN state and
+ * stays private to startProdComStub().
+ */
+export async function eventually(
+  ready: () => boolean,
+  what: string | (() => string),
+  timeoutMs = 3000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ready()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
+}
+
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
   // Mutable: addEntry() appends to it while the stub is running.
   const entries = [...(options.entries ?? [])];
+  const rollingWindowCap = options.rollingWindowCap;
+  /** Drop the oldest rows past the cap — what ProdCom itself does once its
+   *  rolling window is full. A no-op when no cap is set. */
+  const applyRollingWindowCap = (): void => {
+    if (rollingWindowCap !== undefined && entries.length > rollingWindowCap) {
+      entries.splice(0, entries.length - rollingWindowCap);
+    }
+  };
+  applyRollingWindowCap(); // a test can seed `entries` already past the cap
   const channels = options.channels ?? [];
   const channelKeywords = options.channelKeywords ?? {};
   /** ProdCom's clock, which is not this process's — see StubOptions.now. */
@@ -299,6 +396,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     failKeywords: options.failKeywords === true,
     refuseWebSocket: options.refuseWebSocket === true,
     failTranscript: options.failTranscript === true,
+    failSseStream: options.failSseStream === true,
   };
   /** Responses already held once by `transcriptDelayMs`. */
   const held = new WeakSet<http.ServerResponse>();
@@ -311,14 +409,25 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     !options.requireBearer || headers["authorization"] === `Bearer ${options.requireBearer}`;
 
   const server = http.createServer((req, res) => {
-    // On arrival, and only once: a held answer (see delayTranscriptMs) re-enters
-    // this handler, and counting it twice would tell a test two reads happened
-    // where one did.
-    if (!held.has(res)) {
+    // On arrival, and only once: a held answer (see delayTranscriptMs and
+    // delayRequestMs) re-enters this handler, and counting it twice would tell
+    // a test two reads happened where one did.
+    const alreadyHeld = held.has(res);
+    if (!alreadyHeld) {
       requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
       notify();
     }
     const url = new URL(req.url ?? "/", "http://stub");
+
+    if (!alreadyHeld && options.delayRequestMs) {
+      const delay = options.delayRequestMs(url);
+      if (delay > 0) {
+        held.add(res);
+        const timer = setTimeout(() => server.emit("request", req, res), delay);
+        timer.unref?.();
+        return;
+      }
+    }
 
     if (!authorized(req.headers)) {
       res.writeHead(401, { "content-type": "application/json" });
@@ -390,21 +499,35 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
           ? entries.filter((e) => Date.parse(e.date) > Date.parse(since))
           : entries;
       const page = filtered.slice(offset, offset + limit);
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          data: page,
-          meta: {
-            timestamp: peerNow(),
-            totalCount: filtered.length,
-            hasMore: offset + page.length < filtered.length,
-          },
-        }),
-      );
+      const body = JSON.stringify({
+        data: page,
+        meta: {
+          timestamp: peerNow(),
+          totalCount: filtered.length,
+          hasMore: offset + page.length < filtered.length,
+        },
+      });
+      const answerIn = options.delayTranscriptAnswerMs?.(url) ?? 0;
+      const answer = (): void => {
+        if (res.destroyed) return;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(body);
+      };
+      if (answerIn > 0) {
+        const timer = setTimeout(answer, answerIn);
+        timer.unref?.();
+      } else {
+        answer();
+      }
       return;
     }
 
     if (url.pathname === "/api/v1/transcript/stream") {
+      if (state.failSseStream) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
+        return;
+      }
       state.sseOpens++;
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       if (options.sseCloseImmediately) {
@@ -435,9 +558,21 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
   server.on("upgrade", (req, socket: Duplex) => {
     requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
     notify();
+    const refuse = state.refuseWebSocket;
+    const delay = options.delayUpgradeMs?.(req.headers) ?? 0;
+    if (delay > 0) {
+      const timer = setTimeout(() => answerUpgrade(req, socket, refuse), delay);
+      timer.unref?.();
+      return;
+    }
+    answerUpgrade(req, socket, refuse);
+  });
+
+  function answerUpgrade(req: http.IncomingMessage, socket: Duplex, refuse: boolean): void {
+    if (socket.destroyed) return;
     const url = new URL(req.url ?? "/", "http://stub");
 
-    if (state.refuseWebSocket || url.pathname !== "/api/v1/ws") {
+    if (refuse || url.pathname !== "/api/v1/ws") {
       socket.write("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
@@ -497,9 +632,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       ),
     );
     notify();
-  });
+  }
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
 
@@ -536,6 +671,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     get sseOpens() {
       return state.sseOpens;
     },
+    get openSseStreams() {
+      return sseStreams.size;
+    },
     wsSend,
     setFailKeywords: (fail: boolean) => {
       state.failKeywords = fail;
@@ -545,10 +683,14 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     addEntry: (entry: StubEntry) => {
       entries.push(entry);
+      applyRollingWindowCap();
       notify();
     },
     setFailTranscript: (fail: boolean) => {
       state.failTranscript = fail;
+    },
+    setFailSseStream: (fail: boolean) => {
+      state.failSseStream = fail;
     },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
     wsTranscript: (entry, wrap = "data") => {
@@ -570,6 +712,14 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       for (const s of sockets) s.destroy();
       sockets.clear();
       subscribed.clear();
+    },
+    sseBreakAll: () => {
+      for (const s of sseStreams) s.destroy();
+      sseStreams.clear();
+    },
+    sseResetAll: () => {
+      for (const s of sseStreams) s.socket?.resetAndDestroy();
+      sseStreams.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),
     waitForSse: (n, timeoutMs = 4000) => until(() => state.sseOpens >= n, `${n} SSE stream(s)`, timeoutMs),

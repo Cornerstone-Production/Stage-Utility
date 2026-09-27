@@ -9,6 +9,8 @@
 //               gear is picked up promptly as it powers on.
 //   • DORMANT — otherwise: back off toward a long ceiling, and bias the next attempt
 //               toward the moment the next window opens.
+// With no window still to come — no PCO credentials, a fetch that failed, nothing
+// planned — the schedule is unknown, and both answers fail open to ACTIVE.
 // The exponential ramp still runs first, so a simple mid-week restart reconnects
 // within a couple minutes before it ever goes dormant.
 
@@ -28,6 +30,8 @@ class ServiceWindowService {
   private sched: ReconnectSchedule = { ...DEFAULT_RECONNECT_SCHEDULE };
   /** Upcoming (or current) windows in epoch ms, sorted by open. */
   private windows: { open: number; close: number }[] = [];
+  /** Whether the last answer failed open, so the log says so once per change. */
+  private failingOpen: boolean | null = null;
 
   setSchedule(sched: ReconnectSchedule): void {
     this.sched = sched;
@@ -36,6 +40,23 @@ class ServiceWindowService {
   /** Replace the known windows (controller recomputes from PCO periodically). */
   setWindows(windows: { open: number; close: number }[]): void {
     this.windows = [...windows].sort((a, b) => a.open - b.open);
+  }
+
+  /**
+   * Is the schedule unknown? True with no window still to come: none were ever
+   * fetched (no PCO credentials, a first fetch that failed), or every one has
+   * closed because each fetch since has failed or nothing is planned. Going
+   * quiet on a schedule nobody could work out is how gear at an event Planning
+   * Center does not know about stops being retried.
+   */
+  private scheduleUnknown(now: number): boolean {
+    const unknown = !this.windows.some((w) => w.close >= now);
+    if (unknown !== this.failingOpen) {
+      if (unknown) console.log("[reconnect] no upcoming service window is known, so reconnects and polls stay at full speed");
+      else if (this.failingOpen) console.log("[reconnect] service windows are known again, so reconnects back off outside them");
+      this.failingOpen = unknown;
+    }
+    return unknown;
   }
 
   isActive(now = Date.now()): boolean {
@@ -57,15 +78,16 @@ class ServiceWindowService {
    * window-aware ceiling. `forceActive` lets an integration stay snappy while a
    * client is actively watching it (demand-driven), regardless of the schedule.
    *   • feature off → plain 2-min cap (previous behavior)
-   *   • active window / forced → ≤2 min (fast pickup as gear powers on)
+   *   • active window / forced / schedule unknown → ≤2 min (fast pickup as gear
+   *     powers on)
    *   • dormant → up to the idle ceiling, but never past the next window opening
    */
-  capDelayMs(rawMs: number, forceActive = false): number {
+  capDelayMs(rawMs: number, forceActive = false, now = Date.now()): number {
     if (!this.sched.enabled) return Math.min(rawMs, ACTIVE_CAP_MS);
-    const active = forceActive || this.isActive();
+    const active = forceActive || this.scheduleUnknown(now) || this.isActive(now);
     const cap = active
       ? ACTIVE_CAP_MS
-      : Math.min(this.sched.dormantMin * 60_000, this.msUntilNextOpen());
+      : Math.min(this.sched.dormantMin * 60_000, this.msUntilNextOpen(now));
     return clamp(rawMs, 1000, cap); // floor at 1s
   }
 
@@ -77,13 +99,13 @@ class ServiceWindowService {
    * poll runs at 4s around the clock, which is ~151,000 requests a week against a
    * rate-limited cloud API for the ~5% of it that is a service.
    *
-   * Fails OPEN. With no windows known — no PCO credentials, a failed fetch, the
-   * feature switched off — this returns the active cadence, because going quiet
-   * because we could not work out the schedule is how a service gets missed.
+   * Fails OPEN. With the schedule unknown (see scheduleUnknown) or the feature
+   * switched off, this returns the active cadence, because going quiet because
+   * we could not work out the schedule is how a service gets missed.
    */
   pollDelayMs(activeMs: number, dormantCeilingMs = 5 * 60_000, now = Date.now()): number {
     if (!this.sched.enabled) return activeMs;
-    if (this.windows.length === 0) return activeMs; // schedule unknown → stay awake
+    if (this.scheduleUnknown(now)) return activeMs;
     if (this.isActive(now)) return activeMs;
     // Never sleep past the moment the next window opens, so the ramp-up is not
     // missed by up to a whole dormant interval.

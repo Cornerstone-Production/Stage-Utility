@@ -27,6 +27,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogClose,
+  ErrorNote,
   Select,
   SelectTrigger,
   SelectContent,
@@ -118,11 +119,7 @@ export function ExportPlanDialog({
             </p>
           )}
 
-          {!!preview.error && (
-            <p role="alert" className="rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-              {errorMessage(preview.error)}
-            </p>
-          )}
+          {!!preview.error && <ErrorNote>{errorMessage(preview.error)}</ErrorNote>}
 
           {data && (
             <div className="overflow-hidden rounded-lg border border-line">

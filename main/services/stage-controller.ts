@@ -4,7 +4,7 @@
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
-import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
+import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { checklistTicksStore } from "./checklist-ticks-store.js";
@@ -311,6 +311,7 @@ export class StageController {
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
+    followProdcomColors: false,
     autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
@@ -518,6 +519,7 @@ export class StageController {
       iconColors: settings.iconColors ?? {},
       iconGlyphs: settings.iconGlyphs ?? {},
       captionChannelColors: settings.captionChannelColors ?? {},
+      followProdcomColors: settings.followProdcomColors ?? false,
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
@@ -630,12 +632,22 @@ export class StageController {
     // took the operator's centre away on every restart — which is every update.
     // That half is gone (see never-chosen-defaults.ts); this half stops after
     // its one pass.
-    const alreadyCleaned = (await settingsStore.get()).layoutDefaultsCleaned === true;
+    const done = await settingsStore.get();
+    const alreadyCleaned = done.layoutDefaultsCleaned === true;
     const cleaned = alreadyCleaned ? (seeded as View[]) : migrateNeverChosenDefaults(seeded as View[]);
     const cleanedCount = alreadyCleaned ? 0 : countNeverChosen(seeded as View[]);
-    // Recorded even when it found nothing: a fresh install has nothing to clean,
-    // and must still never run it again.
-    if (!alreadyCleaned) await settingsStore.patch({ layoutDefaultsCleaned: true });
+    // The 8% card hairline raised to the registry's, once, with its own flag:
+    // installs that ran the pass above before it folded to the right border
+    // still need this one.
+    const alreadyRaised = done.cardHairlineRaised === true;
+    const raised = alreadyRaised ? cleaned : migrateCardHairline(cleaned);
+    const raisedCount = alreadyRaised ? 0 : countFaintHairlines(cleaned);
+    // Recorded even when they found nothing: a fresh install has nothing to
+    // clean, and must still never run either again. NOT patched here, though:
+    // see needsFlagPatch below — a crash between this and viewsStore.save()
+    // left settings.json saying the pass ran while views.json still carried
+    // the pre-migration data, and it never got another chance to.
+    const needsFlagPatch = !alreadyCleaned || !alreadyRaised;
     if (cleanedCount > 0) {
       console.log(
         `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
@@ -644,7 +656,13 @@ export class StageController {
           "with the current opaque card, once. Still editable per object in the layout editor.",
       );
     }
-    const result = migrateSurfaces(cleaned, outputs);
+    if (raisedCount > 0) {
+      console.log(
+        `[layout-defaults] ${scrub(raisedCount)} object${scrub(raisedCount === 1 ? "" : "s")} wore the older 8% card ` +
+          "border; raised to the 10% one every card now gets, once. Still editable per object in the layout editor.",
+      );
+    }
+    const result = migrateSurfaces(raised, outputs);
     // A stored slug is only ever checked on the way IN, so a path the app claims
     // for itself later silently shadows the screen holding it. Re-checked here,
     // on both load paths, for the same reason the surface migration is.
@@ -652,10 +670,18 @@ export class StageController {
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged =
       slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
-    if (!viewsChanged && !outputsChanged) return { views, outputs };
+    if (!viewsChanged && !outputsChanged) {
+      // Nothing left to save this pass, so recording the flags here cannot
+      // outrun a write that isn't happening.
+      if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true });
+      return { views, outputs };
+    }
 
     if (viewsChanged) await viewsStore.save(result.views);
     if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
+    // AFTER the saves above, not before: a crash here at worst repeats an
+    // idempotent pass on the next boot, rather than skipping it for good.
+    if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true });
 
     // Logged in full, and this one is not optional: the operator's screen has a
     // different URL than it did yesterday, and the only way they learn that is
@@ -2537,6 +2563,16 @@ export class StageController {
     }
     this.state = { ...this.state, captionChannelColors: next };
     await settingsStore.patch({ captionChannelColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Turn "follow ProdCom's channel colors" on or off. A per-channel custom
+   *  pick (captionChannelColors above) always wins over either default;
+   *  clearing one returns that channel to whichever default is active now. */
+  async setFollowProdcomColors(on: boolean): Promise<StageState> {
+    this.state = { ...this.state, followProdcomColors: on };
+    await settingsStore.patch({ followProdcomColors: on });
     this.broadcast();
     return this.state;
   }

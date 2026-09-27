@@ -24,6 +24,7 @@
 import type { PcoLiveDTO } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
 import { serviceDateKey } from "./live-service-gate.js";
+import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 
 /**
@@ -48,6 +49,17 @@ import { stageController } from "./stage-controller.js";
  * see openItem in service-timeline-recorder.ts.
  */
 export const SERVICE_GAP_MS = 10 * 60_000;
+
+/**
+ * One airing of a plan item: its id, and Planning Center's own `live_start_at`
+ * for it. Two ticks naming the same airing are the item staying on air, not
+ * going live again — compared PCO time to PCO time, so this host's clock never
+ * enters into it.
+ */
+interface Airing {
+  itemId: string;
+  liveStartAt: string | null;
+}
 
 /** One entry in a record's per-item list, as the lookups below need to see it. */
 export interface RecordedItem {
@@ -125,6 +137,20 @@ export interface ServiceRecord {
   serviceTimeId: string | null;
   startedAt: string;
   endedAt: string | null;
+  /**
+   * The item this record OPENED with — the first live item id any of the three
+   * recorders saw for this occurrence. Set once, by ensureRecord's
+   * captureOpeningItem, and never overwritten.
+   *
+   * SPL and attendance keep no item list of their own to derive this from
+   * later (attendance keeps none at all; SPL's is per-metric, not ordered by
+   * arrival), so it travels on the record itself — one field, set in one
+   * place, read by all three. Persisted, so a restart mid-hold still knows it.
+   * Absent (undefined) on a record made before this existed, which is treated
+   * the same as null: unknown, so shouldHoldThroughServiceTimeChange falls
+   * back to the ten-minute/gap rule alone.
+   */
+  openingItemId?: string | null;
 }
 
 /** The slice of a keyed store the lifecycle needs. */
@@ -166,6 +192,15 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    *  decision is announced once and not on every tick for the length of an
    *  overrun. Cleared when a record is established. */
   private loggedServiceTimeChange: string | null = null;
+  /** The item captureOpeningItem last declined as already on air, so the skip
+   *  is announced once rather than on every tick it stays live. Cleared when a
+   *  record is established. */
+  private loggedSkippedOpener: string | null = null;
+  /** The airing on the last tick this recorder handled. */
+  private lastAiring: Airing | null = null;
+  /** The airing already on when the current record was established — see
+   *  captureOpeningItem. */
+  private inheritedAiring: Airing | null = null;
 
   protected abstract readonly label: string;
   protected abstract readonly store: RecorderStore<T>;
@@ -175,6 +210,22 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
   /** Build a record for an occurrence this box has not recorded before. */
   protected abstract createRecord(ctx: NewRecordContext, live: PcoLiveDTO): T;
+
+  /**
+   * Publish a record this recorder just closed, on this recorder's own channel,
+   * in the same shape a live push already uses (broadcastTimeline for the
+   * timeline recorder; `broadcast("…:history", record)` for the other two).
+   *
+   * Exists for exactly one caller: ensureRecord's split path below. Every other
+   * close a recorder produces (onLiveTick leaving "item"/service mode) already
+   * broadcasts inline right after it persists, but the split finalizes and
+   * persists the OUTGOING record and then moves straight on to the incoming
+   * one — the new record's first push was the only broadcast a split ever
+   * produced, so a History page open at the moment of a split never heard the
+   * old occurrence close and kept showing it "recording" until the page was
+   * reloaded (24 Sep 2026, all three recorders).
+   */
+  protected abstract publishClosed(record: T): void;
 
   /**
    * Prepare a stored record for further writing.
@@ -193,6 +244,20 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   /** Active in-progress record (for hydration), or the last one recorded. */
   getCurrent(): T | null {
     return this.current;
+  }
+
+  /**
+   * One service's record: this recorder's own in-memory copy while that
+   * service is still recording, else the store's. The store lags an open
+   * record by up to one debounced persist (schedulePersist), so a service
+   * started seconds ago, or one just resumed and rebuilt, reads null or an
+   * older copy from the store alone. A closed record is on disk as it closes,
+   * and the store may since hold a newer copy (an archive import), so it is
+   * never preferred. Every per-service read route answers through this.
+   */
+  async getRecord(serviceKey: string): Promise<T | null> {
+    const live = this.current;
+    return live?.serviceKey === serviceKey && live.endedAt == null ? live : this.store.get(serviceKey);
   }
 
   /**
@@ -294,6 +359,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * start, so up to SERVICE_GAP_MS of the second service's pre-service can still
    * land in the first record before the split. That is the same window the
    * overrun case needs, and it is bounded — not the unbounded merge this fixes.
+   *
+   * One more thing beats the clock: the OPENING item of this record going live
+   * again while held (Doors, tonight) is the next service actually starting,
+   * whatever the ten-minute rule still says — an operator does not restart a
+   * service's first item mid-overrun, but the next service always starts with
+   * one. A reprise of any OTHER item (a song, a step back) is not evidence of
+   * that and keeps holding. See openingItemId / captureOpeningItem.
    */
   private shouldHoldThroughServiceTimeChange(
     live: PcoLiveDTO,
@@ -307,16 +379,78 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
-    const transition = `${from}→${serviceTimeId}`;
+
+    // The opening item overrides a hold outright. Logged unconditionally, not
+    // through loggedServiceTimeChange: the split below changes currentKey on
+    // THIS tick, so this transition is never asked about again and nothing can
+    // double-log it.
+    const openingItemId = this.current?.openingItemId ?? null;
+    if (hold && openingItemId != null && live.currentItemId === openingItemId) {
+      console.log(
+        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? openingItemId)}" went live again during the hold — the next service has begun, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+      );
+      return false;
+    }
+
+    // Keyed on the decision as well as the transition: a hold announced 35
+    // minutes out is followed, ten minutes out, by the split it was holding
+    // for, and that split is news too. Keyed on the transition alone, it was
+    // silent: the log read "holding" and never said the record closed.
+    const transition = `${from}→${serviceTimeId}:${hold ? "hold" : "split"}`;
     if (this.loggedServiceTimeChange !== transition) {
       this.loggedServiceTimeChange = transition;
+      const closing = `closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`;
       console.log(
         hold
           ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId}, holding the open record (next occurrence starts in ${Math.round(untilMs / 60_000)} min)`
-          : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+          : untilMs > 0
+            ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} starts in ${Math.max(1, Math.round(untilMs / 60_000))} min, ${closing}`
+            : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, ${closing}`,
       );
     }
     return hold;
+  }
+
+  /**
+   * Remember the item THIS record opened with — the first live tick to reach
+   * here with an item id, whichever recorder sees it first.
+   *
+   * The timeline and SPL recorders only call ensureRecord once an item is
+   * live, so this fires the moment their record is created. Attendance can
+   * establish a record during the pre-service arrival ramp with no item live
+   * yet (see attendance-phase.ts), so its record's openingItemId starts null
+   * and this backfills it on whichever later tick brings the first real item —
+   * the same value the other two captured, because this is the one place any
+   * of the three ever sets it. Never overwritten once set, so a resumed or
+   * reopened record keeps the value it was created with.
+   *
+   * Skips an item that was already on air before this record opened, which
+   * never was its first item: the airing the tick before the record was
+   * established was already showing (the previous service's overrun closing
+   * item, carried across the ten-minute split), or one live for longer than
+   * SERVICE_GAP_MS before the record opened (a rehearsal leftover, seen first
+   * after a restart). Adopting either let a hold split at that item's own later,
+   * genuine run. The next item to go live becomes the opener; if none does, the
+   * hold falls back to the ten-minute rule alone, the v1.23.0 behaviour. A late
+   * first tick for a genuine opener is not a skip: the airing test is PCO time
+   * against PCO time, and the fallback allows the whole service gap.
+   */
+  private captureOpeningItem(live: PcoLiveDTO): void {
+    if (!this.current || this.current.openingItemId != null || !live.currentItemId) return;
+    const inherited =
+      this.inheritedAiring?.itemId === live.currentItemId && this.inheritedAiring.liveStartAt === live.liveStartAt;
+    const opened = Date.parse(this.current.startedAt);
+    const longBefore = Number.isFinite(opened) && opened - itemLiveSinceMs(live) > SERVICE_GAP_MS;
+    if (inherited || longBefore) {
+      if (this.loggedSkippedOpener !== live.currentItemId) {
+        this.loggedSkippedOpener = live.currentItemId;
+        console.log(
+          `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId)}" was already on air before this record opened — not treating it as the opening item`,
+        );
+      }
+      return;
+    }
+    this.current.openingItemId = live.currentItemId;
   }
 
   /**
@@ -334,6 +468,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // while this waits on the store abandons the work rather than re-assigning
     // this.current and writing the deleted record straight back.
     const gen = this.generation;
+    const priorAiring = this.lastAiring;
+    this.lastAiring = live.currentItemId ? { itemId: live.currentItemId, liveStartAt: live.liveStartAt } : null;
 
     const st = stageController.getState();
     const serviceTypeId = st.serviceTypeId;
@@ -347,7 +483,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
     const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) return;
+    if (this.currentKey === key && this.current) {
+      this.captureOpeningItem(live); // backfill for a record that opened before any item was live
+      return;
+    }
 
     // Hold the open record through a serviceTimeId change WITHIN one live service
     // — see SERVICE_GAP_MS.
@@ -361,11 +500,14 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       return;
     }
 
-    // Key changed → finalize + persist the outgoing record.
+    // Key changed → finalize + persist the outgoing record, then publish it on
+    // this recorder's own channel — see publishClosed's doc above.
     if (this.current) {
       this.finalizeRecord();
-      await this.store.upsert(this.current);
+      const outgoing = this.current;
+      await this.store.upsert(outgoing);
       if (gen !== this.generation) return; // forgotten while we waited
+      this.publishClosed(outgoing);
     }
 
     const existing = await this.store.get(key);
@@ -398,6 +540,9 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     }
     this.currentKey = key;
     this.loggedServiceTimeChange = null; // the next transition out of THIS record is news again
+    this.loggedSkippedOpener = null;
+    this.inheritedAiring = priorAiring;
+    this.captureOpeningItem(live);
     this.onRecordEstablished();
   }
 }

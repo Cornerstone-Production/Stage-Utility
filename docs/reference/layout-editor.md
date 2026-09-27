@@ -333,12 +333,13 @@ and the stored padding was what made small widgets clip, because the readout
 composition draws its own. How a widget uses the space it is given is the
 composition's job.
 
-Objects created before the surface list was cut down wear an older card —
-`#191919` with a 10% hairline — while everything since wears `#141414` with an
-8% one. Both are cards; they are cards from two different years, and a layout
-built across both reads as some widgets having a border and others not. They are
-folded into the current card once, on load, and the server logs how many under
-`[layout-defaults]`. A ground you picked yourself is never touched.
+Every card wears `#141414` with a 10% hairline. Objects created before the
+surface list was cut down wear an older card, `#191919`, and some wear an 8%
+hairline from before every card border was the same; a layout built across both
+reads as some widgets having a border and others not. Each is folded into the
+current card once, on load, and the server logs how many under
+`[layout-defaults]`. A ground you picked yourself is never touched; an 8% border
+is raised on that one pass whoever set it, and any border set afterwards stays.
 
 ## Picking a colour
 

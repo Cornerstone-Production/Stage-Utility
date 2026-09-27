@@ -4,7 +4,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useTranscript } from "./use-transcript";
-import { channelColor, channelLabel } from "./channel-color";
+import { channelLabel, lineColor } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
@@ -229,7 +229,11 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
         <SplStrip spl={spl} />
 
-        <TranscriptStrip lines={transcript} />
+        <TranscriptStrip
+          lines={transcript}
+          colorOverrides={state.captionChannelColors}
+          followProdcom={state.followProdcomColors}
+        />
 
         <LiveControls live={pcoLive?.mode === "item"} />
       </div>
@@ -238,7 +242,15 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 }
 
 /** Compact live-transcript strip — only renders when ProdCom has lines. */
-function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
+function TranscriptStrip({
+  lines,
+  colorOverrides,
+  followProdcom,
+}: {
+  lines: TranscriptLineDTO[];
+  colorOverrides?: Record<string, string> | null;
+  followProdcom?: boolean;
+}) {
   if (lines.length === 0) return null;
   const last = lines[lines.length - 1];
   const speaker = channelLabel(last);
@@ -246,7 +258,10 @@ function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
     <div className="shrink-0 su-card px-4 py-3 flex items-center gap-3 min-h-0">
       <span
         className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
-        style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
+        style={{
+          letterSpacing: "0.1em",
+          color: speaker ? lineColor(last, colorOverrides, followProdcom) : "rgba(255,255,255,0.4)",
+        }}
       >
         {speaker ?? "Transcript"}
       </span>

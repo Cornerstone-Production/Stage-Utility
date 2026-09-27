@@ -41,8 +41,8 @@ export interface ScoreActivityState {
 export const SCORE_HOLD_MS = 6500;
 
 export interface ScoreActivityStore {
-  subscribe(fn: () => void): () => void;
-  get(): ScoreActivityState;
+  subscribe: (fn: () => void) => () => void;
+  get: () => ScoreActivityState;
   /**
    * Open or close by hand.
    *
@@ -50,9 +50,9 @@ export interface ScoreActivityStore {
    * over from a score, so a tap to dismiss is never undone two seconds later by
    * a timer the operator cannot see.
    */
-  toggle(): void;
-  close(): void;
-  focus(i: number): void;
+  toggle: () => void;
+  close: () => void;
+  focus: (i: number) => void;
   /**
    * A score arrived. Opens, and folds away on its own.
    *
@@ -60,12 +60,12 @@ export interface ScoreActivityStore {
    * late SSE subscriber from the hello burst, and without this a page opened five
    * minutes after a touchdown would pop the panel as if it had just happened.
    */
-  scored(rev: number, focus: number, eventId: string | null): void;
+  scored: (rev: number, focus: number, eventId: string | null) => void;
   /**
    * Seed `seenRev` without opening — used on first mount so a page loaded long
    * after a score does not animate a stale one.
    */
-  seed(rev: number): void;
+  seed: (rev: number) => void;
 }
 
 export function createScoreActivity(): ScoreActivityStore {

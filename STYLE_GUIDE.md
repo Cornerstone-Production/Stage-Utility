@@ -204,8 +204,27 @@ flows through automatically.
 | **Field / FieldSet / FieldGroup / FieldContent / FieldLabel / FieldDescription** | the form-row system: `FieldSet` = `rounded-lg border-line`; `FieldGroup` = `divide-y divide-gray-a4`; `Field` = `px-3 py-2.5 bg-bg`, horizontal stacks below `sm`; `FieldLabel` = `text-footnote font-medium text-fg`; `FieldDescription` = `text-caption2 text-fg-subtle`. |
 
 Other primitives in the folder follow the same token conventions (Dialog, confirm /
-AlertDialog, ScrollArea, Separator, EmptyState, Skeleton, Status, InfoHint,
+AlertDialog, ScrollArea, Separator, EmptyState, ErrorNote, Skeleton, Status, InfoHint,
 Collapsible, Toast, UnsavedBanner, ButtonGroup, TooltipProvider, ErrorBoundary).
+
+**A failed read is an `ErrorNote`, never an `EmptyState`.** One danger-toned line
+with `role="alert"` — "Couldn't load the saved groups." — in the place the empty
+state would have taken, because an empty state drawn for a fetch that failed says
+something false about a system that is fine: "no saved groups", "connect Planning
+Center". Where the screen carries on without the data, the note says what it is
+showing instead ("…so all columns are shown"). `useFailedReads`
+(`renderer/lib/use-failed-reads.ts`) keeps which reads failed, logs each on the
+component's `/log` tag once per failure streak, and clears it when the read later
+succeeds. A display object says it in its own type rather than a banner, since it
+is drawn on a wall at whatever size its box is.
+
+**Not connected is a state, not a failure.** Don't make a read Planning Center backs
+while `pcoConfigured` is false: the service types would answer 502 and the rest an
+empty list, which draws a church with no plans. Say to connect it, in neutral text —
+no `ErrorNote`, no log line. When the state itself could not be read, make the reads
+anyway, so a real failure still says so, and let a failure from before the state
+arrived give way once it says not connected. `pcoConnected`
+(`renderer/main/use-stage-state.ts`) is that rule as a function.
 
 ---
 

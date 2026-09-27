@@ -349,6 +349,27 @@ describe("prodcom.phrase-said", () => {
       false,
     );
   });
+
+  test("THE GUARD: fires when a phrase appears in a REVISION of an id already seen", () => {
+    // ProdCom revises one id from its first partial through to its final —
+    // "so" -> "so now let us" -> "so now let us pray" -> "So now let us pray."
+    // — so a phrase anywhere but the first ~250ms of an utterance used to never
+    // fire: the old code only matched ids absent from `prev`, and this id was
+    // never absent after its first partial.
+    assert.equal(
+      t().didFire(feed(line("utt-1", "so now let us")), feed(line("utt-1", "so now let us pray")),
+        { phrase: "let us pray" }, NOW),
+      true,
+    );
+  });
+
+  test("does not fire again for the same phrase in a LATER revision of the same entry", () => {
+    assert.equal(
+      t().didFire(feed(line("utt-1", "so now let us pray")), feed(line("utt-1", "So now let us pray.")),
+        { phrase: "let us pray" }, NOW),
+      false,
+    );
+  });
 });
 
 // ── Baptism timer ──────────────────────────────────────────────────────────

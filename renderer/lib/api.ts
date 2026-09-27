@@ -75,7 +75,297 @@ function del<T>(path: string): Promise<T> {
 
 // ── Channel → HTTP mapping ────────────────────────────────────────────────────
 
-export async function invoke<T>(channel: string, params?: Params): Promise<T> {
+/**
+ * Every channel `invoke()` actually dispatches, as a SORTED union — one entry
+ * per line, never a bare count, for the reason this repo's other exact-list
+ * guards give: a count cannot tell an add plus a remove from no change, and a
+ * single line is a guaranteed merge conflict between two branches each adding
+ * a channel.
+ *
+ * Tied to the switch below in both directions, each a `tsc` failure: delete a
+ * `case` and its member reaches `default:`, which is not assignable to
+ * `never`; delete a member and its `case` is no longer comparable to the
+ * union (TS2678). A new channel is a member here AND a case there.
+ *
+ * `invoke()` takes this union rather than `string`, so every channel reaching
+ * it has to be a member to compile: a literal, a ternary, a typed variable
+ * (baptism-operator.tsx's `primaryChannel`), or the parameter of a wrapper
+ * however deeply nested. A wrapper whose channel is `string` cannot forward to
+ * it at all. The ways past that are a cast, an `any`, and a METHOD-syntax
+ * signature that declares `string`: TypeScript checks method parameters
+ * bivariantly, so anything whose channel is IpcChannel (`invoke`, a typed
+ * wrapper, a class or object-literal method) can stand in for
+ * `{ send(channel: string): Promise<unknown> }`, where the property form
+ * `send: (channel: string) => Promise<unknown>` rejects it. Lint requires the
+ * property form throughout renderer/ (`@typescript-eslint/method-signature-style`),
+ * which leaves class and object-literal methods (the latter taken as a type
+ * with `typeof`) and constructors, bivariant the same way, and any signature
+ * declared outside renderer/. A channel chosen at runtime is written
+ * as a literal in each call that can send it, a ternary or one call per choice,
+ * as use-stream-state.ts does: a table read through a key or a generic hides
+ * which entry is sent.
+ *
+ * What a type cannot say is whether a channel still has a caller. That is
+ * api-channels.test.ts, which asks the type checker which literal channels
+ * actually reach invoke(), and refuses the routes past this union it can see:
+ * a cast, an `any`, and invoke, a forwarder or an object holding one handed on
+ * as a value.
+ */
+export type IpcChannel =
+  | "action:invoke"
+  | "app:getInfo"
+  | "attendance:deleteHistory"
+  | "attendance:getHistory"
+  | "attendance:getHistoryCurrent"
+  | "attendance:listSummaries"
+  | "automation:addRule"
+  | "automation:clearLog"
+  | "automation:importPairs"
+  | "automation:log"
+  | "automation:plan-items"
+  | "automation:propresenter-instances"
+  | "automation:propresenter-macros"
+  | "automation:registry"
+  | "automation:removeRule"
+  | "automation:rules"
+  | "automation:setSettings"
+  | "automation:settings"
+  | "automation:testRule"
+  | "automation:updateRule"
+  | "backup:getSchedule"
+  | "backup:runNow"
+  | "backup:setSchedule"
+  | "baptism:advance"
+  | "baptism:baptized"
+  | "baptism:deleteSession"
+  | "baptism:dismissSaveError"
+  | "baptism:finish"
+  | "baptism:get"
+  | "baptism:getTriggers"
+  | "baptism:lane"
+  | "baptism:next"
+  | "baptism:pause"
+  | "baptism:rebuild"
+  | "baptism:reset"
+  | "baptism:resume"
+  | "baptism:sessions"
+  | "baptism:setMode"
+  | "baptism:setTriggers"
+  | "baptism:start"
+  | "baptism:startBaptisms"
+  | "baptism:undo"
+  | "barItems:set"
+  | "calendar:getGrid"
+  | "calendar:sources"
+  | "captions:setChannelColor"
+  | "captions:setFollowProdcomColors"
+  | "checklist:clear"
+  | "checklist:get"
+  | "checklist:sources"
+  | "checklist:tick"
+  | "companion:buttons"
+  | "companion:pairs"
+  | "companion:refreshButtons"
+  | "config:deleteSnapshot"
+  | "config:import"
+  | "config:listSnapshots"
+  | "config:recallSnapshot"
+  | "config:saveSnapshot"
+  | "cues:call"
+  | "cues:homeAssistantYaml"
+  | "cues:manifest"
+  | "cues:mintToken"
+  | "cues:revokeToken"
+  | "cues:states"
+  | "cues:tokens"
+  | "devices:claim"
+  | "devices:list"
+  | "devices:release"
+  | "devices:scan"
+  | "displays:getPresence"
+  | "displays:refresh"
+  | "history:deleteMilestone"
+  | "history:editWindow"
+  | "history:live"
+  | "history:listMilestones"
+  | "history:merge"
+  | "history:rebuild"
+  | "history:recalcAttendance"
+  | "history:saveMilestone"
+  | "history:setItemCounted"
+  | "history:setItemTimes"
+  | "icons:setColor"
+  | "icons:setIcon"
+  | "integrations:list"
+  | "integrations:setConfig"
+  | "integrations:setEnabled"
+  | "integrations:test"
+  | "layout:uploadImage"
+  | "layoutGroups:delete"
+  | "layoutGroups:list"
+  | "layoutGroups:save"
+  | "layoutObjects:setSlots"
+  | "layoutTemplates:delete"
+  | "layoutTemplates:list"
+  | "layoutTemplates:save"
+  | "layoutTemplates:update"
+  | "notes:set"
+  | "obs:getStatus"
+  | "osc:addTarget"
+  | "osc:getFeedback"
+  | "osc:getFeedbackPort"
+  | "osc:listTargets"
+  | "osc:removeTarget"
+  | "osc:send"
+  | "osc:setFeedbackPort"
+  | "osc:testTarget"
+  | "osc:updateTarget"
+  | "outputs:add"
+  | "outputs:openWindow"
+  | "outputs:remove"
+  | "outputs:rename"
+  | "outputs:reorder"
+  | "outputs:setHideTopBar"
+  | "outputs:setLocked"
+  | "outputs:setMode"
+  | "outputs:setSlug"
+  | "outputs:setView"
+  | "patch:get"
+  | "patch:parseXlsx"
+  | "patch:save"
+  | "pco:getLive"
+  | "pco:getPlanItems"
+  | "pco:liveNext"
+  | "pco:livePrevious"
+  | "people:getCount"
+  | "plans:exportPreview"
+  | "plans:upcoming"
+  | "presets:apply"
+  | "presets:delete"
+  | "presets:import"
+  | "presets:list"
+  | "presets:overwrite"
+  | "presets:rename"
+  | "presets:reorder"
+  | "presets:save"
+  | "prodcom:clearTranscript"
+  | "prodcom:getChannels"
+  | "prodcom:getTranscript"
+  | "propresenter:getInstances"
+  | "propresenter:getStatus"
+  | "pvp:getStatus"
+  | "reaper:getStatus"
+  | "resi:getStatus"
+  | "rosstalk:addTarget"
+  | "rosstalk:commands"
+  | "rosstalk:removeTarget"
+  | "rosstalk:send"
+  | "rosstalk:setSimulate"
+  | "rosstalk:targets"
+  | "rosstalk:test"
+  | "rosstalk:updateTarget"
+  | "savedColors:set"
+  | "scores:getFavourites"
+  | "scores:getStatus"
+  | "scores:listTeams"
+  | "scores:setFavourites"
+  | "scriptview:getConfig"
+  | "scriptview:listLayouts"
+  | "scriptview:listRoles"
+  | "scriptview:noteCategories"
+  | "scriptview:rundown"
+  | "scriptview:saveLayouts"
+  | "scriptview:saveRoles"
+  | "scriptview:setConfig"
+  | "sensource:listLocations"
+  | "sensource:listZones"
+  | "serviceTimeline:delete"
+  | "serviceTimeline:get"
+  | "serviceTimeline:getCurrent"
+  | "serviceTimeline:list"
+  | "serviceTimeline:resetPacing"
+  | "settings:setBaptismAutoStart"
+  | "settings:setChecklistSources"
+  | "settings:setHourCycle"
+  | "settings:setReconnectSchedule"
+  | "settings:setTaperWindow"
+  | "settings:setTimezone"
+  | "slots:clearOverride"
+  | "slots:promoteOverride"
+  | "slots:targets"
+  | "spl:deleteHistory"
+  | "spl:getHistory"
+  | "spl:getHistoryCurrent"
+  | "spl:getMetrics"
+  | "spl:getSummary"
+  | "spl:getTrendPrefs"
+  | "spl:getVisibleMetrics"
+  | "spl:listHistory"
+  | "spl:series"
+  | "spl:setTrendPrefs"
+  | "spl:setVisibleMetrics"
+  | "stage:getBrandingSource"
+  | "stage:getRemoteUrl"
+  | "stage:getState"
+  | "stage:listPlans"
+  | "stage:listServiceTypes"
+  | "stage:listTeamPositions"
+  | "stage:refresh"
+  | "stage:selectNextPlan"
+  | "stage:setAllowedServiceTypes"
+  | "stage:setBranding"
+  | "stage:setKioskDiscovery"
+  | "stage:setNdiEnabled"
+  | "stage:setOnboardingDismissed"
+  | "stage:setPlan"
+  | "stage:setPlanMode"
+  | "stage:setPlanSwitcherMode"
+  | "stage:setPublicUrl"
+  | "stage:setServiceType"
+  | "stage:setShowQr"
+  | "update:apply"
+  | "update:check"
+  | "update:dismissNotice"
+  | "update:lock"
+  | "update:notices"
+  | "update:restart"
+  | "update:setAuto"
+  | "update:setTrack"
+  | "update:status"
+  | "views:add"
+  | "views:copySlots"
+  | "views:duplicate"
+  | "views:import"
+  | "views:remove"
+  | "views:rename"
+  | "views:reorder"
+  | "views:resolveSlots"
+  | "views:setCalendarFilters"
+  | "views:setHideChrome"
+  | "views:setKind"
+  | "views:setLayout"
+  | "views:setScriptViewLayout"
+  | "views:setSlots"
+  | "views:setSlotsLayout"
+  | "views:setSurface"
+  | "window:closeSettings"
+  | "wireless:addConnection"
+  | "wireless:channelStatuses"
+  | "wireless:getMeterRate"
+  | "wireless:listChannels"
+  | "wireless:listConnections"
+  | "wireless:listProviders"
+  | "wireless:removeConnection"
+  | "wireless:setMeterRate"
+  | "wireless:testConnection"
+  | "wireless:updateConnection"
+  | "youtube:connectCancel"
+  | "youtube:connectDisconnect"
+  | "youtube:connectStart"
+  | "youtube:connectStatus"
+  | "youtube:getStatus";
+
+export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T> {
   const p = params ?? {};
 
   switch (channel) {
@@ -87,6 +377,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/prodcom/transcript");
     case "prodcom:clearTranscript":
       return post<T>("/api/prodcom/transcript/clear");
+    case "prodcom:getChannels":
+      return apiFetch<T>("/api/prodcom/channels");
 
     case "stage:listServiceTypes":
       return apiFetch<T>("/api/service-types");
@@ -262,8 +554,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "attendance:getHistoryCurrent":
       return apiFetch<T>("/api/attendance/history/current");
 
-    case "attendance:listHistory":
-      return apiFetch<T>("/api/attendance/history");
+    case "attendance:listSummaries":
+      return apiFetch<T>("/api/attendance/history?summary=1");
 
     case "attendance:getHistory": {
       const key = p.serviceKey as string;
@@ -294,6 +586,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "serviceTimeline:resetPacing":
       return post<T>("/api/service-timeline/current/reset-pacing");
 
+    case "history:live":
+      return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
+
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
     case "history:saveMilestone":
@@ -305,6 +600,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":
       return apiFetch<T>("/api/baptism/sessions");
+    case "baptism:lane":
+      return apiFetch<T>(`/api/baptism/lane?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
     case "baptism:start":
       return post<T>("/api/baptism/start");
     case "baptism:baptized":
@@ -313,6 +610,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/baptism/start-baptisms");
     case "baptism:next":
       return post<T>("/api/baptism/next");
+    case "baptism:advance":
+      return post<T>("/api/baptism/advance");
+    case "baptism:pause":
+      return post<T>("/api/baptism/pause");
+    case "baptism:resume":
+      return post<T>("/api/baptism/resume");
     case "baptism:setMode":
       return post<T>("/api/baptism/mode", { mode: p.mode });
     case "baptism:undo":
@@ -321,6 +624,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/baptism/finish");
     case "baptism:reset":
       return post<T>("/api/baptism/reset");
+    case "baptism:dismissSaveError":
+      return post<T>("/api/baptism/dismiss-save-error");
     case "baptism:deleteSession": {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
@@ -333,6 +638,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
         testimonyItemId: p.testimonyItemId,
         baptismItemId: p.baptismItemId,
       });
+    case "baptism:rebuild":
+      return post<T>("/api/baptism/rebuild", { serviceKey: p.serviceKey });
 
     case "spl:series":
       return apiFetch<T>(
@@ -370,6 +677,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "captions:setChannelColor":
       return post<T>("/api/caption-colors", p);
+    case "captions:setFollowProdcomColors":
+      return post<T>("/api/caption-colors/follow-prodcom", p);
 
     // ── In-app self-update ───────────────────────────────────────────────
     case "update:status":
@@ -961,8 +1270,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "app:getInfo":
       return { version: "standalone", name: "Stage Utility" } as unknown as T;
 
-    default:
+    default: {
+      // If this line fails to compile, IpcChannel above lists a channel with
+      // no `case` — add one, or the exhaustiveness check would otherwise be
+      // silently defeated by an `any`-shaped default falling through.
+      const exhaustive: never = channel;
+      void exhaustive;
       throw new Error(`[api] Unknown IPC channel: "${channel}"`);
+    }
   }
 }
 

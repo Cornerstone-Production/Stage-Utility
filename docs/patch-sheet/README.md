@@ -16,6 +16,15 @@ Waves SoundGrid, monitoring.
 Each sheet has its own devices, endpoints, variants and weekly assignments. Sheets
 can be colour-coded and marked with which team owns them.
 
+## Devices
+
+Each sheet's device list is the rack spine every endpoint references: racks,
+snakes, drop snakes, floor pockets, wireless/RF and arrays. A device has a
+**name**, a **color** that tints every channel sourced from it in the table and
+on `/patch`, and can generate sequential connector labels from a **prefix**
+(`B-`) and a starting number — those labels autocomplete in the From/To path
+cells and ripple cleanly (`B-1` → `B-2`) in the patch table.
+
 ## Inputs and outputs
 
 Both are first-class, on their own tabs.

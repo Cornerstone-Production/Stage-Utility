@@ -62,6 +62,18 @@ test("error carries an explicit status", async () => {
   assert.deepEqual(out.json, { error: "gone" });
 });
 
+test("error carries a machine-readable code when given one", async () => {
+  const out = await callRoute(async ({ res }) => error(res, "still recording", 409, "live"), "/x");
+  assert.equal(out.status, 409);
+  assert.deepEqual(out.json, { error: "still recording", code: "live" });
+});
+
+test("error omits code entirely when none is given — no bare `code: undefined` on the wire", async () => {
+  const out = await callRoute(async ({ res }) => error(res, "nope", 400), "/x");
+  assert.deepEqual(out.json, { error: "nope" });
+  assert.equal(Object.hasOwn(out.json as object, "code"), false);
+});
+
 test("a null body serialises rather than throwing", async () => {
   const out = await callRoute(async ({ res }) => json(res, null), "/x");
   assert.equal(out.status, 200);

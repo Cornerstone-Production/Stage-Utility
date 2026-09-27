@@ -221,8 +221,17 @@ export function ImageConfig({ src, onChange }: { src: string; onChange: (v: stri
   );
 }
 
-export function RowNumber({ label, hint, value, step, min, max, onChange }: { label: string; hint?: string; value: number; step?: number; min?: number; max?: number; onChange: (v: number) => void }) {
-  return <Row label={label} hint={hint}><NumberInput value={value} step={step} min={min} max={max} onChange={onChange} /></Row>;
+/** `onUnset` and `placeholder` are NumberInput's: pass `onUnset` for a field
+ *  where blank is a real setting, and `value: null` then shows the placeholder. */
+export function RowNumber({ label, hint, value, step, min, max, onChange, onUnset, placeholder }: { label: string; hint?: string; value: number | null; step?: number; min?: number; max?: number; onChange: (v: number) => void; onUnset?: () => void; placeholder?: string }) {
+  // Straight to the themed field: the editor's own wrappers coerce a missing
+  // value to 0, which is exactly what a blank-means-something field must not do.
+  const shown = onUnset ? value : typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return (
+    <Row label={label} hint={hint}>
+      <UiNumberInput value={shown} step={step ?? 0.01} min={min} max={max} onChange={onChange} onUnset={onUnset} placeholder={placeholder} />
+    </Row>
+  );
 }
 
 /** A segmented (accent/filled) button toggle — the most repeated inspector control. */

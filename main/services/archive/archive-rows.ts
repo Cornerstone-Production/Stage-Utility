@@ -50,6 +50,25 @@ export async function readArchiveRows(dir: string, base: string): Promise<Archiv
   return found ? out : null;
 }
 
+/**
+ * Rows in chronological order, leaving an unparseable stamp beside its
+ * neighbours — the sort is stable, so returning 0 does not herd damaged rows to
+ * one end of the file.
+ *
+ * Lives here rather than in one rebuilder because every replay of the raw layer
+ * needs it and none of them may disagree about it: the timing rebuild and the
+ * baptism replay both order rows this way, and a second copy is how the SSE
+ * buffer cap and the `endedAt` guard drifted.
+ */
+export function rowsByTime<T extends ArchiveRow>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.at ?? "");
+    const tb = Date.parse(b.at ?? "");
+    if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
+    return ta - tb;
+  });
+}
+
 /** The rolled filenames actually present for one source, in roll order. */
 export async function rolledFiles(dir: string, base: string): Promise<string[]> {
   let names: string[];

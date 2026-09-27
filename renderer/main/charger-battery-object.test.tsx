@@ -17,16 +17,12 @@ import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 
 // The widget reads its bays from the render context, not from a stream, but
 // `ObjectContent` reaches hooks that open one on other branches.
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, cleanup } = await import("@testing-library/react");

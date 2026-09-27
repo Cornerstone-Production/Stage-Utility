@@ -5,7 +5,7 @@
 // that creates a view imports the templates without wanting the editor.
 
 import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
-import { CARD_PRESETS, PILL } from "../main/layout-objects";
+import { CARD_PRESETS, HAIRLINE_COLOR, PILL } from "../main/layout-objects";
 
 export function uid(): string {
   const c = globalThis.crypto;
@@ -82,7 +82,7 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
   const FG_FAINT = "rgba(255,255,255,0.30)";
   const ACCENT = "#6aa6df";
   // Glass surface (near-black stage; cards read as faint frosted panels).
-  const glass: LayoutStyle = { background: "rgba(255,255,255,0.035)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.014 };
+  const glass: LayoutStyle = { background: "rgba(255,255,255,0.035)", borderColor: HAIRLINE_COLOR, borderWidth: 0.001, cornerRadius: 0.014 };
   // Uppercase eyebrow/label used above hero + rail sections and on each tile.
   const eyebrow = (color = FG_FAINT): LayoutStyle => ({ fontSize: 0.017, fontWeight: 600, color, uppercase: true, letterSpacing: 0.14, textAlign: "left", vAlign: "middle" });
 

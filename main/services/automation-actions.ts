@@ -7,8 +7,9 @@
 
 import { errorMessage } from "./errors.js";
 import type { ActionDef, ActionResult } from "../types/automation.js";
-import type { PcoLiveDTO } from "../types/stage.js";
+import type { BaptismState, PcoLiveDTO } from "../types/stage.js";
 import { advanceGuard } from "./automation-pco-items.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
 import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
@@ -73,6 +74,27 @@ async function runObsOutput(
   if (simulate) return ok(`would ${command} ${obsOutputNoun(kind)}`);
   const result = await obsOutput(kind, command);
   return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
+}
+
+/**
+ * What `baptism.advance` just did, in words — for the Activity log, so a
+ * Sunday-morning operator can see which of the five things one physical key did
+ * without opening the timer. Describes the transition ACTUALLY taken (`before`
+ * compared against `after`, both real BaptismState snapshots) rather than
+ * predicting one from `before` alone: the baptismTimerService is the only place
+ * that decides what advance() does in a given phase, and re-deriving that
+ * decision here risks drifting from it. The one case that cannot be told from
+ * `before` alone is the last person in a grouped session, whose advance() call
+ * auto-finishes the whole session — caught by checking `after` first.
+ */
+function describeBaptismAdvance(before: BaptismState, after: BaptismState): string {
+  if (after.phase === "idle" && before.phase !== "idle") return "finished the baptism session";
+  if (before.phase === "idle") return "started a baptism session";
+  if (before.armed) return "began person 1";
+  if (before.phase === "testimony") {
+    return before.mode === "grouped" ? "moved to the next testimony" : "marked baptized";
+  }
+  return "moved to the next person";
 }
 
 /** The two things the PCO Live action touches, behind a seam. Tests replace them;
@@ -425,6 +447,103 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       if (ctx.simulate) return ok("would refresh displays");
       broadcast("display:refresh", { at: new Date().toISOString() });
       return ok("refreshed displays");
+    },
+  },
+
+  "baptism.start": {
+    id: "baptism.start",
+    label: "Start a baptism session",
+    help:
+      "Begins a fresh session at person 1's testimony. Does nothing when a session is already " +
+      "running — use Advance or Back to move it, not a second Start.",
+    params: [],
+    run: async (_params, ctx) => {
+      if (baptismTimerService.getState().phase !== "idle") {
+        return fail("a baptism session is already running");
+      }
+      if (ctx.simulate) return ok("would start a baptism session");
+      baptismTimerService.start();
+      return ok("started a baptism session");
+    },
+  },
+
+  "baptism.advance": {
+    id: "baptism.advance",
+    label: "Advance the baptism timer",
+    help:
+      "The phase-aware primary press — whatever the operator panel's main button would do right " +
+      "now: start a session from idle, begin person 1 once armed, close a testimony or a baptism, " +
+      "and move to the next person. One button runs the whole service, so nobody has to know which " +
+      "action is legal in which phase.",
+    params: [],
+    run: async (_params, ctx) => {
+      // advance() falls through to next() in the baptism phase, and next()'s
+      // grouped branch is a documented no-op (same reference back) for a
+      // restored record with nobody at the current baptismIndex — the exact
+      // shape undo() guards against below. Silently reporting success there
+      // is the one thing this action must never do: it is what a physical key
+      // fires. advanceWouldChange() is the SAME predicate next()'s own guard
+      // runs on, so a dry run cannot say "would advance" over a state a real
+      // press would refuse.
+      const refusal = "the baptism timer did not move — this session was restored with nobody at this position";
+      if (!baptismTimerService.advanceWouldChange()) return fail(refusal);
+      if (ctx.simulate) return ok("would advance the baptism timer");
+      const before = baptismTimerService.getState();
+      const after = baptismTimerService.advance();
+      if (after === before) return fail(refusal);
+      return ok(describeBaptismAdvance(before, after));
+    },
+  },
+
+  "baptism.back": {
+    id: "baptism.back",
+    label: "Step the baptism timer back",
+    help: "Undoes the last press without losing the session — fixes a mis-tap.",
+    params: [],
+    run: async (_params, ctx) => {
+      // undoWouldChange() is the same predicate undo()'s own guards run on —
+      // see baptism.advance above for why a dry run must ask it too.
+      if (!baptismTimerService.undoWouldChange()) return fail("nothing to undo");
+      if (ctx.simulate) return ok("would step the baptism timer back");
+      const before = baptismTimerService.getState();
+      const after = baptismTimerService.undo();
+      if (after === before) return fail("nothing to undo");
+      return ok("stepped the baptism timer back");
+    },
+  },
+
+  "baptism.pause": {
+    id: "baptism.pause",
+    label: "Pause or resume the baptism timer",
+    help:
+      "Toggles: pauses a running clock, resumes a paused one. Idle and armed have no clock running " +
+      "to pause, and the action says so rather than doing nothing silently.",
+    params: [],
+    run: async (_params, ctx) => {
+      const state = baptismTimerService.getState();
+      if (state.phase === "idle") return fail("no baptism session is running");
+      if (state.armed) return fail("armed and waiting for the first press — nothing is running to pause");
+      const running = state.segmentStartedAt !== null;
+      if (ctx.simulate) return ok(running ? "would pause the baptism timer" : "would resume the baptism timer");
+      if (running) {
+        baptismTimerService.pause();
+        return ok("paused the baptism timer");
+      }
+      baptismTimerService.resume();
+      return ok("resumed the baptism timer");
+    },
+  },
+
+  "baptism.finish": {
+    id: "baptism.finish",
+    label: "Finish the baptism session",
+    help: "Closes the in-progress person/segment, freezes the session, and logs it.",
+    params: [],
+    run: async (_params, ctx) => {
+      if (baptismTimerService.getState().phase === "idle") return fail("no baptism session is running");
+      if (ctx.simulate) return ok("would finish the baptism session");
+      baptismTimerService.finish();
+      return ok("finished the baptism session");
     },
   },
 

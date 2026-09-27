@@ -32,6 +32,28 @@
       // `kiosk` scopes the stage design tokens (near-black surfaces, white-opacity
       // text) — see the .kiosk overrides in renderer/styles.css.
       document.documentElement.classList.add("dark", "kiosk");
+      // A settings preview (Screens page, view editor) runs this SAME document
+      // inside a small <iframe>. `overscroll-behavior: none` below is right for
+      // a REAL display — full-window, nowhere to hand a scroll gesture off to —
+      // and exactly backwards for a preview: Safari reads it as the iframe
+      // refusing to let a wheel gesture over it chain out to the page embedding
+      // it, so hovering a preview stops the whole Screens page from scrolling.
+      // This has to run before first paint, not from a React effect after the
+      // preview's bundle has loaded: LazyPreview (renderer/settings/sections/
+      // lazy-preview.tsx) mounts a fresh iframe every time a card scrolls into
+      // view, so an effect-based fix would leave the broken window open again
+      // on every card — right when the operator is scrolling.
+      //
+      // "preview-" is a THIRD copy of RESERVED_SLUG_PREFIX
+      // (main/services/reserved-slugs.ts) / PREVIEW_PREFIX
+      // (renderer/main/preview-url.ts) — spelled again rather than imported for
+      // the same reason preview-url.ts gives for its own copy: this script runs
+      // before any module graph exists at all. kiosk-preview-boot.test.ts
+      // guards the three staying in sync by running this exact script, not by
+      // matching its text.
+      if (location.pathname.startsWith("/preview-")) {
+        document.documentElement.classList.add("kiosk-preview");
+      }
     </script>
     <style>
       :root, .dark {
@@ -53,6 +75,12 @@
         overflow: hidden;
         overscroll-behavior: none;
         touch-action: manipulation;
+      }
+      /* The preview case the script above marks — the opposite of the rule
+         above, and ONLY the opposite: nothing else about a preview's kiosk
+         document should differ from the real display it is a picture of. */
+      .kiosk-preview, .kiosk-preview body, .kiosk-preview #root {
+        overscroll-behavior: auto;
       }
     </style>
   </head>

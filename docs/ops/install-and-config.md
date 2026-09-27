@@ -41,8 +41,11 @@ Options for the one-line installers:
 |---|---|
 | `STAGE_TRACK=beta` | install a prerelease instead of stable |
 | `STAGE_VERSION=v1.9.2` | pin an exact release |
+| `STAGE_REPO=you/fork` | install from a different GitHub repository, for testing a fork |
 | `STAGE_PORT=8080` | serve on a different port |
 | `STAGE_DATA=/srv/stage` | put config and history somewhere else |
+| `STAGE_PREFIX=/opt/stage` | install to a different prefix |
+| `STAGE_USER=svc` | the account the service runs as — Linux and macOS only. Default `stage-utility` on Linux (created if it does not exist), `root` on macOS |
 | `STAGE_NO_SERVICE=1` | install the files, register nothing |
 
 **Where they go matters.** In a `curl … | sudo bash` pipeline, a variable placed

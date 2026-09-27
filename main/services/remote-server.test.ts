@@ -8,9 +8,44 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { isCrossOrigin } from "./remote-server.js";
+import { isCrossOrigin, handlerErrorStatus, handlerErrorCode } from "./remote-server.js";
+import { ServiceIsLiveError, NoRawRowsError } from "./history-edit.js";
 
 const HOST = "192.168.1.50:8788";
+
+// The catch in startServer's own request handler — the ONE place these two
+// functions' answers actually reach the wire — is untestable through
+// callRoute (every route test stops at the route, before this catch ever
+// runs) and untestable through the header/UI tests (they stub fetch
+// entirely). These three real error shapes are what a route actually
+// throws; testing the pure functions directly is what actually covers the
+// line, not a route test that happens to also exercise it.
+describe("what a thrown route error puts on the wire", () => {
+  test("ServiceIsLiveError becomes a 409 carrying code 'live'", () => {
+    const err = new ServiceIsLiveError("rebuilt");
+    const status = handlerErrorStatus(err);
+    assert.equal(status, 409);
+    assert.equal(handlerErrorCode(err, status), "live");
+  });
+
+  test("NoRawRowsError becomes a 409 carrying code 'no-raw-rows' — tellable apart from ServiceIsLiveError's own 409", () => {
+    const err = new NoRawRowsError();
+    const status = handlerErrorStatus(err);
+    assert.equal(status, 409);
+    assert.equal(handlerErrorCode(err, status), "no-raw-rows");
+  });
+
+  test("an ordinary failure becomes a 500 with NO code — a Node errno must never reach the wire", () => {
+    const err = Object.assign(new Error("ENOSPC: no space left on device"), { errno: -28, code: "ENOSPC" });
+    const status = handlerErrorStatus(err);
+    assert.equal(status, 500, "sanity: an undeclared status falls back to 500");
+    assert.equal(
+      handlerErrorCode(err, status),
+      undefined,
+      "the error's own Node errno code must not be forwarded just because the shape looks similar",
+    );
+  });
+});
 
 describe("isCrossOrigin — clients that must keep working", () => {
   test("a request with no Origin is allowed (Companion, curl, scripts)", () => {

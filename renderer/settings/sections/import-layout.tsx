@@ -21,6 +21,7 @@ import { invoke } from "../../lib/api";
 import {
   Button,
   ButtonGroup,
+  ErrorNote,
   Select,
   SelectTrigger,
   SelectContent,
@@ -194,11 +195,7 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
         Import layout…
       </Button>
 
-      {error && (
-        <p role="alert" className="mt-2 basis-full rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-          {error}
-        </p>
-      )}
+      {error && <ErrorNote className="mt-2 basis-full">{error}</ErrorNote>}
 
       {pending && (
         <section className="mt-3 basis-full overflow-hidden rounded-xl border border-line-strong bg-surface">
