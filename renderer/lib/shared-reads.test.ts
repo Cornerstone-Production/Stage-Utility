@@ -110,6 +110,33 @@ describe("shared snapshot reads", () => {
     assert.equal(f.reads("/api/pco/live"), 2);
   });
 
+  test("a cue call is a write too: a read after it does not join one sent before it", async () => {
+    // cues:call cannot go through apiFetch (it reads a 409's body as an answer),
+    // so it is the one write that could have skipped the rule.
+    const f = heldFetch();
+    const before = invoke("stage:getState");
+    const cue = invoke("cues:call", { name: "rec_on" });
+    const afterCue = invoke("stage:getState");
+    f.answerAll({});
+    await Promise.all([before, cue, afterCue]);
+    assert.equal(f.reads("/api/state"), 2);
+  });
+
+  test("a shared read's failure keeps the reason underneath it", async () => {
+    // Node's own message for every network failure is "fetch failed", with the
+    // real reason on `cause`; a non-shared read rethrows it with that intact.
+    (globalThis as unknown as { fetch: unknown }).fetch = async () => {
+      throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 192.168.16.61:8788") });
+    };
+    const err = await invoke("pco:getLive").then(
+      () => assert.fail("the read should have failed"),
+      (e: unknown) => e as TypeError & { cause?: Error },
+    );
+    assert.ok(err instanceof TypeError);
+    assert.equal(err.message, "fetch failed");
+    assert.equal(err.cause?.message, "connect ECONNREFUSED 192.168.16.61:8788");
+  });
+
   test("a read sent more than two seconds ago is not joined", async () => {
     const f = heldFetch();
     const realNow = Date.now;
@@ -239,5 +266,32 @@ describe("a preview frame reads through its page", () => {
     const [, fromPreview] = await Promise.all([page, preview]);
     assert.equal(f.reads("/api/state"), 1, "the preview did not send a read of its own");
     assert.deepEqual(fromPreview, { n: 1 });
+  });
+
+  test("a child whose parent publishes no reader reads for itself", async () => {
+    // A page from an older build, or one that is not this app at all: the
+    // preview must still work, just without sharing.
+    const f = heldFetch();
+    // A plain object: built on the real window it would inherit the page's
+    // reader through the prototype and prove nothing.
+    const stranger: Record<string, unknown> = {};
+    stranger.parent = stranger;
+    const childWindow = Object.create(globalThis.window) as Window & Record<string, unknown>;
+    Object.defineProperty(childWindow, "parent", { value: stranger });
+    const pageWindow = globalThis.window;
+    (globalThis as unknown as { window: unknown }).window = childWindow;
+    let child: typeof import("./api.js");
+    try {
+      const anotherCopy = "./api.js?no-reader-parent";
+      child = (await import(anotherCopy)) as typeof import("./api.js");
+    } finally {
+      (globalThis as unknown as { window: unknown }).window = pageWindow;
+    }
+    const page = invoke("stage:getState");
+    const preview = child.invoke<{ n: number }>("stage:getState");
+    f.answerAll({ n: 2 });
+    const [, fromPreview] = await Promise.all([page, preview]);
+    assert.equal(f.reads("/api/state"), 2, "the preview sent its own read");
+    assert.deepEqual(fromPreview, { n: 2 });
   });
 });

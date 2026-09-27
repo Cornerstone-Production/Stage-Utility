@@ -24,6 +24,20 @@ export interface ApiError extends Error {
   code?: string;
 }
 
+/** A non-2xx answer's body, or null when it is not JSON — never fatal. */
+async function errorBody(res: Response): Promise<{ error?: string; code?: string } | null> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** The Error a read that ran past REQUEST_TIMEOUT_MS becomes. */
+function timeoutError(path: string, cause: unknown): Error {
+  return new Error(`Request to ${path} timed out`, { cause });
+}
+
 /** The Error a non-2xx answer becomes, from its status and parsed body. */
 function httpError(status: number, statusText: string, body: { error?: string; code?: string } | null): ApiError {
   const err = new Error(typeof body?.error === "string" ? body.error : statusText) as ApiError;
@@ -51,7 +65,7 @@ function httpError(status: number, statusText: string, body: { error?: string; c
 // rev, or "a push arrived first, drop the read"). A read that re-asks BECAUSE
 // something changed must never join one sent before the change, which is why
 // sharing is a list and not the default, and why any write clears every read
-// on its way — the refetch after a save always goes out fresh.
+// on its way (asWrite) — the refetch after a save always goes out fresh.
 //
 // Only a read still ON ITS WAY is joined, and only one sent within
 // JOIN_WINDOW_MS. A finished answer is never reused.
@@ -117,7 +131,7 @@ type SharedRead =
   | { kind: "ok"; body: unknown }
   | { kind: "http"; status: number; statusText: string; body: { error?: string; code?: string } | null }
   | { kind: "timeout" }
-  | { kind: "failed"; name: string; message: string };
+  | { kind: "failed"; name: string; message: string; cause: string | null };
 
 /** A shared read's answer, and when that read was sent. */
 interface SharedAnswer {
@@ -154,17 +168,17 @@ function sendRead(path: string): Promise<SharedAnswer> {
         headers: { "Content-Type": "application/json" },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      if (!res.ok) {
-        let body: { error?: string; code?: string } | null = null;
-        try {
-          body = await res.json();
-        } catch { /* ignore */ }
-        return { kind: "http", status: res.status, statusText: res.statusText, body };
-      }
+      if (!res.ok) return { kind: "http", status: res.status, statusText: res.statusText, body: await errorBody(res) };
       return { kind: "ok", body: await res.json() };
     } catch (err) {
       if (err instanceof DOMException && err.name === "TimeoutError") return { kind: "timeout" };
-      return { kind: "failed", name: err instanceof Error ? err.name : "Error", message: errorMessage(err) };
+      return {
+        kind: "failed",
+        name: err instanceof Error ? err.name : "Error",
+        message: errorMessage(err),
+        // Node says "fetch failed" and puts the real reason one level down.
+        cause: err instanceof Error && err.cause !== undefined ? errorMessage(err.cause) : null,
+      };
     }
   })();
   const read = result.then((r): SharedAnswer => ({ sentAt: now, result: r }));
@@ -206,9 +220,14 @@ async function sharedGet<T>(path: string, share: { channel: string; rev: boolean
     case "http":
       throw httpError(r.status, r.statusText, r.body);
     case "timeout":
-      throw new Error(`Request to ${path} timed out`, { cause: new DOMException("signal timed out", "TimeoutError") });
+      throw timeoutError(path, new DOMException("signal timed out", "TimeoutError"));
     case "failed": {
-      const err = r.name === "TypeError" ? new TypeError(r.message) : r.name === "SyntaxError" ? new SyntaxError(r.message) : new Error(r.message);
+      // Rebuilt in this frame's realm, so `instanceof TypeError` holds here.
+      const options = r.cause === null ? undefined : { cause: new Error(r.cause) };
+      let err: Error;
+      if (r.name === "TypeError") err = new TypeError(r.message, options);
+      else if (r.name === "SyntaxError") err = new SyntaxError(r.message, options);
+      else err = new Error(r.message, options);
       if (err.name !== r.name) err.name = r.name;
       throw err;
     }
@@ -221,12 +240,22 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // stops every read on its way from being joined, before AND after it lands.
   const share = init === undefined ? SHARED_READ_PATHS.get(path) : undefined;
   if (share) return sharedGet<T>(path, share);
-  const write = init?.method !== undefined && init.method !== "GET";
-  if (write) sharedReader.invalidate();
+  if (init?.method !== undefined && init.method !== "GET") return asWrite(() => sendAsAsked<T>(path, init));
+  return sendAsAsked<T>(path, init);
+}
+
+/**
+ * Send a write so that no read already on its way can be joined across it —
+ * before it goes out, and again once it has landed, so the refetch after a
+ * save is always sent after the save. EVERY write goes through here, including
+ * the one that cannot use apiFetch (cues:call).
+ */
+async function asWrite<T>(send: () => Promise<T>): Promise<T> {
+  sharedReader.invalidate();
   try {
-    return await sendAsAsked<T>(path, init);
+    return await send();
   } finally {
-    if (write) sharedReader.invalidate();
+    sharedReader.invalidate();
   }
 }
 
@@ -239,21 +268,13 @@ async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
       signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new Error(`Request to ${path} timed out`, { cause: err });
-    }
+    if (err instanceof DOMException && err.name === "TimeoutError") throw timeoutError(path, err);
     throw err;
   }
-  if (!res.ok) {
-    let body: { error?: string; code?: string } | null = null;
-    try {
-      body = await res.json();
-    } catch { /* ignore */ }
-    // Carry the status and any machine-readable `code` on the Error. Callers that
-    // only interpolate the message are unaffected, but one that has to tell a
-    // conflict from a failure (a 409 is a choice, not an error) now can.
-    throw httpError(res.status, res.statusText, body);
-  }
+  // Carry the status and any machine-readable `code` on the Error. Callers that
+  // only interpolate the message are unaffected, but one that has to tell a
+  // conflict from a failure (a 409 is a choice, not an error) now can.
+  if (!res.ok) throw httpError(res.status, res.statusText, await errorBody(res));
   return res.json() as Promise<T>;
 }
 
@@ -1405,16 +1426,17 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // confirmation the panel cannot give, 409 refused with a reason. The button
     // reads all three; throwing on a 409 would turn "not allowed during a
     // service" into a generic failure toast. So not post(), which throws.
-    case "cues:call": {
-      const res = await fetch(`/api/cues/${encodeURIComponent(String(p.name))}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    case "cues:call":
+      return asWrite(async () => {
+        const res = await fetch(`/api/cues/${encodeURIComponent(String(p.name))}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        return { ...body, status: res.status } as T;
       });
-      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      return { ...body, status: res.status } as T;
-    }
     case "cues:mintToken": return post("/api/cues/tokens", params);
     case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
     // YAML, not JSON — the one text response in this file, so it cannot go
