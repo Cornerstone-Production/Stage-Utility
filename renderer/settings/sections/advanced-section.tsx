@@ -91,6 +91,27 @@ function Segmented<T extends string>({
   );
 }
 
+/** A recorder's record is open (still recording) when it exists and its
+ *  `endedAt` has not been stamped — the same field name and meaning on
+ *  ServiceSplHistory, ServiceAttendance and ServiceTimeline alike (all extend
+ *  ServiceRecord in main/services/service-recorder.ts). */
+function isRecordOpen(payload: unknown): boolean {
+  return !!payload && typeof payload === "object" && (payload as { endedAt?: string | null }).endedAt == null;
+}
+
+/**
+ * The one fact each lock-relevant channel carries that the server's lock
+ * (serviceActivity() in main/services/routes/system-routes.ts) actually
+ * depends on — never the rest of the payload, which changes far more often
+ * than the lock does.
+ */
+const LOCK_CHANNELS: readonly (readonly [string, (payload: unknown) => boolean])[] = [
+  ["pco:live", (p) => (p as { mode?: string } | null)?.mode === "item"],
+  ["spl:history", isRecordOpen],
+  ["attendance:history", isRecordOpen],
+  ["service-timeline:history", isRecordOpen],
+];
+
 function formatHour(h: number): string {
   const am = h < 12;
   const h12 = h % 12 === 0 ? 12 : h % 12;
@@ -245,8 +266,24 @@ export function UpdatesPanel({
         });
     };
     refresh();
-    const offs = ["pco:live", "spl:history", "attendance:history", "service-timeline:history"].map((ch) =>
-      onNotification(ch, refresh),
+    // All four channels are hydrated (sse-channels.ts), so every one replays
+    // its last frame the moment this effect subscribes — on top of the mount
+    // `refresh()` above, that was 5 reads every time the page opened. A
+    // replay is at best as new as this mount, which `refresh()` already
+    // covers, so it seeds the comparison below but never causes a re-read.
+    // pco:live especially keeps broadcasting (an item change, or a 15s
+    // keepalive) with the lock's own fact unchanged, so a read is worth
+    // repeating only when that fact — a PCO item live, or a recorder's
+    // record newly opened/closed — actually flips. See serviceActivity() in
+    // main/services/routes/system-routes.ts for what the lock reads.
+    const lastFact = new Map<string, boolean>();
+    const offs = LOCK_CHANNELS.map(([ch, fact]) =>
+      onNotification(ch, (payload, replayed) => {
+        const next = fact(payload);
+        const prev = lastFact.get(ch);
+        lastFact.set(ch, next);
+        if (!replayed && next !== prev) refresh();
+      }),
     );
     return () => {
       cancelled = true;
