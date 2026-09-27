@@ -95,6 +95,7 @@ const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { StageView } = await import("./stage-view.js");
 const { __resetForTests } = await import("./use-stage-state.js");
+const { __resetReplayCacheForTests } = await import("../lib/api.js");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
@@ -110,8 +111,9 @@ after(async () => { cleanup(); await settle(); teardown(); });
 // it after the last consumer unmounts, so without this drop a case would
 // inherit the previous one's state and pass or fail on test ORDER — the first
 // case here leaves a request pending, which is how every later screen came to
-// render the loading spinner.
-beforeEach(() => { cleanup(); __resetForTests(); });
+// render the loading spinner. api.ts would hand that same pending read to the
+// next case's first read of /api/state, too; its reset forgets reads in flight.
+beforeEach(() => { cleanup(); __resetForTests(); __resetReplayCacheForTests(); });
 afterEach(async () => { cleanup(); await settle(); });
 
 // ---- fixtures ---------------------------------------------------------------

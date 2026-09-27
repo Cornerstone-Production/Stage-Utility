@@ -36,8 +36,12 @@ const attached = new Set<string>();
  * channel that is minutes: a countdown simply blank on a display someone just
  * opened. api.ts solves the same problem for late-mounting components; the shared
  * path has to solve it for late-arriving TABS.
+ *
+ * `at` is when the frame arrived. A replay carries it, so a tab can tell a
+ * cached snapshot newer than a read it joined from one older than it — see
+ * "Shared reads" in api.ts.
  */
-const lastPayload = new Map<string, unknown>();
+const lastPayload = new Map<string, { data: unknown; at: number }>();
 let es: EventSource | null = null;
 // One stable id for the shared connection (insecure-context safe — no crypto.randomUUID).
 const cid = `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -65,7 +69,7 @@ function attach(channel: string): void {
   es.addEventListener(channel, (e) => {
     try {
       const data = JSON.parse((e as MessageEvent).data);
-      if (HYDRATED_SET.has(channel)) lastPayload.set(channel, data);
+      if (HYDRATED_SET.has(channel)) lastPayload.set(channel, { data, at: Date.now() });
       fanout(channel, data);
     } catch {
       /* malformed frame — ignore */
@@ -83,12 +87,15 @@ function attach(channel: string): void {
  * live push once it reached a subscriber, which is the shared-worker transport
  * this app uses by default (`sharedSse`) — so every `replayed`-aware guard in
  * the renderer (the update lock among them) silently never saw one true.
+ *
+ * `at` is when the cached frame arrived — see "Shared reads" in api.ts.
  */
 function replayTo(port: MessagePort, channels: Iterable<string>): void {
   for (const c of channels) {
     if (!HYDRATED_SET.has(c)) continue;
-    if (!lastPayload.has(c)) continue;
-    port.postMessage({ channel: c, data: lastPayload.get(c), replay: true });
+    const cached = lastPayload.get(c);
+    if (!cached) continue;
+    port.postMessage({ channel: c, data: cached.data, replay: true, at: cached.at });
   }
 }
 
