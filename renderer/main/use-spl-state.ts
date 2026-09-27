@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
-import { useStatusChannel } from "./use-status-channel";
+import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 /**
- * Live SPL state from Smaart, pushed on the "spl:metrics" channel. Hydrates once
- * on mount (the channel only broadcasts on change) then stays live. Shared by the
- * dashboard SPL card and the custom-layout SPL object.
+ * Live SPL state from Smaart, pushed on the "spl:metrics" channel, plus whether
+ * it has answered yet. Hydrates once on mount (the channel only broadcasts on
+ * change) then stays live. Shared by the dashboard SPL card and the
+ * custom-layout SPL object — the former reads "not connected" ("Smaart
+ * offline") off `null` and must not say so before `known` is true.
  *
  * Ordering between the hydrate and the first push is useStatusChannel's job —
  * see the note there for the staleness this used to have. Smaart in particular
  * keeps its snapshot current between throttled broadcasts, so at an equal rev
  * the read can be the fresher of the two and must still apply.
  */
-export function useSplState(enabled = true): SplMetricsDTO | null {
+export function useSplStatus(enabled = true): StatusChannelResult<SplMetricsDTO> {
   const read = useCallback(() => invoke<SplMetricsDTO>("spl:getMetrics"), []);
   return useStatusChannel<SplMetricsDTO>(read, "spl:metrics", enabled);
+}
+
+/** The value alone, for the custom-layout SPL object, where a `null` first
+ *  paint is already the intended placeholder. */
+export function useSplState(enabled = true): SplMetricsDTO | null {
+  return useSplStatus(enabled).value;
 }
 
 /**

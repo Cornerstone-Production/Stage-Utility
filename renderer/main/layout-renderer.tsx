@@ -17,7 +17,7 @@ import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
-import { useDisplayPresence } from "./use-display-presence";
+import { useDisplayPresenceStatus } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
@@ -173,6 +173,10 @@ export interface LayoutRenderCtx {
    * pass it" must not be indistinguishable from it.
    */
   onlineOutputIds: readonly string[];
+  /** Whether presence has answered yet — see useDisplayPresenceStatus. Home's
+   *  screens count and readiness list read it; the wall screen tile does not,
+   *  since it already draws "no heartbeat" as offline before ANY read too. */
+  onlineKnown: boolean;
 
   /**
    * The id of the Home card whose own right-click menu is open right now, or
@@ -867,6 +871,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           pcoLive={ctx.pcoLive}
           now={ctx.now}
           onlineOutputIds={ctx.onlineOutputIds}
+          onlineKnown={ctx.onlineKnown}
           secondsToStart={homeSecondsToStart(ctx)}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
         />
@@ -3083,7 +3088,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // gate and its dot never lit. collectLayoutTypes now walks into embedded
   // layouts, so that tile reports "screen-embed" on its own and the stand-in is
   // gone — a view-embed of a clock no longer opens the presence channel.
-  const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
+  const onlinePresence = useDisplayPresenceStatus(want(["screen-embed", "home-screens", "home-readiness"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
@@ -3094,7 +3099,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 /**
@@ -3128,7 +3133,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3201,7 +3206,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

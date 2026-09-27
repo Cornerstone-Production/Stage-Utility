@@ -188,10 +188,14 @@ describe("nothing appears or disappears", () => {
     bar: contextBarState(null, NOW),
     now: NOW,
     obs: null,
+    obsKnown: true,
     reaper: null,
-    integrations: { states: [], labels: {} },
+    reaperKnown: true,
+    integrations: { states: [], labels: {}, known: true },
     resi: null,
+    resiKnown: true,
     youtube: null,
+    youtubeKnown: true,
     scores: null,
   };
 
@@ -398,10 +402,14 @@ describe("what a rung leaves behind", () => {
     bar: contextBarState(null, NOW),
     now: NOW,
     obs: null,
+    obsKnown: true,
     reaper: null,
-    integrations: { states: [], labels: {} },
+    reaperKnown: true,
+    integrations: { states: [], labels: {}, known: true },
     resi: null,
+    resiKnown: true,
     youtube: null,
+    youtubeKnown: true,
     scores: null,
   };
 
@@ -571,10 +579,14 @@ describe("the bar and its probe are the same loop", () => {
     bar: contextBarState(LIVE_ITEM, NOW),
     now: NOW,
     obs: null,
+    obsKnown: true,
     reaper: null,
-    integrations: { states: [], labels: {} },
+    reaperKnown: true,
+    integrations: { states: [], labels: {}, known: true },
     resi: null,
+    resiKnown: true,
     youtube: null,
+    youtubeKnown: true,
     scores: null,
   };
 

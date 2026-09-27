@@ -70,10 +70,11 @@ function deferred<T>() {
 
 /** Render the hook and expose what it currently reports. */
 function mount(read: () => Promise<Dto | null>, channel: string) {
-  const seen: { value: Dto | null } = { value: null };
+  const seen: { value: Dto | null; known: boolean } = { value: null, known: false };
   function Probe(): React.ReactElement {
-    const v = useStatusChannel<Dto>(read, channel);
+    const { value: v, known } = useStatusChannel<Dto>(read, channel);
     seen.value = v;
+    seen.known = known;
     return React.createElement("output", null, v ? String(v.recording) : "none");
   }
   render(React.createElement(Probe));

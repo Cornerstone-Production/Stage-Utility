@@ -15,7 +15,7 @@ import { useStatusChannel } from "./use-status-channel";
  */
 export function useBaptismState(): BaptismState | null {
   const read = useCallback(() => invoke<BaptismState>("baptism:get"), []);
-  return useStatusChannel<BaptismState>(read, "baptism:state");
+  return useStatusChannel<BaptismState>(read, "baptism:state").value;
 }
 
 /**
