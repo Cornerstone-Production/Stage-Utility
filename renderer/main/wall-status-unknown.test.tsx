@@ -12,10 +12,12 @@
 // production. Two halves per case:
 //
 //  - reads in flight: the widget's quiet state, and none of its negative words;
-//  - reads answered "nothing connected": the negative words ARE drawn.
+//  - ITS OWN reads answered "nothing connected": the negative words ARE drawn.
 //
 // The second half is what stops this passing on a widget that simply lost its
-// offline state. A negative claim that is TRUE still has to be made.
+// offline state. A negative claim that is TRUE still has to be made. Only the
+// widget's own reads are released, every other one still held, so a flag
+// threaded off a neighbouring hook leaves the widget quiet and fails here.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
@@ -136,67 +138,82 @@ async function answer(...paths: string[]): Promise<void> {
 
 const text = (el: HTMLElement) => el.textContent ?? "";
 
+const OBS = "/api/obs/status";
+const REAPER = "/api/reaper/status";
+const RESI = "/api/resi/status";
+const YOUTUBE = "/api/youtube/status";
+
 /**
  * The shape every text widget below shares: quiet while unknown, the claim once
- * it is known to be true.
+ * the reads it watches — `own`, and only those — say it is true.
  */
-async function quietThenClaims(config: Record<string, unknown>, claim: RegExp, quiet = /—/): Promise<void> {
+async function quietThenClaims(config: Record<string, unknown>, claim: RegExp, own: string[]): Promise<void> {
   const el = await wall(config);
-  assert.ok(held.size > 0, `${String(config.type)}: no read was held — the fixture is not exercising the unknown window`);
+  for (const path of own) {
+    assert.ok(held.has(path), `${String(config.type)}: ${path} was not held — the fixture is not exercising the unknown window`);
+  }
   assert.doesNotMatch(
     text(el),
     claim,
     `${String(config.type)} claimed ${claim} before any read had answered: "${text(el)}"`,
   );
-  assert.match(text(el), quiet, `${String(config.type)} drew no quiet placeholder while unknown: "${text(el)}"`);
+  assert.match(text(el), /—/, `${String(config.type)} drew no quiet placeholder while unknown: "${text(el)}"`);
 
-  await answer();
+  await answer(...own);
   assert.match(
     text(el),
     claim,
-    `${String(config.type)} never made its claim once the reads said it was true: "${text(el)}"`,
+    `${String(config.type)} never made its claim once ${own.join(" + ")} said it was true: "${text(el)}"`,
   );
 }
 
 describe("a wall widget with no answer yet makes no negative claim", () => {
   test("record-status (any recorder)", async () => {
-    await quietThenClaims({ type: "record-status", source: "any" }, /NO RECORDER/i);
+    await quietThenClaims({ type: "record-status", source: "any" }, /NO RECORDER/i, [OBS, REAPER]);
   });
 
   test("obs-status", async () => {
-    await quietThenClaims({ type: "obs-status" }, /Offline/i);
+    await quietThenClaims({ type: "obs-status" }, /Offline/i, [OBS]);
   });
 
   test("reaper-status", async () => {
-    await quietThenClaims({ type: "reaper-status" }, /Offline/i);
+    await quietThenClaims({ type: "reaper-status" }, /Offline/i, [REAPER]);
   });
 
   test("stream-status (every platform)", async () => {
-    await quietThenClaims({ type: "stream-status", platform: "any" }, /Offline|Off air/i);
+    await quietThenClaims({ type: "stream-status", platform: "any" }, /Offline|Off air/i, [RESI, YOUTUBE, OBS]);
+  });
+
+  test("stream-status (Resi)", async () => {
+    await quietThenClaims({ type: "stream-status", platform: "resi" }, /Offline/i, [RESI]);
+  });
+
+  test("stream-status (YouTube)", async () => {
+    await quietThenClaims({ type: "stream-status", platform: "youtube" }, /Offline/i, [YOUTUBE]);
   });
 
   test("home-streaming drawn as its wall twin", async () => {
     // Off Home the streaming card is the stream-status widget — same function,
     // separate registry type, so it gets its own line here.
-    await quietThenClaims({ type: "home-streaming" }, /Offline|Off air/i);
+    await quietThenClaims({ type: "home-streaming" }, /Offline|Off air/i, [RESI, YOUTUBE, OBS]);
   });
 
   test("scores", async () => {
-    await quietThenClaims({ type: "scores" }, /No teams followed/i);
+    await quietThenClaims({ type: "scores" }, /No teams followed/i, ["/api/scores/status"]);
   });
 
   test("integration-status", async () => {
-    await quietThenClaims({ type: "integration-status", integrationId: "obs", label: "OBS" }, /Offline/i);
+    await quietThenClaims({ type: "integration-status", integrationId: "obs", label: "OBS" }, /Offline/i, ["/api/integrations"]);
   });
 
   test("baptism-timer (live)", async () => {
     // "0:00 / ready" over a baptism that is running is the same lie in the
     // other direction: nothing is happening, said before anything was asked.
-    await quietThenClaims({ type: "baptism-timer", field: "live" }, /ready|0:00/i);
+    await quietThenClaims({ type: "baptism-timer", field: "live" }, /ready|0:00/i, ["/api/baptism"]);
   });
 
   test("baptism-timer (count)", async () => {
-    await quietThenClaims({ type: "baptism-timer", field: "count" }, /\b0\b/);
+    await quietThenClaims({ type: "baptism-timer", field: "count" }, /\b0\b/, ["/api/baptism"]);
   });
 
   test("screen-embed's status dot", async () => {
@@ -206,7 +223,7 @@ describe("a wall widget with no answer yet makes no negative claim", () => {
     assert.match(text(el), /Left Display/, "the tile did not draw its label bar — the dot has nowhere to be");
     assert.equal(label(), null, "the dot claimed a connection state before presence had answered");
 
-    await answer();
+    await answer("/api/displays/presence");
     assert.equal(label(), "Not connected", "the dot never said so once presence answered with nothing");
   });
 });
@@ -216,25 +233,25 @@ describe("a widget watching more than one source waits for all of them", () => {
     // OBS alone answering "not connected" is not "no recorder": REAPER might be
     // rolling. The card on Home makes the same rule.
     const el = await wall({ type: "record-status", source: "any" });
-    await answer("/api/obs/status");
-    assert.ok(held.has("/api/reaper/status"), "REAPER's read was not held — the fixture proves nothing");
+    await answer(OBS);
+    assert.ok(held.has(REAPER), "REAPER's read was not held — the fixture proves nothing");
     assert.doesNotMatch(text(el), /NO RECORDER|STANDBY/i, `claimed on OBS's answer alone: "${text(el)}"`);
   });
 
   test("record-status (any) says RECORDING as soon as one recorder is", async () => {
     // A true positive does not wait for the other source: whatever REAPER says,
     // something is recording.
-    overrides = { "/api/obs/status": { connected: true, recording: true, streaming: false, virtualCam: false } };
+    overrides = { [OBS]: { connected: true, recording: true, streaming: false, virtualCam: false } };
     const el = await wall({ type: "record-status", source: "any" });
-    await answer("/api/obs/status");
-    assert.ok(held.has("/api/reaper/status"), "REAPER's read was not held — the fixture proves nothing");
+    await answer(OBS);
+    assert.ok(held.has(REAPER), "REAPER's read was not held — the fixture proves nothing");
     assert.match(text(el), /RECORDING/i, `a recorder that IS recording waited on the other: "${text(el)}"`);
   });
 
   test("stream-status (any) says nothing while one platform is still unknown", async () => {
     const el = await wall({ type: "stream-status", platform: "any" });
-    await answer("/api/resi/status", "/api/youtube/status");
-    assert.ok(held.has("/api/obs/status"), "OBS's read was not held — the fixture proves nothing");
+    await answer(RESI, YOUTUBE);
+    assert.ok(held.has(OBS), "OBS's read was not held — the fixture proves nothing");
     assert.doesNotMatch(text(el), /Offline|Off air/i, `claimed on two of three platforms: "${text(el)}"`);
   });
 });
@@ -253,7 +270,7 @@ describe("the stage and dashboard displays make no negative claim before they kn
         assert.ok(held.has(path), `${path} was not held — the fixture proves nothing`);
         assert.doesNotMatch(text(el), claim, `${name} claimed ${claim} before ${what} had answered`);
 
-        await answer();
+        await answer(path);
         assert.match(text(el), claim, `${name} never claimed ${claim} once ${what} answered that it was true`);
       });
     }
