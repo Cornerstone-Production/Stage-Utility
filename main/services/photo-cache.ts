@@ -63,30 +63,57 @@ function urlToFilename(url: string): string {
   return `${hash}${ext}`;
 }
 
-export async function getPhotoPath(photoUrl: string): Promise<string | null> {
+/** Where `photoUrl` is on disk, or null when it has not been fetched yet. */
+async function cachedPhotoPath(photoUrl: string): Promise<string | null> {
+  const filePath = path.join(await getCacheDir(), urlToFilename(photoUrl));
+  try {
+    await fs.access(filePath);
+    return filePath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetches in flight, by upstream URL. Thirteen slots across a Screens page ask
+ * for the same few photos at once; without this each one fetched and wrote the
+ * same file, and a reader could open it half-written.
+ */
+const inflight = new Map<string, Promise<string | null>>();
+
+export function getPhotoPath(photoUrl: string): Promise<string | null> {
+  const running = inflight.get(photoUrl);
+  if (running) return running;
+  const p = loadPhoto(photoUrl).finally(() => inflight.delete(photoUrl));
+  inflight.set(photoUrl, p);
+  return p;
+}
+
+async function loadPhoto(photoUrl: string): Promise<string | null> {
   if (!isAllowedPhotoUrl(photoUrl)) {
     console.warn(`[photo-cache] refused to fetch a photo from outside PCO: ${photoUrl}`);
     return null;
   }
   try {
-    const dir = await getCacheDir();
-    const filename = urlToFilename(photoUrl);
-    const filePath = path.join(dir, filename);
-
-    // Return cached version if it exists.
-    try {
-      await fs.access(filePath);
-      return filePath;
-    } catch {
-      // Not cached yet — fetch.
-    }
+    const cached = await cachedPhotoPath(photoUrl);
+    if (cached) return cached;
 
     // Fetch with a timeout + one retry: PCO photo URLs occasionally blip, and a
     // hung connection would otherwise stall the slot. Failures aren't cached, so
     // the next request (or the client's retry) re-attempts.
     const buffer = await fetchPhoto(photoUrl);
     if (!buffer) return null;
-    await fs.writeFile(filePath, buffer);
+    // Written aside and renamed into place, so the file is either absent or
+    // whole: it is served immutable, and a torn one would be kept for a year.
+    const filePath = path.join(await getCacheDir(), urlToFilename(photoUrl));
+    const tmp = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+    try {
+      await fs.writeFile(tmp, buffer);
+      await fs.rename(tmp, filePath);
+    } catch (err) {
+      await fs.rm(tmp, { force: true });
+      throw err;
+    }
     return filePath;
   } catch (err) {
     console.error("[photo-cache] Error caching photo:", err);
