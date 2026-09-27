@@ -3168,6 +3168,42 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cues, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
+type LayoutData = ReturnType<typeof useLayoutData>;
+
+/**
+ * Every status channel's value and its `known` flag, unpacked off useLayoutData
+ * for a surface that assembles its own context — Home's grid and the editor's
+ * preview.
+ *
+ * One mapping rather than one per surface. Each pair must come off the SAME
+ * hook, and a flag copied from its neighbour compiles, then draws a false claim
+ * or a dash for ever. LayoutRenderer's own literal stays spelled out, because
+ * gate-render-parity.test.ts reads it to map each ctx field to its gate.
+ */
+export function statusCtx(
+  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "integrationsSnap" | "onlinePresence">,
+) {
+  return {
+    obs: d.obsStatus.value,
+    obsKnown: d.obsStatus.known,
+    reaper: d.reaperStatus.value,
+    reaperKnown: d.reaperStatus.known,
+    resi: d.resiStatus.value,
+    resiKnown: d.resiStatus.known,
+    youtube: d.youtubeStatus.value,
+    youtubeKnown: d.youtubeStatus.known,
+    scores: d.scoresStatus.value,
+    scoresKnown: d.scoresStatus.known,
+    baptism: d.baptismStatus.value,
+    baptismKnown: d.baptismStatus.known,
+    integrations: d.integrationsSnap.states,
+    integrationLabels: d.integrationsSnap.labels,
+    integrationsKnown: d.integrationsSnap.known,
+    onlineOutputIds: d.onlinePresence.onlineOutputIds,
+    onlineKnown: d.onlinePresence.known,
+  } satisfies Partial<LayoutRenderCtx>;
+}
+
 /**
  * Renders a custom-layout View: a fixed design canvas scaled to fit the viewport,
  * with absolutely-positioned, live-data-bound objects.
