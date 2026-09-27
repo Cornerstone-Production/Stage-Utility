@@ -24,7 +24,7 @@ import { HistoryCalendar } from "../../components/history-calendar";
 import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
+import { AllServicesLink, RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
@@ -1783,9 +1783,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const statusText = live ? `${lastOccupancy.toLocaleString()} in the room now` : "no items recorded";
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
+        <AllServicesLink onClick={() => setSelectedKey(null)} />
         {/* The same vocabulary as a service's own page — the green `recording`
             pill, "Sound", and cards — rather than the red LIVE badge and
             border-t dividers this page kept while the other one moved on. It
@@ -1824,9 +1822,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   ) {
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
+        <AllServicesLink onClick={() => setSelectedKey(null)} />
         <ErrorNote>Couldn't load this service's record. Nothing has been changed; reload the page to try again.</ErrorNote>
       </div>
     );
@@ -2300,7 +2296,7 @@ function SoundSection({
  * under it, so this is the common case, not every case. The Trends card's
  * loading state, for one service.
  */
-function ChartLoading({ what }: { what: string }) {
+function ChartLoading({ what }: { what: "attendance" | "sound" }) {
   return (
     <div data-history-loading={what} aria-busy="true" className="flex flex-col gap-3">
       <Skeleton className="h-10 w-full" />
@@ -2318,9 +2314,7 @@ function ChartLoading({ what }: { what: string }) {
 function ServiceLoading({ onBack }: { onBack: () => void }) {
   return (
     <div data-history-loading="service" aria-busy="true" className="flex flex-col gap-4">
-      <button className="self-start text-caption1 text-accent hover:underline" onClick={onBack}>
-        ← All services
-      </button>
+      <AllServicesLink onClick={onBack} />
       <div className="flex flex-col gap-1.5">
         <Skeleton className="h-6 w-64 max-w-full" />
         <Skeleton className="h-4 w-96 max-w-full" />

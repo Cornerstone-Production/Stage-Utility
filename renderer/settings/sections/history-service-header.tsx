@@ -512,6 +512,16 @@ export interface ServiceHeaderProps {
   sections?: readonly { id: string; label: string }[];
 }
 
+/** The way back from a service to the list — this header's, and every page
+ *  History draws for a service without one. */
+export function AllServicesLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="self-start text-caption1 text-accent hover:underline" onClick={onClick}>
+      ← All services
+    </button>
+  );
+}
+
 export function ServiceHeader({
   timeline,
   attendance,
@@ -544,7 +554,9 @@ export function ServiceHeader({
       void metricsVersion;
       const figures = serviceKpis(timeline, attendance, spl, live ? now : undefined);
       if (spl) return figures;
-      return soundUnavailable ? markSoundUnavailable(figures) : soundLoading ? markSoundLoading(figures) : figures;
+      if (soundUnavailable) return markSoundUnavailable(figures);
+      if (soundLoading) return markSoundLoading(figures);
+      return figures;
     },
     [timeline, attendance, spl, soundUnavailable, soundLoading, live, now, metricsVersion],
   );
@@ -575,9 +587,7 @@ export function ServiceHeader({
         "before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-bg before:content-['']",
       )}
     >
-      <button className="self-start text-caption1 text-accent hover:underline" onClick={onBack}>
-        ← All services
-      </button>
+      <AllServicesLink onClick={onBack} />
 
       {/* Title beside the actions once the HEADER has room for both, not the
           viewport: beside the rail at 640px the actions would not shrink and
