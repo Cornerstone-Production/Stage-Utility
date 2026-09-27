@@ -86,14 +86,19 @@ function httpError(status: number, statusText: string, body: { error?: string; c
 // answer serves the page and every preview in it. What crosses between frames
 // is the parsed body, and each caller takes its own structuredClone of it in its
 // own realm: no object is shared between callers or crosses as a live reference.
+// The staleness check reads the CALLER's frame's content times, which holds
+// because every reader of these paths subscribes to the paired channel in its
+// own frame (the hydrate-then-subscribe shape); a reader that did not would see
+// no newer content, and trust a joined answer it should have re-asked.
 
 /**
  * The reads that may be shared: the hydrate read behind each live snapshot, the
  * channel that carries the same snapshot, and whether the answer carries a
  * server `rev` its consumers order by. Checked against prod, 27 Sep 2026.
- * Sorted by path, one per line.
+ * Sorted by path, one per line. shared-reads-table.test.ts pins the list and
+ * asks the server code itself whether each `rev: true` answer carries one.
  */
-const SHARED_READ_PATHS: ReadonlyMap<string, { channel: string; rev: boolean }> = new Map([
+export const SHARED_READ_PATHS: ReadonlyMap<string, { channel: string; rev: boolean }> = new Map([
   ["/api/attendance/history/current", { channel: "attendance:history", rev: false }],
   ["/api/baptism", { channel: "baptism:state", rev: false }],
   ["/api/displays/presence", { channel: "displays:presence", rev: true }],
