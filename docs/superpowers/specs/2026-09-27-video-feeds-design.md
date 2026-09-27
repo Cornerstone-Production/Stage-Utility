@@ -129,7 +129,8 @@ never to MediaMTX:
 
 - `reconcile(feeds)` — make the relay's paths match the feed list exactly.
 - `status()` — relay up/down, and per path: ready, source connected, codec,
-  whether WebRTC can carry it, reader count.
+  resolution and profile (MediaMTX reports them per track), whether WebRTC can
+  carry it, reader count.
 - `playback(feedId)` — how a browser plays it: a WHEP URL and an HLS URL, both
   on Stage Utility's own origin.
 
@@ -144,7 +145,10 @@ on a Pi 5 or a computer.
   asset (linux amd64/arm64, darwin amd64/arm64, windows amd64).
 - It is downloaded the first time video is turned on, never at install, into the
   data folder under a versioned directory, verified against the pinned checksum,
-  and only then made executable. A mismatch deletes the file and refuses to run.
+  and only then extracted (with the system `tar`, which Linux, macOS and Windows
+  10+ all ship) and made executable. A mismatch deletes the file and refuses to
+  run. v1.21.1 is a 27 MB download and 55 MB on disk; the page says so before
+  the first download.
 - A newer MediaMTX ships as an ordinary Stage Utility release that bumps the pin.
   The app never follows MediaMTX's releases on its own.
 - Offline machines: the page names the exact path and filename to place the
@@ -168,7 +172,11 @@ on a Pi 5 or a computer.
 ### Configuration
 
 - **The API listens on 127.0.0.1 only.** Nothing on the network can reconfigure
-  the relay. Metrics and the playback server stay off.
+  the relay. Metrics, pprof, the playback server, RTSPS, RTMPS and **MoQ** stay
+  off. MoQ matters: v1.21.1 turns it on by default and binds `:8892` and `:8893`
+  on every interface, so the generated config must say `moq: false` explicitly.
+  Every listener the app does not use is switched off by name, not left to the
+  default.
 - **HTTP playback listeners (WebRTC signalling, HLS) listen on 127.0.0.1 only**;
   browsers reach them through Stage Utility (below).
 - **Inputs listen on the LAN:** RTSP 8554, RTMP 1935, SRT 8890, WebRTC media UDP
@@ -178,8 +186,12 @@ on a Pi 5 or a computer.
 - **`pull` paths fetch on demand** (`sourceOnDemand`), closing a few seconds
   after the last viewer leaves. An unwatched feed costs no traffic.
 - **Publishing needs the feed's password.** Every `push` path accepts a publisher
-  only with its own credentials; a stray device cannot take over a feed. Reading
-  is allowed only from 127.0.0.1, which is the proxy.
+  only with its own credentials, and `overridePublisher` is false (MediaMTX
+  defaults it to true), so a second device cannot kick the first off a feed.
+  Reading is allowed only from 127.0.0.1, which is the proxy. How each protocol
+  carries the credentials: SRT in the `streamid`
+  (`publish:<path>:<user>:<pass>`), RTMP as `?user=&pass=`, and OBS's WHIP
+  "Bearer Token" field as `user:pass`, which MediaMTX accepts for exactly this.
 
 ### Playback goes through Stage Utility
 
@@ -191,10 +203,21 @@ Browsers talk only to Stage Utility's own origin, on 8788 and on port 80:
 - `/video/<feedId>/index.m3u8` and its segments — HLS, proxied and streamed.
 - Only existing feeds of the `pull` and `push` kinds are served; any other id is
   404.
-- **B-frame detection lives here.** MediaMTX answers a WHEP offer for a
-  B-frame stream with an error saying so. The proxy records it on the feed's
-  status and returns it to the player, which falls back to HLS. The page then
-  says what to change on the device.
+- **B-frames are detected from the relay's own log, not the WHEP answer.**
+  Probed against the real v1.21.1 binary: MediaMTX answers a B-frame stream's
+  offer with `201`, the peer connection comes up, and it then closes the session
+  with `closed: WebRTC doesn't support H264 streams with B-frames`. The browser
+  sees "connected" and no frames. The supervisor already reads the child's
+  output; it pairs `[session X] is reading from path 'P'` with that close line
+  and marks feed P "WebRTC unavailable: B-frames". The status then sends every
+  screen straight to HLS, and the page says what to change on the device. The
+  mark clears when the path's source changes (a new publisher, or a re-pulled
+  source), since that may be the encoder with its settings fixed. The lines are
+  pinned by a test built from the real output; a MediaMTX bump that changes the
+  wording fails it.
+- **The player backs this up.** A WebRTC session that is connected but has
+  decoded no frame within 5 s falls back to HLS as well. That also covers a
+  blocked UDP port, and anything the log does not name.
 
 ### Status
 
