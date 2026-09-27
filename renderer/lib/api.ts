@@ -1965,13 +1965,29 @@ export function onNotification(
   // payloads. Falls through to the direct path if the worker can't be created.
   if (sharedSse && ensureWorker()) {
     let set = workerHandlers.get(channel);
+    // BEFORE adding this callback: was the channel already held open by
+    // another local subscriber? That is the one condition under which this
+    // process's own `lastPayload` is guaranteed fresh — the worker keeps
+    // forwarding a channel to this PORT for as long as ANY local callback
+    // wants it (see sse-shared-worker.ts's `fanout`, gated on the port's
+    // reported channel set), so a continuously-held channel's cache never
+    // goes stale. The moment the local count drops to zero the worker stops
+    // forwarding it to this port at all, and OUR copy freezes at whatever it
+    // last was — replaying that here raced the worker's OWN, still-warm
+    // reply (its cache keeps updating from the underlying EventSource
+    // regardless of who wants it) and lost: a new subscriber joining a
+    // channel nobody currently holds got OUR stale value first, then the
+    // worker's fresh one a tick later — wrong, then right. Left to the
+    // worker's own diff-based replayTo in that case, which is the fresher of
+    // the two exactly because nothing here raced ahead of it.
+    const alreadyHeld = !!set && set.size > 0;
     if (!set) {
       set = new Set();
       workerHandlers.set(channel, set);
     }
     set.add(cb);
     workerReport();
-    replayCached();
+    if (alreadyHeld) replayCached();
     return () => {
       set!.delete(cb);
       if (set!.size === 0) workerHandlers.delete(channel);
