@@ -16,6 +16,7 @@ import { stageController } from "../stage-controller.js";
 import { propresenterManager } from "../propresenter-service.js";
 import { prodcomService } from "../prodcom-service.js";
 import { THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "../propresenter-service.js";
+import { photoSizeFor } from "../avatar-geometry.js";
 
 // Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
 // cache-bust token. Lets multiple displays showing the same slide share one
@@ -103,30 +104,40 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       try {
-        const { getPhotoPath } = await import("../photo-cache.js");
+        const { getSizedPhotoPath } = await import("../photo-cache.js");
+        // `?s=` is how big the display draws it, longest side in device pixels.
+        // Snapped up to the ladder, so an arbitrary number cannot mint a new disk
+        // entry and a new PCO fetch per value; absent or junk means the geometry
+        // the URL already carries.
+        const size = photoSizeFor(Number(url.searchParams.get("s")));
         // `searchParams.get` has already decoded once. Decoding again turned the
         // avatar geometry's %23 into a literal '#', which a URL treats as the start
         // of a fragment — so PCO never saw the crop flag and returned a fit-inside
         // image instead of a crop. Invisible while the request was square (both give
         // the same result); it silently capped every non-square crop.
-        const localPath = await getPhotoPath(photoUrl);
-        if (!localPath) {
+        const photo = await getSizedPhotoPath(photoUrl, size);
+        if (!photo) {
           res.writeHead(404);
           res.end("Photo not found");
           return;
         }
-        const ext = localPath.split(".").pop()?.toLowerCase() ?? "jpg";
+        const ext = photo.path.split(".").pop()?.toLowerCase() ?? "jpg";
         const mime =
           ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
-        const data = await fs.readFile(localPath);
+        const data = await fs.readFile(photo.path);
         // Cache hard. The upstream URL is content-addressed by PCO — the path holds
         // the upload timestamp (`/person/<id>-<uploaded>/avatar.png`), so a new
         // photo is a new URL and therefore a new cache key. Without this header a
         // display re-downloaded every face on every load: nine photos at ~500 KB is
-        // ~4.5 MB per reload, per screen, for images that had not changed.
+        // ~4.5 MB per reload, per screen, for images that had not changed. `s` is
+        // part of the request URL, so the browser keys each size separately too.
+        //
+        // Except a fallback: that is the full-size photo standing in for a small
+        // one PCO would not give us. Immutable would pin it at this URL for a year;
+        // no-cache lets the next load ask for the small one again.
         res.writeHead(200, {
           "Content-Type": mime,
-          "Cache-Control": "public, max-age=31536000, immutable",
+          "Cache-Control": photo.fellBack ? "no-cache" : "public, max-age=31536000, immutable",
         });
         res.end(data);
       } catch (err) {
