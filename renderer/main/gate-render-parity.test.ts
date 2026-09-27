@@ -54,9 +54,43 @@ function topLevelFunction(lines: string[], name: string): string {
   return lines.slice(head, end + 1).join("\n");
 }
 
-/** Every `ctx.<field>` named in a chunk of source. */
+/** Every `ctx` field a chunk of source reads: `ctx.<field>`, and the names in a
+ *  `const { … } = ctx`, which read those fields just as surely. */
 function ctxReads(text: string): Set<string> {
-  return new Set([...text.matchAll(/\bctx\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+  const found = new Set([...text.matchAll(/\bctx\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+  for (const m of text.matchAll(/\{([^{}]*)\}\s*=\s*ctx\b(?!\s*\.)/g)) {
+    for (const part of m[1].split(",")) {
+      const key = part.trim();
+      assert.ok(!key.startsWith("..."), "a rest element taken out of ctx — the scan cannot attribute what it reads");
+      const field = key.split(/[:=]/)[0].trim();
+      if (field) found.add(field);
+    }
+  }
+  return found;
+}
+
+/**
+ * Components the renderer hands `ctx` to that live in another file, and why
+ * none of their reads belong to the object that hands it over.
+ *
+ * EmbeddedView draws a different View. Its widgets' channels are opened by the
+ * gate's walk INTO that view (collectLayoutTypes), under their own types, so
+ * attributing them to view-embed or screen-embed would demand gates those two
+ * do not need.
+ */
+const DRAWS_ANOTHER_VIEW = new Set(["EmbeddedView"]);
+
+/**
+ * Every function a chunk hands the whole `ctx` to: a component given
+ * `ctx={ctx}` or `ctx={{ ...ctx, … }}`, and a call taking `ctx` as any direct
+ * argument — `f(ctx)`, `f(ctx, x)`, `f(x, ctx)`.
+ */
+function handedCtx(text: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of text.matchAll(/<(\w+)[^>]*?\bctx=\{(?:ctx\}|\{\s*\.\.\.ctx\b)/gs)) names.add(m[1]);
+  for (const m of text.matchAll(/\b(\w+)\((?:[^()]*?,\s*)?ctx\s*[,)]/g)) names.add(m[1]);
+  for (const name of DRAWS_ANOTHER_VIEW) names.delete(name);
+  return names;
 }
 
 /** The `case "type":` arms of a switch, each with the source up to the next arm. */
@@ -95,12 +129,12 @@ function switchArms(lines: string[], header: string): Map<string, string> {
 function scanGates(): { gated: Map<string, Set<string>>; ungated: string[] } {
   const useLayoutData = topLevelFunction(RENDERER, "useLayoutData");
 
-  // Every local a hook assigns, gated or not: `const x = useX(…)` and
-  // `const { a, b } = useY(…)`. Matched on the assignment, which prose in a
+  // Every local a hook assigns, gated or not: `const x = useX(…)`,
+  // `const { a, b } = useY(…)` and `const [a, b] = useZ(…)`. Matched on the assignment, which prose in a
   // comment does not produce.
   const hookLocals = new Set<string>();
   for (const m of useLayoutData.matchAll(/const (\w+) = use\w+\(/g)) hookLocals.add(m[1]);
-  for (const m of useLayoutData.matchAll(/const \{([^}]*)\} = use\w+\(/g)) {
+  for (const m of useLayoutData.matchAll(/const [{[]([^}\]]*)[}\]] = use\w+\(/g)) {
     for (const name of m[1].split(",")) {
       const local = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
       if (local.trim()) hookLocals.add(local.trim());
@@ -169,7 +203,8 @@ function scanGates(): { gated: Map<string, Set<string>>; ungated: string[] } {
  *  - closures declared at the top of `ObjectBody` that close over `ctx`
  *    (`streamingReadout` reads ctx.resi, ctx.youtube and ctx.obs — that last one
  *    is where `stream-status` was missing a gate);
- *  - components and helpers handed the whole `ctx` (`ctx={ctx}`, `f(ctx)`);
+ *  - components and helpers handed the whole `ctx` (`ctx={ctx}`, a spread of
+ *    it, or `ctx` as any argument), followed as deep as the hand-offs go;
  *  - `HomeCard`, which is handed named props off `ctx`. A Home card's channels
  *    are decided in ITS switch, not in the shared branch that renders it — the
  *    branch passes `onlineOutputIds` for all fifteen types and only two use it.
@@ -197,15 +232,26 @@ function readsByType(): Map<string, Set<string>> {
   }
 
   /** A chunk's own reads, plus those of everything it hands `ctx` to. */
-  const expand = (text: string): Set<string> => {
+  const expand = (text: string, seen: Set<string> = new Set()): Set<string> => {
     const found = ctxReads(text);
+    const follow = (key: string, source: string) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      expand(source, seen).forEach((f) => found.add(f));
+    };
     for (const [name, source] of closures) {
-      if (new RegExp(`\\b${name}\\(`).test(text)) ctxReads(source).forEach((f) => found.add(f));
+      if (new RegExp(`\\b${name}\\(`).test(text)) follow(`closure:${name}`, source);
     }
-    const handed = new Set<string>();
-    for (const m of text.matchAll(/<(\w+)[^>]*\bctx=\{ctx\}/gs)) handed.add(m[1]);
-    for (const m of text.matchAll(/\b(\w+)\(ctx\)/g)) handed.add(m[1]);
-    for (const name of handed) ctxReads(topLevelFunction(RENDERER, name)).forEach((f) => found.add(f));
+    for (const name of handedCtx(text)) {
+      const source = topLevelFunction(RENDERER, name);
+      // Reads are matched on the name `ctx`. A function that takes the context
+      // under another name would read it unseen, so it is refused, not skipped.
+      const lines = source.split("\n");
+      const signature = lines.slice(0, lines.findIndex((l) => /\)\s*(?::[^=]*)?\{\s*$/.test(l)) + 1).join("\n");
+      const renamed = /\b(\w+)\s*:\s*LayoutRenderCtx\b/.exec(signature);
+      assert.ok(!renamed || renamed[1] === "ctx", `${name} takes the render context as "${renamed?.[1]}" — the scan reads only \`ctx\``);
+      follow(name, source);
+    }
     return found;
   };
 
