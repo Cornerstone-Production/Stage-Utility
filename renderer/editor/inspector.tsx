@@ -48,12 +48,12 @@ import { useSplState } from "../main/use-spl-state";
 // exactly what somebody is doing while the gear is still in a case.
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
-import { useObsState } from "../main/use-obs-state";
+import { useObsStatus } from "../main/use-obs-state";
 import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type PvpNowLabel } from "../main/pvp-now";
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
-import { useReaperState } from "../main/use-reaper-state";
+import { useReaperStatus } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { pcoConnected, useStageState } from "../main/use-stage-state";
@@ -611,6 +611,39 @@ export function PlanAttachmentConfig({
 }
 
 /** Object types fed by ProPresenter — they get the per-object instance picker. */
+/**
+ * OBS's live state, under the OBS status settings. Its own subscription, so the
+ * channel is open only while an OBS status object is selected, as the cue and
+ * scores reads below are gated on their object types.
+ *
+ * The dash until OBS has answered: "Not connected" before the read lands is a
+ * claim the read has not made yet.
+ */
+export function ObsLiveLabel({ mode }: { mode: string }) {
+  const { value: obs, known } = useObsStatus();
+  const label = !known
+    ? "—"
+    : !obs?.connected
+      ? "Not connected"
+      : (mode === "streaming" ? obs.streaming : mode === "virtualcam" ? obs.virtualCam : obs.recording)
+        ? "Active now"
+        : "Connected · idle";
+  return <span className="text-caption2 text-fg-muted">{label}</span>;
+}
+
+/** REAPER's live state, under the REAPER status settings — as ObsLiveLabel. */
+export function ReaperLiveLabel() {
+  const { value: reaper, known } = useReaperStatus();
+  const label = !known
+    ? "—"
+    : !reaper?.connected
+      ? "Not connected"
+      : reaper.recording
+        ? "Recording now"
+        : "Connected · idle";
+  return <span className="text-caption2 text-fg-muted">{label}</span>;
+}
+
 export function Inspector({
   o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
@@ -645,8 +678,6 @@ export function Inspector({
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
   const { data: wirelessChannels = [] } = useWirelessChannels();
-  const obs = useObsState();
-  const reaper = useReaperState();
   const pvp = usePvpState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
@@ -1197,11 +1228,6 @@ export function Inspector({
 
       {c.type === "obs-status" && (() => {
         const mode = c.mode ?? "recording";
-        const liveLabel = !obs?.connected
-          ? "Not connected"
-          : (mode === "streaming" ? obs.streaming : mode === "virtualcam" ? obs.virtualCam : obs.recording)
-            ? "Active now"
-            : "Connected · idle";
         const { active: activePlaceholder, idle: idlePlaceholder } = obsModeText(mode);
         return (
           <>
@@ -1215,7 +1241,7 @@ export function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="OBS"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
+            <Row label="OBS"><ObsLiveLabel mode={mode} /></Row>
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder={STATUS_TEXT.obs.offline} onChange={(v) => onConfig({ ...c, offlineText: v })} />
@@ -1265,24 +1291,17 @@ export function Inspector({
           />
         </>
       )}
-      {c.type === "reaper-status" && (() => {
-        const liveLabel = !reaper?.connected
-          ? "Not connected"
-          : reaper.recording
-            ? "Recording now"
-            : "Connected · idle";
-        return (
-          <>
-            <Row label="REAPER"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
-            <RowText label="Recording text" value={c.recordingText ?? ""} placeholder={STATUS_TEXT.reaper.recording} onChange={(v) => onConfig({ ...c, recordingText: v })} />
-            <RowText label="Idle text" value={c.idleText ?? ""} placeholder={STATUS_TEXT.reaper.idle} onChange={(v) => onConfig({ ...c, idleText: v })} />
-            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder={STATUS_TEXT.reaper.offline} onChange={(v) => onConfig({ ...c, offlineText: v })} />
-            <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
-            <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
-            <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
-          </>
-        );
-      })()}
+      {c.type === "reaper-status" && (
+        <>
+          <Row label="REAPER"><ReaperLiveLabel /></Row>
+          <RowText label="Recording text" value={c.recordingText ?? ""} placeholder={STATUS_TEXT.reaper.recording} onChange={(v) => onConfig({ ...c, recordingText: v })} />
+          <RowText label="Idle text" value={c.idleText ?? ""} placeholder={STATUS_TEXT.reaper.idle} onChange={(v) => onConfig({ ...c, idleText: v })} />
+          <RowText label="Offline text" value={c.offlineText ?? ""} placeholder={STATUS_TEXT.reaper.offline} onChange={(v) => onConfig({ ...c, offlineText: v })} />
+          <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+          <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
+          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+        </>
+      )}
       {c.type === "pvp-layers" && (
           <>
             <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>

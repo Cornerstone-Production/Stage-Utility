@@ -98,6 +98,7 @@ const { LayoutRenderer } = await import("./layout-renderer.js");
 const { StageDisplayView } = await import("./stage-display-view.js");
 const { DashboardView } = await import("./dashboard-view.js");
 const { SplRundownView } = await import("./spl-rundown-view.js");
+const { ObsLiveLabel, ReaperLiveLabel } = await import("../editor/inspector.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 /** A fetch, its json() and the hook's then() are three turns apart. */
@@ -328,3 +329,18 @@ describe("the SPL rundown display says why it has no items, and only once it kno
   });
 });
 
+describe("the editor inspector's live line makes no claim before its recorder answers", () => {
+  for (const [name, el, path] of [
+    ["OBS", () => React.createElement(ObsLiveLabel, { mode: "recording" }), OBS],
+    ["REAPER", () => React.createElement(ReaperLiveLabel), REAPER],
+  ] as const) {
+    test(name, async () => {
+      const box = await draw(el());
+      assert.ok(held.has(path), `${path} was not held — the fixture proves nothing`);
+      assert.doesNotMatch(text(box), /Not connected/, `the ${name} row said "Not connected" before ${name} answered`);
+      assert.match(text(box), /—/);
+      await answer(path);
+      assert.match(text(box), /Not connected/, `the ${name} row never said so once ${name} answered disconnected`);
+    });
+  }
+});
