@@ -83,15 +83,29 @@ function switchArms(lines: string[], header: string): Map<string, string> {
 // ---------------------------------------------------------------- the gates
 
 /**
- * Each gated `ctx` field, and the object types whose presence opens it.
+ * Each gated `ctx` field, and the object types whose presence opens it — and
+ * each `ctx` field a hook feeds with NO gate.
  *
  * Read out of `useLayoutData`: `const spl = useSplState(want(["spl-meter"]))`
  * gates the local `spl`, and the `LayoutRenderCtx` literal maps that local onto
  * the ctx field a widget reads. A hook called with no `want()` is ungated —
- * always subscribed, so nothing has to name it.
+ * read and subscribed on every layout surface, whatever it holds — which is
+ * what `ungated` lists.
  */
-function gatedFields(): Map<string, Set<string>> {
+function scanGates(): { gated: Map<string, Set<string>>; ungated: string[] } {
   const useLayoutData = topLevelFunction(RENDERER, "useLayoutData");
+
+  // Every local a hook assigns, gated or not: `const x = useX(…)` and
+  // `const { a, b } = useY(…)`. Matched on the assignment, which prose in a
+  // comment does not produce.
+  const hookLocals = new Set<string>();
+  for (const m of useLayoutData.matchAll(/const (\w+) = use\w+\(/g)) hookLocals.add(m[1]);
+  for (const m of useLayoutData.matchAll(/const \{([^}]*)\} = use\w+\(/g)) {
+    for (const name of m[1].split(",")) {
+      const local = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
+      if (local.trim()) hookLocals.add(local.trim());
+    }
+  }
 
   // Gates hoisted into a local first: `const peopleWanted = want([...])`.
   const named = new Map<string, string[]>();
@@ -130,7 +144,8 @@ function gatedFields(): Map<string, Set<string>> {
   }
   parts.push(cur);
 
-  const out = new Map<string, Set<string>>();
+  const gated = new Map<string, Set<string>>();
+  const ungated: string[] = [];
   for (const part of parts) {
     const t = part.trim();
     if (!t) continue;
@@ -138,9 +153,10 @@ function gatedFields(): Map<string, Set<string>> {
     const field = colon < 0 ? t : t.slice(0, colon).trim();
     const local = colon < 0 ? t : /^[A-Za-z_$][\w$]*/.exec(t.slice(colon + 1).trim())?.[0] ?? "";
     const gate = byLocal.get(local);
-    if (gate) out.set(field, gate);
+    if (gate) gated.set(field, gate);
+    else if (hookLocals.has(local)) ungated.push(field);
   }
-  return out;
+  return { gated, ungated: ungated.sort() };
 }
 
 // ---------------------------------------------------------------- the reads
@@ -237,7 +253,7 @@ function readsByType(): Map<string, Set<string>> {
 
 // ---------------------------------------------------------------- the guard
 
-const GATED = gatedFields();
+const { gated: GATED, ungated: UNGATED } = scanGates();
 const READS = readsByType();
 
 describe("every channel a widget draws is one its layout subscribes to", () => {
@@ -258,7 +274,23 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     for (const field of ["obs", "reaper", "resi", "onlineOutputIds"]) {
       assert.ok(GATED.has(field), `ctx.${field} is gated in useLayoutData but the scan did not see it`);
     }
-    assert.ok(GATED.size >= 4);
+  });
+
+  test("every source useLayoutData reads is gated, except the three the canvas itself draws", () => {
+    // The stage state, PCO Live and the server clock feed the canvas and nearly
+    // every widget on it, so every layout reads them. Anything else a hook
+    // feeds in ungated is read and subscribed on a wall showing one clock: six
+    // sources sat that way — the baptism timer, the plan rundown, the service
+    // timeline, the integration list and both ProPresenter snapshots — until
+    // each was given a gate. A seventh fails here instead.
+    //
+    // Exact, and a list rather than a count. It also keeps the parse honest: a
+    // gate the scan stops seeing shows up here as ungated.
+    assert.deepEqual(UNGATED, [
+      "now",
+      "pcoLive",
+      "state",
+    ]);
   });
 
   test("no arm reads a channel its type is not gated for", () => {

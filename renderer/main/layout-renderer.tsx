@@ -3084,12 +3084,36 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // layouts, so that tile reports "screen-embed" on its own and the stand-in is
   // gone — a view-embed of a clock no longer opens the presence channel.
   const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
-  const propresenter = useProPresenterStatus();
-  const propInstances = usePropInstances();
-  const baptism = useBaptismState();
-  const planItems = usePlanItems();
-  const serviceTimeline = useServiceTimeline();
-  const integrationsSnap = useIntegrations();
+  // Every object that reads ProPresenter, through its own instance or the
+  // default one — the types layout-objects.ts marks `propInstance: true`. A
+  // literal rather than derived from that flag, because gate-render-parity
+  // reads gates as literals; layout-data-reads holds this list to the flag.
+  // The status channel is the costly one: while anything subscribes to it the
+  // server holds its ProPresenter fallback poll at full rate, so a Home of
+  // status cards must not. The two service-item objects are here although they
+  // follow PCO first — they fall back to ProPresenter's playlist when PCO has no
+  // current item.
+  const proWanted = want([
+    "current-service-item",
+    "current-slide-notes",
+    "current-slide-text",
+    "next-service-item",
+    "next-slide-text",
+    "pp-timer",
+    "section-chip",
+    "slide-progress",
+    "slide-thumbnail",
+  ]);
+  const propresenter = useProPresenterStatus(proWanted);
+  const propInstances = usePropInstances(proWanted);
+  const baptism = useBaptismState(want(["baptism-timer"]));
+  // service-pacing reads the rundown only for its projected-end mode, and is
+  // named whatever its config says: a gate that followed config would open the
+  // read one render after the operator flipped the switch, and the projection
+  // would sit on a dash until it landed.
+  const planItems = usePlanItems(want(["service-order", "service-pacing"]));
+  const serviceTimeline = useServiceTimeline(want(["service-pacing", "people-graph"]));
+  const integrationsSnap = useIntegrations(want(["integration-status"]));
 
   // One clock for the whole canvas, and it is the SERVER's — a wall Pi's own is
   // as wrong as the last time anyone set it.

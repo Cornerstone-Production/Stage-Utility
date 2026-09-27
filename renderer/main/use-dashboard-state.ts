@@ -85,16 +85,24 @@ export function useProPresenterStatus(enabled = true): ProPresenterStatusDTO | n
  * All configured ProPresenter instances + their live status (for custom layouts
  * that pick which auditorium an object reads from). Hydrates once, then stays
  * live on the "propresenter:instances" channel. Always includes id "default".
+ *
+ * @param enabled false where nothing on screen draws it. Off, it neither reads
+ *   nor subscribes; the last list it had is kept, so a widget added back paints
+ *   at once and the read that re-runs corrects it.
  */
-export function usePropInstances(): PropInstancesDTO | null {
+export function usePropInstances(enabled = true): PropInstancesDTO | null {
   const [instances, setInstances] = useState<PropInstancesDTO | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<PropInstancesDTO>("propresenter:getInstances")
       .then((d) => { if (!cancelled && d) setInstances(d); })
       .catch(() => { /* not configured yet — ignore */ });
     return () => { cancelled = true; };
-  }, []);
-  useEffect(() => onNotification("propresenter:instances", (p) => setInstances(p as PropInstancesDTO)), []);
+  }, [enabled]);
+  useEffect(() => {
+    if (!enabled) return;
+    return onNotification("propresenter:instances", (p) => setInstances(p as PropInstancesDTO));
+  }, [enabled]);
   return instances;
 }
