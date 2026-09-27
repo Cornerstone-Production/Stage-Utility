@@ -274,11 +274,63 @@ describe("nothing appears or disappears", () => {
       integrations: {
         states: [{ id: "obs", enabled: true, configured: true, connection: "disconnected" }],
         labels: { obs: "OBS" },
+        known: true,
       },
     };
     for (const id of MUST_RENDER) {
       assert.notEqual(renderBarItem(id, rolling as never), null, `${id} vanishes with a recorder stopped`);
     }
+  });
+
+  /** Every text node `renderBarItem` produced, joined — cheap and readable,
+   *  unlike asserting on a live DOM node (node:assert would try to inspect it
+   *  to build a failure message and never finish). */
+  const textOf = (id: (typeof ALL)[number], ctx: unknown): string =>
+    renderToStaticMarkup(renderBarItem(id, ctx as never) as never);
+
+  test("recording/streaming/integration-health read the placeholder, not the idle words, before any answer has landed", () => {
+    // Unknown is its own state — see use-status-channel.ts's own header. Each
+    // of these three items has TWO negative-sounding readings that are both
+    // claims about the PRESENT ("No recorder", "All connected"), and neither
+    // is true merely because a read has not landed: the bar must show neither
+    // until `known`, or an operator glancing at a strip that has not finished
+    // loading reads it as a settled fact about their gear.
+    const unknown = {
+      ...idle,
+      obsKnown: false,
+      reaperKnown: false,
+      resiKnown: false,
+      youtubeKnown: false,
+      integrations: { states: [], labels: {}, known: false },
+    };
+    const idleWordsByItem = {
+      recording: /No recorder/,
+      streaming: /No stream/,
+      "integration-health": /No integrations|All connected/,
+    } as const;
+    for (const [id, idleWords] of Object.entries(idleWordsByItem)) {
+      const text = textOf(id as keyof typeof idleWordsByItem, unknown);
+      assert.match(text, /—/, `${id} did not show the placeholder while unknown`);
+      assert.doesNotMatch(text, idleWords, `${id} claimed a settled state before any answer — got ${JSON.stringify(text)}`);
+    }
+  });
+
+  test("recording only needs BOTH obs and reaper known — either alone still reads unknown", () => {
+    // "any" folds both sources into one reading (recorders()), so it must wait
+    // for both: answering from whichever landed first would say "no recorder
+    // connected" on the strength of OBS alone while REAPER's own read is
+    // still in flight.
+    assert.match(textOf("recording", { ...idle, obsKnown: false }), /—/, "obs still unknown must hold the card back");
+    assert.match(textOf("recording", { ...idle, reaperKnown: false }), /—/, "reaper still unknown must hold the card back");
+    assert.doesNotMatch(textOf("recording", idle), /—/, "control: both known renders the real reading");
+  });
+
+  test("streaming only needs ALL THREE sources known — any one alone still reads unknown", () => {
+    // streamers() folds OBS's own streaming flag in alongside Resi/YouTube.
+    assert.match(textOf("streaming", { ...idle, resiKnown: false }), /—/);
+    assert.match(textOf("streaming", { ...idle, youtubeKnown: false }), /—/);
+    assert.match(textOf("streaming", { ...idle, obsKnown: false }), /—/);
+    assert.doesNotMatch(textOf("streaming", idle), /—/, "control: all three known renders the real reading");
   });
 
   const scoresCtx = (games: ScoreGameDTO[], over: Record<string, unknown> = {}) => ({
