@@ -15,7 +15,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
-import { useDashboardState, usePropInstances } from "./use-dashboard-state";
+import { useDashboardState, useProPresenterStatus, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
@@ -3014,7 +3014,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // The state comes FIRST, before the gates that used to be computed above it:
   // an embedded view's objects live in `state.views`, and a gate that cannot see
   // them leaves every widget inside a tile without a channel.
-  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const { state, isLoading, error, pcoLive } = useDashboardState();
   const views = state?.views;
   const outputs = state?.outputs;
   // `views`/`outputs` are fresh array identities on every state broadcast, so
@@ -3084,6 +3084,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // layouts, so that tile reports "screen-embed" on its own and the stand-in is
   // gone — a view-embed of a clock no longer opens the presence channel.
   const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
+  const propresenter = useProPresenterStatus();
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
