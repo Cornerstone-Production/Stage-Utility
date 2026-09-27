@@ -24,7 +24,7 @@ const teardown = installRenderDom();
 
 const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
-const { RecordingCard, SplCard, ScreensCard } = await import("./cards.js");
+const { RecordingCard, SplCard, ScreensCard, ScoresCard } = await import("./cards.js");
 const { RouterContextProvider, createRootRoute, createRouter, createMemoryHistory } = await import("@tanstack/react-router");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -91,6 +91,35 @@ test("SplCard: an unresolved read renders the placeholder, not Smaart offline", 
     const text = container.textContent ?? "";
     assert.ok(!/offline/i.test(text), `unresolved SPL read must not claim offline — got ${JSON.stringify(text)}`);
     assert.match(text, /—/);
+  } finally {
+    f.restore();
+  }
+});
+
+test("ScoresCard: an unresolved read renders the placeholder, not No teams followed", async () => {
+  const f = stubFetchWithLog(() => pending());
+  try {
+    const { container } = await mount(React.createElement(ScoresCard, {}));
+    const text = container.textContent ?? "";
+    assert.ok(!/No teams followed/.test(text), `unresolved scores read must not claim no teams are followed — got ${JSON.stringify(text)}`);
+    assert.match(text, /—/);
+  } finally {
+    f.restore();
+  }
+});
+
+test("ScoresCard: once the read answers no teams followed, it correctly says so", async () => {
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/scores/status")) {
+      return ok({ connected: false, games: [], rev: 0, error: null } as unknown as ScoresStatusDTO);
+    }
+    return ok({});
+  });
+  try {
+    const { container } = await mount(React.createElement(ScoresCard, {}));
+    await settle();
+    const text = container.textContent ?? "";
+    assert.match(text, /No teams followed/, "a settled, genuinely unconnected answer must still say so");
   } finally {
     f.restore();
   }
