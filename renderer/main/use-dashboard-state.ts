@@ -19,6 +19,11 @@ interface UseDashboardStateResult {
    */
   pcoLiveKnown: boolean;
   propresenter: ProPresenterStatusDTO | null;
+  /** Has ProPresenter answered yet? The same question as `pcoLiveKnown`, for
+   *  the same reason: a `null` status is also what a server with no
+   *  ProPresenter configured answers, so "ProPresenter offline" off the value
+   *  alone is said before the first read has landed. See useStatusChannel. */
+  propresenterKnown: boolean;
 }
 
 /**
@@ -34,7 +39,7 @@ export function useDashboardState(): UseDashboardStateResult {
   // ProPresenter is a StatusIntegration, so its hydrate and its pushes are
   // version-stamped and ordered by useStatusChannel — see the note there.
   const readPro = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
-  const { value: propresenter } = useStatusChannel<ProPresenterStatusDTO>(readPro, "propresenter:status");
+  const { value: propresenter, known: propresenterKnown } = useStatusChannel<ProPresenterStatusDTO>(readPro, "propresenter:status");
 
   // pco:live is NOT one: it comes from the live controller, not an integration,
   // and carries no rev. It keeps the plain hydrate-then-subscribe shape.
@@ -63,7 +68,7 @@ export function useDashboardState(): UseDashboardStateResult {
     setPcoLiveKnown(true);
   }), []);
 
-  return { state, isLoading, error, pcoLive, pcoLiveKnown, propresenter };
+  return { state, isLoading, error, pcoLive, pcoLiveKnown, propresenter, propresenterKnown };
 }
 
 /**

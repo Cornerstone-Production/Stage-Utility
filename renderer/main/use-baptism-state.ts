@@ -3,19 +3,27 @@ import { useCallback } from "react";
 import { invoke } from "../lib/api";
 import { reduceBaptismPeople } from "../lib/baptism-people";
 import { formatClock } from "../lib/clock-format";
-import { useStatusChannel } from "./use-status-channel";
+import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 /**
- * Live baptism-timer state, pushed on the "baptism:state" channel. Hydrates once
- * on mount then stays live. Shared by the operator panel and the display object.
+ * Live baptism-timer state, pushed on the "baptism:state" channel, plus whether
+ * it has answered yet. Hydrates once on mount then stays live. The display
+ * object reads "0:00 ready" and "0 baptized" off a `null` state, and must not
+ * say either before `known` is true. See useStatusChannel's own header.
  *
  * Ordering between the hydrate and the first push is useStatusChannel's job — see
  * the note there. A running timer whose read landed after the start frame reads
  * as stopped on the wall until the next button press.
  */
-export function useBaptismState(): BaptismState | null {
+export function useBaptismStatus(): StatusChannelResult<BaptismState> {
   const read = useCallback(() => invoke<BaptismState>("baptism:get"), []);
-  return useStatusChannel<BaptismState>(read, "baptism:state").value;
+  return useStatusChannel<BaptismState>(read, "baptism:state");
+}
+
+/** The value alone, for the operator panel, which draws its own loading state
+ *  rather than reading a `null` as idle. */
+export function useBaptismState(): BaptismState | null {
+  return useBaptismStatus().value;
 }
 
 /**

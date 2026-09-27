@@ -2381,7 +2381,7 @@ export function LayoutEditor({
               // `home` is the VIEW's identity, not the editor's: editing Home's
               // own layout must preview Home's cards, and editing anything else
               // must preview what that surface will draw.
-              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, onlineOutputIds: data.onlinePresence.onlineOutputIds, onlineKnown: data.onlinePresence.known }}
+              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, integrationsKnown: data.integrationsSnap.known, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, onlineOutputIds: data.onlinePresence.onlineOutputIds, onlineKnown: data.onlinePresence.known, obs: data.obsStatus.value, obsKnown: data.obsStatus.known, reaper: data.reaperStatus.value, reaperKnown: data.reaperStatus.known, resi: data.resiStatus.value, resiKnown: data.resiStatus.known, youtube: data.youtubeStatus.value, youtubeKnown: data.youtubeStatus.known, scores: data.scoresStatus.value, scoresKnown: data.scoresStatus.known, baptism: data.baptismStatus.value, baptismKnown: data.baptismStatus.known }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
