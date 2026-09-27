@@ -14,10 +14,10 @@ import { getPhotoPath, isAllowedPhotoUrl, readCapped } from "./photo-cache.js";
 
 describe("photo proxy host allowlist", () => {
   it("allows the avatars production actually serves", () => {
-    // Taken from a live /api/state.
+    // The shape a live /api/state serves, for a person who does not exist.
     assert.ok(
       isAllowedPhotoUrl(
-        "https://avatars.planningcenteronline.com/uploads/person/36097057-1522778894/avatar.3.png?g=220x1000%23",
+        "https://avatars.planningcenteronline.com/uploads/person/100000001-1600000000/avatar.3.png?g=220x1000%23",
       ),
     );
   });
