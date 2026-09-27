@@ -60,7 +60,7 @@ function timeline() {
   };
 }
 
-function installFetch(): void {
+function installFetch({ recordFails = false } = {}): void {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -72,7 +72,10 @@ function installFetch(): void {
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (url === `/api/service-timeline/${encodeURIComponent(KEY)}`) return ok(timeline());
-    if (url.startsWith("/api/service-timeline/")) return ok(null);
+    if (url.startsWith("/api/service-timeline/")) {
+      if (recordFails) throw new TypeError("fetch failed");
+      return ok(null);
+    }
     if (url.startsWith("/api/attendance/history/")) return ok(null);
     if (url.startsWith("/api/spl/history/")) return ok(null);
     throw new Error(`unexpected fetch: ${method} ${url}`);
@@ -155,6 +158,18 @@ describe("History opens the service named in its URL", () => {
       "an unknown key must not open a detail page",
     );
     assert.ok(text(view.container).includes("Sunday 11:00"), "the list must still render, not an empty page");
+  });
+
+  test("a key the list does not hold, whose record cannot be read, says so", async () => {
+    // A service the list holds opens from the list's own copy whatever its
+    // own read does (history-detail-reads.test.tsx). One it does not hold has
+    // nothing to draw, and a failure must not read as "no such service".
+    installFetch({ recordFails: true });
+    const { view } = renderHistoryAt(historyServiceHref(OTHER_KEY));
+    for (let i = 0; i < 6; i++) await settle();
+
+    assert.match(text(view.container), /Couldn't load this service's record/);
+    assert.ok(text(view.container).includes("All services"), "and the way back is there");
   });
 
   test("selecting a row opens it immediately and writes ?service=<key> back to the URL", async () => {
