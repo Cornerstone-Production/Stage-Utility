@@ -59,12 +59,19 @@ const ANSWERS: Record<string, unknown> = {
   "/api/displays/presence": { connected: [], rev: 1 },
   "/api/propresenter/status": { connected: false },
   "/api/pco/live": null,
+  "/api/cues/manifest": { version: 1, switches: [], buttons: [] },
+  // What the server answers for an unconfigured Planning Center: an EMPTY
+  // rundown, never null.
+  "/api/pco/plan-items": { planId: null, items: [], noteCategories: [] },
 };
 
 /** Every read but the stage state waits here until a test releases it. */
 const held = new Map<string, () => void>();
 /** Per-path answers a single test overrides; cleared between tests. */
 let overrides: Record<string, unknown> = {};
+/** Paths a single test answers with a 502, as the server does when its own
+ *  read of the integration fails; cleared between tests. */
+let failing = new Set<string>();
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   const path = String(url).split("?")[0];
@@ -75,6 +82,10 @@ let overrides: Record<string, unknown> = {};
     const prev = held.get(path);
     held.set(path, () => { prev?.(); resolve(); });
   });
+  if (failing.has(path)) {
+    const err = { error: "upstream read failed" };
+    return { ok: false, status: 502, statusText: "Bad Gateway", json: async () => err, text: async () => JSON.stringify(err) };
+  }
   const body = path in overrides ? overrides[path] : (ANSWERS[path] ?? null);
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -86,6 +97,7 @@ const { TooltipProvider } = await import("../components/ui/tooltip-provider.js")
 const { LayoutRenderer } = await import("./layout-renderer.js");
 const { StageDisplayView } = await import("./stage-display-view.js");
 const { DashboardView } = await import("./dashboard-view.js");
+const { SplRundownView } = await import("./spl-rundown-view.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 /** A fetch, its json() and the hook's then() are three turns apart. */
@@ -99,7 +111,7 @@ function release(...paths: string[]): void {
   }
 }
 
-beforeEach(() => { overrides = {}; });
+beforeEach(() => { overrides = {}; failing = new Set(); });
 afterEach(async () => {
   release();
   cleanup();
@@ -139,6 +151,7 @@ async function answer(...paths: string[]): Promise<void> {
 const text = (el: HTMLElement) => el.textContent ?? "";
 
 const OBS = "/api/obs/status";
+const PLAN = "/api/pco/plan-items";
 const REAPER = "/api/reaper/status";
 const RESI = "/api/resi/status";
 const YOUTUBE = "/api/youtube/status";
@@ -216,6 +229,25 @@ describe("a wall widget with no answer yet makes no negative claim", () => {
     await quietThenClaims({ type: "baptism-timer", field: "count" }, /\b0\b/, ["/api/baptism"]);
   });
 
+  test("cue-button", async () => {
+    // No label of its own, so the name comes off the manifest; before the
+    // manifest has answered there is nothing to call it but the dash.
+    await quietThenClaims({ type: "cue-button", cue: "lights" }, /Unbound/i, ["/api/cues/manifest"]);
+  });
+
+  test("service-order: a plan known to be empty", async () => {
+    await quietThenClaims({ type: "service-order" }, /No service plan/, [PLAN]);
+  });
+
+  test("service-order: a read that failed says so, not \"No service plan\"", async () => {
+    failing = new Set([PLAN]);
+    const el = await wall({ type: "service-order" });
+    assert.doesNotMatch(text(el), /No service plan|Couldn't load/, `claimed before the read answered: "${text(el)}"`);
+    await answer(PLAN);
+    assert.match(text(el), /Couldn't load the plan/, `a failed read did not say so: "${text(el)}"`);
+    assert.doesNotMatch(text(el), /No service plan/, "a failed read was drawn as an empty plan");
+  });
+
   test("screen-embed's status dot", async () => {
     const el = await wall({ type: "screen-embed", outputId: "out-1", showLabel: true, showStatus: true });
     const label = () =>
@@ -276,3 +308,23 @@ describe("the stage and dashboard displays make no negative claim before they kn
     }
   }
 });
+
+describe("the SPL rundown display says why it has no items, and only once it knows", () => {
+  test("Planning Center not configured: said after the read, not before", async () => {
+    const el = await draw(React.createElement(SplRundownView, { displayId: "out-1" }));
+    assert.ok(held.has(PLAN), "the rundown read was not held — the fixture proves nothing");
+    assert.doesNotMatch(text(el), /not configured|No items/, `claimed before the rundown answered: "${text(el)}"`);
+    await answer(PLAN);
+    // STATE.pcoConfigured is false, and the server answered with its empty rundown.
+    assert.match(text(el), /Planning Center not configured/);
+  });
+
+  test("a failed read says so, rather than calling Planning Center unconfigured", async () => {
+    failing = new Set([PLAN]);
+    const el = await draw(React.createElement(SplRundownView, { displayId: "out-1" }));
+    await answer(PLAN);
+    assert.match(text(el), /Couldn't load the plan/, `a failed read did not say so: "${text(el)}"`);
+    assert.doesNotMatch(text(el), /not configured/, "a failed read was drawn as an unconfigured Planning Center");
+  });
+});
+

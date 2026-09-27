@@ -36,11 +36,11 @@ import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { ActionButton } from "./action-button";
 import { CueButton } from "./cue-button";
-import { useCueLive, type CuesLive } from "./use-cue-live";
+import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
-import { usePlanItems } from "./use-plan-items";
+import { usePlanItemsStatus } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration, projectedServiceEndMs } from "./pco-timer";
 import { servicePacing } from "./service-pacing";
@@ -65,6 +65,11 @@ export interface LayoutRenderCtx {
   propInstances: PropInstancesDTO | null;
   /** Current PCO plan rundown (items + note categories) — for the service-order object. */
   planItems: PlanItemsDTO | null;
+  /** Whether the rundown read has answered, and whether the last one failed —
+   *  see usePlanItemsStatus. "No service plan" is for a plan known to be empty,
+   *  never for one not read yet or one whose read went wrong. */
+  planItemsKnown: boolean;
+  planItemsFailed: boolean;
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
@@ -95,6 +100,9 @@ export interface LayoutRenderCtx {
   osc: OscFeedbackDTO | null;
   /** Live cue manifest and states — for the cue-button object. null until loaded. */
   cues: CuesLive | null;
+  /** Whether the cue manifest has answered — see useCueLiveStatus. A button
+   *  reads "Unbound" only once it is known to be. */
+  cuesKnown: boolean;
   /** Global RossTalk simulate mode, so a button can show it is not really sending.
    *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
   rosstalkSimulate?: boolean;
@@ -1403,7 +1411,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "action-button":
       return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
-      return <CueButton config={c} cues={ctx.cues} interactive={ctx.interactive} ts={ts} />;
+      return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":
       return (
         <OscButton
@@ -2907,7 +2915,11 @@ function ServiceOrderObject({
   const color = s.color ?? "#ffffff";
 
   if (items.length === 0) {
-    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>No service plan</span>;
+    // Three different nothings. The server answers an unconfigured Planning
+    // Center with an empty rundown, so only a plan KNOWN to be empty is "No
+    // service plan"; one not read yet is the dash, and a failed read says so.
+    const why = !ctx.planItemsKnown ? "—" : ctx.planItemsFailed ? "Couldn't load the plan" : "No service plan";
+    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>{why}</span>;
   }
 
   return (
@@ -3139,7 +3151,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const osc = useOscState(want(["osc-button"]));
   // Gated like the rest: a wall of clocks must not open the cues:all channel,
   // whose subscriber is what starts the server's five-second Companion read.
-  const cues = useCueLive(want(["cue-button"]));
+  const cuesStatus = useCueLiveStatus(want(["cue-button"]));
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
@@ -3157,7 +3169,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const onlinePresence = useDisplayPresenceStatus(want(["screen-embed", "home-screens", "home-readiness"]));
   const propInstances = usePropInstances();
   const baptismStatus = useBaptismStatus();
-  const planItems = usePlanItems();
+  const planItemsStatus = usePlanItemsStatus();
   const serviceTimeline = useServiceTimeline();
   const integrationsSnap = useIntegrations();
 
@@ -3165,7 +3177,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cues, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3181,7 +3193,7 @@ type LayoutData = ReturnType<typeof useLayoutData>;
  * gate-render-parity.test.ts reads it to map each ctx field to its gate.
  */
 export function statusCtx(
-  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "integrationsSnap" | "onlinePresence">,
+  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
 ) {
   return {
     obs: d.obsStatus.value,
@@ -3196,6 +3208,11 @@ export function statusCtx(
     scoresKnown: d.scoresStatus.known,
     baptism: d.baptismStatus.value,
     baptismKnown: d.baptismStatus.known,
+    cues: d.cuesStatus.value,
+    cuesKnown: d.cuesStatus.known,
+    planItems: d.planItemsStatus.value,
+    planItemsKnown: d.planItemsStatus.known,
+    planItemsFailed: d.planItemsStatus.failed,
     integrations: d.integrationsSnap.states,
     integrationLabels: d.integrationsSnap.labels,
     integrationsKnown: d.integrationsSnap.known,
@@ -3235,7 +3252,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cues, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3308,7 +3325,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

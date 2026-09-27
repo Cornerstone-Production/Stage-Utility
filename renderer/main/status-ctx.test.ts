@@ -20,9 +20,11 @@ type Input = Parameters<typeof statusCtx>[0];
 /** Each source, and the ctx flag it must light. Sorted, one per line. */
 const FLAG_FOR = {
   baptismStatus: "baptismKnown",
+  cuesStatus: "cuesKnown",
   integrationsSnap: "integrationsKnown",
   obsStatus: "obsKnown",
   onlinePresence: "onlineKnown",
+  planItemsStatus: "planItemsKnown",
   reaperStatus: "reaperKnown",
   resiStatus: "resiKnown",
   scoresStatus: "scoresKnown",
@@ -40,6 +42,10 @@ function input(answered: Source | null): Input {
     youtubeStatus: status("youtubeStatus"),
     scoresStatus: status("scoresStatus"),
     baptismStatus: status("baptismStatus"),
+    cuesStatus: status("cuesStatus"),
+    // `failed` is lit alongside `known`, so a failure flag read off another
+    // hook shows up in the one-source-at-a-time tests below.
+    planItemsStatus: { ...status("planItemsStatus"), failed: answered === "planItemsStatus" },
     integrationsSnap: {
       states: [{ from: "integrationsSnap" }] as never,
       labels: { from: "integrationsSnap" },
@@ -49,8 +55,12 @@ function input(answered: Source | null): Input {
   };
 }
 
+/** Every boolean flag the helper lit — `known` flags and planItemsFailed alike. */
 const litFlags = (out: Record<string, unknown>) =>
-  Object.entries(out).filter(([k, v]) => k.endsWith("Known") && v === true).map(([k]) => k).sort();
+  Object.entries(out).filter(([k, v]) => /(Known|Failed)$/.test(k) && v === true).map(([k]) => k).sort();
+
+/** planItems' answer lights its failure flag with it; see input(). */
+const LIT_WITH: Partial<Record<Source, string>> = { planItemsStatus: "planItemsFailed" };
 
 describe("statusCtx", () => {
   test("carries exactly the known flags a context needs", () => {
@@ -64,7 +74,7 @@ describe("statusCtx", () => {
 
   for (const [source, flag] of Object.entries(FLAG_FOR) as [Source, string][]) {
     test(`${source} answering lights ${flag} and nothing else`, () => {
-      assert.deepEqual(litFlags(statusCtx(input(source))), [flag]);
+      assert.deepEqual(litFlags(statusCtx(input(source))), [flag, LIT_WITH[source]].filter(Boolean).sort());
     });
   }
 
@@ -77,6 +87,8 @@ describe("statusCtx", () => {
     assert.equal(from(out.youtube), "youtubeStatus");
     assert.equal(from(out.scores), "scoresStatus");
     assert.equal(from(out.baptism), "baptismStatus");
+    assert.equal(from(out.cues), "cuesStatus");
+    assert.equal(from(out.planItems), "planItemsStatus");
     assert.equal(from(out.integrations[0]), "integrationsSnap");
     assert.equal(from(out.integrationLabels), "integrationsSnap");
     assert.deepEqual(out.onlineOutputIds, ["onlinePresence"]);
