@@ -60,13 +60,16 @@ function timeline() {
   };
 }
 
-function installFetch({ recordFails = false } = {}): void {
+function installFetch({ recordFails = false, heldList }: { recordFails?: boolean; heldList?: Promise<void> } = {}): void {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
     if (method !== "GET") return ok({ ok: true });
-    if (url === "/api/service-timeline") return ok([timeline()]);
+    if (url === "/api/service-timeline") {
+      if (heldList) await heldList;
+      return ok([timeline()]);
+    }
     if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
@@ -145,6 +148,26 @@ describe("History opens the service named in its URL", () => {
       true,
       "the seeded service never opened from its URL",
     );
+  });
+
+  test("a link opened before the list has loaded shows the service's shape, not the list's", async () => {
+    // The list skeleton turning into a service page is the same jump a click
+    // used to make, so a link that names a service waits in that service's shape.
+    let release: () => void = () => {};
+    const heldList = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    installFetch({ heldList });
+    const { view } = renderHistoryAt(historyServiceHref(KEY));
+    for (let i = 0; i < 6; i++) await settle();
+
+    assert.equal(view.container.querySelector('[data-history-loading="service"]') != null, true, "no service placeholder");
+    assert.ok(text(view.container).includes("All services"), "the way back is there while it loads");
+
+    await act(async () => release());
+    for (let i = 0; i < 6; i++) await settle();
+    assert.equal(isOpen(view), true, "the service opened once the list landed");
+    assert.equal(view.container.querySelector('[data-history-loading="service"]'), null);
   });
 
   test("an unknown key falls back to the list rather than an empty page", async () => {
