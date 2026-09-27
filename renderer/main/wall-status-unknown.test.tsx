@@ -32,6 +32,31 @@ for (const [prop, px] of [["offsetHeight", BOX_PX], ["offsetWidth", 520]] as con
   Object.defineProperty(HTMLElement.prototype, prop, { get: () => px, configurable: true });
 }
 
+/** An EventSource that keeps its listeners, so a test can push a frame down it.
+ *  Installed before anything imports api.ts, which opens one per module. */
+type Frame = (e: { data: string }) => void;
+const listeners = new Map<string, Set<Frame>>();
+(globalThis as unknown as { EventSource: unknown }).EventSource = class {
+  static readonly CONNECTING = 0;
+  readyState = 0;
+  onmessage: unknown = null;
+  onerror: unknown = null;
+  onopen: unknown = null;
+  addEventListener(channel: string, cb: Frame): void {
+    let set = listeners.get(channel);
+    if (!set) listeners.set(channel, (set = new Set()));
+    set.add(cb);
+  }
+  removeEventListener(channel: string, cb: Frame): void {
+    listeners.get(channel)?.delete(cb);
+  }
+  close(): void {}
+};
+function push(channel: string, payload: unknown): void {
+  const data = JSON.stringify(payload);
+  for (const cb of [...(listeners.get(channel) ?? [])]) cb({ data });
+}
+
 const STATE = {
   hourCycle: "24h",
   timezone: null,
@@ -65,8 +90,9 @@ const ANSWERS: Record<string, unknown> = {
   "/api/pco/plan-items": { planId: null, items: [], noteCategories: [] },
 };
 
-/** Every read but the stage state waits here until a test releases it. */
-const held = new Map<string, () => void>();
+/** Every read but the stage state waits here, oldest first, until a test
+ *  releases it. */
+const held = new Map<string, (() => void)[]>();
 /** Per-path answers a single test overrides; cleared between tests. */
 let overrides: Record<string, unknown> = {};
 /** Paths a single test answers with a 502, as the server does when its own
@@ -78,15 +104,17 @@ let failing = new Set<string>();
   if (path === "/api/state") {
     return { ok: true, status: 200, json: async () => STATE, text: async () => JSON.stringify(STATE) };
   }
+  // Decided when the request is made, as a server would: a read released late
+  // still carries the answer for the moment it asked.
+  const fails = failing.has(path);
+  const body = path in overrides ? overrides[path] : (ANSWERS[path] ?? null);
   await new Promise<void>((resolve) => {
-    const prev = held.get(path);
-    held.set(path, () => { prev?.(); resolve(); });
+    held.set(path, [...(held.get(path) ?? []), resolve]);
   });
-  if (failing.has(path)) {
+  if (fails) {
     const err = { error: "upstream read failed" };
     return { ok: false, status: 502, statusText: "Bad Gateway", json: async () => err, text: async () => JSON.stringify(err) };
   }
-  const body = path in overrides ? overrides[path] : (ANSWERS[path] ?? null);
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
@@ -99,16 +127,17 @@ const { StageDisplayView } = await import("./stage-display-view.js");
 const { DashboardView } = await import("./dashboard-view.js");
 const { SplRundownView } = await import("./spl-rundown-view.js");
 const { ObsLiveLabel, ReaperLiveLabel } = await import("../editor/inspector.js");
+const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 /** A fetch, its json() and the hook's then() are three turns apart. */
 const drain = async () => { for (let i = 0; i < 5; i++) await settle(); };
 
 function release(...paths: string[]): void {
-  for (const [path, go] of [...held]) {
+  for (const [path, waiting] of [...held]) {
     if (paths.length && !paths.includes(path)) continue;
     held.delete(path);
-    go();
+    for (const go of waiting) go();
   }
 }
 
@@ -117,6 +146,9 @@ afterEach(async () => {
   release();
   cleanup();
   await drain();
+  // A pushed stage state is cached for the next subscriber; the next test's
+  // renderer must not start on this one's plan.
+  resetReplayCache();
 });
 after(async () => { await drain(); teardown(); });
 
@@ -343,4 +375,55 @@ describe("the editor inspector's live line makes no claim before its recorder an
       assert.match(text(box), /Not connected/, `the ${name} row never said so once ${name} answered disconnected`);
     });
   }
+});
+
+describe("a plan change never shows the old plan's rundown as the new one's", () => {
+  // The service order and the SPL rundown share usePlanItemsStatus. Holding on
+  // to plan A's items across a switch to plan B drew A's rundown as B's, with no
+  // sign anything was wrong — script-view-plan-switch.test.tsx is the same rule
+  // for ScriptView, where it was worse than showing nothing too.
+  const item = (title: string) => ({ id: title, title, itemType: "item", lengthSec: 60, sequence: 1, notesByCategory: {}, description: null });
+  const onPlan = (planId: string) =>
+    act(async () => {
+      push("stage:state-changed", { ...STATE, planId });
+      await drain();
+    });
+
+  for (const [name, mount] of [
+    ["service order", () => wall({ type: "service-order" })],
+    ["SPL rundown", () => draw(React.createElement(SplRundownView, { displayId: "out-1" }))],
+  ] as const) {
+    test(`${name}: plan B's read fails`, async () => {
+      overrides = { [PLAN]: { planId: "plan-a", items: [item("Welcome (plan A)")], noteCategories: [] } };
+      const el = await mount();
+      await onPlan("plan-a");
+      await answer(PLAN);
+      assert.match(text(el), /Welcome \(plan A\)/, "fixture: plan A's rundown never drew");
+
+      failing = new Set([PLAN]);
+      await onPlan("plan-b");
+      assert.ok(held.has(PLAN), "plan B's read was not held — the fixture proves nothing");
+      assert.doesNotMatch(text(el), /plan A/, `plan A's rundown stayed up while plan B's read was in flight: "${text(el)}"`);
+      await answer(PLAN);
+      assert.doesNotMatch(text(el), /plan A/, `plan A's rundown stayed up after plan B's read failed: "${text(el)}"`);
+      assert.match(text(el), /Couldn't load the plan/, `a failed read for plan B did not say so: "${text(el)}"`);
+    });
+  }
+});
+
+test("a slow answer for the plan just left does not overwrite the live plan's", async () => {
+  const item = (title: string) => ({ id: title, title, itemType: "item", lengthSec: 60, sequence: 1, notesByCategory: {}, description: null });
+  overrides = { [PLAN]: { planId: "plan-a", items: [item("Welcome (plan A)")], noteCategories: [] } };
+  const el = await wall({ type: "service-order" });
+  await act(async () => { push("stage:state-changed", { ...STATE, planId: "plan-a" }); await drain(); });
+  overrides = { [PLAN]: { planId: "plan-b", items: [item("Welcome (plan B)")], noteCategories: [] } };
+  await act(async () => { push("stage:state-changed", { ...STATE, planId: "plan-b" }); await drain(); });
+
+  // Plan B's read answers first; plan A's, asked earlier, lands after it.
+  const waiting = held.get(PLAN) ?? [];
+  assert.ok(waiting.length >= 2, `expected plan A's and plan B's reads in flight, found ${waiting.length}`);
+  await act(async () => { waiting.at(-1)!(); await drain(); });
+  assert.match(text(el), /Welcome \(plan B\)/, `plan B's own answer did not draw: "${text(el)}"`);
+  await answer(PLAN);
+  assert.doesNotMatch(text(el), /plan A/, `plan A's late answer overwrote plan B's rundown: "${text(el)}"`);
 });
