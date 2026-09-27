@@ -77,6 +77,7 @@ import {
 } from "../main/layout-objects";
 import { DEFAULT_READOUT_ALIGN, READOUT_ALIGNED_TYPES } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
+import { numberParamDefault } from "@main/services/automation-param-validation";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import {
@@ -284,7 +285,20 @@ export function RossTalkButtonConfig({
           { value: "", label: "Pick a command…" },
           ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
         ]}
-        onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
+        onChange={(v) => {
+          // SEEDED, not left {} — the same reason the rule editor's
+          // seedNumberDefaults runs on pick: this inspector displays each
+          // number param at its default the instant a command is chosen (the
+          // fallback two lines below), so leaving params empty made the
+          // control show a value ("Bank 1, Custom control 1") the wire press
+          // then refused as missing.
+          const picked = commands.find((cmd) => cmd.id === v) ?? null;
+          const seeded: Record<string, string | number> = {};
+          if (picked) {
+            for (const p of picked.params) if (p.type === "number") seeded[p.key] = numberParamDefault(p);
+          }
+          onConfig({ ...c, commandId: v || null, params: seeded });
+        }}
       />
       {command?.params.map((p) =>
         p.type === "number" ? (
@@ -292,7 +306,7 @@ export function RossTalkButtonConfig({
             key={p.key}
             label={p.label}
             hint={p.help}
-            value={Number(c.params[p.key] ?? p.min ?? 0)}
+            value={Number(c.params[p.key] ?? numberParamDefault(p))}
             min={p.min}
             max={p.max}
             onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}

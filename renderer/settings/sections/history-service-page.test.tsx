@@ -14,33 +14,15 @@ import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
+import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 import { fmtTime } from "./overview-data.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** api.ts opens an SSE stream on first use — most tests here never push on
- *  it, but a few drive a live channel through `FakeEventSource.last`. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
+// api.ts opens an SSE stream on first use — most tests here never push on
+// it, but a few drive a live channel through `FakeEventSource.last`.
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
   observe(): void {}
@@ -166,30 +148,20 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
-const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-  await import("@tanstack/react-router");
+const { RouterContextProvider } = await import("@tanstack/react-router");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
-/** A real (memory-history) router carrying /history/manage (where this page
- *  itself lives, so useSelectedServiceKey's own navigation has somewhere
- *  real to resolve) and /baptism (the Baptisms card's "Open in Baptisms"
- *  link) — the same mechanism past-sessions.test.tsx uses for its own
- *  cross-link, so the rendered href is AppLink/Link's real resolution, never
- *  a hand-built string compared against itself. Only the ONE test that
- *  needs a real destination for that link asks for this; every other test
- *  keeps rendering with no router at all, exactly as before. */
-function routerWithBaptismDestination() {
-  const rootRoute = createRootRoute({});
-  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-  const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
-  return createRouter({
-    routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
-    history: createMemoryHistory({ initialEntries: ["/history/manage"] }),
-  });
-}
+// A real (memory-history) router carrying /history/manage (where this page
+// itself lives, so useSelectedServiceKey's own navigation has somewhere real
+// to resolve) and /baptism (the Baptisms card's "Open in Baptisms" link) — the
+// same mechanism past-sessions.test.tsx uses for its own cross-link, so the
+// rendered href is AppLink/Link's real resolution, never a hand-built string
+// compared against itself. Only the ONE test that needs a real destination
+// for that link asks for this; every other test keeps rendering with no
+// router at all, exactly as before.
 
 async function openTheService(Section: React.ComponentType, opts: { router?: ReturnType<typeof routerWithBaptismDestination> } = {}) {
   const section = opts.router
@@ -390,6 +362,103 @@ describe("the History service page", () => {
     assert.equal(figure("Longest").sub, "person 1");
     assert.equal(figure("Vs plan").value, "−1:00", "480s segment vs 540s planned");
     assert.equal(figure("Vs plan").sub, "9:00 planned");
+  });
+
+  // The page passes its OWN det.items into HistorySessionChart — session-chart.tsx
+  // takes them as a prop rather than fetching its own copy (see that file's own
+  // "used to fetch its own plan items once per serviceKey" test), so nothing here
+  // proves the wiring unless it goes through THIS page's state, edited through
+  // the page's own Edit times flow, not a component rerender the page never
+  // triggers on its own.
+  test("the Baptisms card's chart plan lane draws this page's own items, and follows an item-time edit", async (t) => {
+    // A tailored fixture: the shared timeline()/baptisms() pair's session and
+    // item windows never overlap at all (see the six-figures test's own
+    // comment above), so neither would put anything in the plan lane.
+    let tl = {
+      ...timeline(),
+      items: [
+        { itemId: "song", title: "Baptism Song", sequence: 0, plannedLengthSec: 300, startedAt: iso("20:41:00"), endedAt: iso("20:46:00"), actualDurationSec: 300, counted: true },
+      ],
+    };
+    const laneSession = {
+      id: "b-plan-lane",
+      startedAt: iso("20:41:00"),
+      finishedAt: iso("20:49:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
+    };
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string; body?: unknown }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method === "POST" && url === "/api/history/item-times") {
+        const body = JSON.parse(String(init?.body)) as { itemId: string; startedAt?: string | null; endedAt?: string | null };
+        tl = {
+          ...tl,
+          items: tl.items.map((it) =>
+            it.itemId === body.itemId
+              ? {
+                  ...it,
+                  startedAt: typeof body.startedAt === "string" ? body.startedAt : it.startedAt,
+                  endedAt: typeof body.endedAt === "string" ? body.endedAt : it.endedAt,
+                }
+              : it,
+          ),
+        };
+        return ok(tl);
+      }
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([laneSession]);
+      if (/^\/api\/baptism\/lane\?/.test(url)) {
+        // One raw span inside the session's own window — with none at all,
+        // hasChart is false and the card shows the empty note instead of a
+        // chart at all (session-chart.tsx's own gate on sessionOnlySpans).
+        return ok({ spans: [{ kind: "testimony", person: 1, startedAt: iso("20:41:30"), endedAt: iso("20:43:00") }] });
+      }
+      if (url === "/api/service-timeline") return ok([tl]);
+      if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    const view = await openTheService(ServiceHistorySection, { router: routerWithBaptismDestination() });
+    t.after(() => cleanup());
+
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    assert.ok(bap, "expected the Baptisms card to render");
+    const rectX = () => bap.querySelector("[data-plan-segment] rect")?.getAttribute("x");
+    const before = rectX();
+    assert.ok(before, "expected the page's own item to draw a plan segment in the chart, not an empty items=[] wiring");
+
+    const editBtn = [...view.container.querySelectorAll('[data-testid="history-actions"] button')].find((b) => text(b) === "Edit times")!;
+    assert.ok(editBtn, "expected the Edit times action");
+    fireEvent.click(editBtn);
+    await settle();
+
+    const started = view.container.querySelector('input[aria-label="Started — Baptism Song"]') as HTMLInputElement | null;
+    assert.ok(started, "expected the item's own Started field once Edit times is on");
+    fireEvent.change(started!, { target: { value: "20:44:00" } });
+    await settle();
+
+    const saveItemBtn = [...view.container.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Save times — Baptism Song");
+    assert.ok(saveItemBtn, "expected the item's own Save button once its field is dirty");
+    fireEvent.click(saveItemBtn!);
+    await settle();
+    await settle();
+
+    assert.notEqual(
+      rectX(),
+      before,
+      "the Baptisms card's chart must move its plan lane to the edited item time immediately, without a reload",
+    );
   });
 
   test("Vs plan says the plan has no lengths rather than pretending they are zero", async (t) => {
@@ -699,6 +768,173 @@ describe("the History service page", () => {
     assert.ok(
       averageOccupancy(rec)! >= rec.minOccupancy!,
       `an average below the recorded low is not an average of the service: ${averageOccupancy(rec)} < ${rec.minOccupancy}`,
+    );
+  });
+
+  // fmtDur(0) prints "0:00" for a real instant, false for a testimony or
+  // baptism average that never happened at all. A grouped Finish during the
+  // testimonies is a real, common session: real testimony time, nobody
+  // baptized.
+  test("the pasted report dashes an average whose baptism (or testimony) never happened, never '0:00'", async () => {
+    const { buildReport } = await import("./service-history-section.js");
+    const nobodyBaptized = [
+      {
+        id: "b-nobody",
+        startedAt: iso("20:45:00"),
+        finishedAt: iso("20:47:00"),
+        title: "Evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        serviceKey: KEY,
+        people: [{ testimonyMs: 60_000, baptizeMs: 0 }, { testimonyMs: 50_000, baptizeMs: 0 }],
+      },
+    ] as unknown as BaptismSession[];
+    const lines = buildReport(timeline() as unknown as ServiceTimeline, null, null, nobodyBaptized).split("\n");
+    assert.equal(
+      lines.find((l) => l.startsWith("baptism ")),
+      "baptism 0:00 (avg —)",
+      "the total is a real 0:00 (nobody baptized); the AVERAGE must not also claim a baptism took no time",
+    );
+    assert.equal(
+      lines.find((l) => l.startsWith("testimony ")),
+      "testimony 1:50 (avg 0:55)",
+      "testimony DID happen — this real average must not dash just because nobody was baptized",
+    );
+  });
+
+  test("historyBaptismFigures dashes Testimony/Baptism total's own average the same way, for the same reason", async () => {
+    const { historyBaptismFigures } = await import("./service-history-section.js");
+    const nobodyBaptized = [
+      {
+        id: "b-nobody",
+        startedAt: iso("20:45:00"),
+        finishedAt: iso("20:47:00"),
+        title: "Evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        serviceKey: KEY,
+        people: [{ testimonyMs: 60_000, baptizeMs: 0 }],
+      },
+    ] as unknown as BaptismSession[];
+    const figs = historyBaptismFigures(nobodyBaptized, []);
+    assert.equal(figs.find((f) => f.key === "baptism")?.sub, "avg —");
+    assert.equal(figs.find((f) => f.key === "testimony")?.sub, "avg 1:00");
+  });
+
+  // Same code on main. mergeServiceRecords deletes the source's attendance record with no
+  // push naming the deletion — only the target's own merged record is
+  // broadcast — so doMerge calling only reload() (the timeline list) left the
+  // source's stale entry sitting in attList. It then resurrected itself as an
+  // attendance-only "no items recorded" row (and an extra Trends point) the
+  // instant `rows` recomputed, until the page was reopened.
+  test("merging a mis-split service clears the source's row everywhere, not just from the timeline list", async (t) => {
+    const SOURCE_KEY = "salt:plan-2:early";
+    const sourceTimeline = () => ({
+      serviceKey: SOURCE_KEY,
+      serviceTypeId: "salt",
+      serviceTypeName: "Weekend",
+      planId: "plan-2",
+      planTitle: "Early Service",
+      seriesTitle: "Kickoff",
+      serviceDate: DAY,
+      serviceTimeId: "early",
+      serviceTimeStartsAt: iso("18:00:00"),
+      startedAt: iso("18:00:00"),
+      endedAt: iso("18:30:00"),
+      items: [
+        { itemId: "x", title: "Welcome", sequence: 0, plannedLengthSec: 300, startedAt: iso("18:00:00"), endedAt: iso("18:05:00"), actualDurationSec: 300 },
+      ],
+    });
+    const sourceAttendance = () => ({
+      serviceKey: SOURCE_KEY, serviceTypeId: "salt", serviceDate: DAY, planTitle: "Early Service",
+      startedAt: iso("18:00:00"), endedAt: iso("18:30:00"),
+      peakAttendance: 50, peakOccupancy: 40, minOccupancy: 10, totalAttendance: 50,
+      lastAttendance: 50, lastOccupancy: 10, attendanceBaseline: 0,
+      samples: [{ t: iso("18:05:00"), attendance: 50, occupancy: 40 }],
+    });
+
+    let merged = false;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (method === "POST" && url === "/api/history/merge") {
+        merged = true;
+        return ok({ ok: true });
+      }
+      if (method !== "GET") return ok({ ok: true });
+      if (url === "/api/baptism/sessions") return ok([]);
+      // The timeline LIST reflects the merge (reload() re-fetches it) — the
+      // source is gone from here either way. The bug is entirely about the
+      // OTHER list, attList, below.
+      if (url === "/api/service-timeline") return ok(merged ? [timeline()] : [timeline(), sourceTimeline()]);
+      // attList is never re-fetched by doMerge at all — this always answers
+      // with BOTH records, exactly as a real server would if nothing ever
+      // asked it again (matching the bug's own "until the page is reopened").
+      if (url === "/api/attendance/history?summary=1") return ok([attendance(), sourceAttendance()]);
+      if (url === "/api/spl/summary") return ok([]);
+      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+      if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
+      if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
+      if (url === `/api/service-timeline/${encodeURIComponent(SOURCE_KEY)}`) return ok(sourceTimeline());
+      if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+      if (url === `/api/attendance/history/${encodeURIComponent(SOURCE_KEY)}`) return ok(sourceAttendance());
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
+      if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    };
+    t.after(() => cleanup());
+
+    const view = render(
+      React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection), React.createElement(ConfirmHost)),
+    );
+    await settle();
+    await settle();
+    await settle();
+
+    const sourceRow = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Early Service"));
+    assert.ok(sourceRow, "sanity: the source service's own row must render before the merge");
+    fireEvent.click(sourceRow!);
+    await settle();
+    await settle();
+
+    const mergeBtn = [...document.body.querySelectorAll("button")].find((b) => text(b).includes("Merge…"));
+    assert.ok(mergeBtn, "expected the Merge action — two same-day recordings must offer it");
+    fireEvent.click(mergeBtn!);
+    await settle();
+
+    const select = document.querySelector("select") as HTMLSelectElement;
+    assert.ok(select, "expected the merge-target picker");
+    fireEvent.change(select, { target: { value: KEY } });
+    await settle();
+
+    const startMerge = [...document.body.querySelectorAll("button")].find((b) => text(b) === "Merge + delete this");
+    assert.ok(startMerge, "expected the panel's own Merge + delete this action");
+    fireEvent.click(startMerge!);
+    await settle();
+
+    const dialog = document.querySelector('[role="alertdialog"]');
+    assert.ok(dialog, "expected the shared confirm dialog to open");
+    const confirmBtn = [...dialog!.querySelectorAll("button")].find((b) => text(b) === "Merge + delete this");
+    assert.ok(confirmBtn, "expected the dialog's own confirm action");
+    fireEvent.click(confirmBtn!);
+    await settle();
+    await settle();
+    await settle();
+
+    // doMerge jumps straight to the TARGET's own detail view (setSelectedKey),
+    // which replaces the all-services list entirely — the ghost row lives in
+    // THAT list, not the detail page, so it can only be seen by going back to it.
+    const back = [...document.body.querySelectorAll("button")].find((b) => text(b).includes("All services"));
+    assert.ok(back, "expected the '← All services' back action after the merge lands on the target's page");
+    fireEvent.click(back!);
+    await settle();
+    await settle();
+
+    assert.equal(
+      [...document.body.querySelectorAll("button")].some((b) => text(b).includes("Early Service")),
+      false,
+      "the merged-away source must not resurrect itself as an attendance-only ghost row",
     );
   });
 

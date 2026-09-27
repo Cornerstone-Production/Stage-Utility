@@ -95,12 +95,12 @@ const withQuery = (children: React.ReactNode) =>
  * IntegrationDialog builds ProdCom's dialog from — holding one ColorField, the
  * way caption-colors-panel.tsx holds one per channel.
  */
-function drawColorFieldInADialog() {
+function drawColorFieldInADialog(onOpenChange: (open: boolean) => void = () => {}) {
   return render(
     withQuery(
       React.createElement(
         DialogRoot,
-        { open: true, onOpenChange: () => {} },
+        { open: true, onOpenChange },
         React.createElement(
           DialogContent,
           { "aria-describedby": undefined },
@@ -180,6 +180,30 @@ describe("the colour panel over a modal dialog", () => {
     assert.ok(
       document.activeElement === first,
       `Tab off the last control landed on ${where(document.activeElement)} — it left the panel, into the dialog behind it`,
+    );
+  });
+
+  test("THE GUARD: Escape closes only the panel, not the dialog around it", async () => {
+    // Radix's DismissableLayer listens for Escape on the document in the
+    // capture phase, and the dialog's own Content is a layer too — the
+    // ancestor's capture-phase handler runs before the panel ever sees the
+    // key, so without the panel registering as a HIGHER layer the dialog
+    // dismisses right alongside it.
+    const changes: boolean[] = [];
+    drawColorFieldInADialog((open) => changes.push(open));
+    await settle();
+    fireEvent.click(trigger());
+    await settle();
+    assert.ok(document.activeElement === panel(), "precondition: the panel is open and focused");
+
+    fireEvent.keyDown(panel(), { key: "Escape" });
+    await settle();
+
+    assert.equal(document.querySelector("[data-color-panel]"), null, "the panel should have closed");
+    assert.deepEqual(
+      changes,
+      [],
+      `Escape meant for the colour panel also asked the dialog to close: onOpenChange(${JSON.stringify(changes)})`,
     );
   });
 });

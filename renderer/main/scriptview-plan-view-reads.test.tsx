@@ -17,33 +17,12 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
+import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-/** A stream a test can push on, as the server's SSE does. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  onopen: unknown = null;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, act } = await import("@testing-library/react");
@@ -122,6 +101,73 @@ test("a failed service-type read under a slug URL says so instead of spinning", 
     assert.ok(logged(f.logs, /service types/i), `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`);
   } finally {
     f.restore();
+  }
+});
+
+test("a transient service-type failure recovers on the page's own retry timer, not a manual reload", async () => {
+  const intervals: (() => void)[] = [];
+  const realSetInterval = globalThis.setInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    intervals.push(fn);
+    return realSetInterval(fn, ms);
+  }) as typeof setInterval;
+  let typeReads = 0;
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/service-types")) {
+      typeReads++;
+      return typeReads === 1 ? reply(502, { error: "Planning Center answered 429" }) : ok([{ id: "st1", name: "Weekend" }]);
+    }
+    if (url.includes("/api/scriptview/layouts")) return ok([{ id: "svl1", name: "Audio", order: 0, columnRoles: ["r1"] }]);
+    if (url.includes("/api/scriptview/roles")) return ok([{ id: "r1", name: "Sound", members: ["Audio"] }]);
+    if (url.includes("/api/scriptview/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/pco/live")) return ok(null);
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    return ok({});
+  });
+  try {
+    await mount();
+    assert.match(alerts(), /Couldn't load the service types/i);
+    await act(async () => { for (const fn of [...intervals]) fn(); });
+    await settle();
+    assert.equal(alerts(), "", "the failure cleared once the retry succeeded");
+    assert.ok(typeReads > 1, "the page asked for the service types again on its own, without a reload");
+  } finally {
+    f.restore();
+    globalThis.setInterval = realSetInterval;
+  }
+});
+
+test("a transient layouts/roles failure recovers the same way", async () => {
+  const intervals: (() => void)[] = [];
+  const realSetInterval = globalThis.setInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    intervals.push(fn);
+    return realSetInterval(fn, ms);
+  }) as typeof setInterval;
+  let layoutReads = 0;
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }]);
+    if (url.includes("/api/scriptview/layouts")) {
+      layoutReads++;
+      if (layoutReads === 1) throw new TypeError("fetch failed");
+      return ok([{ id: "svl1", name: "Audio", order: 0, columnRoles: ["r1"] }]);
+    }
+    if (url.includes("/api/scriptview/roles")) return ok([{ id: "r1", name: "Sound", members: ["Audio"] }]);
+    if (url.includes("/api/scriptview/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/pco/live")) return ok(null);
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    return ok({});
+  });
+  try {
+    await mount();
+    assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i);
+    await act(async () => { for (const fn of [...intervals]) fn(); });
+    await settle();
+    assert.equal(alerts(), "", "the layouts failure cleared once the retry succeeded");
+    assert.ok(layoutReads > 1, "the page asked for the layouts again on its own, without a reload");
+  } finally {
+    f.restore();
+    globalThis.setInterval = realSetInterval;
   }
 });
 
@@ -212,6 +258,46 @@ test("a plan that cannot be read says so, and reaches the log", async () => {
     await mount();
     assert.notEqual(alerts(), "", "the body says the plan could not load");
     assert.ok(logged(f.logs, /could not read the rundown for service type st1/), `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`);
+  } finally {
+    f.restore();
+  }
+});
+
+test("a slug switch whose new rundown fails to load drops the stale plan, rather than keeping it on screen", async () => {
+  // Weekend resolves and loads; the page then navigates (a rerender with new
+  // props, same instance — the shape a client-side route change takes) to
+  // Youth, whose rundown fails.
+  const RUNDOWN_WEEKEND = { ...RUNDOWN, serviceTypeId: "st1", planTitle: "Sunday service" };
+  const f = stubFetchWithLog((url) => {
+    if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }, { id: "st2", name: "Youth" }]);
+    if (url.includes("/api/scriptview/layouts")) return ok([]);
+    if (url.includes("/api/scriptview/roles")) return ok([]);
+    if (url.includes("/api/scriptview/rundown")) {
+      const typeId = new URL(url, "http://x").searchParams.get("serviceTypeId");
+      return typeId === "st2" ? reply(500, { error: "boom" }) : ok(RUNDOWN_WEEKEND);
+    }
+    if (url.includes("/api/pco/live")) return ok(null);
+    if (url.includes("/api/state")) return ok({ pcoConfigured: true });
+    return ok({});
+  });
+  try {
+    const el = (serviceTypeParam: string) =>
+      React.createElement(TooltipProvider, null, React.createElement(ScriptViewPlan, { serviceTypeParam, layoutParam: "audio" }));
+    const view = render(el("weekend"));
+    await settle();
+    await settle();
+    await settle();
+    assert.equal(document.body.textContent?.includes("Sunday service"), true, "Weekend's plan is on screen");
+    view.rerender(el("youth"));
+    await settle();
+    await settle();
+    await settle();
+    assert.equal(
+      document.body.textContent?.includes("Sunday service"),
+      false,
+      "Weekend's plan must not still read as current once the page has moved to Youth",
+    );
+    assert.notEqual(alerts(), "", "the failure is shown, since there is nothing good left to fall back on");
   } finally {
     f.restore();
   }

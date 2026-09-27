@@ -47,6 +47,7 @@ import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STYLES = path.join(HERE, "..", "styles.css");
@@ -61,11 +62,6 @@ const teardown = installDom();
 // EventSource on mount. jsdom has none, and what this measures is the colour
 // token an object inherits — fed by the cascade either way — so a stub that
 // never emits is the whole requirement.
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const realFetch = globalThis.fetch;

@@ -2,7 +2,7 @@ import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, ErrorNote, Collapsible, confirm } from "../../components/ui";
+import { Button, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, ErrorNote, Collapsible, confirm, SkeletonRows } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { pcoConnected, useStageState } from "../../main/use-stage-state";
@@ -159,6 +159,10 @@ export function ScriptViewSection() {
 
 
   async function persist(next: ScriptViewLayout[]) {
+    // The settings read (this page's own layouts list) has not landed yet: `layouts`
+    // is still `[]` regardless of what is actually saved. Posting now would replace
+    // every real layout with whatever `next` is built from that empty starting point.
+    if (!settingsRead) return;
     setLayouts(next);
     try { await invoke("scriptview:saveLayouts", { layouts: next }); }
     catch (e) { setError(errorMessage(e)); }
@@ -168,6 +172,7 @@ export function ScriptViewSection() {
     persist(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   function addLayout() {
+    if (!settingsRead) return;
     const order = sortedLayouts.length ? Math.max(...sortedLayouts.map((l) => l.order)) + 1 : 0;
     const layout: ScriptViewLayout = {
       id: uid(), name: `Layout ${sortedLayouts.length + 1}`, order,
@@ -285,6 +290,11 @@ export function ScriptViewSection() {
 
       {failed.has("settings") ? (
         <ErrorNote>Couldn't load the ScriptView layouts. Nothing has been changed; reload the page to try again.</ErrorNote>
+      ) : !settingsRead ? (
+        // Drawn in place of the empty state below, whose Add layout button would
+        // otherwise post a one-layout list over every saved layout the read has
+        // not answered with yet.
+        <SkeletonRows rows={3} />
       ) : sortedLayouts.length === 0 ? (
         <EmptyState
           title="No layouts yet"

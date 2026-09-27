@@ -28,6 +28,7 @@
 // this repo has no `ws` dependency. Only what a test needs is implemented: text
 // and close frames, no fragmentation, no extensions, no compression.
 
+import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
 import * as http from "node:http";
 import type { Duplex } from "node:stream";
@@ -152,6 +153,14 @@ export type StubOptions = {
    */
   delayTranscriptMs?: (url: URL) => number;
   /**
+   * Like `delayTranscriptMs`, but the answer is COMPUTED on arrival and only
+   * sent late — what a real box does when it reads its history and the reply
+   * is slow getting back. `delayTranscriptMs` computes it when the hold ends,
+   * so anything added during the hold is in it; this one's answer describes
+   * the moment the request arrived.
+   */
+  delayTranscriptAnswerMs?: (url: URL) => number;
+  /**
    * Like `delayTranscriptMs`, but applied to EVERY request before its own
    * handler runs — channels, keywords, transcript, alike. Independent of
    * `delayTranscriptMs`, which only ever covers `/api/v1/transcript`, so no
@@ -160,6 +169,18 @@ export type StubOptions = {
    * stopped while a REST read that is not the transcript is still in flight.
    */
   delayRequestMs?: (url: URL) => number;
+  /**
+   * How long to hold a WebSocket upgrade before answering it, decided per
+   * request from its headers. Return 0 for no delay.
+   *
+   * The client's refused-upgrade probe (see prodcom-service.ts's probeUpgrade)
+   * arrives on this same path, named by its User-Agent, and a real one can take
+   * seconds. Holding it is what opens the window where a newer attempt comes up
+   * while the probe about an older one is still out. Whether to refuse is
+   * decided when the request ARRIVES, so a held request is answered the way the
+   * box would have answered it then, whatever setRefuseWebSocket() says since.
+   */
+  delayUpgradeMs?: (headers: http.IncomingHttpHeaders) => number;
   /** Bind to this exact port rather than an ephemeral one — so a test can close
    *  one stub and start another on the same port, simulating a box that dropped
    *  off the network and came back rather than one that changed address. */
@@ -235,6 +256,11 @@ export type ProdComStub = {
    *  whatever has already been sent — a mid-stream body error (client sees
    *  `res.on("error")`, ECONNRESET), not the clean end `close()` sends. */
   sseBreakAll(): void;
+  /** Reset every open SSE stream's TCP connection, AFTER its 200 — an RST, not
+   *  the FIN sseBreakAll sends. What a box that crashed, or a peer the
+   *  keepalive has given up on, looks like: Node reports it on the client's
+   *  REQUEST (`req.on("error")`, ECONNRESET), which sseBreakAll never reaches. */
+  sseResetAll(): void;
   /** Resolve once at least `n` WebSocket upgrades have been accepted. */
   waitForUpgrades(n: number, timeoutMs?: number): Promise<void>;
   /** Resolve once at least `n` SSE streams have been opened. */
@@ -316,6 +342,28 @@ function clientFrameType(text: string): string | null {
   if (!parsed || typeof parsed !== "object") return null;
   const type = (parsed as { type?: unknown }).type;
   return typeof type === "string" ? type : null;
+}
+
+/**
+ * Poll `ready` every 5ms until it's true, or fail the test after `timeoutMs`.
+ *
+ * Shared by the ProdCom test suites that drive the real client against this
+ * stub: each one waits on a condition of the SERVICE (a socket open, a line on
+ * the buffer, a report pushed), which the stub has no way to notify on — unlike
+ * `until()` above, which is this file's own internal wait for its OWN state and
+ * stays private to startProdComStub().
+ */
+export async function eventually(
+  ready: () => boolean,
+  what: string | (() => string),
+  timeoutMs = 3000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ready()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
 }
 
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
@@ -451,17 +499,26 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
           ? entries.filter((e) => Date.parse(e.date) > Date.parse(since))
           : entries;
       const page = filtered.slice(offset, offset + limit);
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          data: page,
-          meta: {
-            timestamp: peerNow(),
-            totalCount: filtered.length,
-            hasMore: offset + page.length < filtered.length,
-          },
-        }),
-      );
+      const body = JSON.stringify({
+        data: page,
+        meta: {
+          timestamp: peerNow(),
+          totalCount: filtered.length,
+          hasMore: offset + page.length < filtered.length,
+        },
+      });
+      const answerIn = options.delayTranscriptAnswerMs?.(url) ?? 0;
+      const answer = (): void => {
+        if (res.destroyed) return;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(body);
+      };
+      if (answerIn > 0) {
+        const timer = setTimeout(answer, answerIn);
+        timer.unref?.();
+      } else {
+        answer();
+      }
       return;
     }
 
@@ -501,9 +558,21 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
   server.on("upgrade", (req, socket: Duplex) => {
     requests.push({ method: req.method ?? "GET", url: req.url ?? "", headers: req.headers });
     notify();
+    const refuse = state.refuseWebSocket;
+    const delay = options.delayUpgradeMs?.(req.headers) ?? 0;
+    if (delay > 0) {
+      const timer = setTimeout(() => answerUpgrade(req, socket, refuse), delay);
+      timer.unref?.();
+      return;
+    }
+    answerUpgrade(req, socket, refuse);
+  });
+
+  function answerUpgrade(req: http.IncomingMessage, socket: Duplex, refuse: boolean): void {
+    if (socket.destroyed) return;
     const url = new URL(req.url ?? "/", "http://stub");
 
-    if (state.refuseWebSocket || url.pathname !== "/api/v1/ws") {
+    if (refuse || url.pathname !== "/api/v1/ws") {
       socket.write("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
@@ -563,7 +632,7 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       ),
     );
     notify();
-  });
+  }
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address();
@@ -646,6 +715,10 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
     },
     sseBreakAll: () => {
       for (const s of sseStreams) s.destroy();
+      sseStreams.clear();
+    },
+    sseResetAll: () => {
+      for (const s of sseStreams) s.socket?.resetAndDestroy();
       sseStreams.clear();
     },
     waitForUpgrades: (n, timeoutMs = 4000) => until(() => state.wsUpgrades >= n, `${n} websocket upgrade(s)`, timeoutMs),

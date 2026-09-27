@@ -29,33 +29,14 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
+import { FakeEventSource } from "../../../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
 
-/** A minimal fake EventSource that can push a named channel's payload on
- *  demand — what the "a push is a hint, never an answer" tests below use to
- *  prove it. `FakeEventSource.last` is whichever instance api.ts's SSE
- *  client most recently constructed. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
+// `FakeEventSource.last` is whichever instance api.ts's SSE client most
+// recently constructed — what the "a push is a hint, never an answer" tests
+// below use to prove it.
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
@@ -68,23 +49,7 @@ const { rebuildButtonsIn, tooltipTextOf } = await import("./rebuild-button-test-
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-const IDLE: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
-  personNumber: 0,
-  baptismIndex: 0,
-  armed: false,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  sessionStartedAt: null,
-  finishedAt: null,
-  people: [],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-  serviceKey: null,
-};
+const IDLE: BaptismState = baptismState({ serviceKey: null });
 
 function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
   return {
@@ -151,7 +116,12 @@ function stubFetch(
         if (a?.code) errBody.code = a.code;
         return ok(errBody, opts.rebuildStatus);
       }
-      return ok(opts.rebuildAnswer ?? { rows: 3, sessions: 1, updated: 1, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 });
+      // restoredIds is a REQUIRED field on the real BaptismRebuildOutcome
+      // (history-edit.ts) — omitting it here used to go unnoticed because
+      // runBaptismRebuild called onRebuilt() before ever reading it; now that
+      // it decides whether to call onRebuilt() at all, an outcome missing it
+      // threw and read as "Rebuild failed" instead of the intended default.
+      return ok(opts.rebuildAnswer ?? { rows: 3, sessions: 1, updated: 1, added: 0, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: [] });
     }
     return ok({});
   }) as unknown as typeof fetch;
@@ -309,18 +279,38 @@ test("cancelling the confirm reaches neither the server nor onRebuilt", async ()
   }
 });
 
-test("confirming calls onRebuilt so Past sessions and Trends can refresh", async () => {
+// A rebuild that restored something also brings the server's own
+// "baptism:rebuilt" push, but onRebuilt still fires from the answer itself:
+// a push lost to an SSE reconnect must not leave Past sessions stale.
+test("confirming a rebuild that restored something calls onRebuilt from its own answer", async () => {
   const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
   const { view, rebuiltCount, restore } = await mount(state, [], {
     live: false,
-    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 },
+    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: ["restored-1"] },
   });
   try {
     fireEvent.click(rebuildButton(view.container));
     await settle();
     fireEvent.click(findButton(document.body, "Rebuild")!);
     await settle();
-    assert.equal(rebuiltCount(), 1, "onRebuilt must fire exactly once after a successful rebuild");
+    assert.equal(rebuiltCount(), 1, "onRebuilt must fire so Past sessions/Trends reload, push or no push");
+  } finally {
+    restore();
+  }
+});
+
+test("confirming a NO-OP rebuild (nothing restored) calls onRebuilt directly — no push will ever follow it", async () => {
+  const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
+  const { view, rebuiltCount, restore } = await mount(state, [], {
+    live: false,
+    rebuildAnswer: { rows: 5, sessions: 2, updated: 0, added: 0, unchanged: 2, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: [] },
+  });
+  try {
+    fireEvent.click(rebuildButton(view.container));
+    await settle();
+    fireEvent.click(findButton(document.body, "Rebuild")!);
+    await settle();
+    assert.equal(rebuiltCount(), 1, "a no-op rebuild's onRebuilt is the ONLY reload it gets — history-edit.ts never broadcasts for it");
   } finally {
     restore();
   }
@@ -339,6 +329,7 @@ test("describeBaptismRebuild names updated, added, newer, disagreeing and kept �
       invalid: 0,
       kept: 3,
       full: 0,
+      restoredIds: [],
     }),
     "Rebuilt from raw: 1 updated, 1 added, 1 newer than their rows, 1 disagreeing with the rows, 3 left alone",
   );
@@ -357,6 +348,7 @@ test("describeBaptismRebuild names a full store only when it turned any session 
       invalid: 0,
       kept: 0,
       full: 2,
+      restoredIds: [],
     }),
     "Rebuilt from raw: 0 updated, 1 added, the store is full, so 2 were not added",
   );
@@ -372,6 +364,7 @@ test("describeBaptismRebuild names a full store only when it turned any session 
       invalid: 0,
       kept: 0,
       full: 0,
+      restoredIds: [],
     }),
     /full/,
     "full:0 must not mention the store being full at all",
@@ -647,7 +640,7 @@ test("a successful rebuild toasts what changed", async () => {
   const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
   const { view, restore } = await mount(state, [], {
     live: false,
-    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0 },
+    rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: ["restored-1"] },
   });
   try {
     fireEvent.click(rebuildButton(view.container));

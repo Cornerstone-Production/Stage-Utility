@@ -28,8 +28,11 @@ Either way, each entry is normalised into a `TranscriptLineDTO`, kept in a
 rolling buffer (up to 100 lines from the last four hours), and re-broadcast on
 the `prodcom:transcript` channel. Entries carry ProdCom's own `id`; a line is
 revised in place under that id until `inProgress` is false, so a line that
-arrives on both transports while the WebSocket attempt is open is applied and
-broadcast once, not twice.
+arrives on both transports as the WebSocket takes over is applied and broadcast
+once, not twice — and a partial the socket delivers late, shorter than what SSE
+already showed for the same id, does not rewind the caption. Before the socket
+has delivered anything every line came over SSE alone, so there an identical
+re-send still broadcasts and a shortened revision still applies.
 
 The SSE connection reconnects 4 s after it drops, then doubles that for each
 further failure in a row, clamped by the service window the way every other
@@ -75,11 +78,19 @@ older than that horizon are skipped on backfill even when the server returned
 them. So a reconnect cannot re-import a service from days ago just because
 ProdCom's own history still holds it.
 
+**Clear transcript** (Settings → Integrations → **ProdCom**) empties every
+display at once. A later reconnect's backfill skips every row up to the newest
+line that was on screen at the clear — decided by position in ProdCom's own
+oldest-first order, not by timestamp — so the cleared lines stay cleared, while
+anything said after the clear still backfills. Reconfiguring the integration
+forgets the clear, and so does a restart of this server, which backfills the
+last four hours as usual.
+
 A WebSocket attempt does not repeat any of this priming — the SSE stream already
 owns keeping channels, keywords and the buffer current for as long as any
 WebSocket attempt is unproven, so a re-test costs only the silence check's own
-newest-page baseline below (one REST call, or two on a box holding more than a
-page), not a fresh channel read and backfill.
+newest-page baseline below (a one-row read for the row count, then the page),
+not a fresh channel read and backfill.
 
 Only entries whose `source` is `audio` become captions. A message an operator
 typed into a comms channel (`typed`) and a line ProdCom's own automations
@@ -123,16 +134,18 @@ box reached that state, trusting a socket that had delivered nothing for good an
 never demoting a promoted one that went quiet.
 
 So on open, and after every check, the app reads `GET /api/v1/transcript`'s
-newest page (the last 100 rows; two requests unless the whole box already fits on
-one) and records the entry ids on it, plus every id the socket has itself
-delivered since it opened. A spoken row on a later newest page that is in neither
+newest page (the last 100 rows, found with a one-row read of the row count
+first) and records the entry ids on it, plus every id the socket has itself
+delivered that REST did not show yet. A spoken row on a later newest page that is in neither
 set is one the socket missed. No timestamp is compared on either side, for the
 reason a row count also avoided one: a ProdCom is an appliance whose clock is its
 own, and a box running fast or slow would either condemn a healthy socket or hide
 the very failure this check exists to catch.
 
-If the newest page cannot be read the check does nothing at all for that attempt,
-and says so when it opens.
+If the newest page cannot be read when a socket opens, the log says so and the
+check reads it at its next window instead, judging nothing until it has one — a
+socket that carries nothing is then noticed a window later than usual, not
+never. The same holds after promotion.
 
 - **Nothing spoken** — nothing was missed. The question is asked again a minute
   later.
@@ -156,8 +169,9 @@ The first transcript entry over a socket **promotes** it: the SSE stream that ha
 been carrying captions closes and the WebSocket becomes the live transport — but
 the check that got it there does not stop asking. It keeps running on the same
 one-minute clock, now asking about a socket that has already proven itself
-rather than one still on probation: a window it delivers anything in costs no
-REST call; a
+rather than one still on probation. Its first window reads a fresh baseline —
+lines the socket did not carry before it proved itself are not held against
+it — and after that a window it delivers anything in costs no REST call; a
 window it stays quiet in asks the same question probation does — has ProdCom
 recorded anything since this socket last delivered that this socket did not
 carry. ProdCom 2.3.2 is known to deliver once and then go quiet while still
@@ -171,9 +185,9 @@ and go quiet on it even after working, it gets the same widened re-test cadence
 as a box that never delivered at all, and the card reads `Fallback stream — the
 websocket carried no transcript`, same as a box that failed probation. A
 promoted socket that instead dies outright (closes, or misses three
-heartbeats) falls back the same way but is **not** latched silent — it just
-proved itself, so a fresh attempt earns its way back to promotion like any
-other.
+heartbeats) falls back the same way but is **not** latched silent, and the card
+reads the ordinary `Streaming from host:port` — it just proved itself, so a
+fresh attempt earns its way back to promotion like any other.
 
 ### Retrying the WebSocket while it stays unproven
 
@@ -253,7 +267,8 @@ The `/log` page has the evidence when something looks wrong:
   this box has failed that test before …` is a later re-test being dropped, and
   `[prodcom] the websocket is carrying the transcript again …` is one that came
   good. `[prodcom] could not read the transcript's newest page (…)` on open means
-  this attempt has no baseline and the check will not run at all for it.
+  this attempt has no baseline yet: the check reads one at its next window and
+  judges from the window after.
   `[prodcom] could not check whether the websocket is missing transcript
   lines (…)` means REST did not answer and nothing was changed — once per outage
   with a reminder every 15 minutes, not once per check, and
@@ -261,7 +276,9 @@ The `/log` page has the evidence when something looks wrong:
   The "nothing was said, so nothing was missed" case is `console.debug`, so it is
   in the terminal and deliberately not on `/log`
 - a read that lands after the integration has been reconfigured or stopped is
-  dropped rather than applied to the new connection: `[prodcom] dropped a
+  dropped rather than applied to the new connection, and the reads that would
+  have followed it (keywords after channels, backfill after both, the second
+  newest-page read) are never sent to the old box: `[prodcom] dropped a
   backfill (…) that arrived after this connection was replaced`, `… dropped a
   channel list read …`, `… dropped a keyword read …`, and `… dropped a
   baseline read that arrived after this websocket attempt was replaced`. All
@@ -323,14 +340,14 @@ The `/log` page has the evidence when something looks wrong:
   five after, `[prodcom] final on channel … with no partial in flight` when a
   final lands on a channel that has no partial while others do (the renamed
   channel case), and `[prodcom] transcript cleared by operator` naming every live
-  partial and its age when the clear button is pressed
-- `[prodcom] a finished line repeated while a second transport was open —
+  partial and its age when the clear button is pressed; `[prodcom] backfill
+  skipped N line(s) from before the operator cleared the transcript` on each
+  backfill after it
+- `[prodcom] a finished line repeated after the websocket took over —
   duplicate suppressed`, once per connection, the first time an unchanged
-  repeat of a finished line is applied once rather than broadcast twice. Worded
-  without naming which transport: this fires whenever a WebSocket attempt was
-  open at the time, and there is no way to tell a line genuinely delivered by
-  both transports from SSE alone re-sending something while an unrelated
-  WebSocket attempt happened to be open beside it
+  repeat of a finished line is applied once rather than broadcast twice. The
+  repeat came over the socket; whether the first copy was SSE's from before the
+  hand-over or the socket's own is not recorded, so the line does not say
 
 Text is never logged, only its length, and neither is any keyword — only counts.
 `PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how

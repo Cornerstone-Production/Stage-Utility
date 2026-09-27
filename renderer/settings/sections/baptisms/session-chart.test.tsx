@@ -10,40 +10,42 @@
 // baptism-operator-armed.test.tsx's note on why.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
+import { FakeEventSource } from "../../../test-fixtures/fake-event-source.js";
+import { ok } from "../../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
+
+// jsdom's getBoundingClientRect is all zeros, and onMove bails out on a
+// zero-width box (see session-chart.tsx's own guard) — give the SVG a real
+// box so a pointer move means something. Copied from history-chart.test.tsx's
+// identical need.
+const SVG_W = 640;
+Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+  configurable: true,
+  value() {
+    return { left: 0, top: 0, right: SVG_W, bottom: 217, width: SVG_W, height: 217, x: 0, y: 0, toJSON() {} };
+  },
+});
+
+(globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { SessionChart, SESSION_LANES_STORAGE_KEY } = await import("./session-chart.js");
+import type { StatFigure } from "../history-chart";
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-const BASE: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
-  personNumber: 0,
-  baptismIndex: 0,
-  armed: false,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
-  sessionStartedAt: null,
-  finishedAt: null,
-  people: [],
-  pendingTestimonyMs: null,
-  serviceTitle: null,
-  serviceTypeId: null,
-  planId: null,
-};
+const BASE: BaptismState = baptismState();
 
 function stubFetch(lane: { spans: unknown[] }) {
   return (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     if (url.includes("/api/baptism/lane")) return ok(lane);
     if (url.includes("/api/service-timeline/current")) return ok(null);
     if (url.includes("/api/service-timeline/")) return ok(null);
@@ -245,7 +247,6 @@ test("plan items before and after the session are left off the chart, not just s
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     if (url.includes("/api/baptism/lane")) {
       return ok({
         spans: [
@@ -324,7 +325,6 @@ test("Customize toggles the plan lane off, and the choice persists across a remo
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     if (url.includes("/api/baptism/lane")) {
       return ok({
         spans: [
@@ -394,10 +394,10 @@ test("a failed lane fetch shows its own note, not 'no timing detail', and reache
     const url = String(input);
     if (url.includes("/api/log/client")) {
       logCalls.push(JSON.parse(String(init?.body ?? "{}")));
-      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+      return ok({});
     }
     if (url.includes("/api/baptism/lane")) throw new Error("network down");
-    return { ok: true, status: 200, json: async () => null, text: async () => "" };
+    return ok(null);
   }) as unknown as typeof fetch;
 
   try {
@@ -448,7 +448,7 @@ test("a failed lane fetch on a live session says the next press tries again", as
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     if (String(input).includes("/api/baptism/lane")) throw new Error("network down");
-    return { ok: true, status: 200, json: async () => null, text: async () => "" };
+    return ok(null);
   }) as unknown as typeof fetch;
   try {
     render(
@@ -480,7 +480,6 @@ test("a failed plan-timeline fetch shows its own note, and still reaches the log
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     if (url.includes("/api/log/client")) {
       logCalls.push(JSON.parse(String(init?.body ?? "{}")));
       return ok({});
@@ -524,6 +523,165 @@ test("a failed plan-timeline fetch shows its own note, and still reaches the log
     assert.ok(
       logCalls.some((c) => c.tag === "baptism" && /plan timeline fetch failed/i.test(c.message)),
       `expected a logToServer("baptism", ...) call naming the plan timeline fetch — got ${JSON.stringify(logCalls)}`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// hoveredKey (the effect's own dependency for reporting hoverFigs up to the
+// header) used to be built from the running span's OWN identity alone
+// (`${itemId}-running`), which never changes while the span stays open — so
+// the effect that reports hoverFigs never re-ran, and the header kept
+// showing whatever duration was true the instant the hover started, while
+// the bar and the Timer card kept counting underneath the frozen number.
+test("hovering the running segment keeps moving, not frozen at whatever duration was true when the hover started", async (t) => {
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const T0 = Date.parse("2026-09-27T15:00:00.000Z");
+  // 30s into the segment already, not AT its own start — a zero-width domain
+  // (now === segmentStartedAt) draws no segment at all to hover in the first
+  // place.
+  mock.timers.setTime(T0 + 30_000);
+  t.after(() => mock.timers.reset());
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/api/baptism/lane")) {
+      return ok({
+        spans: [{ kind: "testimony", person: 1, startedAt: new Date(T0).toISOString(), endedAt: null }],
+      });
+    }
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(null);
+    return ok({});
+  }) as unknown as typeof fetch;
+
+  const seen: (StatFigure[] | null)[] = [];
+  try {
+    await act(async () => {
+      render(
+        React.createElement(SessionChart, {
+          state: {
+            ...BASE,
+            phase: "testimony",
+            personNumber: 1,
+            serviceKey: "svc-hover-freeze",
+            sessionStartedAt: new Date(T0).toISOString(),
+            segmentStartedAt: new Date(T0).toISOString(),
+          },
+          onHover: (figs: StatFigure[] | null) => seen.push(figs),
+        }),
+      );
+      await settle();
+      await settle();
+    });
+
+    const svg = screen.getByRole("img", { name: /Baptism session timeline/i }) as unknown as SVGSVGElement;
+    // Inside the plot area (session-chart.tsx's own PAD_L=46/PAD_R=14), near
+    // the live edge where a running segment (open-ended, drawn to "now")
+    // sits.
+    await act(async () => {
+      fireEvent.pointerMove(svg, { clientX: SVG_W - 20, clientY: 20 });
+      await settle();
+    });
+
+    const first = seen.at(-1);
+    assert.ok(first, `expected a hover readout for the running segment; saw ${JSON.stringify(seen)}`);
+    const firstPhase = first!.find((f) => f.key === "hoverPhase");
+    assert.ok(firstPhase, "expected the Testimony/Baptism duration figure");
+
+    // 5 seconds pass with the pointer resting in place — no new pointer
+    // event at all, exactly what a still mouse leaves behind. The component
+    // re-renders every second regardless (useServerNow(1000, live)).
+    await act(async () => {
+      mock.timers.tick(5000);
+      await settle();
+    });
+
+    const later = seen.at(-1);
+    const laterPhase = later!.find((f) => f.key === "hoverPhase");
+    assert.notEqual(
+      laterPhase!.value,
+      firstPhase!.value,
+      `hover duration froze at ${firstPhase!.value} through 5 seconds of a still-running segment`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// The window's own live end (win.endMs) was `now` alone — a once-a-second
+// sample (useServerNow) that can be up to a second stale. A press stamps its
+// OWN new span's startedAt at the instant it happens, and the push-triggered
+// lane refetch that follows every press resolves well inside that second —
+// so the fresh span's startedAt can land AFTER the stale `now`, and
+// sessionSpans (session-lane.ts) drops it from the window entirely until the
+// next tick catches up.
+test("a press's own new span draws immediately, even before the next second's clock tick", async (t) => {
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const T0 = Date.parse("2026-09-27T15:00:00.000Z");
+  mock.timers.setTime(T0);
+  t.after(() => mock.timers.reset());
+
+  const T0_ISO = new Date(T0).toISOString();
+  // The press happens 300ms into the same second `now` was last sampled at —
+  // AFTER the stale `now`, but still well before the next 1s tick.
+  const PRESS_ISO = new Date(T0 + 300).toISOString();
+
+  let lane = { spans: [{ kind: "testimony", person: 1, startedAt: T0_ISO, endedAt: null as string | null }] };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/api/baptism/lane")) return ok(lane);
+    if (url.includes("/api/service-timeline/current")) return ok(null);
+    if (url.includes("/api/service-timeline/")) return ok(null);
+    return ok({});
+  }) as unknown as typeof fetch;
+
+  try {
+    await act(async () => {
+      render(
+        React.createElement(SessionChart, {
+          state: {
+            ...BASE,
+            phase: "testimony",
+            personNumber: 1,
+            serviceKey: "svc-press-drop",
+            sessionStartedAt: T0_ISO,
+            segmentStartedAt: T0_ISO,
+          },
+        }),
+      );
+      await settle();
+      await settle();
+    });
+
+    assert.equal(
+      document.querySelectorAll("[data-timer-segment]").length,
+      1,
+      "sanity: the first (open) segment drew before the press",
+    );
+
+    // The operator presses "Next person in": person 1's testimony closes at
+    // the press instant, and person 1's baptism opens there — a real push
+    // the server sends on every press, well before `now`'s next 1s tick.
+    lane = {
+      spans: [
+        { kind: "testimony", person: 1, startedAt: T0_ISO, endedAt: PRESS_ISO },
+        { kind: "baptism", person: 1, startedAt: PRESS_ISO, endedAt: null },
+      ],
+    };
+    await act(async () => {
+      FakeEventSource.last!.push("baptism:state", { phase: "baptism", personNumber: 1, serviceKey: "svc-press-drop" });
+      await settle();
+      await settle();
+    });
+
+    assert.equal(
+      document.querySelectorAll("[data-timer-segment]").length,
+      2,
+      "the span the press just started must draw immediately, not wait for the next second's tick",
     );
   } finally {
     globalThis.fetch = realFetch;

@@ -20,53 +20,29 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { baptismState } from "../test-fixtures/baptism-state.js";
+import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
+import { ok } from "../test-fixtures/fetch-log.js";
+import { routerAt } from "../test-fixtures/router.js";
 
 const teardown = installRenderDom();
-/** A fake EventSource that hands the test its channel listeners to fire —
- *  the same shape history-chart-live.test.tsx's own FakeEventSource uses. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider, ConfirmHost } = await import("../components/ui/index.js");
-const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-  await import("@tanstack/react-router");
+const { RouterContextProvider } = await import("@tanstack/react-router");
 const { BaptismOperator } = await import("./baptism-operator.js");
 const { rebuildButtonsIn, tooltipTextOf } = await import("../settings/sections/baptisms/rebuild-button-test-helpers.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-const IDLE_NO_KEY: BaptismState = {
-  mode: "grouped", phase: "idle", personNumber: 0, baptismIndex: 0, armed: false,
-  segmentStartedAt: null, segmentAccumMs: 0, sessionStartedAt: null, finishedAt: null,
-  people: [], pendingTestimonyMs: null, serviceTitle: null, serviceTypeId: null, planId: null, serviceKey: null,
-};
+const IDLE_NO_KEY: BaptismState = baptismState({ serviceKey: null });
 
 function stubFetch(sessionsOk: boolean) {
   return (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) });
     if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
       if (sessionsOk) return ok([]);
@@ -129,7 +105,6 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) });
     if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
       sessionCalls += 1;
@@ -183,7 +158,6 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json) });
     if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
       sessionCalls += 1;
@@ -197,12 +171,7 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    const rootRoute = createRootRoute({});
-    const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-    const router = createRouter({
-      routeTree: rootRoute.addChildren([historyRoute]),
-      history: createMemoryHistory({ initialEntries: ["/baptism"] }),
-    });
+    const router = routerAt("/baptism", "/history/manage");
     const view = render(
       React.createElement(RouterContextProvider, {
         router,
@@ -227,6 +196,64 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
     assert.ok(
       sessionCalls > mountCalls,
       `expected confirming the header's own Rebuild to reload this page's sessions; calls stayed at ${sessionCalls}`,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// The only reload triggers used to be mount, baptism:rebuilt, and this page's
+// OWN Finish button (Timer card onFinished) — so a Finish that happens
+// anywhere else left Past sessions and Trends stale until a full page
+// reload. That is now the ordinary path: Companion's baptism.advance/
+// baptism.finish automation actions finalize on the last person with no
+// button press on this page at all, and a second tab or the display's
+// operator panel can finish it too.
+test("a Finish pushed from elsewhere (Companion, a second tab, the display) reloads this page's own sessions", async () => {
+  const LIVE: BaptismState = baptismState({
+    phase: "baptism", personNumber: 1,
+    segmentStartedAt: "2026-09-27T15:10:00.000Z", sessionStartedAt: "2026-09-27T15:00:00.000Z",
+    people: [{ testimonyMs: 60_000, baptizeMs: 0 }],
+    serviceTitle: "Sunday", serviceTypeId: "st1", planId: "p1", serviceKey: "svc-1",
+  });
+  const FINISHED: BaptismState = {
+    ...LIVE,
+    phase: "idle",
+    segmentStartedAt: null,
+    finishedAt: "2026-09-27T15:11:00.000Z",
+    people: [{ testimonyMs: 60_000, baptizeMs: 60_000 }],
+  };
+  let sessionCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.endsWith("/api/baptism")) return ok(LIVE);
+    if (url.endsWith("/api/baptism/sessions")) {
+      sessionCalls += 1;
+      return ok([]);
+    }
+    if (url.includes("/api/history/live")) return ok({ live: true });
+    if (url.includes("/api/baptism/lane")) return ok({ spans: [] });
+    return ok({});
+  }) as unknown as typeof fetch;
+  try {
+    const view = render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
+    await settle();
+    await settle();
+    await settle();
+    const mountCalls = sessionCalls;
+    // The server finalizes (a Companion key bound to baptism.advance on the
+    // last person, say) and broadcasts the finished state. Nothing on THIS
+    // page pressed Finish.
+    FakeEventSource.last!.push("baptism:state", FINISHED);
+    await act(async () => {
+      await settle();
+      await settle();
+    });
+    assert.match(view.container.textContent ?? "", /Finished/, "sanity: the pushed finished state reached the page");
+    assert.ok(
+      sessionCalls > mountCalls,
+      `a finish pushed from elsewhere never refetched sessions (calls stayed at ${sessionCalls}); Past sessions and Trends stay stale`,
     );
   } finally {
     globalThis.fetch = realFetch;

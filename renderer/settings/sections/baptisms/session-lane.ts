@@ -234,12 +234,40 @@ export function sessionSpans(
 }
 
 /**
+ * The step ladder for a session past an hour, in minutes: 10m, 15m, 30m, 1h,
+ * 2h, 6h, 12h, 1d. `longSessionStepMs` picks the FIRST (finest) rung that
+ * keeps the tick count at 12 or fewer, rather than a flat 10 minutes — a
+ * baptism timer left running (a Saturday rehearsal nobody pressed Finish or
+ * Reset on, say) resumes live after any restart, so its own axis has no
+ * natural ceiling on how long the window gets: a flat 10-minute step drew 145
+ * ticks a day in, 1009 a week in, each one measured with a canvas
+ * `measureText` call every second while the chart is live (session-chart.tsx's
+ * own `keepAxisLabels`, on `useServerNow(1000, live)`).
+ */
+const LONG_SESSION_STEP_LADDER_MIN = [10, 15, 30, 60, 120, 360, 720, 1440];
+
+/** The step for a session window longer than an hour, capped at 12 ticks —
+ *  see LONG_SESSION_STEP_LADDER_MIN's own comment. Beyond what the ladder
+ *  covers (a session left running for more than about two weeks), the day
+ *  step keeps doubling rather than the count growing without bound. */
+function longSessionStepMs(spanMs: number): number {
+  for (const minutes of LONG_SESSION_STEP_LADDER_MIN) {
+    const stepMs = minutes * 60_000;
+    if (Math.floor(spanMs / stepMs) <= 11) return stepMs;
+  }
+  let stepMs = LONG_SESSION_STEP_LADDER_MIN[LONG_SESSION_STEP_LADDER_MIN.length - 1]! * 60_000;
+  while (Math.floor(spanMs / stepMs) > 11) stepMs *= 2;
+  return stepMs;
+}
+
+/**
  * Elapsed-minute tick offsets from the session's own start ("0m", "1m", ...),
  * matching the approved design: a 1-minute step up to an 8-minute session, 2
  * minutes up to 20, 5 beyond. That design does not cover a session past an
- * hour; this widens to 10 minutes there, so an hour-plus session does not
- * draw a tick every 5 minutes (36+ of them) — said here rather than left
- * silent, since it is this file's own addition, not the approved design's.
+ * hour; this widens from there via `longSessionStepMs`'s own ladder, so an
+ * hour-plus session never draws more than 12 ticks — said here rather than
+ * left silent, since it is this file's own addition, not the approved
+ * design's.
  *
  * LOCAL to this chart, not a change to `history-chart/geometry.ts`'s
  * `timeTicks()`: every History chart's domain is a whole SERVICE, tens of
@@ -265,7 +293,7 @@ export function sessionAxisTicks(domainStartMs: number, domainEndMs: number): nu
         ? 2 * 60_000
         : spanMs <= 60 * 60_000
           ? 5 * 60_000
-          : 10 * 60_000;
+          : longSessionStepMs(spanMs);
   const out: number[] = [];
   for (let t = domainStartMs; t <= domainEndMs; t += stepMs) out.push(t);
   return out;

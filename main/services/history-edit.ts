@@ -949,6 +949,20 @@ interface BaptismRebuildPlan {
 }
 
 /**
+ * Rebuilt sessions that correspond to a session now in the store: `updated` +
+ * `added` (write-time counts, since the store can change between planning a
+ * rebuild and applying it) plus the plan's own `unchanged` + `newer` +
+ * `disagreeing` — everything except `invalid`. The ONE formula behind both
+ * applyBaptismRebuild's log line and BaptismRebuildOutcome.sessions, so a
+ * newer-only run cannot log "1 sessions" while the response it produced says
+ * `sessions:0`, or the reverse — see applyBaptismRebuild's own doc comment
+ * for the two-separately-written-copies bug this replaces.
+ */
+function baptismSessionsWritten(plan: BaptismRebuildPlan, updated: number, added: number): number {
+  return updated + added + plan.unchanged + plan.newer + plan.disagreeing;
+}
+
+/**
  * Derive this service's baptism sessions from `baptism.csv` and work out what
  * merging them into the store would do.
  *
@@ -1159,7 +1173,7 @@ async function applyBaptismRebuild(
   // rebuilt row that corresponds to a session now in the store, not only the
   // ones this call actually wrote — so a newer-only run logs "1 sessions"
   // rather than "0 sessions" while the response it produced says `sessions:1`.
-  const correspond = (u: number, a: number) => u + a + plan.unchanged + plan.newer + plan.disagreeing;
+  // See baptismSessionsWritten, the one formula behind both.
 
   // Computed once, then logged and returned in ONE place at the foot of this
   // function — regardless of which branch below produced them — so the log
@@ -1233,7 +1247,7 @@ async function applyBaptismRebuild(
   if (restoredIds.size > 0) broadcast("baptism:rebuilt", { serviceKey, ids: [...restoredIds] });
 
   console.log(
-    `[baptism] rebuild: ${scrub(correspond(updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
+    `[baptism] rebuild: ${scrub(baptismSessionsWritten(plan, updated, added))} sessions from ${scrub(rowCount)} rows for ${scrub(serviceKey)} — ` +
       `${scrub(updated)} updated, ${scrub(added)} added, ${scrub(tail)}`,
   );
   return { updated, added, full, restoredIds };
@@ -1343,7 +1357,7 @@ export async function rebuildServiceBaptisms(serviceKey: string): Promise<Baptis
   // counted before the write ran — is still exactly right afterward.
   return {
     rows: plan.rows.length,
-    sessions: updated + added + plan.unchanged + plan.newer + plan.disagreeing,
+    sessions: baptismSessionsWritten(plan, updated, added),
     updated,
     added,
     unchanged: plan.unchanged,
@@ -1604,6 +1618,27 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", moved);
     outcome.moved.push("spl");
+  }
+
+  // ── Baptism sessions ──
+  // Not a per-key record like the three stores above — baptismStore holds
+  // every service's sessions in one flat list, each carrying its own
+  // serviceKey field, so there is no "both sides recorded one" case to
+  // reconcile: every session already saved under the source key just gets
+  // re-tagged onto the target. mergeArchives above already moved baptism.csv
+  // itself; without this, a session saved before the merge kept the source's
+  // now-deleted serviceKey — GET /api/baptism/lane?serviceKey=<target>
+  // answered [] for it, and it linked to no service at all.
+  const rekeyedSessions = await baptismStore.rekeyServiceKey(sourceKey, targetKey);
+  if (rekeyedSessions.size > 0) {
+    outcome.moved.push("baptism sessions");
+    // Nothing above reloads a session list on its own — a Baptisms tab or
+    // History page open elsewhere still holds the source's own sessions
+    // under the source key until something tells it to refetch.
+    // `baptism:rebuilt` is the one channel reload-on-baptism-change.ts
+    // already reloads on unconditionally, same shape as a rebuild's own
+    // `restoredIds` push above.
+    broadcast("baptism:rebuilt", { serviceKey: targetKey, ids: [...rekeyedSessions] });
   }
 
   console.log(

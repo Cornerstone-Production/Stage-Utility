@@ -20,14 +20,14 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { routerAt } from "../../../test-fixtures/router.js";
 
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../../components/ui/index.js");
-const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-  await import("@tanstack/react-router");
+const { RouterContextProvider } = await import("@tanstack/react-router");
 const { PastSessionsCard } = await import("./past-sessions.js");
 const { historyServiceHref } = await import("../service-history-section.js");
 const { baptismSessionFixture } = await import("./baptism-session-fixture.js");
@@ -66,12 +66,7 @@ function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
 /** Mounts the card under a real (memory-history) router plus the tooltip and
  *  confirm hosts every button here depends on. */
 function mount(props: { sessions: readonly BaptismSession[]; loadError?: boolean; onDelete?: (id: string) => void }) {
-  const rootRoute = createRootRoute({});
-  const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history/manage", component: () => null });
-  const router = createRouter({
-    routeTree: rootRoute.addChildren([historyRoute]),
-    history: createMemoryHistory({ initialEntries: ["/baptism"] }),
-  });
+  const router = routerAt("/baptism", "/history/manage");
   const view = render(
     React.createElement(
       TooltipProvider,
@@ -118,6 +113,30 @@ describe("PastSessionsCard — figures come from baptismStats, never people.leng
     assert.equal(figureValue(view.container, "Avg testimony"), "1:42", "(108+96)/2 = 102s, averaged over both who testified");
     assert.equal(figureValue(view.container, "Avg baptism"), "0:42", "42s over the one person actually baptized, not both");
     assert.equal(figureValue(view.container, "Total"), "4:06", "108+42+96+0 = 246s summed");
+  });
+
+  // fmtClock(0) prints "0:00" — a real claim for an instant baptism/testimony,
+  // false for one that has not happened at all. A grouped Finish during the
+  // testimonies (or a Finish while armed, or a test run finished instead of
+  // reset) leaves a real session behind with nobody baptized.
+  test("a grouped Finish during the testimonies shows Baptized 0 and a dash for Avg baptism, never '0:00'", () => {
+    const { view } = mount({
+      sessions: [session({ people: [{ testimonyMs: 60_000, baptizeMs: 0 }, { testimonyMs: 50_000, baptizeMs: 0 }] })],
+    });
+    assert.equal(figureValue(view.container, "Baptized"), "0");
+    assert.equal(figureValue(view.container, "Avg baptism"), "—", "no baptism happened at all — a dash, not a false '0:00'");
+    assert.equal(
+      figureValue(view.container, "Avg testimony"),
+      "0:55",
+      "testimony DID happen (55s avg) — this real figure must not also dash just because nobody was baptized",
+    );
+  });
+
+  test("a session finished with literally nobody testifying (armed, then Finish) dashes Avg testimony too", () => {
+    const { view } = mount({ sessions: [session({ people: [] })] });
+    assert.equal(figureValue(view.container, "Baptized"), "0");
+    assert.equal(figureValue(view.container, "Avg testimony"), "—");
+    assert.equal(figureValue(view.container, "Avg baptism"), "—");
   });
 });
 

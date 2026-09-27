@@ -44,8 +44,10 @@ export interface LiveCheck {
  * to ask again: a network round trip has latency, and a push is only ever a
  * HINT that something changed, not an answer about this one key.
  *
- * Re-asked on mount, on every `serviceKey` change, and on every
- * "service-timeline:history" push. Two things narrow the remaining gap
+ * Re-asked on mount, on every `serviceKey` change, and on every LIVE (never
+ * REPLAYED — that is the connect-time cache of an answer already accounted
+ * for by the mount/key-change ask above, not a new event) "service-timeline:history"
+ * push. Two things narrow the remaining gap
  * rather than close it outright, because nothing client-side can:
  *
  *   - a slow backstop interval, while the answer is anything but "not live"
@@ -117,8 +119,8 @@ export function useServiceLive(serviceKey: string | null): LiveCheck {
       });
     };
     run();
-    const off = onNotification("service-timeline:history", () => {
-      if (!cancelled) run();
+    const off = onNotification("service-timeline:history", (_payload, replayed) => {
+      if (!replayed && !cancelled) run();
     });
     return () => {
       cancelled = true;

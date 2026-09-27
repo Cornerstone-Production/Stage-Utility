@@ -1255,7 +1255,10 @@ export function AdvancedSection({
                 </FieldContent>
                 <Switch
                   checked={stageState.kioskDiscovery ?? false}
-                  onCheckedChange={(on: boolean) => void invoke("stage:setKioskDiscovery", { enabled: on })}
+                  onCheckedChange={(on: boolean) =>
+                    void invoke("stage:setKioskDiscovery", { enabled: on })
+                      .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
+                  }
                   aria-label="Answer kiosk devices looking for a server"
                 />
               </Field>

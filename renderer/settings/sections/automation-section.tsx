@@ -19,6 +19,7 @@ import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-p
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useOptionSources } from "./automation-option-sources";
+import { joinWithAnd } from "../../lib/join-with-and";
 
 /** A rule as GET /api/automation/rules sends it — its own fields plus the
  *  issues the server computed against the current registry. See
@@ -173,13 +174,6 @@ function ServiceGuardBadge({ guarded }: { guarded: boolean }) {
       {guarded ? "service-safe" : "any time"}
     </span>
   );
-}
-
-/** "A, B and C" — never an Oxford comma, matching how the app already reads
- *  a short list out loud elsewhere (the pair-delete confirm). */
-function joinWithAnd(items: string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 /**
@@ -358,6 +352,7 @@ function PairRow({
   hidden,
   guarded,
   cueState,
+  issues,
   onOpen,
 }: {
   base: string;
@@ -368,6 +363,9 @@ function PairRow({
   /** BOTH halves carry `service.is-not-live`. See ServiceGuardBadge. */
   guarded: boolean;
   cueState: CueStateRow | null;
+  /** Both halves' issues, combined — either half needing setup is the pair
+   *  needing setup, the same as RuleRow's own badge one field down. */
+  issues: RuleIssue[];
   onOpen: () => void;
 }) {
   return (
@@ -380,8 +378,11 @@ function PairRow({
           aria-label={`${name} pair`}
         >
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-footnote font-medium text-fg" data-cue-pair-name={name}>
-              {name}
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-footnote font-medium text-fg" data-cue-pair-name={name}>
+                {name}
+              </span>
+              {issues.length > 0 && <NeedsSetupBadge issues={issues} />}
             </span>
             <span className="block truncate font-mono text-caption2 text-fg-subtle">
               {onName} / {offName}
@@ -716,6 +717,7 @@ export function AutomationSection() {
         hidden={p.hidden}
         guarded={hasServiceGuard(p.on.conditions) && hasServiceGuard(p.off.conditions)}
         cueState={cueStateFor(cueStateData?.states, p.base)}
+        issues={[...(p.on.issues ?? []), ...(p.off.issues ?? [])]}
         onOpen={() => setEditing({ kind: "pair", id: p.on.id })}
       />
     );

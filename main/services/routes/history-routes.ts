@@ -84,8 +84,7 @@ async function recordedServiceTypeIds(): Promise<string[]> {
  */
 async function baptismLaneFor(serviceKey: string): Promise<BaptismSpan[]> {
   await sampleArchive.flush();
-  const live = serviceTimelineRecorder.getCurrent();
-  const record = live?.serviceKey === serviceKey ? live : await serviceTimelineStore.get(serviceKey);
+  const record = await serviceTimelineRecorder.getRecord(serviceKey);
   if (!record) return [];
   const rows = await readBaptismRows(serviceKey, record.serviceDate);
   if (rows === null) {
@@ -315,7 +314,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       if (attMatch && attMatch[1] !== "current") {
         const key = decodeURIComponent(attMatch[1]);
         if (method === "GET") {
-          json(res, await attendanceStore.get(key));
+          json(res, await attendanceRecorder.getRecord(key));
           return;
         }
         if (method === "DELETE") {
@@ -361,7 +360,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       if (tlMatch && tlMatch[1] !== "current") {
         const key = decodeURIComponent(tlMatch[1]);
         if (method === "GET") {
-          const rec = await serviceTimelineStore.get(key);
+          const rec = await serviceTimelineRecorder.getRecord(key);
           json(res, rec && overlaidTimeline(rec));
           return;
         }

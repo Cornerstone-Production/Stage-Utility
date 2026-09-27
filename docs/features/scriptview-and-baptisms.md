@@ -74,7 +74,10 @@ table: without the layouts it shows all columns, and without the roles it shows
 no note columns, until they load. A display keeps the last layouts it read
 through a later failure and says nothing, since what it shows is still right.
 The plan works the same way: one that cannot be read says so while there is
-nothing to show yet, and a later failure keeps the last plan on screen. Each
+nothing to show yet, and a later failure keeps the last plan on screen — as
+long as it is still the plan being asked for. Switching service type or plan
+drops the previous one immediately, so a failed read for the new one shows the
+failure rather than the old plan under a title that no longer matches it. Each
 failure is on a `[scriptview]` line on the server log.
 
 ## Category roles
@@ -215,18 +218,23 @@ that has not happened yet took no time.
 
 A **Past sessions** card lists every finished session, newest first: the
 service and date, then how many were baptized, the average testimony and
-baptism length, and the total. Each row with a known service links to that
-service's page in Service History; a session recorded before that link
-existed has no service key to link with, and renders without one rather than
-a broken link. Delete removes a session after confirming — its raw rows in
-`baptism.csv` are untouched, so **Rebuild from raw** can bring it back (see
-Recovery, below).
+baptism length, and the total. An average whose own group never happened at
+all — a grouped Finish during the testimonies, before anyone reached the
+water — shows a dash rather than "0:00", the same rule the People card and
+Copy report apply. Each row with a known service links to that service's page
+in Service History; a session recorded before that link existed has no
+service key to link with, and renders without one rather than a broken link.
+Delete removes a session after confirming — its raw rows in `baptism.csv` are
+untouched, so **Rebuild from raw** can bring it back (see Recovery, below).
 
-A **Trends** card averages the last eight sessions against the eight before
+A **Trends** card averages the last eight services against the eight before
 them, across four figures: baptized per service, average testimony, average
 baptism, and the whole segment's wall-clock length — what a planner budgets
 for next week, since it includes the walk to the water and every gap the
-timer lane draws as "not counted". Below three prior sessions to compare
+timer lane draws as "not counted". Sessions sharing the same service (a
+reset-and-restart, or a kids' group and an adults' group both finished the
+same Sunday) count as one service, not two, so a service's own total is never
+split across two half-weighted points. Below three prior services to compare
 against, a tile shows its figure with no change against it, rather than a
 percentage or a delta computed from too little history to mean anything.
 
@@ -281,6 +289,11 @@ own press ("Next person in", then "Last person out" for the last one) to the
 next — the walk-up, the words spoken over them, the dunk, and getting out, never
 the moment of submersion by itself. There is nothing to pause while armed, so
 that button is hidden until the first press.
+
+Every route that steps the timer forward while armed — the panel, a Companion
+action, an automation cue — starts "First person in" the same way; none of
+them skips person 1. Finish while armed still ends the session with nobody
+baptized, which is what it is for.
 
 Undo takes back these presses one at a time, latest first. After "First person
 in" it returns to armed: person 1's clock is thrown away and everyone who

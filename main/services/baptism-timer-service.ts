@@ -46,6 +46,13 @@ function idleState(mode: BaptismMode): BaptismState {
   };
 }
 
+/** The `detail` text every `person-complete` row carries, shared by the four
+ *  call sites (next()'s per-person and grouped-baptism branches, finish()'s
+ *  matching two) so the format cannot drift between them. */
+function personCompleteDetail(p: Pick<BaptismPerson, "testimonyMs" | "baptizeMs">): string {
+  return `t=${p.testimonyMs} b=${p.baptizeMs}`;
+}
+
 /** `list` with `entry` appended, or substituted in place for an entry that
  *  already names the same session — a session that fails to save twice (a
  *  retry that fails again) updates its own reason rather than appending a
@@ -103,7 +110,23 @@ class BaptismTimerService {
     return this.state;
   }
 
+  /**
+   * Every finished session, waiting first for any write already queued
+   * against the store to land.
+   *
+   * finalize() below broadcasts baptism:state before its own addSession call
+   * settles — a Baptisms tab or History page reloads on exactly that push
+   * (reload-on-baptism-change.ts), and answering this call straight from the
+   * store's cache could read whatever the queue held before addSession's own
+   * turn came up, one write short. See baptismStore.flush()'s own doc
+   * comment. This does delay the answer by however long a write already in
+   * flight takes to land — milliseconds, and the same wait GET
+   * /api/baptism/lane already puts a Baptisms tab through for the identical
+   * reason (sampleArchive.flush()) — never the live baptism:state push
+   * itself, which still goes out unconditionally and un-delayed.
+   */
   async listSessions(): Promise<BaptismSession[]> {
+    await baptismStore.flush();
     return baptismStore.listSessions();
   }
 
@@ -418,6 +441,20 @@ class BaptismTimerService {
     return this.commit();
   }
 
+  /** "First person in": begin the person waiting at `baptismIndex` without
+   *  banking the armed stretch, and without closing anyone. Shared by
+   *  advance() and next() — both reach this exact press while armed, and
+   *  once wrote it out separately: next() used to special-case armed
+   *  into skipping the waiting person (baptizeMs stuck at 0, never baptized)
+   *  and starting the NEXT one's clock instead, which is how a Companion
+   *  "Next" press or a panel press racing the auto-arm closed person 1 having
+   *  never run a clock for them. */
+  private beginFirstPerson(): BaptismState {
+    this.state = { ...this.state, ...this.startSegment(0) };
+    this.emitRaw("baptisms-start", 0);
+    return this.commit();
+  }
+
   /**
    * The phase-aware primary press — dispatches to whichever action is legal
    * for the CURRENT phase, so a caller that does not track phase (Companion,
@@ -429,12 +466,7 @@ class BaptismTimerService {
    */
   advance(): BaptismState {
     if (this.state.phase === "idle") return this.start();
-    if (this.state.armed) {
-      // "First person in": begin person 1 without banking the armed stretch.
-      this.state = { ...this.state, ...this.startSegment(0) };
-      this.emitRaw("baptisms-start", 0);
-      return this.commit();
-    }
+    if (this.state.armed) return this.beginFirstPerson();
     if (this.state.phase === "testimony") {
       return this.state.mode === "grouped" ? this.next() : this.baptized();
     }
@@ -476,7 +508,7 @@ class BaptismTimerService {
       const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
       // Emitted BEFORE personNumber advances, so the row names the person who was
       // just baptized rather than the one about to start their testimony.
-      this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
+      this.emitRaw("person-complete", person.baptizeMs, personCompleteDetail(person));
       this.state = { ...this.state, phase: "testimony", people: [...this.state.people, person], personNumber: this.state.personNumber + 1, pendingTestimonyMs: null, ...this.startSegment(0) };
       return this.commit();
     }
@@ -500,9 +532,17 @@ class BaptismTimerService {
       // armed is cleared). With nobody at this index there is nothing to step
       // forward from, so this is a no-op rather than inventing a person.
       //
-      // `armed` may still be true here — /api/baptism/next is a documented route,
-      // reachable directly (bypassing advance()) while the phase is armed — so
-      // startSegment() clearing it is load-bearing, not just tidy.
+      // Armed is handled FIRST, taking the exact "First person in" branch
+      // advance() takes — beginFirstPerson() starts whoever is waiting at
+      // baptismIndex, closing nobody. `/api/baptism/next` is a documented
+      // route, reachable directly (bypassing advance()) while the phase is
+      // armed — Companion's "Next" action does exactly this, and so does a
+      // panel press racing the auto-arm. Until this fix next() treated armed
+      // as "skip the waiting person and start the following one's clock
+      // instead" — closing them with `baptizeMs: 0` though nobody's clock had
+      // run, and ending a one-person session with nobody baptized at all.
+      if (this.state.armed) return this.beginFirstPerson();
+
       const people = this.state.people.map((p, i) => (i === this.state.baptismIndex ? { ...p, baptizeMs: this.elapsedMs() } : p));
       const justBaptized = people[this.state.baptismIndex]!;
       // Emitted against THIS state — mode/phase/baptismIndex still name the
@@ -516,33 +556,9 @@ class BaptismTimerService {
       // person in a grouped session auto-finishes straight into finalize()
       // rather than reaching a `return this.commit()` of its own, so this call
       // is the only chance to record their completion at all.
-      //
-      // Guarded on `!armed`: /api/baptism/next is a documented route reachable
-      // directly while armed (see the comment above), and calling it there
-      // closes person 0 having never run a clock — segmentStartedAt is null
-      // and segmentAccumMs is 0, so elapsedMs() reads 0 the same as it would
-      // for a genuine instant baptism. A person-complete row cannot tell those
-      // apart, and a replay reading "a person-complete row exists" as "this
-      // person was baptized" would invent one that never happened. Nothing is
-      // lost by skipping it: this person already has a testimony-end row (or
-      // was folded into baptisms-armed, for whoever arms last), correctly
-      // carrying baptizeMs: 0 until a real press updates it.
-      if (!this.state.armed) {
-        this.emitRaw(
-          "person-complete",
-          justBaptized.baptizeMs,
-          `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
-        );
-      }
+      this.emitRaw("person-complete", justBaptized.baptizeMs, personCompleteDetail(justBaptized));
       if (this.state.baptismIndex + 1 < people.length) {
-        const fromArmed = this.state.armed === true; // read before startSegment() clears it
         this.state = { ...this.state, people, baptismIndex: this.state.baptismIndex + 1, ...this.startSegment(0) };
-        // A clock started from armed writes the row advance()'s armed branch
-        // writes, and at the same point: after the state moves, so it names the
-        // person whose clock this is. Without it this was the one clock start
-        // the raw log never recorded — the person-complete above is suppressed
-        // while armed, rightly, and nothing else stood in for it.
-        if (fromArmed) this.emitRaw("baptisms-start", 0);
         return this.commit();
       }
       // last person baptized → close the session.
@@ -576,7 +592,7 @@ class BaptismTimerService {
       if (this.state.phase === "baptism") {
         const person: BaptismPerson = { testimonyMs: this.state.pendingTestimonyMs ?? 0, baptizeMs: this.elapsedMs() };
         people.push(person);
-        this.emitRaw("person-complete", person.baptizeMs, `t=${person.testimonyMs} b=${person.baptizeMs}`);
+        this.emitRaw("person-complete", person.baptizeMs, personCompleteDetail(person));
       } else if (this.state.phase === "testimony") {
         const person: BaptismPerson = { testimonyMs: this.elapsedMs(), baptizeMs: 0 };
         people.push(person);
@@ -603,11 +619,7 @@ class BaptismTimerService {
       // per-person mode never sets `armed`, so this can only suppress the
       // grouped case, and per-person's own row above is unaffected.
       if (!this.state.armed) {
-        this.emitRaw(
-          "person-complete",
-          justBaptized.baptizeMs,
-          `t=${justBaptized.testimonyMs} b=${justBaptized.baptizeMs}`,
-        );
+        this.emitRaw("person-complete", justBaptized.baptizeMs, personCompleteDetail(justBaptized));
       }
     } else if (this.state.phase === "baptism") {
       // finalize() below runs unconditionally and archives a "finish" row

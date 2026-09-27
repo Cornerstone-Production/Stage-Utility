@@ -288,11 +288,11 @@ describe("a real grouped session replays back into the session the store recorde
     await assertRoundTrip(ctx, "grouped, finished while armed");
   });
 
-  it("a direct next() while armed: the skipped person replays unbaptized, the next one baptized", async () => {
-    // POST /api/baptism/next while armed skips person 1 — no row, nobody's clock
-    // ran — and starts person 2's, writing a baptisms-start at index 1 that no
-    // advance() ever writes. The replay reads past it: it carries no session
-    // content.
+  it("a direct next() while armed behaves like advance(): starts person 1's clock, skips nobody", async () => {
+    // POST /api/baptism/next while armed used to skip
+    // person 1 — no row, nobody's clock ran — and start person 2's, writing a
+    // baptisms-start at index 1 that no advance() ever wrote. It now takes the
+    // same "First person in" branch advance() does.
     const ctx = freshCtx("replay");
     openService(ctx);
     baptismTimerService.reset();
@@ -303,15 +303,17 @@ describe("a real grouped session replays back into the session the store recorde
     baptismTimerService.next();
     await sleep(8);
     baptismTimerService.startBaptisms();
-    baptismTimerService.next(); // direct, while armed
+    baptismTimerService.next(); // direct, while armed — "First person in"
     await sleep(8);
-    const finished = baptismTimerService.finish();
+    baptismTimerService.next(); // person 1 baptized, person 2's clock starts
+    await sleep(8);
+    const finished = baptismTimerService.next(); // person 2 baptized — auto-finishes
 
-    assert.equal(finished.people[0]!.baptizeMs, 0, "sanity: person 1 was skipped");
+    assert.ok(finished.people[0]!.baptizeMs > 0, "sanity: person 1 ran a real clock — next() while armed no longer skips them");
     assert.ok(finished.people[1]!.baptizeMs > 0, "sanity: person 2 ran a clock");
 
     const [replayed] = await assertRoundTrip(ctx, "grouped, direct next() while armed");
-    assert.equal(replayed!.people[0]!.baptizeMs, 0, "the skipped person replays unbaptized, not as a baptism");
+    assert.ok(replayed!.people[0]!.baptizeMs > 0, "the replay agrees nobody was skipped");
   });
 });
 

@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
@@ -73,19 +73,6 @@ const spoken = (id: string): StubEntry => ({
   inProgress: false,
   date: new Date(NOW).toISOString(),
 });
-
-async function eventually(
-  ready: () => boolean,
-  what: string | (() => string),
-  timeoutMs = 3000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-}
 
 async function withLogs<T>(fn: () => Promise<T>): Promise<{ lines: string[]; value: T }> {
   const lines: string[] = [];
@@ -205,8 +192,9 @@ describe("SSE recovers from both kinds of failure", () => {
     svc.configure("127.0.0.1", port, null);
     await eventually(() => svc.sseUpNow, "the first SSE stream to come up");
 
-    // The box drops off the network entirely — req.on('error') is the ONLY
-    // handler that ever fires for this, unlike a bad status or a clean end.
+    // The box drops off the network entirely. The open stream ends, and every
+    // reconnect after it fails at the connection, which only req.on('error')
+    // sees — unlike a bad status or a clean end.
     await stub.close();
     await eventually(
       () => svc.reports.some((r) => r.state === "error" && (r.message ?? "").includes("Can't reach")),

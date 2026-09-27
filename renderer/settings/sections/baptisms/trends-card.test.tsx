@@ -14,7 +14,7 @@ const teardown = installDom();
 
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { fmtClockDelta, baptismTrendPoint, TrendsCard } = await import("./trends-card.js");
+const { fmtClockDelta, baptismTrendPoint, groupSessionsByService, TrendsCard } = await import("./trends-card.js");
 const { baptismTrends } = await import("./trends.js");
 const { baptismSessionFixture } = await import("./baptism-session-fixture.js");
 
@@ -52,13 +52,33 @@ describe("fmtClockDelta", () => {
 });
 
 describe("baptismTrendPoint", () => {
-  test("reduces a session to its baptized count, averages and wall-clock segment", () => {
-    const p = baptismTrendPoint(session());
+  test("reduces a single-session group to its baptized count, averages and wall-clock segment", () => {
+    const p = baptismTrendPoint([session()]);
     assert.ok(p);
     assert.equal(p!.baptized, 2, "both people have baptizeMs > 0");
     assert.equal(p!.avgTestimonySec, 102, "(108+96)/2 seconds");
     assert.equal(p!.avgBaptismSec, 40, "(42+38)/2 seconds");
     assert.equal(p!.wholeSegmentSec, 17 * 60 + 23, "finishedAt - startedAt, wall clock");
+  });
+
+  // Two sessions in the SAME service — a kids' group then an adults' group,
+  // both finished — must combine into ONE point, not read as two half-weighted
+  // services. baptismStats already sums across the group; wholeSegmentSec is
+  // the SUM of each session's own wall clock, and t is the EARLIEST start.
+  test("a two-session group combines into one point — the group's totals, not either session's alone", () => {
+    const kids = session({
+      id: "kids", startedAt: "2026-09-27T14:05:00.000Z", finishedAt: "2026-09-27T14:15:00.000Z",
+      people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }, { testimonyMs: 60_000, baptizeMs: 30_000 }, { testimonyMs: 60_000, baptizeMs: 30_000 }],
+    });
+    const adults = session({
+      id: "adults", startedAt: "2026-09-27T14:50:00.000Z", finishedAt: "2026-09-27T15:00:00.000Z",
+      people: [{ testimonyMs: 90_000, baptizeMs: 45_000 }, { testimonyMs: 90_000, baptizeMs: 45_000 }, { testimonyMs: 90_000, baptizeMs: 45_000 }],
+    });
+    const p = baptismTrendPoint([kids, adults]);
+    assert.ok(p);
+    assert.equal(p!.baptized, 6, "one service that baptized 6, not two of 3");
+    assert.equal(p!.t, Date.parse(kids.startedAt), "t is the group's EARLIEST startedAt");
+    assert.equal(p!.wholeSegmentSec, 10 * 60 + 10 * 60, "the SUM of each session's own wall clock");
   });
 
   // A mid-testimony person's baptizeMs 0 used to still produce a point
@@ -67,21 +87,37 @@ describe("baptismTrendPoint", () => {
   // a Finish while armed, or a test run finished instead of reset, skewing
   // Avg baptism and Whole segment right along with Baptized per service.
   test("nobody baptized yields no point at all, not one at baptized: 0", () => {
-    const p = baptismTrendPoint(
+    const p = baptismTrendPoint([
       session({ people: [{ testimonyMs: 50_000, baptizeMs: 0 }] }),
-    );
+    ]);
     assert.equal(p, null, "never a point that would feed a real 0 into every tile's average");
   });
 
   test("nobody baptized across several people (all mid-testimony) is the same — never people.length", () => {
-    const p = baptismTrendPoint(
+    const p = baptismTrendPoint([
       session({ people: [{ testimonyMs: 50_000, baptizeMs: 0 }, { testimonyMs: 40_000, baptizeMs: 0 }] }),
-    );
+    ]);
     assert.equal(p, null);
   });
 
   test("an unparseable startedAt yields no point rather than one at NaN", () => {
-    assert.equal(baptismTrendPoint(session({ startedAt: "not-a-date" })), null);
+    assert.equal(baptismTrendPoint([session({ startedAt: "not-a-date" })]), null);
+  });
+});
+
+describe("groupSessionsByService", () => {
+  test("sessions sharing a serviceKey group together; a keyless session stays its own group", () => {
+    const a = session({ id: "a", serviceKey: "svc-1" });
+    const b = session({ id: "b", serviceKey: "svc-1" });
+    const c = session({ id: "c", serviceKey: "svc-2" });
+    const d = session({ id: "d", serviceKey: null });
+    const e = session({ id: "e", serviceKey: null });
+    const groups = groupSessionsByService([a, b, c, d, e]);
+    assert.equal(groups.length, 4, "svc-1, svc-2, and d/e each their own group");
+    assert.deepEqual(groups[0]!.map((s) => s.id), ["a", "b"]);
+    assert.deepEqual(groups[1]!.map((s) => s.id), ["c"]);
+    assert.deepEqual(groups[2]!.map((s) => s.id), ["d"]);
+    assert.deepEqual(groups[3]!.map((s) => s.id), ["e"]);
   });
 });
 
@@ -106,7 +142,7 @@ describe("a nobody-baptized session mixed into an otherwise-real window", () => 
   });
 
   test("is left out entirely — the three real sessions' own averages are untouched", () => {
-    const points = [...real, nobodyBaptized].map(baptismTrendPoint).filter((p) => p != null);
+    const points = [...real, nobodyBaptized].map((s) => baptismTrendPoint([s])).filter((p) => p != null);
     assert.equal(points.length, 3, "the nobody-baptized session must not become a fourth point");
     const t = baptismTrends(points);
     assert.equal(t.baptized.latest, 5, "still 5 baptized per service, not 3.75");
@@ -137,6 +173,34 @@ describe("TrendsCard", () => {
     assert.equal(tile!.querySelector("[data-trend-change]")?.textContent, "no prior window yet");
   });
 
+  // One Sunday service, two sessions: the kids' group finished at 9:05, the
+  // adults' group finished at 9:50 — both share the SAME serviceKey. Before
+  // grouping, this read as TWO "services" at 3.0 baptized each instead of ONE
+  // at 6.0.
+  test("two sessions in one service (a kids' group then an adults' group) read as one service, not two", () => {
+    const three = [
+      { testimonyMs: 60_000, baptizeMs: 30_000 },
+      { testimonyMs: 60_000, baptizeMs: 30_000 },
+      { testimonyMs: 60_000, baptizeMs: 30_000 },
+    ];
+    const kids = session({
+      id: "kids", serviceKey: "svc-oneservice",
+      startedAt: "2026-09-27T14:05:00.000Z", finishedAt: "2026-09-27T14:15:00.000Z", people: three,
+    });
+    const adults = session({
+      id: "adults", serviceKey: "svc-oneservice",
+      startedAt: "2026-09-27T14:50:00.000Z", finishedAt: "2026-09-27T15:00:00.000Z", people: three,
+    });
+    const view = render(React.createElement(TrendsCard, { sessions: [kids, adults] }));
+    const tile = view.container.querySelector('[data-trend-tile="Baptized per service"]');
+    assert.ok(tile);
+    assert.equal(
+      tile!.querySelector("[data-trend-value]")?.textContent,
+      "6.0",
+      "one service that baptized 6 must read as 6 per service, not 3 over two 'services'",
+    );
+  });
+
   // This used to construct "a full prior window that averaged 0 baptized"
   // from 8 nobody-baptized sessions, and asserted the tile said so, distinct
   // from no prior window at all. That scenario can
@@ -146,9 +210,12 @@ describe("TrendsCard", () => {
   // yet" is now the correct, honest read for it, not the wrong one this test
   // used to guard against.
   test("a window of sessions with nobody baptized contributes no points at all", () => {
+    // Each session here is its OWN service (distinct serviceKey) — grouping by
+    // service must not fold 8 separate Sundays into one group.
     const prior = Array.from({ length: 8 }, (_, i) =>
       session({
         id: `p${i}`,
+        serviceKey: `svc-p${i}`,
         startedAt: `2026-08-0${i + 1}T15:00:00.000Z`,
         people: [{ testimonyMs: 60_000, baptizeMs: 0 }],
       }),
@@ -156,6 +223,7 @@ describe("TrendsCard", () => {
     const recent = Array.from({ length: 8 }, (_, i) =>
       session({
         id: `r${i}`,
+        serviceKey: `svc-r${i}`,
         startedAt: `2026-09-0${i + 1}T15:00:00.000Z`,
         people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
       }),
@@ -182,13 +250,15 @@ describe("TrendsCard", () => {
   test("Baptized per service colours an increase ok and a decrease danger; duration tiles never claim a direction", () => {
     // TrendsCard always uses the default TREND_WINDOW (8), so the "recent"
     // window needs a full 8 sessions to mean anything — 8 prior at 1 person
-    // each, then a full 8 recent at 3 each.
+    // each, then a full 8 recent at 3 each. Each session is its own service
+    // (distinct serviceKey), so grouping does not fold this window down.
     const prior = Array.from({ length: 8 }, (_, i) =>
-      session({ id: `p${i}`, startedAt: `2026-08-0${i + 1}T15:00:00.000Z`, people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }] }),
+      session({ id: `p${i}`, serviceKey: `svc-p${i}`, startedAt: `2026-08-0${i + 1}T15:00:00.000Z`, people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }] }),
     );
     const recent = Array.from({ length: 8 }, (_, i) =>
       session({
         id: `r${i}`,
+        serviceKey: `svc-r${i}`,
         startedAt: `2026-09-0${i + 1}T15:00:00.000Z`,
         people: [
           { testimonyMs: 60_000, baptizeMs: 30_000 },

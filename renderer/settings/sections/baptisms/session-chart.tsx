@@ -162,10 +162,18 @@ export function useSessionLane(
 }
 
 /**
- * The plan lane for a session that is NOT live: fetched once per serviceKey,
- * with nothing to refetch on — a finished session's own recorded timeline does
- * not change under it, unlike the live one (see useServiceTimeline, which
- * refetches on "service-timeline:history" for exactly that reason).
+ * The plan lane for the LIVE Baptisms tab's own SessionChart, for whichever
+ * session is not currently live (`active` is `!live`): fetched once per
+ * serviceKey, with nothing to refetch on — a finished session's own recorded
+ * timeline does not change under it, unlike the live one (see
+ * useServiceTimeline, which refetches on "service-timeline:history" for
+ * exactly that reason).
+ *
+ * HistorySessionChart, the read-only PAST-service entry point on a service's
+ * History page, does NOT use this hook — its caller already holds the same
+ * `serviceTimeline:get` read (service-history-section.tsx's own `det.items`)
+ * and passes it down as a prop, so a page reads its own plan items exactly
+ * once rather than fetching them again here for the identical service.
  *
  * A failure here degrades to an empty plan lane rather than its own EMPTY-STATE
  * note: unlike the timer lane, it never produces a WRONG statement on screen —
@@ -258,21 +266,31 @@ export interface HistorySessionChartProps {
    *  one service, means more, and each gets its own chart-or-note and its
    *  own per-person splits, in the order given. */
   sessions: readonly BaptismSession[];
+  /** The service's own plan items — the SAME `serviceTimeline:get` read the
+   *  caller already holds (service-history-section.tsx's `det.items`), passed
+   *  down rather than fetched a second time here. Keeping a private fetch of
+   *  the identical route meant an item-time edit updated the caller's own
+   *  "Vs plan" figure while this chart's plan lane kept drawing the pre-edit
+   *  times until the page reloaded, and every History service page issued
+   *  the timeline GET twice for no reason. The caller's own failed-read
+   *  handling (loadFailed.has("timeline")) covers a fetch failure now — this
+   *  component no longer shows its own plan-fetch note. */
+  items: readonly ServiceTimelineItem[];
 }
 
 /**
  * The read-only, PAST-service entry point onto the Session chart, for the
  * Baptisms card on a service's History page.
  *
- * Shares useSessionLane and usePastPlanItems outright with the live
- * SessionChart above — one fetch of each, for the WHOLE service, exactly as
- * they already work — and slices per session with the same
- * sessionWindow/sessionSpans/clipToSession arithmetic every live chart uses
- * (see sessionSpans' own comment: the lane endpoint already returns every
- * session's spans concatenated, which is what makes drawing more than one
- * session here possible without a second route). SessionSvg itself is never
- * copied, only called again. Nothing here is imported by
- * baptism-operator.tsx, so the live Baptisms page renders exactly as before.
+ * Shares useSessionLane outright with the live SessionChart above — one fetch
+ * of the spans, for the WHOLE service, exactly as it already works — and
+ * slices per session with the same sessionWindow/sessionSpans/clipToSession
+ * arithmetic every live chart uses (see sessionSpans' own comment: the lane
+ * endpoint already returns every session's spans concatenated, which is what
+ * makes drawing more than one session here possible without a second route).
+ * SessionSvg itself is never copied, only called again. Nothing here is
+ * imported by baptism-operator.tsx, so the live Baptisms page renders exactly
+ * as before.
  *
  * A session matched to this service by exact serviceKey but whose own window
  * has no spans in the shared lane (recorded before the raw layer existed, or
@@ -282,9 +300,8 @@ export interface HistorySessionChartProps {
  * timeline was recorded, never an empty chart that reads as nothing
  * happened.
  */
-export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChartProps) {
+export function HistorySessionChart({ serviceKey, sessions, items }: HistorySessionChartProps) {
   const { spans, loaded, error } = useSessionLane(serviceKey);
-  const { items: planItemsAll, error: planError } = usePastPlanItems(serviceKey, true);
   const reduced = prefersReducedMotion();
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
 
@@ -340,7 +357,7 @@ export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChar
                   width={width}
                   win={win}
                   spans={sessionOnlySpans}
-                  planItems={clipToSession(planLaneItems(planItemsAll), win.startMs, win.endMs)}
+                  planItems={clipToSession(planLaneItems(items), win.startMs, win.endMs)}
                   reduced={reduced}
                   measure={measure}
                 />
@@ -355,14 +372,6 @@ export function HistorySessionChart({ serviceKey, sessions }: HistorySessionChar
           </div>
         );
       })}
-      {/* One plan-fetch note for the whole card, not per session: it is the
-          same fetch (usePastPlanItems is keyed on serviceKey alone) and the
-          same failure either way. */}
-      {planError && (
-        <p role="alert" className="text-caption2 text-danger-11">
-          Plan items could not be loaded; the log has the details.
-        </p>
-      )}
     </div>
   );
 }
@@ -435,7 +444,18 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
   // The window is THIS session's own start/finish, never derived from spans
   // or plan items — see sessionWindow's own comment for the bug that was.
-  const win = sessionWindow(state.sessionStartedAt, state.finishedAt, { live, nowMs: now });
+  //
+  // `now` is only a once-a-second sample (useServerNow above), but a press
+  // stamps its own new span's startedAt at the exact instant it happens —
+  // which can be (briefly) LATER than the last sample, since the
+  // push-triggered lane refetch that follows every press resolves well
+  // inside that second. Without folding in the latest span's own start,
+  // `sessionSpans` below would filter the very span the press just opened
+  // back out (and clip the span it closed right at the plot's edge) for up
+  // to a second, until the next tick caught up.
+  const latestSpanStartMs = spans.length ? Date.parse(spans[spans.length - 1]!.startedAt) : NaN;
+  const liveNowMs = live && Number.isFinite(latestSpanStartMs) ? Math.max(now, latestSpanStartMs) : now;
+  const win = sessionWindow(state.sessionStartedAt, state.finishedAt, { live, nowMs: liveNowMs });
   // Plain calls, not useMemo: both are a single small array map (a session
   // has tens of spans and items at most), so memoizing them buys nothing and
   // `rawPlanItems`, computed fresh above from two hook results, would just
@@ -666,8 +686,18 @@ function SessionSvg({
   const hoveredTimerSeg = hoverX != null
     ? (segmentAt(timerSegments, hoverX, "service") as (LaneSegment & { item: TimerLaneItem }) | null)
     : null;
+  // A running span's own endedAt is null for as long as it runs, so a key
+  // built from it alone stays IDENTICAL for the whole time the pointer rests
+  // on it — the effect below, keyed on this, would then never re-run, and
+  // the header's hover figures would freeze at whatever duration was true the
+  // instant the hover started, while the bar and the Timer card keep
+  // counting. Folding in domainEndMs (already recomputed every 1s render, via
+  // useServerNow above) keeps the key moving for exactly as long as the span
+  // stays open, without changing it at all once the span closes (endedAt then
+  // wins outright, so hovering a closed segment still keys on nothing but its
+  // own identity).
   const hoveredKey = hoveredTimerSeg
-    ? `${hoveredTimerSeg.item.itemId}-${hoveredTimerSeg.item.endedAt ?? "running"}`
+    ? `${hoveredTimerSeg.item.itemId}-${hoveredTimerSeg.item.endedAt ?? `running-${Math.floor(domainEndMs / 1000)}`}`
     : "";
   const hoverFigs = hoveredTimerSeg ? timerHoverFigures(hoveredTimerSeg.item, domainEndMs) : null;
   const onHoverRef = useRef(onHover);

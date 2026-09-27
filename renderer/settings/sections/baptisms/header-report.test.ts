@@ -1,4 +1,4 @@
-// header.test.ts — baptismReportText's plain-text summary, the Copy report
+// header-report.test.ts — baptismReportText's plain-text summary, the Copy report
 // button's clipboard target. Pure function, no DOM: the header COMPONENT
 // (sticky positioning, the ResizeObserver measurement, the action group's
 // wrap) is not unit-tested here, for the reason header.tsx's own top comment
@@ -8,24 +8,16 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
+import { baptismState } from "../../../test-fixtures/baptism-state.js";
 import { baptismReportText } from "./header.js";
 
-const BASE: BaptismState = {
-  mode: "grouped",
-  phase: "idle",
+const BASE: BaptismState = baptismState({
   personNumber: 3,
   baptismIndex: 1,
-  armed: false,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
   sessionStartedAt: "2026-09-27T16:20:00.000Z",
   finishedAt: "2026-09-27T16:40:00.000Z",
-  people: [],
-  pendingTestimonyMs: null,
   serviceTitle: "Sunday Service",
-  serviceTypeId: null,
-  planId: null,
-};
+});
 
 // This printed "baptism 0:00" for a mid-testimony person here, while the
 // People table printed a dash for the identical entry — one rule now,

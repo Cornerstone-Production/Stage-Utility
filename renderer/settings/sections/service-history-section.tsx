@@ -28,6 +28,7 @@ import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSound
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
+import { reloadOnBaptismChange } from "./baptisms/reload-on-baptism-change";
 import { TrendsCard } from "./history-trends/trends-card";
 import { useHistoryShown, type RowSpl } from "./history-shown";
 import { appZoneOf, trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
@@ -377,8 +378,13 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
     const t = baptismStats(baptisms);
     L.push("", "BAPTISMS");
     L.push(`${t.people} baptized · total ${fmtDur(t.totalSec)}`);
-    L.push(`testimony ${fmtDur(t.testimonySec)} (avg ${fmtDur(t.avgTestimonySec)})`);
-    L.push(`baptism ${fmtDur(t.baptismSec)} (avg ${fmtDur(t.avgBaptismSec)})`);
+    // fmtDur(0) prints "0:00" — true for a genuinely instant testimony/baptism,
+    // false for one that never happened yet (a grouped Finish during the
+    // testimonies has real testimony time but nobody baptized). null reads as
+    // "—", the same call the Past sessions card and the header's own stat
+    // strip (figures.ts) make for the identical shape.
+    L.push(`testimony ${fmtDur(t.testimonySec)} (avg ${fmtDur(t.testified ? t.avgTestimonySec : null)})`);
+    L.push(`baptism ${fmtDur(t.baptismSec)} (avg ${fmtDur(t.people ? t.avgBaptismSec : null)})`);
   }
   return L.join("\n");
 }
@@ -962,14 +968,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // selectedKey changing (opening a service is exactly the moment its own
   // just-finished session needs to be current — a page left open through a
   // live baptism session used to show it only after a full reload, since the
-  // fetch ran once and never again), and on a live, non-replayed
-  // "baptism:state" push whose own finishedAt or saveErrors actually changed
-  // (a session finishing, or a save-failure clearing via a Rebuild done
-  // somewhere ELSE — the Baptisms tab's own header or note — while this page
-  // stays open with no selection change at all). A REPLAYED push is the
-  // connect-time cache of whatever is already true, never a new event; the
-  // signature check on top of that means an unrelated push (a tick, a
-  // workflow toggle) does not refetch the whole session list for nothing.
+  // fetch ran once and never again), and on a session finishing or a Rebuild
+  // changing the store from anywhere ELSE — a second tab, the Baptisms tab's
+  // own header or note, the display's operator panel, or Companion's
+  // baptism.advance/baptism.finish actions — while this page stays open with
+  // no selection change at all. That last part is reloadOnBaptismChange,
+  // shared with baptism-operator.tsx's identical need: see its own comment
+  // for why a replayed push and an unrelated one are both ignored.
   //
   // A failure is not a baptism-free month. This used to `.catch(() =>
   // setBaptisms([]))`, the exact lie the OTHER three loads on this page were
@@ -993,27 +998,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         });
     }
     fetchBaptisms();
-    let lastSignature: string | null = null;
-    const offState = onNotification("baptism:state", (payload, replayed) => {
-      if (replayed) return;
-      const state = payload as BaptismState;
-      const signature = JSON.stringify([state.finishedAt, state.saveErrors ?? null]);
-      if (signature === lastSignature) return;
-      lastSignature = signature;
-      fetchBaptisms();
-    });
-    // A rebuild that adds or updates a session with no save-failure entry to
-    // clear (an operator picking up an older correction, say) never touches
-    // baptism:state at all — this is the store itself changing, from any of
-    // the three routes into applyBaptismRebuild, not a live timer event.
-    const offRebuilt = onNotification("baptism:rebuilt", (_payload, replayed) => {
-      if (replayed) return;
-      fetchBaptisms();
-    });
+    // Shared with baptism-operator.tsx's identical need to react to a session
+    // finishing or a Rebuild done anywhere else — see reload-on-baptism-change.ts.
+    const unsubscribe = reloadOnBaptismChange(fetchBaptisms);
     return () => {
       cancelled = true;
-      offState();
-      offRebuilt();
+      unsubscribe();
     };
   }, [reloadKey, selectedKey, noteFailure, noteLoaded]);
 
@@ -1317,6 +1307,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         setMergeTarget("");
         setSelectedKey(mergeTarget); // jump to the record we merged into
         reload(); // drop the now-deleted source from the list (avoid a dead row)
+        // mergeServiceRecords deletes the source's attendance record too (same
+        // serviceKey the timeline's own reload() above just dropped), with no
+        // push naming the deletion — only the TARGET's own merged record is
+        // broadcast (attendance:history), which the live-push handler below
+        // already merges into attList by key. Left uncleared, the source's own
+        // stale entry in attList resurrects itself the instant `rows`
+        // recomputes: an attendance-only "no items recorded" row and an extra
+        // Trends point (rows/Trends both derive from list + attList), until
+        // the page is reopened and attList's own one-shot fetch runs again.
+        // Same fix, same reason, as deleteService's identical optimistic
+        // removal just above.
+        setAttList((prev) => prev.filter((a) => a.serviceKey !== det.serviceKey));
         setReloadKey((k) => k + 1);
         toast.success("Merged");
       } catch (e) {
@@ -1695,7 +1697,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             }
           >
             <StatStrip figures={historyBaptismFigures(linkedBap, det.items)} hover={null} live={null} announce={false} />
-            <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} />
+            <HistorySessionChart serviceKey={det.serviceKey} sessions={linkedBap} items={det.items} />
           </SectionCard>
         ) : loadFailed.has("baptisms") ? (
           <SectionCard title="Baptisms">
@@ -2281,7 +2283,7 @@ function SectionCard({
  * planLaneItems, session-lane.ts), so Vs plan can never name a different plan
  * than the chart draws right underneath it.
  */
-function historyBaptismFigures(sessions: readonly BaptismSession[], items: readonly ServiceTimelineItem[]): StatFigure[] {
+export function historyBaptismFigures(sessions: readonly BaptismSession[], items: readonly ServiceTimelineItem[]): StatFigure[] {
   const stats = baptismStats(sessions);
 
   // Segment: each session's own WALL-CLOCK span (finishedAt − startedAt),
@@ -2343,8 +2345,12 @@ function historyBaptismFigures(sessions: readonly BaptismSession[], items: reado
   return [
     { key: "people", label: "Baptized", value: String(stats.people) },
     { key: "segment", label: "Segment", value: fmtDur(segmentSec), sub: segmentSub },
-    { key: "testimony", label: "Testimony", value: fmtDur(stats.testimonySec), color: "var(--color-accent)", sub: `avg ${fmtDur(stats.avgTestimonySec)}` },
-    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec), color: "var(--color-live-11)", sub: `avg ${fmtDur(stats.avgBaptismSec)}` },
+    // fmtDur(0) prints "0:00" — a real claim for an instant testimony/baptism,
+    // false for one that has not happened yet. null reads as "—" (fmtDur's
+    // own rule), the same call past-sessions.tsx and figures.ts make for the
+    // identical shape.
+    { key: "testimony", label: "Testimony", value: fmtDur(stats.testimonySec), color: "var(--color-accent)", sub: `avg ${fmtDur(stats.testified ? stats.avgTestimonySec : null)}` },
+    { key: "baptism", label: "Baptism total", value: fmtDur(stats.baptismSec), color: "var(--color-live-11)", sub: `avg ${fmtDur(stats.people ? stats.avgBaptismSec : null)}` },
     { key: "longest", label: "Longest", value: longestPerson ? fmtDur(longestMs / 1000) : "—", sub: longestPerson ? `person ${longestPerson}` : undefined },
     vsPlan,
   ];

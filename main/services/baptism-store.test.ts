@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { BaptismSession } from "../types/stage.js";
+import { captureLog } from "./baptism-save-harness.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-store-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -27,24 +28,6 @@ const session = (n: number): BaptismSession =>
     finishedAt: null,
     people: [],
   }) as unknown as BaptismSession;
-
-/** Capture console.log lines starting with `prefix`, the same technique
- *  baptism-legacy-restore.test.ts uses — a guard on a log line has to watch
- *  the real call, not trust that the code makes it. Restore with release()
- *  even on assertion failure. */
-function captureLog(prefix: string): { lines: string[]; release: () => void } {
-  const lines: string[] = [];
-  const original = console.log;
-  console.log = (...args: unknown[]) => {
-    if (typeof args[0] === "string" && args[0].startsWith(prefix)) lines.push(args[0]);
-  };
-  return {
-    lines,
-    release: () => {
-      console.log = original;
-    },
-  };
-}
 
 describe("baptism sessions", () => {
   beforeEach(async () => {
@@ -340,6 +323,170 @@ describe("mergeRebuilt never evicts, even at the cap", () => {
       await baptismStore.deleteSession(keptId);
       await baptismStore.deleteSession(firstNewId);
       await baptismStore.deleteSession(secondNewId);
+    }
+  });
+});
+
+// mergeRebuilt's own eviction contract (see its doc
+// comment) never evicts, but addSession's DOES, at the cap — and addSession
+// reads file.sessions directly rather than a freshly-sorted view, trusting
+// every earlier append to have kept it newest-first. mergeRebuilt broke that:
+// it pushed a restored session at the tail of the array regardless of its
+// own startedAt, so a session restored from last Sunday landed in the
+// "oldest" storage position even though it was the newest thing in the
+// store. The very next live Finish then evicted THAT session instead of one
+// genuinely years old.
+describe("mergeRebuilt keeps storage newest-first, so eviction takes the oldest", () => {
+  it("a session a rebuild restores is not the one the next live Finish evicts at the cap", async () => {
+    const before = await baptismStore.listSessions();
+    const fillerCount = Math.max(0, MAX_SESSIONS - 1 - before.length);
+    const base = Date.UTC(2020, 0, 1);
+    const filler: BaptismSession[] = Array.from({ length: fillerCount }, (_, i) => ({
+      id: `bap-evict-filler-${i}`,
+      startedAt: new Date(base + i * 86_400_000).toISOString(),
+      finishedAt: new Date(base + i * 86_400_000 + 60_000).toISOString(),
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+    }) as unknown as BaptismSession);
+    await baptismStore.addSessions(filler);
+    assert.equal((await baptismStore.listSessions()).length, MAX_SESSIONS - 1, "precondition: exactly one slot free before the restore");
+
+    const restoredId = "bap-evict-restored";
+    const restored = {
+      id: restoredId,
+      startedAt: new Date(Date.UTC(2026, 8, 20, 15)).toISOString(), // last Sunday
+      finishedAt: new Date(Date.UTC(2026, 8, 20, 16)).toISOString(),
+      people: [{ testimonyMs: 1, baptizeMs: 1 }],
+    } as unknown as BaptismSession;
+
+    const liveId = "bap-evict-live";
+    try {
+      const r = await baptismStore.mergeRebuilt([restored]);
+      assert.equal(r.added, 1, "precondition: the restore landed");
+
+      // Tomorrow's live Finish, arriving at the cap.
+      await baptismStore.addSession({
+        id: liveId,
+        startedAt: new Date(Date.UTC(2026, 8, 27, 15)).toISOString(),
+        finishedAt: new Date(Date.UTC(2026, 8, 27, 16)).toISOString(),
+        people: [{ testimonyMs: 1, baptizeMs: 1 }],
+      } as unknown as BaptismSession);
+
+      const ids = new Set((await baptismStore.listSessions()).map((s) => s.id));
+      assert.ok(ids.has(restoredId), `the just-restored ${restoredId} was evicted while sessions from 2020 were kept`);
+      assert.ok(!ids.has(filler[0]!.id), "the oldest filler session (2020-01-01) should be the one evicted instead");
+    } finally {
+      for (const f of filler) await baptismStore.deleteSession(f.id);
+      await baptismStore.deleteSession(restoredId);
+      await baptismStore.deleteSession(liveId);
+    }
+  });
+});
+
+/** Reach into the store's own internals to write a shape no CURRENT write path
+ *  can produce — v1.23.0's addSession prepended rather than replacing by id,
+ *  so finish, undo, finish left TWO rows sharing one id on an upgraded box.
+ *  This is what is already sitting in such a box's baptism.json, not
+ *  something addSession/addSessions/mergeRebuilt (all id-aware now) could
+ *  ever write. Goes straight through the store's own update() so the
+ *  in-process cache stays consistent with what a later listSessions() reads —
+ *  a raw fs.writeFile here would leave the cache stale. */
+type RawBaptismFile = { current: unknown; sessions: BaptismSession[] };
+type RawStore = { update: (f: (c: RawBaptismFile) => RawBaptismFile) => Promise<RawBaptismFile> };
+function internalsOf(): RawStore {
+  return (baptismStore as unknown as { store: RawStore }).store;
+}
+
+// Pre-existing (not new in this release): sessions v1.23.0 saved twice under
+// one id were counted twice by every reader of listSessions() — the route,
+// and linkBaptisms downstream of it in History.
+describe("listSessions dedupes a session stored twice under one id", () => {
+  it("counts it once, keeping the later finish, and logs once — without touching the file", async () => {
+    const id = "bap-dup-v1230";
+    const earlier = {
+      id,
+      startedAt: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+      finishedAt: new Date(Date.UTC(2026, 0, 1, 0, 10)).toISOString(),
+      people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
+      title: null,
+      serviceTypeId: null,
+      planId: null,
+    } as unknown as BaptismSession;
+    const later = {
+      ...earlier,
+      finishedAt: new Date(Date.UTC(2026, 0, 1, 0, 20)).toISOString(),
+      people: [{ testimonyMs: 90_000, baptizeMs: 45_000 }],
+    } as unknown as BaptismSession;
+
+    const internals = internalsOf();
+    const warnLines: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("[baptism]") && args[0].includes("more than once")) {
+        warnLines.push(args[0]);
+      } else {
+        (originalWarn as (...a: unknown[]) => void)(...args);
+      }
+    };
+    try {
+      await internals.update((file) => ({ ...file, sessions: [earlier, later] }));
+
+      const all = await baptismStore.listSessions();
+      const mine = all.filter((s) => s.id === id);
+      assert.equal(mine.length, 1, "GET /api/baptism/sessions must count this id once, not twice");
+      assert.equal(mine[0]!.finishedAt, later.finishedAt, "the later finish wins");
+      assert.equal(warnLines.length, 1, "a stored duplicate must be logged on a tagged line");
+      // Every History and Baptisms read goes through listSessions(): the same
+      // duplicates are announced once, not on every read.
+      await baptismStore.listSessions();
+      assert.equal(warnLines.length, 1, "the same duplicates were logged again on the next read");
+
+      // Read-side only: the raw storage this test wrote is unchanged by that read.
+      const raw = (await internals.update((file) => file)) as { sessions: BaptismSession[] };
+      assert.equal(raw.sessions.filter((s) => s.id === id).length, 2, "listSessions() must not rewrite or prune the file");
+    } finally {
+      console.warn = originalWarn;
+      await internals.update((file) => ({ ...file, sessions: file.sessions.filter((s) => s.id !== id) }));
+    }
+  });
+});
+
+// Pre-existing (not new in this release): a history merge moves baptism.csv
+// to the target's archive directory (mergeArchives, history-edit.ts) but
+// never re-keyed the stored sessions, which kept the source's serviceKey —
+// orphaned once the merge deletes the source's own service record.
+describe("rekeyServiceKey", () => {
+  it("moves every session recorded under the source key onto the target, leaving others alone", async () => {
+    const moved1 = { ...session(900), serviceKey: "src-key" } as BaptismSession;
+    const moved2 = { ...session(901), serviceKey: "src-key" } as BaptismSession;
+    const untouched = { ...session(902), serviceKey: "other-key" } as BaptismSession;
+    await baptismStore.addSessions([moved1, moved2, untouched]);
+    try {
+      const moved = await baptismStore.rekeyServiceKey("src-key", "tgt-key");
+      assert.equal(moved.size, 2, "exactly the two sessions under the source key must move");
+      assert.deepEqual([...moved].sort(), [moved1.id, moved2.id].sort(), "the ids returned must be the ones that actually moved");
+
+      const all = await baptismStore.listSessions();
+      assert.equal(all.find((s) => s.id === moved1.id)?.serviceKey, "tgt-key");
+      assert.equal(all.find((s) => s.id === moved2.id)?.serviceKey, "tgt-key");
+      assert.equal(all.find((s) => s.id === untouched.id)?.serviceKey, "other-key", "an unrelated session's key must not change");
+      assert.equal((await baptismStore.rekeyServiceKey("src-key", "tgt-key")).size, 0, "nothing left under the source key on a second call");
+    } finally {
+      await baptismStore.deleteSession(moved1.id);
+      await baptismStore.deleteSession(moved2.id);
+      await baptismStore.deleteSession(untouched.id);
+    }
+  });
+
+  it("is a no-op for an empty, missing or identical key, and does not write", async () => {
+    const spy = spyOnWrite();
+    try {
+      assert.equal((await baptismStore.rekeyServiceKey("", "tgt")).size, 0);
+      assert.equal((await baptismStore.rekeyServiceKey("src", "")).size, 0);
+      assert.equal((await baptismStore.rekeyServiceKey("same", "same")).size, 0);
+      assert.equal((await baptismStore.rekeyServiceKey("nothing-recorded-under-this-key", "tgt")).size, 0);
+      assert.equal(spy.calls(), 0, "no session moved, so nothing should reach the underlying write");
+    } finally {
+      spy.restore();
     }
   });
 });

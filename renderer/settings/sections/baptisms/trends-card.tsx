@@ -53,36 +53,75 @@ export function fmtClockDelta(ms: number): string {
 }
 
 /**
- * A finished session, reduced to one BaptismTrendPoint — or null when its
- * start time will not parse, the same defensiveness trendClock's own callers
- * apply rather than plotting a point at NaN. Exported for its own test: the
- * arithmetic in trends.ts is only as honest as what feeds it.
+ * One service occurrence's own sessions, reduced to one BaptismTrendPoint —
+ * or null when NONE of them has a start time that will parse, the same
+ * defensiveness trendClock's own callers apply rather than plotting a point
+ * at NaN.
  *
- * Also null when NOBODY was baptized: an ordinary Finish during the
- * testimonies, a Finish while armed, or a test run finished instead of
- * reset all log a real session with a real wall clock and nothing
- * baptized. Counted in, each fed `avgBaptismSec: 0` and its own short wall
- * clock into every tile's average — measured against three real sessions plus
- * one such session, "Avg baptism" moved from 45s to 33.75s and "Whole
- * segment" from 25 to 19.25 minutes. A session that baptized nobody is left
- * out of the trend entirely, not folded in at zero: TrendsCard's four tiles
- * all read off this ONE point per session, so excluding it here is what keeps
- * every tile — not just "Baptized per service" — honest about the same set
- * of real sessions.
+ * Takes the whole GROUP a service produced, not one session: a reset and
+ * restart, or a kids' group finished then an adults' group finished in the
+ * same grouped service, are two BaptismSessions sharing one `serviceKey`, and
+ * "Baptized per service" means what it says — one point per SERVICE, not per
+ * session, or a service with two sessions counts as two services at half the
+ * real number each. `baptismStats` already takes a set, so the group's totals
+ * and averages come from it directly; `wholeSegmentSec` is the SUM of each
+ * session's own wall clock (each session is its own separate segment of
+ * running time), and `t` is the group's EARLIEST `startedAt`, for oldest-first
+ * sorting. Grouping itself is `groupSessionsByService`'s job, exported for its
+ * own test: the arithmetic in trends.ts is only as honest as what feeds it.
+ *
+ * Also null when NOBODY in the group was baptized: an ordinary Finish during
+ * the testimonies, a Finish while armed, or a test run finished instead of
+ * reset all log a real session with a real wall clock and nothing baptized.
+ * Counted in, each fed `avgBaptismSec: 0` and its own short wall clock into
+ * every tile's average — measured against three real sessions plus one such
+ * session, "Avg baptism" moved from 45s to 33.75s and "Whole segment" from 25
+ * to 19.25 minutes. A group that baptized nobody is left out of the trend
+ * entirely, not folded in at zero: TrendsCard's four tiles all read off this
+ * ONE point per service, so excluding it here is what keeps every tile — not
+ * just "Baptized per service" — honest about the same set of real services.
  */
-export function baptismTrendPoint(s: BaptismSession): BaptismTrendPoint | null {
-  const t = Date.parse(s.startedAt);
-  if (!Number.isFinite(t)) return null;
-  const finish = Date.parse(s.finishedAt);
-  const stats = baptismStats([s]);
+export function baptismTrendPoint(group: readonly BaptismSession[]): BaptismTrendPoint | null {
+  const stats = baptismStats(group);
   if (stats.people === 0) return null;
+  const starts = group.map((s) => Date.parse(s.startedAt)).filter((n) => Number.isFinite(n));
+  if (starts.length === 0) return null;
+  const t = Math.min(...starts);
+  const wholeSegmentSec = group.reduce((sum, s) => {
+    const start = Date.parse(s.startedAt);
+    const finish = Date.parse(s.finishedAt);
+    return Number.isFinite(start) && Number.isFinite(finish) ? sum + Math.max(0, (finish - start) / 1000) : sum;
+  }, 0);
   return {
     t,
     baptized: stats.people,
     avgTestimonySec: stats.avgTestimonySec,
     avgBaptismSec: stats.avgBaptismSec,
-    wholeSegmentSec: Number.isFinite(finish) ? Math.max(0, (finish - t) / 1000) : 0,
+    wholeSegmentSec,
   };
+}
+
+/**
+ * Sessions that belong to the same service occurrence — sharing a
+ * `serviceKey` — grouped together, in first-seen order; a session with no key
+ * (older data, or one recorded before the key existed) stays its own group of
+ * one, exactly as every session behaved before grouping existed.
+ */
+export function groupSessionsByService(sessions: readonly BaptismSession[]): BaptismSession[][] {
+  const order: string[] = [];
+  const groups = new Map<string, BaptismSession[]>();
+  let anonymous = 0;
+  for (const s of sessions) {
+    const key = s.serviceKey || `__no-key-${anonymous++}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = [];
+      groups.set(key, group);
+      order.push(key);
+    }
+    group.push(s);
+  }
+  return order.map((key) => groups.get(key)!);
 }
 
 export interface TrendsCardProps {
@@ -101,7 +140,9 @@ interface TrendChange {
 }
 
 export function TrendsCard({ sessions, loadError = false }: TrendsCardProps) {
-  const points = sessions.map(baptismTrendPoint).filter((p): p is BaptismTrendPoint => p != null);
+  const points = groupSessionsByService(sessions)
+    .map(baptismTrendPoint)
+    .filter((p): p is BaptismTrendPoint => p != null);
   const trends = baptismTrends(points);
 
   return (

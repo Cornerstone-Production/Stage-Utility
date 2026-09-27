@@ -7,11 +7,16 @@
 // same rule rather than three hand-copies drifting apart. See docs/automation.md.
 //
 // A number field is NEVER "missing" here: NumberInput cannot display a blank box,
-// so an absent value reads as `spec.min ?? 0` — the same fallback ParamField and
-// every provider's own `Number(params.x ?? 0)` already use. That is also why the
-// "seed number defaults on pick" fix matters: before it, a freshly chosen step's
-// number params were genuinely `undefined` in storage while the field displayed a
-// default, so a required threshold could be saved unset and never fire.
+// so an absent value reads as `numberParamDefault(spec)` — 0, pulled into the
+// spec's own [min, max] — the same default ParamField, the RossTalk button
+// inspector and every provider's own read already agree on. NOT `spec.min ?? 0`:
+// for a param with a negative floor (only `offsetMinutes` today, min -720) that
+// fallback landed on the floor itself, storing a fresh pick 12 hours from where
+// the operator meant it and displaying that same wrong floor for a legacy value
+// that was never set. That is also why the "seed number defaults on pick" fix
+// matters: before it, a freshly chosen step's number params were genuinely
+// `undefined` in storage while the field displayed a default, so a required
+// threshold could be saved unset and never fire.
 //
 // multi-enum is deliberately NEVER "required" here, regardless of `optional`. Every
 // multi-enum in the registry today (`time.day-of-week`'s `days`,
@@ -45,13 +50,27 @@ export function fieldsNeedAttention(n: number): string {
   return n === 1 ? "1 field needs attention" : `${n} fields need attention`;
 }
 
-/** Every number param's default, keyed by its own `min` (or 0) — what a fresh
- *  pick of a trigger/condition/action must seed immediately, so the field never
- *  displays a value it has not actually stored. See the module doc. */
+/** A number param's own default: 0, pulled into its declared [min, max] — never
+ *  the bare floor, which is wrong for the one param with a negative min
+ *  (`offsetMinutes`, -720: the floor is 12 hours before, 0 is "right now").
+ *  Shared by the seed below, the rule editor's ParamField and the RossTalk
+ *  button inspector — not typed against `ParamDef` so `main/types/rosstalk.ts`'s
+ *  `RossTalkParam` (same `min`/`max`, a different `options` shape) can use it
+ *  too. See the module doc. */
+export function numberParamDefault(spec: { min?: number; max?: number }): number {
+  let n = 0;
+  if (spec.min !== undefined && n < spec.min) n = spec.min;
+  if (spec.max !== undefined && n > spec.max) n = spec.max;
+  return n;
+}
+
+/** Every number param's default — what a fresh pick of a trigger/condition/
+ *  action must seed immediately, so the field never displays a value it has
+ *  not actually stored. See the module doc. */
 export function seedNumberDefaults(specs: ParamDef[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const spec of specs) {
-    if (spec.type === "number") out[spec.key] = spec.min ?? 0;
+    if (spec.type === "number") out[spec.key] = numberParamDefault(spec);
   }
   return out;
 }
@@ -112,7 +131,7 @@ export function validateParams(specs: ParamDef[], params: Record<string, unknown
       case "number": {
         const present = value !== undefined && value !== null && value !== "";
         if (!present) {
-          if (spec.optional) break; // resolves to spec.min ?? 0, always in range
+          if (spec.optional) break; // resolves to numberParamDefault(spec), always in range
           issues.push({ key: spec.key, message: requiredMessage(spec) });
           break;
         }
@@ -192,6 +211,24 @@ export interface RuleStepsLike {
   action: { id: string; params: Record<string, unknown> };
 }
 
+/** One trigger or action step's issues — the shape those two share, and the
+ *  reason they never need a label prefix: a rule has exactly one of each, so
+ *  there is nothing to disambiguate (unlike conditions, see ruleIssues). */
+function simpleStepIssues(
+  step: "trigger" | "action",
+  lookup: StepSpecLookup,
+  id: string,
+  params: Record<string, unknown>,
+): RuleIssue[] {
+  const spec = lookup(step, id);
+  if (!spec) return [];
+  return validateParams(spec.params, params).map((issue) => ({
+    ...issue,
+    step,
+    label: fieldLabel(spec.params, issue.key),
+  }));
+}
+
 /**
  * PURE. Every field across a rule's trigger, conditions and action that needs
  * setup before the rule should run.
@@ -204,12 +241,7 @@ export interface RuleStepsLike {
 export function ruleIssues(rule: RuleStepsLike, lookup: StepSpecLookup): RuleIssue[] {
   const out: RuleIssue[] = [];
 
-  const trigger = lookup("trigger", rule.trigger.id);
-  if (trigger) {
-    for (const issue of validateParams(trigger.params, rule.trigger.params)) {
-      out.push({ ...issue, step: "trigger", label: fieldLabel(trigger.params, issue.key) });
-    }
-  }
+  out.push(...simpleStepIssues("trigger", lookup, rule.trigger.id, rule.trigger.params));
 
   const multipleConditions = rule.conditions.length > 1;
   rule.conditions.forEach((c, index) => {
@@ -226,12 +258,7 @@ export function ruleIssues(rule: RuleStepsLike, lookup: StepSpecLookup): RuleIss
     }
   });
 
-  const action = lookup("action", rule.action.id);
-  if (action) {
-    for (const issue of validateParams(action.params, rule.action.params)) {
-      out.push({ ...issue, step: "action", label: fieldLabel(action.params, issue.key) });
-    }
-  }
+  out.push(...simpleStepIssues("action", lookup, rule.action.id, rule.action.params));
 
   return out;
 }

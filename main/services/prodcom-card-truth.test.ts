@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
@@ -54,15 +54,6 @@ class TestProdCom extends ProdComService {
 }
 
 const CHANNELS = [{ id: "CH-A", name: "Lead TB", color: "#00F900" }];
-
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
 
 function everReportedConnected(svc: TestProdCom): boolean {
   return svc.reports.some((r) => r.state === "connected");
@@ -115,6 +106,43 @@ describe('the card never reports "connected" from a transport that is not up', (
       everReportedConnected(svc),
       false,
       `expected no "connected" report while SSE answers 500, got ${JSON.stringify(svc.reports)}`,
+    );
+  });
+
+  it('stays off "connected" once the stream is reset after its 200', async (t: TestContext) => {
+    // A reset, not a clean end: the box crashed, or the keepalive gave up on
+    // a peer that vanished. Node reports that on the REQUEST, whose handler
+    // used to be the one teardown path that left sseUp true — so every
+    // websocket give-up afterwards told the card "Streaming" for as long as the
+    // outage lasted.
+    const stub = await startProdComStub({ channels: CHANNELS, refuseWebSocket: true });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.sseUpNow, "SSE to come up");
+
+    // From here nothing streams: the reset drops the live stream, and every
+    // reconnect after it is answered 500.
+    stub.setFailSseStream(true);
+    stub.sseResetAll();
+    await eventually(
+      () => svc.reports.some((r) => r.state === "error" && (r.message ?? "").includes("Can't reach")),
+      () => `the reset to reach the request's own error handler, got ${JSON.stringify(svc.reports)}`,
+    );
+    const mark = svc.reports.findIndex((r) => r.state === "error");
+    // Several websocket retry-and-give-up cycles (30ms apart), each of which
+    // reports "connected" when it believes SSE is up.
+    await new Promise((r) => setTimeout(r, 300));
+
+    assert.equal(svc.sseUpNow, false, "sseUp was still true after the stream was reset");
+    const since = svc.reports.slice(mark);
+    assert.equal(
+      since.some((r) => r.state === "connected"),
+      false,
+      `the card reported "connected" during an outage in which nothing streams: ${JSON.stringify(since)}`,
     );
   });
 

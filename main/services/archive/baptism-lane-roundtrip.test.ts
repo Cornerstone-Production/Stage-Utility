@@ -720,21 +720,24 @@ describe("session boundaries on a real lane", () => {
 });
 
 /**
- * The file as it read before a direct next() while armed wrote a row: the same
- * presses, minus that press's `baptisms-start`. advance() writes its own at
- * baptismIndex 0 and only the direct next() writes one further in, so that is
- * the row removed — and exactly one, or the strip proved nothing.
+ * The file as it read before a "First person in" press wrote its own
+ * baptisms-start row. Both advance() and next() (next() once
+ * skipped the waiting person and wrote this row one index further in) write
+ * this identically, at baptismIndex 0, so this is
+ * the ONE baptisms-start row the session records — stripping it proves the
+ * lane's older fallback (see baptism-lane.ts's header: PR 1's emitter, before
+ * baptisms-start existed at all) still places the clock correctly.
  */
 const withoutDirectNextStart: RowEdit = (rows) => {
-  const kept = rows.filter((r) => !(r.event === "baptisms-start" && r.baptismIndex !== "0"));
-  assert.equal(rows.length - kept.length, 1, "exactly one baptisms-start came from the direct next()");
+  const kept = rows.filter((r) => r.event !== "baptisms-start");
+  assert.equal(rows.length - kept.length, 1, "exactly one baptisms-start row to strip");
   return kept;
 };
 
-describe("the clock a direct next() starts while armed", () => {
+describe("the clock 'First person in' starts, whichever route presses it", () => {
   // Each session is read twice. As written, the clock opens on the
-  // baptisms-start row the direct next() writes. With that row stripped — a
-  // file from before it existed — the lane still places the clock from the row
+  // baptisms-start row the press writes. With that row stripped — a file from
+  // before it existed (PR 1) — the lane still places the clock from the row
   // that ends or banks it, the only path in baptism-lane.ts that nothing the
   // emitter writes now reaches.
   it("opens on its own baptisms-start, and without it is placed from the person-complete that ends it", async () => {
@@ -745,13 +748,15 @@ describe("the clock a direct next() starts while armed", () => {
     await sleep(STRETCH_MS);
     timer.startBaptisms();
     await sleep(STRETCH_MS);
-    timer.next(); // POST /api/baptism/next while armed: person 1 skipped, person 2's clock starts
+    timer.next(); // POST /api/baptism/next while armed takes the same
+                  // "First person in" branch advance() does — starts person 1's
+                  // clock rather than skipping them.
     await sleep(STRETCH_MS);
-    timer.finish();
+    timer.finish(); // person 1 baptized; person 2 never stepped up
     const spans = await assertLaneMatchesStore(ctx, "direct next() while armed");
-    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 2"]);
+    assert.deepEqual(shape(spans), ["testimony 1", "testimony 2", "baptism 1"]);
     const inferred = await assertLaneMatchesStore(ctx, "direct next() while armed, its row stripped", 1, withoutDirectNextStart);
-    assert.deepEqual(shape(inferred), ["testimony 1", "testimony 2", "baptism 2"]);
+    assert.deepEqual(shape(inferred), ["testimony 1", "testimony 2", "baptism 1"]);
   });
 
   it("opens on its own baptisms-start, and without it is placed from the pause that banks it", async () => {
@@ -761,7 +766,7 @@ describe("the clock a direct next() starts while armed", () => {
     timer.next();
     await sleep(STRETCH_MS);
     timer.startBaptisms();
-    timer.next(); // direct, while armed
+    timer.next(); // direct, while armed — "First person in"
     await sleep(STRETCH_MS);
     timer.pause();
     await sleep(STRETCH_MS);

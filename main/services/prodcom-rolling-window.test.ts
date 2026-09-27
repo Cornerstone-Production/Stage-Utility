@@ -32,7 +32,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
 
 const NOW = Date.parse("2026-09-24T21:08:00Z");
@@ -82,6 +82,9 @@ class TestProdCom extends ProdComService {
   public wsSettled(): Promise<void> {
     return this.wsBaselinePriming;
   }
+  public get deliveredIdsHeld(): number {
+    return this.wsDeliveredIdCount;
+  }
   public texts(): string[] {
     return this.getBuffer().map((l) => l.text);
   }
@@ -105,25 +108,12 @@ const typed = (id: string, offsetMs = 0): StubEntry => ({ ...spoken(id, offsetMs
  *  window from the moment this service ever connects to it. */
 const fullHistory = (cap: number): StubEntry[] => Array.from({ length: cap }, (_, i) => typed(`history-${i}`, i * 1000));
 
-async function eventually(
-  ready: () => boolean,
-  what: string | (() => string),
-  timeoutMs = 3000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-}
-
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 describe("the silence check on a box whose transcript is already a full rolling window", () => {
   it("gives up on a silent unproven socket within a bounded number of checks", async (t: TestContext) => {
-    // Below WS_SILENCE_CHECK_PAGE_SIZE (100): readNewestPage answers in one
-    // request the whole time, since the capped history already fits on it.
+    // Below WS_SILENCE_CHECK_PAGE_SIZE (100): readNewestPage's page read
+    // starts at offset 0 the whole time, since the capped history fits on it.
     const CAP = 20;
     const stub = await startProdComStub({ channels: CHANNELS, rollingWindowCap: CAP, entries: fullHistory(CAP) });
     const svc = new TestProdCom();
@@ -274,5 +264,209 @@ describe("what the check does and does not count as missed", () => {
 
     assert.equal(svc.onWebSocketNow, true, "a line the socket itself delivered was later treated as one it missed");
     assert.equal(svc.knownSilent, false, "a working socket was latched as known-silent over its own delivery");
+  });
+});
+
+describe("what the promoted check measures from", () => {
+  it("does not count a line said before the socket proved itself", async (t: TestContext) => {
+    // SSE carried it, and the socket had not delivered anything yet — that is
+    // probation's question, answered the moment the socket delivered. Once a
+    // promoted socket only reads REST in quiet windows, a baseline left over
+    // from before promotion would call this line missed at the first one.
+    const stub = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+
+    stub.addEntry(spoken("said-before-the-socket-proved-itself", 1_000));
+    const promoting = spoken("promotes-the-socket", 2_000);
+    stub.addEntry(promoting);
+    stub.wsTranscript(promoting);
+    await eventually(() => svc.onWebSocketNow, "promotion");
+    // Delivering windows, then quiet ones.
+    for (let i = 0; i < 6; i++) {
+      const line = spoken(`delivered-${i}`, 3_000 + i);
+      stub.addEntry(line);
+      stub.wsTranscript(line);
+      await sleep(40);
+    }
+    for (let i = 0; i < 4; i++) {
+      stub.wsPing();
+      await sleep(80);
+    }
+
+    assert.equal(svc.onWebSocketNow, true, "a working socket was demoted over a line said before it was promoted");
+  });
+
+  it("does not let a baseline read from before promotion land after it", async (t: TestContext) => {
+    // The open-time read goes out, and the socket delivers before it answers.
+    // That answer describes the box BEFORE a line the socket never carried;
+    // applied after promotion, it would become the promoted check's baseline
+    // and call that line missed at the first quiet window.
+    let reads = 0;
+    const stub = await startProdComStub({
+      channels: CHANNELS,
+      delayTranscriptAnswerMs: (url) => (url.searchParams.get("limit") === "1" && ++reads === 1 ? 300 : 0),
+    });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.wsOpenNow && reads === 1, "the open-time read to be out");
+
+    stub.addEntry(spoken("said-before-the-socket-proved-itself", 1_000));
+    const promoting = spoken("promotes-the-socket", 2_000);
+    stub.addEntry(promoting);
+    stub.wsTranscript(promoting);
+    await eventually(() => svc.onWebSocketNow, "promotion while the open-time read is out");
+    await svc.wsSettled(); // the late answer lands
+    for (let i = 0; i < 4; i++) {
+      const line = spoken(`delivered-${i}`, 3_000 + i);
+      stub.addEntry(line);
+      stub.wsTranscript(line);
+      await sleep(40);
+    }
+    for (let i = 0; i < 4; i++) {
+      stub.wsPing();
+      await sleep(80);
+    }
+
+    assert.equal(svc.onWebSocketNow, true, "a baseline from before promotion called a pre-promotion line missed");
+  });
+});
+
+describe("what the check costs", () => {
+  /** The silence check's reads of `GET /api/v1/transcript`: it never sends
+   *  `since`, and backfill always does. */
+  const checkReads = (stub: { requests: { url: string }[] }): string[] =>
+    stub.requests.map((r) => r.url).filter((u) => u.startsWith("/api/v1/transcript?") && !u.includes("since="));
+  /** One per readNewestPage, counted by its first request. */
+  const newestPageReads = (stub: { requests: { url: string }[] }): number =>
+    checkReads(stub).filter((u) => u === "/api/v1/transcript?limit=1&offset=0").length;
+
+  it("learns where the newest page starts from a one-row read", async (t: TestContext) => {
+    // Only `meta.totalCount` is used from that first read once a box holds
+    // more than a page, which a real box always does (3001 rows on the live
+    // one) — a full page there is a hundred of the OLDEST rows fetched and
+    // parsed on every check for nothing.
+    const CAP = 150;
+    const stub = await startProdComStub({ channels: CHANNELS, rollingWindowCap: CAP, entries: fullHistory(CAP) });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+    await eventually(() => checkReads(stub).length >= 4, "the check to run once beyond priming");
+
+    assert.deepEqual(
+      [...new Set(checkReads(stub))].sort(),
+      ["/api/v1/transcript?limit=1&offset=0", "/api/v1/transcript?limit=100&offset=50"],
+      "the row-count read asked for more than the one row it needs",
+    );
+  });
+
+  it("costs a promoted socket that keeps delivering one read after promotion, not one per window", async (t: TestContext) => {
+    const stub = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+    stub.wsTranscript(spoken("promotes-the-socket", 1_000));
+    await eventually(() => svc.onWebSocketNow, "promotion");
+    const atPromotion = newestPageReads(stub);
+
+    // Six windows (100 ms each) with a delivery in every one of them, each
+    // line also landing in ProdCom's REST history as the real box does.
+    for (let i = 0; i < 15; i++) {
+      const line = spoken(`delivered-${i}`, 2_000 + i);
+      stub.addEntry(line);
+      stub.wsTranscript(line);
+      await sleep(40);
+    }
+
+    assert.equal(svc.onWebSocketNow, true, "a socket delivering every window was demoted");
+    assert.equal(
+      newestPageReads(stub) - atPromotion,
+      1,
+      "a socket that delivered in every window still cost a REST read every window",
+    );
+  });
+
+  it("still re-reads each window for a socket whose entries carry no id, and does not demote it over its own lines", async (t: TestContext) => {
+    // Nothing excuses an id-less delivery once REST shows it with an id, so a
+    // baseline that stopped moving would read every such line as missed at
+    // the first quiet window. The envelope is the one part of a websocket
+    // frame the spec does not pin, so this is not hypothetical.
+    const stub = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+
+    const say = (id: string, offsetMs: number): void => {
+      const line = spoken(id, offsetMs);
+      stub.addEntry(line);
+      const { id: _drop, ...withoutId } = line;
+      void _drop;
+      stub.wsSend(JSON.stringify({ type: "transcript", data: withoutId }));
+    };
+    say("promotes-the-socket", 1_000);
+    await eventually(() => svc.onWebSocketNow, "promotion");
+    for (let i = 0; i < 8; i++) {
+      say(`no-id-${i}`, 2_000 + i);
+      await sleep(40);
+    }
+    // Then a quiet stretch: heartbeats only, nothing new said.
+    for (let i = 0; i < 4; i++) {
+      stub.wsPing();
+      await sleep(80);
+    }
+
+    assert.equal(svc.onWebSocketNow, true, "a socket was demoted over lines it had itself delivered");
+    assert.equal(svc.knownSilent, false, "a working socket was latched silent over its own id-less deliveries");
+  });
+
+  it("does not keep every id a promoted socket ever delivered", async (t: TestContext) => {
+    const stub = await startProdComStub({ channels: CHANNELS });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+    for (let i = 0; i < 5; i++) {
+      const line = spoken(`delivered-${i}`, 1_000 + i);
+      stub.addEntry(line);
+      stub.wsTranscript(line);
+    }
+    await eventually(() => svc.onWebSocketNow, "promotion");
+    // Quiet windows: the check reads REST, which shows every one of them.
+    for (let i = 0; i < 4; i++) {
+      stub.wsPing();
+      await sleep(80);
+    }
+
+    assert.equal(svc.onWebSocketNow, true, "precondition: a quiet room demoted a working socket");
+    assert.equal(svc.deliveredIdsHeld, 0, "ids REST already shows were kept for the socket's whole life");
   });
 });

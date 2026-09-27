@@ -101,6 +101,12 @@ an archive, and it treats the raw layer differently in each direction:
   column sets, and the source directory is removed. Not optional: SPL rebuilds
   its record from these rows after a restart, so a merge that left them behind
   reverted itself the next time the box came up.
+- **Merging two recordings re-keys the source's baptism sessions onto the
+  target.** `baptism.json` holds every service's sessions in one flat list, not
+  a record per occurrence like the stores above, so there is nothing to
+  combine — a session already saved under the source just gets re-tagged. Left
+  behind, it would link to no service at all once the source's own record is
+  deleted below.
 - **Deleting a recording keeps the raw rows.** Their loss cannot be undone, and
   nothing reads them for a service with no record. Removing an operator's raw
   samples is a bigger decision than "delete this recording" asks for; the

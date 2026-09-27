@@ -543,6 +543,45 @@ describe("buildHistoryWorkbook: Baptisms sheet", () => {
     const { rows } = await sheetOf(buf, "Baptisms");
     assert.equal(rows[0]!["History"], null);
   });
+
+  test("Date and the date filter follow the linked service's own zoned date, not a UTC slice of startedAt", async () => {
+    // KEY's own timeline record (seeded above) is dated 2026-07-26. A session
+    // stamped in the small hours UTC on the 27th is still the SAME session,
+    // recorded during that service — a UTC slice of startedAt would file it a
+    // day later and drop it from a "2026-07-26" export.
+    await seedSession({
+      id: "bap-zoned",
+      serviceKey: KEY,
+      startedAt: "2026-07-27T00:15:00.000Z",
+      finishedAt: "2026-07-27T00:30:00.000Z",
+      people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+    });
+    const buf = await buildHistoryWorkbook({ include: ["baptisms"], from: "2026-07-26", to: "2026-07-26" });
+    const { rows } = await sheetOf(buf, "Baptisms");
+    assert.equal(rows.length, 1, "a UTC-dated slice dropped the session from its own service's export range");
+    assert.equal(rows[0]!["Date"], "2026-07-26");
+  });
+
+  test("Date falls back to the session's OWN zoned date when it names no service", async () => {
+    // A session after 19:00 Chicago is still tonight locally but already
+    // tomorrow in UTC — the case a bare slice(0, 10) always got wrong.
+    setAppTimeZone("America/Chicago");
+    try {
+      await seedSession({
+        id: "bap-unlinked-zoned",
+        serviceKey: null,
+        startedAt: "2026-07-27T00:30:00.000Z", // 7:30 PM CDT on the 26th
+        finishedAt: "2026-07-27T00:45:00.000Z",
+        people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
+      });
+      const buf = await buildHistoryWorkbook({ include: ["baptisms"], from: "2026-07-26", to: "2026-07-26" });
+      const { rows } = await sheetOf(buf, "Baptisms");
+      assert.equal(rows.length, 1, "the session was filed under the UTC date and dropped from the local one");
+      assert.equal(rows[0]!["Date"], "2026-07-26");
+    } finally {
+      setAppTimeZone(null);
+    }
+  });
 });
 
 describe("parseXlsx", () => {

@@ -22,6 +22,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { baptismState } from "../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
 
@@ -33,25 +34,19 @@ const { TooltipProvider } = await import("../components/ui/index.js");
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-const ARMED_STATE: BaptismState = {
-  mode: "grouped",
+const ARMED_STATE: BaptismState = baptismState({
   phase: "baptism",
   personNumber: 2,
-  baptismIndex: 0,
   armed: true,
-  segmentStartedAt: null,
-  segmentAccumMs: 0,
   sessionStartedAt: "2026-09-20T15:00:00.000Z",
-  finishedAt: null,
   people: [
     { testimonyMs: 45_000, baptizeMs: 0 },
     { testimonyMs: 38_000, baptizeMs: 0 },
   ],
-  pendingTestimonyMs: null,
   serviceTitle: "9am",
   serviceTypeId: "svc-1",
   planId: "plan-1",
-};
+});
 
 function stubFetch(state: BaptismState) {
   return (async (input: string) => {

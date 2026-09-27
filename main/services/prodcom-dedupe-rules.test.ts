@@ -7,7 +7,7 @@
 //      box that keeps re-sending the same interim result as a keepalive would
 //      keep a genuinely stalled partial alive forever.
 //   3. A final that actually CHANGED (a real correction) always broadcasts,
-//      even while a second transport is open and would otherwise suppress an
+//      even once the websocket has taken over and would otherwise suppress an
 //      unchanged repeat — see prodcom-duplicate-broadcast.test.ts for the
 //      unchanged half of this same condition.
 //
@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
-import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import { addBroadcastListener } from "./broadcaster.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
@@ -44,6 +44,9 @@ class TestProdCom extends ProdComService {
   }
   public get wsOpenNow(): boolean {
     return this.wsAttemptOpen;
+  }
+  public get promotedNow(): boolean {
+    return this.onWebSocketTransport;
   }
   public settled(): Promise<void> {
     return this.priming;
@@ -87,15 +90,6 @@ function spyOnTranscriptBroadcasts(): unknown[] {
     if (channel === "prodcom:transcript") seen.push(payload);
   });
   return seen;
-}
-
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
 }
 
 describe("rule 1: a late partial never resurrects a finalized line", () => {
@@ -145,7 +139,7 @@ describe("rule 2: an unchanged partial re-send does not reset its staleness cloc
 });
 
 describe("rule 3: a corrected final always broadcasts", () => {
-  it("broadcasts a final whose text actually changed, even while a second transport is open", async (t: TestContext) => {
+  it("broadcasts a final whose text actually changed, even once the websocket has taken over", async (t: TestContext) => {
     const { stub, svc } = await connected(t);
     await stub.waitForSse(1);
     await eventually(() => svc.wsOpenNow, "the websocket to open");
@@ -153,11 +147,13 @@ describe("rule 3: a corrected final always broadcasts", () => {
 
     stub.sseSend(final("correct-me", "the fisrt draft"));
     await eventually(() => svc.texts().includes("the fisrt draft"), "the first version to land");
-    assert.equal(svc.wsOpenNow, true, "the websocket must still be open (unproven) for this case to mean anything");
 
+    // The correction arrives over the socket — its first delivery, so it
+    // promotes it, which is the one state an unchanged repeat is suppressed in.
     const broadcasts = spyOnTranscriptBroadcasts();
-    stub.sseSend(final("correct-me", "the first draft"));
+    stub.wsTranscript(final("correct-me", "the first draft"));
     await eventually(() => svc.texts().includes("the first draft"), "the corrected text to land on the buffer");
+    assert.equal(svc.promotedNow, true, "the websocket must be promoted for this case to mean anything");
     await eventually(
       () =>
         broadcasts.some(
@@ -170,11 +166,11 @@ describe("rule 3: a corrected final always broadcasts", () => {
 
 describe("a partial never runs backwards on screen", () => {
   it("keeps the longer revision when a shorter, same-id partial arrives after it", async (t: TestContext) => {
-    // Both transports can be open at once, and they do not share a clock: a
-    // slower copy of the SAME utterance can land after a faster one that is
-    // already further along. Modelled here as two SSE sends racing out of
-    // order while the websocket is open, which is the same shape ingest()
-    // sees regardless of which transport either one came in on.
+    // The two transports do not share a clock: when the socket takes over, its
+    // first frames can be a slower copy of the SAME utterance SSE has already
+    // carried further along. That hand-over is the one moment a straggler can
+    // exist — before it the socket has delivered nothing, after it SSE is
+    // closed.
     const { stub, svc } = await connected(t);
     await stub.waitForSse(1);
     await eventually(() => svc.wsOpenNow, "the websocket to open");
@@ -184,16 +180,34 @@ describe("a partial never runs backwards on screen", () => {
     await eventually(() => svc.texts().includes("the quick brown fox jum"), "the further-along partial to land");
 
     // A straggler: the same utterance's EARLIER, shorter revision, arriving
-    // late.
-    stub.sseSend(partial("grows-then-shrinks", "the quick"));
+    // late over the socket — its first delivery, so it promotes it.
+    stub.wsTranscript(partial("grows-then-shrinks", "the quick"));
+    await eventually(() => svc.promotedNow, "the socket's first delivery to promote it");
     await new Promise((r) => setTimeout(r, 60));
-    assert.equal(svc.wsOpenNow, true, "the websocket must still be open for this case to mean anything");
 
     assert.deepEqual(
       svc.texts(),
       ["the quick brown fox jum"],
       "a shorter, stale partial rewound a caption that was already further along",
     );
+  });
+
+  it("applies a shorter revision while the open websocket has delivered nothing", async (t: TestContext) => {
+    // The socket is open but unproven — on ProdCom 2.3.2 that is every start-up
+    // and every re-test — so every line so far came over SSE alone, and one
+    // ordered stream cannot deliver a straggler.
+    const { stub, svc } = await connected(t);
+    await stub.waitForSse(1);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.settled();
+
+    stub.sseSend(partial("revised-down", "we are going to the see"));
+    await eventually(() => svc.texts().includes("we are going to the see"), "the first revision to land");
+
+    stub.sseSend(partial("revised-down", "we're going to sea"));
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(svc.wsOpenNow && !svc.promotedNow, true, "the websocket must be open and unproven for this case");
+    assert.deepEqual(svc.texts(), ["we're going to sea"], "the recogniser's own shortened revision was dropped as a straggler");
   });
 
   it("applies a shorter revision when SSE is the only transport", async (t: TestContext) => {

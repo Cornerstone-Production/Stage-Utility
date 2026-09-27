@@ -75,6 +75,18 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
     setError(null);
     setRundown(null);
   });
+  // Dropped in the same render the type or plan changes — not just on a
+  // FAILED read for the new one. Left in place, a stale rundown drew as
+  // though it were current: `showError` (scriptview-body.tsx) only fires
+  // when there is no rundown to fall back on, so the operator's previous
+  // department or plan stayed on screen with nothing to say it no longer
+  // matched what the app was asking for. A poll that refetches the SAME
+  // type/plan never runs this — only an actual switch does — so a failed
+  // retry still keeps the last good rundown exactly as intended below.
+  useResyncOn([serviceTypeId, planId], () => {
+    setRundown(null);
+    clear("rundown");
+  });
 
   // Items change rarely; refetch on a slow timer. The live position arrives
   // separately over SSE, so a stale rundown still highlights the right row.

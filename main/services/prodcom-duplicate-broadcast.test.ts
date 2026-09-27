@@ -1,5 +1,5 @@
-// A line that arrives on both transports, while the WebSocket is open beside
-// SSE and still unproven, must be applied and broadcast once — not twice.
+// A line that arrives on both transports, as the WebSocket takes over from
+// SSE, must be applied and broadcast once — not twice.
 //
 // The trap this guards against: suppressing every broadcast of a final whose
 // content is UNCHANGED from what is already stored is too broad. It also
@@ -8,16 +8,23 @@
 // display that just mounted) needs to see. The single-transport case below is
 // the guard for that; demand-gating.test.ts is not, because its ProdCom
 // payload carries no date, so its two sends differ once normalised. The dedupe
-// is scoped to the one window where "identical to what's stored" really does
-// mean "the other transport just delivered this": while a WebSocket attempt is
-// open beside SSE.
+// is scoped to the one state where "identical to what's stored" really does
+// mean "the other transport just delivered this": once the WebSocket has
+// delivered and taken over. A socket that is merely open has delivered
+// nothing, so every line before that came over SSE alone.
 
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
 import { addBroadcastListener } from "./broadcaster.js";
-import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
+import {
+  eventually,
+  startProdComStub,
+  type ProdComStub,
+  type StubEntry,
+  type StubOptions,
+} from "./fixtures/prodcom-stub.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 
@@ -70,25 +77,17 @@ function spyOnTranscriptBroadcasts(): unknown[] {
   return seen;
 }
 
-async function eventually(ready: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
 describe("a line delivered on both transports broadcasts once, not twice", () => {
-  it("is applied once when SSE and the unproven WebSocket both deliver it", async (t) => {
+  it("is applied once when SSE delivers it and then the WebSocket, taking over, delivers it again", async (t) => {
     const { stub, svc } = await connected(t);
     await stub.waitForSse(1);
     await eventually(() => svc.wsOpenNow, "the websocket to open");
     await svc.settled();
     const broadcasts = spyOnTranscriptBroadcasts();
 
-    // Both transports genuinely open — see the header comment for why this
-    // window specifically is what the dedupe must be scoped to.
+    // SSE carries it first; the socket's copy is its first delivery, so it
+    // promotes it — see the header comment for why that is the state the
+    // dedupe must be scoped to.
     stub.sseSend(final("shared-line", "and all the people said amen"));
     await eventually(() => svc.texts().includes("and all the people said amen"), "the SSE copy to land");
     stub.wsTranscript(final("shared-line", "and all the people said amen"));
@@ -105,6 +104,23 @@ describe("a line delivered on both transports broadcasts once, not twice", () =>
       1,
       `expected exactly one broadcast carrying the shared line, got ${finalBroadcasts.length}`,
     );
+  });
+
+  it("still broadcasts an identical SSE re-send while the open websocket has delivered nothing", async (t) => {
+    // Open is not the same as delivering: until the socket's first entry every
+    // line came over SSE alone, so an unchanged repeat is SSE's own re-send and
+    // has to reach a consumer that subscribed between the two.
+    const { stub, svc } = await connected(t);
+    await stub.waitForSse(1);
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.settled();
+    const broadcasts = spyOnTranscriptBroadcasts();
+
+    stub.sseSend(final("repeat-me", "hello"));
+    await eventually(() => broadcasts.length >= 1, "the first delivery to broadcast");
+    stub.sseSend(final("repeat-me", "hello")); // byte-identical, same transport
+    await eventually(() => broadcasts.length >= 2, "the identical re-send to broadcast again", 500);
+    assert.equal(svc.wsOpenNow, true, "the websocket must still be open for this case to mean anything");
   });
 
   it("still broadcasts an identical re-send with only ONE transport live — the demand-gating case", async (t) => {

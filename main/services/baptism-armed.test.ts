@@ -9,12 +9,11 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../types/stage.js";
+import { sleep } from "./baptism-save-harness.js";
 
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
 const { segmentElapsedMs } = await import("./baptism-elapsed.js");
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("default workflow", () => {
   it("starts grouped, because that is how a baptism is run here", async () => {
@@ -292,9 +291,11 @@ describe("armed is contained — it cannot survive the action that ends it", () 
     assert.equal(armedAt.people.length, 2);
 
     // /api/baptism/next is a documented, reachable route — this is not a
-    // hypothetical misuse.
+    // hypothetical misuse. next() while armed takes the same "First person
+    // in" branch advance() does: it starts person 0's clock rather than
+    // closing them with baptizeMs 0 and jumping to person 1.
     const after = baptismTimerService.next();
-    assert.equal(after.baptismIndex, 1, "moved to the next person");
+    assert.equal(after.baptismIndex, 0, "still waiting on person 0 — next() no longer skips them");
     assert.notEqual(after.segmentStartedAt, null, "a clock is now running");
     assert.equal(after.armed ?? false, false, "armed must not survive next() while it was true");
     // No assertArmedImpliesNoClock call here: armed is already known false, so

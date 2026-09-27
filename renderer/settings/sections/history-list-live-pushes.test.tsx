@@ -20,33 +20,11 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom, settle } from "../../test-dom.js";
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** Same shape as history-service-page.test.tsx's — a fake EventSource that can
- *  be pushed on directly, so a live channel update can be modelled without a
- *  real server. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
   observe(): void {}

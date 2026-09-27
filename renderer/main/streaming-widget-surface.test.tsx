@@ -14,6 +14,7 @@ import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 
@@ -21,11 +22,6 @@ const teardown = installDom();
 // EventSource on mount. jsdom has none, and what this is about is which
 // composition gets drawn — the card is fed from the context either way, so a
 // stub that never emits is the whole requirement.
-class NoStream {
-  close() {}
-  addEventListener() {}
-  removeEventListener() {}
-}
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
 const { render, cleanup } = await import("@testing-library/react");

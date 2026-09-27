@@ -123,3 +123,36 @@ describe("the 8% card hairline, on an install that already folded its cards", ()
     assert.equal(styleOf(out.views).borderColor, "rgba(255,255,255,0.08)", "it raised a second time");
   });
 });
+
+// The flags used to be patched into settings.json BEFORE the migrated views
+// were saved. A crash between the two left settings.json saying the pass ran
+// while views.json still carried the pre-migration data — and, the flags
+// already true, it never got another chance to.
+describe("a crash between the migration and saving the migrated views", () => {
+  test("does not record the pass as done", async () => {
+    await settingsStore.patch({ layoutDefaultsCleaned: false, cardHairlineRaised: false });
+    await viewsStore.save(seedView());
+    const realSave = viewsStore.save.bind(viewsStore);
+    viewsStore.save = (async () => {
+      throw new Error("simulated crash between the flag patch and the save");
+    }) as typeof viewsStore.save;
+    try {
+      await assert.rejects(runLoadPass(await viewsStore.load(), []));
+    } finally {
+      viewsStore.save = realSave;
+    }
+    assert.equal(
+      (await settingsStore.get()).layoutDefaultsCleaned,
+      false,
+      "the pass was recorded as done though the migrated views were never saved",
+    );
+  });
+
+  test("so the pass still runs, and this time both the views and the flags land", async () => {
+    const out = await runLoadPass(await viewsStore.load(), []);
+    assert.equal(styleOf(out.views).background, "#141414", "the ground was folded on the retry");
+    assert.equal(styleOf(await viewsStore.load()).background, "#141414", "and saved this time");
+    assert.equal((await settingsStore.get()).layoutDefaultsCleaned, true);
+    assert.equal((await settingsStore.get()).cardHairlineRaised, true);
+  });
+});

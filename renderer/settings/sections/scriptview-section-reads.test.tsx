@@ -24,33 +24,12 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
+import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-/** A stream a test can push on, as the server's SSE does. */
-class FakeEventSource {
-  static last: FakeEventSource | null = null;
-  readyState = 1;
-  onopen: unknown = null;
-  private readonly listeners = new Map<string, Set<(e: MessageEvent) => void>>();
-  constructor() {
-    FakeEventSource.last = this;
-  }
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    let set = this.listeners.get(name);
-    if (!set) this.listeners.set(name, (set = new Set()));
-    set.add(fn);
-  }
-  removeEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.listeners.get(name)?.delete(fn);
-  }
-  close(): void {}
-  push(channel: string, payload: unknown): void {
-    for (const fn of this.listeners.get(channel) ?? []) fn({ data: JSON.stringify(payload) } as MessageEvent);
-  }
-}
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
@@ -96,30 +75,39 @@ interface Setup {
   config?: () => unknown;
   /** Answer the service-type read — held back, or with a status. */
   types?: () => unknown;
+  /** Answer the layouts read — held back, for the pending-settings-read test. */
+  layouts?: () => unknown;
 }
 
 const typeOf = (url: string) => new URL(url, "http://x").searchParams.get("serviceTypeId") ?? "";
 
 const TYPES = [{ id: "st1", name: "Weekend" }, { id: "st2", name: "Youth" }];
 
-function stubFetch({ failing, pcoConfigured = true, noteCats, rundown, config, types }: Setup = {}) {
+function stubFetch({ failing, pcoConfigured = true, noteCats, rundown, config, types, layouts }: Setup = {}) {
   const asked: string[] = [];
-  const f = stubFetchWithLog((url) => {
+  // Every `scriptview:saveLayouts` POST, whole-list replacements the section
+  // issues via `persist()` — the exact write that must not go out before the layouts are read.
+  const posts: unknown[] = [];
+  const f = stubFetchWithLog((url, init) => {
     asked.push(url);
     const read = (name: Read | "state", json: unknown) => {
       if (failing === name) throw new TypeError("fetch failed");
       return ok(json);
     };
+    if (init?.method === "POST" && url.includes("/api/scriptview/layouts")) {
+      posts.push(JSON.parse(String(init.body)));
+      return ok([]);
+    }
     if (url.includes("/api/state")) return read("state", { pcoConfigured });
     if (url.includes("/api/service-types")) return types ? types() : read("types", TYPES);
-    if (url.includes("/api/scriptview/layouts")) return read("layouts", [{ id: "svl1", name: "Audio", order: 0, columnRoles: [] }]);
+    if (url.includes("/api/scriptview/layouts")) return layouts ? layouts() : read("layouts", [{ id: "svl1", name: "Audio", order: 0, columnRoles: [] }]);
     if (url.includes("/api/scriptview/config")) return config ? config() : ok({ serviceTypeIds: ["st1"] });
     if (url.includes("/api/scriptview/roles")) return ok([{ id: "r1", name: "Sound", members: [] }]);
     if (url.includes("/api/scriptview/note-categories")) return noteCats ? noteCats(typeOf(url)) : read("noteCats", ["Audio", "Lighting"]);
     if (url.includes("/api/scriptview/rundown")) return rundown ? rundown(typeOf(url)) : read("rundown", RUNDOWN);
     return ok({});
   });
-  return { ...f, asked };
+  return { ...f, asked, posts };
 }
 
 const previewWith = () => (screen.getByRole("combobox", { name: "Preview with" }) as HTMLSelectElement).value;
@@ -155,6 +143,26 @@ test("a failed settings read says so, and offers no empty list to Add a layout t
       "adding to a list that never loaded would save over every real layout",
     );
     assert.ok(logged(f.logs, /layouts/i), `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`);
+  } finally {
+    f.restore();
+  }
+});
+
+test("while the settings read is still in flight, no Add layout button can post over the saved layouts", async () => {
+  let answerLayouts: () => void = () => {};
+  const f = stubFetch({ layouts: () => new Promise((resolve) => { answerLayouts = () => resolve(ok([{ id: "svl1", name: "Audio", order: 0, columnRoles: [] }])); }) });
+  try {
+    await mount();
+    assert.equal(!!screen.queryByText(/No layouts yet/i), false, "no empty state while the read has not answered");
+    assert.equal(
+      !!screen.queryByRole("button", { name: /Add layout/i }),
+      false,
+      "no Add layout button before the layouts have been read — clicking it would post an empty list",
+    );
+    await act(async () => answerLayouts());
+    await settle();
+    assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the real layout is there once the read lands");
+    assert.equal(f.posts.length, 0, "the pending window issued no save");
   } finally {
     f.restore();
   }

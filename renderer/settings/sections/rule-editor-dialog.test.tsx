@@ -77,6 +77,18 @@ const REGISTRY = {
         { key: "threshold", label: "Threshold", type: "number", min: 0, max: 100 },
       ],
     },
+    {
+      // The real pco.item-due shape: offsetMinutes is the one param in the
+      // whole registry with a negative min, min -720 max 720.
+      id: "pco.item-due",
+      label: "Plan item is due",
+      channel: "pco:live",
+      params: [
+        { key: "title", label: "Item", type: "string" },
+        { key: "anchor", label: "Relative to", type: "enum", options: [{ value: "item", label: "The item's own time" }] },
+        { key: "offsetMinutes", label: "Offset (minutes)", type: "number", min: -720, max: 720 },
+      ],
+    },
   ],
   conditions: [
     { id: "service.is-not-live", label: "No service is live", params: [] },
@@ -836,6 +848,28 @@ describe("picking a trigger, condition or action seeds its number params at once
       patch.action?.params?.argument,
       0,
       `switching to an action with a number param must seed it into the saved patch, got ${JSON.stringify(patch)}`,
+    );
+  });
+
+  // The one param in the registry with a negative min. Seeding used
+  // `spec.min ?? 0`, so picking this trigger stored offsetMinutes=-720 — 12
+  // hours before the item was due, never landing in a live snapshot window
+  // during the service. The field must both DISPLAY and SAVE 0.
+  test("picking a trigger with a negative-floored number param seeds 0, not the floor", async () => {
+    RULES = [cue("take_screens")];
+    await mount();
+    await openRow("Rule take_screens");
+    await act(async () => {
+      fireEvent.change(selectField("Trigger")!, { target: { value: "pco.item-due" } });
+    });
+    await settle();
+    assert.equal(field("Offset (minutes)")?.value, "0", "the offset field must show 0, not the -720 floor");
+    await press(button("Save"), "Save");
+    const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { trigger?: { params?: Record<string, unknown> } };
+    assert.equal(
+      patch.trigger?.params?.offsetMinutes,
+      0,
+      `a fresh pick must seed and save offsetMinutes as 0, got ${JSON.stringify(patch)}`,
     );
   });
 

@@ -9,12 +9,14 @@ import { test, describe } from "node:test";
 import type { ParamDef } from "../types/automation.js";
 import {
   fieldsNeedAttention,
+  numberParamDefault,
   ruleIssues,
   seedNumberDefaults,
   validateParams,
   type RuleStepsLike,
   type StepSpecLookup,
 } from "./automation-param-validation.js";
+import { AUTOMATION_TRIGGERS } from "./automation-triggers.js";
 
 describe("validateParams — string", () => {
   const spec: ParamDef = { key: "meter", label: "Meter", type: "string", help: 'The Smaart meter key, "device::channel".' };
@@ -210,18 +212,85 @@ describe("validateParams — key-value", () => {
   });
 });
 
+describe("numberParamDefault", () => {
+  test("0, pulled up into a positive floor", () => {
+    assert.equal(numberParamDefault({ min: 1, max: 999 }), 1);
+  });
+
+  test("0 itself, when it is already in range", () => {
+    assert.equal(numberParamDefault({ min: 0, max: 99 }), 0);
+  });
+
+  test("no bound at all is 0", () => {
+    assert.equal(numberParamDefault({}), 0);
+  });
+
+  // The real bug: a NEGATIVE floor must not come back as the floor itself.
+  // offsetMinutes (min -720, max 720) is the one param in the whole registry
+  // this differs for — see first-trigger.test.mts's registry dump in the
+  // review scratchpad, which found no other negative min anywhere.
+  test("a negative floor stays 0, not the floor — offsetMinutes' exact shape", () => {
+    assert.equal(numberParamDefault({ min: -720, max: 720 }), 0);
+  });
+
+  test("a range that excludes 0 entirely clamps to whichever bound is closer", () => {
+    assert.equal(numberParamDefault({ min: -50, max: -10 }), -10);
+    assert.equal(numberParamDefault({ min: 5, max: 10 }), 5);
+  });
+});
+
 describe("seedNumberDefaults", () => {
-  test("seeds every number param to its min (or 0), and nothing else", () => {
+  test("seeds every number param to 0, clamped into its own range, and nothing else", () => {
     const specs: ParamDef[] = [
       { key: "page", label: "Page", type: "number", min: 1, max: 999 },
       { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+      { key: "offsetMinutes", label: "Offset (minutes)", type: "number", min: -720, max: 720 },
       { key: "label", label: "Label", type: "string", optional: true },
     ];
-    assert.deepEqual(seedNumberDefaults(specs), { page: 1, row: 0 });
+    // Reverting to the old `spec.min ?? 0` fallback turns this red:
+    // offsetMinutes would come back -720 instead of 0.
+    assert.deepEqual(seedNumberDefaults(specs), { page: 1, row: 0, offsetMinutes: 0 });
   });
 
   test("a number with no min seeds to 0", () => {
     assert.deepEqual(seedNumberDefaults([{ key: "n", label: "N", type: "number" }]), { n: 0 });
+  });
+});
+
+// A fresh pick of the real "Plan item is due" trigger, left at its
+// default offset. AUTOMATION_TRIGGERS is automation-triggers.ts's real
+// registry (read-only here, not modified) — this proves the fix against the
+// actual param spec, not a stand-in with a friendlier min.
+describe("seedNumberDefaults against the real registry — pco.item-due", () => {
+  test("offsetMinutes seeds to 0, not its -720 floor", () => {
+    const t = AUTOMATION_TRIGGERS["pco.item-due"];
+    assert.deepEqual(seedNumberDefaults(t.params).offsetMinutes, 0);
+  });
+
+  test("a fresh pick fires at the item's own time, not 12 hours early", () => {
+    const t = AUTOMATION_TRIGGERS["pco.item-due"];
+    // What seededParams actually seeds, plus what the operator types: the two
+    // non-number fields (see rule-editor-dialog.tsx's ParamField for the
+    // number branch, and inspector.tsx's RossTalk equivalent — both number
+    // branches share this same seed).
+    const seeded = seedNumberDefaults(t.params);
+    const params = { ...seeded, title: "doors", anchor: "item" };
+    assert.deepEqual(validateParams(t.params, params), [], "the seeded params must validate clean");
+
+    const NOW = Date.parse("2026-09-27T14:00:00Z");
+    const DOORS = NOW + 300_000;
+    const live = (ms: number) => ({
+      mode: "item", currentItemId: "i1", label: null, lengthSec: 300,
+      liveStartAt: null, targetAt: null, serverNow: new Date(ms).toISOString(),
+      currentItemTitle: "Welcome", nextItemTitle: null,
+      serviceTimeId: "st1", serviceTimeStartsAt: new Date(NOW + 600_000).toISOString(),
+      itemSchedule: [{ title: "Doors Open", dueAt: new Date(DOORS).toISOString(), exact: true }],
+    });
+    // Reverting seedNumberDefaults to `spec.min ?? 0` turns this red: stored
+    // offsetMinutes=-720 puts the due moment 12 hours before either snapshot,
+    // so it never lands in the window and this never fires.
+    const fired = t.didFire(live(DOORS - 30_000), live(DOORS + 30_000), params, NOW);
+    assert.equal(fired, true, `did not fire at the item's time; stored offsetMinutes=${seeded.offsetMinutes}`);
   });
 });
 

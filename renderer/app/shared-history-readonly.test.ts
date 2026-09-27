@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { settle, unmountAndTeardown } from "../test-dom.js";
+import { routerWithBaptismDestination } from "../test-fixtures/router.js";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations.js";
 
 // Without this React neither act-wraps a render nor warns about an update
@@ -266,21 +267,14 @@ describe("the shared /history link", () => {
       const React = (await import("react")).default;
       const { TooltipProvider } = await import("../components/ui/index.js");
       const { ServiceHistorySection } = await import("../settings/sections/service-history-section.js");
-      const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterContextProvider } =
-        await import("@tanstack/react-router");
+      const { RouterContextProvider } = await import("@tanstack/react-router");
 
       // A real router, the way history-service-page.test.tsx's own
       // routerWithBaptismDestination does: without one, a dropped readOnly
       // gate crashes rendering the real "Open in Baptisms" link
       // (useLinkProps reading buildLocation off a null router context)
       // rather than actually rendering it for the assertion below to catch.
-      const rootRoute = createRootRoute({});
-      const historyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/history", component: () => null });
-      const baptismRoute = createRoute({ getParentRoute: () => rootRoute, path: "/baptism", component: () => null });
-      const router = createRouter({
-        routeTree: rootRoute.addChildren([historyRoute, baptismRoute]),
-        history: createMemoryHistory({ initialEntries: ["/history"] }),
-      });
+      const router = routerWithBaptismDestination("/history");
 
       const view = render(
         React.createElement(RouterContextProvider, {

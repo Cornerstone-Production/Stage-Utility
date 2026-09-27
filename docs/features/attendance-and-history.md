@@ -67,6 +67,13 @@ from, so the decision is made once, in the machinery all three recorders
 share, and the item id travels on the record itself — surviving a restart mid-
 hold the same way the rest of the record does.
 
+The "opening item" is never one already on air before the record itself opened —
+a rehearsal leftover still live in Planning Center, or this same service's own
+overrun closing item, carried into the record the ten-minute rule just split to.
+Either would otherwise be adopted as the opener and then split the hold at its
+own later, genuine run. The next item to go live becomes the opener instead; if
+none does before the hold ends, it falls back to the ten-minute rule alone.
+
 Inside a record, a plan item that goes live again more than ten minutes after its
 last run ended is recorded as a second entry rather than reopening the first, so a
 re-run never rewrites what already happened. Both the timeline and the SPL
@@ -772,6 +779,11 @@ from — and always points at the read-only `/history` page, never
 `/history/manage`, so a copy handed to someone outside Production never opens
 into the operator app. It is blank on a session recorded before `serviceKey` was
 captured.
+
+A baptism session's `Date` — and the date range you picked — go by the linked
+service's own date in the app time zone, not the session's raw UTC timestamp, so
+a session recorded after 7pm still lands on the service's own day. A session with
+no linked service falls back to its own start time, zoned the same way.
 
 Blank metric cells are normal: columns are the union across everything exported,
 so a service whose meter reported fewer metrics leaves the rest empty. Services

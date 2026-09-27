@@ -251,7 +251,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/metrics` | Latest live SPL reading per meter (device/channel) |
 | GET | `/api/spl/history/current` | The active service's per-item SPL record (live) |
 | GET | `/api/spl/history` | List saved past-service SPL records |
-| GET | `/api/spl/history/:key` | One past-service record |
+| GET | `/api/spl/history/:key` | One record, by key — the recorder's own live copy when that service is the one currently recording (so a record too new for the persist debounce, or mid resume-rebuild, still answers), else the stored one |
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
@@ -269,8 +269,8 @@ untouched by GET, by init, and by any write that does not go through this route
 |--------|------|---------|
 | GET | `/api/people/count` | Live building occupancy (SenSource) |
 | GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
-| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them |
-| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them. One record answers the recorder's live copy when that service is recording, else the stored one |
+| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record. One record answers the recorder's live copy when that service is recording, else the stored one |
 | GET | `/api/obs/status` \| `/api/reaper/status` | Whether that recorder is rolling, and for how long |
 | GET | `/api/pvp/status` | ProVideoPlayer layer state — what is on each layer, and how far in |
 | GET | `/api/resi/status` \| `/api/youtube/status` | Whether that platform is live, and since when |
@@ -574,7 +574,8 @@ something to change:
 
 `baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
 save-failure note's, or History's whole-service rebuild — actually writes a
-session: `{serviceKey, ids}`, `ids` naming the sessions it added or updated.
+session, and when a History merge moves sessions onto the service it keeps:
+`{serviceKey, ids}`, `ids` naming the sessions added, updated or moved.
 
 Every status snapshot carries a `rev` counter so a hydrate read cannot overwrite
 a newer push — see [Integrations](../integrations/README.md#the-snapshot-version).

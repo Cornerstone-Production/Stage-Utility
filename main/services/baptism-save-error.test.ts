@@ -30,7 +30,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import { baptismSessionId, type BaptismSaveError, type BaptismState } from "../types/stage.js";
-import { interceptAddSession, type AddSession } from "./baptism-save-harness.js";
+import { interceptAddSession, sleep, type AddSession } from "./baptism-save-harness.js";
 
 const { baptismTimerService: timer } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
@@ -44,8 +44,6 @@ const pushes: BaptismState[] = [];
 addBroadcastListener((channel, payload) => {
   if (channel === "baptism:state") pushes.push(payload as BaptismState);
 });
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The first push after index `from` that satisfies `test`. Polled: the save
  *  settles on the store's write queue, not after a fixed delay. */

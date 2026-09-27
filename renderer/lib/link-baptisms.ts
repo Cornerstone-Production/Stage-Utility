@@ -45,6 +45,14 @@ export interface BaptismStats {
    *  anyone is baptized, and a session finished mid-testimony leaves an entry
    *  with `baptizeMs: 0` behind permanently; neither counts here. */
   people: number;
+  /** Everyone who testified, baptized or not — zero only for a session
+   *  finished while still ARMED (the testimonies never started at all). The
+   *  denominator `avgTestimonySec` divides by; a caller that wants to know
+   *  whether that average is real rather than a division-by-zero's `0`
+   *  reads THIS, not `people` — a grouped session finished mid-testimony has
+   *  real testimony time (`testified > 0`) with nobody baptized yet
+   *  (`people === 0`), and the two must not be conflated. */
+  testified: number;
   totalSec: number;
   testimonySec: number;
   baptismSec: number;
@@ -70,6 +78,7 @@ export function baptismStats(sessions: readonly BaptismSession[]): BaptismStats 
   const baptismSec = r.totalBaptizeMs / 1000;
   return {
     people: r.baptized,
+    testified: r.testified,
     totalSec: testimonySec + baptismSec,
     testimonySec,
     baptismSec,

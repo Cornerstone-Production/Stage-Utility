@@ -104,9 +104,27 @@ describe("send", () => {
   test("an invalid parameter is rejected before any write", async () => {
     await rosstalkManager.setSimulate(false);
     const id = await target();
-    await assert.rejects(() => rosstalkManager.send(id, { commandId: "cc", params: { bank: 1 } }), /cc/i);
+    // Out of range, not merely absent — a MISSING number now heals to its own
+    // shown default (see the next test) rather than refusing.
+    await assert.rejects(() => rosstalkManager.send(id, { commandId: "cc", params: { bank: 1, cc: 999 } }), /cc/i);
     await new Promise((res) => setTimeout(res, 80));
     assert.equal(device.received.join(""), "");
+  });
+
+  // A button saved before number params were seeded on pick still stores {}
+  // for every one of them. It used to throw "Missing required parameter" on
+  // every press and never reach the wire at all; a missing number now runs
+  // with numberParamDefault(p), the same value inspector.tsx already shows
+  // for it — driven here through the real send() path, over a real socket,
+  // not just formatCommand() in isolation.
+  test("a button saved before number params were seeded fires with the same default the inspector shows", async () => {
+    await rosstalkManager.setSimulate(false);
+    const id = await target();
+    const r = await rosstalkManager.send(id, { commandId: "cc", params: {} });
+
+    assert.equal(r.line, "CC 1:01");
+    await new Promise((res) => setTimeout(res, 80));
+    assert.equal(device.received.join(""), "CC 1:01\r\n");
   });
 
   test("an unknown target throws", async () => {

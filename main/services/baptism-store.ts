@@ -35,10 +35,65 @@ class BaptismStore {
     return (await this.store.load()).current;
   }
 
-  /** Finished sessions, newest first. */
+  /**
+   * Settle every write already queued against this store.
+   *
+   * addSession and saveCurrent both queue their write (DataStore.update, over
+   * the store's own WriteQueue) and return before it lands. finalize()
+   * (baptism-timer-service.ts) broadcasts baptism:state the instant it CALLS
+   * addSession, not once that write settles — a Baptisms tab or History page
+   * open elsewhere reloads its sessions on exactly that push
+   * (reload-on-baptism-change.ts), and a read answered from a call still
+   * queued behind addSession's own write (a saveCurrent in flight, say) came
+   * back a session short. A no-op mutator (`f => f`) queues behind whatever
+   * is already there and writes nothing itself — same pattern, same reason,
+   * as sampleArchive.flush() for GET /api/baptism/lane.
+   */
+  async flush(): Promise<void> {
+    await this.store.update((f) => f);
+  }
+
+  /** The duplicate count listSessions last logged — see its doc comment. */
+  private loggedDuplicateIds = 0;
+
+  /**
+   * Finished sessions, newest first — one per id, even when the FILE holds
+   * more than one.
+   *
+   * v1.23.0's addSession prepended rather than replacing by id (see
+   * addSession's own doc comment above), so finish, undo, finish left TWO
+   * rows sharing an id in a box's baptism.json. This release stops writing new
+   * ones, but an upgraded box's already-written file keeps its old pair, and
+   * every caller of this method — the API, and linkBaptisms downstream of it —
+   * counted that session's people twice.
+   *
+   * Fixed here, on the READ side, deliberately: the operator's file is never
+   * rewritten or pruned to fix this, only what the server SERVES from it. The
+   * later `finishedAt` wins, the same preference addSession's own replace-by-id
+   * already gives a corrected re-finish. Logged on a tagged line when
+   * duplicates are present, once per distinct count rather than on every read.
+   */
   async listSessions(): Promise<BaptismSession[]> {
     const file = await this.store.load();
-    return file.sessions.slice().sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+    const byId = new Map<string, BaptismSession>();
+    let duplicateIds = 0;
+    for (const s of file.sessions) {
+      const existing = byId.get(s.id);
+      if (!existing) {
+        byId.set(s.id, s);
+        continue;
+      }
+      duplicateIds += 1;
+      if (Date.parse(s.finishedAt) > Date.parse(existing.finishedAt)) byId.set(s.id, s);
+    }
+    if (duplicateIds > 0 && duplicateIds !== this.loggedDuplicateIds) {
+      this.loggedDuplicateIds = duplicateIds;
+      console.warn(
+        `[baptism] ${duplicateIds} session id(s) stored more than once — keeping the later finish of each ` +
+          "(the file on disk is unchanged)",
+      );
+    }
+    return [...byId.values()].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
   }
 
   async saveCurrent(state: BaptismState | null): Promise<void> {
@@ -231,6 +286,15 @@ class BaptismStore {
         next.push(s);
       }
       if (!changed) return file;
+      // Newest-first, like addSessions' own merge — never a bare push. addSession's
+      // cap eviction (see its own doc comment) trusts file.sessions to already be in
+      // that order and evicts from the tail without re-sorting; a session this
+      // pushed onto the end regardless of its own startedAt landed in the "oldest"
+      // storage position even when it was the newest thing in the store, so the very
+      // next live Finish evicted the session a rebuild had just restored instead of
+      // one genuinely old. Unreachable below MAX_SESSIONS, so this is for
+      // consistency with the store's own ordering contract, not a live risk today.
+      next.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
       return { ...file, sessions: next };
     });
     return { added: addedIds.size, addedIds, updated: updatedIds.size, updatedIds, full };
@@ -243,6 +307,39 @@ class BaptismStore {
       return { ...file, sessions: file.sessions.filter((s) => s.id !== id) };
     });
     return existed;
+  }
+
+  /**
+   * Re-key every session recorded under `from` onto `to`.
+   *
+   * Not a per-serviceKey record like the timeline/attendance/SPL stores
+   * mergeServiceRecords (history-edit.ts) also touches — this store holds every
+   * service's sessions in one flat list, each carrying its own `serviceKey`
+   * field. A history merge moves `baptism.csv` to the target's archive
+   * directory (see mergeArchives), but a session already SAVED under the
+   * source key does not follow it on its own: `GET
+   * /api/baptism/lane?serviceKey=<target>` answered `[]` for it, and the
+   * source's own service record having just been deleted by the merge, it
+   * would link to nothing at all. Returns the ids that moved, so the caller
+   * can log or broadcast only when it actually did something — the same
+   * shape a rebuild's own `restoredIds` carries into its own
+   * `baptism:rebuilt` push.
+   */
+  async rekeyServiceKey(from: string, to: string): Promise<Set<string>> {
+    const movedIds = new Set<string>();
+    if (!from || !to || from === to) return movedIds;
+    await this.store.update((file) => {
+      let changed = false;
+      const sessions = file.sessions.map((s) => {
+        if (s.serviceKey !== from) return s;
+        changed = true;
+        movedIds.add(s.id);
+        return { ...s, serviceKey: to };
+      });
+      if (!changed) return file;
+      return { ...file, sessions };
+    });
+    return movedIds;
   }
 }
 

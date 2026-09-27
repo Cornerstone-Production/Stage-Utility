@@ -126,6 +126,10 @@ class TestProdCom extends ProdComService {
   public get sseUpNow(): boolean {
     return this.sseStreamUp;
   }
+  /** The entry-id baseline the check measures the current socket against. */
+  public get baselineNow(): ReadonlySet<string> | null {
+    return this.wsBaseline;
+  }
   /** The SSE stream's own priming (channels, keywords, backfill). */
   public settled(): Promise<void> {
     return this.priming;
@@ -209,18 +213,20 @@ const wsAttempts = (stub: ProdComStub): number =>
   stub.requests.filter((r) => r.url === "/api/v1/ws" && r.headers["user-agent"] !== PROBE_USER_AGENT).length;
 
 /**
- * Reads of `GET /api/v1/transcript` made BY THE SILENCE CHECK (either priming a
- * fresh socket's baseline, or the check itself asking again).
+ * Newest-page reads made BY THE SILENCE CHECK (either priming a fresh socket's
+ * baseline, or the check itself asking again), one per read.
  *
- * Matched on the check's own page size, which backfill cannot produce: backfill
- * asks for the spec's documented maximum of 200 and the check asks for
- * WS_SILENCE_CHECK_PAGE_SIZE (100). A plain count of transcript reads would be
- * satisfied by the backfill every transport does on connect, and every
- * assertion here about what the check did or did not cost would then be true
- * whether or not the check ran at all.
+ * Counted by the read's first request, the one-row `limit=1&offset=0` that
+ * learns the row count — which backfill cannot produce: backfill asks for the
+ * spec's documented maximum of 200 and always sends `since`. A plain count of
+ * transcript reads would be satisfied by the backfill every transport does on
+ * connect, and every assertion here about what the check did or did not cost
+ * would then be true whether or not the check ran at all.
  */
+const isNewestPageRead = (url: URL): boolean =>
+  url.pathname === "/api/v1/transcript" && !url.searchParams.has("since") && url.searchParams.get("limit") === "1";
 const transcriptPageReads = (stub: ProdComStub): number =>
-  stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && r.url.includes("limit=100&")).length;
+  stub.requests.filter((r) => isNewestPageRead(new URL(r.url, "http://stub"))).length;
 
 const subscribeFrames = (stub: ProdComStub): number =>
   stub.wsReceived.filter((f) => f.includes('"subscribe"')).length;
@@ -364,27 +370,32 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // floor is one, so one slow transcript read during one drop is enough.
     // Priming and the check share the same request shape now (both read the
     // newest page), so they are told apart by ORDER rather than by size: the
-    // first limit=100 read is always priming (fired the instant the socket
+    // first newest-page read is always priming (fired the instant the socket
     // opens), and the second is the check's own first read (fired after
     // wsSilenceCheckMs). Only the second is held — priming stays fast, so the
-    // line below is spoken before the first check even fires. 1400 ms because
-    // the answer has to land AFTER the replacement socket is up, and
-    // service-window.ts floors every reconnect delay at one second: a shorter
-    // hold returns while `this.ws` is still null and no verdict is reachable,
-    // which is a test that proves nothing.
+    // line below is spoken before the first check even fires. The hold has to
+    // outlast the replacement socket's opening, and the assertions have to
+    // wait until PAST the hold: this used to sleep a fixed 1200 ms after the
+    // replacement opened, which is before a 1400 ms hold ends, so the stale
+    // answer landed after the assertions and the test passed with the identity
+    // check deleted.
+    const HOLD_MS = 1400;
     let transcriptReads = 0;
+    let heldAt = 0;
     const { stub, svc } = await running(t, {
       delayTranscriptMs: (url) => {
-        if (url.searchParams.get("limit") !== "100") return 0;
-        return ++transcriptReads === 2 ? 1400 : 0;
+        if (!isNewestPageRead(url) || ++transcriptReads !== 2) return 0;
+        heldAt = Date.now();
+        return HOLD_MS;
       },
     });
     await speaks(stub, svc, spoken("said-while-the-first-socket-was-up"));
 
     await eventually(() => transcriptPageReads(stub) >= 2, "the check to put a read in flight");
     stub.wsDropAll();
-    await eventually(() => stub.wsUpgrades >= 2, "the replacement socket to open", 6000);
-    await sleep(1200); // past the held answer
+    await eventually(() => stub.wsUpgrades >= 2 && svc.wsOpenNow, "the replacement socket to open", 6000);
+    assert.ok(Date.now() < heldAt + HOLD_MS, "precondition: the replacement opened after the held answer landed");
+    await sleep(heldAt + HOLD_MS + 300 - Date.now()); // past the held answer
 
     assert.equal(
       subscribeFrames(stub),
@@ -554,6 +565,24 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       1,
       `the could-not-ask line repeats per check rather than per outage: ${JSON.stringify(couldNotAsk)}`,
     );
+  });
+
+  it("reads a baseline it could not read on open, then catches a socket that carries nothing", async (t) => {
+    // The newest page failed to load when the socket opened, so the check had
+    // nothing to measure against — and used to re-arm on that for the socket's
+    // whole life without ever asking again. One transient 500 at the wrong
+    // moment was enough to trust a socket that carries nothing indefinitely.
+    const { stub, svc } = await running(t, { subscribeFilterBroken: true, failTranscript: true });
+    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await svc.wsSettled();
+    assert.equal(svc.baselineNow, null, "precondition: the open-time read failed, so there is no baseline");
+
+    // REST recovers. The next check has to read the baseline itself, and the
+    // line said after THAT read is one this socket never delivers.
+    stub.setFailTranscript(false);
+    await eventually(() => svc.baselineNow !== null, "the check to read the baseline it never had", 2000);
+    stub.addEntry(spoken("said-after-the-baseline-was-read"));
+    await eventually(() => stub.wsUpgrades >= 2, "the silent socket to be reopened without the subscribe frame", 2000);
   });
 
   it("broadcasts a line spoken during the websocket's probation minute immediately, via SSE", async (t) => {
@@ -935,6 +964,30 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     assert.ok(
       lines.some((l) => l.startsWith("[prodcom] the websocket is carrying the transcript again")),
       `expected the recovery line, got: ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it("does not blame silence when a re-test socket that delivered then merely drops", async (t) => {
+    // The socket proved itself — it carried the transcript until the network
+    // blipped — so the card must not go back to saying it carried nothing.
+    const { stub, svc } = await silenced(t);
+    await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
+    stub.wsTranscript(spoken("the-box-was-fixed"));
+    await eventually(() => svc.onWebSocketNow, "the re-test to be promoted");
+    const mark = svc.reports.length;
+
+    stub.wsDropAll(); // a plain drop, not a verdict
+    await eventually(
+      () => !svc.onWebSocketNow && svc.reports.slice(mark).some((r) => r.state === "connected"),
+      "SSE to take over again",
+    );
+    const said = svc.reports
+      .slice(mark)
+      .filter((r) => r.state === "connected")
+      .map((r) => r.message);
+    assert.ok(
+      !said.includes(FALLBACK_CARD_MESSAGE),
+      `the card blamed silence for a socket that had just delivered and then dropped: ${JSON.stringify(said)}`,
     );
   });
 

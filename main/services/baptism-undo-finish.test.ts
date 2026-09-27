@@ -25,11 +25,11 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../types/stage.js";
+import { sleep } from "./baptism-save-harness.js";
 
 const { baptismTimerService: timer } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const baptized = (s: BaptismState) => s.people.map((p) => p.baptizeMs);
 
 function begin(mode: "grouped" | "per-person"): void {

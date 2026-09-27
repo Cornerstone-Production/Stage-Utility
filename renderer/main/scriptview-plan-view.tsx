@@ -42,26 +42,51 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     setError(null);
     setRundown(null);
   });
+  // A 502/429 at boot (Planning Center still waking up, the LAN up before the
+  // WAN) used to be permanent: nothing re-ran this effect, since neither
+  // `pcoConnected(null, error)` nor `pcoConnected(state, null)` changes once the
+  // state itself arrives. Retried on the same slow timer as the rundown below,
+  // as script-view.tsx retries its own reads for the identical reason.
   useEffect(() => {
     if (!pcoConfigured) return;
     let cancelled = false;
-    invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
-      .then((t) => {
-        if (cancelled) return;
-        setTypes(t);
-        clear("types");
-      })
-      .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
-    return () => { cancelled = true; };
+    const load = () =>
+      invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
+        .then((t) => {
+          if (cancelled) return;
+          setTypes(t);
+          clear("types");
+        })
+        .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [pcoConfigured, fail, clear]);
+  // Same reasoning for the layouts and roles: a transient failure at boot left
+  // them empty for the life of the page (see script-view.tsx's comment on this
+  // exact shape).
   useEffect(() => {
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
-      .then(setLayouts)
-      .catch((err: unknown) => fail("layouts", "the column layouts", err));
-    invoke<CategoryRole[]>("scriptview:listRoles")
-      .then(setRoles)
-      .catch((err: unknown) => fail("roles", "the category roles", err));
-  }, [fail]);
+    let cancelled = false;
+    const load = () => {
+      invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+        .then((l) => {
+          if (cancelled) return;
+          setLayouts(l);
+          clear("layouts");
+        })
+        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts", err); });
+      invoke<CategoryRole[]>("scriptview:listRoles")
+        .then((r) => {
+          if (cancelled) return;
+          setRoles(r);
+          clear("roles");
+        })
+        .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles", err); });
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [fail, clear]);
 
   // Resolve the service-type slug (or raw id) to an id.
   const serviceType = useMemo(
@@ -77,6 +102,19 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const notice = pcoConfigured === false ? "Planning Center isn't connected, so this page can't find its plan." : null;
   const bodyError =
     error ?? (!resolvedTypeId && failed.has("types") ? "Couldn't load the service types, so this page can't find its plan." : null);
+
+  // Dropped in the same render the resolved type changes (a different slug in
+  // the URL, or the type list finishing a slug's resolution) — not just on a
+  // FAILED read for the new one. Left in place, a stale rundown drew as though
+  // it were current: `showError` (scriptview-body.tsx) only fires when there
+  // is no rundown to fall back on, so the previous type's plan stayed on
+  // screen with nothing to say it no longer matched the URL. A poll that
+  // refetches the SAME type never runs this, so a failed retry still keeps
+  // the last good rundown exactly as intended below.
+  useResyncOn([resolvedTypeId], () => {
+    setRundown(null);
+    clear("rundown");
+  });
 
   // Rundown items change rarely; refetch on a slow timer. Live position arrives
   // separately via the SSE-backed dashboard state (pcoLive). A failure keeps the

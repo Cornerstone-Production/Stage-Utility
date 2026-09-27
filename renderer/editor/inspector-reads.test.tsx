@@ -23,9 +23,10 @@ import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, act } = await import("@testing-library/react");
+const { render, screen, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { PeopleGraphInspector, PlanAttachmentConfig, RossTalkButtonConfig } = await import("./inspector.js");
+const { formatCommand } = await import("@main/services/rosstalk-commands.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -208,6 +209,57 @@ describe("the RossTalk button's target and command pickers", () => {
       assert.equal(!!screen.queryByText(/not found/i), false);
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
+    } finally {
+      f.restore();
+    }
+  });
+
+  // Picking a command used to leave params: {} — the number fields still
+  // DISPLAYED their default (Number(value ?? p.min ?? 0)), so the operator saw
+  // "Bank 1, Custom control 1" and pressed on the console expecting CC 1:01. The
+  // stored rule carried no params at all, and formatCommand refused with
+  // "Missing required parameter". Reverting the Command select's onChange back
+  // to `params: {}` turns this red.
+  test("picking a command seeds its number params, so the shown value is the stored value", async () => {
+    const CC = {
+      id: "cc",
+      label: "Custom control",
+      family: "carbonite",
+      params: [
+        { key: "bank", label: "Bank", type: "number", min: 1, max: 9 },
+        { key: "cc", label: "Custom control", type: "number", min: 1, max: 99, pad: 2 },
+      ],
+    };
+    const f = stubFetch(TARGETS, STUDIO, (url) => (url.includes("/api/rosstalk/commands") ? ok([CC]) : ok({})));
+    let last: Record<string, string | number> | null = null;
+    type RossTalkButtonC = Extract<LayoutObjectConfig, { type: "rosstalk-button" }>;
+    try {
+      function Wrapper() {
+        const [c, setC] = React.useState<RossTalkButtonC>({ ...CONFIG, commandId: null, params: {} });
+        return React.createElement(RossTalkButtonConfig, {
+          c,
+          onConfig: (next: LayoutObjectConfig) => {
+            const rossTalk = next as RossTalkButtonC;
+            last = rossTalk.params;
+            setC(rossTalk);
+          },
+        });
+      }
+      await mount(React.createElement(Wrapper));
+      const commandSelect = [...document.querySelectorAll("select")].find((s) =>
+        [...s.options].some((o) => o.value === "cc"),
+      )!;
+      await act(async () => {
+        fireEvent.change(commandSelect, { target: { value: "cc" } });
+      });
+      await settle();
+
+      assert.deepEqual(last, { bank: 1, cc: 1 }, `picking Custom control must seed its number params, got ${JSON.stringify(last)}`);
+      assert.equal(
+        formatCommand("cc", last ?? {}),
+        "CC 1:01",
+        "the seeded params must be enough to press — not refuse as missing",
+      );
     } finally {
       f.restore();
     }

@@ -126,6 +126,32 @@ const clean = (over: Partial<StubRule> = {}): StubRule => ({
   ...over,
 });
 
+/** A cue pair — `<base>_on` / `<base>_off`, matched by cuePairs.ts on that
+ *  naming convention alone. The OFF half's action is left unpicked
+ *  (targetId missing), the one issue in the pair. */
+const pair = (base: string): StubRule[] => [
+  {
+    id: `rule-${base}_on`,
+    name: `Rule ${base}_on`,
+    enabled: true,
+    trigger: { id: CALL_TRIGGER_ID, params: { name: `${base}_on` } },
+    conditions: [],
+    action: { id: "log.message", params: { message: "on" } },
+    cooldownSec: 0,
+    oncePerService: false,
+  },
+  {
+    id: `rule-${base}_off`,
+    name: `Rule ${base}_off`,
+    enabled: false,
+    trigger: { id: CALL_TRIGGER_ID, params: { name: `${base}_off` } },
+    conditions: [],
+    action: { id: "rosstalk.command", params: {} }, // targetId missing — the pair's one issue
+    cooldownSec: 0,
+    oncePerService: false,
+  },
+];
+
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
@@ -189,6 +215,32 @@ describe("the Needs setup badge", () => {
     RULES = [clean()];
     await mount();
     assert.equal(badge(), null, "a clean rule got a Needs setup badge");
+  });
+
+  // A pair's OFF half lost its target (a hand edit, or a restore from a
+  // damaged file) — GET answers issues on that half, but PairRow never read
+  // them at all. The first sign was the save that turned the half off, with
+  // nothing on the list itself pointing at it. Reverting PairRowData.on/off
+  // back to plain `Rule` (dropping their issues) or PairRow's `issues` prop
+  // turns this red.
+  test("a pair with an issue on one half shows the badge on the pair's own row", async () => {
+    RULES = pair("projectors");
+    await mount();
+    const row = document.querySelector('[data-cue-pair-row="projectors"]');
+    assert.ok(row, "no pair row rendered");
+    const b = row!.querySelector("[data-needs-setup]");
+    assert.ok(b, "the pair's row showed no Needs setup badge over an issue on its OFF half");
+    assert.match(b!.textContent ?? "", /Needs setup: 1 field/);
+    assert.match(b!.getAttribute("title") ?? "", /Target/);
+  });
+
+  test("a pair with no issues on either half shows no badge", async () => {
+    const [on, off] = pair("projectors");
+    RULES = [on!, { ...off!, action: { id: "rosstalk.command", params: { targetId: "t1" } } }];
+    await mount();
+    const row = document.querySelector('[data-cue-pair-row="projectors"]');
+    assert.ok(row, "no pair row rendered");
+    assert.equal(row!.querySelector("[data-needs-setup]"), null, "a clean pair got a Needs setup badge");
   });
 });
 

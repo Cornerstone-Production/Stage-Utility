@@ -18,6 +18,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { ok } from "../../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
@@ -48,18 +49,20 @@ function session(overrides: Partial<BaptismSession> = {}): BaptismSession {
 function stubFetch(lane: { spans: unknown[] }) {
   return (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     if (url.includes("/api/baptism/lane")) return ok(lane);
-    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
     return ok({});
   }) as unknown as typeof fetch;
 }
 
-async function mount(sessions: BaptismSession[], lane: { spans: unknown[] } = { spans: [] }): Promise<void> {
+async function mount(
+  sessions: BaptismSession[],
+  lane: { spans: unknown[] } = { spans: [] },
+  items: ServiceTimelineItem[] = [],
+): Promise<void> {
   const realFetch = globalThis.fetch;
   globalThis.fetch = stubFetch(lane);
   try {
-    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions }));
+    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions, items }));
     await settle();
     await settle();
   } finally {
@@ -92,6 +95,65 @@ test("one linked session with spans draws its chart and its per-person splits in
   assert.equal(tableCount(), 1, "expected one per-person split table inline");
   assert.match(text(document.querySelector("table")), /Person 1/);
   assert.match(text(document.querySelector("table")), /Testimony/);
+});
+
+// This used to fetch its own plan items once per serviceKey (usePastPlanItems),
+// so a History item-time edit updated the caller's own "Vs plan" figure while
+// this chart's plan lane kept drawing the pre-edit times until the page
+// reloaded — and every History service page issued the identical
+// serviceTimeline:get read twice. `items` is now a prop, the SAME
+// det.items the caller (service-history-section.tsx) already fetched, so a
+// rerender with new items must move the plan lane with no fetch at all.
+test("the plan lane draws from the `items` prop, and moves when the caller's own items change — no fetch of its own", async () => {
+  const planItem = (start: string, end: string): ServiceTimelineItem => ({
+    itemId: "song", title: "Song", sequence: 0, startedAt: start, endedAt: end,
+    plannedLengthSec: 300, actualDurationSec: 300, preService: false,
+  });
+  let laneCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string) => {
+    const url = String(input);
+    if (url.includes("/api/baptism/lane")) {
+      laneCalls += 1;
+      return ok({ spans: [{ kind: "testimony", person: 1, startedAt: "2026-09-20T15:01:00.000Z", endedAt: "2026-09-20T15:03:00.000Z" }] });
+    }
+    // No /api/service-timeline/ branch at all — a call to it fails the test
+    // by returning {} where an items array was expected, which is exactly
+    // the point: this component must never ask for its own copy.
+    return ok({});
+  }) as unknown as typeof fetch;
+  try {
+    const view = render(
+      React.createElement(HistorySessionChart, {
+        serviceKey: KEY,
+        sessions: [session()],
+        items: [planItem("2026-09-20T15:00:00.000Z", "2026-09-20T15:05:00.000Z")],
+      }),
+    );
+    await settle();
+    await settle();
+    const rectX = () => view.container.querySelector("[data-plan-segment] rect")?.getAttribute("x");
+    const before = rectX();
+    assert.ok(before, "sanity: the plan lane drew from the initial items prop");
+    const lastLaneCalls = laneCalls;
+
+    // The operator moves the song's start on the History page — det.items
+    // changes, and the caller passes the NEW items straight down.
+    view.rerender(
+      React.createElement(HistorySessionChart, {
+        serviceKey: KEY,
+        sessions: [session()],
+        items: [planItem("2026-09-20T15:03:00.000Z", "2026-09-20T15:08:00.000Z")],
+      }),
+    );
+    await settle();
+    await settle();
+
+    assert.notEqual(rectX(), before, "the plan lane must move to the edited item time");
+    assert.equal(laneCalls, lastLaneCalls, "the timer lane must not refetch just because the items prop changed");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 // The two ways a service ends up with more than one session: a reset-and-
@@ -230,15 +292,13 @@ test("a load failure shows its own error note, distinct from 'no timeline was re
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     if (url.includes("/api/log/client")) return ok({});
     if (url.includes("/api/baptism/lane")) throw new Error("network down");
-    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
     void init;
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()] }));
+    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()], items: [] }));
     await settle();
     await settle();
   } finally {
@@ -280,7 +340,6 @@ test("the host is observed from the very first render, before the lane even load
   // component's FIRST render genuinely has `loaded === false`.
   globalThis.fetch = (async (input: string) => {
     const url = String(input);
-    const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json, text: async () => "" });
     await new Promise((r) => setTimeout(r, 0));
     if (url.includes("/api/baptism/lane")) {
       return ok({
@@ -289,11 +348,10 @@ test("the host is observed from the very first render, before the lane even load
         ],
       });
     }
-    if (url.includes("/api/service-timeline/")) return ok({ items: [] });
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()] }));
+    render(React.createElement(HistorySessionChart, { serviceKey: KEY, sessions: [session()], items: [] }));
     // The FIRST render, before any fetch has resolved: `loaded` is false,
     // yet the host div already exists and is already being watched.
     assert.ok(observed, "expected the host to be observed on the very first render, not stranded until content exists inside it");

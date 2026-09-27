@@ -170,6 +170,17 @@ export function rebuildBaptismSessions(rows: BaptismRow[], identity: BaptismIden
     const at = r.at ?? "";
 
     if (r.event === "start") {
+      // The session this `start` is about to replace, if any, never reached a
+      // `finish` — the row that would have closed it (see the neverFinished
+      // check at the bottom of this walk) is simply not there, the same way a
+      // dropped session at the very end of the file is not. Without this, that
+      // exact defect was counted only when the dropped session happened to be
+      // the LAST one — followed by a normal session that keeps replaying, it
+      // was silently ignored: `open` was overwritten below with no count and
+      // no warning, so an operator asking why the count came up short had
+      // nothing to read.
+      if (open && open.logged === null && open.people.length > 0) skips.neverFinished += 1;
+
       // Without a readable stamp there is no startedAt and therefore no id —
       // and finalize() itself logs nothing without a sessionStartedAt. The
       // whole session is dropped rather than logged under `bap-NaN`, which

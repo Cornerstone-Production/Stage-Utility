@@ -3,6 +3,7 @@ import { useBlocker } from "@tanstack/react-router";
 import { Tooltip } from "../components/ui/tooltip";
 import { toast } from "../components/ui/toast";
 import { errorMessage } from "@main/services/errors";
+import { logToServer } from "../lib/client-log";
 import { UnsavedChangesDialog } from "./unsaved-changes-dialog";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import {
@@ -1593,7 +1594,16 @@ export function LayoutEditor({
     try {
       const list = await invoke<LayoutGroup[]>("layoutGroups:save", { name: groupName.trim() || "Group", object: sel });
       savedGroups.replace(list);
-    } catch { /* ignore */ }
+    } catch (err) {
+      // The name dialog stays open on a failed save — closing it read as
+      // saved while the library gained nothing, with nothing on /log to say
+      // why. The sibling READ (saved-groups.tsx) already surfaces a failure
+      // this way; the two writes beside it, edited in the same release,
+      // still swallowed theirs.
+      toast.error(`Couldn't save the group: ${errorMessage(err)}`);
+      logToServer("layout-editor", `couldn't save a group: ${errorMessage(err)}`);
+      return;
+    }
     setGroupDlgOpen(false);
     setGroupName("");
   }
@@ -1601,7 +1611,10 @@ export function LayoutEditor({
     try {
       const list = await invoke<LayoutGroup[]>("layoutGroups:delete", { id });
       savedGroups.replace(list);
-    } catch { /* ignore */ }
+    } catch (err) {
+      toast.error(`Couldn't delete the group: ${errorMessage(err)}`);
+      logToServer("layout-editor", `couldn't delete a group: ${errorMessage(err)}`);
+    }
   }
   function insertGroup(g: LayoutGroup) {
     pushHistory();

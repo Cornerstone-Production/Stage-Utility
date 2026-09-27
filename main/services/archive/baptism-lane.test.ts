@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { baptismLaneSpans, type BaptismSpan } from "./baptism-lane.js";
 import type { BaptismRow } from "./rebuild-baptism.js";
+import { captureWarnings } from "../baptism-save-harness.js";
 
 /** t is seconds after 11:00:00Z. */
 const row = (t: number, over: Partial<BaptismRow>): BaptismRow => ({
@@ -83,22 +84,6 @@ const off = (iso: string | null) => (iso === null ? null : (Date.parse(iso) - Da
 /** Every span as [kind, person, start, end], so a fixture pins positions, not just lengths. */
 const lane = (rows: BaptismRow[]) =>
   baptismLaneSpans(rows).map((s) => [s.kind, s.person, off(s.startedAt), off(s.endedAt)]);
-
-/** Silence the one [baptism-lane] line a damaged fixture prints, and hand back
- *  what it said so the test can assert the operator has something to read. */
-function captureWarnings<T>(fn: () => T): { value: T; warnings: string[] } {
-  const warnings: string[] = [];
-  const original = console.warn;
-  console.warn = (...args: unknown[]) => {
-    if (typeof args[0] === "string" && args[0].startsWith("[baptism-lane]")) warnings.push(args[0]);
-    else original(...args);
-  };
-  try {
-    return { value: fn(), warnings };
-  } finally {
-    console.warn = original;
-  }
-}
 
 describe("baptismLaneSpans: the press that ends a session opens nothing", () => {
   it("draws no baptism for the person a grouped finish left unbaptized", () => {
@@ -511,10 +496,14 @@ describe("baptismLaneSpans: session boundaries", () => {
 });
 
 describe("baptismLaneSpans: a clock started from armed with no row of its own", () => {
-  it("opens it on the baptisms-start that next() writes, at the person that row names", () => {
-    // The file as the emitter writes it: no row for person 1 (nobody's clock
-    // ran), and baptisms-start for person 2's — the row advance() writes for
-    // person 1's, one index further in.
+  it("opens it on a baptisms-start row at whatever person it names", () => {
+    // A file from before next() was fixed: a direct
+    // POST /api/baptism/next while armed used to skip person 1 (no row,
+    // nobody's clock ran) and start person 2's, writing baptisms-start one
+    // index further in than advance() ever does. The lane reads whatever
+    // index the row names — it does not assume 0 — so an already-recorded
+    // file with this shape still replays correctly; no current press produces
+    // it anymore.
     assert.deepEqual(lane([
       row(0,  { event: "start", phase: "testimony", personNumber: "1" }),
       row(23, { event: "testimony-end", phase: "testimony", personNumber: "1", segmentMs: "23000" }),
@@ -654,7 +643,7 @@ describe("baptismLaneSpans: a damaged file says what it left out", () => {
       row(20, { event: "testimony-end", phase: "testimony", personNumber: "2", segmentMs: "10000" }),
       row(20, { event: "finish", phase: "idle", personNumber: "2" }),
     ];
-    const { value, warnings } = captureWarnings(() => baptismLaneSpans(rows, "st1:p1:t1"));
+    const { value, warnings } = captureWarnings("[baptism-lane]", () => baptismLaneSpans(rows, "st1:p1:t1"));
     // Person 1 ended, and person 2 began, at a time the file cannot say.
     assert.deepEqual(value, []);
     assert.equal(warnings.length, 1, "an operator has one line to read, not one per span");
@@ -662,7 +651,7 @@ describe("baptismLaneSpans: a damaged file says what it left out", () => {
   });
 
   it("says nothing about an undamaged file", () => {
-    const { warnings } = captureWarnings(() =>
+    const { warnings } = captureWarnings("[baptism-lane]", () =>
       baptismLaneSpans([
         row(0,  { event: "reset", phase: "idle" }),
         row(1,  { event: "start", phase: "testimony", personNumber: "1" }),

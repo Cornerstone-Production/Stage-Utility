@@ -32,13 +32,18 @@ marking each bad field and putting the count in the footer.
 
 Saving with a problem still saves — turned off, with a note that it runs once the
 field is fixed. It is never refused outright, so a rule half set up is never lost
-because the dialog would not let go of it. Fix the field and save again and the
-footer offers to turn it back on; saving does.
+because the dialog would not let go of it. Fix the field and save again and, **if
+the Enabled switch still reads on**, it turns back on. A rule you switched off
+yourself, or one that was never turned on in the first place, stays off — fixing
+the field only clears the badge, and the switch in front of you is always the
+last word on whether the rule runs.
 
 The rules list marks a rule with a problem **Needs setup: N fields**, naming
 them, and its switch will not turn it on — turning ON a rule that still has a
 problem is the one thing this refuses, both in the editor and from the list,
-because that is the one action asking the rule to actually run.
+because that is the one action asking the rule to actually run. A pair's row
+carries one badge over both halves, the same as its **any time** badge below —
+either half needing setup is the pair needing setup.
 
 **A rule already enabled with a problem — from before this build, or a restored
 config — keeps running exactly as it did.** Loading it, restoring it, or a
@@ -78,7 +83,7 @@ simply be off right now.
 | OBS starts / stops streaming | the stream output starts or stops |
 | OBS starts / stops the virtual camera | the virtual camera output starts or stops |
 | An OSC message arrives | a value at an OSC address changes to equal, or crosses, what you name — see [Inbound OSC](#inbound-osc) |
-| A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only. It reads the line as displays receive it, so a phrase that is also a ProdCom keyword marked sensitive will not match while [redaction](integrations/prodcom.md#sensitive-keywords) is on |
+| A phrase is said on ProdCom | your text newly appears in a transcript line, optionally on one channel only — including a later partial or the final revising a line already seen, since ProdCom keeps one line id for a whole utterance. A revision that still contains it does not fire again; one that drops the phrase and a later one that brings it back can. It reads the line as displays receive it, so a phrase that is also a ProdCom keyword marked sensitive will not match while [redaction](integrations/prodcom.md#sensitive-keywords) is on |
 | Baptism timer starts | the timer leaves idle |
 | Baptism moves to another phase | testimony to baptism, or either back to idle |
 | Baptism timer finishes | it returns to idle |
@@ -546,7 +551,8 @@ will tell you.
 - *The item's own time* — when that item is scheduled.
 - *The service start* — the service time, ignoring where the item sits.
 
-A negative offset fires early, positive late.
+A negative offset fires early, positive late. Left untouched it is **0** — right
+at the moment itself.
 
 ### How an item gets a time
 
