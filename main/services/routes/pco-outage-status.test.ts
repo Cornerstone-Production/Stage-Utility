@@ -96,6 +96,11 @@ describe("a PCO read that fails answers 502, not 500", () => {
       const original = controller[method];
       assert.equal(typeof original, "function", `stageController.${method} is not a method any more`);
       controller[method] = () => Promise.reject(new Error(OUTAGE));
+      // The operator's only evidence: pco-service logs a retry, never the read
+      // that finally failed, so the route has to say it or nothing does.
+      const warned: string[] = [];
+      const warn = console.warn;
+      console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
       try {
         const out = await callRoute(route, routePath);
         assert.equal(
@@ -104,7 +109,13 @@ describe("a PCO read that fails answers 502, not 500", () => {
           `${routePath} answered ${out.status} for an upstream outage — a 500 blames this app`,
         );
         assert.deepEqual(out.json, { error: OUTAGE }, "the upstream's reason did not reach the caller");
+        assert.deepEqual(
+          warned.filter((l) => l.startsWith("[pco] ")).map((l) => l.replace(/^\[pco\] .+ read failed: /, "")),
+          [OUTAGE],
+          `${routePath} failed without one [pco] line saying so — got ${JSON.stringify(warned)}`,
+        );
       } finally {
+        console.warn = warn;
         controller[method] = original;
       }
     });
