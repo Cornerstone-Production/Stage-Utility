@@ -3,6 +3,7 @@ import { invoke, onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
 import { setDisplayHourCycle } from "../lib/clock-format";
+import { isPreviewSlug } from "./preview-url";
 
 interface UseStageStateResult {
   state: StageState | null;
@@ -212,7 +213,7 @@ export function useStageState(): UseStageStateResult {
     const path = window.location.pathname;
     // The settings console (+ its live-preview iframes) must not reload out from
     // under an operator mid-edit; only the display / volunteer surfaces self-reload.
-    if (path.startsWith("/preview-") || path.startsWith("/settings")) return;
+    if (isPreviewSlug(path.slice(1)) || path.startsWith("/settings")) return;
     const own = (window as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ?? null;
     let reloading = false;
     let seen: string | null = null;

@@ -58,3 +58,10 @@ export function previewOutputId(search: string, previewViewId: string | null): s
 export function previewViewIdFromSlug(slug: string): string | null {
   return slug.startsWith(PREVIEW_PREFIX) ? slug.slice(PREVIEW_PREFIX.length) : null;
 }
+
+/** Whether a path SEGMENT is a settings preview's. For a caller that only needs
+ *  the yes or no — a preview iframe does not reload, send presence, or play
+ *  video until asked — and would otherwise re-type the prefix. */
+export function isPreviewSlug(slug: string): boolean {
+  return previewViewIdFromSlug(slug) !== null;
+}

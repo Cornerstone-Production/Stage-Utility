@@ -13,6 +13,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import { ErrorBoundary } from "../../components/ui/error-boundary-view";
 import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
+import { isPreviewSlug } from "../preview-url";
 import { useOnScreen } from "./use-on-screen";
 import { useVideoSession } from "./use-video-session";
 import { useVideoState } from "./use-video-state";
@@ -22,7 +23,7 @@ const HIDDEN_TEARDOWN_MS = 3000;
 type VideoObjectConfig = Extract<LayoutObjectConfig, { type: "video" }>;
 
 function isPreviewRoute(): boolean {
-  return window.location.pathname.startsWith("/preview-");
+  return isPreviewSlug(window.location.pathname.slice(1));
 }
 
 /**

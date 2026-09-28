@@ -18,7 +18,7 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
-import { previewOutputId, previewViewIdFromSlug } from "./preview-url";
+import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -457,7 +457,7 @@ export function StageView() {
   // targeting this display (or "all"). Lets the operator push new content from
   // Settings without walking to the screen. Preview iframes are never reloaded.
   useEffect(() => {
-    if (displayId.startsWith("preview-")) return;
+    if (isPreviewSlug(displayId)) return;
     return onNotification("display:refresh", (payload: unknown) => {
       const target = (payload as { target?: string } | null)?.target ?? "all";
       if (target === "all" || target === displayId) window.location.reload();
@@ -469,7 +469,7 @@ export function StageView() {
   // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
   // flips the dot offline at once, and the server TTL catches ungraceful deaths.
   useEffect(() => {
-    if (displayId.startsWith("preview-")) return;
+    if (isPreviewSlug(displayId)) return;
     const url = "/api/displays/presence";
     let near = false;
     let timer: ReturnType<typeof setInterval>;
