@@ -54,6 +54,7 @@ import { LiveControls } from "./live-controls";
 import { Loader2Icon, ZapIcon } from "lucide-react";
 import { displayHourCycle, formatClock } from "../lib/clock-format";
 import { externKeyed } from "@main/types/extern-keyed";
+import { VideoObject } from "./video/video-object";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -1151,11 +1152,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           <span style={{ fontSize: `${0.022 * ctx.H}px` }}>{ctx.ndiSource || "no source"}</span>
         </div>
       );
-    // Placeholder: the feed id as text, so an unconfigured Video object reads as
-    // exactly that rather than a blank box. The real player lands in the next
-    // task of the video-feeds plan.
     case "video":
-      return span(c.feedId ?? "Choose a feed");
+      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} />;
     case "slots-grid": {
       // Resolved BY OBJECT wherever the server could do it -- inline grids, and
       // grids embedding a view. Both are free-dragged boxes on a custom layout,
