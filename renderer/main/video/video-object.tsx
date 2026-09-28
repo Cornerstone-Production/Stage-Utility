@@ -175,7 +175,15 @@ function VideoObjectBody({
             <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
               {phase === "waiting" && <StateText big="Waiting for the source" small="Nothing is sending to this feed yet" />}
               {phase === "connecting" && <ConnectingBody name={name} />}
-              {phase === "offline" && <OfflineBody mode={config.whenOffline ?? "message"} name={name} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />}
+              {phase === "offline" && (
+                <OfflineBody
+                  mode={config.whenOffline ?? "message"}
+                  name={name}
+                  deleted={feedDeleted}
+                  appLogo={appLogo}
+                  appLogoMonochrome={appLogoMonochrome}
+                />
+              )}
               {phase === "cant-play" && <CantPlayBody name={name} />}
             </div>
           )}
@@ -225,11 +233,18 @@ function ConnectingBody({ name }: { name: string }) {
 function OfflineBody({
   mode,
   name,
+  deleted,
   appLogo,
   appLogoMonochrome,
 }: {
   mode: "message" | "logo" | "nothing";
   name: string;
+  /** True when this feed id names nothing in the loaded feed list — a live
+   *  feed that is merely down never sets this. The two read as the same
+   *  `phase === "offline"` to everything else here, but they are not the
+   *  same fact: "will appear when the source comes back" is a promise a
+   *  deleted feed can never keep. */
+  deleted: boolean;
   appLogo: string | null;
   appLogoMonochrome: boolean;
 }) {
@@ -244,6 +259,7 @@ function OfflineBody({
       </div>
     );
   }
+  if (deleted) return <StateText big="This feed was removed" small="Choose another feed for this widget" />;
   return <StateText big={`${name} is offline`} small="It will appear here when the source comes back" />;
 }
 

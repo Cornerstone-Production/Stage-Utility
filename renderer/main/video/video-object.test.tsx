@@ -507,10 +507,12 @@ test("a WebRTC picture carries no badge", async () => {
   }
 });
 
-test("a feed id the loaded list does not name shows the offline message without a name", async () => {
+test("a feed id the loaded list does not name shows removed copy, not the come-back promise", async () => {
   const { g } = await renderOnScreen(makeFeed({ id: "some-other-feed" }));
   try {
-    assert.equal(!!screen.queryByText("This feed is offline"), true, "a deleted feed reads as offline");
+    assert.equal(!!screen.queryByText("This feed was removed"), true, "a deleted feed must say it was removed");
+    assert.equal(!!screen.queryByText("Choose another feed for this widget"), true, "expected the corrected second line");
+    assert.equal(!!screen.queryByText("It will appear here when the source comes back"), false, "a deleted feed never comes back on its own");
   } finally {
     g.restore();
   }

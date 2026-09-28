@@ -203,6 +203,12 @@ class VideoService {
   }
 
   async removeFeed(id: string): Promise<boolean> {
+    // Same check as updateFeed, and the same reason: an id this shape never
+    // mints, so it can only ever equal a feed that got into the store some
+    // other way (a hand-edited or restored file). Refusing it here keeps the
+    // two mutating routes agreeing on what a feed id is, instead of DELETE
+    // quietly accepting what PATCH would refuse.
+    if (!FEED_ID_PATTERN.test(id)) return false;
     const { feeds } = await loadFeedsFile();
     if (!feeds.some((f) => f.id === id)) return false;
 

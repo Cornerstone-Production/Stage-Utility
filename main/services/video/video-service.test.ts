@@ -56,3 +56,20 @@ test("an add whose password cannot be saved takes the feed back out and rejects"
   const names = (await videoService.state()).feeds.map((f) => f.name);
   assert.equal(names.includes("Balcony cam"), false, "a feed was left in the store with no password behind it");
 });
+
+test("removeFeed refuses an id outside FEED_ID_PATTERN, even for a feed stored under one", async () => {
+  // feedIdFor() never mints this shape (uppercase, an underscore) — the only
+  // way a feed gets an id like this is a hand-edited or restored file, the
+  // same case updateFeed already refuses. Written straight through the
+  // store, not addFeed, so the id is exactly this and nothing feedIdFor()
+  // would have chosen instead.
+  const { videoFeedsStore } = await import("./feed-store.js");
+  const badId = "Bad_ID";
+  await videoFeedsStore.update((current) => ({
+    ...current,
+    feeds: [...(Array.isArray(current.feeds) ? current.feeds : []), { id: badId, name: "Corrupt", source: { kind: "external", url: "http://192.0.2.90/cam/whep" } }],
+  }));
+  assert.equal(await videoService.removeFeed(badId), false, "a pattern-failing id must be refused before the store is even asked");
+  const names = (await videoService.state()).feeds.map((f) => f.id);
+  assert.ok(names.includes(badId), "the malformed feed must still be there — refused, not silently dropped");
+});
