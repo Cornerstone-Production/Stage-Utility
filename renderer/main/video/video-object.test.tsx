@@ -17,6 +17,7 @@ import { after, afterEach, beforeEach, mock, test } from "node:test";
 import { act } from "react";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 
 const teardown = installRenderDom();
 
@@ -82,37 +83,13 @@ function stubFetch(state: VideoState) {
         ok: true,
         status: 201,
         headers: { get: (h: string) => (h === "Location" ? `${url}/1f2e3d4c` : null) },
-        text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+        text: async () => FAKE_SDP,
         json: async () => ({}),
       } as unknown as Response;
     }
     return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as unknown as Response;
   }) as typeof fetch;
   return { fn, calls };
-}
-
-/** A no-op RTCPeerConnection: enough for startWhep's offer/answer exchange to
- *  complete without ever reaching "connected" — these tests only assert what
- *  was SENT (a POST, a DELETE), never the connection state machine. */
-class FakePeerConnection {
-  iceGatheringState = "complete";
-  connectionState: RTCPeerConnectionState = "new";
-  localDescription: { sdp: string } | null = null;
-  remoteDescription: unknown = null;
-  ontrack: unknown = null;
-  addTransceiver(): void {}
-  async createOffer(): Promise<{ type: "offer"; sdp: string }> {
-    return { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" };
-  }
-  async setLocalDescription(desc: { sdp: string }): Promise<void> {
-    this.localDescription = desc;
-  }
-  async setRemoteDescription(desc: unknown): Promise<void> {
-    this.remoteDescription = desc;
-  }
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
 }
 
 /** The one stubbed IntersectionObserver, handing the test its callback — jsdom
@@ -133,12 +110,11 @@ class StubObserver {
 function stubGlobals(state: VideoState) {
   const { fn, calls } = stubFetch(state);
   const realFetch = globalThis.fetch;
-  const realPc = (globalThis as unknown as { RTCPeerConnection?: unknown }).RTCPeerConnection;
   const realIo = (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
   const realAbortController = globalThis.AbortController;
   const realAbortSignal = globalThis.AbortSignal;
   globalThis.fetch = fn;
-  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePeerConnection;
+  const restorePc = installFakePeerConnection();
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = StubObserver;
   // jsdom's OWN AbortController/AbortSignal, not Node's: a jsdom-rendered
   // <video>'s addEventListener validates a `{ signal }` option's realm, and
@@ -155,7 +131,7 @@ function stubGlobals(state: VideoState) {
     calls,
     restore() {
       globalThis.fetch = realFetch;
-      (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = realPc;
+      restorePc();
       (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = realIo;
       globalThis.AbortController = realAbortController;
       globalThis.AbortSignal = realAbortSignal;
@@ -188,6 +164,7 @@ beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
   StubObserver.last = null;
+  FakePeerConnection.reset();
 });
 afterEach(() => cleanup());
 

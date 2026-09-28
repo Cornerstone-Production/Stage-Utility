@@ -1,7 +1,7 @@
 // renderer/main/video/use-video-session.test.ts — startPlaybackAttempt's state
-// machine, driven directly with a fake RTCPeerConnection dispatching a real
-// `connectionstatechange` event (it extends the real EventTarget, so
-// `{ signal }` listener removal is the real thing, not a simulation of it), a
+// machine, driven directly with the shared fake RTCPeerConnection
+// (test-fixtures/fake-peer-connection.ts, which dispatches a real
+// `connectionstatechange` event on Node's own EventTarget), a
 // fake <video> handing back a stored requestVideoFrameCallback, and
 // node:test's fake timers for the connect, first-frame, drop-grace and
 // backoff windows — plus a few tests that render `useVideoSession` itself
@@ -9,19 +9,12 @@
 // cannot be proven against `startPlaybackAttempt` alone: the backoff reset,
 // and routing a real relay/external feed view through to the right verdict.
 //
-// `NodeEvent` is captured before jsdom is installed below, and used for
-// every `dispatchEvent(new NodeEvent(...))` in this file: jsdom's own
-// `Event`/`AbortSignal` are DIFFERENT CLASSES from Node's (structurally
-// identical, not `instanceof`-equal), and `FakePeerConnection extends
-// EventTarget` here is Node's own EventTarget — dispatching jsdom's `Event`
-// into it throws "parameter 1 is not of type 'Event'".
-const NodeEvent = globalThis.Event;
-
 import { strict as assert } from "node:assert";
 import { after, afterEach, mock, test } from "node:test";
 
 import type { VideoFeedView } from "@main/types/video";
 import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 
 const teardown = installRenderDom();
 
@@ -67,42 +60,6 @@ class FakeVideo extends EventTarget {
   }
 }
 
-class FakePeerConnection extends EventTarget {
-  static instances: FakePeerConnection[] = [];
-  iceGatheringState = "complete";
-  connectionState: RTCPeerConnectionState = "new";
-  localDescription: { sdp: string } | null = null;
-  remoteDescription: unknown = null;
-  ontrack: unknown = null;
-  closed = false;
-  constructor() {
-    super();
-    FakePeerConnection.instances.push(this);
-  }
-  addTransceiver(): void {}
-  async createOffer(): Promise<{ type: "offer"; sdp: string }> {
-    return { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" };
-  }
-  async setLocalDescription(desc: { sdp: string }): Promise<void> {
-    this.localDescription = desc;
-  }
-  async setRemoteDescription(desc: unknown): Promise<void> {
-    this.remoteDescription = desc;
-  }
-  close(): void {
-    this.closed = true;
-  }
-  /** Test helper: flips connectionState and fires the real event. */
-  setConnectionState(s: RTCPeerConnectionState): void {
-    this.connectionState = s;
-    this.dispatchEvent(new NodeEvent("connectionstatechange"));
-  }
-}
-
-function stubPeerConnection(): void {
-  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePeerConnection;
-}
-
 type FetchBehavior = "succeed" | "reject" | "hang" | { status: number };
 
 /** Every fetch call, and which promises are still pending (never resolved
@@ -131,7 +88,7 @@ function stubFetch(behavior: FetchBehavior) {
       ok: true,
       status: 201,
       headers: { get: (h: string) => (h === "Location" ? "/video/p/whep/abcd" : null) },
-      text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+      text: async () => FAKE_SDP,
     } as unknown as Response;
   }) as typeof fetch;
   return { fn, calls, getHangingSignal: () => hangingSignal };
@@ -147,15 +104,14 @@ function stubFetch(behavior: FetchBehavior) {
 function stubGlobals(behavior: FetchBehavior) {
   const { fn, calls, getHangingSignal } = stubFetch(behavior);
   const realFetch = globalThis.fetch;
-  const realPc = (globalThis as unknown as { RTCPeerConnection?: unknown }).RTCPeerConnection;
   globalThis.fetch = fn;
-  stubPeerConnection();
+  const restorePc = installFakePeerConnection();
   return {
     calls,
     getHangingSignal,
     restore() {
       globalThis.fetch = realFetch;
-      (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = realPc;
+      restorePc();
     },
   };
 }
@@ -174,7 +130,7 @@ function makeCallbacks() {
 }
 
 afterEach(() => {
-  FakePeerConnection.instances.length = 0;
+  FakePeerConnection.reset();
 });
 
 test("connects and a frame arrives: live, no unusable/dropped verdict", async () => {

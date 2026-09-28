@@ -6,9 +6,10 @@
 // dispatch.
 
 import { strict as assert } from "node:assert";
-import { afterEach, test } from "node:test";
+import { after, afterEach, test } from "node:test";
 
 import { startWhep } from "./whep-client.js";
+import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 
 // window.location.href resolves a RELATIVE `url` argument into an absolute
 // WHEP endpoint (an absolute `url`, e.g. an external feed's, is untouched by
@@ -16,45 +17,16 @@ import { startWhep } from "./whep-client.js";
 // the endpoint itself now (see whep-client.ts's deleteSession).
 (globalThis as unknown as { window: unknown }).window = { location: { href: "http://localhost:8788/" } };
 
-class FakePeerConnection {
-  static instances: FakePeerConnection[] = [];
-  iceGatheringState = "complete";
-  localDescription: { sdp: string } | null = null;
-  remoteDescription: unknown = null;
-  ontrack: unknown = null;
-  closed = false;
-  constructor() {
-    FakePeerConnection.instances.push(this);
-  }
-  addTransceiver(): void {}
-  async createOffer(): Promise<{ type: "offer"; sdp: string }> {
-    return { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" };
-  }
-  async setLocalDescription(desc: { sdp: string }): Promise<void> {
-    this.localDescription = desc;
-  }
-  async setRemoteDescription(desc: unknown): Promise<void> {
-    this.remoteDescription = desc;
-  }
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {
-    this.closed = true;
-  }
-}
-
-function stubPeerConnection(): void {
-  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePeerConnection;
-}
+const restorePeerConnection = installFakePeerConnection();
+after(restorePeerConnection);
 
 const video = {} as HTMLVideoElement;
 
 afterEach(() => {
-  FakePeerConnection.instances.length = 0;
+  FakePeerConnection.reset();
 });
 
 test("a 201 with a Location DELETEs that address on stop", async () => {
-  stubPeerConnection();
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -63,7 +35,7 @@ test("a 201 with a Location DELETEs that address on stop", async () => {
       return {
         status: 201,
         headers: { get: (h: string) => (h === "Location" ? "/video/p/whep/1f2e3d4c" : null) },
-        text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+        text: async () => FAKE_SDP,
       } as unknown as Response;
     }
     return { status: 200, ok: true, headers: { get: () => null }, text: async () => "" } as unknown as Response;
@@ -79,7 +51,6 @@ test("a 201 with a Location DELETEs that address on stop", async () => {
 });
 
 test("a 404 closes the peer connection and rejects", async () => {
-  stubPeerConnection();
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () =>
     ({ status: 404, ok: false, headers: { get: () => null }, text: async () => "" }) as unknown as Response) as typeof fetch;
 
@@ -89,7 +60,6 @@ test("a 404 closes the peer connection and rejects", async () => {
 });
 
 test("an absolute, cross-origin endpoint's relative Location resolves against THAT origin, not the page's", async () => {
-  stubPeerConnection();
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -101,7 +71,7 @@ test("an absolute, cross-origin endpoint's relative Location resolves against TH
         // against the RELAY's origin, never against window.location.href
         // (this app's own origin, "http://localhost:8788/").
         headers: { get: (h: string) => (h === "Location" ? "/whep/9f8e7d6c" : null) },
-        text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+        text: async () => FAKE_SDP,
       } as unknown as Response;
     }
     return { status: 200, ok: true, headers: { get: () => null }, text: async () => "" } as unknown as Response;
@@ -118,7 +88,6 @@ test("an absolute, cross-origin endpoint's relative Location resolves against TH
 });
 
 test("a 201 whose answer cannot be read closes the peer connection, DELETEs the session, and rethrows", async () => {
-  stubPeerConnection();
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -145,40 +114,13 @@ test("a 201 whose answer cannot be read closes the peer connection, DELETEs the 
 
 // ── a superseded attempt's late track ────────────────────────────────────
 //
-// A separate, minimal FakePeerConnection: these two tests need to fire
-// `ontrack` from INSIDE `setRemoteDescription`, to reproduce the real window
-// the `stopped`-only guard missed — the caller's `end()` aborts the attempt
+// These two fire `ontrack` from INSIDE `setRemoteDescription` (the fake's
+// onSetRemoteDescription hook), to reproduce the real window the
+// `stopped`-only guard missed — the caller's `end()` aborts the attempt
 // (setting its AbortSignal, not yet `stopped`, since that only flips once
 // `stop()` itself has been awaited) WHILE setRemoteDescription is still in
 // flight, and the browser fires `track` for this now-abandoned session
 // before that promise ever settles.
-
-let onSetRemoteDescription: ((pc: FakePcWithTrackHook) => void) | null = null;
-
-class FakePcWithTrackHook {
-  static instances: FakePcWithTrackHook[] = [];
-  iceGatheringState = "complete";
-  localDescription: { sdp: string } | null = null;
-  ontrack: ((e: { streams: unknown[]; track: unknown }) => void) | null = null;
-  closed = false;
-  constructor() {
-    FakePcWithTrackHook.instances.push(this);
-  }
-  addTransceiver(): void {}
-  async createOffer(): Promise<{ type: "offer"; sdp: string }> {
-    return { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" };
-  }
-  async setLocalDescription(desc: { sdp: string }): Promise<void> {
-    this.localDescription = desc;
-  }
-  async setRemoteDescription(): Promise<void> {
-    onSetRemoteDescription?.(this);
-  }
-  addEventListener(): void {}
-  close(): void {
-    this.closed = true;
-  }
-}
 
 function stubFetchFor(path: string) {
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (_input: string | URL, init?: RequestInit) => {
@@ -187,7 +129,7 @@ function stubFetchFor(path: string) {
         status: 201,
         ok: true,
         headers: { get: (h: string) => (h === "Location" ? path : null) },
-        text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+        text: async () => FAKE_SDP,
       } as unknown as Response;
     }
     return { status: 200, ok: true, headers: { get: () => null }, text: async () => "" } as unknown as Response;
@@ -195,13 +137,11 @@ function stubFetchFor(path: string) {
 }
 
 test("a normal ontrack after stop() does not touch srcObject", async () => {
-  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePcWithTrackHook;
-  onSetRemoteDescription = null;
   stubFetchFor("/v/whep/x");
   const video = { srcObject: null as unknown } as unknown as HTMLVideoElement;
 
   const session = await startWhep("/v/whep", video);
-  const pc = FakePcWithTrackHook.instances.at(-1)!;
+  const pc = FakePeerConnection.instances.at(-1)!;
   const handler = pc.ontrack; // a browser keeps the handler after close(); grab it first
   await session.stop();
   handler?.({ streams: ["A"], track: {} });
@@ -210,11 +150,10 @@ test("a normal ontrack after stop() does not touch srcObject", async () => {
 });
 
 test("a session aborted while setRemoteDescription is in flight must not let its late track overwrite the replacement's stream", async () => {
-  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePcWithTrackHook;
   stubFetchFor("/v/whep/x");
   const video = { srcObject: null as unknown } as unknown as HTMLVideoElement;
   const controller = new AbortController();
-  onSetRemoteDescription = (pc) => {
+  FakePeerConnection.onSetRemoteDescription = (pc) => {
     // The caller's end() runs while SRD is still in flight — this attempt's
     // signal is aborted, but `stopped` (whep-client.ts's own flag) is not
     // set until `stop()` itself is awaited, below.
