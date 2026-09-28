@@ -310,6 +310,75 @@ test("stop() ends the attempt cleanly: exactly one DELETE, no further callbacks"
   }
 });
 
+// ── the first frame lifts the cover whatever state events arrive ─────────
+//
+// The frame watch is armed the moment the WHEP answer is applied, not on a
+// "connected" event: a picture that is decoding must go live even if that
+// event is never observed. With the watch armed only from "connected", a
+// session whose state read "connected" by the time the connect timer fired
+// had nothing left to fail it and nothing to see its frames — "Connecting"
+// forever over a picture that was playing.
+
+test("a frame with no connectionstatechange ever dispatched still goes live, and the connect timer leaves it alone", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: false }, cb);
+    await flush();
+    // The browser reached "connected" without the event reaching this
+    // listener: the state reads connected, no event is dispatched.
+    FakePeerConnection.instances[0]!.connectionState = "connected";
+    video.fireFrame();
+
+    assert.deepEqual(
+      calls.filter((c) => c.fn === "onPhase").map((c) => c.arg),
+      ["connecting", "live"],
+      "a decoding picture must lift the cover without a connectionstatechange event",
+    );
+
+    mock.timers.tick(CONNECT_TIMEOUT_MS + FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(
+      calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn),
+      [],
+      "a live session must not be failed by the connect timer",
+    );
+    attempt.stop();
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("through the hook: a frame with no 'connected' event puts the widget's phase at live", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const feed: VideoFeedView = {
+    id: "cam",
+    name: "Cam",
+    kind: "external",
+    sourceLine: "",
+    source: { kind: "external", url: "http://h/cam/whep" },
+    play: { via: "external", url: "http://h/cam/whep", protocol: "whep" },
+    status: { state: null },
+  };
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(result.current.phase, "connecting");
+    act(() => video.fireFrame());
+    assert.equal(result.current.phase, "live");
+  } finally {
+    g.restore();
+  }
+});
+
 // ── a relay feed's refusal falls back to HLS; everything else retries ────
 
 test("a relay feed's WHEP refusal (415) is webrtc-unusable — falls back to HLS", async () => {

@@ -140,11 +140,21 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
     after?.();
   };
 
-  const waitForFirstFrame = (timeoutMs: number) => {
+  /**
+   * Arms the first-frame watch. Called the moment a source is attached — the
+   * WHEP answer applied, the HLS source loaded — and never from a connection
+   * state event: a picture that is decoding lifts the cover whatever state
+   * events were or were not observed. Idempotent.
+   */
+  let watching = false;
+  const watchForFirstFrame = () => {
+    if (watching) return;
+    watching = true;
     const v = video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
     const markFrame = () => {
       if (ended || gotFirstFrame) return;
       gotFirstFrame = true;
+      clearTimeout(connectTimer);
       clearTimeout(frameTimer);
       clearInterval(pollInterval);
       if (choice.method === "hls" && session?.kind === "hls") {
@@ -167,6 +177,11 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
         if (v.getVideoPlaybackQuality().totalVideoFrames > 0) markFrame();
       }, 200);
     }
+  };
+
+  /** The failure half: no frame within `timeoutMs` ends the attempt. */
+  const firstFrameDeadline = (timeoutMs: number) => {
+    clearTimeout(frameTimer);
     frameTimer = setTimeout(() => {
       if (gotFirstFrame) return;
       if (choice.method === "webrtc") end(() => cb.onWebrtcUnusable("connected, but no frame ever arrived"));
@@ -193,11 +208,16 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
         }
         session = { kind: "webrtc", s: whep };
         clearTimeout(connectTimer);
+        watchForFirstFrame();
         // A second, independent window: the handshake succeeded, so THIS
-        // timer firing means the connection itself never came up — that IS
-        // a verdict about WebRTC on this screen.
+        // timer firing with no frame means WebRTC never delivered a picture on
+        // this screen — that IS a verdict about WebRTC here. It fails the
+        // attempt whatever connectionState reads: a state that says
+        // "connected" with no frame is no less stuck than one that never did.
         connectTimer = setTimeout(() => {
-          if (whep.pc.connectionState !== "connected") end(() => cb.onWebrtcUnusable("never connected after a successful handshake"));
+          if (gotFirstFrame) return;
+          const why = whep.pc.connectionState === "connected" ? "connected, but no frame ever arrived" : "never connected after a successful handshake";
+          end(() => cb.onWebrtcUnusable(why));
         }, CONNECT_TIMEOUT_MS);
         whep.pc.addEventListener(
           "connectionstatechange",
@@ -206,9 +226,11 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
             const s = whep.pc.connectionState;
             if (s === "connected") {
               hasConnected = true;
-              clearTimeout(connectTimer);
               clearTimeout(dropTimer);
-              if (!gotFirstFrame) waitForFirstFrame(FIRST_FRAME_TIMEOUT_MS);
+              if (!gotFirstFrame) {
+                clearTimeout(connectTimer);
+                firstFrameDeadline(FIRST_FRAME_TIMEOUT_MS);
+              }
             } else if (s === "failed" || s === "disconnected") {
               if (gotFirstFrame) {
                 // Never stack two: disconnected -> failed (or the reverse)
@@ -236,7 +258,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
         if (whep.pc.connectionState === "connected") {
           hasConnected = true;
           clearTimeout(connectTimer);
-          waitForFirstFrame(FIRST_FRAME_TIMEOUT_MS);
+          firstFrameDeadline(FIRST_FRAME_TIMEOUT_MS);
         }
         video.addEventListener(
           "error",
@@ -277,7 +299,8 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
           return;
         }
         session = { kind: "hls", s: hls };
-        waitForFirstFrame(HLS_FIRST_FRAME_TIMEOUT_MS);
+        watchForFirstFrame();
+        firstFrameDeadline(HLS_FIRST_FRAME_TIMEOUT_MS);
         video.addEventListener(
           "error",
           () => {
