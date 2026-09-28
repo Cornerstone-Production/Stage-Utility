@@ -1,3 +1,5 @@
+// main/services/video/feed-store.ts — the operator's feeds. Config: backed up.
+
 import { DataStore } from "../data-store.js";
 import { DEFAULT_VIDEO_PORTS, type VideoFeedsFile } from "../../types/video.js";
 

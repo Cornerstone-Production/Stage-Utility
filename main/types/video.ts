@@ -1,3 +1,8 @@
+// main/types/video.ts — video feeds, the relay and what a screen plays.
+//
+// A feed is defined once and a layout's Video widget names it by id. The id is
+// permanent; renaming changes only `name`, so a layout never loses its feed.
+
 export const PUSH_PROTOCOLS = ["srt", "rtmp", "whip"] as const;
 export type PushProtocol = (typeof PUSH_PROTOCOLS)[number];
 
