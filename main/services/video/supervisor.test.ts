@@ -307,8 +307,37 @@ describe("RelaySupervisor", () => {
     assert.equal(sup.version(), "v1.21.1");
   });
 
+  it("a throw during start() (a rejecting psImpl) resets state to \"off\" rather than wedging in \"starting\"", async (t) => {
+    enableClock(t);
+    await fs.mkdir(relayDir(), { recursive: true });
+    await fs.writeFile(path.join(relayDir(), "relay.pid"), "4242", "utf8");
+
+    const { spawnImpl, children } = fakeSpawn();
+    const boom = new Error("ps lookup failed");
+    let shouldFail = true;
+    const sup = new RelaySupervisor({
+      spawnImpl,
+      psImpl: async () => {
+        if (shouldFail) throw boom;
+        return null; // no leftover — proceeds straight to spawning
+      },
+    });
+
+    await assert.rejects(() => sup.start("mediamtx", "config.yml"), boom);
+    assert.deepEqual(sup.status(), { state: "off" } satisfies SupervisorStatus);
+    assert.equal(children.length, 0, "the failed start() must not have spawned anything");
+
+    // Without the fix, the guard added for a second start() (state !== "off")
+    // would now refuse this forever, since a wedged "starting" never becomes
+    // "off" again on its own.
+    shouldFail = false;
+    await sup.start("mediamtx", "config.yml");
+    assert.equal(children.length, 1, "a later start(), once the failure clears, must actually spawn");
+    assert.equal(sup.status().state, "running");
+  });
+
   describe("a second start() without stop() first", () => {
-    it("is a no-op while already starting, running or failing — no leftover kill, no second child", async (t) => {
+    it("is a no-op while running — no leftover kill, no second child", async (t) => {
       enableClock(t);
       const { spawnImpl, children } = fakeSpawn();
       const killed: Array<[number, NodeJS.Signals]> = [];
@@ -331,7 +360,36 @@ describe("RelaySupervisor", () => {
       assert.deepEqual(sup.status(), statusAfterFirst, "state must be untouched by the no-op start()");
     });
 
-    it("two start() calls issued back-to-back, neither awaited first, still spawn exactly one child", async (t) => {
+    it("is a no-op while failing (a pending backoff wait) — the scheduled restart is not reset", async (t) => {
+      enableClock(t);
+      const { spawnImpl, children } = fakeSpawn();
+      const killed: Array<[number, NodeJS.Signals]> = [];
+      const sup = new RelaySupervisor({
+        spawnImpl,
+        // Would match relay.pid's content if killLeftover() were ever
+        // wrongly re-run by a second start() during the backoff wait.
+        psImpl: async () => "mediamtx config.yml",
+        killPid: (pid, signal) => killed.push([pid, signal]),
+      });
+
+      await sup.start("mediamtx", "config.yml");
+      children[0].emit("exit", 1, null); // now failing, a 1 s backoff pending
+      const statusWhileFailing = sup.status();
+      assert.equal(statusWhileFailing.state, "failing");
+
+      await sup.start("mediamtx", "config.yml");
+
+      assert.equal(children.length, 1, "a second start() while failing must not spawn another child yet");
+      assert.deepEqual(killed, [], "a second start() must never attempt a leftover kill while failing");
+      assert.deepEqual(sup.status(), statusWhileFailing, "the pending backoff must be untouched, not reset");
+
+      // The ORIGINAL scheduled restart must still fire on schedule — a
+      // second start() must not have cancelled or rescheduled it.
+      t.mock.timers.tick(1000);
+      assert.equal(children.length, 2, "the original backoff timer must still fire");
+    });
+
+    it("is a no-op while starting — two calls issued back-to-back, neither awaited first, still spawn one child", async (t) => {
       enableClock(t);
       const { spawnImpl, children } = fakeSpawn();
       const killed: Array<[number, NodeJS.Signals]> = [];

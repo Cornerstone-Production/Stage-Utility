@@ -202,6 +202,13 @@ export class RelaySupervisor extends EventEmitter {
    * first `await`, so two start() calls issued back to back (neither
    * awaited) cannot both pass it — the second always sees "starting", not
    * "off".
+   *
+   * A throw from either step (an injected psImpl that rejects, a spawnImpl
+   * that throws) resets state back to "off" rather than leaving it wedged
+   * in "starting" forever — the guard above would otherwise admit no
+   * future start() at all, since "starting" is not "off". Rethrown, not
+   * swallowed: the caller asked this relay to start and gets to know it
+   * didn't.
    */
   async start(binary: string, configPath: string): Promise<void> {
     if (this.current.state !== "off") return;
@@ -210,11 +217,16 @@ export class RelaySupervisor extends EventEmitter {
     this.stopping = false;
     this.attempt = 0;
     this.current = { state: "starting" };
-    await this.killLeftover();
-    // A stop() that raced ahead of killLeftover()'s await already cleared
-    // stopWaiters and set state "off"; honor it rather than spawning anyway.
-    if (this.stopping) return;
-    this.spawnChild();
+    try {
+      await this.killLeftover();
+      // A stop() that raced ahead of killLeftover()'s await already cleared
+      // stopWaiters and set state "off"; honor it rather than spawning anyway.
+      if (this.stopping) return;
+      this.spawnChild();
+    } catch (err) {
+      this.current = { state: "off" };
+      throw err;
+    }
   }
 
   /** SIGTERM, then SIGKILL after STOP_KILL_AFTER_MS if the child has not
