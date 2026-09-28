@@ -65,8 +65,19 @@ function FeedPill({ feed }: { feed: VideoFeedView }) {
 /**
  * How the feed plays, in the row's muted meta line. Only what this build can
  * know: an embed is the platform's own player, and an external address is
- * played exactly as given with no health to report. A relay feed's live
- * figures (path, delay, resolution, screens) come with the relay.
+ * played exactly as given with no health to report.
+ *
+ * A relay (pull/push) feed shows how it plays plus its resolution once the
+ * relay reports it: "WebRTC · under 1 s behind" while live, or "HLS · about
+ * 4 s behind" once B-frames or an unsupported codec pushes it onto HLS — the
+ * design's own number for that case (mockup-v2.html's "Delayed about 4 s."
+ * callout; the server's own comment for a B-frames close gives a 2-to-6 s
+ * RANGE, not a single figure, so there is no more precise number to show
+ * here). No frame rate: neither FeedStatus nor the relay's own runtime API
+ * reports one anywhere in this pipeline (feed-state.ts, relay.ts's
+ * RelayPath) — the approved mockup's sample "30 fps" is sample copy with no
+ * real data behind it, so it is left out here rather than invented. A feed
+ * that is standby, waiting or offline has nothing to say yet.
  */
 export function feedMeta(feed: VideoFeedView): string[] {
   const s = feed.source;
@@ -75,6 +86,14 @@ export function feedMeta(feed: VideoFeedView): string[] {
   }
   if (feed.play.via === "external") {
     return [`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see its health"];
+  }
+  if (feed.play.via === "relay") {
+    const status = feed.status;
+    if (status.state === "live" || status.state === "delayed") {
+      const meta = [status.state === "live" ? "WebRTC · under 1 s behind" : "HLS · about 4 s behind"];
+      if (status.width && status.height) meta.push(`${status.width} × ${status.height}`);
+      return meta;
+    }
   }
   return [];
 }

@@ -3,13 +3,16 @@
 // The one owner of `video:state`. Every change goes through here and ends in
 // publish(), so the page, every widget and the hello burst see one snapshot.
 
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
+import { getLanIp } from "../lan-ip.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { secretsStore } from "../secrets.js";
+import { serverPort } from "../server-port.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
 import { embedSrc } from "./embed.js";
@@ -17,14 +20,16 @@ import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput } from "./feed-input.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
+import { pullSource } from "./reconcile-plan.js";
 import { RelayLogWatcher } from "./relay-log.js";
-import type { RelayPath, VideoRelay } from "./relay.js";
+import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
 import type { SupervisorStatus } from "./supervisor.js";
 import type {
   FeedPlay,
   FeedState,
   FeedStatus,
+  PushProtocol,
   RelayStatus,
   VideoFeed,
   VideoFeedsFile,
@@ -37,6 +42,19 @@ import type {
 type Result = { ok: true; feed: VideoFeedView } | { ok: false; error: string };
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
+
+/** A push feed's publish password: 16 base62 characters from
+ *  crypto.randomBytes, never anything predictable — it is what stands
+ *  between "video" (the one publish username every push feed shares, see
+ *  reconcile-plan.ts's publishUsers) and an open publish endpoint. */
+const PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const PASSWORD_LENGTH = 16;
+function generatePushPassword(): string {
+  const bytes = randomBytes(PASSWORD_LENGTH);
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) out += PASSWORD_ALPHABET[bytes[i]! % PASSWORD_ALPHABET.length];
+  return out;
+}
 
 /** How often relay.status() is polled while something watches `video:state`. */
 export const STATUS_POLL_MS = 3000;
@@ -220,7 +238,7 @@ class VideoService {
   private pollTimer: NodeJS.Timeout | null = null;
 
   allowedKinds(): ReadonlySet<VideoSourceKind> {
-    return new Set<VideoSourceKind>(["embed", "external"]);
+    return new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
   }
 
   /**
@@ -775,6 +793,108 @@ class VideoService {
       : { host: "127.0.0.1", port: ports.webrtcHttp, path: `/${feedId}/${kind}` };
   }
 
+  // ── Reconciling the relay on a feed change ───────────────────────────────
+
+  /** Every pull/push feed as the relay needs it, credentials folded in —
+   *  never logged, never returned from here: the only two callers are
+   *  reconcileRelay() (handed straight to relay.reconcile()) and
+   *  pushAddress() (which returns exactly one feed's own password to the
+   *  route that asked for it). */
+  private async relayFeeds(): Promise<RelayFeed[]> {
+    const { feeds } = await loadFeedsFile();
+    const out: RelayFeed[] = [];
+    for (const feed of feeds) {
+      const s = feed.source;
+      if (s.kind === "pull") {
+        const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
+        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, secrets.password) });
+      } else if (s.kind === "push") {
+        const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
+        out.push({ id: feed.id, kind: "push", password: secrets.password ?? "" });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Make the relay match the feed store, best-effort: a failure is logged
+   * once per outage (the same OutageLog the status poll uses, under its own
+   * key) and never thrown — the feed store write the caller already made is
+   * the source of truth, and the relay catches up on its next reconcile or
+   * restart (Task 15's job). Skipped entirely with no relay attached, or one
+   * whose supervisor is not currently "running": there is nothing to ask.
+   */
+  private async reconcileRelay(): Promise<void> {
+    if (!this.relay || this.supervisor?.status().state !== "running") return;
+    try {
+      await this.relay.reconcile(await this.relayFeeds());
+      const decision = this.pollOutage.ok("reconcile", Date.now());
+      if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
+    } catch (err) {
+      const message = errorMessage(err);
+      const decision = this.pollOutage.fail("reconcile", message, Date.now());
+      if (decision.log) console.warn(`[video] could not reconcile the relay: ${scrub(message)}${scrub(decision.note)}`);
+    }
+  }
+
+  // ── A push feed's paste-ready address ────────────────────────────────────
+
+  /** `srt://<lan>:<srt>?streamid=publish:<id>:video:<pw>`;
+   *  `rtmp://<lan>:<rtmp>/<id>?user=video&pass=<pw>`;
+   *  `http://<lan>:<this server's own port>/video/<id>/whip` — WHIP goes
+   *  through the playback proxy on Stage Utility's own origin
+   *  (video-proxy-routes.ts), never straight to the relay's loopback-only
+   *  listener. `password` is `<pw>` for SRT/RTMP, and `video:<pw>` for WHIP
+   *  because that whole string is what OBS's Bearer Token field takes.
+   *  Ports come from the feed store, not `attachedPorts`: a paste-ready
+   *  address is exactly as good with the relay off as running (Task 15
+   *  starts it once a push/pull feed exists), and the store is what the
+   *  relay WILL be listening on once it does. */
+  async pushAddress(id: string): Promise<{ protocol: PushProtocol; address: string; password: string } | null> {
+    if (!FEED_ID_PATTERN.test(id)) return null;
+    const { feeds, ports } = await loadFeedsFile();
+    const feed = feeds.find((f) => f.id === id);
+    if (!feed || feed.source.kind !== "push") return null;
+    const secrets = await secretsStore.getSecrets(SECRET_SLOT(id));
+    const pw = secrets.password ?? "";
+    const lan = getLanIp();
+    const protocol = feed.source.protocol;
+    if (protocol === "srt") {
+      return { protocol, address: `srt://${lan}:${ports.srt}?streamid=publish:${id}:video:${pw}`, password: pw };
+    }
+    if (protocol === "rtmp") {
+      return { protocol, address: `rtmp://${lan}:${ports.rtmp}/${id}?user=video&pass=${pw}`, password: pw };
+    }
+    return { protocol, address: `http://${lan}:${serverPort()}/video/${id}/whip`, password: `video:${pw}` };
+  }
+
+  /** Writes a fresh password, reconciles the relay so it takes effect, then
+   *  kicks whoever is currently publishing — a new password does not by
+   *  itself drop an already-connected device (relay-facts.md), so without
+   *  the kick the OLD stream would keep going under the password just
+   *  replaced. The kick is best-effort, logged the same way reconcileRelay()
+   *  is: nobody publishing right now is not a failure, and a relay that
+   *  cannot be reached for it is already reported by reconcileRelay() or the
+   *  status poll. */
+  async newPushPassword(id: string): Promise<{ protocol: PushProtocol; address: string; password: string } | null> {
+    if (!FEED_ID_PATTERN.test(id)) return null;
+    const { feeds } = await loadFeedsFile();
+    const feed = feeds.find((f) => f.id === id);
+    if (!feed || feed.source.kind !== "push") return null;
+    await secretsStore.setSecret(SECRET_SLOT(id), "password", generatePushPassword());
+    await this.reconcileRelay();
+    if (this.relay) {
+      try {
+        await this.relay.kickPublisher(id);
+      } catch (err) {
+        const message = errorMessage(err);
+        const decision = this.pollOutage.fail("push-kick", message, Date.now());
+        if (decision.log) console.warn(`[video] could not kick the previous publisher: ${scrub(message)}${scrub(decision.note)}`);
+      }
+    }
+    return this.pushAddress(id);
+  }
+
   // ── Feeds ─────────────────────────────────────────────────────────────
 
   async addFeed(body: unknown): Promise<Result> {
@@ -794,19 +914,25 @@ class VideoService {
     if (!feed) throw new Error("[video] the feed store's update never ran");
     const added = feed;
 
-    // The password goes in under the id the update chose. The feed is not
-    // published until it has: a feed visible with no password behind it is
-    // worse than one that never appears, so a failed write takes the feed
-    // back out and the failure goes to the caller.
-    if (parsed.password) {
+    // A push feed gets its password minted here, server-side, regardless of
+    // what the body said — parseFeedInput's push branch never reads one, so
+    // parsed.password is always undefined for it. Pull takes whatever
+    // password the body supplied, if any. The feed is not published until
+    // its password (if it needs one) is safely stored: a feed visible with
+    // no password behind it is worse than one that never appears, so a
+    // failed write takes the feed back out and the failure goes to the
+    // caller.
+    const password = added.source.kind === "push" ? generatePushPassword() : parsed.password;
+    if (password) {
       try {
-        await secretsStore.setSecret(SECRET_SLOT(added.id), "password", parsed.password);
+        await secretsStore.setSecret(SECRET_SLOT(added.id), "password", password);
       } catch (err) {
         await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
         throw err;
       }
     }
     await this.publish();
+    await this.reconcileRelay();
     return { ok: true, feed: this.view(added) };
   }
 
@@ -828,14 +954,59 @@ class VideoService {
     // key (see main/types/video.ts). Only feedIdFor(), at creation, mints one.
     const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
 
-    if (parsed.password) await secretsStore.setSecret(SECRET_SLOT(id), "password", parsed.password);
+    await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
 
     await videoFeedsStore.update((current) => ({
       ...current,
       feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
     }));
     await this.publish();
+    await this.reconcileRelay();
     return { ok: true, feed: this.view(feed) };
+  }
+
+  /**
+   * updateFeed's secrets-slot half, split out for its own comment: the rule
+   * differs by whether the kind is CHANGING, not only by what it is now.
+   *
+   *  - Staying pull: `parsed.password` follows CLAUDE.md's wireless rule —
+   *    undefined (the body left it out) leaves the stored password alone,
+   *    "" clears it, anything else replaces it. feed-input.ts is what makes
+   *    "" survive as "" rather than collapsing to undefined.
+   *  - Becoming pull FROM something else (most notably push): the OLD
+   *    secret must never survive under the new kind — "a pull feed's
+   *    password comes only from its body" — so undefined here means clear,
+   *    not leave alone, the one place this differs from the bullet above.
+   *  - Becoming push (from anything else): a fresh password is minted the
+   *    same way addFeed() mints one for a brand new push feed. Staying push
+   *    touches nothing here; a push feed's password only ever changes
+   *    through newPushPassword().
+   *  - Landing on embed/external, having been pull or push before: the slot
+   *    is cleared — an embed/external feed keeps no secret at all.
+   */
+  private async updateFeedSecret(
+    id: string,
+    oldKind: VideoSourceKind,
+    newKind: VideoSourceKind,
+    password: string | undefined,
+  ): Promise<void> {
+    if (newKind === "push") {
+      if (oldKind !== "push") await secretsStore.setSecret(SECRET_SLOT(id), "password", generatePushPassword());
+      return;
+    }
+    if (newKind === "pull") {
+      if (oldKind !== "pull") {
+        if (password) await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
+        else await secretsStore.clearSecrets(SECRET_SLOT(id));
+        return;
+      }
+      if (password !== undefined) {
+        if (password === "") await secretsStore.clearSecrets(SECRET_SLOT(id));
+        else await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
+      }
+      return;
+    }
+    if (oldKind === "pull" || oldKind === "push") await secretsStore.clearSecrets(SECRET_SLOT(id));
   }
 
   async removeFeed(id: string): Promise<boolean> {
@@ -866,6 +1037,7 @@ class VideoService {
     // instead of "waiting" — the old feed's history, not its own.
     await this.forgetSeenSafely(id);
     await this.publish();
+    await this.reconcileRelay();
     return true;
   }
 

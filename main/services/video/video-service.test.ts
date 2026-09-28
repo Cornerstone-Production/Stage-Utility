@@ -15,12 +15,13 @@ const { videoService, SECRET_SLOT, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BO
 );
 const { secretsStore } = await import("../secrets.js");
 const { configSnapshot } = await import("../config-snapshot.js");
-const { withAllKinds } = await import("../fixtures/video-kinds.js");
 const { videoSeenStore, SEEN_WRITE_INTERVAL_MS } = await import("./seen-store.js");
 const { DEFAULT_SETTLE_MS } = await import("../repeat-log.js");
 const { RelaySupervisor } = await import("./supervisor.js");
+const { serverPort } = await import("../server-port.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 type RelayPath = import("./relay.js").RelayPath;
+type RelayFeed = import("./relay.js").RelayFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type VideoPorts = import("../../types/video.js").VideoPorts;
@@ -45,9 +46,7 @@ beforeEach(() => (videoService as unknown as { pollOutage: { forget(): void } })
 
 test("a config snapshot never carries a feed's password", async () => {
   const password = "correct-horse-battery-staple";
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Lobby cam", source: { kind: "pull", url: "rtsp://192.0.2.10:8554/s", username: "admin" }, password }),
-  );
+  const made = await videoService.addFeed({ name: "Lobby cam", source: { kind: "pull", url: "rtsp://192.0.2.10:8554/s", username: "admin" }, password });
   assert.ok(made.ok, "expected the pull feed to be added");
   const id = (made as { feed: { id: string } }).feed.id;
   assert.equal((await secretsStore.getSecrets(SECRET_SLOT(id))).password, password, "the seed never reached the secrets store");
@@ -75,9 +74,7 @@ test("an add whose password cannot be saved takes the feed back out and rejects"
   };
   try {
     await assert.rejects(
-      withAllKinds(() =>
-        videoService.addFeed({ name: "Balcony cam", source: { kind: "pull", url: "rtsp://192.0.2.30/s", username: "" }, password: "pw" }),
-      ),
+      videoService.addFeed({ name: "Balcony cam", source: { kind: "pull", url: "rtsp://192.0.2.30/s", username: "" }, password: "pw" }),
       /disk full/,
     );
   } finally {
@@ -260,9 +257,7 @@ test("nothing polls until something is watching; the timer starts, reads immedia
 });
 
 test("a poll broadcasts only when the relay's answer actually changes the snapshot", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Atrium cam", source: { kind: "pull", url: "rtsp://192.0.2.50/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Atrium cam", source: { kind: "pull", url: "rtsp://192.0.2.50/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -297,9 +292,7 @@ test("a poll broadcasts only when the relay's answer actually changes the snapsh
 });
 
 test("logs a feed's live/offline transitions on the poll, once each — never on every poll", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Narthex cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Narthex cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -335,9 +328,7 @@ test("logs a feed's entry into delayed too, and never prints an unknown picture"
   // push, not pull: a not-ready pull feed nobody has requested reads
   // "standby" (a quieter, different fact — see feed-state.ts), and this test
   // is about the "went offline" / "is live" pair either side of "delayed".
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Undercroft cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Undercroft cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -380,9 +371,7 @@ test("logs a feed's entry into delayed too, and never prints an unknown picture"
 });
 
 test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once per session", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Choir cam", source: { kind: "pull", url: "rtsp://192.0.2.51/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Choir cam", source: { kind: "pull", url: "rtsp://192.0.2.51/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   const readyTime = "2026-09-28T01:00:00Z";
@@ -426,9 +415,7 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
 });
 
 test("binding an ALREADY-ready B-frames mark publishes immediately, not waiting for the next poll", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Instant cam", source: { kind: "pull", url: "rtsp://192.0.2.66/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Instant cam", source: { kind: "pull", url: "rtsp://192.0.2.66/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   const readyTime = "T-instant";
@@ -461,9 +448,7 @@ test("binding an ALREADY-ready B-frames mark publishes immediately, not waiting 
 });
 
 test("a B-frames close on an on-demand pull feed that is not yet ready binds on the next poll that sees it ready", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Annex cam", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Annex cam", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   const readyTime = "2026-09-28T02:00:00Z";
@@ -515,9 +500,7 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
 });
 
 test("a pending B-frames mark does not survive a detach — it cannot bind to a later, unrelated session", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Pending cam", source: { kind: "pull", url: "rtsp://192.0.2.63/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Pending cam", source: { kind: "pull", url: "rtsp://192.0.2.63/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -553,9 +536,7 @@ test("a pending B-frames mark does not survive a detach — it cannot bind to a 
 });
 
 test("a pending B-frames mark expires after PENDING_MARK_TTL_MS without a ready poll", async (t) => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Timeout cam", source: { kind: "pull", url: "rtsp://192.0.2.64/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Timeout cam", source: { kind: "pull", url: "rtsp://192.0.2.64/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -678,9 +659,7 @@ test("markRequested moves a not-ready pull feed off standby — its only observa
   // relayTarget-refusal tests): markRequested() itself is a trusted,
   // synchronous setter with nothing to reject, so there is no "unknown id"
   // or "pattern-failing id" case left to prove here.
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Gym cam", source: { kind: "pull", url: "rtsp://192.0.2.52/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Gym cam", source: { kind: "pull", url: "rtsp://192.0.2.52/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -713,12 +692,10 @@ test("relayTarget refuses a pattern-failing id, an unknown id, and a kind an emb
   assert.deepEqual(videoService.relayTarget("Bad_ID", "whep"), { refuse: 404 });
   assert.deepEqual(videoService.relayTarget("no-such-feed", "whep"), { refuse: 404 });
 
-  const made = await withAllKinds(() =>
-    videoService.addFeed({
+  const made = await videoService.addFeed({
       name: "YouTube feed",
       source: { kind: "embed", player: "youtube-channel", ref: "UC0123456789abcdefghijkl" },
-    }),
-  );
+    });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   try {
@@ -735,11 +712,9 @@ test("relayTarget refuses whip on a pull feed and on a push feed whose own proto
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const pull = await withAllKinds(() =>
-    videoService.addFeed({ name: "Lobby", source: { kind: "pull", url: "rtsp://192.0.2.60/s", username: "" } }),
-  );
-  const srtPush = await withAllKinds(() => videoService.addFeed({ name: "Stage box", source: { kind: "push", protocol: "srt" } }));
-  const whipPush = await withAllKinds(() => videoService.addFeed({ name: "OBS", source: { kind: "push", protocol: "whip" } }));
+  const pull = await videoService.addFeed({ name: "Lobby", source: { kind: "pull", url: "rtsp://192.0.2.60/s", username: "" } });
+  const srtPush = await videoService.addFeed({ name: "Stage box", source: { kind: "push", protocol: "srt" } });
+  const whipPush = await videoService.addFeed({ name: "OBS", source: { kind: "push", protocol: "whip" } });
   assert.ok(pull.ok && srtPush.ok && whipPush.ok);
   const pullId = (pull as { feed: { id: string } }).feed.id;
   const srtId = (srtPush as { feed: { id: string } }).feed.id;
@@ -763,9 +738,7 @@ test("relayTarget refuses whip on a pull feed and on a push feed whose own proto
 });
 
 test("relayTarget answers 503 only once the feed and kind both check out, and the relay itself is not running", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Balcony", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Balcony", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   try {
@@ -802,9 +775,7 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
 // port nothing is listening on yet.
 test("relayTarget uses the ports the relay was attached with, even after the store's own ports change under it", async () => {
   const { videoFeedsStore } = await import("./feed-store.js");
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Dock cam", source: { kind: "pull", url: "rtsp://192.0.2.70/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Dock cam", source: { kind: "pull", url: "rtsp://192.0.2.70/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -878,9 +849,7 @@ test("relay status maps the supervisor's status and version onto the wire shape,
 });
 
 test("detachRelay reports the relay off and forgets its last known paths — a stale answer must not linger", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Loft cam", source: { kind: "pull", url: "rtsp://192.0.2.53/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Loft cam", source: { kind: "pull", url: "rtsp://192.0.2.53/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -910,9 +879,7 @@ test("detachRelay reports the relay off and forgets its last known paths — a s
 });
 
 test("detachRelay settles feeds — logs went offline and flushes the seen store, not just a bare publish", async (t) => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Sanctum cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Sanctum cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -948,9 +915,7 @@ test("detachRelay settles feeds — logs went offline and flushes the seen store
 });
 
 test("a poll that fails clears lastPaths and reports the relay as failing to answer", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Vestry cam", source: { kind: "pull", url: "rtsp://192.0.2.60/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Vestry cam", source: { kind: "pull", url: "rtsp://192.0.2.60/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1155,9 +1120,7 @@ test("the attached supervisor's status events publish immediately, without waiti
 });
 
 test("an in-flight SUCCESS against a process the supervisor has since reported failing does not resurrect the feed", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Inflight cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Inflight cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1269,9 +1232,7 @@ test("a status change alone, with no detach, still lets the next poll run even w
 });
 
 test("a status event to a non-running state clears lastPaths immediately — a dead process's feed does not stay live", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Ember cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Ember cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1303,9 +1264,7 @@ test("a status event to a non-running state clears lastPaths immediately — a d
 });
 
 test("against a real supervisor: the not-answering flag does not carry over into a freshly respawned process", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Respawn cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Respawn cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1466,9 +1425,7 @@ test("attaching a new relay while the old one's poll is still in flight does not
 });
 
 test("a stale in-flight SUCCESS from an already-detached relay is never applied, even when it resolves READY", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Race cam", source: { kind: "pull", url: "rtsp://192.0.2.70/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Race cam", source: { kind: "pull", url: "rtsp://192.0.2.70/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1497,9 +1454,7 @@ test("a stale in-flight SUCCESS from an already-detached relay is never applied,
 });
 
 test("a stale in-flight REJECTION from an already-detached relay does not mark the new relay not answering", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Reject cam", source: { kind: "pull", url: "rtsp://192.0.2.71/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Reject cam", source: { kind: "pull", url: "rtsp://192.0.2.71/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1537,9 +1492,7 @@ test("a stale in-flight REJECTION from an already-detached relay does not mark t
 });
 
 test("a seen-store write that rejects still lets the poll publish its transitions, warns once per outage, and logs recovery once settled", async (t) => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Crypt cam", source: { kind: "pull", url: "rtsp://192.0.2.62/s", username: "" } }),
-  );
+  const made = await videoService.addFeed({ name: "Crypt cam", source: { kind: "pull", url: "rtsp://192.0.2.62/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1588,9 +1541,7 @@ test("a seen-store write that rejects still lets the poll publish its transition
 });
 
 test("a rejected forgetSeen write still lets removeFeed succeed and publish, and logs once through the seen-store outage", async () => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Culvert cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Culvert cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1617,7 +1568,7 @@ test("a rejected forgetSeen write still lets removeFeed succeed and publish, and
 
 test("removeFeed forgets the seen store, so a re-added feed under the same name reads waiting, not a stale offline", async () => {
   const name = "Steeple cam";
-  const made = await withAllKinds(() => videoService.addFeed({ name, source: { kind: "push", protocol: "rtmp" }, password: "pw" }));
+  const made = await videoService.addFeed({ name, source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1630,7 +1581,7 @@ test("removeFeed forgets the seen store, so a re-added feed under the same name 
 
   await videoService.removeFeed(id);
 
-  const readded = await withAllKinds(() => videoService.addFeed({ name, source: { kind: "push", protocol: "rtmp" }, password: "pw" }));
+  const readded = await videoService.addFeed({ name, source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(readded.ok);
   const newId = (readded as { feed: { id: string } }).feed.id;
   assert.equal(newId, id, "feedIdFor() is deterministic — this only proves anything if the id really did come back");
@@ -1653,9 +1604,7 @@ test("removeFeed forgets the seen store, so a re-added feed under the same name 
 });
 
 test("the last-seen time is flushed to disk on the transition out of ready, not left to the throttle", async (t) => {
-  const made = await withAllKinds(() =>
-    videoService.addFeed({ name: "Vault cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
-  );
+  const made = await videoService.addFeed({ name: "Vault cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
@@ -1685,5 +1634,217 @@ test("the last-seen time is flushed to disk on the transition out of ready, not 
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
+  }
+});
+
+// ── Reconciling the relay on a feed change, push passwords and addresses ──
+
+function recordingRelay(reconciled: RelayFeed[][], opts: { kickPublisher?: (feedId: string) => Promise<void> } = {}): VideoRelay {
+  return {
+    reconcile: async (feeds) => {
+      reconciled.push(feeds);
+    },
+    status: async () => [],
+    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
+    kickPublisher: opts.kickPublisher ?? (async () => {}),
+  };
+}
+
+test("addFeed, updateFeed and removeFeed each reconcile the relay while it is attached and running, with a pull feed's credentials folded into its plan entry", async () => {
+  const reconciled: RelayFeed[][] = [];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay(reconciled), supervisor);
+
+  try {
+    const made = await videoService.addFeed({
+      name: "Pulpit cam",
+      source: { kind: "pull", url: "rtsp://192.0.2.90:8554/s", username: "admin" },
+      password: "cam-pw",
+    });
+    assert.ok(made.ok);
+    const id = (made as { feed: { id: string } }).feed.id;
+    assert.equal(reconciled.length, 1, "expected addFeed to reconcile the relay");
+    // Other tests in this shared-store file leave their own feeds behind, so
+    // the plan reconcile sees is never just this one feed — find it by id
+    // rather than assume it is reconciled[0][0].
+    const added = reconciled[0]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "pull" }> | undefined;
+    assert.ok(added, "expected the just-added feed in the reconciled plan");
+    assert.equal(added.kind, "pull");
+    assert.equal(added.source, "rtsp://admin:cam-pw@192.0.2.90:8554/s", "expected the credentials folded into the URL the relay sees");
+
+    await videoService.updateFeed(id, { name: "Pulpit cam 2" });
+    assert.equal(reconciled.length, 2, "expected updateFeed to reconcile the relay");
+
+    await videoService.removeFeed(id);
+    assert.equal(reconciled.length, 3, "expected removeFeed to reconcile the relay");
+    assert.equal(reconciled[2]!.some((f) => f.id === id), false, "the removed feed must be gone from the plan reconcile sees");
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("a push feed's plan entry carries its password, read fresh from secretsStore — a rotated password reaches the very next reconcile", async () => {
+  const reconciled: RelayFeed[][] = [];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay(reconciled), supervisor);
+
+  try {
+    const made = await videoService.addFeed({ name: "Stage box", source: { kind: "push", protocol: "srt" } });
+    assert.ok(made.ok);
+    const id = (made as { feed: { id: string } }).feed.id;
+    const first = reconciled[0]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
+    assert.ok(first, "expected the just-added feed in the reconciled plan");
+    assert.equal(first.kind, "push");
+    assert.equal(first.password, (await secretsStore.getSecrets(SECRET_SLOT(id))).password);
+
+    await videoService.newPushPassword(id);
+    const rotated = reconciled[reconciled.length - 1]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
+    assert.ok(rotated);
+    assert.notEqual(rotated.password, first.password, "expected the reconciled plan to carry the freshly rotated password, not the old one");
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("reconcile is skipped while the relay is attached but the supervisor is not running, and resumes once it is", async () => {
+  const reconciled: RelayFeed[][] = [];
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "starting" };
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay(reconciled), supervisor);
+
+  try {
+    const made = await videoService.addFeed({ name: "Choir loft cam", source: { kind: "external", url: "http://192.0.2.91/cam/whep" } });
+    assert.ok(made.ok);
+    assert.equal(reconciled.length, 0, "expected no reconcile while the supervisor reports \"starting\"");
+    const id = (made as { feed: { id: string } }).feed.id;
+
+    supervisor.current = { state: "running", since: 0 };
+    await videoService.updateFeed(id, { name: "Choir loft" });
+    assert.equal(reconciled.length, 1, "expected a reconcile once the supervisor reports running");
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("a reconcile failure is logged once per outage and never rejects addFeed/updateFeed — the feed store write is the source of truth", async () => {
+  let fail = true;
+  const relay: VideoRelay = {
+    reconcile: async () => {
+      if (fail) throw new Error("relay unreachable");
+    },
+    status: async () => [],
+    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
+    kickPublisher: async () => {},
+  };
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const lines: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    const made = await videoService.addFeed({ name: "Narthex box", source: { kind: "push", protocol: "rtmp" } });
+    assert.ok(made.ok, "a reconcile failure must not fail the add — the feed store write already succeeded");
+    const id = (made as { feed: { id: string } }).feed.id;
+    const updated = await videoService.updateFeed(id, { name: "Narthex" });
+    assert.ok(updated.ok, "a reconcile failure must not fail the update either");
+    assert.equal(
+      lines.filter((l) => l.includes("could not reconcile")).length,
+      1,
+      "expected one line for the whole outage, not one per call",
+    );
+
+    fail = false;
+    await videoService.removeFeed(id);
+  } finally {
+    console.warn = realWarn;
+    await videoService.detachRelay();
+  }
+});
+
+test("newPushPassword writes a fresh secret, reconciles, then kicks the current publisher — a kick failure is logged, not thrown, and the answer still carries the new password", async () => {
+  const kicked: string[] = [];
+  const reconciled: RelayFeed[][] = [];
+  const relay = recordingRelay(reconciled, {
+    kickPublisher: async (feedId) => {
+      kicked.push(feedId);
+      throw new Error("relay unreachable");
+    },
+  });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const lines: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    const made = await videoService.addFeed({ name: "ProPresenter output", source: { kind: "push", protocol: "srt" } });
+    assert.ok(made.ok);
+    const id = (made as { feed: { id: string } }).feed.id;
+    const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+
+    const result = await videoService.newPushPassword(id);
+    assert.ok(result, "expected newPushPassword to still answer even though the kick failed");
+    assert.notEqual(result!.password, before, "expected a genuinely new password");
+    assert.deepEqual(kicked, [id], "expected kickPublisher to be called with the feed's own id");
+    assert.equal(lines.filter((l) => l.includes("could not kick")).length, 1);
+  } finally {
+    console.warn = realWarn;
+    await videoService.detachRelay();
+  }
+});
+
+test("newPushPassword and pushAddress answer null for an id outside FEED_ID_PATTERN, an unknown id, or a feed that is not push", async () => {
+  const made = await videoService.addFeed({ name: "Online", source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    for (const badId of ["does-not-exist", "__proto__", id]) {
+      assert.equal(await videoService.pushAddress(badId), null, badId);
+      assert.equal(await videoService.newPushPassword(badId), null, badId);
+    }
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("pushAddress's SRT and RTMP forms embed the password in the address; WHIP's password is the Bearer Token, prefixed video:", async () => {
+  // Ports come from the feed store, not a hardcoded default — an earlier
+  // test in this shared-store file (relayTarget uses the ports the relay was
+  // attached with…) already rewrote it to a non-default set, which pinning
+  // 8890/1935 here would have missed entirely.
+  const { loadFeedsFile } = await import("./feed-store.js");
+  const { ports } = await loadFeedsFile();
+  for (const protocol of ["srt", "rtmp", "whip"] as const) {
+    const made = await videoService.addFeed({ name: `Test ${protocol}`, source: { kind: "push", protocol } });
+    assert.ok(made.ok);
+    const id = (made as { feed: { id: string } }).feed.id;
+    try {
+      const stored = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+      assert.ok(stored, "expected addFeed to have minted a password already");
+      const address = await videoService.pushAddress(id);
+      assert.ok(address);
+      assert.equal(address!.protocol, protocol);
+      if (protocol === "srt") {
+        assert.ok(address!.address.startsWith("srt://"), address!.address);
+        assert.ok(address!.address.endsWith(`:${ports.srt}?streamid=publish:${id}:video:${stored}`), address!.address);
+        assert.equal(address!.password, stored);
+      } else if (protocol === "rtmp") {
+        assert.ok(address!.address.endsWith(`:${ports.rtmp}/${id}?user=video&pass=${stored}`), address!.address);
+        assert.equal(address!.password, stored);
+      } else {
+        assert.ok(address!.address.endsWith(`:${serverPort()}/video/${id}/whip`), address!.address);
+        assert.equal(address!.password, `video:${stored}`, "expected WHIP's password to be the whole Bearer Token, user:pass");
+      }
+    } finally {
+      await videoService.removeFeed(id);
+    }
   }
 });

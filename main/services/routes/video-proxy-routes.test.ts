@@ -30,7 +30,6 @@ process.env.STAGE_UTILITY_DATA = TMP;
 
 const { videoService } = await import("../video/video-service.js");
 const { videoFeedsStore } = await import("../video/feed-store.js");
-const { withAllKinds } = await import("../fixtures/video-kinds.js");
 const { videoProxyRoutes, proxyTimeouts, proxyOutage } = await import("./video-proxy-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
@@ -301,10 +300,10 @@ before(async () => {
     ...current,
     ports: { ...current.ports, webrtcHttp: upstreamPort, hls: upstreamPort },
   }));
-  const cam = await withAllKinds(() => videoService.addFeed({ name: "cam", source: { kind: "push", protocol: "whip" } }));
-  const lobby = await withAllKinds(() => videoService.addFeed({ name: "lobby", source: { kind: "pull", url: "rtsp://192.0.2.40/s", username: "" } }));
-  const hang = await withAllKinds(() => videoService.addFeed({ name: "hangcam", source: { kind: "push", protocol: "whip" } }));
-  const badloc = await withAllKinds(() => videoService.addFeed({ name: "badloc", source: { kind: "push", protocol: "whip" } }));
+  const cam = await videoService.addFeed({ name: "cam", source: { kind: "push", protocol: "whip" } });
+  const lobby = await videoService.addFeed({ name: "lobby", source: { kind: "pull", url: "rtsp://192.0.2.40/s", username: "" } });
+  const hang = await videoService.addFeed({ name: "hangcam", source: { kind: "push", protocol: "whip" } });
+  const badloc = await videoService.addFeed({ name: "badloc", source: { kind: "push", protocol: "whip" } });
   assert.ok(cam.ok && lobby.ok && hang.ok && badloc.ok, "fixture feeds must be created for any of the tests below to mean anything");
   camId = (cam as { feed: { id: string } }).feed.id;
   lobbyId = (lobby as { feed: { id: string } }).feed.id;

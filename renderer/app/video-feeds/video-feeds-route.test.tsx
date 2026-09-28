@@ -74,6 +74,32 @@ function externalFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
   };
 }
 
+function pullFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
+  return {
+    id: "feed-pull",
+    name: "Program (IMAG)",
+    kind: "pull",
+    sourceLine: "Pulled from a device · rtsp://192.0.2.21:8554/stream2",
+    source: { kind: "pull", url: "rtsp://192.0.2.21:8554/stream2", username: "" },
+    play: { via: "relay", whep: "/video/feed-pull/whep", hls: "/video/feed-pull/index.m3u8" },
+    status: { state: "waiting" },
+    ...overrides,
+  };
+}
+
+function pushFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
+  return {
+    id: "feed-push",
+    name: "Stage PTZ",
+    kind: "push",
+    sourceLine: "The device pushes · SRT",
+    source: { kind: "push", protocol: "srt" },
+    play: { via: "relay", whep: "/video/feed-push/whep", hls: "/video/feed-push/index.m3u8" },
+    status: { state: "waiting" },
+    ...overrides,
+  };
+}
+
 function makeState(feeds: VideoFeedView[]): VideoState {
   return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], feeds };
 }
@@ -101,6 +127,12 @@ interface FetchStubOptions {
   onRemoveFeed?: () => FeedResponse;
   /** What video:feedUsage reports. Default: two layouts. "fail" rejects. */
   usage?: { viewId: string; name: string }[] | "fail";
+  /** Answers a video:pushAddress GET, keyed by feed id. Default: a plain SRT
+   *  address carrying "testpw". */
+  onPushAddress?: (id: string) => FeedResponse;
+  /** Answers a video:newPushPassword POST, keyed by feed id. Default: the
+   *  same address with "rotatedpw" in place of "testpw". */
+  onNewPushPassword?: (id: string) => FeedResponse;
 }
 
 /** Every request the page makes, matched by method and path — including the
@@ -126,6 +158,24 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
     }
     if (method === "POST" && url.endsWith("/api/video/feeds")) {
       const r = opts.onAddFeed?.(body) ?? { status: 201, body: { feed: {} } };
+      return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
+    }
+    const push = url.match(/\/api\/video\/feeds\/([^/]+)\/push$/);
+    if (method === "GET" && push) {
+      const id = decodeURIComponent(push[1]!);
+      const r = opts.onPushAddress?.(id) ?? {
+        status: 200,
+        body: { protocol: "srt", address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:testpw`, password: "testpw" },
+      };
+      return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
+    }
+    const newPassword = url.match(/\/api\/video\/feeds\/([^/]+)\/push\/new-password$/);
+    if (method === "POST" && newPassword) {
+      const id = decodeURIComponent(newPassword[1]!);
+      const r = opts.onNewPushPassword?.(id) ?? {
+        status: 200,
+        body: { protocol: "srt", address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:rotatedpw`, password: "rotatedpw" },
+      };
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
     const one = url.match(/\/api\/video\/feeds\/([^/]+)$/);
@@ -619,5 +669,205 @@ test("a field's description sits under its control, not beside its label", async
     assert.ok(input.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING, "the Name description must follow its input");
   } finally {
     g.restore();
+  }
+});
+
+const ALL_KINDS: VideoState["kinds"] = ["pull", "push", "embed", "external"];
+
+/** A real updateFeed response never carries the PATCH body's own `password`
+ *  key back — that field is write-only. Used by the fixture `onUpdateFeed`
+ *  callbacks below so a fake response is shaped the same way. */
+function echoUpdate(id: string, body: unknown): { feed: VideoFeedView } {
+  const { password: _password, ...rest } = body as Record<string, unknown>;
+  return { feed: pullFeed({ id, ...(rest as Partial<VideoFeedView>) }) };
+}
+
+test("a pull feed's Address, Username and password fields render, the Magewell callout shows, and Save carries the new address/username with no password when untouched", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed()]), kinds: ALL_KINDS },
+    { onUpdateFeed: (id, body) => ({ status: 200, body: echoUpdate(id, body) }) },
+  );
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    const address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
+    assert.equal(address.value, "rtsp://192.0.2.21:8554/stream2");
+    const username = container.querySelector('input[aria-label="Username"]') as HTMLInputElement;
+    assert.equal(username.value, "");
+    const password = container.querySelector('input[aria-label="Password"]') as HTMLInputElement;
+    assert.equal(password.value, "", "a stored password is never sent to the client");
+    assert.ok(screen.getByText(/Magewell Ultra Stream/), "expected the Magewell callout for a pull feed");
+
+    fireEvent.change(address, { target: { value: "rtsp://192.0.2.99:8554/stream9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+
+    const patch = g.calls.find((c) => c.method === "PATCH");
+    assert.ok(patch, "expected a video:updateFeed request");
+    assert.deepEqual(
+      patch!.body,
+      { name: "Program (IMAG)", source: { kind: "pull", url: "rtsp://192.0.2.99:8554/stream9", username: "" } },
+      "an untouched password field must not send a password key at all",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("typing a pull password then clearing it back to empty still sends password: \"\" — the field is TOUCHED, not merely blank", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed()]), kinds: ALL_KINDS },
+    { onUpdateFeed: (id, body) => ({ status: 200, body: echoUpdate(id, body) }) },
+  );
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    const password = container.querySelector('input[aria-label="Password"]') as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "temp" } });
+    fireEvent.change(password, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+
+    const patch = g.calls.find((c) => c.method === "PATCH");
+    assert.ok(patch, "expected a video:updateFeed request");
+    assert.equal((patch!.body as { password?: string }).password, "", 'expected password: "" once the field was touched, even though it ends up blank');
+  } finally {
+    g.restore();
+  }
+});
+
+test("a push feed's segmented control, address and password load, and New password rotates both", async () => {
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    assert.ok(screen.getByRole("group", { name: "How it connects" }), "expected the protocol segmented control");
+    const srtButton = screen.getByRole("button", { name: "SRT" });
+    assert.equal(srtButton.getAttribute("aria-pressed"), "true", "expected SRT pressed for this feed's saved protocol");
+
+    assert.ok(await screen.findByText("The password is part of the address. Anything that pushes without it is refused."));
+    const addressInput = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+    assert.ok(addressInput.value.includes("testpw"), addressInput.value);
+    const passwordInput = screen.getByLabelText("Password") as HTMLInputElement;
+    assert.equal(passwordInput.value, "testpw");
+
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    await settle();
+
+    const rotatedAddress = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+    assert.ok(rotatedAddress.value.includes("rotatedpw"), rotatedAddress.value);
+    const rotatedPassword = screen.getByLabelText("Password") as HTMLInputElement;
+    assert.equal(rotatedPassword.value, "rotatedpw");
+
+    const rotateCall = g.calls.find((c) => c.method === "POST" && /\/push\/new-password$/.test(c.url));
+    assert.ok(rotateCall, "expected a video:newPushPassword POST");
+  } finally {
+    g.restore();
+  }
+});
+
+test("WHIP's description names OBS's Bearer Token, switching from SRT/RTMP's password-in-the-address sentence", async () => {
+  const g = stubGlobals(
+    {
+      ...makeState([pushFeed({ id: "feed-whip", name: "OBS", source: { kind: "push", protocol: "whip" } })]),
+      kinds: ALL_KINDS,
+    },
+    {
+      onPushAddress: (id) => ({
+        status: 200,
+        body: { protocol: "whip", address: `http://192.168.1.50:8788/video/${id}/whip`, password: "video:testpw" },
+      }),
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.ok(await screen.findByText(/Use the password below as the Bearer Token/));
+    assert.equal(screen.queryByText("The password is part of the address. Anything that pushes without it is refused."), null);
+  } finally {
+    g.restore();
+  }
+});
+
+test("a brand new push draft shows a note to save first, and never requests a push address for an unsaved feed", async () => {
+  const g = stubGlobals({ ...makeState([embedFeed({ id: "feed-1" })]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    const sourceSelect = container.querySelector('select[aria-label="Source"]') as HTMLSelectElement;
+    fireEvent.change(sourceSelect, { target: { value: "push" } });
+    await settle();
+
+    assert.ok(screen.getByText("Save this feed to get its address and password."));
+    assert.equal(
+      g.calls.some((c) => c.method === "GET" && /\/push$/.test(c.url)),
+      false,
+      "must never ask for a push address before the feed has been saved",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("Copy falls back to selecting the address and prompting Ctrl+C/Cmd+C — jsdom has no navigator.clipboard, the same as Stage Utility's own plain-HTTP LAN deployment", async () => {
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    const addressInput = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await settle();
+
+    assert.ok(screen.getByText("Press Ctrl+C / Cmd+C to copy"));
+    assert.equal(addressInput.selectionStart, 0);
+    assert.equal(addressInput.selectionEnd, addressInput.value.length, "expected the whole address selected");
+  } finally {
+    g.restore();
+  }
+});
+
+test("a feed delayed by B-frames shows the design's warning callout with the OBS fix text; a live feed shows none", async () => {
+  const g = stubGlobals({
+    ...makeState([pullFeed({ status: { state: "delayed", delayedBecause: "b-frames" } })]),
+    kinds: ALL_KINDS,
+  });
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.ok(screen.getByText(/Keyframe interval 1 s with B-frames 0/), "expected the OBS B-frames fix text");
+  } finally {
+    g.restore();
+  }
+
+  const g2 = stubGlobals({
+    ...makeState([pullFeed({ status: { state: "live" } })]),
+    kinds: ALL_KINDS,
+  });
+  try {
+    cleanup();
+    __resetReplayCacheForTests();
+    mount();
+    await settle();
+    await settle();
+    assert.equal(screen.queryByText(/Keyframe interval/), null, "a live feed must show no delay warning");
+  } finally {
+    g2.restore();
   }
 });

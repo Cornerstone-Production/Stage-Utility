@@ -8,7 +8,6 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-routes-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 const { callRoute } = await import("./route-harness.js");
 const { videoRoutes } = await import("./video-routes.js");
-const { withAllKinds } = await import("../fixtures/video-kinds.js");
 
 const EMBED = { name: "Online stream", source: { kind: "embed", player: "youtube-video", ref: "dQw4w9WgXcQ" } };
 
@@ -98,20 +97,148 @@ test("usage names the layouts that place the feed, inside containers too", async
 
 test("a PATCH's password reaches the feed's secrets slot", async () => {
   const { secretsStore } = await import("../secrets.js");
-  await withAllKinds(async () => {
-    const made = await callRoute(videoRoutes, "/api/video/feeds", {
-      method: "POST",
-      body: { name: "Pulpit cam", source: { kind: "pull", url: "rtsp://192.0.2.40:8554/s", username: "admin" } },
-    });
-    assert.equal(made.status, 201);
-    const id = (made.json as { feed: { id: string } }).feed.id;
-
-    const patched = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { password: "new-password" } });
-    assert.equal(patched.status, 200);
-    assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, "new-password", "the PATCH's password was dropped");
-
-    assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+  const made = await callRoute(videoRoutes, "/api/video/feeds", {
+    method: "POST",
+    body: { name: "Pulpit cam", source: { kind: "pull", url: "rtsp://192.0.2.40:8554/s", username: "admin" } },
   });
+  assert.equal(made.status, 201);
+  const id = (made.json as { feed: { id: string } }).feed.id;
+
+  const patched = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { password: "new-password" } });
+  assert.equal(patched.status, 200);
+  assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, "new-password", "the PATCH's password was dropped");
+
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+});
+
+test("a push feed's password lives only in secretsStore — never in the feed file, /api/video/state or its broadcast — and the address routes carry it", async () => {
+  const { secretsStore } = await import("../secrets.js");
+  const { addBroadcastListener } = await import("../broadcaster.js");
+  const frames: unknown[] = [];
+  addBroadcastListener((channel, payload) => {
+    if (channel === "video:state") frames.push(payload);
+  });
+
+  const made = await callRoute(videoRoutes, "/api/video/feeds", {
+    method: "POST",
+    body: { name: "Stage box", source: { kind: "push", protocol: "srt" } },
+  });
+  assert.equal(made.status, 201);
+  const id = (made.json as { feed: { id: string } }).feed.id;
+
+  const secret = (await secretsStore.getSecrets(`video:${id}`)).password;
+  assert.equal(typeof secret, "string", "expected addFeed to mint a push password");
+  assert.equal(secret!.length, 16, "expected a 16-character password");
+
+  // The feed file on disk — read raw, not through the store's own API, so a
+  // password folded into `source` or a sibling field would still be caught.
+  const raw = await fs.readFile(path.join(TMP, "video-feeds.json"), "utf-8");
+  assert.equal(raw.includes(secret!), false, "the feed file must never carry the password");
+
+  const state = await callRoute(videoRoutes, "/api/video/state");
+  assert.equal(JSON.stringify(state.json).includes(secret!), false, "GET /api/video/state must never carry the password");
+  assert.equal(
+    frames.some((f) => JSON.stringify(f).includes(secret!)),
+    false,
+    "the video:state broadcast must never carry the password",
+  );
+
+  const address = await callRoute(videoRoutes, `/api/video/feeds/${id}/push`);
+  assert.equal(address.status, 200);
+  const addrBody = address.json as { protocol: string; address: string; password: string };
+  assert.equal(addrBody.protocol, "srt");
+  assert.equal(addrBody.password, secret);
+  assert.ok(addrBody.address.includes(secret!), "expected the SRT address to carry the password in its streamid");
+
+  const rotated = await callRoute(videoRoutes, `/api/video/feeds/${id}/push/new-password`, { method: "POST" });
+  assert.equal(rotated.status, 200);
+  const rotatedBody = rotated.json as { password: string };
+  assert.notEqual(rotatedBody.password, secret, "expected new-password to mint a different password");
+  assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, rotatedBody.password);
+
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+  assert.deepEqual(await secretsStore.getSecrets(`video:${id}`), {}, "delete must clear the push feed's secret slot");
+});
+
+test("GET and POST /push routes 404 for a feed that is not push, or does not exist", async () => {
+  const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: EMBED });
+  assert.equal(made.status, 201);
+  const id = (made.json as { feed: { id: string } }).feed.id;
+
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}/push`)).status, 404, "an embed feed has no push address");
+  assert.equal(
+    (await callRoute(videoRoutes, `/api/video/feeds/${id}/push/new-password`, { method: "POST" })).status,
+    404,
+  );
+  assert.equal((await callRoute(videoRoutes, "/api/video/feeds/nonexistent/push")).status, 404);
+
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+});
+
+test("a pull feed's password lives only in secretsStore — never in the feed file — and an empty-string PATCH clears it", async () => {
+  const { secretsStore } = await import("../secrets.js");
+  const made = await callRoute(videoRoutes, "/api/video/feeds", {
+    method: "POST",
+    body: { name: "Balcony cam", source: { kind: "pull", url: "rtsp://192.0.2.41:8554/s", username: "admin" }, password: "s3cret!" },
+  });
+  assert.equal(made.status, 201);
+  const id = (made.json as { feed: { id: string } }).feed.id;
+  assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, "s3cret!");
+
+  const raw = await fs.readFile(path.join(TMP, "video-feeds.json"), "utf-8");
+  assert.equal(raw.includes("s3cret!"), false, "the feed file must never carry the password");
+
+  const cleared = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { password: "" } });
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(
+    await secretsStore.getSecrets(`video:${id}`),
+    {},
+    'an update carrying password: "" must clear the stored password, not leave it in place',
+  );
+
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+});
+
+test("changing a feed's kind moves its secret correctly: push clears on -> external, pull gets nothing carried over from a former push, embed/external never touch secrets", async () => {
+  const { secretsStore } = await import("../secrets.js");
+
+  // push -> external: the push password must not survive under the new kind.
+  const push = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "PTZ", source: { kind: "push", protocol: "rtmp" } } });
+  const pushId = (push.json as { feed: { id: string } }).feed.id;
+  assert.ok((await secretsStore.getSecrets(`video:${pushId}`)).password, "expected a push password at creation");
+  await callRoute(videoRoutes, `/api/video/feeds/${pushId}`, {
+    method: "PATCH",
+    body: { source: { kind: "external", url: "http://192.0.2.80/cam/whep" } },
+  });
+  assert.deepEqual(await secretsStore.getSecrets(`video:${pushId}`), {}, "push -> external must clear the secret slot");
+
+  // external -> push: a fresh password is minted.
+  await callRoute(videoRoutes, `/api/video/feeds/${pushId}`, { method: "PATCH", body: { source: { kind: "push", protocol: "whip" } } });
+  const minted = (await secretsStore.getSecrets(`video:${pushId}`)).password;
+  assert.ok(minted, "expected external -> push to mint a fresh password");
+
+  // push -> pull, with no password in the body: nothing carries over.
+  await callRoute(videoRoutes, `/api/video/feeds/${pushId}`, {
+    method: "PATCH",
+    body: { source: { kind: "pull", url: "rtsp://192.0.2.81:8554/s", username: "" } },
+  });
+  assert.deepEqual(
+    await secretsStore.getSecrets(`video:${pushId}`),
+    {},
+    "push -> pull must not carry the old push password over as the pull password",
+  );
+
+  // push -> pull, WITH a password in the same body: that password (not the old one) is what lands.
+  const push2 = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "PTZ 2", source: { kind: "push", protocol: "srt" } } });
+  const push2Id = (push2.json as { feed: { id: string } }).feed.id;
+  await callRoute(videoRoutes, `/api/video/feeds/${push2Id}`, {
+    method: "PATCH",
+    body: { source: { kind: "pull", url: "rtsp://192.0.2.82:8554/s", username: "" }, password: "fresh-pull-pw" },
+  });
+  assert.equal((await secretsStore.getSecrets(`video:${push2Id}`)).password, "fresh-pull-pw");
+
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${pushId}`, { method: "DELETE" })).status, 200);
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${push2Id}`, { method: "DELETE" })).status, 200);
 });
 
 test("a PATCH carrying a source replaces it, and keeps the name", async () => {
@@ -176,13 +303,11 @@ test("the source line names the kind, then the address, protocol or ref", async 
     [{ kind: "pull", url: "rtsp://192.0.2.71:8554/s", username: "" }, "Pulled from a device · rtsp://192.0.2.71:8554/s"],
     [{ kind: "push", protocol: "whip" }, "The device pushes · WHIP (OBS)"],
   ];
-  await withAllKinds(async () => {
-    for (const [source, line] of cases) {
-      const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "Line check", source } });
-      assert.equal(made.status, 201, JSON.stringify(source));
-      const feed = (made.json as { feed: { id: string; sourceLine: string } }).feed;
-      assert.equal(feed.sourceLine, line);
-      await callRoute(videoRoutes, `/api/video/feeds/${feed.id}`, { method: "DELETE" });
-    }
-  });
+  for (const [source, line] of cases) {
+    const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "Line check", source } });
+    assert.equal(made.status, 201, JSON.stringify(source));
+    const feed = (made.json as { feed: { id: string; sourceLine: string } }).feed;
+    assert.equal(feed.sourceLine, line);
+    await callRoute(videoRoutes, `/api/video/feeds/${feed.id}`, { method: "DELETE" });
+  }
 });

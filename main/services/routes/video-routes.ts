@@ -29,6 +29,22 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
+  const push = pathname.match(/^\/api\/video\/feeds\/([^/]+)\/push$/);
+  if (method === "GET" && push) {
+    const address = await videoService.pushAddress(decodeURIComponent(push[1]));
+    if (address) json(res, address);
+    else error(res, "No such push feed", 404);
+    return;
+  }
+
+  const newPassword = pathname.match(/^\/api\/video\/feeds\/([^/]+)\/push\/new-password$/);
+  if (method === "POST" && newPassword) {
+    const address = await videoService.newPushPassword(decodeURIComponent(newPassword[1]));
+    if (address) json(res, address);
+    else error(res, "No such push feed", 404);
+    return;
+  }
+
   const one = pathname.match(/^\/api\/video\/feeds\/([^/]+)$/);
   if (one && (method === "PATCH" || method === "DELETE")) {
     const id = decodeURIComponent(one[1]);

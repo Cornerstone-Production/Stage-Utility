@@ -114,7 +114,12 @@ export function parseFeedInput(
         username,
       },
     };
-    if (password) result.password = password;
+    // `!== undefined`, not truthy: `password: ""` is how an update explicitly
+    // CLEARS a stored password (video-service.ts's updateFeed), and a truthy
+    // check here dropped that "" on the floor before it ever reached the
+    // caller, so a PATCH carrying it silently left the old password in place
+    // — the same bug class CLAUDE.md names for wireless.
+    if (password !== undefined) result.password = password;
     return result;
   }
 
