@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -8,9 +9,15 @@ import { afterEach, beforeEach, describe, it, type TestContext } from "node:test
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-supervisor-"));
 process.env.STAGE_UTILITY_DATA = TMP;
+// Each RelaySupervisor registers one process "exit" listener for its own
+// lifetime (never removed, by design — see the constructor). This suite
+// builds well over 10 of them across its cases, which is only ever a
+// warning, not a leak: the default cap is a heuristic tuned for a long-lived
+// server process, not a test file that constructs many short-lived ones.
+process.setMaxListeners(50);
 
 const { relayDir } = await import("./acquire.js");
-const { RelaySupervisor, restartDelayMs } = await import("./supervisor.js");
+const { RelaySupervisor, restartDelayMs, isExpectedKillFailure } = await import("./supervisor.js");
 import type { PsLookup, SpawnImpl, SupervisorStatus } from "./supervisor.js";
 
 // No test here ever spawns the real MediaMTX binary: every RelaySupervisor
@@ -90,6 +97,15 @@ describe("restartDelayMs", () => {
     assert.equal(restartDelayMs(5), 32000);
     assert.equal(restartDelayMs(6), 60000, "1000 * 2^6 = 64000, over the cap");
     assert.equal(restartDelayMs(19), 60000, "it never gives up, and never grows past the cap either");
+  });
+});
+
+describe("isExpectedKillFailure", () => {
+  it("treats ESRCH as expected (already gone), and everything else as not", () => {
+    assert.equal(isExpectedKillFailure(Object.assign(new Error("no such process"), { code: "ESRCH" })), true);
+    assert.equal(isExpectedKillFailure(Object.assign(new Error("not permitted"), { code: "EPERM" })), false);
+    assert.equal(isExpectedKillFailure(new Error("no code at all")), false);
+    assert.equal(isExpectedKillFailure(null), false);
   });
 });
 
@@ -276,5 +292,171 @@ describe("RelaySupervisor", () => {
       .filter((line) => line.startsWith("[video] relay recovered"));
     assert.equal(recovered.length, 1, `expected one recovery line, got: ${JSON.stringify(recovered)}`);
     assert.match(recovered[0], /after 1 failed attempt/);
+  });
+
+  it("version() returns the relay's own version once logged, and null before that", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    assert.equal(sup.version(), null, "nothing logged yet");
+
+    await sup.start("mediamtx", "config.yml");
+    children[0].stdout.write("2026/09/28 12:00:00 INF MediaMTX v1.21.1, darwin, arm64\n");
+    await settle();
+
+    assert.equal(sup.version(), "v1.21.1");
+  });
+
+  describe("a second start() without stop() first", () => {
+    it("is a no-op while already starting, running or failing — no leftover kill, no second child", async (t) => {
+      enableClock(t);
+      const { spawnImpl, children } = fakeSpawn();
+      const killed: Array<[number, NodeJS.Signals]> = [];
+      const sup = new RelaySupervisor({
+        spawnImpl,
+        // Would match relay.pid's content (this run's own child) if
+        // killLeftover() were ever wrongly re-run by a second start().
+        psImpl: async () => "mediamtx config.yml",
+        killPid: (pid, signal) => killed.push([pid, signal]),
+      });
+
+      await sup.start("mediamtx", "config.yml");
+      assert.equal(children.length, 1);
+      const statusAfterFirst = sup.status();
+
+      await sup.start("mediamtx", "config.yml");
+
+      assert.equal(children.length, 1, "a second start() while running must not spawn another child");
+      assert.deepEqual(killed, [], "a second start() must never SIGTERM its own healthy child as a leftover");
+      assert.deepEqual(sup.status(), statusAfterFirst, "state must be untouched by the no-op start()");
+    });
+
+    it("two start() calls issued back-to-back, neither awaited first, still spawn exactly one child", async (t) => {
+      enableClock(t);
+      const { spawnImpl, children } = fakeSpawn();
+      const killed: Array<[number, NodeJS.Signals]> = [];
+      const sup = new RelaySupervisor({
+        spawnImpl,
+        psImpl: async () => "mediamtx config.yml",
+        killPid: (pid, signal) => killed.push([pid, signal]),
+      });
+
+      // Neither is awaited before the other is called — both synchronous
+      // prologues run before either's first `await` suspends it.
+      const p1 = sup.start("mediamtx", "config.yml");
+      const p2 = sup.start("mediamtx", "config.yml");
+      await Promise.all([p1, p2]);
+
+      assert.equal(children.length, 1, "only the call that first set state to \"starting\" may spawn");
+      assert.deepEqual(killed, []);
+    });
+
+    it("a stale child's exit cannot change status or schedule a restart once a newer child has taken over", async (t) => {
+      enableClock(t);
+      const { spawnImpl, children } = fakeSpawn();
+      const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+      await sup.start("mediamtx", "config.yml");
+      const staleChild = children[0];
+      const statusBefore = sup.status();
+
+      // start()'s re-entrancy guard above already closes off every PUBLIC
+      // path that could leave `this.child` pointing somewhere other than
+      // the one child whose exit is still pending. This proves the exit
+      // closure's own identity check as a second, independent layer of
+      // defense, by reaching past the public API to force exactly that
+      // state — the shape the reviewer's reproduction actually corrupted
+      // (this.child reassigned to a newer child while an older child,
+      // SIGTERMed by killLeftover, was still on its way out).
+      const decoy = makeFakeChild(999999);
+      (sup as unknown as { child: FakeChild }).child = decoy;
+
+      staleChild.emit("exit", 1, null);
+
+      assert.deepEqual(sup.status(), statusBefore, "a stale child's exit must be a complete no-op");
+      t.mock.timers.tick(120_000);
+      assert.equal(children.length, 1, "no restart may be scheduled from a stale exit");
+    });
+  });
+
+  describe("a leftover-pid failure is reported, never swallowed", () => {
+    it("the default killPid quietly accepts a leftover pid that is already gone (ESRCH)", async (t) => {
+      enableClock(t);
+      await fs.mkdir(relayDir(), { recursive: true });
+      // A pid guaranteed not to be running: spawnSync blocks until this
+      // short-lived child has already exited, so signalling its pid throws
+      // ESRCH — exactly the case the real, uninjected default killPid must
+      // swallow.
+      const finished = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+      const goneP = finished.pid;
+      assert.ok(typeof goneP === "number" && goneP > 0, "expected a real pid from the short-lived child");
+      await fs.writeFile(path.join(relayDir(), "relay.pid"), String(goneP), "utf8");
+
+      const { spawnImpl, children } = fakeSpawn();
+      const warnSpy = t.mock.method(console, "warn");
+      const sup = new RelaySupervisor({
+        spawnImpl,
+        psImpl: async (pid) => (pid === goneP ? "/opt/mediamtx/mediamtx config.yml" : null),
+        // No killPid override — this exercises the real default.
+      });
+
+      await sup.start("/opt/mediamtx/mediamtx", "config.yml");
+
+      assert.equal(children.length, 1, "still starts its own relay");
+      assert.deepEqual(warnSpy.mock.calls, [], "ESRCH is the expected case and must stay quiet");
+    });
+
+    it("a non-ESRCH failure to kill a leftover is reported, not swallowed", async (t) => {
+      enableClock(t);
+      await fs.mkdir(relayDir(), { recursive: true });
+      await fs.writeFile(path.join(relayDir(), "relay.pid"), "4242", "utf8");
+
+      const { spawnImpl, children } = fakeSpawn();
+      const warnSpy = t.mock.method(console, "warn");
+      const sup = new RelaySupervisor({
+        spawnImpl,
+        psImpl: async () => "/opt/mediamtx/mediamtx config.yml",
+        killPid: () => {
+          const err = new Error("Operation not permitted") as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        },
+      });
+
+      await sup.start("/opt/mediamtx/mediamtx", "config.yml");
+
+      assert.equal(children.length, 1, "still starts its own relay despite the leftover it could not stop");
+      const warned = warnSpy.mock.calls.map((c) => c.arguments[0] as string);
+      assert.ok(
+        warned.some((line) => line.includes("pid 4242") && line.includes("would not stop")),
+        `expected a could-not-stop warning naming the leftover, got: ${JSON.stringify(warned)}`,
+      );
+    });
+
+    it("a non-ENOENT failure to read relay.pid is reported, not swallowed", async (t) => {
+      enableClock(t);
+      // A DIRECTORY named relay.pid, not a file: reading it throws EISDIR, a
+      // real, non-ENOENT error, with no need to fake the filesystem. The
+      // same fixture also makes writePidFile's own write fail the same way
+      // once start() gets to spawning its own child, so both lines are
+      // asserted for.
+      await fs.mkdir(path.join(relayDir(), "relay.pid"), { recursive: true });
+
+      const { spawnImpl, children } = fakeSpawn();
+      const warnSpy = t.mock.method(console, "warn");
+      const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+
+      await sup.start("mediamtx", "config.yml");
+
+      assert.equal(children.length, 1, "still starts its own relay despite the pidfile trouble");
+      const warned = warnSpy.mock.calls.map((c) => c.arguments[0] as string);
+      assert.ok(
+        warned.some((line) => line.startsWith("[video] could not read relay.pid:")),
+        `expected a could-not-read warning, got: ${JSON.stringify(warned)}`,
+      );
+      assert.ok(
+        warned.some((line) => line.startsWith("[video] could not write relay.pid:")),
+        `expected a could-not-write warning too, got: ${JSON.stringify(warned)}`,
+      );
+    });
   });
 });

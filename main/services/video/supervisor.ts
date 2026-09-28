@@ -18,6 +18,7 @@ import * as readline from "node:readline";
 import type { Readable } from "node:stream";
 import { promisify } from "node:util";
 
+import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { relayDir } from "./acquire.js";
 import { RelayLogWatcher } from "./relay-log.js";
@@ -88,12 +89,32 @@ function realSpawn(binary: string, args: string[]): SupervisedChild {
   return nodeSpawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
 }
 
+/**
+ * Whether a `process.kill()` failure is the expected "already gone" case
+ * (ESRCH — quiet; SIGTERM was going to reach that outcome anyway) rather
+ * than something an operator needs to know about (EPERM, most commonly —
+ * the leftover is still there and still holding the relay's ports).
+ *
+ * Split out from the default killPid below so the decision itself — the
+ * part with a bug to have — is unit-testable on a synthetic error, without
+ * ever calling the real `process.kill()`: there is no host pid safe to
+ * signal on purpose to prove the non-ESRCH branch (pid 1 exists on every
+ * host, but is not safe to touch even to have it refuse — a container's own
+ * init can be pid 1 and does not universally refuse a signal the way a
+ * bare host's does).
+ */
+export function isExpectedKillFailure(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException)?.code === "ESRCH";
+}
+
 export interface RelaySupervisorOptions {
   spawnImpl?: SpawnImpl;
   psImpl?: PsLookup;
   /** Test seam for the leftover-pid kill, so a test never signals a real
-   *  host pid. Real default is `process.kill`, swallowing ESRCH — the
-   *  process is already gone, which is what SIGTERM was going to achieve. */
+   *  host pid. Real default is `process.kill`, swallowing ESRCH (the
+   *  process is already gone, which is what SIGTERM was going to achieve)
+   *  and rethrowing anything else — killLeftover() is the caller, and
+   *  decides what an operator is told. */
   killPid?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
@@ -139,8 +160,11 @@ export class RelaySupervisor extends EventEmitter {
       ((pid, signal) => {
         try {
           process.kill(pid, signal);
-        } catch {
-          // Already gone — the outcome SIGTERM was going to reach anyway.
+        } catch (err) {
+          if (isExpectedKillFailure(err)) return;
+          // killLeftover() below is the only caller, and decides what to
+          // tell the operator.
+          throw err;
         }
       });
     // So the server never leaves a relay running after IT exits — whatever
@@ -155,7 +179,32 @@ export class RelaySupervisor extends EventEmitter {
     return this.current;
   }
 
+  /** The relay's own version string, parsed from its startup log line
+   *  (`INF MediaMTX v1.21.1, ...`) — null until it has printed one.
+   *  Survives a restart: the watcher is never replaced, only fed more
+   *  lines, so the last version logged stays visible while a new child is
+   *  starting up and has not logged its own yet. */
+  version(): string | null {
+    return this.watcher.version();
+  }
+
+  /**
+   * A no-op unless the relay is currently off. Without this guard, a second
+   * start() on an already-running relay would re-run killLeftover() — which
+   * reads relay.pid, finds the CURRENT child's own pid (this run already
+   * wrote it) matching this same binary, and SIGTERMs its own healthy
+   * child as if it were left over from a previous run — then spawn a
+   * second child on top of it. Reproduced in review: `killed via
+   * killLeftover during 2nd start(): [[1000,'SIGTERM']], children spawned
+   * total: 2`. Call stop() first to restart with a clean state.
+   *
+   * The check and the "starting" state it sets both happen before the
+   * first `await`, so two start() calls issued back to back (neither
+   * awaited) cannot both pass it — the second always sees "starting", not
+   * "off".
+   */
   async start(binary: string, configPath: string): Promise<void> {
+    if (this.current.state !== "off") return;
     this.binary = binary;
     this.configPath = configPath;
     this.stopping = false;
@@ -196,15 +245,37 @@ export class RelaySupervisor extends EventEmitter {
     let text: string;
     try {
       text = await fsp.readFile(path.join(relayDir(), PID_FILE_NAME), "utf8");
-    } catch {
-      return; // No pid file — nothing left over.
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // No pid file — nothing left over.
+      this.reportPidfileTrouble("could not read relay.pid", err);
+      return;
     }
     const pid = Number(text.trim());
     if (!Number.isInteger(pid) || pid <= 0) return;
     const cmd = await this.psImpl(pid);
     if (!cmd || !cmd.includes(this.binary)) return;
-    this.killPid(pid, "SIGTERM");
+    try {
+      this.killPid(pid, "SIGTERM");
+    } catch (err) {
+      const result = this.outage.fail("relay-leftover-kill", errorMessage(err), Date.now());
+      if (result.log) {
+        console.warn(
+          `[video] a relay left over from the last run (pid ${pid}) would not stop: ` +
+            `${errorMessage(err)}${result.note} — it may still be holding the relay's ports`,
+        );
+      }
+      return;
+    }
     console.log(`[video] stopped a relay left over from the last run (pid ${pid})`);
+  }
+
+  /** `relay.pid` itself could not be written, read or removed — every case
+   *  has some real cause (disk full, permissions) and none is expected, so
+   *  every one is worth a line, gated the same way a relay exit is rather
+   *  than once each. */
+  private reportPidfileTrouble(what: string, err: unknown): void {
+    const result = this.outage.fail("relay-pidfile", errorMessage(err), Date.now());
+    if (result.log) console.warn(`[video] ${what}: ${errorMessage(err)}${result.note}`);
   }
 
   private writePidFile(pid: number | undefined): void {
@@ -212,21 +283,23 @@ export class RelaySupervisor extends EventEmitter {
     try {
       fs.mkdirSync(relayDir(), { recursive: true });
       fs.writeFileSync(path.join(relayDir(), PID_FILE_NAME), String(pid), "utf8");
-    } catch {
-      // Best-effort bookkeeping for the NEXT run's leftover check. A failure
-      // here changes nothing about THIS run; it only means a future crash
-      // would leave an orphan killLeftover() cannot find. Nothing to return
-      // it to — start() has already committed to spawning.
+    } catch (err) {
+      // Bookkeeping for the NEXT run's leftover check, not THIS run — a
+      // failure here changes nothing about the child already spawned, so it
+      // is reported rather than returned (nobody is waiting on this call).
+      this.reportPidfileTrouble("could not write relay.pid", err);
     }
   }
 
   private deletePidFile(): void {
     try {
       fs.unlinkSync(path.join(relayDir(), PID_FILE_NAME));
-    } catch {
-      // Same reasoning as writePidFile: best-effort, and a stale file here
-      // only fails killLeftover()'s command check on the next run rather
-      // than misidentifying an unrelated process.
+    } catch (err) {
+      // ENOENT: already gone (we may have raced a manual cleanup, or never
+      // finished writing it) — quiet. Anything else leaves a stale pid file
+      // that will misfire killLeftover()'s command check on the next run.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      this.reportPidfileTrouble("could not remove relay.pid", err);
     }
   }
 
@@ -238,7 +311,15 @@ export class RelaySupervisor extends EventEmitter {
     this.emit("spawned");
     this.attachReader(child.stdout);
     this.attachReader(child.stderr);
-    child.once("exit", (code: number | null) => this.onExit(code));
+    child.once("exit", (code: number | null) => {
+      // A second, independent layer beyond start()'s re-entrancy guard: if
+      // `this.child` has moved on to a newer child by the time THIS child
+      // (closed over here, not read off `this` again) finally exits, that
+      // exit is stale and must not touch the newer child's timers, pid
+      // file or status.
+      if (this.child !== child) return;
+      this.onExit(code);
+    });
     this.armHealthyTimer();
   }
 
