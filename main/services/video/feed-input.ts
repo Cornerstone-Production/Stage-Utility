@@ -3,6 +3,10 @@
 import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource } from "../../types/video.js";
 import { normalizeEmbedRef } from "./embed.js";
 
+function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
+  return typeof v === "string" && (list as readonly string[]).includes(v);
+}
+
 export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
@@ -56,9 +60,6 @@ export function parseFeedInput(
     if (typeof source.url !== "string") {
       return { ok: false, error: "Pull source URL is required." };
     }
-    if (typeof source.username !== "string") {
-      return { ok: false, error: "Pull source username is required." };
-    }
 
     let url: URL;
     try {
@@ -76,10 +77,14 @@ export function parseFeedInput(
       return { ok: false, error: "Put the username and password in their own fields, not the address." };
     }
 
-    if (typeof source.username === "string" && source.username.length > 100) {
+    const username = typeof source.username === "string" ? source.username : "";
+    if (username.length > 100) {
       return { ok: false, error: "Username must be at most 100 characters." };
     }
 
+    if (obj.password !== undefined && typeof obj.password !== "string") {
+      return { ok: false, error: "The password must be text." };
+    }
     const password = typeof obj.password === "string" ? obj.password : undefined;
     if (password && password.length > 200) {
       return { ok: false, error: "Password must be at most 200 characters." };
@@ -91,7 +96,7 @@ export function parseFeedInput(
       source: {
         kind: "pull",
         url: source.url,
-        username: source.username,
+        username,
       },
     };
     if (password) result.password = password;
@@ -102,24 +107,24 @@ export function parseFeedInput(
     if (typeof source.protocol !== "string") {
       return { ok: false, error: "Push source protocol is required." };
     }
-    if (!PUSH_PROTOCOLS.includes(source.protocol as any)) {
+    if (!isOneOf(PUSH_PROTOCOLS, source.protocol)) {
       return { ok: false, error: `Push protocol must be one of: ${PUSH_PROTOCOLS.join(", ")}.` };
     }
-    return { ok: true, name, source: { kind: "push", protocol: source.protocol as any } };
+    return { ok: true, name, source: { kind: "push", protocol: source.protocol } };
   }
 
   if (kind === "embed") {
     if (typeof source.player !== "string") {
       return { ok: false, error: "Embed player is required." };
     }
-    if (!EMBED_PLAYERS.includes(source.player as any)) {
+    if (!isOneOf(EMBED_PLAYERS, source.player)) {
       return { ok: false, error: `Embed player must be one of: ${EMBED_PLAYERS.join(", ")}.` };
     }
     if (typeof source.ref !== "string") {
       return { ok: false, error: "Embed ref is required." };
     }
 
-    const normalized = normalizeEmbedRef(source.player as any, source.ref);
+    const normalized = normalizeEmbedRef(source.player, source.ref);
     if (!normalized.ok) {
       return { ok: false, error: normalized.error };
     }
@@ -129,7 +134,7 @@ export function parseFeedInput(
       name,
       source: {
         kind: "embed",
-        player: source.player as any,
+        player: source.player,
         ref: normalized.ref,
       },
     };

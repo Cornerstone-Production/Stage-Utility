@@ -36,3 +36,8 @@ test("every src is muted, autoplays and has no controls", () => {
   assert.equal(resi.searchParams.get("autoplay"), "true");
   assert.equal(resi.searchParams.get("mute"), "true");
 });
+test("resi embeds override existing mute and autoplay to true", () => {
+  const resi = new URL(embedSrc("resi", "https://control.resi.io/webplayer/video.html?id=abc-123&mute=false&autoplay=false"));
+  assert.equal(resi.searchParams.get("autoplay"), "true");
+  assert.equal(resi.searchParams.get("mute"), "true");
+});

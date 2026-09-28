@@ -35,6 +35,16 @@ test("a pull password is returned separately, never inside the source", () => {
   assert.equal((r as { password?: string }).password, "pw");
   assert.equal(JSON.stringify((r as { source: unknown }).source).includes("pw"), false);
 });
+test("pull username defaults to empty when omitted", () => {
+  const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "rtsp://h/s" } }, ALL);
+  assert.ok(r.ok);
+  assert.equal((r as { source: { username: string } }).source.username, "");
+});
+test("non-string password is refused", () => {
+  const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "rtsp://h/s", username: "" }, password: 123 }, ALL);
+  assert.equal(r.ok, false);
+  assert.match((r as { error: string }).error, /must be text/);
+});
 test("external protocol follows the path", () => {
   assert.equal(externalProtocol("https://h/live/index.m3u8?t=1"), "hls");
   assert.equal(externalProtocol("http://h/cam/whep"), "whep");

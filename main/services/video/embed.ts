@@ -47,7 +47,7 @@ export function embedSrc(player: EmbedPlayer, ref: string): string {
   if (player === "youtube-channel") return `https://www.youtube.com/embed/live_stream?channel=${ref}&${PLAYER_FLAGS}`;
   if (player === "youtube-video") return `https://www.youtube.com/embed/${ref}?${PLAYER_FLAGS}`;
   const u = new URL(ref);
-  if (!u.searchParams.has("autoplay")) u.searchParams.set("autoplay", "true");
-  if (!u.searchParams.has("mute")) u.searchParams.set("mute", "true");
+  u.searchParams.set("autoplay", "true");
+  u.searchParams.set("mute", "true");
   return u.toString();
 }
