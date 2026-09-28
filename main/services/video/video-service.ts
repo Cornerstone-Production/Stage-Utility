@@ -26,6 +26,14 @@ type Result = { ok: true; feed: VideoFeedView } | { ok: false; error: string };
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
+/** The first half of each feed's source line, per kind. */
+const SOURCE_LINE_KIND: Record<VideoSourceKind, string> = {
+  pull: "Pulled from a device",
+  push: "The device pushes",
+  embed: "YouTube or Resi",
+  external: "Other address",
+};
+
 /** `current.feeds`, defensively — the same reasoning loadFeedsFile applies to a
  *  disk read: a file written by an older build, or hand-restored, may carry no
  *  `feeds` array at all. */
@@ -86,11 +94,17 @@ class VideoService {
     return { via: "relay", whep: `${base}/whep`, hls: `${base}/index.m3u8` };
   }
 
+  /** The page's list line: what kind of source, then its address, protocol
+   *  or embed reference — "Pulled from a device · rtsp://…". */
   private sourceLine(feed: VideoFeed): string {
     const s = feed.source;
-    if (s.kind === "pull" || s.kind === "external") return s.url;
-    if (s.kind === "push") return { srt: "SRT", rtmp: "RTMP", whip: "WHIP (OBS)" }[s.protocol];
-    return { "youtube-channel": "YouTube channel", "youtube-video": "YouTube video", resi: "Resi" }[s.player];
+    const detail =
+      s.kind === "pull" || s.kind === "external"
+        ? s.url
+        : s.kind === "push"
+          ? { srt: "SRT", rtmp: "RTMP", whip: "WHIP (OBS)" }[s.protocol]
+          : s.ref;
+    return `${SOURCE_LINE_KIND[s.kind]} · ${detail}`;
   }
 
   view(feed: VideoFeed): VideoFeedView {

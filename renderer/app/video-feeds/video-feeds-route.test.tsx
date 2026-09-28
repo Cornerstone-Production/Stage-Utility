@@ -26,7 +26,7 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js"
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
 const React = await import("react");
 const { ConfirmHost } = await import("../../components/ui/index.js");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
@@ -53,7 +53,7 @@ function embedFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
     id: "feed-embed",
     name: "Online stream",
     kind: "embed",
-    sourceLine: "YouTube channel",
+    sourceLine: "YouTube or Resi · UC1234567890123456789012",
     source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" },
     play: { via: "embed", src: "https://www.youtube.com/embed/live_stream?channel=UC1234567890123456789012" },
     status: { state: "embed" },
@@ -66,7 +66,7 @@ function externalFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
     id: "feed-external",
     name: "Lobby relay",
     kind: "external",
-    sourceLine: "https://relay.example.org/feed.whep",
+    sourceLine: "Other address · https://relay.example.org/feed.whep",
     source: { kind: "external", url: "https://relay.example.org/feed.whep" },
     play: { via: "external", url: "https://relay.example.org/feed.whep", protocol: "whep" },
     status: { state: null },
@@ -99,8 +99,8 @@ interface FetchStubOptions {
   onUpdateFeed?: (id: string, body: unknown) => FeedResponse;
   /** Answers a video:removeFeed DELETE. Default: 200. */
   onRemoveFeed?: () => FeedResponse;
-  /** What video:feedUsage reports. Default: two layouts. */
-  usage?: { viewId: string; name: string }[];
+  /** What video:feedUsage reports. Default: two layouts. "fail" rejects. */
+  usage?: { viewId: string; name: string }[] | "fail";
 }
 
 /** Every request the page makes, matched by method and path — including the
@@ -116,10 +116,11 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
       return { ok: true, status: 200, json: async () => state, text: async () => "" } as unknown as Response;
     }
     if (method === "GET" && /\/api\/video\/feeds\/[^/]+\/usage$/.test(url)) {
+      if (opts.usage === "fail") throw new TypeError("fetch failed");
       return {
         ok: true,
         status: 200,
-        json: async () => ({ layouts: opts.usage ?? [{ viewId: "v1", name: "Stage confidence" }, { viewId: "v2", name: "Home" }] }),
+        json: async () => ({ layouts: (opts.usage as { viewId: string; name: string }[] | undefined) ?? [{ viewId: "v1", name: "Stage confidence" }, { viewId: "v2", name: "Home" }] }),
         text: async () => "",
       } as unknown as Response;
     }
@@ -222,21 +223,24 @@ test("Delete calls video:feedUsage BEFORE video:removeFeed, and the confirmation
     await settle();
 
     const del = screen.getByRole("button", { name: "Delete feed" });
+    // The editor reads usage once on its own, for its used-by line. What is
+    // asserted here is the read Delete makes, after the click.
+    const before = g.calls.length;
     fireEvent.click(del);
     await settle();
     await settle();
 
     // The usage read must have happened, and the confirm must be open with
     // the layouts named — all BEFORE any DELETE request goes out.
-    const usageIndex = g.calls.findIndex((c) => c.method === "GET" && /\/usage$/.test(c.url));
-    assert.notEqual(usageIndex, -1, "expected a video:feedUsage request");
+    const usageIndex = g.calls.findIndex((c, i) => i >= before && c.method === "GET" && /\/usage$/.test(c.url));
+    assert.notEqual(usageIndex, -1, "expected Delete to make a video:feedUsage request");
     assert.equal(
       g.calls.some((c) => c.method === "DELETE"),
       false,
       "video:removeFeed must not fire before the confirm is answered",
     );
     assert.ok(
-      screen.getByText("Used by 2 layouts: Stage confidence, Home."),
+      within(screen.getByRole("alertdialog")).getByText("Used by 2 layouts: Stage confidence, Home."),
       "expected the confirmation to name the layouts video:feedUsage reported",
     );
 
@@ -500,7 +504,7 @@ test("one layout is \"1 layout\", not \"1 layouts\"", async () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
     await settle();
     await settle();
-    assert.equal(!!screen.queryByText("Used by 1 layout: Stage confidence."), true);
+    assert.equal(!!within(screen.getByRole("alertdialog")).queryByText("Used by 1 layout: Stage confidence."), true);
   } finally {
     g.restore();
   }
@@ -536,13 +540,83 @@ test("the embed callout names the player: YouTube's delay for YouTube, Resi's ow
     const { container } = mount();
     await settle();
     await settle();
-    assert.equal(!!screen.queryByText(/Plays in YouTube's own player, 5 to 15 seconds behind/), true);
+    const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
+    assert.equal(!!editor.queryByText(/Plays in YouTube's own player, 5 to 15 seconds behind/), true);
 
     const player = container.querySelector('select[aria-label="Player"]') as HTMLSelectElement;
     fireEvent.change(player, { target: { value: "resi" } });
     await settle();
-    assert.equal(!!screen.queryByText("Plays in Resi's own player. Good for a lobby, not for the stage."), true);
-    assert.equal(!!screen.queryByText(/YouTube's own player/), false, "a Resi player must not be described as YouTube's");
+    assert.equal(!!editor.queryByText("Plays in Resi's own player. Good for a lobby, not for the stage."), true);
+    assert.equal(!!editor.queryByText(/YouTube's own player/), false, "a Resi player must not be described as YouTube's");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── the layout the approved design specifies, as far as text can show it ────
+//
+// Widths, stacking and the pane proportions are CSS, and jsdom loads no
+// stylesheet: those were checked in Chromium against the approved design
+// (the one-card, wide-list, narrow-editor layout). What follows is what the
+// DOM can prove.
+
+test("each row says how its feed plays", async () => {
+  const g = stubGlobals(makeState([embedFeed(), embedFeed({ id: "resi", name: "Resi lobby", source: { kind: "embed", player: "resi", ref: "https://control.resi.io/webplayer/video.html?id=1" } }), externalFeed()]));
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText("Plays in YouTube's own player · 5 to 15 s behind"), true);
+    assert.equal(!!screen.queryByText("Plays in Resi's own player"), true);
+    assert.equal(!!screen.queryByText("WebRTC, played as given"), true);
+    assert.equal(!!screen.queryByText("Stage Utility cannot see its health"), true);
+    assert.equal(!!screen.queryByText("Other address · https://relay.example.org/feed.whep"), true, "the source line is shown as the server built it");
+  } finally {
+    g.restore();
+  }
+});
+
+test("the editor says which layouts use the selected feed", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
+  try {
+    mount();
+    await settle();
+    await settle();
+    const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
+    assert.equal(!!editor.queryByText("Used by 2 layouts: Stage confidence, Home."), true);
+  } finally {
+    g.restore();
+  }
+});
+
+test("a failed usage read says so, never that the feed is unused", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), { usage: "fail" });
+  try {
+    mount();
+    await settle();
+    await settle();
+    const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
+    assert.equal(!!editor.queryByText("Couldn't read which layouts use this feed."), true);
+    assert.equal(!!editor.queryByText(/Not used by any layout/), false);
+    assert.equal(
+      g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/log/client")),
+      true,
+      "the failed read must reach /log",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("a field's description sits under its control, not beside its label", async () => {
+  const g = stubGlobals(makeState([embedFeed()]));
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    const input = container.querySelector('input[aria-label="Name"]')!;
+    const description = screen.getByText("What layouts and Home show. Renaming keeps every layout using it.");
+    assert.ok(input.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING, "the Name description must follow its input");
   } finally {
     g.restore();
   }

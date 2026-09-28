@@ -1,97 +1,82 @@
-// feed-list.tsx — the left pane of the Video feeds page: every feed, each row
-// showing its status pill and source line, plus "Add feed" underneath.
+// feed-list.tsx — the wide left pane of the Video feeds page: one row per feed
+// (its name and status pill, its source line, and a line on how it plays),
+// with "Add feed" directly under the last row.
 
 import { PlusIcon } from "lucide-react";
 
-import type { VideoFeedView } from "@main/types/video";
+import type { FeedState, VideoFeedView } from "@main/types/video";
 
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
 
 /**
- * The list row's pill text, or null for a feed this build cannot see the
- * health of — an "external" source always reports `status.state: null` (see
- * main/services/video/video-service.ts's feedStatus and main/types/video.ts's
- * FeedState doc), which is exactly the mockup's "external shows no pill".
+ * The row's pill: its text, its tint and its dot, or null for a feed this
+ * build cannot see the health of — an "external" source always reports
+ * `status.state: null`, and shows no pill.
  *
- * A switch on the full `FeedState | null` union, not a lookup table: adding a
- * FeedState the type system knows about and this function does not fails to
- * compile, rather than silently falling through to "no pill".
+ * A switch on the full FeedState union, not a lookup table: a FeedState the
+ * type system knows about and this function does not fails to compile, rather
+ * than silently falling through to "no pill".
+ *
+ * The tints are the approved design's: live-9 at 12%, warn-9 at 14%,
+ * danger-9 at 11%, and the neutral fill. Live text is green-11 in light mode
+ * and --su-live-11 in dark: the app's --su-live-11 is the kiosk's light
+ * emerald in both themes, which reads as light green on a light green tint.
+ * Only the live dot takes the brighter live-9; every other dot is the text
+ * colour.
  */
-function pillLabel(feed: VideoFeedView): string | null {
-  switch (feed.status.state) {
+function pillFor(feed: VideoFeedView): { label: string; tint: string; dot: string } | null {
+  const live = { tint: "bg-live-9/12 text-green-11 [.dark_&]:text-live-11", dot: "bg-live-9" };
+  const state: FeedState | null = feed.status.state;
+  switch (state) {
     case null:
       return null;
     case "live":
-      return "Live";
-    case "delayed":
-      return "Live, delayed";
-    case "standby":
-      return "Standby";
-    case "waiting":
-      return "Waiting for source";
-    case "offline":
-      return "Offline";
+      return { label: "Live", ...live };
     case "embed":
-      return feed.source.kind === "embed" && feed.source.player === "resi" ? "Live on Resi" : "Live on YouTube";
+      return { label: feed.source.kind === "embed" && feed.source.player === "resi" ? "Live on Resi" : "Live on YouTube", ...live };
+    case "delayed":
+      return { label: "Live, delayed", tint: "bg-warn-9/14 text-warn-11", dot: "bg-current" };
+    case "offline":
+      return { label: "Offline", tint: "bg-danger-9/11 text-danger-11", dot: "bg-current" };
+    case "standby":
+      return { label: "Standby", tint: "bg-fill text-fg-muted", dot: "bg-current" };
+    case "waiting":
+      return { label: "Waiting for source", tint: "bg-fill text-fg-muted", dot: "bg-current" };
   }
 }
 
-/**
- * `.pill`'s background/text pair, mockup-v2.html: `.pill.live` (green tint),
- * `.pill.warn` (yellow tint), `.pill.off` (the app's own neutral fill), `.pill.bad`
- * (red tint) — reworked onto this app's actual token names rather than the
- * mockup's own `--su-live-tint`/`--su-warn-tint`/`--su-danger-tint`, which do
- * not exist in renderer/styles.css (only flat `-9`/`-11` pairs are defined for
- * the semantic live/warn/danger tokens, no alpha ramp). `bg-<token>-9/10` is
- * the tint idiom already shipped here for exactly this (error-note.tsx's
- * `border-danger-9/40 bg-danger-9/10 text-danger-11`); "off" uses the real
- * `bg-fill`/`text-fg-muted` tokens the mockup's own `--su-fill`/`--su-fg-muted`
- * resolve to. "embed" pills take the live style, per the brief.
- */
-function pillTint(state: NonNullable<VideoFeedView["status"]["state"]>): string {
-  switch (state) {
-    case "live":
-    case "embed":
-      return "bg-live-9/10 text-live-11";
-    case "delayed":
-      return "bg-warn-9/10 text-warn-11";
-    case "offline":
-      return "bg-danger-9/10 text-danger-11";
-    case "standby":
-    case "waiting":
-      return "bg-fill text-fg-muted";
-  }
-}
-
-/**
- * `.pill .d`'s own rule: `background: currentColor`, overridden ONLY for
- * `.pill.live .d` to the stronger `--su-live-9` (brighter than the live TEXT
- * color, `--su-live-11`) — every other variant's dot just inherits the pill's
- * own text color. "embed" takes the live style here too.
- */
-function pillDot(state: NonNullable<VideoFeedView["status"]["state"]>): string {
-  return state === "live" || state === "embed" ? "bg-live-9" : "bg-current";
-}
-
-/** mockup-v2.html's `.pill`: inline-flex, 6px gap, a 999px pill, 2px/8px
- *  padding, 12px/500 text, no wrap — and `.feed .pill`'s own placement, the
- *  row's top right. */
 function FeedPill({ feed }: { feed: VideoFeedView }) {
-  const state = feed.status.state;
-  const label = pillLabel(feed);
-  if (state === null || label === null) return null;
+  const pill = pillFor(feed);
+  if (!pill) return null;
   return (
     <span
       className={cn(
-        "ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-caption1 font-medium",
-        pillTint(state),
+        "col-start-2 row-start-1 justify-self-end self-start inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-caption1 font-medium",
+        pill.tint,
       )}
     >
-      <span className={cn("size-1.5 rounded-full", pillDot(state))} />
-      {label}
+      <span className={cn("size-1.5 rounded-full", pill.dot)} />
+      {pill.label}
     </span>
   );
+}
+
+/**
+ * How the feed plays, in the row's muted meta line. Only what this build can
+ * know: an embed is the platform's own player, and an external address is
+ * played exactly as given with no health to report. A relay feed's live
+ * figures (path, delay, resolution, screens) come with the relay.
+ */
+export function feedMeta(feed: VideoFeedView): string[] {
+  const s = feed.source;
+  if (s.kind === "embed") {
+    return [s.player === "resi" ? "Plays in Resi's own player" : "Plays in YouTube's own player · 5 to 15 s behind"];
+  }
+  if (feed.play.via === "external") {
+    return [`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see its health"];
+  }
+  return [];
 }
 
 export function FeedList({
@@ -106,38 +91,36 @@ export function FeedList({
   onAddFeed: () => void;
 }) {
   return (
-    <div className="flex flex-col min-h-0">
-      <div className="flex-1 overflow-y-auto divide-y divide-line">
-        {feeds.length === 0 && (
-          <p className="px-4 py-6 text-footnote text-fg-subtle">No feeds yet — add one below.</p>
-        )}
-        {feeds.map((feed) => (
+    <div className="flex min-w-0 flex-col">
+      {feeds.length === 0 && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
+      {feeds.map((feed) => {
+        const meta = feedMeta(feed);
+        return (
           <button
             key={feed.id}
             type="button"
             aria-current={feed.id === selectedId ? "true" : undefined}
             onClick={() => onSelect(feed.id)}
             className={cn(
-              "flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors",
-              feed.id === selectedId ? "bg-fill" : "hover:bg-fill/60",
+              "grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-line px-4 py-3 text-left transition-colors",
+              feed.id === selectedId ? "bg-accent/12" : "hover:bg-fill",
             )}
           >
-            <span className="flex items-center gap-2">
-              <span className="min-w-0 truncate text-footnote font-medium text-fg">{feed.name}</span>
-              <FeedPill feed={feed} />
-            </span>
-            <span className="truncate text-caption2 text-fg-subtle font-mono">{feed.sourceLine}</span>
+            <span className="col-start-1 row-start-1 min-w-0 text-[14px] leading-[18px] font-semibold text-fg">{feed.name}</span>
+            <FeedPill feed={feed} />
+            <span className="col-start-1 font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]">{feed.sourceLine}</span>
+            {meta.length > 0 && (
+              <span className="col-span-2 flex flex-wrap gap-x-3.5 gap-y-1 text-caption1 text-fg-subtle">
+                {meta.map((m) => (
+                  <span key={m}>{m}</span>
+                ))}
+              </span>
+            )}
           </button>
-        ))}
-      </div>
-      <div className="border-t border-line p-3">
-        <Button
-          type="button"
-          variant="filled"
-          size="small"
-          onClick={onAddFeed}
-          className="w-full justify-center"
-        >
+        );
+      })}
+      <div className="flex items-center gap-2 px-4 py-3">
+        <Button type="button" variant="accent" size="small" onClick={onAddFeed}>
           <PlusIcon className="size-3.5" />
           Add feed
         </Button>

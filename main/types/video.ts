@@ -79,7 +79,8 @@ export interface VideoFeedView {
   id: string;
   name: string;
   kind: VideoSourceKind;
-  /** One line for the page's list, e.g. "rtsp://192.0.2.21:8554/stream2". */
+  /** One line for the page's list: the kind, then the address, protocol or
+   *  embed reference, e.g. "Pulled from a device · rtsp://192.0.2.21:8554/stream2". */
   sourceLine: string;
   source: VideoSource;
   play: FeedPlay;

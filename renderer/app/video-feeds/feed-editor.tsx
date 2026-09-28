@@ -1,29 +1,21 @@
-// feed-editor.tsx — the right pane of the Video feeds page: a live picture of
-// the selected feed, its Name and Source, whatever fields that source needs,
-// and Save / Cancel / Delete.
+// feed-editor.tsx — the narrow right pane of the Video feeds page: a live
+// picture of the selected feed, its Name and Source, whatever fields that
+// source needs, Save / Cancel / Delete, and which layouts use it.
 //
-// PR 1 offers only two of VideoSourceKind's four members — "embed" and
-// "external" — because the `kinds` prop (video:state, from
-// main/services/video/video-service.ts's allowedKinds()) is what this build
-// actually accepts pre-relay. Nothing here hardcodes that: the Source
-// select's options come from `kinds`, so PR 2 widening allowedKinds() to
-// "pull" and "push" needs no change on THIS page except the two field groups
-// those kinds need — this file's growth point when that PR lands.
+// The Source select offers exactly video:state's `kinds` (the kinds this
+// build accepts; see allowedKinds() in main/services/video/video-service.ts).
+// A kind with no field group here yet is refused at Save rather than guessed
+// at.
 
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { errorMessage } from "@main/services/errors";
-import type { EmbedPlayer, VideoFeedView, VideoSourceKind } from "@main/types/video";
+import { EMBED_PLAYERS, type EmbedPlayer, type VideoFeedView, type VideoSourceKind } from "@main/types/video";
 
 import {
   Button,
   confirm,
   ErrorNote,
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
   Input,
   Select,
   SelectContent,
@@ -32,6 +24,7 @@ import {
   SelectValue,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { logReadFailure } from "../../lib/client-log";
 import { VideoObject } from "../../main/video/video-object";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
@@ -40,8 +33,6 @@ const KIND_LABEL: Record<VideoSourceKind, string> = {
   embed: "YouTube or Resi player",
   external: "Another WebRTC or HLS address",
 };
-
-const EMBED_PLAYERS: readonly EmbedPlayer[] = ["youtube-channel", "youtube-video", "resi"];
 
 const EMBED_PLAYER_LABEL: Record<EmbedPlayer, string> = {
   "youtube-channel": "YouTube, the channel's current live stream",
@@ -144,9 +135,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
     setError(null);
   }
 
-  /** null for a kind PR 2 has not wired a field group for yet — see the file
-   *  header. Unreachable today: `kinds` (and so the Source select) never
-   *  offers "pull" or "push" until allowedKinds() does. */
+  /** null for a kind with no field group here yet (see the file header). */
   function sourcePayload(): { kind: "embed"; player: EmbedPlayer; ref: string } | { kind: "external"; url: string } | null {
     if (draft.kind === "embed") return { kind: "embed", player: draft.embedPlayer, ref: draft.embedRef };
     if (draft.kind === "external") return { kind: "external", url: draft.externalUrl };
@@ -209,103 +198,79 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
   const picture = pictureFor(feed?.id ?? null);
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <h2 className="text-body font-semibold text-fg">{isNew ? "New feed" : feed?.name}</h2>
+    <aside
+      aria-label="Feed settings"
+      className="flex min-w-0 flex-col gap-3.5 border-t border-line bg-surface-raised p-4 min-[900px]:border-l min-[900px]:border-t-0"
+    >
+      <h2 className="text-subheadline font-semibold text-fg">{isNew ? "New feed" : feed?.name}</h2>
 
-      <div className="aspect-video w-full overflow-hidden rounded-lg bg-black">
+      <div className="aspect-video w-full overflow-hidden rounded-[10px] bg-black">
         <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />
       </div>
 
-      <FieldGroup>
-        <Field orientation="horizontal">
-          <FieldContent>
-            <FieldLabel>Name</FieldLabel>
-            <FieldDescription>What layouts and Home show. Renaming keeps every layout using it.</FieldDescription>
-          </FieldContent>
-          <Input
-            aria-label="Name"
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-        </Field>
+      <StackedField label="Name" description="What layouts and Home show. Renaming keeps every layout using it.">
+        <Input aria-label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+      </StackedField>
 
-        <Field orientation="horizontal">
-          <FieldContent>
-            <FieldLabel>Source</FieldLabel>
-          </FieldContent>
-          <Select value={draft.kind} onValueChange={(v) => setDraft({ ...draft, kind: v as VideoSourceKind })}>
-            <SelectTrigger aria-label="Source">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {kinds.map((k) => (
-                <SelectItem key={k} value={k}>
-                  {KIND_LABEL[k]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-
-        {draft.kind === "embed" && (
-          <>
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel>Player</FieldLabel>
-              </FieldContent>
-              <Select
-                value={draft.embedPlayer}
-                onValueChange={(v) => setDraft({ ...draft, embedPlayer: v as EmbedPlayer })}
-              >
-                <SelectTrigger aria-label="Player">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {EMBED_PLAYERS.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {EMBED_PLAYER_LABEL[p]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel>{EMBED_FIELD_LABEL[draft.embedPlayer]}</FieldLabel>
-              </FieldContent>
-              <Input
-                aria-label={EMBED_FIELD_LABEL[draft.embedPlayer]}
-                value={draft.embedRef}
-                onChange={(e) => setDraft({ ...draft, embedRef: e.target.value })}
-              />
-            </Field>
-          </>
-        )}
-
-        {draft.kind === "external" && (
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>WebRTC (WHEP) or HLS address</FieldLabel>
-              <FieldDescription>
-                Something else already serves this feed. Stage Utility plays it as given and cannot report its health.
-              </FieldDescription>
-            </FieldContent>
-            <Input
-              aria-label="WebRTC (WHEP) or HLS address"
-              className="font-mono"
-              value={draft.externalUrl}
-              onChange={(e) => setDraft({ ...draft, externalUrl: e.target.value })}
-            />
-          </Field>
-        )}
-      </FieldGroup>
+      <StackedField label="Source">
+        <Select value={draft.kind} onValueChange={(v) => setDraft({ ...draft, kind: v as VideoSourceKind })}>
+          <SelectTrigger aria-label="Source" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {kinds.map((k) => (
+              <SelectItem key={k} value={k}>
+                {KIND_LABEL[k]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </StackedField>
 
       {draft.kind === "embed" && (
-        <p className="rounded-lg border border-line bg-fill px-3 py-2 text-caption1 text-fg-muted">{EMBED_CALLOUT[draft.embedPlayer]}</p>
+        <>
+          <StackedField label="Player">
+            <Select value={draft.embedPlayer} onValueChange={(v) => setDraft({ ...draft, embedPlayer: v as EmbedPlayer })}>
+              <SelectTrigger aria-label="Player" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EMBED_PLAYERS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {EMBED_PLAYER_LABEL[p]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </StackedField>
+
+          <StackedField label={EMBED_FIELD_LABEL[draft.embedPlayer]}>
+            <Input
+              aria-label={EMBED_FIELD_LABEL[draft.embedPlayer]}
+              value={draft.embedRef}
+              onChange={(e) => setDraft({ ...draft, embedRef: e.target.value })}
+            />
+          </StackedField>
+
+          <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">{EMBED_CALLOUT[draft.embedPlayer]}</p>
+        </>
       )}
 
-      <div className="flex items-center gap-2">
+      {draft.kind === "external" && (
+        <StackedField
+          label="WebRTC (WHEP) or HLS address"
+          description="Something else already serves this feed. Stage Utility plays it as given and cannot report its health."
+        >
+          <Input
+            aria-label="WebRTC (WHEP) or HLS address"
+            className="font-mono text-caption1"
+            value={draft.externalUrl}
+            onChange={(e) => setDraft({ ...draft, externalUrl: e.target.value })}
+          />
+        </StackedField>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="accent" size="small" onClick={() => void handleSave()} disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
@@ -326,6 +291,47 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       </div>
 
       {error && <ErrorNote>{error}</ErrorNote>}
+
+      {!isNew && feed && <UsedByLine feedId={feed.id} />}
+    </aside>
+  );
+}
+
+/** The approved design's field: the label, the control at full width, and an
+ *  optional description in small muted text under it. */
+function StackedField({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-footnote font-medium text-fg">{label}</span>
+      {children}
+      {description && <span className="text-caption2 leading-[14px] text-fg-subtle">{description}</span>}
     </div>
   );
+}
+
+/**
+ * "Used by 2 layouts: Stage confidence, Home.", under the editor's buttons,
+ * read when a feed is selected. Delete reads it again before its confirm, so
+ * the confirm is never answered on a stale count. A failed read says so here
+ * and on /log rather than claiming the feed is unused.
+ */
+function UsedByLine({ feedId }: { feedId: string }) {
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    invoke<{ layouts: { viewId: string; name: string }[] }>("video:feedUsage", { id: feedId }).then(
+      (usage) => {
+        if (live) setLine(usedBy(usage.layouts));
+      },
+      (err: unknown) => {
+        logReadFailure("video", "which layouts use a feed", err);
+        if (live) setLine("Couldn't read which layouts use this feed.");
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [feedId]);
+  if (line === null) return null;
+  return <span className="text-caption1 text-fg-subtle">{line}</span>;
 }

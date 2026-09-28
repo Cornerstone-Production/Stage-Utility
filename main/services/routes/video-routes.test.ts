@@ -180,3 +180,21 @@ test("add, update and remove each push video:state, and current() carries it", a
   assert.equal(current().includes("Choir"), false);
   assert.ok(frames[0]!.rev < frames[1]!.rev && frames[1]!.rev < frames[2]!.rev, "each push advances rev");
 });
+
+test("the source line names the kind, then the address, protocol or ref", async () => {
+  const cases: [unknown, string][] = [
+    [{ kind: "embed", player: "youtube-video", ref: "dQw4w9WgXcQ" }, "YouTube or Resi · dQw4w9WgXcQ"],
+    [{ kind: "external", url: "http://192.0.2.70/cam/whep" }, "Other address · http://192.0.2.70/cam/whep"],
+    [{ kind: "pull", url: "rtsp://192.0.2.71:8554/s", username: "" }, "Pulled from a device · rtsp://192.0.2.71:8554/s"],
+    [{ kind: "push", protocol: "whip" }, "The device pushes · WHIP (OBS)"],
+  ];
+  await withAllKinds(async () => {
+    for (const [source, line] of cases) {
+      const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "Line check", source } });
+      assert.equal(made.status, 201, JSON.stringify(source));
+      const feed = (made.json as { feed: { id: string; sourceLine: string } }).feed;
+      assert.equal(feed.sourceLine, line);
+      await callRoute(videoRoutes, `/api/video/feeds/${feed.id}`, { method: "DELETE" });
+    }
+  });
+});

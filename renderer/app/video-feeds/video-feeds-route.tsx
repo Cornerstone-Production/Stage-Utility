@@ -1,12 +1,11 @@
-// video-feeds-route.tsx — the Video feeds page under Screens: every feed
-// this build knows about, with a live editor beside the list.
+// video-feeds-route.tsx — the Video feeds page under Screens: one card with
+// the page's heading, the feed list as its wide pane and the editor beside it,
+// as the approved design lays it out.
 //
-// PR 1 scope only. The relay's status line and its on/off switch — the top of
-// mockup-v2.html's "Video feeds" tab — are PR 2's: there is no relay yet to
-// report on. useVideoState()'s `kinds` already limits the Source dropdown to
-// what this build actually offers (embed, external — see
-// main/services/video/video-service.ts's allowedKinds()), so nothing here
-// needs to change when PR 2 widens it (task-6-brief.md).
+// The relay's status line and on/off switch belong in this card's header too,
+// and arrive with the relay; there is nothing to report on without one.
+// useVideoState()'s `kinds` already limits the Source dropdown to what this
+// build offers, so nothing here changes when that list widens.
 //
 // No stage state is read here for the picture's offline-logo fallback:
 // appLogo/appLogoMonochrome are passed as null/false. Wiring useStageState()
@@ -60,12 +59,12 @@ export function VideoFeedsRoute() {
   const selected = creatingNew ? null : (justSaved ?? fromList ?? feeds[0] ?? null);
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
+    <FieldSet>
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-line px-4 py-3.5">
         <h1 className="text-subheadline font-semibold text-fg">Video feeds</h1>
-        <p className="text-footnote text-fg-muted">Shows camera and program feeds in layouts and on Home</p>
+        <span className="text-caption1 text-fg-muted">Shows camera and program feeds in layouts and on Home</span>
       </div>
-      <FieldSet className="grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_1fr] divide-y lg:divide-y-0 lg:divide-x divide-line">
+      <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_360px]">
         <FeedList
           feeds={feeds}
           selectedId={selected?.id ?? null}
@@ -105,7 +104,7 @@ export function VideoFeedsRoute() {
           }}
           onCancelNew={() => setCreatingNew(false)}
         />
-      </FieldSet>
-    </div>
+      </div>
+    </FieldSet>
   );
 }
