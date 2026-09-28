@@ -127,9 +127,10 @@ interface FetchStubOptions {
   onRemoveFeed?: () => FeedResponse;
   /** What video:feedUsage reports. Default: two layouts. "fail" rejects. */
   usage?: { viewId: string; name: string }[] | "fail";
-  /** Answers a video:pushAddress GET, keyed by feed id. Default: a plain SRT
-   *  address carrying "testpw". */
-  onPushAddress?: (id: string) => FeedResponse;
+  /** Answers a video:pushAddress GET, keyed by feed id and the `?protocol=`
+   *  query param the client sends (R14g-a's preview) — undefined when the
+   *  request carried none. Default: a plain SRT address carrying "testpw". */
+  onPushAddress?: (id: string, protocol: string | undefined) => FeedResponse;
   /** Answers a video:newPushPassword POST, keyed by feed id. Default: the
    *  same address with "rotatedpw" in place of "testpw". */
   onNewPushPassword?: (id: string) => FeedResponse;
@@ -160,12 +161,19 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
       const r = opts.onAddFeed?.(body) ?? { status: 201, body: { feed: {} } };
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
-    const push = url.match(/\/api\/video\/feeds\/([^/]+)\/push$/);
+    // `(?:\?.*)?` — R14g-a's client now appends `?protocol=<draft protocol>`
+    // to every push-address GET, previewing another protocol before Save.
+    const push = url.match(/\/api\/video\/feeds\/([^/?]+)\/push(?:\?.*)?$/);
     if (method === "GET" && push) {
       const id = decodeURIComponent(push[1]!);
-      const r = opts.onPushAddress?.(id) ?? {
+      const requestedProtocol = new URL(url, "http://localhost").searchParams.get("protocol") ?? undefined;
+      const r = opts.onPushAddress?.(id, requestedProtocol) ?? {
         status: 200,
-        body: { protocol: "srt", address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:testpw`, password: "testpw" },
+        body: {
+          protocol: requestedProtocol ?? "srt",
+          address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:testpw`,
+          password: "testpw",
+        },
       };
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
@@ -174,7 +182,13 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
       const id = decodeURIComponent(newPassword[1]!);
       const r = opts.onNewPushPassword?.(id) ?? {
         status: 200,
-        body: { protocol: "srt", address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:rotatedpw`, password: "rotatedpw" },
+        body: {
+          protocol: "srt",
+          address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:rotatedpw`,
+          password: "rotatedpw",
+          applied: true,
+          kicked: false,
+        },
       };
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
@@ -842,21 +856,47 @@ test("Copy falls back to selecting the address and prompting Ctrl+C/Cmd+C — js
   }
 });
 
-test("a feed delayed by B-frames shows the design's warning callout with the OBS fix text; a live feed shows none", async () => {
+test("R14g: a push feed set to WHIP shows the OBS-specific B-frames fix text; a pull feed (never necessarily OBS) shows the generic device text instead; a live feed shows neither", async () => {
   const g = stubGlobals({
-    ...makeState([pullFeed({ status: { state: "delayed", delayedBecause: "b-frames" } })]),
+    ...makeState([pushFeed({ id: "feed-whip-delayed", name: "OBS delayed", source: { kind: "push", protocol: "whip" }, status: { state: "delayed", delayedBecause: "b-frames" } })]),
     kinds: ALL_KINDS,
   });
   try {
     mount();
     await settle();
     await settle();
-    assert.ok(screen.getByText(/Keyframe interval 1 s with B-frames 0/), "expected the OBS B-frames fix text");
+    // getByText/queryByText match a single element's own text, and the
+    // headline sits inside its own <b> nested in the callout's <p> — a
+    // regex loose enough to match the <p>'s full text ALSO matches the <b>
+    // inside it, "multiple elements" either way. document.body.textContent
+    // sidesteps that; what is being proven is presence, not which element.
+    const body = document.body.textContent ?? "";
+    assert.ok(body.includes("Delayed about 4 s."), "expected the design's headline");
+    assert.ok(body.includes("OBS is sending B-frames"), "expected OBS named for a push+WHIP feed");
+    assert.ok(body.includes("Keyframe interval 1 s with B-frames 0"), "expected the OBS-specific fix text");
   } finally {
     g.restore();
   }
 
   const g2 = stubGlobals({
+    ...makeState([pullFeed({ status: { state: "delayed", delayedBecause: "b-frames" } })]),
+    kinds: ALL_KINDS,
+  });
+  try {
+    cleanup();
+    __resetReplayCacheForTests();
+    mount();
+    await settle();
+    await settle();
+    const body2 = document.body.textContent ?? "";
+    assert.ok(body2.includes("the device is sending B-frames"), "expected \"the device\", never OBS, for a pull feed");
+    assert.equal(body2.includes("OBS is sending"), false, "a pull feed must never be called OBS");
+    assert.equal(body2.includes("Keyframe interval"), false, "the OBS-specific Settings path must not appear for a non-WHIP feed");
+  } finally {
+    g2.restore();
+  }
+
+  const g3 = stubGlobals({
     ...makeState([pullFeed({ status: { state: "live" } })]),
     kinds: ALL_KINDS,
   });
@@ -866,7 +906,229 @@ test("a feed delayed by B-frames shows the design's warning callout with the OBS
     mount();
     await settle();
     await settle();
-    assert.equal(screen.queryByText(/Keyframe interval/), null, "a live feed must show no delay warning");
+    assert.equal(screen.queryByText(/Delayed about/), null, "a live feed must show no delay warning");
+  } finally {
+    g3.restore();
+  }
+});
+
+test("item 12: a pull feed with a stored password shows \"A password is saved\" with a Clear button, which sends password: \"\" immediately", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed({ hasPassword: true })]), kinds: ALL_KINDS },
+    { onUpdateFeed: (id, body) => ({ status: 200, body: echoUpdate(id, body) }) },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    assert.ok(screen.getByText("A password is saved. Type to replace it, or clear it."));
+    const clear = screen.getByRole("button", { name: "Clear" });
+    fireEvent.click(clear);
+    await settle();
+    await settle();
+
+    const patch = g.calls.find((c) => c.method === "PATCH");
+    assert.ok(patch, "expected Clear to send a PATCH immediately, not wait for Save");
+    assert.deepEqual(patch!.body, { password: "" });
+  } finally {
+    g.restore();
+  }
+});
+
+test("item 12: typing into the pull Password field hides the \"password is saved\" message and the Clear button", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed({ hasPassword: true })]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    assert.ok(screen.getByText("A password is saved. Type to replace it, or clear it."));
+
+    const password = container.querySelector('input[aria-label="Password"]') as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "new-one" } });
+    await settle();
+
+    assert.equal(screen.queryByText("A password is saved. Type to replace it, or clear it."), null);
+    assert.equal(screen.queryByRole("button", { name: "Clear" }), null);
+  } finally {
+    g.restore();
+  }
+});
+
+test("item 12: a pull feed with no stored password shows neither the message nor Clear", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed({ hasPassword: false })]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.equal(screen.queryByText(/A password is saved/), null);
+    assert.equal(screen.queryByRole("button", { name: "Clear" }), null);
+  } finally {
+    g.restore();
+  }
+});
+
+test("item 11: a failed rotation keeps the address and password fields visible, shows the error, and New password stays pressable", async () => {
+  let attempt = 0;
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+    {
+      onNewPushPassword: () => {
+        attempt++;
+        if (attempt === 1) return { status: 500, body: { error: "The relay could not be reached." } };
+        return { status: 200, body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:secondpw", password: "secondpw", applied: true, kicked: false } };
+      },
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    const before = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    assert.ok(before.value.includes("testpw"));
+
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    await settle();
+
+    assert.ok(screen.getByText("The relay could not be reached."), "expected the error to show");
+    const stillThere = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+    assert.ok(stillThere.value.includes("testpw"), "the address must stay visible, unchanged, after a failed rotation");
+    const retryButton = screen.getByRole("button", { name: "New password" });
+    assert.equal((retryButton as HTMLButtonElement).disabled, false, "New password must be pressable again after a failure");
+
+    // And pressing it again succeeds.
+    fireEvent.click(retryButton);
+    await settle();
+    await settle();
+    const after = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+    assert.ok(after.value.includes("secondpw"));
+    assert.equal(screen.queryByText("The relay could not be reached."), null, "the error must clear on a later success");
+  } finally {
+    g.restore();
+  }
+});
+
+test("R14g-a: flipping the segmented control before Save re-fetches the OTHER protocol's address, without saving", async () => {
+  const requested: (string | undefined)[] = [];
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+    {
+      onPushAddress: (id, protocol) => {
+        requested.push(protocol);
+        return {
+          status: 200,
+          body:
+            protocol === "whip"
+              ? { protocol: "whip", address: `http://192.168.1.50:8788/video/${id}/whip`, password: "video:testpw" }
+              : { protocol: "srt", address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:testpw`, password: "testpw" },
+        };
+      },
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.ok((await screen.findByLabelText("Paste this into the device") as HTMLInputElement).value.startsWith("srt://"));
+
+    fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
+    await settle();
+    await settle();
+
+    const address = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    assert.ok(address.value.startsWith("http://"), address.value);
+    assert.ok(requested.includes("whip"), "expected a GET carrying ?protocol=whip");
+
+    // Nothing was saved: no PATCH/POST /api/video/feeds went out for this.
+    assert.equal(
+      g.calls.some((c) => c.method === "PATCH" || (c.method === "POST" && c.url.endsWith("/api/video/feeds"))),
+      false,
+      "flipping the segmented control alone must never save anything",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("R14g: Copy's button label flips to \"Copied\" — exercised here via the plain-HTTP fallback path, which jsdom always takes (no navigator.clipboard)", async () => {
+  // The secure-clipboard branch (real \"Copied\" on success) is not
+  // reachable in jsdom at all — navigator.clipboard is undefined here,
+  // the same as Stage Utility's own prod (see the Copy-fallback test above)
+  // — so this only proves the button's OWN label is "Copy", never
+  // silently "Copied" from a stale render, and that clicking it does not
+  // throw. The actual flip is confirmed in the browser drive.
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+    assert.ok(screen.getByRole("button", { name: "Copy" }), "expected the button to read \"Copy\" before any click");
+  } finally {
+    g.restore();
+  }
+});
+
+test("R14d: the editor shows a note when applied or kicked is false for a RUNNING relay, and shows neither when the relay is off", async () => {
+  const runningState = {
+    ...makeState([pushFeed()]),
+    kinds: ALL_KINDS,
+    relay: { state: "running" as const, version: "1.21.1", ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 } },
+  };
+  const g = stubGlobals(runningState, {
+    onNewPushPassword: () => ({
+      status: 200,
+      body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:p2", password: "p2", applied: false, kicked: false },
+    }),
+  });
+  try {
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    await settle();
+
+    assert.ok(
+      screen.getByText("The relay did not take the new password yet; it will on its next start"),
+      "expected the applied:false note while the relay is running",
+    );
+  } finally {
+    g.restore();
+  }
+
+  // The same applied:false/kicked:false rotation, but with NO relay running
+  // (makeState's default): no note at all — R14d's whole point.
+  const g2 = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+    {
+      onNewPushPassword: () => ({
+        status: 200,
+        body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:p3", password: "p3", applied: false, kicked: false },
+      }),
+    },
+  );
+  try {
+    cleanup();
+    __resetReplayCacheForTests();
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    await settle();
+
+    assert.equal(
+      screen.queryByText(/did not take the new password/),
+      null,
+      "no relay running — the note must not fire even though applied/kicked are both false",
+    );
   } finally {
     g2.restore();
   }

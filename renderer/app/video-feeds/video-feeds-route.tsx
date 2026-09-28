@@ -92,6 +92,7 @@ export function VideoFeedsRoute() {
           kinds={state.kinds}
           appLogo={null}
           appLogoMonochrome={false}
+          relayRunning={state.relay.state === "running"}
           onSaved={(feed) => {
             setCreatingNew(false);
             setSelectedId(feed.id);

@@ -98,6 +98,22 @@ export function feedMeta(feed: VideoFeedView): string[] {
   return [];
 }
 
+/**
+ * R14g: the design's per-row B-frames hint (mockup-v2.html's `.hint` span,
+ * distinct from the muted meta line above it) — null for anything else,
+ * including a codec-delayed feed (no per-row hint text is specified for
+ * that case). Same OBS-vs-device wording as the editor's own warning
+ * callout (feed-editor.tsx's delayWarning): "OBS" only for a push feed set
+ * to WHIP, "the device" otherwise, since neither a pull camera nor a push
+ * feed on SRT/RTMP is necessarily OBS.
+ */
+export function bFramesHint(feed: VideoFeedView): string | null {
+  if (feed.status.state !== "delayed" || feed.status.delayedBecause !== "b-frames") return null;
+  const isObsWhip = feed.source.kind === "push" && feed.source.protocol === "whip";
+  const who = isObsWhip ? "OBS" : "The device";
+  return `${who} is sending B-frames — a few seconds late.`;
+}
+
 export function FeedList({
   feeds,
   selectedId,
@@ -114,6 +130,7 @@ export function FeedList({
       {feeds.length === 0 && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
       {feeds.map((feed) => {
         const meta = feedMeta(feed);
+        const hint = bFramesHint(feed);
         return (
           <button
             key={feed.id}
@@ -135,6 +152,7 @@ export function FeedList({
                 ))}
               </span>
             )}
+            {hint && <span className="col-span-2 text-caption1 text-warn-11">{hint}</span>}
           </button>
         );
       })}

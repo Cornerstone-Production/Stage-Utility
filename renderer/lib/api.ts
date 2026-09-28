@@ -849,7 +849,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
     case "video:pushAddress": {
       const id = p.id as string;
-      return apiFetch<T>(`/api/video/feeds/${encodeURIComponent(id)}/push`);
+      // R14g: `protocol`, when given, previews another protocol's address
+      // with the feed's SAME stored password, without saving anything.
+      const query = p.protocol ? `?protocol=${encodeURIComponent(p.protocol as string)}` : "";
+      return apiFetch<T>(`/api/video/feeds/${encodeURIComponent(id)}/push${query}`);
     }
     case "video:newPushPassword": {
       const id = p.id as string;

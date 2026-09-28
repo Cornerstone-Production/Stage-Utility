@@ -14,7 +14,6 @@ import {
   EMBED_PLAYERS,
   PUSH_PROTOCOLS,
   type EmbedPlayer,
-  type FeedStatus,
   type PushProtocol,
   type VideoFeedView,
   type VideoSourceKind,
@@ -59,20 +58,35 @@ const PUSH_DESCRIPTION: Record<PushProtocol, string> = {
   whip: "In OBS: Settings, Stream, Service WHIP. Use the password below as the Bearer Token.",
 };
 
-/** The design's warning callout for a relay feed playing over HLS instead of
- *  WebRTC — null for anything else, including "delayed" via an embed/
- *  external source, which this build never reports. B-frames gets the OBS
- *  fix text the brief calls for; an unsupported codec (H265) is not
- *  necessarily from OBS, so it gets a plainer sentence instead. */
-function delayWarning(status: FeedStatus): string | null {
+/**
+ * The design's warning callout for a relay feed playing over HLS instead of
+ * WebRTC — null for anything else, including "delayed" via an embed/
+ * external source, which this build never reports.
+ *
+ * R14g: `<b>Delayed about N s.</b>` then the hint sentence, then the fix —
+ * matching mockup-v2.html's own template. "OBS" and its specific Settings
+ * path apply only to a push feed set to WHIP: that is the one case this
+ * app KNOWS the device is OBS. A pull camera, or a push feed on SRT/RTMP,
+ * says "the device" and a protocol-agnostic fix, since it is very possibly
+ * not OBS at all (a Magewell, ProPresenter's own output, anything else that
+ * can push or be pulled from). Exported for the list row's own hint line
+ * (feed-list.tsx), which needs the same OBS-vs-device wording.
+ */
+export function delayWarning(feed: VideoFeedView): { headline: string; body: string } | null {
+  const status = feed.status;
   if (status.state !== "delayed") return null;
+  const isObsWhip = feed.source.kind === "push" && feed.source.protocol === "whip";
+  const who = isObsWhip ? "OBS" : "the device";
   if (status.delayedBecause === "b-frames") {
-    return (
-      "Delayed, playing over HLS instead of WebRTC: the device is sending B-frames. " +
-      "In OBS: Settings, Output, Streaming, set Profile to baseline, or Keyframe interval 1 s with B-frames 0."
-    );
+    const fix = isObsWhip
+      ? "In OBS: Settings, Output, Streaming, set Profile to baseline, or Keyframe interval 1 s with B-frames 0."
+      : "Turn off B-frames on the device — Baseline profile, or a 1 s keyframe interval with B-frames 0, if it offers the choice.";
+    return { headline: "Delayed about 4 s.", body: `${who} is sending B-frames, so screens see it a few seconds late. ${fix}` };
   }
-  return `Delayed, playing over HLS instead of WebRTC: ${status.codec ?? "this"} video is not supported over WebRTC.`;
+  return {
+    headline: "Delayed about 4 s.",
+    body: `${status.codec ?? "This"} video is not supported over WebRTC, so screens see it over HLS instead.`,
+  };
 }
 
 const EMBED_PLAYER_LABEL: Record<EmbedPlayer, string> = {
@@ -174,9 +188,14 @@ export interface FeedEditorProps {
    * whatever was selected before "Add feed" — see video-feeds-route.tsx.
    */
   onCancelNew: () => void;
+  /** `video:state`'s `relay.state === "running"` — R14d gates the push
+   *  editor's "did not take effect" notes on this, so they never fire
+   *  merely because no relay is attached yet (the common case until Task
+   *  15 wires one into the server). */
+  relayRunning: boolean;
 }
 
-export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew }: FeedEditorProps) {
+export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew, relayRunning }: FeedEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(feed, kinds));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -240,6 +259,24 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
     }
   }
 
+  /** Item 12: clears a pull feed's stored password immediately — sends
+   *  `password: ""` on its own, rather than waiting for the operator to
+   *  also press Save. Only shown while a password IS stored and the
+   *  operator has not started typing a replacement (see the field's own
+   *  render below). */
+  async function handleClearPullPassword() {
+    if (!feed) return;
+    setError(null);
+    try {
+      const result = await invoke<{ feed: VideoFeedView }>("video:updateFeed", { id: feed.id, patch: { password: "" } });
+      onSaved(result.feed);
+      setDraft((d) => ({ ...d, pullPassword: "" }));
+      setPullPasswordTouched(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   async function handleDelete() {
     if (!feed) return;
     setError(null);
@@ -271,6 +308,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
   }
 
   const picture = pictureFor(feed?.id ?? null);
+  const warning = !isNew && feed ? delayWarning(feed) : null;
 
   return (
     <aside
@@ -283,8 +321,10 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />
       </div>
 
-      {!isNew && feed && delayWarning(feed.status) && (
-        <p className="rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">{delayWarning(feed.status)}</p>
+      {warning && (
+        <p className="rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+          <b>{warning.headline}</b> {warning.body}
+        </p>
       )}
 
       <StackedField label="Name" description="What layouts and Home show. Renaming keeps every layout using it.">
@@ -339,6 +379,19 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
                 }}
               />
             </div>
+            {/* Item 12: the field itself never shows a stored password —
+                only THAT one is stored, via hasPassword, never the value.
+                Hidden the moment the operator starts typing a replacement,
+                since the message ("a password is saved") stops being true
+                the instant they are actively setting a new one. */}
+            {!isNew && feed?.source.kind === "pull" && feed.hasPassword && !pullPasswordTouched && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-caption1 text-fg-subtle">A password is saved. Type to replace it, or clear it.</span>
+                <Button type="button" variant="transparent" size="small" onClick={() => void handleClearPullPassword()}>
+                  Clear
+                </Button>
+              </div>
+            )}
           </StackedField>
 
           <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">
@@ -360,12 +413,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           </StackedField>
 
           {!isNew && feed && feed.source.kind === "push" ? (
-            // Keyed off the feed's own SAVED protocol, not the draft: the
-            // address and password come from the server, tied to whatever
-            // protocol is actually stored — flipping the segmented control
-            // above previews nothing here until Save commits it, the same
-            // way the picture above never previews an unsaved feedId.
-            <PushAddressFields key={feed.source.protocol} feedId={feed.id} />
+            // R14g-a: `protocol` is the DRAFT's current segmented-control
+            // choice, not necessarily the feed's saved one — the address
+            // and description now preview whatever protocol is selected,
+            // via the server's own protocolOverride (pushAddress()), never
+            // saving anything until Save is pressed.
+            <PushAddressFields feedId={feed.id} protocol={draft.pushProtocol} relayRunning={relayRunning} />
           ) : (
             <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">
               Save this feed to get its address and password.
@@ -450,11 +503,25 @@ interface PushAddress {
   password: string;
 }
 
+/** What newPushPassword() reports about the rotation that just ran — R14d.
+ *  Kept separate from `PushAddress`: it is only ever set by an ACTUAL
+ *  rotation this session, never by a plain load, so its presence alone is
+ *  "a rotation happened," not "the feed has ever been rotated." */
+interface RotationResult {
+  applied: boolean;
+  kicked: boolean;
+}
+
+/** How long the Copy button's label reads "Copied" before reverting — R14g. */
+const COPIED_LABEL_MS = 1400;
+
 /**
- * The saved push feed's paste-ready address and password: "Paste this into
- * the device" with Copy, then Password with New password. Fetched fresh
- * whenever `feedId` changes (the parent remounts this on a protocol change
- * too — see its own comment at the call site).
+ * A push feed's paste-ready address and password: "Paste this into the
+ * device" with Copy, then Password with New password. Re-fetched whenever
+ * `feedId` OR `protocol` changes — R14g-a: `protocol` is the editor's own
+ * DRAFT choice (the segmented control above), so flipping it previews that
+ * protocol's address with the SAME stored password, via the server's own
+ * `protocolOverride`, without saving anything.
  *
  * Copy never throws: `navigator.clipboard` is undefined outside a secure
  * context, which is how Stage Utility is normally served on a LAN (plain
@@ -464,15 +531,17 @@ interface PushAddress {
  * operator to see and confirm the selection, not a copy that happened
  * invisibly.
  */
-function PushAddressFields({ feedId }: { feedId: string }) {
+function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string; protocol: PushProtocol; relayRunning: boolean }) {
   const [data, setData] = useState<PushAddress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
+  const [rotation, setRotation] = useState<RotationResult | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [justCopied, setJustCopied] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
-    return invoke<PushAddress>("video:pushAddress", { id: feedId }).then(
+    return invoke<PushAddress>("video:pushAddress", { id: feedId, protocol }).then(
       (r) => {
         setData(r);
         setError(null);
@@ -482,7 +551,7 @@ function PushAddressFields({ feedId }: { feedId: string }) {
         setError("Couldn't read the push address.");
       },
     );
-  }, [feedId]);
+  }, [feedId, protocol]);
 
   useEffect(() => {
     void load();
@@ -491,8 +560,15 @@ function PushAddressFields({ feedId }: { feedId: string }) {
   async function handleNewPassword() {
     setRotating(true);
     try {
-      const r = await invoke<PushAddress>("video:newPushPassword", { id: feedId });
-      setData(r);
+      const r = await invoke<PushAddress & RotationResult>("video:newPushPassword", { id: feedId });
+      // The rotation response is always the feed's own SAVED protocol,
+      // which can differ from an unsaved preview above — shown directly
+      // rather than re-fetched in the PREVIEWED protocol, so what is on
+      // screen is always exactly what newPushPassword just confirmed, with
+      // no second round trip that could show a stale password if it lands
+      // out of order.
+      setData({ protocol: r.protocol, address: r.address, password: r.password });
+      setRotation({ applied: r.applied, kicked: r.kicked });
       setError(null);
       setCopyHint(null);
     } catch (err) {
@@ -507,7 +583,11 @@ function PushAddressFields({ feedId }: { feedId: string }) {
     try {
       if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(data.address).then(
-          () => setCopyHint("Copied"),
+          () => {
+            setCopyHint(null);
+            setJustCopied(true);
+            setTimeout(() => setJustCopied(false), COPIED_LABEL_MS);
+          },
           () => {
             addressRef.current?.select();
             setCopyHint("Press Ctrl+C / Cmd+C to copy");
@@ -522,8 +602,25 @@ function PushAddressFields({ feedId }: { feedId: string }) {
     setCopyHint("Press Ctrl+C / Cmd+C to copy");
   }
 
-  if (error) return <ErrorNote>{error}</ErrorNote>;
+  // Item 11: an error from a ROTATION (data already loaded) keeps the
+  // fields on screen, with the error under Password and New password still
+  // pressable — only a failed INITIAL load (nothing to show at all) falls
+  // back to a bare ErrorNote.
+  if (error && !data) return <ErrorNote>{error}</ErrorNote>;
   if (!data) return null;
+
+  // R14d: a note only for a RUNNING relay — with none attached (the common
+  // case until Task 15 wires one into the server), `applied`/`kicked` are
+  // vacuously true/false and would otherwise show a false alarm on every
+  // single rotation. `applied` false wins when both are false: the new
+  // password is not live at the relay yet, so whether the kick itself also
+  // failed is moot until it is.
+  const rotationNote =
+    relayRunning && rotation && (!rotation.applied || !rotation.kicked)
+      ? !rotation.applied
+        ? "The relay did not take the new password yet; it will on its next start"
+        : "The device already sending could not be dropped; it keeps sending until it reconnects"
+      : null;
 
   return (
     <>
@@ -535,9 +632,10 @@ function PushAddressFields({ feedId }: { feedId: string }) {
             readOnly
             className="min-w-0 flex-1 font-mono text-caption1"
             value={data.address}
+            onBlur={() => setCopyHint(null)}
           />
-          <Button type="button" variant="transparent" size="small" className="shrink-0" onClick={handleCopy}>
-            Copy
+          <Button type="button" variant="filled" size="small" className="shrink-0" onClick={handleCopy}>
+            {justCopied ? "Copied" : "Copy"}
           </Button>
         </div>
         {copyHint && <span className="text-caption1 text-fg-subtle">{copyHint}</span>}
@@ -548,7 +646,7 @@ function PushAddressFields({ feedId }: { feedId: string }) {
           <Input aria-label="Password" readOnly className="min-w-0 flex-1 font-mono text-caption1" value={data.password} />
           <Button
             type="button"
-            variant="transparent"
+            variant="filled"
             size="small"
             className="shrink-0 whitespace-nowrap"
             onClick={() => void handleNewPassword()}
@@ -558,6 +656,9 @@ function PushAddressFields({ feedId }: { feedId: string }) {
           </Button>
         </div>
       </StackedField>
+
+      {rotationNote && <p className="text-caption1 text-warn-11">{rotationNote}</p>}
+      {error && <ErrorNote>{error}</ErrorNote>}
     </>
   );
 }
