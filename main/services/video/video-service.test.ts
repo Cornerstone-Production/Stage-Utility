@@ -2579,3 +2579,62 @@ test("item 12: view() reports hasPassword for a pull feed (never the value), tru
     await videoService.removeFeed(id);
   }
 });
+
+// ── relay-lifecycle.ts's own hooks: fired on every feed/ports change ───────
+
+test("setFeedsChangedListener fires on addFeed, updateFeed and removeFeed — the hook relay-lifecycle.ts starts/stops the relay from", async () => {
+  const calls: string[] = [];
+  videoService.setFeedsChangedListener(() => calls.push("changed"));
+  try {
+    const made = await videoService.addFeed({ name: "Hook pull", source: { kind: "pull", url: "rtsp://192.0.2.104:8554/s", username: "" } });
+    assert.ok(made.ok);
+    const id = (made as { feed: { id: string } }).feed.id;
+    assert.equal(calls.length, 1, "addFeed did not fire the hook");
+
+    await videoService.updateFeed(id, { name: "Hook pull renamed" });
+    assert.equal(calls.length, 2, "updateFeed did not fire the hook");
+
+    await videoService.removeFeed(id);
+    assert.equal(calls.length, 3, "removeFeed did not fire the hook");
+  } finally {
+    videoService.setFeedsChangedListener(null);
+  }
+});
+
+test("setPortsChangedListener fires from setPorts, and only on a body that validates", async () => {
+  const calls: string[] = [];
+  videoService.setPortsChangedListener(() => calls.push("changed"));
+  try {
+    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 });
+    assert.equal(bad.ok, false, "a port below 1024 must be refused");
+    assert.equal(calls.length, 0, "the hook fired on a body that never saved anything");
+
+    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997 });
+    assert.ok(ok.ok);
+    assert.equal(calls.length, 1, "a valid ports save never fired the hook");
+  } finally {
+    videoService.setPortsChangedListener(null);
+    const { videoFeedsStore } = await import("./feed-store.js");
+    await videoFeedsStore.update((current) => ({ ...current, ports: DEFAULT_VIDEO_PORTS }));
+  }
+});
+
+test("setPreAttachStatus reports a RelayStatus with no supervisor attached, and clearing it falls back to off", async () => {
+  assert.equal((await videoService.state()).relay.state, "off");
+  videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 10, totalBytes: 100 });
+  assert.deepEqual((await videoService.state()).relay, { state: "downloading", receivedBytes: 10, totalBytes: 100 });
+
+  videoService.setPreAttachStatus(null);
+  assert.deepEqual((await videoService.state()).relay, { state: "off" });
+});
+
+test("attachRelay always wins over a stale setPreAttachStatus — a supervisor's own status is the only truth once one exists", async () => {
+  videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 1, totalBytes: 2 });
+  const supervisor = new FakeSupervisor();
+  attach(fakeRelay(async () => []), supervisor);
+  try {
+    assert.equal((await videoService.state()).relay.state, "running", "attachRelay must clear a stale pre-attach status");
+  } finally {
+    await videoService.detachRelay();
+  }
+});

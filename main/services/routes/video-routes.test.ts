@@ -382,3 +382,36 @@ test("the source line names the kind, then the address, protocol or ref", async 
     await callRoute(videoRoutes, `/api/video/feeds/${feed.id}`, { method: "DELETE" });
   }
 });
+
+const GOOD_PORTS = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
+
+test("PATCH /api/video/ports saves six distinct in-range ports, and GET /api/video/state reflects them", async () => {
+  const saved = await callRoute(videoRoutes, "/api/video/ports", { method: "PATCH", body: GOOD_PORTS });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((saved.json as { ports: unknown }).ports, GOOD_PORTS);
+
+  const state = (await callRoute(videoRoutes, "/api/video/state")).json as { ports: unknown };
+  assert.deepEqual(state.ports, GOOD_PORTS);
+});
+
+test("PATCH /api/video/ports refuses a port outside 1024-65535, and a non-integer", async () => {
+  for (const bad of [
+    { ...GOOD_PORTS, rtmp: 80 },
+    { ...GOOD_PORTS, api: 70000 },
+    { ...GOOD_PORTS, hls: 8888.5 },
+    { ...GOOD_PORTS, srt: "8890" },
+  ]) {
+    const r = await callRoute(videoRoutes, "/api/video/ports", { method: "PATCH", body: bad });
+    assert.equal(r.status, 400, JSON.stringify(bad));
+    assert.match((r.json as { error: string }).error, /1024 to 65535/);
+  }
+});
+
+test("PATCH /api/video/ports refuses two ports set to the same value", async () => {
+  const r = await callRoute(videoRoutes, "/api/video/ports", {
+    method: "PATCH",
+    body: { ...GOOD_PORTS, srt: GOOD_PORTS.rtmp },
+  });
+  assert.equal(r.status, 400);
+  assert.match((r.json as { error: string }).error, /must be different/);
+});

@@ -279,6 +279,15 @@ const NOT_SCANNED = new Map<string, string>([
       "just excused.",
   ],
   [
+    "video/relay-lifecycle.ts",
+    "logs the relay's own version (MediaMTX's startup banner, the same not-HTTP-data as " +
+      "supervisor.ts below) and its bound ports, which ARE saved through PATCH " +
+      "/api/video/ports — but ports.ts's own parsePorts() accepts only an integer 1024-" +
+      "65535 for each, so nothing that reaches the log line can carry a newline. The one " +
+      "free-text value, a busy port's holder, is describePortHolder()'s own OS process " +
+      "lookup — the DEVICE threat model below, not an HTTP body. Audited, not just excused.",
+  ],
+  [
     "video/supervisor.ts",
     "logs the leftover-relay pid it cleans up (its own bookkeeping file, never HTTP data) and " +
       "the relay CHILD PROCESS's own exit reason — MediaMTX's stdout/stderr, parsed by " +

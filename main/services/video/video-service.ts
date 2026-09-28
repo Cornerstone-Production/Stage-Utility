@@ -20,24 +20,26 @@ import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput } from "./feed-input.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
+import { parsePorts } from "./ports.js";
 import { pullSource } from "./reconcile-plan.js";
 import { RelayLogWatcher } from "./relay-log.js";
 import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
 import type { SupervisorStatus } from "./supervisor.js";
-import type {
-  FeedPlay,
-  FeedState,
-  FeedStatus,
-  KickResult,
-  PushProtocol,
-  RelayStatus,
-  VideoFeed,
-  VideoFeedsFile,
-  VideoFeedView,
-  VideoPorts,
-  VideoSourceKind,
-  VideoState,
+import {
+  DEFAULT_VIDEO_PORTS,
+  type FeedPlay,
+  type FeedState,
+  type FeedStatus,
+  type KickResult,
+  type PushProtocol,
+  type RelayStatus,
+  type VideoFeed,
+  type VideoFeedsFile,
+  type VideoFeedView,
+  type VideoPorts,
+  type VideoSourceKind,
+  type VideoState,
 } from "../../types/video.js";
 
 type Result = { ok: true; feed: VideoFeedView } | { ok: false; error: string };
@@ -166,12 +168,28 @@ class VideoService {
     rev: 0,
     relay: { state: "off" },
     kinds: [...this.allowedKinds()],
+    ports: DEFAULT_VIDEO_PORTS,
     feeds: [],
   };
 
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
   private supervisor: RelaySupervisorLike | null = null;
+  /**
+   * Reported by relay-lifecycle.ts's start sequence for the phase no
+   * supervisor exists yet to derive a RelayStatus from: ensureBinary's own
+   * download progress, or a failure before any supervisor is spawned (a busy
+   * port, a failed download, a config file that could not be written).
+   * Cleared the moment a supervisor takes over — attachRelay() and
+   * detachInternal() both do, so a stale one can never survive into an
+   * attached relay's own reporting, which relayStatus() below always prefers
+   * once `this.supervisor` is set. */
+  private preAttachStatus: RelayStatus | null = null;
+  /** relay-lifecycle.ts's own hooks — see setFeedsChangedListener's comment
+   *  for why a feed CRUD needs one beyond reconcileRelay(), and setPorts()
+   *  for the ports one. */
+  private feedsChangedListener: (() => void) | null = null;
+  private portsChangedListener: (() => void) | null = null;
   /**
    * The ports the CURRENT relay process was actually started with — pinned
    * at attachRelay(), never re-read from the store while the same process
@@ -280,7 +298,7 @@ class VideoService {
    * pollFailureIsNews() says so.
    */
   private relayStatus(): RelayStatus {
-    if (!this.supervisor) return { state: "off" };
+    if (!this.supervisor) return this.preAttachStatus ?? { state: "off" };
     const status = this.supervisor.status();
     switch (status.state) {
       case "off":
@@ -375,14 +393,18 @@ class VideoService {
   }
 
   async state(): Promise<VideoState> {
-    // Only `feeds` comes from the store now — the running relay's OWN
-    // ports come from attachedPorts (relayStatus()'s own comment), not from
-    // whatever the store currently holds.
-    const { feeds } = await loadFeedsFile();
+    // `ports` here is the STORED value — what relay-lifecycle.ts's next
+    // start uses, and what the Advanced page's ports card edits. The running
+    // relay's OWN ports (relayStatus()'s "running" variant) come from
+    // attachedPorts instead, and can differ from this for the moment between
+    // a ports save and the restart it triggers — see VideoState's own field
+    // comment for why the two are not one field.
+    const { feeds, ports } = await loadFeedsFile();
     return {
       rev: this.rev,
       relay: this.relayStatus(),
       kinds: [...this.allowedKinds()],
+      ports,
       feeds: await Promise.all(feeds.map((f) => this.view(f))),
     };
   }
@@ -397,6 +419,43 @@ class VideoService {
   async init(): Promise<void> {
     await loadSeen();
     this.snapshot = await this.state();
+  }
+
+  /** relay-lifecycle.ts's own status while no supervisor exists yet to ask —
+   *  see the field's own comment. `null` clears it back to plain "off". */
+  setPreAttachStatus(status: RelayStatus | null): void {
+    this.preAttachStatus = status;
+    void this.publish();
+  }
+
+  /**
+   * relay-lifecycle.ts's hook for "a feed was added, changed or removed" —
+   * separate from reconcileRelay() (called from the same three places),
+   * because the two answer different questions. reconcileRelay() catches an
+   * ALREADY-ATTACHED relay up on its paths; it is a no-op with none attached.
+   * Starting the relay on the first pull/push feed, or stopping it once the
+   * last one is gone, is relay-lifecycle's job, and the only way it can know
+   * to look is being told a feed changed at all — this is that hook.
+   */
+  setFeedsChangedListener(cb: (() => void) | null): void {
+    this.feedsChangedListener = cb;
+  }
+
+  /** relay-lifecycle.ts's hook for "the stored ports changed" — setPorts()'s
+   *  own trigger to restart an already-running relay on the new ones. */
+  setPortsChangedListener(cb: (() => void) | null): void {
+    this.portsChangedListener = cb;
+  }
+
+  /** `PATCH /api/video/ports`: validated, saved, and relay-lifecycle.ts told
+   *  to restart an already-running relay on the new ones. */
+  async setPorts(body: unknown): Promise<{ ok: true; ports: VideoPorts } | { ok: false; error: string }> {
+    const parsed = parsePorts(body);
+    if (!parsed.ok) return parsed;
+    await videoFeedsStore.update((current) => ({ ...current, ports: parsed.ports }));
+    await this.publish();
+    this.portsChangedListener?.();
+    return { ok: true, ports: parsed.ports };
   }
 
   /**
@@ -441,6 +500,10 @@ class VideoService {
     this.relay = relay;
     this.supervisor = supervisor;
     this.attachedPorts = ports;
+    // Irrelevant from here on — relayStatus() only reads this while
+    // `this.supervisor` is null — but cleared anyway so it cannot survive
+    // stale into a later detach that leaves it behind.
+    this.preAttachStatus = null;
     this.lineListener = (text: string) => this.handleLine(text);
     // Starting and failing-with-retry must reach video:state as soon as the
     // supervisor itself knows them, not only on the next poll tick — a poll
@@ -474,6 +537,10 @@ class VideoService {
     this.relay = null;
     this.supervisor = null;
     this.attachedPorts = null;
+    // A caller that just detached is telling relay-lifecycle.ts's own
+    // sequence to report from scratch (setPreAttachStatus, next) — never
+    // whatever a previous run last set.
+    this.preAttachStatus = null;
     this.lineListener = null;
     this.statusListener = null;
     this.relayNotAnswering = false;
@@ -895,11 +962,13 @@ class VideoService {
   }
 
   /** Every pull/push feed as the relay needs it, credentials folded in —
-   *  never logged, never returned from here: the only two callers are
-   *  reconcileOnce() (handed straight to relay.reconcile()) and
-   *  pushAddress() (which returns exactly one feed's own password to the
-   *  route that asked for it). */
-  private async relayFeeds(): Promise<RelayFeed[]> {
+   *  never logged, never returned from here: the callers are reconcileOnce()
+   *  (handed straight to relay.reconcile()), pushAddress() (which returns
+   *  exactly one feed's own password to the route that asked for it), and
+   *  relay-lifecycle.ts's start sequence, which needs the same list to build
+   *  the initial config's publish users before any relay exists to reconcile
+   *  against. PUBLIC for that last caller alone. */
+  async relayFeeds(): Promise<RelayFeed[]> {
     const { feeds } = await loadFeedsFile();
     const out: RelayFeed[] = [];
     for (const feed of feeds) {
@@ -930,8 +999,10 @@ class VideoService {
    * once per outage (the same OutageLog the status poll uses, under its own
    * key) and never thrown — the feed store write the caller already made is
    * the source of truth, and the relay catches up on its next reconcile or
-   * restart (Task 15's job). Skipped entirely with no relay attached, or one
-   * whose supervisor is not currently "running": there is nothing to ask.
+   * restart. Skipped entirely with no relay attached, or one whose
+   * supervisor is not currently "running": there is nothing to ask. PUBLIC so
+   * relay-lifecycle.ts's own readiness retry can call it directly once the
+   * relay it just started has an API worth asking.
    *
    * R14e: single-flight. Two feed changes calling this while a reconcile is
    * already talking to the relay used to fire two overlapping
@@ -967,7 +1038,7 @@ class VideoService {
    * statement, wedging every later reconcileRelay() call behind a flag
    * that would never come back down.
    */
-  private reconcileRelay(): Promise<boolean> {
+  reconcileRelay(): Promise<boolean> {
     if (this.reconcileRunning) {
       this.reconcileDirty = true;
       return this.reconcileChain;
@@ -1008,6 +1079,20 @@ class VideoService {
       if (decision.log) console.warn(`[video] could not reconcile the relay: ${scrub(message)}${scrub(decision.note)}`);
       return false;
     }
+  }
+
+  /**
+   * addFeed/updateFeed/removeFeed's shared tail: reconcile whatever relay is
+   * already attached (reconcileRelay(), above), then tell relay-lifecycle.ts
+   * a feed changed at all — see setFeedsChangedListener's own comment for
+   * why both are needed. newPushPassword() calls reconcileRelay() directly
+   * instead: a password rotation never adds or removes a relay feed, so
+   * there is nothing for relay-lifecycle to start or stop over it.
+   */
+  private async notifyFeedsChanged(): Promise<boolean> {
+    const applied = await this.reconcileRelay();
+    this.feedsChangedListener?.();
+    return applied;
   }
 
   // ── A push feed's paste-ready address ────────────────────────────────────
@@ -1143,7 +1228,7 @@ class VideoService {
       }
     }
     await this.publish();
-    await this.reconcileRelay();
+    await this.notifyFeedsChanged();
     return { ok: true, feed: await this.view(added) };
   }
 
@@ -1179,7 +1264,7 @@ class VideoService {
     }));
     await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
     await this.publish();
-    await this.reconcileRelay();
+    await this.notifyFeedsChanged();
     return { ok: true, feed: await this.view(feed) };
   }
 
@@ -1255,7 +1340,7 @@ class VideoService {
     // instead of "waiting" — the old feed's history, not its own.
     await this.forgetSeenSafely(id);
     await this.publish();
-    await this.reconcileRelay();
+    await this.notifyFeedsChanged();
     return true;
   }
 

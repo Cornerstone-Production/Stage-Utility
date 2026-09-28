@@ -30,6 +30,7 @@ const NOTHING = {
   oscTargets: 0,
   rossTalkTargets: 0,
   followedTeams: 0,
+  videoFeeds: 0,
 };
 
 describe("integrations whose setup is not in state.config", () => {
@@ -62,11 +63,12 @@ describe("integrations whose setup is not in state.config", () => {
     assert.equal(configuredFor({ id: "scores", config: {} }, NOTHING, false), false);
   });
 
-  test("wireless, osc and rosstalk answer from their own lists", () => {
+  test("wireless, osc, rosstalk and video answer from their own lists", () => {
     for (const [id, setup] of [
       ["wireless", { ...NOTHING, wirelessConnections: 1 }],
       ["osc", { ...NOTHING, oscTargets: 1 }],
       ["rosstalk", { ...NOTHING, rossTalkTargets: 1 }],
+      ["video", { ...NOTHING, videoFeeds: 1 }],
     ] as const) {
       assert.equal(configuredFor({ id, config: {} }, setup, false), true, `${id} with a list entry`);
       assert.equal(configuredFor({ id, config: {} }, NOTHING, false), false, `${id} with an empty list`);

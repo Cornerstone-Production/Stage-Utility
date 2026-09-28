@@ -18,16 +18,28 @@
 
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
+import { useRouter } from "@tanstack/react-router";
 
 import type { VideoFeedView } from "@main/types/video";
 
-import { FieldSet } from "../../components/ui";
+import { FieldSet, toast } from "../../components/ui";
+import { invoke } from "../../lib/api";
+import { useIntegrations } from "../../main/use-integration-states";
 import { useVideoState } from "../../main/video/use-video-state";
 import { FeedEditor } from "./feed-editor";
 import { FeedList } from "./feed-list";
+import { RelayStatusHeader } from "./relay-status";
+
+/** Typed as string — the generated route union does not satisfy a bare
+ *  literal (see integrations-panel.tsx's own VIDEO_FEEDS_ROUTE for the same
+ *  reason, the other direction). */
+const ADVANCED_ROUTE: string = "/settings/advanced";
 
 export function VideoFeedsRoute() {
   const state = useVideoState();
+  const { states } = useIntegrations();
+  const router = useRouter();
+  const [toggling, setToggling] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
   /**
@@ -57,6 +69,18 @@ export function VideoFeedsRoute() {
   // select yet" (an empty list) — either way the editor's isNew form is what
   // belongs on screen.
   const selected = creatingNew ? null : (justSaved ?? fromList ?? feeds[0] ?? null);
+  const videoEnabled = states.find((s) => s.id === "video")?.enabled === true;
+
+  async function toggleVideo(enabled: boolean): Promise<void> {
+    setToggling(true);
+    try {
+      await invoke("integrations:setEnabled", { id: "video", enabled });
+    } catch (err) {
+      toast.error(`Failed to ${enabled ? "enable" : "disable"} video feeds: ${String(err)}`);
+    } finally {
+      setToggling(false);
+    }
+  }
 
   return (
     <FieldSet>
@@ -64,6 +88,13 @@ export function VideoFeedsRoute() {
         <h1 className="text-subheadline font-semibold text-fg">Video feeds</h1>
         <span className="text-caption1 text-fg-muted">Shows camera and program feeds in layouts and on Home</span>
       </div>
+      <RelayStatusHeader
+        relay={state.relay}
+        enabled={videoEnabled}
+        toggling={toggling}
+        onToggle={(v) => void toggleVideo(v)}
+        onChangePorts={() => router.navigate({ to: ADVANCED_ROUTE })}
+      />
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_360px]">
         <FeedList
           feeds={feeds}

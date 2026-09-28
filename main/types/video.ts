@@ -118,5 +118,12 @@ export interface VideoState {
   relay: RelayStatus;
   /** The Source kinds this build offers; the page's dropdown lists exactly these. */
   kinds: VideoSourceKind[];
+  /** The STORED ports — what the next start (or restart) will use, and what
+   *  the Advanced page's ports card edits. Independent of `relay`: a running
+   *  relay's OWN ports (relay.state === "running" ? relay.ports : never) can
+   *  differ from this for the moment between a ports save and the restart it
+   *  triggers, which is exactly why the two are separate fields rather than
+   *  one "ports" the running state alone carries. */
+  ports: VideoPorts;
   feeds: VideoFeedView[];
 }

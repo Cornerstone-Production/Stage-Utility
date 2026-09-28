@@ -51,6 +51,7 @@ describe("an integration's blurb is a blurb", () => {
         "scores",
         "sensource",
         "smaart",
+        "video",
         "wireless",
         "youtube",
       ],

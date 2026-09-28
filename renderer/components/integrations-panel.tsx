@@ -1,6 +1,7 @@
 import { isMask } from "@main/services/mask";
 import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
+import { useRouter } from "@tanstack/react-router";
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
@@ -99,7 +100,7 @@ const CATEGORY_ORDER = [
   ["smaart"], // Audio
   ["sensource"], // People
   ["wireless"], // Wireless
-  ["resi", "youtube"], // Streaming
+  ["resi", "youtube", "video"], // Streaming
   ["companion", "obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
   ["scores"], // Information
 ] as const satisfies readonly (readonly IntegrationId[])[];
@@ -259,7 +260,33 @@ function bespokePanelFor(descriptor: IntegrationDescriptor): ReactNode | null {
   // multi-league team picker is not expressible as a ConfigField.
   if (descriptor.id === "scores") return <ScoresTeamsPanel />;
   if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
+  // Every feed and port lives on its own page, not in this dialog — see
+  // VIDEO_DESCRIPTOR's own comment in integration-manager.ts.
+  if (descriptor.id === "video") return <VideoFeedsLinkPanel />;
   return null;
+}
+
+/** Typed as string, matching disconnected-popover.tsx's own INTEGRATIONS_ROUTE
+ *  — the generated route union does not satisfy a bare literal. */
+const VIDEO_FEEDS_ROUTE: string = "/video-feeds";
+
+/** A button, not a Link — same reason disconnected-popover.tsx's own "go"
+ *  uses `useRouter().navigate()` rather than `<Link>`: this dialog closes
+ *  first, and a bare `<Link>` needs no closing of its own. */
+function VideoFeedsLinkPanel() {
+  const router = useRouter();
+  return (
+    <p className="px-1 py-2 text-callout text-fg-muted">
+      Feeds, ports and the relay's status all live on their own page.{" "}
+      <button
+        type="button"
+        className="text-accent hover:underline"
+        onClick={() => router.navigate({ to: VIDEO_FEEDS_ROUTE })}
+      >
+        Open Video feeds
+      </button>
+    </p>
+  );
 }
 
 /**

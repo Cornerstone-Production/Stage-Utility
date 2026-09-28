@@ -22,6 +22,12 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     json(res, { feeds: (await videoService.state()).feeds });
     return;
   }
+  if (method === "PATCH" && pathname === "/api/video/ports") {
+    const r = await videoService.setPorts(await readBody(req));
+    if (r.ok) json(res, { ports: r.ports });
+    else error(res, r.error);
+    return;
+  }
   if (method === "POST" && pathname === "/api/video/feeds") {
     const r = await videoService.addFeed(await readBody(req));
     if (r.ok) json(res, { feed: r.feed }, 201);

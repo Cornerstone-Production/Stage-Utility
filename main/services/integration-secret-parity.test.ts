@@ -128,7 +128,7 @@ describe("a table keyed by an id from outside the app", () => {
   });
 
   test("configuredFor answers for an inherited name instead of throwing", () => {
-    const setup = { wirelessConnections: 0, oscTargets: 0, rossTalkTargets: 0, followedTeams: 0 };
+    const setup = { wirelessConnections: 0, oscTargets: 0, rossTalkTargets: 0, followedTeams: 0, videoFeeds: 0 };
     for (const name of INHERITED) {
       assert.equal(
         configuredFor({ id: name, config: {} }, setup, false),
