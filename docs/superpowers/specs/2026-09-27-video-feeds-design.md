@@ -281,8 +281,15 @@ The same object is a Home card, in Home's card frame.
 2. **HLS** as the fallback, when WebRTC is refused for B-frames, the browser
    has no WebRTC, or WebRTC does not connect within 10 s (a blocked UDP port) —
    unless the screen's "Use HLS on this screen" switch is off, in which case it
-   goes to step 4. Native HLS on Safari and iPads; hls.js elsewhere (a new
-   dependency, checked against the maintained-dependencies rule in the plan).
+   goes to step 4. hls.js (a new dependency, checked against the
+   maintained-dependencies rule in the plan) wherever the browser has Media
+   Source Extensions, including Safari and iPadOS 17.1+ through
+   `ManagedMediaSource`; the browser's own HLS only where it has neither.
+   Chrome 153 reports native HLS support, but its player fails on MediaMTX's
+   low-latency HLS where hls.js plays it (driven 28 Sep 2026).
+   A relay feed that fell back to HLS tries WebRTC again after 5 minutes, so one
+   blip does not leave a stage screen delayed for the rest of the service. An
+   `external` WHEP feed has no HLS to fall back to, so any failure retries.
 3. **The platform's player** for `embed` feeds: YouTube's or Resi's iframe,
    muted, autoplay, no controls.
 4. **"This screen can't play video"**, naming the feed, when none of those can
@@ -298,9 +305,12 @@ Always muted, never controls, never audio tracks requested.
 - **Screens previews show "Video paused in preview" with a Play button**, so a
   page of nine previews does not decode nine streams. The layout editor's canvas
   plays live.
-- A dropped connection retries with backoff and shows the offline state while it
-  waits. When the feed's status goes live again, the widget reconnects at once
-  instead of waiting out the backoff.
+- A dropped connection retries with backoff (1 s doubling to 30 s) and shows the
+  offline state while it waits. The backoff resets only after 10 s of continuous
+  playback, not on the first frame: a player that shows one frame and then fails
+  would otherwise retry every second forever. When the feed's status goes live
+  again, the widget reconnects at once instead of waiting out the backoff. A
+  failing feed writes one log line per outage, not one per retry.
 
 ### What it shows
 
