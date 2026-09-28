@@ -77,6 +77,7 @@ test("no asset for this platform/arch: refused by name, no filesystem touched", 
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.reason, `Video relay is not available for ${process.platform} ${process.arch}.`);
+  await assert.rejects(fs.access(path.join(relayDir(), "downloads")), "no filesystem touched");
 });
 
 test("a downloaded archive whose hash does not match is refused, deleted, and never extracted", async () => {
@@ -164,6 +165,52 @@ test("an already-extracted binary is used as-is, with no fetch", async () => {
   assert.equal(result.path, exePath);
 });
 
+test("a failing extract step is reported, not thrown, and leaves no binary behind", async () => {
+  await resetRelayDir();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  const { sha256 } = await buildArchive(downloadsDir, "mediamtx-extract-fails.tar.gz");
+  const assets = new Map([[KEY, asset("mediamtx-extract-fails.tar.gz", sha256)]]);
+
+  const result = await ensureBinary({
+    assets,
+    fetchImpl: throwIfCalled(),
+    extract: async () => {
+      throw new Error("tar exploded");
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.reason, /extracting mediamtx-extract-fails\.tar\.gz failed: tar exploded/);
+  assert.equal(result.placeArchiveAt, path.join(downloadsDir, "mediamtx-extract-fails.tar.gz"));
+  await assert.rejects(fs.access(path.join(relayDir(), MEDIAMTX_VERSION, EXE)));
+});
+
+test(
+  "a failing chmod is reported, not thrown",
+  { skip: process.platform === "win32" ? "chmod is never run on win32" : false },
+  async () => {
+    await resetRelayDir();
+    const downloadsDir = path.join(relayDir(), "downloads");
+    const { sha256 } = await buildArchive(downloadsDir, "mediamtx-chmod-fails.tar.gz");
+    const assets = new Map([[KEY, asset("mediamtx-chmod-fails.tar.gz", sha256)]]);
+
+    const result = await ensureBinary({
+      assets,
+      fetchImpl: throwIfCalled(),
+      // Resolves without writing the exe — the same seam as the extract-failure
+      // test above, used here to put chmod's target path in a state (missing)
+      // that makes the REAL chmod() reject with ENOENT, rather than adding a
+      // chmod seam nothing else in this file needs.
+      extract: async () => {},
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.reason, /could not make .*mediamtx.* executable/);
+  },
+);
+
 test("a fresh download that matches the pin is verified, extracted, and made executable", async () => {
   await resetRelayDir();
   const downloadsDir = path.join(relayDir(), "downloads");
@@ -202,11 +249,19 @@ test("a download over 64 MB is refused by actual bytes received, not a spoofed C
   const assets = new Map([[KEY, asset("mediamtx-oversized.tar.gz", "b".repeat(64))]]);
 
   const CHUNK = 8 * 1024 * 1024;
+  let cancelled = false;
+  // pull(), not start(): the source keeps handing over 8 MB chunks for as
+  // long as the reader keeps asking, and never closes on its own — the shape
+  // of a run-away or malicious response. That is what makes reader.cancel()
+  // below a real assertion: a source that had already closed itself (as a
+  // start()-enqueued-and-closed stream would, after 9 reads) would not call
+  // this cancel() at all, so the test could pass with no cancel ever wired.
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      // 9 * 8 MB = 72 MB, over the 64 MB cap.
-      for (let i = 0; i < 9; i++) controller.enqueue(new Uint8Array(CHUNK));
-      controller.close();
+    pull(controller) {
+      controller.enqueue(new Uint8Array(CHUNK));
+    },
+    cancel() {
+      cancelled = true;
     },
   });
 
@@ -220,6 +275,7 @@ test("a download over 64 MB is refused by actual bytes received, not a spoofed C
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.reason, /exceeded 67108864 bytes/);
+  assert.equal(cancelled, true, "the over-cap stream must be cancelled, not read to completion");
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-oversized.tar.gz")));
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-oversized.tar.gz.part")));
 });

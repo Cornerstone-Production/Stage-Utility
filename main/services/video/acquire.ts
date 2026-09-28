@@ -90,6 +90,9 @@ async function downloadToPart(
       if (done) break;
       received += value.byteLength;
       if (received > MAX_DOWNLOAD_BYTES) {
+        // Cancels the stream so the transfer stops rather than running to
+        // completion in the background.
+        await reader.cancel().catch(() => {});
         return { ok: false, reason: `download of ${url} exceeded ${MAX_DOWNLOAD_BYTES} bytes; refused` };
       }
       hash.update(value);
