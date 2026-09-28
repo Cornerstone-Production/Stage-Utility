@@ -138,3 +138,16 @@ test("a PATCH carrying a source replaces it, and keeps the name", async () => {
   assert.deepEqual([feed.name, feed.source.kind], ["Foyer", "external"]);
   assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
 });
+
+test("a PATCH whose name is not text is refused with the name rule, and the name is kept", async () => {
+  const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "Side stage", source: EMBED.source } });
+  const id = (made.json as { feed: { id: string } }).feed.id;
+  for (const name of [123, null, ""]) {
+    const r = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { name } });
+    assert.equal(r.status, 400, JSON.stringify(name));
+    assert.equal((r.json as { error: string }).error, "Name must be 1–60 characters.", JSON.stringify(name));
+  }
+  const s = (await callRoute(videoRoutes, "/api/video/state")).json as { feeds: { id: string; name: string }[] };
+  assert.equal(s.feeds.find((f) => f.id === id)?.name, "Side stage");
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+});

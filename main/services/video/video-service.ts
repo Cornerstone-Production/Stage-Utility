@@ -41,7 +41,9 @@ const feedsOf = (current: VideoFeedsFile): VideoFeed[] => (Array.isArray(current
 function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; source: unknown; password: unknown } {
   const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   return {
-    name: typeof obj.name === "string" ? obj.name : existing.name,
+    // Present means supplied, whatever its type: a name that is not text
+    // must be refused by the name rule, not quietly replaced by the old one.
+    name: "name" in obj ? obj.name : existing.name,
     source: obj.source !== undefined ? obj.source : existing.source,
     password: obj.password,
   };

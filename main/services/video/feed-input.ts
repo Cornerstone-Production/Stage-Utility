@@ -3,6 +3,9 @@
 import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource } from "../../types/video.js";
 import { normalizeEmbedRef } from "./embed.js";
 
+/** Longest name a feed may have, after trimming. */
+export const MAX_NAME_LENGTH = 60;
+
 function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
   return typeof v === "string" && (list as readonly string[]).includes(v);
 }
@@ -26,12 +29,12 @@ export function parseFeedInput(
   const obj = body as Record<string, unknown>;
 
   // Validate name
-  if (typeof obj.name !== "string") {
+  if (obj.name === undefined) {
     return { ok: false, error: "Name is required." };
   }
-  const name = obj.name.trim();
-  if (name.length === 0 || name.length > 60) {
-    return { ok: false, error: "Name must be 1–60 characters." };
+  const name = typeof obj.name === "string" ? obj.name.trim() : "";
+  if (name.length === 0 || name.length > MAX_NAME_LENGTH) {
+    return { ok: false, error: `Name must be 1–${MAX_NAME_LENGTH} characters.` };
   }
 
   // Validate source exists and has kind
