@@ -219,6 +219,20 @@ class VideoService {
    *  the same fact as a relay actually answering: a hung process is running
    *  and not answering both. */
   private relayNotAnswering = false;
+  /** R14i: whether a poll has SUCCEEDED since the supervisor's status last
+   *  became "running" — reset false on every status change (same moment as
+   *  relayNotAnswering, in handleStatusChange()/detachInternal()) and set
+   *  true only by pollOnce()'s own success path, once its generation still
+   *  matches. Folded into relayFeedStatus()'s "up" check alongside
+   *  "running": between the supervisor reaching running and the relay's own
+   *  first successful poll, nothing here has actually heard from the
+   *  process yet, so a missing path must still read standby, not offline —
+   *  without this, a relay feed read "offline" the instant the supervisor
+   *  said running, before the relay had ever reported ANYTHING about that
+   *  feed's path. "failing" is unaffected: it means the relay WAS running
+   *  and reporting a moment ago, whether or not the CURRENT process (there
+   *  may be none any more) ever answered a poll of its own. */
+  private polledSinceRunning = false;
 
   // ── The last poll's answer, and what is derived from it ─────────────────
   private lastPaths = new Map<string, RelayPath>();
@@ -297,14 +311,19 @@ class VideoService {
   }
 
   private relayFeedStatus(feedId: string, kind: "pull" | "push"): FeedStatus {
-    // R14a: "up" is running or failing (it was running, and knew this
-    // feed's path, a moment ago) — off/starting/never-attached all mean
-    // nothing here can yet tell a down source from one nobody has asked
-    // about, which feedState() reads as standby rather than offline.
+    // R14a/R14i: "up" is running WITH at least one poll answered since it
+    // last reached running (never true fresh out of "starting", where the
+    // relay may not have opened its API yet — see RELAY_BOOT_GRACE_MS's own
+    // reasoning), or failing (it WAS running, and reporting on this feed's
+    // path, a moment ago, whatever the CURRENT process has or has not
+    // answered). Off, starting, or a running relay nothing has polled yet
+    // all mean nothing here can yet tell a down source from one nobody has
+    // asked about, which feedState() reads as standby rather than offline.
     const relayState = this.relayStatus().state;
+    const relayUp = (relayState === "running" && this.polledSinceRunning) || relayState === "failing";
     return feedState({
       kind,
-      relayUp: relayState === "running" || relayState === "failing",
+      relayUp,
       path: this.lastPaths.get(feedId),
       bframesMark: this.bframesMarks.get(feedId),
       recentlyRequested: this.isRecentlyRequested(feedId),
@@ -458,6 +477,7 @@ class VideoService {
     this.lineListener = null;
     this.statusListener = null;
     this.relayNotAnswering = false;
+    this.polledSinceRunning = false;
     this.stopPolling();
     // "No path" is exactly how feedState() reads a relay it cannot ask.
     this.lastPaths = new Map();
@@ -495,6 +515,10 @@ class VideoService {
   private handleStatusChange(status: SupervisorStatus): void {
     this.relayGeneration++;
     this.relayNotAnswering = false;
+    // R14i: a status change is always a DIFFERENT process's moment (even a
+    // crash-and-respawn on the same object) — nothing has polled THIS one
+    // yet, whatever the previous one answered.
+    this.polledSinceRunning = false;
     if (status.state !== "running") this.lastPaths = new Map();
     void this.settleFeeds();
   }
@@ -561,6 +585,10 @@ class VideoService {
       }
       if (this.relayGeneration !== generation) return; // see the comment in the catch branch above
       this.reportPollSuccess();
+      // R14i: THIS generation has now genuinely heard from the relay once —
+      // relayFeedStatus() may read a missing path as offline from here on,
+      // for as long as this same generation lasts.
+      this.polledSinceRunning = true;
       this.lastPaths = new Map(paths.map((p) => [p.name, p]));
       await this.settleFeeds();
     } finally {
@@ -831,14 +859,39 @@ class VideoService {
    * happens before the log line, so a write failure propagates to the
    * caller (reconcileRelay's own catch, or pushAddress's route) without
    * ever claiming success.
+   *
+   * Single-flight per feed id (R14 round 2 item 4) — this is called from
+   * BOTH reconcileOnce() (relayFeeds(), every reconcile) and pushAddress()
+   * (a single feed, on every GET), so a feed with no stored secret yet can
+   * have both land at once; without mintingPassword each reads "no
+   * password" and mints its OWN fresh one, and whichever setSecret() call
+   * lands last silently wins over the other — the relay's own plan and the
+   * route's answer to the operator then disagree about which password is
+   * actually live. Concurrent callers instead share the ONE mint already in
+   * flight: the check-and-set below has no `await` in it, so it is atomic
+   * against JS's own single-threaded scheduling — whichever caller's
+   * `getSecrets()` resolves first is the one that runs it and registers the
+   * promise before any other caller's continuation can run.
    */
+  private readonly mintingPassword = new Map<string, Promise<string>>();
+
   private async pushPassword(feed: VideoFeed): Promise<string> {
     const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
     if (secrets.password) return secrets.password;
-    const fresh = generatePushPassword();
-    await secretsStore.setSecret(SECRET_SLOT(feed.id), "password", fresh);
-    console.warn(`[video] ${scrub(feed.name)}: made a new publish password (none was stored)`);
-    return fresh;
+    const inFlight = this.mintingPassword.get(feed.id);
+    if (inFlight) return inFlight;
+    const mint = (async () => {
+      const fresh = generatePushPassword();
+      await secretsStore.setSecret(SECRET_SLOT(feed.id), "password", fresh);
+      console.warn(`[video] ${scrub(feed.name)}: made a new publish password (none was stored)`);
+      return fresh;
+    })();
+    this.mintingPassword.set(feed.id, mint);
+    try {
+      return await mint;
+    } finally {
+      this.mintingPassword.delete(feed.id);
+    }
   }
 
   /** Every pull/push feed as the relay needs it, credentials folded in —
@@ -886,12 +939,28 @@ class VideoService {
    * store and racing the OTHER's writes to the relay, so the loser's own
    * change could be overwritten by the winner's now-stale plan. Instead: a
    * caller arriving mid-chain only sets `reconcileDirty` and awaits the
-   * SAME chain: reconcileOnce()'s own do/while loop below re-checks it the
-   * moment the in-flight call settles and, if set, runs exactly one more
-   * pass — reading the feed store and secrets FRESH at that point, so it
-   * carries every change made while it was waiting, not just the one that
-   * triggered it. That is "the plan is computed inside the chain": never
-   * captured before entering it.
+   * SAME chain: reconcileOnce()'s own loop below re-checks it the moment the
+   * in-flight call settles and, if set, runs exactly one more pass — reading
+   * the feed store and secrets FRESH at that point, so it carries every
+   * change made while it was waiting, not just the one that triggered it.
+   * That is "the plan is computed inside the chain": never captured before
+   * entering it.
+   *
+   * R14 round 2 item 5: `reconcileRunning` is cleared INSIDE reconcileLoop()
+   * itself, in the same synchronous step as its own last dirty check — not
+   * in a `.finally()` chained on here, which used to leave a gap between
+   * "the loop just decided dirty is false and is about to return" and "the
+   * `.finally()` callback actually runs, one microtask later" (JS runs a
+   * `.finally()` reaction only once the current microtask queue gets to it,
+   * never in the same tick as the function it is attached to returning). A
+   * caller landing in exactly that gap sees `reconcileRunning` still true,
+   * correctly folds in by setting `reconcileDirty` and awaiting
+   * `reconcileChain` — but the loop has already committed to returning, so
+   * nothing was ever going to check that flag again, and the change it
+   * carried was silently dropped once the `.finally()` cleared the flag
+   * out from under it. Clearing it as part of the same synchronous
+   * check-then-clear-then-recheck removes the gap rather than narrowing it:
+   * nothing can run between two statements with no `await` between them.
    */
   private reconcileRelay(): Promise<boolean> {
     if (this.reconcileRunning) {
@@ -899,18 +968,22 @@ class VideoService {
       return this.reconcileChain;
     }
     this.reconcileRunning = true;
-    this.reconcileChain = this.reconcileLoop().finally(() => {
-      this.reconcileRunning = false;
-    });
+    this.reconcileChain = this.reconcileLoop();
     return this.reconcileChain;
   }
 
   private async reconcileLoop(): Promise<boolean> {
     let applied: boolean;
-    do {
+    for (;;) {
       this.reconcileDirty = false;
       applied = await this.reconcileOnce();
-    } while (this.reconcileDirty);
+      if (this.reconcileDirty) continue;
+      // No `await` between here and the recheck below — see this method's
+      // own comment on why that is what actually closes the gap.
+      this.reconcileRunning = false;
+      if (!this.reconcileDirty) break;
+      this.reconcileRunning = true; // a caller landed in the gap after all — one more pass catches it
+    }
     return applied;
   }
 

@@ -1117,6 +1117,54 @@ test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed wi
   }
 });
 
+test("R14i: between the supervisor reaching running and the first successful poll, a relay feed stays standby with no \"went offline\" line; the first successful poll with no path for it is what flips it to offline, with exactly one line", async () => {
+  const relay = fakeRelay(async () => []); // no path ever matches this feed
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "off" };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const made = await videoService.addFeed({ name: "Boot window push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    supervisor.current = { state: "starting" };
+    supervisor.emit("status", supervisor.current);
+    await new Promise((r) => setTimeout(r, 20));
+    let feed = videoService.current().feeds.find((f) => f.id === id);
+    assert.equal(feed?.status.state, "standby", "still starting — nothing has answered a poll yet");
+
+    supervisor.current = { state: "running", since: 0 };
+    supervisor.emit("status", supervisor.current);
+    await new Promise((r) => setTimeout(r, 20));
+    feed = videoService.current().feeds.find((f) => f.id === id);
+    assert.equal(feed?.status.state, "standby", "just reached running — no poll has answered for THIS process yet");
+    assert.equal(
+      lines.filter((l) => l.includes("Boot window push")).length,
+      0,
+      "reaching running with no poll yet must log nothing about this feed",
+    );
+
+    await pollOnce(); // the first successful poll — no path for this feed
+    feed = videoService.current().feeds.find((f) => f.id === id);
+    assert.equal(feed?.status.state, "offline", "the relay has now genuinely answered, and has no path for this feed");
+    assert.equal(
+      lines.filter((l) => l.includes("Boot window push went offline")).length,
+      1,
+      "exactly one line for the standby -> offline transition",
+    );
+  } finally {
+    console.log = realLog;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("the \"not answering\" override never applies while starting, even with a version left over from a previous run, and logs nothing", async () => {
   const relay = fakeRelay(async () => {
     throw new Error("ECONNREFUSED");
@@ -1974,6 +2022,57 @@ test("R14e: reconciles are single-flight — a change arriving mid-reconcile is 
   }
 });
 
+test("item 5: a change landing between the loop's own last dirty check and reconcileRunning actually clearing is not silently dropped", async () => {
+  const reconciled: RelayFeed[][] = [];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay(reconciled), supervisor);
+
+  const made = await videoService.addFeed({ name: "Gap-race push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  reconciled.length = 0; // addFeed's own reconcile already ran once
+
+  // Wraps the private reconcileLoop() so a SECOND reconcileRelay() call is
+  // attached, via .then(), directly onto the SAME promise reconcileRelay()
+  // itself consumes — registered first, so it runs in whatever gap exists
+  // between the real reconcileLoop() deciding to return and anything else
+  // that promise's resolution triggers (the OLD `.finally()` this used to be
+  // the exact gap this item closes; a genuinely separate caller landing in
+  // production would see the same ordering, for the same reason: promise
+  // reactions run in registration order).
+  const svc = videoService as unknown as { reconcileLoop(): Promise<boolean>; reconcileRelay(): Promise<boolean> };
+  const realLoop = svc.reconcileLoop.bind(videoService);
+  let armed = true;
+  let injected: Promise<boolean> | null = null;
+  svc.reconcileLoop = () => {
+    const p = realLoop();
+    if (armed) {
+      armed = false;
+      p.then(() => {
+        injected = svc.reconcileRelay();
+      });
+    }
+    return p;
+  };
+
+  try {
+    await videoService.updateFeed(id, { name: "Gap-race push 2" }); // the main pass
+    while (!injected) await new Promise((r) => setTimeout(r, 1));
+    await injected;
+
+    assert.equal(
+      reconciled.length,
+      2,
+      "expected a SECOND relay.reconcile() call for the change that landed in the gap — under the bug it is silently dropped and the count stays at 1",
+    );
+  } finally {
+    svc.reconcileLoop = realLoop;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async () => {
   const made = await videoService.addFeed({ name: "Snapshot restore", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
@@ -2062,6 +2161,65 @@ test("R14c: a kind change's store write failing leaves the OLD secret in place �
     "a failed store write must leave the OLD (push) secret exactly as it was — the kind on disk is still push",
   );
   await videoService.removeFeed(id);
+});
+
+test("item 4: pushPassword mints single-flight — two concurrent callers on a wiped secret share ONE mint, not two racing ones", async () => {
+  const made = await videoService.addFeed({ name: "Racing mint push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  await secretsStore.clearSecrets(SECRET_SLOT(id));
+  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
+
+  // Every read of THIS feed's slot waits on one shared gate, released only
+  // once BOTH callers' reads are pending on it — so both resolve together,
+  // and whichever caller's synchronous continuation reaches the mint-map
+  // check first (there is no `await` between checking the map and setting
+  // it — see pushPassword()'s own comment) wins the mint, and the other
+  // must find its entry rather than racing its own. Genuinely overlapping
+  // reads, not just two fast, sequential ones.
+  const realGetSecrets = secretsStore.getSecrets.bind(secretsStore);
+  const gate: { fn: (() => void) | null } = { fn: null };
+  const gatePromise = new Promise<void>((resolve) => {
+    gate.fn = resolve;
+  });
+  let readsPending = 0;
+  (secretsStore as unknown as { getSecrets: typeof secretsStore.getSecrets }).getSecrets = async (slot: string) => {
+    const result = await realGetSecrets(slot);
+    if (slot === SECRET_SLOT(id)) {
+      readsPending++;
+      await gatePromise;
+    }
+    return result;
+  };
+
+  const lines: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    const first = videoService.pushAddress(id);
+    const second = videoService.pushAddress(id);
+    while (readsPending < 2) await new Promise((r) => setTimeout(r, 1));
+    gate.fn!(); // release both reads at once — genuinely overlapping from here
+
+    const [a, b] = await Promise.all([first, second]);
+    assert.ok(a && b);
+    assert.equal(a!.password, b!.password, "expected one password everywhere, not two callers racing two mints");
+    assert.equal(
+      (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+      a!.password,
+      "expected the shared mint to actually be the one stored, not overwritten by a second write",
+    );
+    assert.equal(
+      lines.filter((l) => l.includes("made a new publish password")).length,
+      1,
+      "expected exactly one mint line, not one per racing caller",
+    );
+  } finally {
+    console.warn = realWarn;
+    (secretsStore as unknown as { getSecrets: typeof secretsStore.getSecrets }).getSecrets = realGetSecrets;
+    await videoService.removeFeed(id);
+  }
 });
 
 test("R14d: newPushPassword's applied shape — true with nothing to apply to, false only when a running relay's reconcile fails", async () => {
@@ -2183,6 +2341,59 @@ test("R14d: kickPublisher runs only while the supervisor is running, and its own
       console.log = realLog;
     }
   } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+// R14 round 2 item 1: the PRIOR version of this test only proved ok()
+// settles SILENTLY when no failure was ever open — true whether or not the
+// ok("push-kick", ...) call exists at all, since nothing was ever failing.
+// This proves the actual recovery line fires: a kick failure opens the
+// outage, and a kick succeeding once the settle window has passed closes it
+// with the announcement.
+test("item 1: a kick failure opens the push-kick outage, and a kick succeeding past the settle window announces the recovery", async (t) => {
+  let fail = true;
+  const relay = recordingRelay([], {
+    kickPublisher: async () => {
+      if (fail) throw new Error("relay unreachable");
+      return true;
+    },
+  });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const made = await videoService.addFeed({ name: "Recovering kick push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  const lines: string[] = [];
+  const realLog = console.log;
+  const realWarn = console.warn;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    await videoService.newPushPassword(id); // the kick throws — opens the run
+    assert.equal(
+      lines.filter((l) => l.includes("could not kick the previous publisher")).length,
+      1,
+      "expected the failure itself to open the outage",
+    );
+
+    fail = false;
+    t.mock.timers.tick(DEFAULT_SETTLE_MS + 1000); // past the settle window
+    await videoService.newPushPassword(id); // the kick succeeds now
+    assert.equal(
+      lines.filter((l) => l.includes("kicking a publisher is working again")).length,
+      1,
+      "a kick succeeding past the settle window must announce the recovery — deleting the ok() call leaves this at 0",
+    );
+  } finally {
+    console.log = realLog;
+    console.warn = realWarn;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
