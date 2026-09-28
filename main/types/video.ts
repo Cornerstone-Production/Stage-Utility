@@ -90,9 +90,12 @@ export interface VideoFeedView {
 export type RelayStatus =
   | { state: "off" }
   | { state: "downloading"; receivedBytes: number; totalBytes: number }
-  /** `version` is null until the relay's own startup banner has been parsed
-   *  out of its log — a freshly spawned process is "starting" before it has
-   *  printed a line, not after. */
+  /** `version` is null only if no process has EVER printed a startup banner
+   *  — once one has, it never resets, surviving every later restart. A
+   *  "starting" supervisor has no live child at all yet (one is not spawned
+   *  until AFTER "starting"), so a non-null version here describes a
+   *  PREVIOUS run, never proof that the current attempt has printed
+   *  anything. */
   | { state: "starting"; version: string | null }
   | { state: "running"; version: string; ports: VideoPorts }
   | { state: "failing"; reason: string; retryAt: number | null; placeArchiveAt?: string };

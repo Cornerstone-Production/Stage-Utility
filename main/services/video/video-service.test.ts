@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,12 +10,13 @@ import * as path from "node:path";
 // against this directory, never the default data folder.
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-service-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { videoService, SECRET_SLOT, STATUS_POLL_MS, videoPollDeps } = await import("./video-service.js");
+const { videoService, SECRET_SLOT, STATUS_POLL_MS, PENDING_MARK_TTL_MS, videoPollDeps } = await import("./video-service.js");
 const { secretsStore } = await import("../secrets.js");
 const { configSnapshot } = await import("../config-snapshot.js");
 const { withAllKinds } = await import("../fixtures/video-kinds.js");
 const { videoSeenStore, SEEN_WRITE_INTERVAL_MS } = await import("./seen-store.js");
 const { DEFAULT_SETTLE_MS } = await import("../repeat-log.js");
+const { RelaySupervisor } = await import("./supervisor.js");
 type RelayPath = import("./relay.js").RelayPath;
 type VideoRelay = import("./relay.js").VideoRelay;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
@@ -92,13 +94,30 @@ test("removeFeed refuses an id outside FEED_ID_PATTERN, even for a feed stored u
 // fix from Minor #4.
 
 class FakeSupervisor extends EventEmitter {
-  current: SupervisorStatus = { state: "off" };
+  // "running" by default — R12h now skips polling entirely while the
+  // supervisor reports "off", so every test that expects pollOnce() to
+  // actually call relay.status() would otherwise need its own explicit
+  // override. The handful of tests ABOUT off/starting/failing set their own.
+  current: SupervisorStatus = { state: "running", since: 1 };
   ver: string | null = null;
   status(): SupervisorStatus {
     return this.current;
   }
   version(): string | null {
     return this.ver;
+  }
+}
+
+/** A fake child process for the REAL RelaySupervisor (P4) — structurally
+ *  satisfies SupervisedChild (an EventEmitter with pid/stdout/stderr/kill)
+ *  with no cast, the same way supervisor.test.ts's own fixture does. */
+class FakeChild extends EventEmitter {
+  pid = 424242;
+  stdout = new PassThrough();
+  stderr = new PassThrough();
+  kill(): boolean {
+    setImmediate(() => this.emit("exit", 0));
+    return true;
   }
 }
 
@@ -376,6 +395,41 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
   }
 });
 
+test("Item 10: binding an ALREADY-ready B-frames mark publishes immediately, not waiting for the next poll", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Instant cam", source: { kind: "pull", url: "rtsp://192.0.2.66/s", username: "" } }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const readyTime = "T-instant";
+
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(fakeRelay(async () => [readyPath({ name: id, readyTime })]), supervisor);
+
+  const { addBroadcastListener } = await import("../broadcaster.js");
+  const frames: { feeds: { id: string; status: { state: string } }[] }[] = [];
+  addBroadcastListener((channel, payload) => {
+    if (channel === "video:state") frames.push(payload as { feeds: { id: string; status: { state: string } }[] });
+  });
+
+  try {
+    await pollOnce(); // the path is already ready and known — "live" published once
+
+    const before = frames.length;
+    supervisor.emit("line", `[WebRTC] [session 11aa22bb] is reading from path '${id}'`);
+    supervisor.emit("line", `[WebRTC] [session 11aa22bb] closed: WebRTC doesn't support H264 streams with B-frames`);
+    await new Promise((r) => setTimeout(r, 20)); // no pollOnce() call in between
+
+    assert.ok(frames.length > before, "binding an already-ready mark must publish on its own, not wait for the next poll");
+    const feed = frames.at(-1)?.feeds.find((f) => f.id === id);
+    assert.equal(feed?.status.state, "delayed");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("R12c: a B-frames close on an on-demand pull feed that is not yet ready binds on the next poll that sees it ready", async () => {
   const made = await withAllKinds(() =>
     videoService.addFeed({ name: "Annex cam", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } }),
@@ -423,6 +477,84 @@ test("R12c: a B-frames close on an on-demand pull feed that is not yet ready bin
     supervisor.emit("line", `[WebRTC] [session cccc3333] closed: WebRTC doesn't support H264 streams with B-frames`);
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 1);
+  } finally {
+    console.log = realLog;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("P6 / R12i: a pending B-frames mark does not survive a detach — it cannot bind to a later, unrelated session", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Pending cam", source: { kind: "pull", url: "rtsp://192.0.2.63/s", username: "" } }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(fakeRelay(async () => [notReadyPath({ name: id })]), supervisor);
+
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    await pollOnce();
+    supervisor.emit("line", `[WebRTC] [session dd44ee55] is reading from path '${id}'`);
+    supervisor.emit("line", `[WebRTC] [session dd44ee55] closed: WebRTC doesn't support H264 streams with B-frames`);
+    await new Promise((r) => setTimeout(r, 30));
+    await pollOnce(); // still not ready — the on-demand source closed again, the mark is still pending
+
+    await videoService.detachRelay(); // relay turned off / reconfigured
+
+    // Hours later: a different relay, the device now reconfigured with B-frames off.
+    videoService.attachRelay(fakeRelay(async () => [readyPath({ name: id, readyTime: "T9" })]), new FakeSupervisor());
+    await pollOnce();
+
+    const feed = videoService.current().feeds.find((f) => f.id === id);
+    assert.notEqual(feed?.status.state, "delayed", "an old pending mark must never bind to a session it never saw");
+    assert.equal(lines.filter((l) => l.includes("B-frames")).length, 0, "no announcement belongs to the new session either");
+  } finally {
+    console.log = realLog;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("R12i: a pending B-frames mark expires after PENDING_MARK_TTL_MS without a ready poll", async (t) => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Timeout cam", source: { kind: "pull", url: "rtsp://192.0.2.64/s", username: "" } }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  let answer: RelayPath[] = [notReadyPath({ name: id })];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(fakeRelay(async () => answer), supervisor);
+
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    await pollOnce();
+    supervisor.emit("line", `[WebRTC] [session ff11aa22] is reading from path '${id}'`);
+    supervisor.emit("line", `[WebRTC] [session ff11aa22] closed: WebRTC doesn't support H264 streams with B-frames`);
+    await new Promise((r) => setTimeout(r, 30));
+
+    t.mock.timers.tick(PENDING_MARK_TTL_MS + 1000); // well past 30 s, with no ready poll in between
+    await pollOnce(); // still not ready — this poll is what sweeps the expiry
+
+    answer = [readyPath({ name: id, readyTime: "T9" })];
+    await pollOnce(); // NOW it becomes ready — the expired mark must not bind
+
+    const feed = videoService.current().feeds.find((f) => f.id === id);
+    assert.notEqual(feed?.status.state, "delayed", "an expired pending mark must not bind once the feed eventually becomes ready");
+    assert.equal(lines.filter((l) => l.includes("B-frames")).length, 0);
   } finally {
     console.log = realLog;
     await videoService.detachRelay();
@@ -604,6 +736,44 @@ test("detachRelay reports the relay off and forgets its last known paths — a s
   }
 });
 
+test("Item 7: detachRelay settles feeds — logs went offline and flushes the seen store, not just a bare publish", async (t) => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Sanctum cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor);
+
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    await pollOnce(); // t=0 — the first-ever write always lands
+    t.mock.timers.tick(SEEN_WRITE_INTERVAL_MS - 1000); // t=59_000 — still inside the throttle window
+    await pollOnce(); // still live — this write would be throttled away by noteSeen() alone
+
+    await videoService.detachRelay(); // t=59_000 — must settle, not just publish
+
+    assert.ok(lines.includes("[video] Sanctum cam went offline"), "detachRelay must log the transition, not silently drop it");
+    const onDisk = (await videoSeenStore.reload())[id];
+    assert.equal(
+      onDisk,
+      SEEN_WRITE_INTERVAL_MS - 1000,
+      "the flush must carry the LATEST in-memory value, not the throttled-away first write",
+    );
+  } finally {
+    console.log = realLog;
+    await videoService.removeFeed(id);
+  }
+});
+
 test("R12a / Important #1: a poll that fails clears lastPaths and reports the relay as failing to answer", async () => {
   const made = await withAllKinds(() =>
     videoService.addFeed({ name: "Vestry cam", source: { kind: "pull", url: "rtsp://192.0.2.60/s", username: "" } }),
@@ -644,10 +814,10 @@ test("R12a / Important #1: a poll that fails clears lastPaths and reports the re
   }
 });
 
-test("R12a follow-up: a stopped relay reads off, not \"not answering\", even when a poll against it fails", async () => {
-  // Nothing has started yet — a poll failing here (nothing is listening on
-  // the API port) is not news, and must not be read as the relay failing.
+test("R12h: the service does not poll while the supervisor is off, so a relay switched off produces no \"not answering\" line", async () => {
+  let calls = 0;
   const relay = fakeRelay(async () => {
+    calls++;
     throw new Error("ECONNREFUSED");
   });
   const supervisor = new FakeSupervisor();
@@ -655,10 +825,17 @@ test("R12a follow-up: a stopped relay reads off, not \"not answering\", even whe
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
+  const warns: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+
   try {
     await pollOnce();
+    assert.equal(calls, 0, "an off supervisor must never even be asked — the poll loop checks it first, before any relay.status() call");
     assert.deepEqual(videoService.current().relay, { state: "off" });
+    assert.equal(warns.filter((l) => l.includes("not answering")).length, 0, "an off relay must never log as not answering");
   } finally {
+    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -680,33 +857,29 @@ test("R12a follow-up: a relay the supervisor already reports failing keeps its o
   }
 });
 
-test("R12a follow-up: the \"starting\" override waits for the relay's own banner, not just any failed poll", async () => {
+test("R12f: the \"not answering\" override never applies while starting, even with a version left over from a previous run", async () => {
   const relay = fakeRelay(async () => {
     throw new Error("ECONNREFUSED");
   });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "starting" };
-  supervisor.ver = null; // no banner parsed yet
+  supervisor.ver = "v1.21.1"; // leftover from a PREVIOUS run — version() never resets on its own
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
   try {
-    await pollOnce();
+    await pollOnce(); // fails to answer — there is no live child yet to BE "not answering"
     assert.deepEqual(
       videoService.current().relay,
-      { state: "starting", version: null },
-      "a poll failing before the relay has even logged its banner is normal, not a failure to report",
+      { state: "starting", version: "v1.21.1" },
+      "starting must never read as failing, however long ago the leftover version was logged",
     );
-
-    supervisor.ver = "v1.21.1"; // the relay has now logged its startup banner
-    await pollOnce(); // still fails to answer
-    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "The relay is not answering", retryAt: null });
   } finally {
     await videoService.detachRelay();
   }
 });
 
-test("R12b: the attached supervisor's spawned/exit events publish immediately, without waiting for a poll", async () => {
+test("R12g: the attached supervisor's status events publish immediately, without waiting for a poll", async () => {
   const relay = fakeRelay(async () => []);
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false; // no poll is running at all
@@ -720,19 +893,113 @@ test("R12b: the attached supervisor's spawned/exit events publish immediately, w
 
   try {
     supervisor.current = { state: "starting" };
-    supervisor.emit("spawned");
+    supervisor.emit("status", supervisor.current);
     await new Promise((r) => setTimeout(r, 20));
-    assert.ok(frames.length >= 1, "spawned must publish without a poll ever running");
+    assert.ok(frames.length >= 1, "a status event must publish without a poll ever running");
     assert.deepEqual(frames.at(-1)?.relay, { state: "starting", version: null });
 
     const before = frames.length;
     supervisor.current = { state: "failing", reason: "boom", retryAt: 999 };
-    supervisor.emit("exit", 1, "boom");
+    supervisor.emit("status", supervisor.current);
     await new Promise((r) => setTimeout(r, 20));
-    assert.ok(frames.length > before, "exit must publish too");
+    assert.ok(frames.length > before, "every status event must publish, not only the first");
     assert.deepEqual(frames.at(-1)?.relay, { state: "failing", reason: "boom", retryAt: 999 });
   } finally {
     await videoService.detachRelay();
+  }
+});
+
+test("Item 4: a status event to a non-running state clears lastPaths immediately — a dead process's feed does not stay live", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Ember cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor);
+
+  try {
+    await pollOnce();
+    assert.equal(videoService.current().feeds.find((f) => f.id === id)?.status.state, "live");
+
+    // The supervisor's OWN crash detection reports failing — no new poll has run.
+    supervisor.current = { state: "failing", reason: "crashed", retryAt: 123 };
+    supervisor.emit("status", supervisor.current);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const snap = videoService.current();
+    assert.equal(
+      snap.feeds.find((f) => f.id === id)?.status.state,
+      "offline",
+      "a dead process's feed must not still read live just because no poll has run against it yet",
+    );
+    assert.deepEqual(snap.relay, { state: "failing", reason: "crashed", retryAt: 123 });
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("P4 / Important: the not-answering flag does not carry over into a freshly respawned process", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Respawn cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const children: FakeChild[] = [];
+  const sup = new RelaySupervisor({
+    spawnImpl: () => {
+      const c = new FakeChild();
+      children.push(c);
+      return c;
+    },
+    psImpl: async () => null,
+  });
+
+  let apiUp = true;
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(
+    fakeRelay(async () => {
+      if (!apiUp) throw new Error("ECONNREFUSED");
+      return [readyPath({ name: id })];
+    }),
+    sup,
+  );
+
+  try {
+    await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
+    children[0].stdout.write("2026/09/28 10:00:00 INF MediaMTX v1.21.1, ...\n");
+    await new Promise((r) => setTimeout(r, 20));
+    await pollOnce();
+    assert.equal(videoService.current().relay.state, "running");
+    assert.equal(videoService.current().feeds.find((f) => f.id === id)?.status.state, "live");
+
+    apiUp = false;
+    children[0].emit("exit", 1); // the process crashes — onExit(): status "failing", then "exit"
+    await new Promise((r) => setTimeout(r, 20)); // the status listener's own publish
+
+    await pollOnce(); // a poll during backoff — fails; the supervisor already says failing on its own
+    assert.equal(videoService.current().relay.state, "failing");
+
+    await new Promise((r) => setTimeout(r, 1100)); // restartDelayMs(0) = 1 s — the real respawn
+    await new Promise((r) => setTimeout(r, 20)); // spawnChild()'s status event -> publish
+
+    apiUp = true; // the fresh process's API is reachable, but nothing has POLLED it yet
+    const afterRespawn = videoService.current();
+    assert.equal(afterRespawn.relay.state, "running", "a fresh process must not still read failing");
+    assert.notEqual(
+      (afterRespawn.relay as { reason?: string }).reason,
+      "The relay is not answering",
+      "the OLD process's not-answering verdict must not have carried over to the NEW one",
+    );
+  } finally {
+    await videoService.detachRelay();
+    await sup.stop();
+    await videoService.removeFeed(id);
   }
 });
 
@@ -796,6 +1063,37 @@ test("Minor #4: attaching a new relay while the old one's poll is still in fligh
   }
 });
 
+test("P1 / Open item 1: a stale in-flight answer from an already-detached relay is never applied, even when it resolves READY", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Race cam", source: { kind: "pull", url: "rtsp://192.0.2.70/s", username: "" } }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  resolveA = null;
+  const relayA = fakeRelay(() => new Promise<RelayPath[]>((resolve) => { resolveA = resolve; }));
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relayA, new FakeSupervisor());
+  const inFlight = pollOnce(); // A's status() is now pending, unawaited
+
+  try {
+    await videoService.detachRelay();
+    videoService.attachRelay(fakeRelay(async () => [notReadyPath({ name: id })]), new FakeSupervisor());
+
+    // A's stale answer finally lands, claiming the feed IS ready — this is
+    // the exact shape the staleness guard (the `this.relayGeneration !==
+    // generation` check after a successful relay.status()) exists for.
+    callResolveA([readyPath({ name: id })]);
+    await inFlight;
+
+    const feed = (await videoService.state()).feeds.find((f) => f.id === id);
+    assert.notEqual(feed?.status.state, "live", "a stale answer from an already-detached relay must never be applied");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("Important #3: a seen-store write that rejects still lets the poll publish its transitions, warns once per outage, and logs recovery once settled", async (t) => {
   const made = await withAllKinds(() =>
     videoService.addFeed({ name: "Crypt cam", source: { kind: "pull", url: "rtsp://192.0.2.62/s", username: "" } }),
@@ -844,6 +1142,34 @@ test("Important #3: a seen-store write that rejects still lets the poll publish 
     store.update = realUpdate;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
+  }
+});
+
+test("Item 6: a rejected forgetSeen write still lets removeFeed succeed and publish, and logs once through the seen-store outage", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Culvert cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const store = videoSeenStore as unknown as { update: (...a: unknown[]) => Promise<unknown> };
+  const realUpdate = store.update.bind(videoSeenStore);
+  store.update = async () => {
+    throw new Error("disk full");
+  };
+
+  const lines: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  try {
+    const removed = await videoService.removeFeed(id);
+    assert.equal(removed, true, "removeFeed must still succeed despite the seen-store write rejecting");
+    assert.equal((await videoService.state()).feeds.some((f) => f.id === id), false, "the feed must actually be gone");
+    assert.equal(lines.filter((l) => l.includes("could not save the last-seen time")).length, 1, "the write failure must still reach the operator once");
+  } finally {
+    console.warn = realWarn;
+    store.update = realUpdate;
   }
 });
 

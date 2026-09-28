@@ -7,7 +7,8 @@
 // on retries: a misconfigured relay stays in `failing`, forever retried,
 // rather than ever going quiet. Turning `status()` into the page's relay
 // state lives in video-service.ts; reconciling paths once the relay's own
-// API answers lives in relay.ts.
+// API answers lives in mediamtx-relay.ts and reconcile-plan.ts, called by
+// the service once the relay does.
 
 import { execFile, spawn as nodeSpawn } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -179,6 +180,16 @@ export class RelaySupervisor extends EventEmitter {
     return this.current;
   }
 
+  /** Sets `this.current` and tells anyone listening — emitted AFTER the
+   *  change, so a "status" listener reading status() from inside its own
+   *  handler sees the new value, never the one it is replacing. The single
+   *  place every status transition (off, starting, running, failing) goes
+   *  through, so nothing can update `this.current` without also emitting. */
+  private setStatus(status: SupervisorStatus): void {
+    this.current = status;
+    this.emit("status", status);
+  }
+
   /** The relay's own version string, parsed from its startup log line
    *  (`INF MediaMTX v1.21.1, ...`) — null until it has printed one.
    *  Survives a restart: the watcher is never replaced, only fed more
@@ -216,7 +227,7 @@ export class RelaySupervisor extends EventEmitter {
     this.configPath = configPath;
     this.stopping = false;
     this.attempt = 0;
-    this.current = { state: "starting" };
+    this.setStatus({ state: "starting" });
     try {
       await this.killLeftover();
       // A stop() that raced ahead of killLeftover()'s await already cleared
@@ -224,7 +235,7 @@ export class RelaySupervisor extends EventEmitter {
       if (this.stopping) return;
       this.spawnChild();
     } catch (err) {
-      this.current = { state: "off" };
+      this.setStatus({ state: "off" });
       throw err;
     }
   }
@@ -236,7 +247,7 @@ export class RelaySupervisor extends EventEmitter {
     this.stopping = true;
     this.clearRestartTimer();
     if (!this.child) {
-      this.current = { state: "off" };
+      this.setStatus({ state: "off" });
       return;
     }
     const child = this.child;
@@ -319,7 +330,7 @@ export class RelaySupervisor extends EventEmitter {
     const child = this.spawnImpl(this.binary, [this.configPath]);
     this.child = child;
     this.writePidFile(child.pid);
-    this.current = { state: "running", since: Date.now() };
+    this.setStatus({ state: "running", since: Date.now() });
     this.emit("spawned");
     this.attachReader(child.stdout);
     this.attachReader(child.stderr);
@@ -366,16 +377,24 @@ export class RelaySupervisor extends EventEmitter {
     this.killTimer = null;
   }
 
+  /**
+   * `setStatus()` — and so the "status" event — fires before "exit". A
+   * listener reacting to "exit" (kept for existing callers) can then trust
+   * `status()` already reflects where this process landed, rather than
+   * whatever it was on its way out; video-service.ts's own R12g fix depends
+   * on this order to reset its "not answering" verdict against the RIGHT
+   * process before "exit" ever reaches it.
+   */
   private onExit(code: number | null): void {
     this.clearHealthyTimer();
     this.clearKillTimer();
     this.child = null;
     this.deletePidFile();
     const lastError = this.watcher.lastError();
-    this.emit("exit", code, lastError);
 
     if (this.stopping) {
-      this.current = { state: "off" };
+      this.setStatus({ state: "off" });
+      this.emit("exit", code, lastError);
       const waiters = this.stopWaiters;
       this.stopWaiters = [];
       for (const resolve of waiters) resolve();
@@ -385,7 +404,8 @@ export class RelaySupervisor extends EventEmitter {
     const reason = lastError ?? `exit code ${code}`;
     const delay = restartDelayMs(this.attempt);
     this.attempt += 1;
-    this.current = { state: "failing", reason, retryAt: Date.now() + delay };
+    this.setStatus({ state: "failing", reason, retryAt: Date.now() + delay });
+    this.emit("exit", code, lastError);
 
     const result = this.outage.fail("relay", reason, Date.now());
     if (result.log) {

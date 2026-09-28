@@ -238,6 +238,44 @@ describe("RelaySupervisor", () => {
     );
   });
 
+  it("emits 'status' after every transition, and 'exit' after 'status' — never the reverse", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    const seen: Array<{ event: string; statusAtEmitTime: SupervisorStatus["state"] }> = [];
+    sup.on("status", (s: SupervisorStatus) => seen.push({ event: "status", statusAtEmitTime: s.state }));
+    sup.on("exit", () => seen.push({ event: "exit", statusAtEmitTime: sup.status().state }));
+
+    await sup.start("mediamtx", "config.yml");
+    assert.deepEqual(
+      seen,
+      [{ event: "status", statusAtEmitTime: "starting" }, { event: "status", statusAtEmitTime: "running" }],
+      "start() must emit status for both starting and running, never exit",
+    );
+
+    seen.length = 0;
+    children[0].emit("exit", 1, null);
+    assert.deepEqual(
+      seen,
+      [{ event: "status", statusAtEmitTime: "failing" }, { event: "exit", statusAtEmitTime: "failing" }],
+      "status must fire before exit, and status() must already read the NEW state by the time exit's own listener runs",
+    );
+
+    seen.length = 0;
+    t.mock.timers.tick(1000); // the respawn
+    assert.deepEqual(seen, [{ event: "status", statusAtEmitTime: "running" }], "a respawn is a status event, not another exit");
+
+    seen.length = 0;
+    const stopped = sup.stop();
+    children[1].emit("exit", null, "SIGTERM");
+    await stopped;
+    assert.deepEqual(
+      seen,
+      [{ event: "status", statusAtEmitTime: "off" }, { event: "exit", statusAtEmitTime: "off" }],
+      "stop()'s own exit must also see status fire first",
+    );
+  });
+
   it("SIGTERMs a relay left running from the last run, named in relay.pid, before spawning its own", async (t) => {
     enableClock(t);
     await fs.mkdir(relayDir(), { recursive: true });
