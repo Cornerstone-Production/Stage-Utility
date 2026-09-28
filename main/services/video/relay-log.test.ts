@@ -56,6 +56,21 @@ describe("RelayLogWatcher", () => {
     strictEqual(watcher2.lastError(), "[API] path already exists");
   });
 
+  // R14j: a real v1.21.1 binary given a malformed pull source echoed the
+  // WHOLE credentialed URL back in exactly this shape — lastError() is what
+  // supervisor.ts turns into its exit reason (status.reason, and the
+  // "relay exited" log line), so this must never carry it through.
+  it("R14j: strips a user:pass@ userinfo out of an ERR line before it becomes lastError()", () => {
+    const watcher = new RelayLogWatcher();
+    const result = watcher.line(
+      "2026/09/27 18:00:33 ERR [API] 'rtsp://admin:s3c%!z(MISSING)ret@192.0.2.1/s' is not a valid URL"
+    );
+    deepEqual(result, { kind: "error", text: "[API] 'rtsp://192.0.2.1/s' is not a valid URL" });
+    strictEqual(watcher.lastError(), "[API] 'rtsp://192.0.2.1/s' is not a valid URL");
+    strictEqual(watcher.lastError()?.includes("admin"), false, "the username must not survive either");
+    strictEqual(watcher.lastError()?.includes("s3c"), false, "no fragment of the password may survive");
+  });
+
   it("maintains session map with 256-entry limit", () => {
     const watcher = new RelayLogWatcher();
 

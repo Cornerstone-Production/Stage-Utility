@@ -1,3 +1,5 @@
+import { withoutCredentials } from "./redact-url.js";
+
 export type RelayLogEvent =
   | { kind: "b-frames"; path: string }
   | { kind: "error"; text: string };
@@ -23,8 +25,15 @@ export class RelayLogWatcher {
     // Check for errors
     const errorMatch = text.match(ERROR);
     if (errorMatch) {
-      this.lastErrorText = errorMatch[1];
-      return { kind: "error", text: errorMatch[1] };
+      // R14j: the relay's own error lines can echo a credentialed URL back
+      // verbatim (a real v1.21.1 binary given a malformed pull source did
+      // exactly this) — lastError() is what the supervisor turns into its
+      // exit reason (status.reason, and the "relay exited" log line), so
+      // stripped here, at the one place this text is captured, rather than
+      // trusted to every future reader of lastError() to strip it itself.
+      const stripped = withoutCredentials(errorMatch[1]!);
+      this.lastErrorText = stripped;
+      return { kind: "error", text: stripped };
     }
 
     // Check for reading (session started)

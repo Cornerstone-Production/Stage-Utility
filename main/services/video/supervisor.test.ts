@@ -134,6 +134,42 @@ describe("RelaySupervisor", () => {
     assert.deepEqual(sup.status(), { state: "running", since: START + 1000 } satisfies SupervisorStatus);
   });
 
+  // R14j: a real v1.21.1 binary given a malformed pull source echoed the
+  // WHOLE credentialed URL back in its own ERR line — this is what the
+  // supervisor turns into both its exit reason (status.reason) and the
+  // "relay exited" log line, so neither may carry it through.
+  it("R14j: a credentialed ERR line never reaches the exit reason or the \"relay exited\" log line", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+
+    const lines: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+    try {
+      children[0].stderr.write(
+        "2026/09/28 12:00:00 ERR [API] 'rtsp://admin:s3c%!z(MISSING)ret@192.0.2.1/s' is not a valid URL\n",
+      );
+      await settle();
+
+      children[0].emit("exit", 1, null);
+      const status = sup.status();
+      assert.equal(status.state, "failing");
+      if (status.state !== "failing") throw new Error("unreachable");
+      assert.equal(status.reason.includes("admin"), false, "the username must not survive into status.reason");
+      assert.equal(status.reason.includes("s3c"), false, "no fragment of the password may survive into status.reason");
+
+      const exitLine = lines.find((l) => l.includes("relay exited"));
+      assert.ok(exitLine, "expected the \"relay exited\" log line");
+      assert.equal(exitLine!.includes("admin"), false, "the username must not survive into the log line either");
+      assert.equal(exitLine!.includes("s3c"), false, "no fragment of the password may survive into the log line either");
+    } finally {
+      console.warn = realWarn;
+    }
+  });
+
   it("backs off 1, 2, 4 s on quick repeats, and after 20 exits still spawns again at the 60 s cap", async (t) => {
     enableClock(t);
     const { spawnImpl, children } = fakeSpawn();

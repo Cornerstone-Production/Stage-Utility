@@ -36,6 +36,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { publishUsers, planReconcile } from "./reconcile-plan.js";
+import { withoutCredentials } from "./redact-url.js";
 import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
 import type { RelayUser } from "./mediamtx-config.js";
 
@@ -82,22 +83,6 @@ function canonicalIp(ip: string): string {
 
 function canonicalUsers(users: RelayUser[]): RelayUser[] {
   return users.map((user) => ({ ...user, ips: user.ips.map(canonicalIp) }));
-}
-
-/**
- * Defence in depth for R14b: strips a `user:pass@` userinfo segment out of
- * a relay error's text before it ever becomes this module's own Error
- * message — which is what video-service.ts logs on a reconcile failure.
- * Confirmed necessary, not theoretical: a real v1.21.1 binary given a pull
- * source URL with an unescaped `%` in its credential (reconcile-plan.ts's
- * own fix is the primary defence for that) echoed the WHOLE credentialed
- * URL back, garbled by its own Go fmt formatting, in exactly the `error`
- * field this method turns into an Error. Applied unconditionally to every
- * relay error, not only ones this app expects to carry a URL — a future
- * error text is not this file's to predict.
- */
-function withoutCredentials(message: string): string {
-  return message.replace(/:\/\/[^\s/@]+@/g, "://");
 }
 
 /** MediaMTX, driven through its own control API. The only implementation of
