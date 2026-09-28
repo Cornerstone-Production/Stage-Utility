@@ -314,6 +314,17 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
+  // A playlist or segment is only ever read, never written — MediaMTX's
+  // HLS listener has nothing else to do with a POST/PUT/DELETE, and
+  // forwarding one anyway would be handing an arbitrary method through to
+  // a listener nothing here has reason to trust with one. Refused before
+  // the body is even read, so nothing reaches the relay either way.
+  if (parsed.kind === "hls" && method !== "GET" && method !== "HEAD") {
+    res.writeHead(405, { "Content-Type": "application/json", Allow: "GET, HEAD" });
+    res.end(JSON.stringify({ error: "Method not allowed" }));
+    return;
+  }
+
   // Buffered, not piped: the only way to guarantee an over-cap body "never
   // reaches upstream" (task-13-brief.md) is to finish reading it before the
   // upstream connection even opens. Safe to buffer at this size — an SDP

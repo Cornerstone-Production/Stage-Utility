@@ -424,6 +424,14 @@ describe("once the relay is attached and running", () => {
     assert.deepEqual([...new Uint8Array(await res.arrayBuffer())], [1, 2, 3, 4]);
   });
 
+  test("a POST to an HLS file is 405 with an Allow header, and never reaches the relay", async () => {
+    const receivedCountBefore = received.length;
+    const res = await fetchSu(`/video/${camId}/index.m3u8`, { method: "POST" });
+    assert.equal(res.status, 405);
+    assert.equal(res.headers.get("allow"), "GET, HEAD");
+    assert.equal(received.length, receivedCountBefore, "a write against a read-only playlist must never reach the relay");
+  });
+
   test("a relay dying mid-segment (after headers) IS reported — unlike a viewer leaving, this is genuinely news about the relay", async () => {
     proxyOutage.forget();
     const warns = await captureConsole("warn", async () => {
