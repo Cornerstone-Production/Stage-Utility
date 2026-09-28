@@ -271,6 +271,14 @@ const NOT_SCANNED = new Map<string, string>([
       "filesystem, never from an HTTP request; the module handles no route. Audited, not " +
       "just excused.",
   ],
+  [
+    "video/supervisor.ts",
+    "logs the leftover-relay pid it cleans up (its own bookkeeping file, never HTTP data) and " +
+      "the relay CHILD PROCESS's own exit reason — MediaMTX's stdout/stderr, parsed by " +
+      "RelayLogWatcher and never from an HTTP request the module itself handles (it owns no " +
+      "route). The same shape as a device or provider talking back, since a LAN publisher's " +
+      "stream key could in principle reach MediaMTX's own log — not audited line by line.",
+  ],
   ["wireless-manager.ts", DEVICE],
   ["youtube-service.ts", DEVICE],
 ]);
