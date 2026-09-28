@@ -687,6 +687,96 @@ test("noteRequested only records a real feed id, taken from the feed list — ne
   }
 });
 
+// ── relayTarget() — what the playback proxy is allowed to reach ───────────
+
+test("relayTarget refuses a pattern-failing id, an unknown id, and a kind an embed/external feed cannot serve, all before ever asking whether the relay is up", async () => {
+  // No relay attached at all — every one of these must read 404, not 503, so
+  // an unknown feed can never be mistaken for "the relay is down".
+  assert.deepEqual(videoService.relayTarget("../../etc/passwd", "whep"), { refuse: 404 });
+  assert.deepEqual(videoService.relayTarget("Bad_ID", "whep"), { refuse: 404 });
+  assert.deepEqual(videoService.relayTarget("no-such-feed", "whep"), { refuse: 404 });
+
+  const made = await withAllKinds(() =>
+    videoService.addFeed({
+      name: "YouTube feed",
+      source: { kind: "embed", player: "youtube-channel", ref: "UC0123456789abcdefghijkl" },
+    }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    assert.deepEqual(videoService.relayTarget(id, "whep"), { refuse: 404 }, "embed has no relay path at all");
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { refuse: 404 });
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("relayTarget refuses whip on a pull feed and on a push feed whose own protocol is not whip", async () => {
+  const relay = fakeRelay(async () => []);
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor);
+
+  const pull = await withAllKinds(() =>
+    videoService.addFeed({ name: "Lobby", source: { kind: "pull", url: "rtsp://192.0.2.60/s", username: "" } }),
+  );
+  const srtPush = await withAllKinds(() => videoService.addFeed({ name: "Stage box", source: { kind: "push", protocol: "srt" } }));
+  const whipPush = await withAllKinds(() => videoService.addFeed({ name: "OBS", source: { kind: "push", protocol: "whip" } }));
+  assert.ok(pull.ok && srtPush.ok && whipPush.ok);
+  const pullId = (pull as { feed: { id: string } }).feed.id;
+  const srtId = (srtPush as { feed: { id: string } }).feed.id;
+  const whipId = (whipPush as { feed: { id: string } }).feed.id;
+
+  try {
+    assert.deepEqual(videoService.relayTarget(pullId, "whip"), { refuse: 404 }, "a pull feed has nothing listening for a WHIP offer");
+    assert.deepEqual(videoService.relayTarget(srtId, "whip"), { refuse: 404 }, "this push feed's device speaks SRT, not WHIP");
+    // The one case that must NOT be refused: a genuine push+whip feed, relay running.
+    assert.deepEqual(videoService.relayTarget(whipId, "whip"), {
+      host: "127.0.0.1",
+      port: 8889,
+      path: `/${whipId}/whip`,
+    });
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(pullId);
+    await videoService.removeFeed(srtId);
+    await videoService.removeFeed(whipId);
+  }
+});
+
+test("relayTarget answers 503 only once the feed and kind both check out, and the relay itself is not running", async () => {
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Balcony", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    // No relay attached — relayStatus() reads "off", which relayTarget must
+    // treat as "not running" exactly like "starting" or "failing".
+    assert.deepEqual(videoService.relayTarget(id, "whep"), { refuse: 503 });
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { refuse: 503 });
+
+    const relay = fakeRelay(async () => []);
+    const supervisor = new FakeSupervisor();
+    supervisor.current = { state: "starting" };
+    videoPollDeps.inDemand = () => false;
+    videoService.attachRelay(relay, supervisor);
+    // attachRelay() itself does not publish (see its own comment) — force one
+    // so the snapshot relayTarget reads picks up "starting" without waiting
+    // on a poll. publish() is private; reached the same way pollOnce() above is.
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(videoService.relayTarget(id, "whep"), { refuse: 503 }, "starting is not running either");
+
+    supervisor.current = { state: "running", since: Date.now() };
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, path: `/${id}` });
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("relay status maps the supervisor's status and version onto the wire shape, including a null starting version before the banner is parsed", async () => {
   const relay = fakeRelay(async () => []);
   const supervisor = new FakeSupervisor();

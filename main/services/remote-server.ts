@@ -84,6 +84,7 @@ import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
 import { videoRoutes } from "./routes/video-routes.js";
+import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
@@ -132,8 +133,12 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * is: dispatch.test.ts walks routes/ and requires every module it finds to be in
  * one of these two lists, and a module dispatched by a bespoke line would have to
  * be excused by name — which is how a coverage scan stops covering anything.
+ *
+ * videoProxyRoutes belongs here for the same reason logRoutes does: none of
+ * `/video/<feedId>/whep|whip|<file>` starts with /api/, so the static-build
+ * arm below would serve the SPA shell for every one of them.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes, videoProxyRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged

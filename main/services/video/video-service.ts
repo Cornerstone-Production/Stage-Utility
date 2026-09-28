@@ -711,6 +711,37 @@ class VideoService {
     this.requestedAt.set(feedId, Date.now());
   }
 
+  /**
+   * Where the playback proxy (video-proxy-routes.ts) should forward a
+   * `/video/<feedId>/<kind>…` request, or the reason to refuse. Read off
+   * `this.snapshot` — the same synchronous truth writeHelloBurst uses (see
+   * the field comment above) — so this needs no store read of its own: every
+   * mutation that could change the answer (addFeed/updateFeed/removeFeed,
+   * attachRelay/detachRelay, a status poll picking up "running") already ends
+   * in publish(), which is what keeps the snapshot current.
+   *
+   * 404 for a pattern-failing or unknown id, for a kind this feed's source
+   * cannot serve (embed/external have no relay path at all; "whip" beyond
+   * that needs a push feed whose OWN protocol is whip — a pull feed, or a
+   * push feed on SRT/RTMP, has nothing listening for a WHIP offer). 503 only
+   * once a feed and kind both check out: an unknown feed is never "the relay
+   * is down" even while it genuinely is.
+   */
+  relayTarget(
+    feedId: string,
+    kind: "whep" | "whip" | "hls",
+  ): { host: "127.0.0.1"; port: number; path: string } | { refuse: 404 | 503 } {
+    if (!FEED_ID_PATTERN.test(feedId)) return { refuse: 404 };
+    const feed = this.snapshot.feeds.find((f) => f.id === feedId);
+    if (!feed || (feed.source.kind !== "pull" && feed.source.kind !== "push")) return { refuse: 404 };
+    if (kind === "whip" && !(feed.source.kind === "push" && feed.source.protocol === "whip")) return { refuse: 404 };
+    if (this.snapshot.relay.state !== "running") return { refuse: 503 };
+    const { ports } = this.snapshot.relay;
+    return kind === "hls"
+      ? { host: "127.0.0.1", port: ports.hls, path: `/${feedId}` }
+      : { host: "127.0.0.1", port: ports.webrtcHttp, path: `/${feedId}/${kind}` };
+  }
+
   // ── Feeds ─────────────────────────────────────────────────────────────
 
   async addFeed(body: unknown): Promise<Result> {

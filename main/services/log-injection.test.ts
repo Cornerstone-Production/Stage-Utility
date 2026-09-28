@@ -133,6 +133,10 @@ const REQUEST_FACING = [
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
+  // Its one outage line names the feed id off the proxied URL (validated
+  // against the feed list first, so it is never an attacker's raw string)
+  // and whatever the relay's own error said back.
+  "routes/video-proxy-routes.ts",
   // Logs nothing today — every routes/ file is walked, so a new one forces this
   // decision rather than being found the day it first logs a feed name or a URL
   // typed into a POST /api/video/feeds body.

@@ -478,6 +478,16 @@ neither is a 400.
 | DELETE | `/api/video/feeds/:id` | Remove a feed. A layout still pointed at it keeps the binding and renders it as offline |
 | GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
 
+Playback is proxied on Stage Utility's own origin, not under `/api`, because
+the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
+`PATCH`/`DELETE /video/<feedId>/whep/<session>`, `POST /video/<feedId>/whip`
+(OBS's Authorization Bearer token forwarded through), and
+`GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. `404` for an unknown feed id, a
+kind the feed's own source cannot serve (embed/external have no relay path;
+WHIP needs a push feed whose own protocol is WHIP), or a file name outside
+the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `503` while the relay
+is not running.
+
 **Branding & events**
 | Method | Path | Purpose |
 |--------|------|---------|
