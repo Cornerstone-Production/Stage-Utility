@@ -23,10 +23,10 @@ import { videoService } from "../video/video-service.js";
 import { type RouteCtx, error, readRawBody } from "./context.js";
 
 /**
- * WHEP/WHIP and HLS timeouts, and the request-body cap — mutable so a test
- * can shrink a timeout to milliseconds rather than actually waiting 10 s or
- * 30 s for one (see video-proxy-routes.test.ts's timeout tests), the same
- * seam video-service.ts's own `videoPollDeps` is for its poll interval.
+ * WHEP/WHIP and HLS timeouts — mutable so a test can shrink one to
+ * milliseconds rather than actually waiting 10 s or 30 s for it (see
+ * video-proxy-routes.test.ts's timeout tests), the same seam
+ * video-service.ts's own `videoPollDeps` is for its poll interval.
  * Restored by every test that touches it; production never assigns to it.
  */
 export const proxyTimeouts = {

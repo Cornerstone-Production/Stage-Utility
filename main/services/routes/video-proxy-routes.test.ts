@@ -617,11 +617,11 @@ describe("a viewer leaving mid-hold", () => {
 
   test("aborting a held HLS request logs no relay-failure line — the viewer left, the relay did not fail", async () => {
     // AbortController, not a raw http.request destroy(): this is what an
-    // actual browser navigating away mid-hold does, and — found chasing
-    // this test down for fix round 1 — a raw client-side req.destroy()
-    // here sometimes never even reaches `su`'s socket before the fixture's
-    // hold ends, proving nothing. fetch()'s abort reliably tears down the
-    // real connection this proxy is holding open.
+    // actual browser navigating away mid-hold does. (A raw client would
+    // work too, PROVIDED it calls .end() first — Node sends nothing on the
+    // wire before .end()/.write(), so a request destroyed without one
+    // never reaches the server at all; the first draft of this test forgot
+    // that and chased a false lead. fetch() has no such trap.)
     const warns = await captureConsole("warn", async () => {
       const controller = new AbortController();
       const fetchPromise = fetchSu(`/video/${camId}/index.m3u8`, { signal: controller.signal });
