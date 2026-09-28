@@ -168,8 +168,9 @@ function VideoObjectBody({
               invisible-but-still-"visible" video may never fire
               requestVideoFrameCallback in every browser, which would time
               every attempt out before a frame had a chance to arrive. Omitted
-              entirely for "nothing": the mockup's offline-nothing state is
-              transparent over the box, not a covered one with empty content. */}
+              entirely for "nothing": the approved design's offline-nothing
+              state is transparent over the box, not a covered one with empty
+              content. */}
           {!isEmbed && !showingPicture && !(phase === "offline" && config.whenOffline === "nothing") && (
             <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
               {phase === "waiting" && <StateText big="Waiting for the source" small="Nothing is sending to this feed yet" />}

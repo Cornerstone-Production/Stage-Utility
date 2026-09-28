@@ -1,5 +1,5 @@
 // The Video widget's inspector section: Feed, Fit, Show feed name and When
-// offline — the four settings the mockup's Layout editor tab shows.
+// offline — the four settings the approved design's Layout editor tab shows.
 //
 // Driven through the real VideoConfig component with a stubbed fetch, not
 // reasoned about: a control that renders is not a control that patches the

@@ -52,7 +52,7 @@ const EMBED_CALLOUT: Record<EmbedPlayer, string> = {
   resi: "Plays in Resi's own player. Good for a lobby, not for the stage.",
 };
 
-/** The field label under the Player select follows the player, per the mockup. */
+/** The field label under the Player select follows the player, per the approved design. */
 const EMBED_FIELD_LABEL: Record<EmbedPlayer, string> = {
   "youtube-channel": "Channel",
   "youtube-video": "Video",
@@ -181,8 +181,9 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         title: `Delete "${feed.name}"?`,
         message,
         // "Delete", not "Delete feed": the row's own trigger already reads
-        // "Delete feed" (the mockup's action copy), and this is the confirm
-        // dialog's OWN action button, a distinct control from that trigger.
+        // "Delete feed" (the approved design's action copy), and this is the
+        // confirm dialog's OWN action button, a distinct control from that
+        // trigger.
         confirmLabel: "Delete",
         destructive: true,
       });

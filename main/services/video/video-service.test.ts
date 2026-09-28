@@ -4,8 +4,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { VideoSourceKind } from "../../types/video.js";
-
 // Before any store is constructed: every import below builds its stores
 // against this directory, never the default data folder.
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-service-"));
@@ -13,18 +11,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 const { videoService, SECRET_SLOT } = await import("./video-service.js");
 const { secretsStore } = await import("../secrets.js");
 const { configSnapshot } = await import("../config-snapshot.js");
-
-/** Offers every kind for the duration of `fn`: this build offers only embed
- *  and external, and a password only exists for pull. */
-async function withAllKinds<T>(fn: () => Promise<T>): Promise<T> {
-  const svc = videoService as unknown as { allowedKinds: () => ReadonlySet<VideoSourceKind> };
-  svc.allowedKinds = () => new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
-  try {
-    return await fn();
-  } finally {
-    delete (svc as { allowedKinds?: unknown }).allowedKinds;
-  }
-}
+const { withAllKinds } = await import("../fixtures/video-kinds.js");
 
 test("a config snapshot never carries a feed's password", async () => {
   const password = "correct-horse-battery-staple";

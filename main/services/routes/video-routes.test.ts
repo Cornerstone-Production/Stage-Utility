@@ -8,6 +8,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-routes-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 const { callRoute } = await import("./route-harness.js");
 const { videoRoutes } = await import("./video-routes.js");
+const { withAllKinds } = await import("../fixtures/video-kinds.js");
 
 const EMBED = { name: "Online stream", source: { kind: "embed", player: "youtube-video", ref: "dQw4w9WgXcQ" } };
 
@@ -94,19 +95,6 @@ test("usage names the layouts that place the feed, inside containers too", async
   const r = await callRoute(videoRoutes, "/api/video/feeds/cam/usage");
   assert.deepEqual(r.json, { layouts: [{ viewId: "v1", name: "Stage confidence" }] });
 });
-
-/** Offers every kind for the duration of `fn`: this build offers only embed
- *  and external, and a password only exists for pull. */
-async function withAllKinds<T>(fn: () => Promise<T>): Promise<T> {
-  const { videoService } = await import("../video/video-service.js");
-  const svc = videoService as unknown as { allowedKinds: () => ReadonlySet<string> };
-  svc.allowedKinds = () => new Set(["pull", "push", "embed", "external"]);
-  try {
-    return await fn();
-  } finally {
-    delete (svc as { allowedKinds?: unknown }).allowedKinds;
-  }
-}
 
 test("a PATCH's password reaches the feed's secrets slot", async () => {
   const { secretsStore } = await import("../secrets.js");
