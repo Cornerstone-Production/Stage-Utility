@@ -264,6 +264,13 @@ const NOT_SCANNED = new Map<string, string>([
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
+  [
+    "video/acquire.ts",
+    "logs the pinned MediaMTX asset name and computed SHA-256 hashes, and the downloads/ " +
+      "path built from the asset name — all from the compiled-in pin table or the local " +
+      "filesystem, never from an HTTP request; the module handles no route. Audited, not " +
+      "just excused.",
+  ],
   ["wireless-manager.ts", DEVICE],
   ["youtube-service.ts", DEVICE],
 ]);
