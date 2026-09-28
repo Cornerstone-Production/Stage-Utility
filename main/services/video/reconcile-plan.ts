@@ -27,6 +27,43 @@ export interface PathConf {
  *  configured instead of the relay's own "path not found." */
 const ALL_OTHERS = "all_others";
 
+/** A pull feed's address with its credentials folded in — what a `RelayFeed`
+ *  of kind "pull" carries as `source`. Never logs: the return value carries
+ *  a password, and nothing that touches it here is a log call.
+ *
+ *  rtsp/rtsps/http/https put the credentials in the URL's own userinfo,
+ *  percent-encoded by the `URL` setters (`p@ss` becomes `p%40ss`); srt has
+ *  no userinfo convention of its own, so its password goes in the query as
+ *  `passphrase=<pw>` and its username is ignored — MediaMTX authenticates
+ *  an SRT pull by passphrase alone. An empty username with no password
+ *  leaves `url` untouched.
+ */
+export function pullSource(url: string, username: string, password: string | undefined): string {
+  const parsed = new URL(url);
+
+  if (parsed.protocol === "srt:") {
+    if (!password) return url;
+    parsed.searchParams.set("passphrase", password);
+    return parsed.toString();
+  }
+
+  if (username === "" && !password) return url;
+
+  // The URL setters below silently no-op when the URL "cannot have a
+  // username/password" — true only when its host is empty (per the WHATWG
+  // URL spec; not actually scheme-specific for any of the four schemes
+  // this ever sees). Every rtsp/rtsps/http/https URL a feed can carry has
+  // already been through `new URL()` in feed-input.ts, which requires a
+  // host to parse at all — so this is a defensive fallback, not a reachable
+  // one, and the scheme is left with no credentials rather than silently
+  // dropping a password nobody can see was dropped.
+  if (parsed.host === "") return url;
+
+  parsed.username = username;
+  if (password !== undefined) parsed.password = password;
+  return parsed.toString();
+}
+
 /** The config MediaMTX needs for one feed's path. */
 export function pathConf(feed: RelayFeed): PathConf {
   if (feed.kind === "pull") {

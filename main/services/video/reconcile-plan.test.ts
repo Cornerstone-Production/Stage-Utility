@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { pathConf, planReconcile, publishUsers } from "./reconcile-plan.ts";
-import { READER_USER } from "./mediamtx-config.ts";
-import type { RelayFeed } from "./relay.ts";
+import { pathConf, planReconcile, publishUsers, pullSource } from "./reconcile-plan.js";
+import { READER_USER } from "./mediamtx-config.js";
+import type { RelayFeed } from "./relay.js";
 
 const PULL: RelayFeed = { id: "cam1", kind: "pull", source: "rtsp://h/s" };
 const PULL_2: RelayFeed = { id: "cam2", kind: "pull", source: "rtsp://h2/s2" };
@@ -117,5 +117,49 @@ describe("publishUsers", () => {
 
   it("is just the reader user when there are no push feeds", () => {
     assert.deepEqual(publishUsers([PULL, PULL_2]), [READER_USER]);
+  });
+});
+
+describe("pullSource", () => {
+  it("folds a username and password into rtsp userinfo, percent-encoded", () => {
+    assert.equal(pullSource("rtsp://h/s", "admin", "p@ss"), "rtsp://admin:p%40ss@h/s");
+  });
+
+  it("does the same for rtsps, http and https", () => {
+    assert.equal(pullSource("rtsps://h/s", "admin", "p@ss"), "rtsps://admin:p%40ss@h/s");
+    assert.equal(pullSource("http://h/s", "admin", "p@ss"), "http://admin:p%40ss@h/s");
+    assert.equal(pullSource("https://h/s", "admin", "p@ss"), "https://admin:p%40ss@h/s");
+  });
+
+  it("percent-encodes a password carrying @, : and /", () => {
+    assert.equal(pullSource("rtsp://h/s", "user", "a@b:c/d"), "rtsp://user:a%40b%3Ac%2Fd@h/s");
+  });
+
+  it("leaves the URL unchanged with an empty username and no password", () => {
+    assert.equal(pullSource("rtsp://h/s", "", undefined), "rtsp://h/s");
+    assert.equal(pullSource("rtsp://h/s", "", ""), "rtsp://h/s");
+  });
+
+  it("uses the password alone when there is no username, for a scheme that allows it", () => {
+    assert.equal(pullSource("rtsp://h/s", "", "p@ss"), "rtsp://:p%40ss@h/s");
+  });
+
+  it("puts an SRT pull's password in the query as passphrase, URL-encoded", () => {
+    assert.equal(pullSource("srt://h:9000", "ignored", "p@ss"), "srt://h:9000?passphrase=p%40ss");
+  });
+
+  it("percent-encodes an SRT passphrase carrying @, : and /", () => {
+    assert.equal(pullSource("srt://h:9000", "x", "a@b:c/d"), "srt://h:9000?passphrase=a%40b%3Ac%2Fd");
+  });
+
+  it("ignores the username for SRT and keeps an existing query", () => {
+    assert.equal(
+      pullSource("srt://h:9000?streamid=x&mode=caller", "someone", "p@ss"),
+      "srt://h:9000?streamid=x&mode=caller&passphrase=p%40ss",
+    );
+  });
+
+  it("leaves an SRT URL unchanged with no password", () => {
+    assert.equal(pullSource("srt://h:9000?streamid=x", "ignored", undefined), "srt://h:9000?streamid=x");
   });
 });

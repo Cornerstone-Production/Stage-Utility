@@ -9,9 +9,9 @@ import assert from "node:assert/strict";
 import * as http from "node:http";
 import { afterEach, before, after, describe, it } from "node:test";
 
-import { READER_USER, type RelayUser } from "./mediamtx-config.ts";
-import { MediaMtxRelay } from "./mediamtx-relay.ts";
-import type { RelayFeed } from "./relay.ts";
+import { READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { MediaMtxRelay } from "./mediamtx-relay.js";
+import type { RelayFeed } from "./relay.js";
 
 /** Keys `GET /v3/config/paths/list` reports beyond what this app ever sets
  *  — recording, run-on-demand, every other protocol's own timeouts — so a
@@ -151,7 +151,14 @@ const PUSH: RelayFeed = { id: "obs1", kind: "push", password: "hunter2" };
 const STORED_READER_USER = { ...READER_USER, ips: ["127.0.0.1/32", "::1/128"] };
 
 describe("MediaMtxRelay.reconcile", () => {
-  it("patches authInternalUsers BEFORE adding paths", async () => {
+  it("patches authInternalUsers BEFORE every path write — an add, a replace AND a remove alike", async () => {
+    // Pre-seed the relay directly (bypassing HTTP) so one reconcile() call
+    // has to add obs1, replace cam1 (its stale conf differs from PULL's)
+    // and remove orphan, all alongside the very first users patch — the
+    // ordering claim has to hold for every write kind, not just add.
+    configPaths.set("cam1", { ...PATH_EXTRAS, source: "rtsp://stale-host/s", sourceOnDemand: true });
+    configPaths.set("orphan", { ...PATH_EXTRAS, source: "rtsp://gone/x", sourceOnDemand: true });
+
     const relay = new MediaMtxRelay(port);
     await relay.reconcile([PULL, PUSH]);
 
@@ -160,11 +167,20 @@ describe("MediaMtxRelay.reconcile", () => {
     const addIndexes = writes
       .map((c, i) => (c.url.startsWith("/v3/config/paths/add/") ? i : -1))
       .filter((i) => i >= 0);
+    const replaceIndexes = writes
+      .map((c, i) => (c.url.startsWith("/v3/config/paths/replace/") ? i : -1))
+      .filter((i) => i >= 0);
+    const removeIndexes = writes
+      .map((c, i) => (c.method === "DELETE" ? i : -1))
+      .filter((i) => i >= 0);
     assert.ok(patchIndex >= 0, "expected a users patch");
-    assert.ok(addIndexes.length > 0, "expected path adds");
+    assert.ok(addIndexes.length > 0, "expected a path add");
+    assert.ok(replaceIndexes.length > 0, "expected a path replace");
+    assert.ok(removeIndexes.length > 0, "expected a path remove");
     assert.ok(
-      addIndexes.every((i) => i > patchIndex),
-      `expected the users patch (index ${patchIndex}) before every path add (indexes ${addIndexes.join(",")})`,
+      [...addIndexes, ...replaceIndexes, ...removeIndexes].every((i) => i > patchIndex),
+      `expected the users patch (index ${patchIndex}) before every add/replace/remove ` +
+        `(add ${addIndexes.join(",")}, replace ${replaceIndexes.join(",")}, remove ${removeIndexes.join(",")})`,
     );
 
     assert.deepEqual(globalConfig.authInternalUsers, [
@@ -173,6 +189,7 @@ describe("MediaMtxRelay.reconcile", () => {
     ]);
     assert.equal(configPaths.get("cam1")?.source, "rtsp://admin:p%40ss@h/s");
     assert.equal(configPaths.get("obs1")?.source, "publisher");
+    assert.equal(configPaths.has("orphan"), false);
   });
 
   it("forwards a pull feed's folded URL unchanged, including an SRT passphrase in the query", async () => {
@@ -338,6 +355,19 @@ describe("MediaMtxRelay.kickPublisher", () => {
       calls.filter((c) => c.method === "POST").length,
       0,
     );
+  });
+
+  it("throws for a source type outside the three mapped ones", async () => {
+    runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "rtspSession", id: "conn-9" } }];
+    const relay = new MediaMtxRelay(port);
+    await assert.rejects(
+      () => relay.kickPublisher("cam1"),
+      (err: Error) => {
+        assert.equal(err.message, 'Cannot kick a publisher of type "rtspSession"');
+        return true;
+      },
+    );
+    assert.equal(calls.filter((c) => c.method === "POST").length, 0);
   });
 });
 
