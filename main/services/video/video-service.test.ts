@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import * as fs from "node:fs/promises";
@@ -22,6 +22,11 @@ const { RelaySupervisor } = await import("./supervisor.js");
 type RelayPath = import("./relay.js").RelayPath;
 type VideoRelay = import("./relay.js").VideoRelay;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
+
+// Every test here shares the one videoService, and so its OutageLog: an outage
+// one test leaves open would swallow, as a repeat of the same failure, the
+// line a later test expects to see first. Each test starts with none open.
+beforeEach(() => (videoService as unknown as { pollOutage: { forget(): void } }).pollOutage.forget());
 
 test("a config snapshot never carries a feed's password", async () => {
   const password = "correct-horse-battery-staple";
@@ -614,11 +619,9 @@ test("a relay that stops answering warns once per outage; recovery logs once aft
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
-  // Anchored to the real clock (see the boot-grace tests below for why),
-  // and past the supervisor's own boot grace window relative to its
-  // "since" (a fixed 1 ms — safely in the past either way), so these
-  // failures are read as the relay actually not answering.
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + RELAY_BOOT_GRACE_MS + 1000 });
+  // Past the supervisor's boot grace window (FakeSupervisor's "since" is 1),
+  // so these failures read as the relay actually not answering.
+  t.mock.timers.enable({ apis: ["Date"], now: RELAY_BOOT_GRACE_MS + 1000 });
 
   const lines: string[] = [];
   const realWarn = console.warn;
@@ -833,13 +836,7 @@ test("a poll that fails within the supervisor's own boot grace window does not f
     throw new Error("ECONNREFUSED");
   });
   const supervisor = new FakeSupervisor();
-  // Anchored to the real clock, not an arbitrary small number: the shared
-  // OutageLog key this test also touches ("relay-status") can carry an open
-  // run from an earlier test's real Date.now() failure, and a mocked clock
-  // starting BEFORE that real timestamp would misread it as a reminder
-  // still far in the future rather than a stale run to treat fresh.
-  const base = Date.now();
-  supervisor.current = { state: "running", since: base };
+  supervisor.current = { state: "running", since: 0 };
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
@@ -847,7 +844,7 @@ test("a poll that fails within the supervisor's own boot grace window does not f
   // before MediaMTX has actually opened its API — 1 s before the grace
   // window ends, a failed poll is still that boot-up window, not a real
   // failure to answer.
-  t.mock.timers.enable({ apis: ["Date"], now: base });
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
   t.mock.timers.tick(RELAY_BOOT_GRACE_MS - 1000);
 
   const warns: string[] = [];
@@ -865,23 +862,15 @@ test("a poll that fails within the supervisor's own boot grace window does not f
 });
 
 test("a poll that fails after the supervisor's own boot grace window flips the relay to not answering, and logs once", async (t) => {
-  // A distinct message, not the "ECONNREFUSED" several other tests in this
-  // file also throw: the shared OutageLog treats a repeat of the SAME
-  // message within 15 minutes as one ongoing outage, not news — correct
-  // behavior it is not this test's job to fight. A message no other test
-  // uses is always a first-of-its-kind failure, so the log line this test
-  // checks for cannot depend on what ran, or how much real time passed,
-  // before it.
   const relay = fakeRelay(async () => {
-    throw new Error("relay-boot-grace-probe-timeout");
+    throw new Error("ECONNREFUSED");
   });
   const supervisor = new FakeSupervisor();
-  const base = Date.now(); // see the previous test for why this is anchored to real time
-  supervisor.current = { state: "running", since: base };
+  supervisor.current = { state: "running", since: 0 };
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
-  t.mock.timers.enable({ apis: ["Date"], now: base });
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
   t.mock.timers.tick(RELAY_BOOT_GRACE_MS + 1000); // 1 s past the grace
 
   const warns: string[] = [];
