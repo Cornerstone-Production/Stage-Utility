@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import type { VideoFeedView } from "@main/types/video";
 import { errorMessage } from "@main/services/errors";
+import { OutageLog } from "@main/services/repeat-log";
 import { browserCaps, choosePlayback } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
@@ -43,6 +44,13 @@ export const FIRST_FRAME_TIMEOUT_MS = 5000;
 export const HLS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 export const RETRY_MIN_MS = 1000;
 export const RETRY_MAX_MS = 30_000;
+/** How long playback must hold, with no drop, before the backoff starts over
+ *  and a failing streak counts as recovered. One frame is not recovery:
+ *  Chrome's native HLS player showed one frame of the relay's low-latency
+ *  HLS and then failed, every time. */
+export const RESET_AFTER_PLAYING_MS = 10_000;
+/** A failing streak's "still failing" reminder, at most this often. */
+export const STREAK_REMIND_MS = 5 * 60 * 1000;
 /** How long a relay feed plays over HLS after WebRTC proved unusable on this
  *  screen before WebRTC is tried again: the verdict is about a moment (a
  *  blocked port, an encoder's settings), not about the screen for ever. */
@@ -393,9 +401,9 @@ export interface VideoSessionInput {
   video: HTMLVideoElement | null;
   /** The screen's "Use HLS on this screen" switch; true where it is not set. */
   allowHls: boolean;
-  /** A reason string for every WebRTC-fallback and every drop-triggered
-   *  retry, for the widget to put on a `[video]` log line. Not called for
-   *  every subsequent retry tick of the SAME drop — only once per decision. */
+  /** A line for the widget to put on the `[video]` log: every WebRTC
+   *  fallback, and a failing streak's first failure, its reminders (at most
+   *  every STREAK_REMIND_MS) and its recovery. Never once per retry. */
   onLog?: (reason: string) => void;
 }
 
@@ -431,8 +439,17 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // must persist between retries (2s, then 4s, then 8s...), but resetting it
   // to 0 on success must never itself retrigger the effect and tear down the
   // session that just succeeded, which is exactly what putting it in state
-  // alongside `retryToken` would do.
+  // alongside `retryToken` would do. Reset only once playback has held for
+  // RESET_AFTER_PLAYING_MS, never on a first frame.
   const attemptCountRef = useRef(0);
+  // The failing streak, for the log: its first failure, a reminder at most
+  // every STREAK_REMIND_MS, and its recovery — never a line per retry, which
+  // from one widget had /api/log/client answering 429 within seconds. The
+  // server's own once-per-outage rule (main/services/repeat-log.ts), with no
+  // settle window of its own: `ok` is only called once playback has held,
+  // which is this hook's settle window.
+  const streakRef = useRef<OutageLog | null>(null);
+  const streak = () => (streakRef.current ??= new OutageLog(0, STREAK_REMIND_MS));
 
   // Primitives, not `feed` itself: useVideoState hands back a NEW object on
   // every push, including one that changes nothing about THIS feed. An
@@ -487,28 +504,43 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     setAttemptPhase("connecting");
     setLatency(null);
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let heldTimer: ReturnType<typeof setTimeout> | undefined;
+    const name = current?.name ?? "this feed";
+    const key = current?.id ?? "";
 
     const attemptHandle = startPlaybackAttempt(video, choice, {
       onPhase: (p) => {
         setAttemptPhase(p);
-        if (p === "live" || p === "delayed") attemptCountRef.current = 0;
+        if ((p === "live" || p === "delayed") && heldTimer === undefined) {
+          heldTimer = setTimeout(() => {
+            attemptCountRef.current = 0;
+            const d = streak().ok(key, Date.now());
+            if (d.log) onLogRef.current?.(`"${name}" is playing again on this screen${d.note}`);
+          }, RESET_AFTER_PLAYING_MS);
+        }
       },
       onLatency: setLatency,
       onWebrtcUnusable: (reason) => {
-        onLogRef.current?.(`WebRTC unusable for "${current?.name ?? "this feed"}" on this screen: ${reason}`);
+        onLogRef.current?.(`WebRTC unusable for "${name}" on this screen: ${reason}`);
         setWebrtcFailed(true);
       },
       onDropped: (reason) => {
+        clearTimeout(heldTimer);
         setAttemptPhase("offline");
         const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** attemptCountRef.current);
         attemptCountRef.current += 1;
-        onLogRef.current?.(`"${current?.name ?? "this feed"}" dropped on this screen (${reason}); retrying in ${delay}ms`);
+        const d = streak().fail(key, "dropped", Date.now());
+        if (d.log) onLogRef.current?.(`"${name}" failed on this screen (${reason}); retrying with backoff${d.note}`);
+        // The browser console only, never the server log: devtools shows
+        // Verbose on request, and a retry is not news on /log.
+        console.debug(`[video] "${name}" retrying in ${delay} ms (${reason})`);
         retryTimer = setTimeout(() => setRetryToken((t) => t + 1), delay);
       },
     });
 
     return () => {
       clearTimeout(retryTimer);
+      clearTimeout(heldTimer);
       attemptHandle.stop();
     };
   }, [active, video, retryToken, verdict, feedRef, onLogRef]);

@@ -22,7 +22,10 @@ import {
   CONNECT_TIMEOUT_MS,
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
+  RESET_AFTER_PLAYING_MS,
+  RETRY_MAX_MS,
   RETRY_MIN_MS,
+  STREAK_REMIND_MS,
   startPlaybackAttempt,
   useVideoSession,
   WEBRTC_RETRY_AFTER_MS,
@@ -31,6 +34,14 @@ const { renderHook, act, cleanup } = await import("@testing-library/react");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
+
+// Every retry writes a console.debug line (the browser console's Verbose
+// level); dozens of them per backoff test are noise in the test output.
+const realDebug = console.debug;
+console.debug = () => {};
+after(() => {
+  console.debug = realDebug;
+});
 
 /**
  * Drains every already-queued microtask, not a fixed guess at how many
@@ -64,17 +75,38 @@ class FakeVideo extends EventTarget {
     this.dispatchEvent(new NodeEvent("error"));
   }
   // What startHls's native branch touches (Node has no MediaSource, so an HLS
-  // attempt here always takes it).
-  src = "";
+  // attempt here always takes it). `srcSets` counts HLS attempts started.
+  private assignedSrc = "";
+  srcSets = 0;
+  get src(): string {
+    return this.assignedSrc;
+  }
+  set src(v: string) {
+    this.assignedSrc = v;
+    if (v) this.srcSets++;
+  }
   srcObject: unknown = null;
+  /** Native HLS's latency reads the live edge from here; empty means unknown. */
+  seekable = { length: 0, end: (_i: number) => 0 };
+  currentTime = 0;
   canPlayType(): string {
     return "maybe";
   }
   removeAttribute(name: string): void {
-    if (name === "src") this.src = "";
+    if (name === "src") this.assignedSrc = "";
   }
   load(): void {}
 }
+
+const EXTERNAL_WHEP: VideoFeedView = {
+  id: "cam",
+  name: "Cam",
+  kind: "external",
+  sourceLine: "",
+  source: { kind: "external", url: "http://h/cam/whep" },
+  play: { via: "external", url: "http://h/cam/whep", protocol: "whep" },
+  status: { state: null },
+};
 
 type FetchBehavior = "succeed" | "reject" | "hang" | { status: number };
 
@@ -83,12 +115,13 @@ type FetchBehavior = "succeed" | "reject" | "hang" | { status: number };
  *  connect timeout rather than left open forever. `getHangingSignal()` is for
  *  proving the connect timeout actually ABORTS the hung request's own
  *  signal, not merely its own app-level callback. */
-function stubFetch(behavior: FetchBehavior) {
+function stubFetch(behaviorOrFn: FetchBehavior | (() => FetchBehavior)) {
   const calls: { method: string; url: string }[] = [];
   let hangingSignal: AbortSignal | undefined;
   const fn = (async (input: string | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     calls.push({ method, url: String(input) });
+    const behavior = typeof behaviorOrFn === "function" ? behaviorOrFn() : behaviorOrFn;
     if (method === "DELETE") return { ok: true, status: 200, headers: { get: () => null }, text: async () => "" } as unknown as Response;
     if (behavior === "reject") throw new Error("fetch failed");
     if (behavior === "hang") {
@@ -117,7 +150,7 @@ function stubFetch(behavior: FetchBehavior) {
 // Overwriting `globalThis.window` with a plain object per test, as a stub
 // once did, would have pulled the rug out from under `renderHook` in this
 // same file, which needs the real one.
-function stubGlobals(behavior: FetchBehavior) {
+function stubGlobals(behavior: FetchBehavior | (() => FetchBehavior)) {
   const { fn, calls, getHangingSignal } = stubFetch(behavior);
   const realFetch = globalThis.fetch;
   globalThis.fetch = fn;
@@ -519,64 +552,219 @@ test("the connect timeout aborts the hung POST's own signal, not only its app-le
   }
 });
 
-// ── the backoff counter resets on a first frame ──────────────────────────
+// ── the backoff grows across a failing streak ────────────────────────────
 //
-// Only provable through `useVideoSession` itself — the backoff EXPONENT is
-// held in the hook's own `attemptCountRef`, across repeated calls to
-// `startPlaybackAttempt`, which a test of that function alone cannot see.
+// Measured by WHEN the next attempt goes out, not by what a log line says:
+// the delay is the behaviour, and the log is now once per streak. Only
+// provable through `useVideoSession` itself — the backoff exponent lives in
+// the hook, across repeated calls to `startPlaybackAttempt`.
 
-test("the backoff counter resets after a first frame, not just after the FIRST drop", async () => {
-  const g = stubGlobals("succeed");
-  mock.timers.enable({ apis: ["setTimeout"] });
-  const logs: string[] = [];
-  const video = new FakeVideo();
-  const feed: VideoFeedView = {
-    id: "f",
-    name: "F",
-    kind: "pull",
-    sourceLine: "",
-    source: { kind: "pull", url: "rtsp://x", username: "" },
-    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
-    status: { state: "live" },
+const EXPECTED_DELAYS = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
+
+const EXTERNAL_HLS: VideoFeedView = {
+  id: "obs",
+  name: "OBS",
+  kind: "external",
+  sourceLine: "",
+  source: { kind: "external", url: "http://h/obs/index.m3u8" },
+  play: { via: "external", url: "http://h/obs/index.m3u8", protocol: "hls" },
+  status: { state: null },
+};
+
+/** jsdom's <video> plays no HLS and Node has no MediaSource, so browserCaps()
+ *  would answer "can't play" for an HLS feed. Claiming native HLS puts
+ *  startHls on its native branch, which only sets `src` on the fake. */
+function claimNativeHls(): () => void {
+  const proto = Object.getPrototypeOf(document.createElement("video")) as { canPlayType: (t: string) => string };
+  const real = proto.canPlayType;
+  proto.canPlayType = () => "maybe";
+  return () => {
+    proto.canPlayType = real;
   };
+}
+
+/**
+ * The delay before each retry, measured: after each failure, `fail()` drives
+ * the attempt to its drop, then the clock is advanced one millisecond short of
+ * the expected delay (no new attempt may start) and then the last millisecond
+ * (one must). `attempts()` counts attempts started so far.
+ */
+async function measureDelays(opts: {
+  rounds: number;
+  attempts: () => number;
+  fail: () => void;
+  expected: number[];
+}): Promise<void> {
+  for (let i = 0; i < opts.rounds; i++) {
+    const before = opts.attempts();
+    act(() => opts.fail());
+    const want = opts.expected[i]!;
+    await act(async () => {
+      mock.timers.tick(want - 1);
+      await flush();
+    });
+    assert.equal(opts.attempts(), before, `retry ${i + 1} started before ${want} ms`);
+    await act(async () => {
+      mock.timers.tick(1);
+      await flush();
+    });
+    assert.equal(opts.attempts(), before + 1, `retry ${i + 1} did not start at ${want} ms`);
+  }
+}
+
+test("the retry delay grows 1, 2, 4, 8, 16 s and caps at 30 s across consecutive failures", async () => {
+  const g = stubGlobals("reject");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  try {
+    renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    // Every POST rejects, so each attempt has already dropped by the time
+    // its microtasks drain: `fail` has nothing left to do.
+    await measureDelays({
+      rounds: EXPECTED_DELAYS.length,
+      attempts: () => g.calls.filter((c) => c.method === "POST").length,
+      fail: () => {},
+      expected: EXPECTED_DELAYS,
+    });
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a failure right after a single frame still grows the delay — one frame is not recovery", async () => {
+  // Chrome's native HLS player showed one frame of the relay's LL-HLS and
+  // then failed with a demuxer error. Resetting the counter on that frame
+  // pinned every retry at RETRY_MIN_MS, for ever.
+  const g = stubGlobals("succeed");
+  const restoreHls = claimNativeHls();
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  try {
+    renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_HLS, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    await measureDelays({
+      rounds: 4,
+      attempts: () => video.srcSets,
+      fail: () => {
+        video.fireFrame();
+        video.fireError();
+      },
+      expected: [1000, 2000, 4000, 8000],
+    });
+  } finally {
+    mock.timers.reset();
+    restoreHls();
+    g.restore();
+  }
+});
+
+test("playback that holds for RESET_AFTER_PLAYING_MS restarts the backoff at RETRY_MIN_MS", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  try {
+    renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    const posts = () => g.calls.filter((c) => c.method === "POST").length;
+    const dropAfterPlaying = (heldMs: number) => () => {
+      const pc = FakePeerConnection.instances.at(-1)!;
+      pc.setConnectionState("connected");
+      video.fireFrame();
+      mock.timers.tick(heldMs);
+      pc.setConnectionState("failed");
+      mock.timers.tick(DROP_GRACE_MS);
+    };
+    // Two short plays: the counter keeps growing.
+    await measureDelays({ rounds: 1, attempts: posts, fail: dropAfterPlaying(0), expected: [1000] });
+    await measureDelays({ rounds: 1, attempts: posts, fail: dropAfterPlaying(0), expected: [2000] });
+    // A play that holds: the next failure starts over.
+    await measureDelays({ rounds: 1, attempts: posts, fail: dropAfterPlaying(RESET_AFTER_PLAYING_MS), expected: [1000] });
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+// ── the log is written once per streak, never once per retry ─────────────
+
+test("a failing streak logs once, reminds at most every 5 minutes, and logs its recovery", async () => {
+  let failing = true;
+  const g = stubGlobals(() => (failing ? "reject" : "succeed"));
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
   try {
     renderHook(() =>
       useVideoSession({
         active: true,
-        feed,
+        feed: EXTERNAL_WHEP,
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
-        onLog: (r) => logs.push(r),
+        onLog: (l) => logs.push(l),
       }),
     );
-    // Two full rounds: connect, get a frame (this is what SHOULD reset the
-    // counter), then drop. If the reset never happened, the second round's
-    // drop would log RETRY_MIN_MS * 2 (2000ms), not RETRY_MIN_MS (1000ms).
-    for (let round = 0; round < 2; round++) {
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 1, "the first failure is news");
+    assert.match(logs[0]!, /"Cam" failed on this screen \(fetch failed\); retrying with backoff/);
+
+    // Keep failing for just under five minutes: dozens of retries, no line.
+    for (let t = 0; t < STREAK_REMIND_MS - RETRY_MAX_MS; t += 1000) {
       await act(async () => {
+        mock.timers.tick(1000);
         await flush();
       });
-      const pc = FakePeerConnection.instances.at(-1)!;
-      act(() => {
-        pc.setConnectionState("connected");
-        video.fireFrame();
-      });
-      act(() => {
-        pc.setConnectionState("failed");
-        mock.timers.tick(DROP_GRACE_MS);
-      });
-      act(() => {
-        mock.timers.tick(RETRY_MIN_MS * 4); // comfortably past either possible delay
+    }
+    assert.ok(g.calls.filter((c) => c.method === "POST").length > 10, "expected many retries in that time");
+    assert.equal(logs.length, 1, "a retry is not news");
+
+    // Past five minutes: one reminder.
+    for (let t = 0; t < 2 * RETRY_MAX_MS; t += 1000) {
+      await act(async () => {
+        mock.timers.tick(1000);
+        await flush();
       });
     }
+    assert.equal(logs.length, 2, "expected exactly one reminder past five minutes");
+    assert.match(logs[1]!, /still failing after \d+ attempts/);
 
-    assert.match(logs[0]!, /retrying in 1000ms/, "expected the first drop to retry at RETRY_MIN_MS");
-    assert.match(
-      logs[1]!,
-      /retrying in 1000ms/,
-      "a drop after a FRESH first frame must restart the backoff at RETRY_MIN_MS, not carry the previous round's exponent forward",
-    );
+    // The endpoint recovers; playback holds; the recovery is logged once.
+    failing = false;
+    for (let t = 0; t < RETRY_MAX_MS; t += 1000) {
+      await act(async () => {
+        mock.timers.tick(1000);
+        await flush();
+      });
+      const pc = FakePeerConnection.instances.at(-1);
+      if (pc && pc.connectionState === "new" && g.calls.at(-1)?.method === "POST") {
+        act(() => {
+          pc.setConnectionState("connected");
+          video.fireFrame();
+        });
+        break;
+      }
+    }
+    act(() => {
+      mock.timers.tick(RESET_AFTER_PLAYING_MS);
+    });
+    assert.equal(logs.length, 3, "expected one recovery line");
+    assert.match(logs[2]!, /"Cam" is playing again on this screen after \d+ failed attempts/);
   } finally {
     mock.timers.reset();
     g.restore();
@@ -657,7 +845,7 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
     });
 
     assert.ok(
-      logs.some((l) => l.includes("retrying in")),
+      logs.some((l) => l.includes("retrying with backoff")),
       "expected an external feed's refusal to retry — it has no HLS to fall back to",
     );
     assert.equal(
@@ -679,15 +867,6 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
 // feed does fall back to HLS, and that verdict is not forever either: after
 // WEBRTC_RETRY_AFTER_MS on HLS it tries WebRTC again.
 
-const EXTERNAL_WHEP: VideoFeedView = {
-  id: "cam",
-  name: "Cam",
-  kind: "external",
-  sourceLine: "",
-  source: { kind: "external", url: "http://h/cam/whep" },
-  play: { via: "external", url: "http://h/cam/whep", protocol: "whep" },
-  status: { state: null },
-};
 
 /** Each way startPlaybackAttempt can decide WebRTC is unusable, driven to
  *  the point of that decision. */
