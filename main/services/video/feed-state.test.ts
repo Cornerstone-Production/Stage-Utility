@@ -1,4 +1,4 @@
-// One row per line of task-12-brief.md's state table, transcribed as-is.
+// One case per input shape feedState() tells apart, and the status each reads as.
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";

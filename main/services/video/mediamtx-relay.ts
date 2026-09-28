@@ -14,7 +14,7 @@
 // let the very first connection race a user that is not there yet.
 //
 // Two things about `GET /v3/config/global/get`, confirmed against the real
-// v1.21.1 binary and in neither its docs nor relay-facts.md:
+// v1.21.1 binary and not in its docs:
 //
 // 1. It normalizes a bare IP in `ips` to CIDR ("127.0.0.1" comes back
 //    "127.0.0.1/32", "::1" comes back "::1/128"). Comparing the raw values
@@ -28,10 +28,10 @@
 //    always "<redacted>"), and this always re-sends it. That is
 //    deliberate, not missed: the alternative — excluding `pass` from the
 //    comparison so an unchanged relay makes no writes — would also skip
-//    the patch on a GENUINE password rotation (task 14's "New password"),
+//    the patch on a GENUINE password rotation (a push feed's "New password"),
 //    since nothing else about that user changes. A silently stale
 //    publish password is worse than an extra harmless PATCH (every live
-//    publisher and reader survives it, per relay-facts.md).
+//    publisher and reader survives it, observed against the same binary).
 
 import { isDeepStrictEqual } from "node:util";
 

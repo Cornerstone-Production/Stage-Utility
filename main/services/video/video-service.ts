@@ -142,7 +142,7 @@ class VideoService {
     feeds: [],
   };
 
-  // ── The relay, once task 15 attaches one ────────────────────────────────
+  // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
   private supervisor: RelaySupervisorLike | null = null;
   private lineListener: ((text: string) => void) | null = null;
@@ -158,14 +158,15 @@ class VideoService {
    *  parsed event it re-exports. */
   private readonly logWatcher = new RelayLogWatcher();
   /**
-   * Bumped on every attachRelay()/detachRelay(). A poll captures the
-   * generation it started under and checks it again after every await —
-   * cheaper and more complete than comparing `this.relay` by identity, and
-   * it is also what makes pollOnce()'s reentry guard per-ATTACHMENT rather
-   * than global: a boolean guard here (an earlier version's design) let an
-   * old relay's still-in-flight poll block the NEW relay's own first read
-   * after a detach+reattach, because the boolean stayed "true" across the
-   * swap. See pollingGeneration below.
+   * Bumped on every attachRelay()/detachRelay() and on every supervisor
+   * status change (handleStatusChange()): each means an answer to a poll
+   * already in flight is about a relay, or a process, this service no longer
+   * has. A poll captures the generation it started under and checks it again
+   * once relay.status() settles, which also covers a crash-and-respawn that
+   * leaves `this.relay` the same object. The reentry guard is keyed to it as
+   * well (pollingGeneration below), so a stale poll still in flight never
+   * blocks the first read of whatever replaced it; a plain boolean would stay
+   * true across the swap and do exactly that.
    */
   private relayGeneration = 0;
   /** True while a poll for `relayGeneration` is in flight. Compared against
@@ -194,7 +195,7 @@ class VideoService {
    *  same still-open session does not repeat the log line every time the
    *  relay logs another closed WebRTC attempt against it. */
   private readonly bframesAnnouncedAt = new Map<string, string | null>();
-  /** Epoch ms a WHEP/HLS request last named a feed — task 13's noteRequested(). */
+  /** Epoch ms a WHEP/HLS request last named a feed — see noteRequested(). */
   private readonly requestedAt = new Map<string, number>();
   /** The last FeedState logged for each feed, so "is live"/"is delayed"/
    *  "went offline" fire on the transition only. */
@@ -335,7 +336,7 @@ class VideoService {
     return JSON.stringify(body);
   }
 
-  // ── The relay: attached once by task 15, polled while watched ───────────
+  // ── The relay: attached when video is switched on, polled while watched ─
 
   /** Give the service a relay and its supervisor. Safe to call again with no
    *  detachRelay() first — the previous relay's listeners are removed here,
@@ -557,7 +558,7 @@ class VideoService {
     if (decision.log) console.log(`[video] the relay is answering again${scrub(decision.note)}`);
   }
 
-  /** Important #3: a rejected seen-store write must never abort the poll it
+  /** A rejected seen-store write must never abort the poll it
    *  happened inside of (the transition still has to log and publish), and
    *  must never surface as an unhandled rejection — it is reported the same
    *  way a relay that stops answering is, one line per outage. */
@@ -693,7 +694,7 @@ class VideoService {
   }
 
   /**
-   * Task 13's playback proxy calls this on every WHEP POST and playlist GET,
+   * The playback proxy calls this on every WHEP POST and playlist GET,
    * so an on-demand pull feed nothing has watched for RECENT_REQUEST_MS reads
    * as "standby" rather than "offline" — see feed-state.ts.
    *
