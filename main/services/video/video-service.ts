@@ -6,7 +6,6 @@
 import { EventEmitter } from "node:events";
 
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
-import { DEFAULT_VIDEO_PORTS } from "../../types/video.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
@@ -253,11 +252,13 @@ class VideoService {
         if (this.relayNotAnswering) {
           return { state: "failing", reason: "The relay is not answering", retryAt: null };
         }
-        // attachRelay() always sets attachedPorts in the same call that sets
-        // supervisor, so a "running" supervisor implies this is non-null —
-        // the || fallback exists only so a test double that skips attachRelay
-        // cannot crash this on a type the compiler already guarantees.
-        return { state: "running", version: this.supervisor.version() ?? "", ports: this.attachedPorts ?? DEFAULT_VIDEO_PORTS };
+        // attachRelay() requires ports and sets attachedPorts in the same
+        // call that sets supervisor, so a "running" supervisor GUARANTEES
+        // this is non-null — asserted, not defaulted: a silent fallback
+        // here is the exact bug class R13a fixed, and attachRelay()'s own
+        // required parameter is what makes this assertion true rather than
+        // hopeful.
+        return { state: "running", version: this.supervisor.version() ?? "", ports: this.attachedPorts! };
     }
   }
 
@@ -359,14 +360,20 @@ class VideoService {
   // ── The relay: attached when video is switched on, polled while watched ─
 
   /** Give the service a relay and its supervisor, and the ports THIS
-   *  process was actually started with (defaulted for a caller — a test,
-   *  today; nothing in production calls this yet — that does not care).
+   *  process was actually started with. Required, not defaulted: a caller
+   *  that does not know what it started the relay on has no business
+   *  attaching one — a silent default here is exactly the wrong-port bug
+   *  class R13a fixed (see attachedPorts's own comment), just moved one
+   *  call site earlier. A ports change (PR 2's `PATCH /api/video/ports`)
+   *  takes effect only once the relay restarts on the new ones; whatever
+   *  restarts it must attachRelay() again with THOSE ports, not reuse the
+   *  old attachment.
    *  Safe to call again with no detachRelay() first — the previous relay's
    *  listeners are removed here, never left to leak, but nothing is
    *  published for that half: a caller replacing one relay with another
    *  wants ONE settled state at the end, not an intermediate "off"
    *  broadcast between the two. */
-  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS): void {
+  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts): void {
     if (this.relay) this.detachInternal();
     this.relayGeneration++;
     this.relay = relay;
