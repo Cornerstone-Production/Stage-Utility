@@ -7,7 +7,7 @@
 // A kind with no field group here yet is refused at Save rather than guessed
 // at.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
 import { EMBED_PLAYERS, type EmbedPlayer, type VideoFeedView, type VideoSourceKind } from "@main/types/video";
@@ -22,6 +22,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  StackedField,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
@@ -294,18 +295,6 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
 
       {!isNew && feed && <UsedByLine feedId={feed.id} />}
     </aside>
-  );
-}
-
-/** The approved design's field: the label, the control at full width, and an
- *  optional description in small muted text under it. */
-function StackedField({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-footnote font-medium text-fg">{label}</span>
-      {children}
-      {description && <span className="text-caption2 leading-[14px] text-fg-subtle">{description}</span>}
-    </div>
   );
 }
 

@@ -94,3 +94,28 @@ export function FieldDescription({ className, children, ...props }: FieldDescrip
     </span>
   );
 }
+
+// ── StackedField ──────────────────────────────────────────────────────────────
+
+interface StackedFieldProps {
+  label: string;
+  description?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}
+
+/**
+ * The label above its control, the control at full width, and the description
+ * in full under it. For a narrow pane — the Video feeds editor, the layout
+ * inspector — where a label-left row squeezes the label, the control or the
+ * description into a column too narrow to read.
+ */
+export function StackedField({ label, description, className, children }: StackedFieldProps) {
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <FieldLabel>{label}</FieldLabel>
+      {children}
+      {description && <FieldDescription className="mt-0">{description}</FieldDescription>}
+    </div>
+  );
+}

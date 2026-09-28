@@ -141,6 +141,30 @@ describe("VideoConfig — Feed", () => {
   });
 });
 
+describe("VideoConfig — laid out as the approved design", () => {
+  // Stacking and truncation are CSS, which jsdom does not load; the section
+  // was checked in Chromium against the design's layout-editor tab. What the
+  // DOM can show: the Feed description is on the page in full, not behind an
+  // (i) that has to be clicked, and every label is there whole.
+  test("the Feed description is shown in full, not behind an info button", async () => {
+    const f = stubVideoState();
+    try {
+      const { queryByText, queryByRole } = await mount(DEFAULT_CONFIG, () => {});
+      assert.equal(
+        !!queryByText("Feeds are set up once on the Video feeds page. Change a feed there and every layout using it follows."),
+        true,
+        "the Feed description is hidden",
+      );
+      assert.equal(!!queryByRole("button", { name: "More info" }), false);
+      for (const label of ["Feed", "Fit", "Show feed name", "When the feed is offline"]) {
+        assert.equal(!!queryByText(label, { exact: true }), true, label);
+      }
+    } finally {
+      f.restore();
+    }
+  });
+});
+
 describe("VideoConfig — Fit", () => {
   // THE guard this file exists for. Break the toggle's onChange (comment out
   // the RED case below) and this must go red — see the commit body for the
