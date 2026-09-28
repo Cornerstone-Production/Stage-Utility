@@ -38,16 +38,36 @@ follows it:
 Either way the feed plays in the platform's own player, muted, and only while
 the stream is public or unlisted — a private one has no embed to load. YouTube
 runs 5 to 15 seconds behind live. This is a lobby feed, not a stage one: there
-is no way to reduce that delay or to see the platform's health from inside
-Stage Utility, so the feed list shows no status for it beyond "live on
-YouTube"/"live on Resi" once the platform reports it playing.
+is no way to reduce that delay from inside Stage Utility. The feed list's pill
+for it reads **Live on YouTube** or **Live on Resi**, which names the player the
+feed uses. Stage Utility cannot see whether the platform's stream is actually
+live.
 
 ### External WHEP or HLS address
 
 For something that already serves WebRTC (WHEP) or HLS on its own — a switcher
-or another box's relay. Stage Utility plays the address exactly as given and
-cannot see whether it is up, so this kind carries no live/offline status
-either: it plays, or it does not.
+or another box's relay. An address ending in `.m3u8` plays over HLS, anything
+else over WebRTC. Stage Utility plays the address exactly as given and cannot
+see whether it is up, so this kind carries no live/offline status and no pill:
+it plays, or it retries. A failed attempt retries the same way after a delay
+that starts at 1 second and doubles to 30, and never gives up; playback that
+holds for 10 seconds starts the delay over.
+
+The address may not carry a username or password (`https://user:pass@…`):
+browsers refuse to play one, so it is refused when the feed is saved.
+
+## The Video feeds page
+
+One card: the list of feeds on the left, the selected feed's editor on the
+right. Each row shows the feed's name, its status pill, a source line (the
+kind, then the address or embed reference) and a line on how it plays. **Add
+feed** sits under the last row.
+
+The editor shows the feed's live picture, its **Name** and **Source**, and the
+fields for that source, each with its label above it. Under **Save**,
+**Cancel** and **Delete feed** it says which layouts use the feed. Delete asks
+before it removes anything, naming those layouts again; the widgets in them
+then show their offline state.
 
 ## The Video widget
 
@@ -59,6 +79,19 @@ holding a connection nobody is watching.
 
 Settings, states and the "N s behind" badge are covered in the widget
 reference: see [Video](../reference/widgets.md#video).
+
+## Logging
+
+Each screen writes `[video]` lines to [`/log`](../ops/updates-and-logs.md) from
+the browser:
+
+- A feed failing on a screen, once per failing streak: its first failure and
+  the reason, a reminder at most every 5 minutes while it goes on failing
+  (with how many attempts and for how long), and a line when it is playing
+  again after holding for 10 seconds. Individual retries are not logged; the
+  browser console shows each one, with its delay, at the Verbose level.
+- A Video widget crashing, with the error. The rest of the layout keeps
+  drawing.
 
 ## Screens previews
 

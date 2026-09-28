@@ -31,7 +31,8 @@ outside `a-z`, `0-9` and `-`.
 
 Reserved: the empty path, `settings`, `log`, `logs`, `photos`, `enroll`, and every
 operator page below — `history`, `baptism`, `patch`, `scriptview`, `automation`,
-`plan`, `screens`, `consoles`, `views`, `displays` — plus the `preview-` prefix.
+`plan`, `screens`, `video-feeds`, `consoles`, `views`, `displays` — plus the
+`preview-` prefix.
 These are pages in their own right: a display slugged `history` would render the
 History page rather than the display.
 
@@ -70,6 +71,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | --- | --- |
 | `/` | Home |
 | `/screens` | Screens and the views they show |
+| `/video-feeds` | Video feeds: every feed, and the editor for each |
 | `/scriptview/manage` | Rundown launcher |
 | `/patch` | This week's stage patch, for volunteers |
 | `/automation` | Automation rules |

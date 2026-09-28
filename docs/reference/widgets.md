@@ -535,13 +535,14 @@ nothing at all.
 
 A YouTube or Resi feed plays in the platform's own player. A feed pointed at
 another WebRTC or HLS address plays over HLS when the address ends in `.m3u8`,
-or over WebRTC otherwise — Stage Utility cannot see either kind's health, so a
-failed attempt just retries the same method rather than switching to the
-other.
+or over WebRTC otherwise. Stage Utility cannot see either kind's health, so a
+failed attempt retries the same method rather than switching to the other,
+after a delay that starts at 1 second and doubles to 30; playback that holds
+for 10 seconds starts the delay over. It never gives up on such a feed.
 
 | State | Shown as |
 |---|---|
-| No feed chosen | "Choose a feed" (in the layout editor only) |
+| No feed chosen | "Choose a feed" |
 | Connecting | A pulsing dot and "Connecting to \<feed name\>" |
 | Live | The picture |
 | Live, over HLS | The picture, with a badge counting how many seconds behind live it is |
@@ -549,8 +550,9 @@ other.
 | Can't play here | "This screen can't play video" |
 
 **Offline** is what shows when a widget's feed has been deleted from the Video
-feeds page while a layout still points at it. **Can't play here** is this
-screen's browser lacking WebRTC or HLS support for the feed's address.
+feeds page while a layout still points at it, and while a feed that dropped
+waits for its next attempt. **Can't play here** is this screen's browser
+lacking WebRTC or HLS support for the feed's address.
 
 ---
 
