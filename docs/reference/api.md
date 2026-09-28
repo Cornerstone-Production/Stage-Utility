@@ -481,12 +481,15 @@ neither is a 400.
 Playback is proxied on Stage Utility's own origin, not under `/api`, because
 the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
 `PATCH`/`DELETE /video/<feedId>/whep/<session>`, `POST /video/<feedId>/whip`
-(OBS's Authorization Bearer token forwarded through), and
+(OBS's Authorization Bearer token forwarded through),
+`PATCH`/`DELETE /video/<feedId>/whip/<session>`, and
 `GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. `404` for an unknown feed id, a
 kind the feed's own source cannot serve (embed/external have no relay path;
 WHIP needs a push feed whose own protocol is WHIP), or a file name outside
-the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `503` while the relay
-is not running.
+the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `502` if the relay
+refuses the connection or the exchange times out (10 s for WHEP/WHIP, 30 s
+for HLS — an LL-HLS blocking playlist reload can legitimately hold that
+long); `503` while the relay is not running.
 
 **Branding & events**
 | Method | Path | Purpose |
