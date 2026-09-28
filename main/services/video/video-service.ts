@@ -29,6 +29,7 @@ import type {
   FeedPlay,
   FeedState,
   FeedStatus,
+  KickResult,
   PushProtocol,
   RelayStatus,
   VideoFeed,
@@ -40,6 +41,14 @@ import type {
 } from "../../types/video.js";
 
 type Result = { ok: true; feed: VideoFeedView } | { ok: false; error: string };
+
+/** newPushPassword()'s own rotation-summary line, per KickResult — never
+ *  the password either side of it. */
+const KICK_LOG_TEXT: Record<KickResult, string> = {
+  dropped: "dropped the current publisher",
+  none: "nothing was publishing",
+  failed: "could not drop the current publisher",
+};
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
@@ -977,8 +986,13 @@ class VideoService {
    * actually taken hold yet, rather than showing a new password nothing is
    * enforcing: `applied` is false only when a relay IS running and the
    * reconcile itself failed (true, vacuously, with no relay to apply to —
-   * there is nothing wrong to report); `kicked` is true only when an actual
-   * publisher was dropped.
+   * there is nothing wrong to report). `kicked` is three-way, not a
+   * boolean (controller ruling on R14d's own flagged wording gap): "none"
+   * covers BOTH "nobody was publishing" and "no relay is running to ask" —
+   * two different facts a boolean could not tell apart, which is exactly
+   * what let the editor's old two-state note say a device was sending when
+   * none was. Only "failed" — a publisher WAS there and dropping it did
+   * not work — is worth the operator's attention; see PushAddressFields.
    *
    * One rotation, one summary log line, without the password either side of
    * it: what happened to whoever was connected. The kick's own
@@ -987,7 +1001,7 @@ class VideoService {
    */
   async newPushPassword(
     id: string,
-  ): Promise<{ protocol: PushProtocol; address: string; password: string; applied: boolean; kicked: boolean } | null> {
+  ): Promise<{ protocol: PushProtocol; address: string; password: string; applied: boolean; kicked: KickResult } | null> {
     if (!FEED_ID_PATTERN.test(id)) return null;
     const { feeds } = await loadFeedsFile();
     const feed = feeds.find((f) => f.id === id);
@@ -995,22 +1009,21 @@ class VideoService {
     await secretsStore.setSecret(SECRET_SLOT(id), "password", generatePushPassword());
     const applied = await this.reconcileRelay();
 
-    let kicked = false;
+    let kicked: KickResult = "none";
     if (this.relay && this.supervisor?.status().state === "running") {
       try {
-        kicked = await this.relay.kickPublisher(id);
+        kicked = (await this.relay.kickPublisher(id)) ? "dropped" : "none";
         const decision = this.pollOutage.ok("push-kick", Date.now());
         if (decision.log) console.log(`[video] kicking a publisher is working again${scrub(decision.note)}`);
       } catch (err) {
+        kicked = "failed";
         const message = errorMessage(err);
         const decision = this.pollOutage.fail("push-kick", message, Date.now());
         if (decision.log) console.warn(`[video] could not kick the previous publisher: ${scrub(message)}${scrub(decision.note)}`);
       }
     }
 
-    console.log(
-      `[video] ${scrub(feed.name)}: new publish password; ${scrub(kicked ? "dropped the current publisher" : "nothing was publishing")}`,
-    );
+    console.log(`[video] ${scrub(feed.name)}: new publish password; ${scrub(KICK_LOG_TEXT[kicked])}`);
 
     const address = await this.pushAddress(id);
     if (!address) return null; // the feed vanished mid-rotation — nothing left to report against

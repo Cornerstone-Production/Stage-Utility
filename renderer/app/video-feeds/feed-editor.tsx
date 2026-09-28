@@ -14,6 +14,7 @@ import {
   EMBED_PLAYERS,
   PUSH_PROTOCOLS,
   type EmbedPlayer,
+  type KickResult,
   type PushProtocol,
   type VideoFeedView,
   type VideoSourceKind,
@@ -509,7 +510,7 @@ interface PushAddress {
  *  "a rotation happened," not "the feed has ever been rotated." */
 interface RotationResult {
   applied: boolean;
-  kicked: boolean;
+  kicked: KickResult;
 }
 
 /** How long the Copy button's label reads "Copied" before reverting — R14g. */
@@ -609,14 +610,18 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   if (error && !data) return <ErrorNote>{error}</ErrorNote>;
   if (!data) return null;
 
-  // R14d: a note only for a RUNNING relay — with none attached (the common
-  // case until Task 15 wires one into the server), `applied`/`kicked` are
-  // vacuously true/false and would otherwise show a false alarm on every
-  // single rotation. `applied` false wins when both are false: the new
-  // password is not live at the relay yet, so whether the kick itself also
-  // failed is moot until it is.
+  // R14d, refined per controller ruling: a note only for a RUNNING relay —
+  // with none attached (the common case until Task 15 wires one into the
+  // server), `applied` is vacuously true and `kicked` is "none", and would
+  // otherwise show a false alarm on every single rotation. `kicked` is
+  // three-way, not a boolean: "none" means EITHER nobody was publishing OR
+  // no relay was there to ask — both unremarkable — so the note fires only
+  // for "failed", where a device really was connected and dropping it did
+  // not work. `applied` false wins when both are true: the new password is
+  // not live at the relay yet, so whether the kick itself also failed is
+  // moot until it is.
   const rotationNote =
-    relayRunning && rotation && (!rotation.applied || !rotation.kicked)
+    relayRunning && rotation && (!rotation.applied || rotation.kicked === "failed")
       ? !rotation.applied
         ? "The relay did not take the new password yet; it will on its next start"
         : "The device already sending could not be dropped; it keeps sending until it reconnects"

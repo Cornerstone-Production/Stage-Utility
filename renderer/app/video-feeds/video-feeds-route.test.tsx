@@ -187,7 +187,7 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
           address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:rotatedpw`,
           password: "rotatedpw",
           applied: true,
-          kicked: false,
+          kicked: "none",
         },
       };
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
@@ -976,7 +976,7 @@ test("item 11: a failed rotation keeps the address and password fields visible, 
       onNewPushPassword: () => {
         attempt++;
         if (attempt === 1) return { status: 500, body: { error: "The relay could not be reached." } };
-        return { status: 200, body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:secondpw", password: "secondpw", applied: true, kicked: false } };
+        return { status: 200, body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:secondpw", password: "secondpw", applied: true, kicked: "none" } };
       },
     },
   );
@@ -1071,65 +1071,71 @@ test("R14g: Copy's button label flips to \"Copied\" — exercised here via the p
   }
 });
 
-test("R14d: the editor shows a note when applied or kicked is false for a RUNNING relay, and shows neither when the relay is off", async () => {
-  const runningState = {
-    ...makeState([pushFeed()]),
-    kinds: ALL_KINDS,
-    relay: { state: "running" as const, version: "1.21.1", ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 } },
-  };
-  const g = stubGlobals(runningState, {
-    onNewPushPassword: () => ({
-      status: 200,
-      body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:p2", password: "p2", applied: false, kicked: false },
-    }),
-  });
-  try {
-    mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+const RUNNING_RELAY = {
+  state: "running" as const,
+  version: "1.21.1",
+  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+};
 
-    fireEvent.click(screen.getByRole("button", { name: "New password" }));
-    await settle();
-    await settle();
-
-    assert.ok(
-      screen.getByText("The relay did not take the new password yet; it will on its next start"),
-      "expected the applied:false note while the relay is running",
-    );
-  } finally {
-    g.restore();
-  }
-
-  // The same applied:false/kicked:false rotation, but with NO relay running
-  // (makeState's default): no note at all — R14d's whole point.
-  const g2 = stubGlobals(
-    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+/** Mounts, rotates once, and returns whether the "could not be dropped" /
+ *  "did not take the new password" notes are on screen — shared by the
+ *  four R14d scenarios below, which differ only in `relay` and the
+ *  rotation response's own `applied`/`kicked`. */
+async function rotateAndCheckNotes(relay: VideoState["relay"], applied: boolean, kicked: "dropped" | "none" | "failed") {
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS, relay },
     {
       onNewPushPassword: () => ({
         status: 200,
-        body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:p3", password: "p3", applied: false, kicked: false },
+        body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:p2", password: "p2", applied, kicked },
       }),
     },
   );
   try {
-    cleanup();
-    __resetReplayCacheForTests();
     mount();
     await settle();
     await settle();
     await screen.findByLabelText("Paste this into the device");
-
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
     await settle();
-
-    assert.equal(
-      screen.queryByText(/did not take the new password/),
-      null,
-      "no relay running — the note must not fire even though applied/kicked are both false",
-    );
+    return {
+      appliedNote: !!screen.queryByText("The relay did not take the new password yet; it will on its next start"),
+      kickedNote: !!screen.queryByText("The device already sending could not be dropped; it keeps sending until it reconnects"),
+    };
   } finally {
-    g2.restore();
+    g.restore();
+    cleanup();
+    __resetReplayCacheForTests();
   }
+}
+
+test("R14d: applied:false shows its own note while the relay is running", async () => {
+  const notes = await rotateAndCheckNotes(RUNNING_RELAY, false, "none");
+  assert.equal(notes.appliedNote, true);
+  assert.equal(notes.kickedNote, false);
+});
+
+test("R14d: kicked:\"failed\" shows its own note while the relay is running — a publisher really was connected and dropping it did not work", async () => {
+  const notes = await rotateAndCheckNotes(RUNNING_RELAY, true, "failed");
+  assert.equal(notes.kickedNote, true);
+  assert.equal(notes.appliedNote, false);
+});
+
+test("R14d: kicked:\"none\" shows NO note while the relay is running — nobody was publishing is not a failure worth flagging", async () => {
+  const notes = await rotateAndCheckNotes(RUNNING_RELAY, true, "none");
+  assert.equal(notes.kickedNote, false, "\"none\" must never be read as \"could not be dropped\"");
+  assert.equal(notes.appliedNote, false);
+});
+
+test("R14d: kicked:\"dropped\" shows no note either — a successful kick is not a failure", async () => {
+  const notes = await rotateAndCheckNotes(RUNNING_RELAY, true, "dropped");
+  assert.equal(notes.kickedNote, false);
+  assert.equal(notes.appliedNote, false);
+});
+
+test("R14d: with no relay running, neither note fires even for applied:false and kicked:\"failed\"", async () => {
+  const notes = await rotateAndCheckNotes({ state: "off" }, false, "failed");
+  assert.equal(notes.appliedNote, false, "no relay running — the note must not fire even though applied is false");
+  assert.equal(notes.kickedNote, false, "no relay running — the note must not fire even though kicked is \"failed\"");
 });

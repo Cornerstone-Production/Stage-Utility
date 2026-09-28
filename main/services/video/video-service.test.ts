@@ -1851,6 +1851,7 @@ test("newPushPassword writes a fresh secret, reconciles, then kicks the current 
     assert.notEqual(result!.password, before, "expected a genuinely new password");
     assert.deepEqual(kicked, [id], "expected kickPublisher to be called with the feed's own id");
     assert.equal(lines.filter((l) => l.includes("could not kick")).length, 1);
+    assert.equal(result!.kicked, "failed", "a publisher WAS there and dropping it threw — kicked must read \"failed\", never \"none\"");
   } finally {
     console.warn = realWarn;
     await videoService.detachRelay();
@@ -2063,15 +2064,14 @@ test("R14c: a kind change's store write failing leaves the OLD secret in place �
   await videoService.removeFeed(id);
 });
 
-test("R14d: newPushPassword's applied/kicked shape — applied is true with nothing to apply to, false only when a running relay's reconcile fails; kicked is true only when a publisher was actually dropped", async () => {
-  // No relay attached at all: nothing to apply to, nobody to kick — both vacuously true/false-as-documented.
+test("R14d: newPushPassword's applied shape — true with nothing to apply to, false only when a running relay's reconcile fails", async () => {
+  // No relay attached at all: nothing to apply to — vacuously true.
   const madeNoRelay = await videoService.addFeed({ name: "No relay push", source: { kind: "push", protocol: "srt" } });
   assert.ok(madeNoRelay.ok);
   const idNoRelay = (madeNoRelay as { feed: { id: string } }).feed.id;
   const resultNoRelay = await videoService.newPushPassword(idNoRelay);
   assert.ok(resultNoRelay);
   assert.equal(resultNoRelay!.applied, true, "nothing to apply to — vacuously true");
-  assert.equal(resultNoRelay!.kicked, false, "nobody to kick with no relay running");
   await videoService.removeFeed(idNoRelay);
 
   // A running relay whose reconcile fails: applied false.
@@ -2093,26 +2093,56 @@ test("R14d: newPushPassword's applied/kicked shape — applied is true with noth
     const resultFailing = await videoService.newPushPassword(idFailing);
     assert.ok(resultFailing);
     assert.equal(resultFailing!.applied, false, "a running relay whose reconcile failed — applied must be false");
-    assert.equal(resultFailing!.kicked, false, "nobody was publishing");
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(idFailing);
   }
+});
 
-  // A running relay that succeeds and actually drops a publisher: applied and kicked both true.
-  const supervisor2 = new FakeSupervisor();
-  attach(recordingRelay([], { kickPublisher: async () => true }), supervisor2);
-  const madeKicked = await videoService.addFeed({ name: "Kicked push", source: { kind: "push", protocol: "srt" } });
-  assert.ok(madeKicked.ok);
-  const idKicked = (madeKicked as { feed: { id: string } }).feed.id;
+// Controller ruling on R14d's own flagged wording gap: `kicked` is
+// three-way, not a boolean — "none" and "failed" are both "nothing got
+// dropped," but only "failed" means a device really was connected and
+// stayed connected under the old password. One test per value.
+test("R14d: kicked is \"none\" with no relay attached at all — nothing to ask, not a failure", async () => {
+  const made = await videoService.addFeed({ name: "No relay kick", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const result = await videoService.newPushPassword(id);
+  assert.ok(result);
+  assert.equal(result!.kicked, "none");
+  await videoService.removeFeed(id);
+});
+
+test("R14d: kicked is \"none\" with a running relay but nobody publishing", async () => {
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay([], { kickPublisher: async () => false }), supervisor);
+  const made = await videoService.addFeed({ name: "Nobody publishing push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
   try {
-    const resultKicked = await videoService.newPushPassword(idKicked);
-    assert.ok(resultKicked);
-    assert.equal(resultKicked!.applied, true);
-    assert.equal(resultKicked!.kicked, true, "expected kicked: true when the relay actually dropped a publisher");
+    const result = await videoService.newPushPassword(id);
+    assert.ok(result);
+    assert.equal(result!.kicked, "none", "kickPublisher returned false — nobody was there to drop, not a failure");
   } finally {
     await videoService.detachRelay();
-    await videoService.removeFeed(idKicked);
+    await videoService.removeFeed(id);
+  }
+});
+
+test("R14d: kicked is \"dropped\" only once the relay actually drops a connected publisher", async () => {
+  const supervisor = new FakeSupervisor();
+  attach(recordingRelay([], { kickPublisher: async () => true }), supervisor);
+  const made = await videoService.addFeed({ name: "Kicked push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    const result = await videoService.newPushPassword(id);
+    assert.ok(result);
+    assert.equal(result!.kicked, "dropped");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
   }
 });
 
@@ -2144,7 +2174,7 @@ test("R14d: kickPublisher runs only while the supervisor is running, and its own
       const result = await videoService.newPushPassword(id);
       assert.ok(result);
       assert.equal(kickCalls, 1, "expected the kick to be attempted now that the supervisor is running");
-      assert.equal(result!.kicked, true);
+      assert.equal(result!.kicked, "dropped");
       assert.ok(
         lines.some((l) => l.includes("kicking a publisher is working again")) === false,
         "no PRIOR failure was open, so ok() must settle silently — nothing to announce recovering from",

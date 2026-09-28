@@ -183,11 +183,11 @@ test("the push address and new-password routes carry the password, and delete cl
 
   const rotated = await callRoute(videoRoutes, `/api/video/feeds/${id}/push/new-password`, { method: "POST" });
   assert.equal(rotated.status, 200);
-  const rotatedBody = rotated.json as { password: string; applied: boolean; kicked: boolean };
+  const rotatedBody = rotated.json as { password: string; applied: boolean; kicked: "dropped" | "none" | "failed" };
   assert.notEqual(rotatedBody.password, secret, "expected new-password to mint a different password");
   assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, rotatedBody.password);
   assert.equal(rotatedBody.applied, true, "no relay is attached in this route test — vacuously applied");
-  assert.equal(rotatedBody.kicked, false, "no relay is attached — nobody to kick");
+  assert.equal(rotatedBody.kicked, "none", "no relay is attached — nobody to kick");
 
   assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
   assert.deepEqual(await secretsStore.getSecrets(`video:${id}`), {}, "delete must clear the push feed's secret slot");

@@ -6,6 +6,15 @@
 export const PUSH_PROTOCOLS = ["srt", "rtmp", "whip"] as const;
 export type PushProtocol = (typeof PUSH_PROTOCOLS)[number];
 
+/** What newPushPassword()'s kick attempt did, three ways rather than a
+ *  boolean — "none" and "failed" are both "nothing got dropped," but only
+ *  one of them means a device really was pushing and stayed connected
+ *  under the old password (controller ruling on R14d's own flagged wording
+ *  gap): "dropped" a publisher was actually dropped; "none" nobody was
+ *  publishing, or no relay is running to ask; "failed" a publisher WAS
+ *  there and the attempt to drop it failed. */
+export type KickResult = "dropped" | "none" | "failed";
+
 export const EMBED_PLAYERS = ["youtube-channel", "youtube-video", "resi"] as const;
 export type EmbedPlayer = (typeof EMBED_PLAYERS)[number];
 
