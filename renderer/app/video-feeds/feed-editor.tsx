@@ -93,6 +93,13 @@ function pictureFor(feedId: string | null): { o: LayoutObject; config: Extract<L
   return { o: { id: "video-feeds-preview", x: 0, y: 0, w: 1, h: 1, z: 0, config }, config };
 }
 
+/** "Used by 2 layouts: Stage confidence, Home." — or 1 layout, or none. */
+export function usedBy(layouts: readonly { name: string }[]): string {
+  if (layouts.length === 0) return "Not used by any layout.";
+  const noun = layouts.length === 1 ? "layout" : "layouts";
+  return `Used by ${layouts.length} ${noun}: ${layouts.map((l) => l.name).join(", ")}.`;
+}
+
 export interface FeedEditorProps {
   /** The feed being edited, or null when creating one (see `isNew`). */
   feed: VideoFeedView | null;
@@ -168,11 +175,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       // whether to break two layouts needs that fact BEFORE being asked, not
       // a toast that flashes past after the feed is already gone.
       const usage = await invoke<{ layouts: { viewId: string; name: string }[] }>("video:feedUsage", { id: feed.id });
-      const layouts = usage.layouts;
-      const message =
-        layouts.length === 0
-          ? "Not used by any layout."
-          : `Used by ${layouts.length} layouts: ${layouts.map((l) => l.name).join(", ")}.`;
+      const message = usedBy(usage.layouts);
       const ok = await confirm({
         title: `Delete "${feed.name}"?`,
         message,

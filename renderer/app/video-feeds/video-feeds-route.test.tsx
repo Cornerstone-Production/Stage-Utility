@@ -488,3 +488,20 @@ test("the Source dropdown offers exactly the kinds video:state reports", async (
     }
   }
 });
+
+test("one layout is \"1 layout\", not \"1 layouts\"", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), {
+    usage: [{ viewId: "v1", name: "Stage confidence" }],
+  });
+  try {
+    mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText("Used by 1 layout: Stage confidence."), true);
+  } finally {
+    g.restore();
+  }
+});
