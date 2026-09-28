@@ -1,15 +1,18 @@
 // renderer/main/video/whep-client.test.ts — a fake RTCPeerConnection and a fake
 // fetch on globalThis (assigned per test), no jsdom: nothing here touches the
-// DOM beyond a plain object standing in for the <video> element, since ontrack
-// is never fired in either case below.
+// DOM beyond a plain object standing in for the <video> element. Most tests
+// never fire `ontrack` at all; the two that do (Minor 8, below) fire it
+// directly rather than through a real MediaStream/track dispatch.
 
 import { strict as assert } from "node:assert";
 import { afterEach, test } from "node:test";
 
 import { startWhep } from "./whep-client.js";
 
-// window.location.href is read only inside stop(), to resolve a relative
-// Location header against the page's own origin.
+// window.location.href resolves a RELATIVE `url` argument into an absolute
+// WHEP endpoint (an absolute `url`, e.g. an external feed's, is untouched by
+// this) — not, any longer, where a Location header resolves; that is against
+// the endpoint itself now (Important 8, see whep-client.ts's deleteSession).
 (globalThis as unknown as { window: unknown }).window = { location: { href: "http://localhost:8788/" } };
 
 class FakePeerConnection {
@@ -137,4 +140,90 @@ test("a 201 whose answer cannot be read closes the peer connection, DELETEs the 
   assert.equal(pc?.closed, true, "expected the peer connection closed rather than left open");
   const del = calls.find((c) => c.method === "DELETE");
   assert.ok(del, "expected the relay told to drop the session the 201 already created, not left to leak until its own timeout");
+});
+
+// ── Minor 8: a superseded attempt's late track ──────────────────────────────
+//
+// A separate, minimal FakePeerConnection: these two tests need to fire
+// `ontrack` from INSIDE `setRemoteDescription`, to reproduce the real window
+// the `stopped`-only guard missed — the caller's `end()` aborts the attempt
+// (setting its AbortSignal, not yet `stopped`, since that only flips once
+// `stop()` itself has been awaited) WHILE setRemoteDescription is still in
+// flight, and the browser fires `track` for this now-abandoned session
+// before that promise ever settles.
+
+let onSetRemoteDescription: ((pc: FakePcWithTrackHook) => void) | null = null;
+
+class FakePcWithTrackHook {
+  static instances: FakePcWithTrackHook[] = [];
+  iceGatheringState = "complete";
+  localDescription: { sdp: string } | null = null;
+  ontrack: ((e: { streams: unknown[]; track: unknown }) => void) | null = null;
+  closed = false;
+  constructor() {
+    FakePcWithTrackHook.instances.push(this);
+  }
+  addTransceiver(): void {}
+  async createOffer(): Promise<{ type: "offer"; sdp: string }> {
+    return { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" };
+  }
+  async setLocalDescription(desc: { sdp: string }): Promise<void> {
+    this.localDescription = desc;
+  }
+  async setRemoteDescription(): Promise<void> {
+    onSetRemoteDescription?.(this);
+  }
+  addEventListener(): void {}
+  close(): void {
+    this.closed = true;
+  }
+}
+
+function stubFetchFor(path: string) {
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (_input: string | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        status: 201,
+        ok: true,
+        headers: { get: (h: string) => (h === "Location" ? path : null) },
+        text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+      } as unknown as Response;
+    }
+    return { status: 200, ok: true, headers: { get: () => null }, text: async () => "" } as unknown as Response;
+  }) as typeof fetch;
+}
+
+test("a normal ontrack after stop() does not touch srcObject — Minor 8", async () => {
+  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePcWithTrackHook;
+  onSetRemoteDescription = null;
+  stubFetchFor("/v/whep/x");
+  const video = { srcObject: null as unknown } as unknown as HTMLVideoElement;
+
+  const session = await startWhep("/v/whep", video);
+  const pc = FakePcWithTrackHook.instances.at(-1)!;
+  const handler = pc.ontrack; // a browser keeps the handler after close(); grab it first
+  await session.stop();
+  handler?.({ streams: ["A"], track: {} });
+
+  assert.equal(video.srcObject, null, "a track delivered after stop() must not set srcObject");
+});
+
+test("a session aborted while setRemoteDescription is in flight must not let its late track overwrite the replacement's stream — Minor 8", async () => {
+  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePcWithTrackHook;
+  stubFetchFor("/v/whep/x");
+  const video = { srcObject: null as unknown } as unknown as HTMLVideoElement;
+  const controller = new AbortController();
+  onSetRemoteDescription = (pc) => {
+    // The caller's end() runs while SRD is still in flight — this attempt's
+    // signal is aborted, but `stopped` (whep-client.ts's own flag) is not
+    // set until `stop()` itself is awaited, below.
+    controller.abort();
+    (video as unknown as { srcObject: unknown }).srcObject = "B"; // a newer attempt attaches
+    pc.ontrack?.({ streams: ["A"], track: {} }); // SRD "completes": the browser fires track for THIS session
+  };
+
+  const session = await startWhep("/v/whep", video, { signal: controller.signal });
+  await session.stop();
+
+  assert.equal(video.srcObject, "B", "the abandoned session's late track must not overwrite the newer attempt's stream");
 });

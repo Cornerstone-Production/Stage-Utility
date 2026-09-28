@@ -1,21 +1,41 @@
 // renderer/main/video/use-video-session.test.ts — startPlaybackAttempt's state
-// machine, driven directly (no React, no jsdom): a fake RTCPeerConnection
-// dispatching real `connectionstatechange`/`error` events (it extends the
-// real EventTarget, so `{ signal }` listener removal is the real thing, not a
-// simulation of it), a fake <video> handing back a stored
-// requestVideoFrameCallback, and node:test's fake timers for the connect,
-// first-frame, drop-grace and backoff windows. This is what R-T5a asks the
-// structural move into its own file for: none of this needs a DOM to prove.
+// machine, driven directly with a fake RTCPeerConnection dispatching real
+// `connectionstatechange`/`error` events (it extends the real EventTarget, so
+// `{ signal }` listener removal is the real thing, not a simulation of it), a
+// fake <video> handing back a stored requestVideoFrameCallback, and
+// node:test's fake timers for the connect, first-frame, drop-grace and
+// backoff windows — plus one test that renders `useVideoSession` itself (via
+// `renderHook`), for the backoff-reset behaviour that only exists at the
+// hook layer and cannot be proven against `startPlaybackAttempt` alone.
+//
+// `NodeEvent` is captured before jsdom is installed below, and used for
+// every `dispatchEvent(new NodeEvent(...))` in this file: jsdom's own
+// `Event`/`AbortSignal` are DIFFERENT CLASSES from Node's (structurally
+// identical, not `instanceof`-equal), and `FakePeerConnection extends
+// EventTarget` here is Node's own EventTarget — dispatching jsdom's `Event`
+// into it throws "parameter 1 is not of type 'Event'".
+const NodeEvent = globalThis.Event;
 
 import { strict as assert } from "node:assert";
-import { afterEach, mock, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
+
+import type { VideoFeedView } from "@main/types/video";
+import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+
+const teardown = installRenderDom();
 
 import {
   CONNECT_TIMEOUT_MS,
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
+  RETRY_MIN_MS,
   startPlaybackAttempt,
+  useVideoSession,
 } from "./use-video-session.js";
+const { renderHook, act, cleanup } = await import("@testing-library/react");
+
+after(() => unmountAndTeardown(cleanup, teardown));
+afterEach(() => cleanup());
 
 /**
  * Drains every already-queued microtask, not a fixed guess at how many
@@ -74,7 +94,7 @@ class FakePeerConnection extends EventTarget {
   /** Test helper: flips connectionState and fires the real event. */
   setConnectionState(s: RTCPeerConnectionState): void {
     this.connectionState = s;
-    this.dispatchEvent(new Event("connectionstatechange"));
+    this.dispatchEvent(new NodeEvent("connectionstatechange"));
   }
 }
 
@@ -82,20 +102,29 @@ function stubPeerConnection(): void {
   (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePeerConnection;
 }
 
+type FetchBehavior = "succeed" | "reject" | "hang" | { status: number };
+
 /** Every fetch call, and which promises are still pending (never resolved
  *  unless the test settles them) — for proving a hung POST is bounded by the
- *  connect timeout rather than left open forever. */
-function stubFetch(behavior: "succeed" | "reject" | "hang") {
+ *  connect timeout rather than left open forever. `getHangingSignal()` is for
+ *  proving the connect timeout actually ABORTS the hung request's own
+ *  signal, not merely its own app-level callback (Minor 6). */
+function stubFetch(behavior: FetchBehavior) {
   const calls: { method: string; url: string }[] = [];
+  let hangingSignal: AbortSignal | undefined;
   const fn = (async (input: string | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     calls.push({ method, url: String(input) });
     if (method === "DELETE") return { ok: true, status: 200, headers: { get: () => null }, text: async () => "" } as unknown as Response;
     if (behavior === "reject") throw new Error("fetch failed");
     if (behavior === "hang") {
+      hangingSignal = init?.signal ?? undefined;
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
       });
+    }
+    if (typeof behavior === "object") {
+      return { ok: false, status: behavior.status, headers: { get: () => null }, text: async () => "" } as unknown as Response;
     }
     return {
       ok: true,
@@ -104,23 +133,28 @@ function stubFetch(behavior: "succeed" | "reject" | "hang") {
       text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
     } as unknown as Response;
   }) as typeof fetch;
-  return { fn, calls };
+  return { fn, calls, getHangingSignal: () => hangingSignal };
 }
 
-function stubGlobals(behavior: "succeed" | "reject" | "hang") {
-  const { fn, calls } = stubFetch(behavior);
+// `window.location.href` needs no stubbing here: `installRenderDom()` above
+// already provides jsdom's own window at exactly "http://localhost:8788/"
+// (test-dom.ts's own JSDOM constructor URL) — the SAME origin a hand-built
+// stub used before jsdom was installed for the backoff-reset test below.
+// Overwriting `globalThis.window` with a plain object per test, as a stub
+// once did, would have pulled the rug out from under `renderHook` in this
+// same file, which needs the real one.
+function stubGlobals(behavior: FetchBehavior) {
+  const { fn, calls, getHangingSignal } = stubFetch(behavior);
   const realFetch = globalThis.fetch;
   const realPc = (globalThis as unknown as { RTCPeerConnection?: unknown }).RTCPeerConnection;
-  const realWindow = (globalThis as unknown as { window?: unknown }).window;
   globalThis.fetch = fn;
   stubPeerConnection();
-  (globalThis as unknown as { window: unknown }).window = { location: { href: "http://localhost:8788/" } };
   return {
     calls,
+    getHangingSignal,
     restore() {
       globalThis.fetch = realFetch;
       (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = realPc;
-      (globalThis as unknown as { window: unknown }).window = realWindow;
     },
   };
 }
@@ -147,7 +181,7 @@ test("connects and a frame arrives: live, no unusable/dropped verdict", async ()
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     // The offer/POST/answer exchange runs as microtasks.
     await flush();
     const pc = FakePeerConnection.instances[0]!;
@@ -172,7 +206,7 @@ test("connected but no frame within FIRST_FRAME_TIMEOUT_MS: webrtc unusable, ses
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
     const pc = FakePeerConnection.instances[0]!;
     pc.setConnectionState("connected");
@@ -194,7 +228,7 @@ test("never connects: the post-handshake connect timeout is webrtc-unusable, not
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
     // The handshake succeeded (a session exists) but connectionState never
     // reaches "connected" — this is a verdict about WebRTC, not the network.
@@ -214,7 +248,7 @@ test("a POST that never gets a reply is dropped (retried), never marked webrtc-u
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
 
     // The WHOLE handshake window elapses with no reply at all.
@@ -237,7 +271,7 @@ test("a POST that rejects immediately is dropped (retried) with the real error, 
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
 
     const dropped = calls.find((c) => c.fn === "onDropped");
@@ -264,7 +298,7 @@ test("disconnected then failed, then a full recovery before the grace period: no
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
     const pc = FakePeerConnection.instances[0]!;
     pc.setConnectionState("connected");
@@ -296,7 +330,7 @@ test("stop() ends the attempt cleanly: exactly one DELETE, no further callbacks"
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
   try {
-    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep" }, cb);
+    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
 
     attempt.stop();
@@ -312,6 +346,190 @@ test("stop() ends the attempt cleanly: exactly one DELETE, no further callbacks"
       calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn),
       [],
       "no terminal callback may fire after stop()",
+    );
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+// ── R-T5d: relay refusals fall back to HLS; everything else retries ───────
+
+test("a relay feed's WHEP refusal (415) is webrtc-unusable — falls back to HLS — R-T5d", async () => {
+  const g = stubGlobals({ status: 415 });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+
+    assert.deepEqual(
+      calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn),
+      ["onWebrtcUnusable"],
+      "a relay's outright refusal of the offer is a verdict about the stream, not the network",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("a relay feed's WHEP 404 retries — a waiting push feed answers 404 until something sends — R-T5d", async () => {
+  const g = stubGlobals({ status: 404 });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn), ["onDropped"]);
+  } finally {
+    g.restore();
+  }
+});
+
+test("an external WHEP feed's 415 still retries — it has no HLS to fall back to — R-T5d", async () => {
+  const g = stubGlobals({ status: 415 });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: false }, cb);
+    await flush();
+
+    assert.deepEqual(
+      calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn),
+      ["onDropped"],
+      "Stage Utility cannot report an external feed's health, so a WHEP refusal there must not be treated as a stream verdict",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+// ── R-T5e: srcObject is cleared, never left dangling for HLS to inherit ────
+
+test("srcObject is cleared once a WebRTC attempt ends, and again before HLS starts — R-T5e", async () => {
+  const g = stubGlobals({ status: 415 }); // relay refusal -> webrtc-unusable -> the hook would retry via HLS
+  const raw = new FakeVideo();
+  const untyped = raw as unknown as { srcObject: unknown };
+  const video = raw as unknown as HTMLVideoElement & FakeVideo;
+  untyped.srcObject = "a-live-mediastream";
+  const { cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    assert.equal(untyped.srcObject, null, "expected srcObject cleared the moment the WebRTC attempt ended");
+    attempt.stop();
+  } finally {
+    g.restore();
+  }
+});
+
+test("srcObject is cleared before an HLS attempt starts, even if something set it since", async () => {
+  const g = stubGlobals("succeed");
+  const raw = new FakeVideo();
+  const untyped = raw as unknown as { srcObject: unknown; canPlayType: () => string };
+  const video = raw as unknown as HTMLVideoElement & FakeVideo;
+  const { cb } = makeCallbacks();
+  try {
+    untyped.srcObject = "leftover-from-a-webrtc-attempt";
+    // startHls's native branch needs `canPlayType`; absent here, it takes the
+    // hls.js branch instead — set to "" for the same reason FakeVideo omits
+    // requestVideoFrameCallback in some tests: forcing a specific code path.
+    untyped.canPlayType = () => "";
+    const attempt = startPlaybackAttempt(video, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    await flush();
+    assert.equal(untyped.srcObject, null, "expected srcObject cleared before HLS attaches — a non-null one takes precedence over `src`");
+    // hls.js schedules its own internal timers once attached; left running
+    // past this test, one touches `self` after this FILE's own jsdom
+    // teardown, surfacing as an uncaught exception on a LATER, unrelated
+    // test. destroy()ing it here is what a real widget's unmount does too.
+    attempt.stop();
+    await flush();
+  } finally {
+    g.restore();
+  }
+});
+
+// ── Minor 6: the connect timeout must abort the underlying fetch itself ────
+
+test("the connect timeout aborts the hung POST's own signal, not only its app-level callback — Minor 6", async () => {
+  const g = stubGlobals("hang");
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+
+    mock.timers.tick(CONNECT_TIMEOUT_MS);
+    await flush();
+
+    const signal = g.getHangingSignal();
+    assert.ok(signal, "expected the hung POST to have received an AbortSignal");
+    assert.equal(signal?.aborted, true, "expected the connect timeout to abort the fetch's OWN signal, not just fire its own callback");
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+// ── Important 4 / R-T5a: the backoff counter resets on a first frame ───────
+//
+// Only provable through `useVideoSession` itself — the backoff EXPONENT is
+// held in the hook's own `attemptCountRef`, across repeated calls to
+// `startPlaybackAttempt`, which a test of that function alone cannot see.
+
+test("the backoff counter resets after a first frame, not just after the FIRST drop — Important 4", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  const video = new FakeVideo();
+  const feed: VideoFeedView = {
+    id: "f",
+    name: "F",
+    kind: "pull",
+    sourceLine: "",
+    source: { kind: "pull", url: "rtsp://x", username: "" },
+    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
+    status: { state: "live" },
+  };
+  try {
+    renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        onLog: (r) => logs.push(r),
+      }),
+    );
+    // Two full rounds: connect, get a frame (this is what SHOULD reset the
+    // counter), then drop. If the reset never happened, the second round's
+    // drop would log RETRY_MIN_MS * 2 (2000ms), not RETRY_MIN_MS (1000ms).
+    for (let round = 0; round < 2; round++) {
+      await act(async () => {
+        await flush();
+      });
+      const pc = FakePeerConnection.instances.at(-1)!;
+      act(() => {
+        pc.setConnectionState("connected");
+        video.fireFrame();
+      });
+      act(() => {
+        pc.setConnectionState("failed");
+        mock.timers.tick(DROP_GRACE_MS);
+      });
+      act(() => {
+        mock.timers.tick(RETRY_MIN_MS * 4); // comfortably past either possible delay
+      });
+    }
+
+    assert.match(logs[0]!, /retrying in 1000ms/, "expected the first drop to retry at RETRY_MIN_MS");
+    assert.match(
+      logs[1]!,
+      /retrying in 1000ms/,
+      "a drop after a FRESH first frame must restart the backoff at RETRY_MIN_MS, not carry the previous round's exponent forward",
     );
   } finally {
     mock.timers.reset();

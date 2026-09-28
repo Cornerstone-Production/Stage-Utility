@@ -20,7 +20,19 @@ import type { VideoFeedView } from "@main/types/video";
 import { errorMessage } from "@main/services/errors";
 import { browserCaps, choosePlayback } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
-import { startWhep, type WhepSession } from "./whep-client";
+import { startWhep, WhepError, type WhepSession } from "./whep-client";
+
+/**
+ * R-T5d: a relay feed's WHEP answer in this set means the encoder cannot be
+ * carried over WebRTC AT ALL (an unsupported codec/profile, a malformed
+ * offer this relay's build rejects) — a verdict about the STREAM, not the
+ * network, so it falls back to HLS. Everything else (404 while a push feed's
+ * source has not connected yet, a 5xx, a network error) retries the same
+ * method: those say nothing about whether WebRTC itself can carry this feed.
+ * An EXTERNAL WHEP feed gets none of this — "Stage Utility cannot report its
+ * health" (main/types/video.ts), so every failure there retries.
+ */
+const RELAY_WEBRTC_REFUSAL_STATUSES = new Set([400, 406, 415, 422]);
 
 export const CONNECT_TIMEOUT_MS = 10_000;
 export const FIRST_FRAME_TIMEOUT_MS = 5000;
@@ -81,14 +93,15 @@ function stopActiveSession(session: ActiveSession | null): void {
  * already-stopped session (no double DELETE) and can never report a second,
  * contradictory outcome.
  */
-export function startPlaybackAttempt(
-  video: HTMLVideoElement,
-  choice: { method: "webrtc"; url: string } | { method: "hls"; url: string },
-  cb: AttemptCallbacks,
-): PlaybackAttempt {
+export type PlaybackAttemptChoice =
+  | { method: "webrtc"; url: string; relayManaged: boolean }
+  | { method: "hls"; url: string };
+
+export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAttemptChoice, cb: AttemptCallbacks): PlaybackAttempt {
   const controller = new AbortController();
   let ended = false;
   let gotFirstFrame = false;
+  let hasConnected = false; // distinguishes "never got going" from "connected, but stalled before a frame" below
   let session: ActiveSession | null = null;
   let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let frameTimer: ReturnType<typeof setTimeout> | undefined;
@@ -119,6 +132,11 @@ export function startPlaybackAttempt(
     const s = session;
     session = null;
     stopActiveSession(s);
+    // R-T5e: a non-null srcObject takes precedence over `src` on a <video>
+    // element, so leaving a WebRTC attempt's MediaStream attached after it
+    // ends would play that dead stream's last frame forever instead of the
+    // HLS fallback about to attach via `src`.
+    if (choice.method === "webrtc") video.srcObject = null;
     after?.();
   };
 
@@ -187,6 +205,7 @@ export function startPlaybackAttempt(
             if (ended) return;
             const s = whep.pc.connectionState;
             if (s === "connected") {
+              hasConnected = true;
               clearTimeout(connectTimer);
               clearTimeout(dropTimer);
               if (!gotFirstFrame) waitForFirstFrame(FIRST_FRAME_TIMEOUT_MS);
@@ -200,6 +219,13 @@ export function startPlaybackAttempt(
                 // actually fine.
                 clearTimeout(dropTimer);
                 dropTimer = setTimeout(() => onDroppedAfterFrame(`connection ${s}`), DROP_GRACE_MS);
+              } else if (hasConnected) {
+                // Reached "connected" at least once, but a frame never
+                // arrived before it dropped again (the same shape as the
+                // B-frames case waitForFirstFrame's own timeout reports) —
+                // worded differently from the branch below, which never
+                // connected at all.
+                end(() => cb.onWebrtcUnusable(`connection ${s} before a frame ever arrived`));
               } else {
                 end(() => cb.onWebrtcUnusable(`connection ${s} before it ever connected`));
               }
@@ -208,6 +234,7 @@ export function startPlaybackAttempt(
           { signal: controller.signal },
         );
         if (whep.pc.connectionState === "connected") {
+          hasConnected = true;
           clearTimeout(connectTimer);
           waitForFirstFrame(FIRST_FRAME_TIMEOUT_MS);
         }
@@ -223,10 +250,22 @@ export function startPlaybackAttempt(
       })
       .catch((err: unknown) => {
         if (ended) return;
+        // R-T5d: a relay feed's WHEP answer refusing the offer outright
+        // (400/406/415/422) is a verdict about the STREAM — this encoder
+        // cannot be carried over WebRTC at all — so it falls back to HLS
+        // like any other webrtc-unusable verdict. An external feed's
+        // endpoint reports its own health however it likes ("Stage Utility
+        // cannot report its health", main/types/video.ts) and gets no HLS to
+        // fall back to regardless, so every failure there retries instead.
+        if (choice.relayManaged && err instanceof WhepError && RELAY_WEBRTC_REFUSAL_STATUSES.has(err.status)) {
+          end(() => cb.onWebrtcUnusable(`the relay refused this feed over WebRTC (${err.message})`));
+          return;
+        }
         end(() => cb.onDropped(errorMessage(err)));
       });
   } else {
     cb.onPhase("connecting");
+    video.srcObject = null; // R-T5e: a non-null srcObject takes precedence over `src` in the element
     startHls(choice.url, video, {
       onFatal: (why) => {
         if (!ended) onDroppedAfterFrame(`hls.js: ${why}`);
@@ -275,7 +314,7 @@ export type Verdict =
   | { kind: "known-offline" }
   | { kind: "embed"; url: string }
   | { kind: "cant-play" }
-  | { kind: "attempt"; choice: { method: "webrtc" | "hls"; url: string } };
+  | { kind: "attempt"; choice: PlaybackAttemptChoice };
 
 function computeVerdict(feedDeleted: boolean, feed: VideoFeedView | null, allowHls: boolean, webrtcFailed: boolean): Verdict {
   if (feedDeleted) return { kind: "deleted" };
@@ -284,7 +323,8 @@ function computeVerdict(feedDeleted: boolean, feed: VideoFeedView | null, allowH
   // Only a relay feed is one Stage Utility actually monitors — an external or
   // embed source's health is never reported, so those always attempt to play
   // (see VideoSource's `external` comment in main/types/video.ts).
-  if (feed.play.via === "relay") {
+  const isRelay = feed.play.via === "relay";
+  if (isRelay) {
     const s = feed.status.state;
     if (s === "waiting" || s === "standby") return { kind: "waiting" }; // confirmed: nothing is sending to this feed
     if (s === "offline") return { kind: "known-offline" }; // confirmed: it WAS live and is down now
@@ -294,6 +334,7 @@ function computeVerdict(feedDeleted: boolean, feed: VideoFeedView | null, allowH
   const choice = choosePlayback({ play: feed.play, status: feed.status, caps: browserCaps(), allowHls, webrtcFailed });
   if (choice.method === "embed") return { kind: "embed", url: choice.url };
   if (choice.method === "none") return { kind: "cant-play" };
+  if (choice.method === "webrtc") return { kind: "attempt", choice: { method: "webrtc", url: choice.url, relayManaged: isRelay } };
   return { kind: "attempt", choice };
 }
 
@@ -352,10 +393,13 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // every push, including one that changes nothing about THIS feed. An
   // object-identity dependency on the ATTEMPT EFFECT would tear a live
   // session down and rebuild it on every unrelated feed's update — the
-  // flapping this file exists to avoid. The verdict memo below recomputes on
-  // every push regardless (it is pure and cheap: no timers, no network), but
-  // the effect that actually runs a session is keyed on `choiceKey`, which
-  // only changes when the CHOSEN method or URL actually does.
+  // flapping this file exists to avoid. `verdict` is a useMemo, so ITS
+  // reference only changes when one of the primitives below actually does —
+  // and the attempt effect is keyed on `verdict` itself (not a separately
+  // derived "did the method/URL change" string), because a memo recompute
+  // whose choice happens to look the same (e.g. `delayedBecause` clearing
+  // while the feed was already choosing HLS for some other reason) is still
+  // a fresh verdict the effect must react to.
   const playKey = feed ? JSON.stringify(feed.play) : null;
   const statusState = feed?.status.state ?? null;
   const delayedBecause = feed?.status.delayedBecause ?? null;
@@ -371,7 +415,6 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   );
 
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
-  const choiceKey = verdict.kind === "attempt" ? `${verdict.choice.method}:${verdict.choice.url}` : null;
 
   const phase: SessionPhase =
     verdict.kind === "deleted" || verdict.kind === "known-offline"
@@ -387,7 +430,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
               : attemptPhase;
 
   useEffect(() => {
-    if (!active || !choiceKey || !video || verdict.kind !== "attempt") return undefined;
+    if (!active || !video || verdict.kind !== "attempt") return undefined;
     const choice = verdict.choice;
     const current = feedRef.current;
 
@@ -423,7 +466,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       clearTimeout(retryTimer);
       attemptHandle.stop();
     };
-  }, [active, choiceKey, video, retryToken, verdict, feedRef, onLogRef]);
+  }, [active, video, retryToken, verdict, feedRef, onLogRef]);
 
   return { phase, embedUrl, latency };
 }

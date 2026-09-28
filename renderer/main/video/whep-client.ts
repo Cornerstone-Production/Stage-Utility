@@ -10,6 +10,19 @@ export interface WhepSession {
   stop: () => Promise<{ ok: boolean }>;
 }
 
+/** A non-201 answer, carrying the status so a caller can tell "this relay
+ *  feed's encoder cannot be carried over WebRTC at all" (400/406/415/422 —
+ *  fall back to HLS) from "try again" (404 while a push feed's source has
+ *  not connected yet, or a 5xx) — see R-T5d in use-video-session.ts. */
+export class WhepError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`WHEP ${status}`);
+    this.name = "WhepError";
+    this.status = status;
+  }
+}
+
 /** DELETEs the session at `location`, resolved against the WHEP `endpoint` —
  *  NOT against the page's own origin. `location` is usually a path relative
  *  to the relay (an external feed's endpoint can be a different host
@@ -30,11 +43,17 @@ export async function startWhep(url: string, video: HTMLVideoElement, opts?: { s
   const pc = new RTCPeerConnection();
   // Guards a superseded attempt's late track: once THIS session has been
   // stopped or never got going, its ontrack must not steal the <video>
-  // element out from under whatever replaced it.
+  // element out from under whatever replaced it. `stopped` alone misses the
+  // real window: a caller that aborts (calls `stop()`, which is really just
+  // `end()` from use-video-session.ts) WHILE `setRemoteDescription` is still
+  // in flight leaves `stopped` false until that await returns — but the
+  // caller's OWN abort signal is already true the moment it decided to move
+  // on, and the browser can fire `track` for this session before the SRD
+  // promise it belongs to ever settles.
   let stopped = false;
   pc.addTransceiver("video", { direction: "recvonly" });
   pc.ontrack = (e) => {
-    if (stopped) return;
+    if (stopped || opts?.signal?.aborted) return;
     video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
   };
   const offer = await pc.createOffer();
@@ -57,7 +76,7 @@ export async function startWhep(url: string, video: HTMLVideoElement, opts?: { s
   if (res.status !== 201) {
     stopped = true;
     pc.close();
-    throw new Error(`WHEP ${res.status}`);
+    throw new WhepError(res.status);
   }
   const location = res.headers.get("Location");
 
