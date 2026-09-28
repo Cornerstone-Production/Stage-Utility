@@ -23,6 +23,16 @@ export interface BFramesMark {
 
 export interface FeedStateInput {
   kind: "pull" | "push";
+  /** Whether the relay is currently "running" or "failing" — R14a. Off,
+   *  starting, or never attached at all (video switched off) all read the
+   *  same way here: nothing yet can tell a genuinely-down source from one
+   *  nobody has been able to ask about, so a missing path means "standby"
+   *  (neutral), never "offline" (red). Only once the relay is up enough to
+   *  actually report on a path — running, or failing after having been —
+   *  does a missing path mean the source itself is absent. See
+   *  video-service.ts's relayFeedStatus(), which computes this from
+   *  relayStatus(). */
+  relayUp: boolean;
   /** The relay's own report for this feed's path (relay.status(), keyed by
    *  feed id — see reconcile-plan.ts), or undefined when the relay does not
    *  know about it at all: not yet reconciled, or the relay itself is down. */
@@ -38,11 +48,19 @@ export interface FeedStateInput {
 }
 
 export function feedState(i: FeedStateInput): FeedStatus {
-  const { kind, path, bframesMark, recentlyRequested, lastSeenAt } = i;
+  const { kind, relayUp, path, bframesMark, recentlyRequested, lastSeenAt } = i;
 
-  // The relay has no path for this feed at all — reconciliation has not run,
-  // or the relay is down. Neither "standby" nor "waiting" fits: both mean the
-  // relay is fine and simply has nothing to report yet, which this is not.
+  // R14a: video switched off, the relay still starting, or never attached
+  // at all — standby, not a red "offline", whatever `path` says. A stale
+  // path should never survive this (the service clears lastPaths on every
+  // non-running status change), but the relay's own state is what decides
+  // this, not an absence this function has no way to explain otherwise.
+  if (!relayUp) return { state: "standby" };
+
+  // The relay is up but has no path for this feed at all — reconciliation
+  // has not run yet, or the relay lost the feed. Neither "standby" nor
+  // "waiting" fits: both mean the relay is fine and simply has nothing to
+  // report yet, which this is not.
   if (!path) return { state: "offline", lastSeenAt };
 
   if (path.ready) {

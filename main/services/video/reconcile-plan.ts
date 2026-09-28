@@ -27,13 +27,29 @@ export interface PathConf {
  *  configured instead of the relay's own "path not found." */
 const ALL_OTHERS = "all_others";
 
+/** A literal `%` survives the WHATWG `URL` username/password setters
+ *  unescaped — confirmed against Node's own `URL` (`new URL("rtsp://h/s")`
+ *  with `.password = "s3c%zret"` serializes as `s3c%zret`, verbatim): `%`
+ *  is not in the userinfo percent-encode set, since the setters treat a URL
+ *  as already-encoded input, not a raw credential to encode. Pre-escaping
+ *  it here is what makes the setters' own encoding of `@`, `:`, `/` and the
+ *  rest correct as a ROUND TRIP: `50%off!` must reach the device as
+ *  `50%off!`, not `50` truncated at a `%` a real client tries to decode as
+ *  an escape. `searchParams.set` (the SRT branch below) does not need this
+ *  — form-urlencoded serialization already encodes `%` as `%25` on its
+ *  own, confirmed the same way. */
+function encodePercent(s: string): string {
+  return s.replace(/%/g, "%25");
+}
+
 /** A pull feed's address with its credentials folded in — what a `RelayFeed`
  *  of kind "pull" carries as `source`. Never logs: the return value carries
  *  a password, and nothing that touches it here is a log call.
  *
  *  rtsp/rtsps/http/https put the credentials in the URL's own userinfo,
- *  percent-encoded by the `URL` setters (`p@ss` becomes `p%40ss`); srt has
- *  no userinfo convention of its own, so its password goes in the query as
+ *  percent-encoded by the `URL` setters (`p@ss` becomes `p%40ss`) after a
+ *  literal `%` is pre-escaped (see encodePercent); srt has no userinfo
+ *  convention of its own, so its password goes in the query as
  *  `passphrase=<pw>` and its username is ignored — MediaMTX authenticates
  *  an SRT pull by passphrase alone. An empty username with no password
  *  leaves `url` untouched.
@@ -59,8 +75,8 @@ export function pullSource(url: string, username: string, password: string | und
   // dropping a password nobody can see was dropped.
   if (parsed.host === "") return url;
 
-  parsed.username = username;
-  if (password !== undefined) parsed.password = password;
+  parsed.username = encodePercent(username);
+  if (password !== undefined) parsed.password = encodePercent(password);
   return parsed.toString();
 }
 

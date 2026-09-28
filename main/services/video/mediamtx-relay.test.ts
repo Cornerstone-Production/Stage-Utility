@@ -41,12 +41,17 @@ let runtimePaths: Record<string, unknown>[];
 /** Makes `GET /v3/config/paths/list` answer 500, to prove a non-2xx answer
  *  throws rather than being swallowed. */
 let failPathsList = false;
+/** When set, `failPathsList`'s 500 carries this `error` text instead of the
+ *  fixed "relay is not ready" — for R14b's credential-stripping test, which
+ *  needs to control exactly what the relay's own error text says. */
+let failPathsListWith: string | null = null;
 
 function bootState(): void {
   configPaths = new Map();
   globalConfig = { authInternalUsers: [] };
   runtimePaths = [];
   failPathsList = false;
+  failPathsListWith = null;
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
@@ -84,7 +89,7 @@ afterEach(() => {
 
 function handle(method: string, url: string, body: unknown, res: http.ServerResponse): void {
   if (method === "GET" && url === "/v3/config/paths/list") {
-    if (failPathsList) return send(res, 500, { error: "relay is not ready" });
+    if (failPathsList) return send(res, 500, { error: failPathsListWith ?? "relay is not ready" });
     const items = [...configPaths.entries()].map(([name, conf]) => ({ name, ...conf }));
     return send(res, 200, { items });
   }
@@ -281,6 +286,28 @@ describe("MediaMtxRelay.reconcile", () => {
       },
     );
   });
+
+  // R14b, defence in depth: reconcile-plan.ts's own fix (percent-encoding a
+  // literal `%`) is the primary defence against a credentialed URL ever
+  // reaching the relay malformed in the first place — this is what happens
+  // if a credential reaches an Error message anyway, from any cause, not
+  // only that one. Confirmed against a real v1.21.1 binary that a malformed
+  // pull source produces exactly this shape of error text (garbled by the
+  // relay's own Go fmt formatting, credentials and all).
+  it("strips a user:pass@ userinfo out of the relay's own error text before it becomes this module's Error message", async () => {
+    failPathsList = true;
+    failPathsListWith = "'rtsp://admin:s3c%!z(MISSING)zret@192.0.2.1/s' is not a valid URL";
+    const relay = new MediaMtxRelay(port);
+    await assert.rejects(
+      () => relay.reconcile([PULL]),
+      (err: Error) => {
+        assert.equal(err.message, "'rtsp://192.0.2.1/s' is not a valid URL");
+        assert.equal(err.message.includes("admin"), false, "the username must not survive either");
+        assert.equal(err.message.includes("s3c"), false, "no fragment of the password may survive");
+        return true;
+      },
+    );
+  });
 });
 
 describe("MediaMtxRelay.status", () => {
@@ -326,35 +353,32 @@ describe("MediaMtxRelay.status", () => {
 });
 
 describe("MediaMtxRelay.kickPublisher", () => {
-  it("an rtmpConn publisher is kicked at /v3/rtmpconns/kick/<id>", async () => {
+  it("an rtmpConn publisher is kicked at /v3/rtmpconns/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "rtmpConn", id: "conn-1" } }];
     const relay = new MediaMtxRelay(port);
-    await relay.kickPublisher("cam1");
+    assert.equal(await relay.kickPublisher("cam1"), true);
     assert.ok(calls.some((c) => c.method === "POST" && c.url === "/v3/rtmpconns/kick/conn-1"));
   });
 
-  it("an srtConn publisher is kicked at /v3/srtconns/kick/<id>", async () => {
+  it("an srtConn publisher is kicked at /v3/srtconns/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "srtConn", id: "conn-2" } }];
     const relay = new MediaMtxRelay(port);
-    await relay.kickPublisher("cam1");
+    assert.equal(await relay.kickPublisher("cam1"), true);
     assert.ok(calls.some((c) => c.method === "POST" && c.url === "/v3/srtconns/kick/conn-2"));
   });
 
-  it("a webRTCSession publisher is kicked at /v3/webrtcsessions/kick/<id>", async () => {
+  it("a webRTCSession publisher is kicked at /v3/webrtcsessions/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "webRTCSession", id: "conn-3" } }];
     const relay = new MediaMtxRelay(port);
-    await relay.kickPublisher("cam1");
+    assert.equal(await relay.kickPublisher("cam1"), true);
     assert.ok(calls.some((c) => c.method === "POST" && c.url === "/v3/webrtcsessions/kick/conn-3"));
   });
 
-  it("is a no-op when nobody is publishing", async () => {
+  it("is a no-op when nobody is publishing, and reports false — never mistaken for a drop that happened", async () => {
     runtimePaths = [{ name: "cam1", ready: false, readyTime: null, source: null }];
     const relay = new MediaMtxRelay(port);
-    await relay.kickPublisher("cam1");
-    assert.equal(
-      calls.filter((c) => c.method === "POST").length,
-      0,
-    );
+    assert.equal(await relay.kickPublisher("cam1"), false);
+    assert.equal(calls.filter((c) => c.method === "POST").length, 0);
   });
 
   it("throws for a source type outside the three mapped ones", async () => {

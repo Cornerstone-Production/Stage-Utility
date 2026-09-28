@@ -135,6 +135,23 @@ describe("pullSource", () => {
     assert.equal(pullSource("rtsp://h/s", "user", "a@b:c/d"), "rtsp://user:a%40b%3Ac%2Fd@h/s");
   });
 
+  // R14b (fix round 1): the WHATWG URL setters leave a literal `%` alone —
+  // confirmed against a real MediaMTX v1.21.1 binary, which then choked
+  // parsing the result and echoed the whole credentialed URL, garbled by its
+  // own Go fmt formatting, into an API error text a relay failure would log
+  // (mediamtx-relay.ts's own defence-in-depth strips that separately).
+  it("percent-encodes a literal % in the password, so it round-trips rather than reading as a broken escape", () => {
+    assert.equal(pullSource("rtsp://h/s", "admin", "50%off!"), "rtsp://admin:50%25off!@h/s");
+  });
+
+  it("percent-encodes a literal % in the username too", () => {
+    assert.equal(pullSource("rtsp://h/s", "50%admin", undefined), "rtsp://50%25admin@h/s");
+  });
+
+  it("does not double-encode a % that was already followed by two hex digits — every % in the raw credential is literal, not a pre-existing escape", () => {
+    assert.equal(pullSource("rtsp://h/s", "user", "already%20encoded"), "rtsp://user:already%2520encoded@h/s");
+  });
+
   it("leaves the URL unchanged with an empty username and no password", () => {
     assert.equal(pullSource("rtsp://h/s", "", undefined), "rtsp://h/s");
     assert.equal(pullSource("rtsp://h/s", "", ""), "rtsp://h/s");

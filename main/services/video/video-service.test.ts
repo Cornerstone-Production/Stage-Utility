@@ -101,6 +101,22 @@ test("removeFeed refuses an id outside FEED_ID_PATTERN, even for a feed stored u
   assert.ok(names.includes(badId), "the malformed feed must still be there — refused, not silently dropped");
 });
 
+test("R14a: a pull or push feed reads standby, not offline, while no relay is attached at all (video switched off)", async () => {
+  const pull = await videoService.addFeed({ name: "Off-cam pull", source: { kind: "pull", url: "rtsp://192.0.2.95/s", username: "" } });
+  const push = await videoService.addFeed({ name: "Off-cam push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(pull.ok && push.ok);
+  try {
+    const feeds = (await videoService.state()).feeds;
+    const pullId = (pull as { feed: { id: string } }).feed.id;
+    const pushId = (push as { feed: { id: string } }).feed.id;
+    assert.equal(feeds.find((f) => f.id === pullId)?.status.state, "standby", "no relay attached at all — standby, not offline");
+    assert.equal(feeds.find((f) => f.id === pushId)?.status.state, "standby");
+  } finally {
+    await videoService.removeFeed((pull as { feed: { id: string } }).feed.id);
+    await videoService.removeFeed((push as { feed: { id: string } }).feed.id);
+  }
+});
+
 // ── The status poll, attach/detach, and the transition log lines ──────────
 //
 // Most of these tests use a fake relay and a fake supervisor. A few, marked
@@ -150,7 +166,7 @@ function fakeRelay(status: () => Promise<RelayPath[]>): VideoRelay {
     reconcile: async () => {},
     status,
     playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => {},
+    kickPublisher: async () => false,
   };
 }
 
@@ -472,7 +488,17 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
 
     let feed = (await videoService.state()).feeds.find((f) => f.id === id);
     assert.notEqual(feed?.status.state, "delayed", "there is nothing to bind the mark to yet");
-    assert.equal(lines.length, 0, "nothing is announced until the mark is bound to a real readyTime");
+    // Scoped to THIS feed, not a bare `lines.length === 0`: this file shares
+    // one videoFeedsStore across every test (several deliberately leave
+    // their own feed behind), and R14a means one of THOSE can now log its
+    // own standby<->offline flap as other tests attach and detach relays
+    // around it — a fact about test isolation in a shared store, not about
+    // whether Annex cam's own mark was announced early.
+    assert.equal(
+      lines.some((l) => l.includes("Annex cam")),
+      false,
+      "nothing about Annex cam is announced until the mark is bound to a real readyTime",
+    );
 
     answer = [readyPath({ name: id, readyTime })];
     await pollOnce(); // the first poll that sees the path ready — binds and announces
@@ -868,17 +894,18 @@ test("detachRelay reports the relay off and forgets its last known paths — a s
     const state = await videoService.state();
     assert.deepEqual(state.relay, { state: "off" });
     feed = state.feeds.find((f) => f.id === id);
-    // "no path at all" — not "standby" — is what feed-state.ts reads a
-    // detached relay as, same as a relay that has never reconciled this feed.
-    assert.equal(feed?.status.state, "offline");
-    assert.ok((feed?.status.lastSeenAt ?? 0) > 0, "the earlier live poll must have recorded a seen time");
+    // R14a: a detached relay is "off", not merely "no path yet" — standby
+    // (neutral), not a red "offline". This used to read "offline", the same
+    // as a relay that had simply never reconciled this feed; the controller
+    // ruling that distinguishes them is what this test now proves.
+    assert.equal(feed?.status.state, "standby");
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("detachRelay settles feeds — logs went offline and flushes the seen store, not just a bare publish", async (t) => {
+test("detachRelay settles feeds — flushes the seen store, not just a bare publish; R14a means the transition itself is to standby, not offline, so no \"went offline\" line fires", async (t) => {
   const made = await videoService.addFeed({ name: "Sanctum cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -898,10 +925,21 @@ test("detachRelay settles feeds — logs went offline and flushes the seen store
     await pollOnce(); // t=0 — the first-ever write always lands
     t.mock.timers.tick(SEEN_WRITE_INTERVAL_MS - 1000); // t=59_000 — still inside the throttle window
     await pollOnce(); // still live — this write would be throttled away by noteSeen() alone
+    const beforeDetach = lines.length; // the earlier "is live" poll also names "Sanctum cam"
 
     await videoService.detachRelay(); // t=59_000 — must settle, not just publish
 
-    assert.ok(lines.includes("[video] Sanctum cam went offline"), "detachRelay must log the transition, not silently drop it");
+    // R14a: detaching the relay is a transition to "standby" (video
+    // switched off), not "offline" — logTransition() has no "went to
+    // standby" line, so nothing here claims the SOURCE dropped when it was
+    // Stage Utility that stopped asking. The seen-store flush below is the
+    // part of "settle" that still must happen regardless of what state the
+    // transition lands on.
+    assert.equal(
+      lines.slice(beforeDetach).some((l) => l.includes("Sanctum cam")),
+      false,
+      "a deliberate detach must not log a per-feed \"went offline\" — nothing about the SOURCE changed",
+    );
     const onDisk = (await videoSeenStore.reload())[id];
     assert.equal(
       onDisk,
@@ -1058,6 +1096,24 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
   } finally {
     console.warn = realWarn;
     await videoService.detachRelay();
+  }
+});
+
+test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed with no path as offline, not standby — it is up enough to have an opinion", async () => {
+  const relay = fakeRelay(async () => []);
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const made = await videoService.addFeed({ name: "Failing-relay push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  try {
+    const feed = (await videoService.state()).feeds.find((f) => f.id === (made as { feed: { id: string } }).feed.id);
+    assert.equal(feed?.status.state, "offline", "failing counts as \"up\" for R14a — the relay has an opinion, even a bad one");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed((made as { feed: { id: string } }).feed.id);
   }
 });
 
@@ -1639,14 +1695,14 @@ test("the last-seen time is flushed to disk on the transition out of ready, not 
 
 // ── Reconciling the relay on a feed change, push passwords and addresses ──
 
-function recordingRelay(reconciled: RelayFeed[][], opts: { kickPublisher?: (feedId: string) => Promise<void> } = {}): VideoRelay {
+function recordingRelay(reconciled: RelayFeed[][], opts: { kickPublisher?: (feedId: string) => Promise<boolean> } = {}): VideoRelay {
   return {
     reconcile: async (feeds) => {
       reconciled.push(feeds);
     },
     status: async () => [],
     playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: opts.kickPublisher ?? (async () => {}),
+    kickPublisher: opts.kickPublisher ?? (async () => false),
   };
 }
 
@@ -1737,7 +1793,7 @@ test("a reconcile failure is logged once per outage and never rejects addFeed/up
     },
     status: async () => [],
     playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => {},
+    kickPublisher: async () => false,
   };
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -1771,7 +1827,7 @@ test("newPushPassword writes a fresh secret, reconciles, then kicks the current 
   const kicked: string[] = [];
   const reconciled: RelayFeed[][] = [];
   const relay = recordingRelay(reconciled, {
-    kickPublisher: async (feedId) => {
+    kickPublisher: async (feedId): Promise<boolean> => {
       kicked.push(feedId);
       throw new Error("relay unreachable");
     },
@@ -1846,5 +1902,397 @@ test("pushAddress's SRT and RTMP forms embed the password in the address; WHIP's
     } finally {
       await videoService.removeFeed(id);
     }
+  }
+});
+
+// ── Fix round 1 — R14b through R14h ────────────────────────────────────────
+
+test("R14e: reconciles are single-flight — a change arriving mid-reconcile is folded into ONE more pass with the LATEST store contents, never a second overlapping relay.reconcile() call", async () => {
+  const reconciled: RelayFeed[][] = [];
+  // A mutable container, not a bare `let`: TS's reachability analysis reads
+  // `while (!releaseFirst.fn)` as possibly-infinite when the only
+  // reassignment is inside a closure it does not track the same way for a
+  // bare captured variable, and marks everything after the loop
+  // unreachable (`never`) — a property on an object sidesteps that.
+  const releaseFirst: { fn: (() => void) | null } = { fn: null };
+  let firstCallStarted = false;
+  const relay: VideoRelay = {
+    reconcile: async (feeds) => {
+      if (!firstCallStarted) {
+        firstCallStarted = true;
+        // Genuinely blocks the FIRST call until the test releases it below,
+        // so the second addFeed's own reconcileRelay() call arrives while
+        // this one is still talking to the relay — not just fast, actually
+        // overlapping in time.
+        await new Promise<void>((resolve) => {
+          releaseFirst.fn = () => resolve();
+        });
+      }
+      reconciled.push(feeds);
+    },
+    status: async () => [],
+    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
+    kickPublisher: async () => false,
+  };
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  let idA: string | undefined;
+  let idB: string | undefined;
+  try {
+    const addA = videoService.addFeed({ name: "Interleave A", source: { kind: "push", protocol: "srt" } });
+    while (!releaseFirst.fn) await new Promise((r) => setTimeout(r, 1));
+
+    // A's reconcile is now genuinely in flight and blocked. B's own store
+    // write completes fully — feed-store.ts's own write queue serialises
+    // that independently of the relay — before its reconcileRelay() call
+    // arrives here, finds one already running, and marks dirty rather than
+    // firing a second overlapping relay.reconcile() call.
+    const addB = videoService.addFeed({ name: "Interleave B", source: { kind: "push", protocol: "rtmp" } });
+    await new Promise((r) => setTimeout(r, 20)); // let B's own write + reconcileRelay() call actually reach "mark dirty"
+
+    releaseFirst.fn!();
+    const [madeA, madeB] = await Promise.all([addA, addB]);
+    assert.ok(madeA.ok && madeB.ok, "both adds must still succeed");
+    idA = (madeA as { feed: { id: string } }).feed.id;
+    idB = (madeB as { feed: { id: string } }).feed.id;
+
+    assert.equal(
+      reconciled.length,
+      2,
+      "expected exactly two relay.reconcile() calls — A's own blocked one, and ONE dirty-triggered follow-up — never two overlapping calls racing each other",
+    );
+    const followUp = reconciled[1]!;
+    assert.ok(followUp.some((f) => f.id === idA), "expected the follow-up pass to still carry A's own feed");
+    assert.ok(followUp.some((f) => f.id === idB), "expected the follow-up pass to carry B's feed — the one that arrived mid-flight, proving the plan is computed INSIDE the chain, not captured before it");
+  } finally {
+    await videoService.detachRelay();
+    if (idA) await videoService.removeFeed(idA);
+    if (idB) await videoService.removeFeed(idB);
+  }
+});
+
+test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async () => {
+  const made = await videoService.addFeed({ name: "Snapshot restore", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    // Simulate a restored snapshot / wiped secrets file: the secret is gone,
+    // but the feed itself is still there.
+    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
+
+    const lines: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+    let address: Awaited<ReturnType<typeof videoService.pushAddress>>;
+    try {
+      address = await videoService.pushAddress(id);
+    } finally {
+      console.warn = realWarn;
+    }
+
+    assert.ok(address);
+    assert.ok(address!.password.length > 0, "expected pushAddress to mint a fresh password rather than publish with none");
+    assert.equal(
+      (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+      address!.password,
+      "expected the minted password to actually be stored, not just handed out once",
+    );
+    assert.ok(
+      lines.some((l) => l.includes("made a new publish password")),
+      "expected the one-time \"made a new publish password\" log line",
+    );
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("R14c: relayFeeds() mints a password for a push feed with no stored secret too, so the relay is never handed an empty one", async () => {
+  const reconciled: RelayFeed[][] = [];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay(reconciled), supervisor);
+
+  try {
+    const made = await videoService.addFeed({ name: "No-secret push", source: { kind: "push", protocol: "rtmp" } });
+    assert.ok(made.ok);
+    const id = (made as { feed: { id: string } }).feed.id;
+    await secretsStore.clearSecrets(SECRET_SLOT(id));
+
+    // A no-op update just to trigger another reconcile without touching the secret directly.
+    await videoService.updateFeed(id, { name: "No-secret push 2" });
+
+    const last = reconciled[reconciled.length - 1]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
+    assert.ok(last);
+    assert.notEqual(last.password, "", "the relay must never be handed an empty publish password");
+    await videoService.removeFeed(id);
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("R14c: a kind change's store write failing leaves the OLD secret in place — the secret only changes after the store write succeeds", async () => {
+  const made = await videoService.addFeed({ name: "Reorder push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+  assert.ok(before);
+
+  const { videoFeedsStore } = await import("./feed-store.js");
+  const store = videoFeedsStore as unknown as { update: (...a: unknown[]) => Promise<void> };
+  const realUpdate = store.update.bind(videoFeedsStore);
+  store.update = async () => {
+    throw new Error("disk full");
+  };
+  try {
+    await assert.rejects(
+      videoService.updateFeed(id, { source: { kind: "external", url: "http://192.0.2.98/x/whep" } }),
+      /disk full/,
+    );
+  } finally {
+    store.update = realUpdate;
+  }
+
+  assert.equal(
+    (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+    before,
+    "a failed store write must leave the OLD (push) secret exactly as it was — the kind on disk is still push",
+  );
+  await videoService.removeFeed(id);
+});
+
+test("R14d: newPushPassword's applied/kicked shape — applied is true with nothing to apply to, false only when a running relay's reconcile fails; kicked is true only when a publisher was actually dropped", async () => {
+  // No relay attached at all: nothing to apply to, nobody to kick — both vacuously true/false-as-documented.
+  const madeNoRelay = await videoService.addFeed({ name: "No relay push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(madeNoRelay.ok);
+  const idNoRelay = (madeNoRelay as { feed: { id: string } }).feed.id;
+  const resultNoRelay = await videoService.newPushPassword(idNoRelay);
+  assert.ok(resultNoRelay);
+  assert.equal(resultNoRelay!.applied, true, "nothing to apply to — vacuously true");
+  assert.equal(resultNoRelay!.kicked, false, "nobody to kick with no relay running");
+  await videoService.removeFeed(idNoRelay);
+
+  // A running relay whose reconcile fails: applied false.
+  const failingRelay: VideoRelay = {
+    reconcile: async () => {
+      throw new Error("relay unreachable");
+    },
+    status: async () => [],
+    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
+    kickPublisher: async () => false,
+  };
+  const supervisor1 = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(failingRelay, supervisor1);
+  const madeFailing = await videoService.addFeed({ name: "Failing reconcile push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(madeFailing.ok);
+  const idFailing = (madeFailing as { feed: { id: string } }).feed.id;
+  try {
+    const resultFailing = await videoService.newPushPassword(idFailing);
+    assert.ok(resultFailing);
+    assert.equal(resultFailing!.applied, false, "a running relay whose reconcile failed — applied must be false");
+    assert.equal(resultFailing!.kicked, false, "nobody was publishing");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(idFailing);
+  }
+
+  // A running relay that succeeds and actually drops a publisher: applied and kicked both true.
+  const supervisor2 = new FakeSupervisor();
+  attach(recordingRelay([], { kickPublisher: async () => true }), supervisor2);
+  const madeKicked = await videoService.addFeed({ name: "Kicked push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(madeKicked.ok);
+  const idKicked = (madeKicked as { feed: { id: string } }).feed.id;
+  try {
+    const resultKicked = await videoService.newPushPassword(idKicked);
+    assert.ok(resultKicked);
+    assert.equal(resultKicked!.applied, true);
+    assert.equal(resultKicked!.kicked, true, "expected kicked: true when the relay actually dropped a publisher");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(idKicked);
+  }
+});
+
+test("R14d: kickPublisher runs only while the supervisor is running, and its own outage run closes with ok() on a successful kick", async () => {
+  let kickCalls = 0;
+  const relay = recordingRelay([], {
+    kickPublisher: async () => {
+      kickCalls++;
+      return true;
+    },
+  });
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "starting" };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const made = await videoService.addFeed({ name: "Starting-relay push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    await videoService.newPushPassword(id);
+    assert.equal(kickCalls, 0, "the kick must not even be attempted while the supervisor is not running");
+
+    supervisor.current = { state: "running", since: 0 };
+    const lines: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+    try {
+      const result = await videoService.newPushPassword(id);
+      assert.ok(result);
+      assert.equal(kickCalls, 1, "expected the kick to be attempted now that the supervisor is running");
+      assert.equal(result!.kicked, true);
+      assert.ok(
+        lines.some((l) => l.includes("kicking a publisher is working again")) === false,
+        "no PRIOR failure was open, so ok() must settle silently — nothing to announce recovering from",
+      );
+    } finally {
+      console.log = realLog;
+    }
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("R14d/item 9: newPushPassword reconciles BEFORE it kicks — the new password must already be live at the relay before the old connection is dropped", async () => {
+  const order: string[] = [];
+  const relay: VideoRelay = {
+    reconcile: async () => {
+      order.push("reconcile");
+    },
+    status: async () => [],
+    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
+    kickPublisher: async () => {
+      order.push("kick");
+      return true;
+    },
+  };
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const made = await videoService.addFeed({ name: "Order push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    order.length = 0; // addFeed's own reconcile already ran once
+    await videoService.newPushPassword(id);
+    const reconcileIndex = order.indexOf("reconcile");
+    const kickIndex = order.indexOf("kick");
+    assert.ok(reconcileIndex >= 0 && kickIndex >= 0, "expected both a reconcile and a kick");
+    assert.ok(reconcileIndex < kickIndex, `expected reconcile (${reconcileIndex}) before kick (${kickIndex})`);
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("R14d/item 10: newPushPassword logs one summary line per rotation, without the password, naming what happened to the current publisher", async () => {
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+  // No relay: "nothing was publishing".
+  const made = await videoService.addFeed({ name: "Summary line push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+    lines.length = 0;
+    await videoService.newPushPassword(id);
+    const summary = lines.find((l) => l.startsWith("[video] Summary line push: new publish password"));
+    assert.ok(summary, `expected a rotation summary line; got: ${JSON.stringify(lines)}`);
+    assert.equal(summary, "[video] Summary line push: new publish password; nothing was publishing");
+    assert.equal(summary!.includes(before!), false, "the summary line must never carry the password");
+  } finally {
+    console.log = realLog;
+    await videoService.removeFeed(id);
+  }
+});
+
+test("item 8 (carry 4 gaps): pull -> external/embed clears the slot; pull -> push overwrites the pull password with a fresh push one", async () => {
+  const madePull = await videoService.addFeed({
+    name: "Gap pull",
+    source: { kind: "pull", url: "rtsp://192.0.2.99:8554/s", username: "" },
+    password: "pull-secret",
+  });
+  assert.ok(madePull.ok);
+  const pullId = (madePull as { feed: { id: string } }).feed.id;
+  assert.equal((await secretsStore.getSecrets(SECRET_SLOT(pullId))).password, "pull-secret");
+
+  await videoService.updateFeed(pullId, { source: { kind: "external", url: "http://192.0.2.100/x/whep" } });
+  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(pullId)), {}, "pull -> external must clear the slot");
+  await videoService.removeFeed(pullId);
+
+  const madePull2 = await videoService.addFeed({
+    name: "Gap pull 2",
+    source: { kind: "pull", url: "rtsp://192.0.2.101:8554/s", username: "" },
+    password: "pull-secret-2",
+  });
+  assert.ok(madePull2.ok);
+  const pullId2 = (madePull2 as { feed: { id: string } }).feed.id;
+  await videoService.updateFeed(pullId2, { source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" } });
+  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(pullId2)), {}, "pull -> embed must clear the slot");
+  await videoService.removeFeed(pullId2);
+
+  const madePull3 = await videoService.addFeed({
+    name: "Gap pull 3",
+    source: { kind: "pull", url: "rtsp://192.0.2.102:8554/s", username: "" },
+    password: "pull-secret-3",
+  });
+  assert.ok(madePull3.ok);
+  const pullId3 = (madePull3 as { feed: { id: string } }).feed.id;
+  await videoService.updateFeed(pullId3, { source: { kind: "push", protocol: "srt" } });
+  const afterPushSecret = (await secretsStore.getSecrets(SECRET_SLOT(pullId3))).password;
+  assert.ok(afterPushSecret, "expected pull -> push to mint a push password");
+  assert.notEqual(afterPushSecret, "pull-secret-3", "expected the OLD pull password overwritten, not reused as the push password");
+  await videoService.removeFeed(pullId3);
+});
+
+test("R14g-a: pushAddress's protocolOverride previews another protocol's address with the SAME stored password, without saving anything", async () => {
+  const made = await videoService.addFeed({ name: "Preview push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    const saved = await videoService.pushAddress(id);
+    assert.ok(saved);
+    assert.equal(saved!.protocol, "srt");
+
+    const preview = await videoService.pushAddress(id, "whip");
+    assert.ok(preview);
+    assert.equal(preview!.protocol, "whip");
+    assert.equal(preview!.password, `video:${saved!.password}`, "expected the SAME underlying password, just formatted for WHIP");
+    assert.ok(preview!.address.includes("/whip"));
+
+    // Nothing was saved — the feed's own stored protocol is unchanged.
+    const stillSaved = await videoService.pushAddress(id);
+    assert.equal(stillSaved!.protocol, "srt", "a preview must never write anything");
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("item 12: view() reports hasPassword for a pull feed (never the value), true once a password is stored and false once cleared", async () => {
+  const made = await videoService.addFeed({ name: "HasPassword pull", source: { kind: "pull", url: "rtsp://192.0.2.103:8554/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  try {
+    let feed = (await videoService.state()).feeds.find((f) => f.id === id);
+    assert.equal(feed?.hasPassword, false, "no password stored yet");
+
+    await videoService.updateFeed(id, { password: "now-set" });
+    feed = (await videoService.state()).feeds.find((f) => f.id === id);
+    assert.equal(feed?.hasPassword, true);
+    assert.equal(JSON.stringify(feed).includes("now-set"), false, "hasPassword must never leak the value itself");
+
+    await videoService.updateFeed(id, { password: "" });
+    feed = (await videoService.state()).feeds.find((f) => f.id === id);
+    assert.equal(feed?.hasPassword, false, "cleared again");
+  } finally {
+    await videoService.removeFeed(id);
   }
 });

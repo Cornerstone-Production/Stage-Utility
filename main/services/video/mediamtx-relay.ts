@@ -84,6 +84,22 @@ function canonicalUsers(users: RelayUser[]): RelayUser[] {
   return users.map((user) => ({ ...user, ips: user.ips.map(canonicalIp) }));
 }
 
+/**
+ * Defence in depth for R14b: strips a `user:pass@` userinfo segment out of
+ * a relay error's text before it ever becomes this module's own Error
+ * message — which is what video-service.ts logs on a reconcile failure.
+ * Confirmed necessary, not theoretical: a real v1.21.1 binary given a pull
+ * source URL with an unescaped `%` in its credential (reconcile-plan.ts's
+ * own fix is the primary defence for that) echoed the WHOLE credentialed
+ * URL back, garbled by its own Go fmt formatting, in exactly the `error`
+ * field this method turns into an Error. Applied unconditionally to every
+ * relay error, not only ones this app expects to carry a URL — a future
+ * error text is not this file's to predict.
+ */
+function withoutCredentials(message: string): string {
+  return message.replace(/:\/\/[^\s/@]+@/g, "://");
+}
+
 /** MediaMTX, driven through its own control API. The only implementation of
  *  VideoRelay; everything else in the app sees relay.ts's interface. */
 export class MediaMtxRelay implements VideoRelay {
@@ -103,7 +119,7 @@ export class MediaMtxRelay implements VideoRelay {
         data !== null && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"
           ? (data as { error: string }).error
           : `MediaMTX answered ${res.status}`;
-      throw new Error(message);
+      throw new Error(withoutCredentials(message));
     }
     return data;
   }
@@ -164,14 +180,15 @@ export class MediaMtxRelay implements VideoRelay {
     return { whep: `${base}/whep`, hls: `${base}/index.m3u8` };
   }
 
-  async kickPublisher(feedId: string): Promise<void> {
+  async kickPublisher(feedId: string): Promise<boolean> {
     const list = (await this.request("GET", "/v3/paths/list")) as RuntimePathsListResponse;
     const item = list.items?.find((path) => path.name === feedId);
-    if (!item?.source) return; // Nobody is publishing to this feed right now.
+    if (!item?.source) return false; // Nobody is publishing to this feed right now.
     const endpoint = KICK_ENDPOINT[item.source.type];
     if (!endpoint) {
       throw new Error(`Cannot kick a publisher of type "${item.source.type}"`);
     }
     await this.request("POST", `/v3/${endpoint}/kick/${encodeURIComponent(item.source.id)}`);
+    return true;
   }
 }

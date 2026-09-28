@@ -85,6 +85,10 @@ export interface VideoFeedView {
   source: VideoSource;
   play: FeedPlay;
   status: FeedStatus;
+  /** Set only for a pull feed: whether a password is CURRENTLY stored for
+   *  it — never the value. The editor uses this to say "a password is
+   *  saved" without a blank field implying there is none. */
+  hasPassword?: boolean;
 }
 
 export type RelayStatus =

@@ -288,8 +288,14 @@ class VideoService {
   }
 
   private relayFeedStatus(feedId: string, kind: "pull" | "push"): FeedStatus {
+    // R14a: "up" is running or failing (it was running, and knew this
+    // feed's path, a moment ago) — off/starting/never-attached all mean
+    // nothing here can yet tell a down source from one nobody has asked
+    // about, which feedState() reads as standby rather than offline.
+    const relayState = this.relayStatus().state;
     return feedState({
       kind,
+      relayUp: relayState === "running" || relayState === "failing",
       path: this.lastPaths.get(feedId),
       bframesMark: this.bframesMarks.get(feedId),
       recentlyRequested: this.isRecentlyRequested(feedId),
@@ -323,11 +329,21 @@ class VideoService {
     return `${SOURCE_LINE_KIND[s.kind]} · ${detail}`;
   }
 
-  view(feed: VideoFeed): VideoFeedView {
-    return {
+  /** R14c/item 12: `hasPassword` only for a pull feed — whether a password
+   *  is currently stored, NEVER the value. Lets the editor say "a password
+   *  is saved" without a blank field silently implying there is none. A
+   *  push feed's password is never on this view at all; it has its own
+   *  dedicated GET (pushAddress()). */
+  async view(feed: VideoFeed): Promise<VideoFeedView> {
+    const out: VideoFeedView = {
       id: feed.id, name: feed.name, kind: feed.source.kind, source: feed.source,
       sourceLine: this.sourceLine(feed), play: this.play(feed), status: this.feedStatus(feed),
     };
+    if (feed.source.kind === "pull") {
+      const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
+      out.hasPassword = !!secrets.password;
+    }
+    return out;
   }
 
   async state(): Promise<VideoState> {
@@ -339,7 +355,7 @@ class VideoService {
       rev: this.rev,
       relay: this.relayStatus(),
       kinds: [...this.allowedKinds()],
-      feeds: feeds.map((f) => this.view(f)),
+      feeds: await Promise.all(feeds.map((f) => this.view(f))),
     };
   }
 
@@ -795,9 +811,30 @@ class VideoService {
 
   // ── Reconciling the relay on a feed change ───────────────────────────────
 
+  /**
+   * A push feed's password, minting and storing a fresh one first if none is
+   * currently stored — R14c. `secrets.password ?? ""` used to hand the relay
+   * an EMPTY password for a push feed with no secret (a restored snapshot, a
+   * wiped secrets file, or a kind change that landed between two writes),
+   * and an empty `pass` is exactly READER_USER's OWN convention for "no
+   * password required" (mediamtx-config.ts) — never something a PUBLISHER
+   * should ever be given by accident. Logged once, and only once: the write
+   * happens before the log line, so a write failure propagates to the
+   * caller (reconcileRelay's own catch, or pushAddress's route) without
+   * ever claiming success.
+   */
+  private async pushPassword(feed: VideoFeed): Promise<string> {
+    const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
+    if (secrets.password) return secrets.password;
+    const fresh = generatePushPassword();
+    await secretsStore.setSecret(SECRET_SLOT(feed.id), "password", fresh);
+    console.warn(`[video] ${scrub(feed.name)}: made a new publish password (none was stored)`);
+    return fresh;
+  }
+
   /** Every pull/push feed as the relay needs it, credentials folded in —
    *  never logged, never returned from here: the only two callers are
-   *  reconcileRelay() (handed straight to relay.reconcile()) and
+   *  reconcileOnce() (handed straight to relay.reconcile()) and
    *  pushAddress() (which returns exactly one feed's own password to the
    *  route that asked for it). */
   private async relayFeeds(): Promise<RelayFeed[]> {
@@ -809,12 +846,22 @@ class VideoService {
         const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
         out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, secrets.password) });
       } else if (s.kind === "push") {
-        const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
-        out.push({ id: feed.id, kind: "push", password: secrets.password ?? "" });
+        out.push({ id: feed.id, kind: "push", password: await this.pushPassword(feed) });
       }
     }
     return out;
   }
+
+  /** True while a reconcileOnce() chain is running — see reconcileRelay()'s
+   *  own comment for what this and reconcileDirty together implement. */
+  private reconcileRunning = false;
+  /** Set by a reconcileRelay() call that arrives while one is already
+   *  running; read (and cleared) by the running chain's own loop. */
+  private reconcileDirty = false;
+  /** The current (or most recently finished) chain's promise — what a
+   *  caller arriving mid-chain awaits, since its own change is folded into
+   *  the dirty-triggered rerun rather than starting a second chain. */
+  private reconcileChain: Promise<boolean> = Promise.resolve(true);
 
   /**
    * Make the relay match the feed store, best-effort: a failure is logged
@@ -823,17 +870,58 @@ class VideoService {
    * the source of truth, and the relay catches up on its next reconcile or
    * restart (Task 15's job). Skipped entirely with no relay attached, or one
    * whose supervisor is not currently "running": there is nothing to ask.
+   *
+   * R14e: single-flight. Two feed changes calling this while a reconcile is
+   * already talking to the relay used to fire two overlapping
+   * relay.reconcile() calls — each reading its own snapshot of the feed
+   * store and racing the OTHER's writes to the relay, so the loser's own
+   * change could be overwritten by the winner's now-stale plan. Instead: a
+   * caller arriving mid-chain only sets `reconcileDirty` and awaits the
+   * SAME chain: reconcileOnce()'s own do/while loop below re-checks it the
+   * moment the in-flight call settles and, if set, runs exactly one more
+   * pass — reading the feed store and secrets FRESH at that point, so it
+   * carries every change made while it was waiting, not just the one that
+   * triggered it. That is "the plan is computed inside the chain": never
+   * captured before entering it.
    */
-  private async reconcileRelay(): Promise<void> {
-    if (!this.relay || this.supervisor?.status().state !== "running") return;
+  private reconcileRelay(): Promise<boolean> {
+    if (this.reconcileRunning) {
+      this.reconcileDirty = true;
+      return this.reconcileChain;
+    }
+    this.reconcileRunning = true;
+    this.reconcileChain = this.reconcileLoop().finally(() => {
+      this.reconcileRunning = false;
+    });
+    return this.reconcileChain;
+  }
+
+  private async reconcileLoop(): Promise<boolean> {
+    let applied: boolean;
+    do {
+      this.reconcileDirty = false;
+      applied = await this.reconcileOnce();
+    } while (this.reconcileDirty);
+    return applied;
+  }
+
+  /** @returns whether the relay was actually reconciled — true when there
+   *  was nothing to apply to (no relay attached, or its supervisor is not
+   *  "running"), or the reconcile succeeded; false only when a relay IS
+   *  running and the reconcile call itself failed. See reconcileRelay()'s
+   *  own comment for the single-flight/dirty chain this runs inside. */
+  private async reconcileOnce(): Promise<boolean> {
+    if (!this.relay || this.supervisor?.status().state !== "running") return true;
     try {
       await this.relay.reconcile(await this.relayFeeds());
       const decision = this.pollOutage.ok("reconcile", Date.now());
       if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
+      return true;
     } catch (err) {
       const message = errorMessage(err);
       const decision = this.pollOutage.fail("reconcile", message, Date.now());
       if (decision.log) console.warn(`[video] could not reconcile the relay: ${scrub(message)}${scrub(decision.note)}`);
+      return false;
     }
   }
 
@@ -849,16 +937,23 @@ class VideoService {
    *  Ports come from the feed store, not `attachedPorts`: a paste-ready
    *  address is exactly as good with the relay off as running (Task 15
    *  starts it once a push/pull feed exists), and the store is what the
-   *  relay WILL be listening on once it does. */
-  async pushAddress(id: string): Promise<{ protocol: PushProtocol; address: string; password: string } | null> {
+   *  relay WILL be listening on once it does.
+   *
+   *  `protocolOverride` (R14g): the editor's protocol segmented control
+   *  previews the OTHER protocols' addresses before Save — same feed, same
+   *  password, a different protocol's address shape — without writing
+   *  anything. Defaults to the feed's own saved protocol. */
+  async pushAddress(
+    id: string,
+    protocolOverride?: PushProtocol,
+  ): Promise<{ protocol: PushProtocol; address: string; password: string } | null> {
     if (!FEED_ID_PATTERN.test(id)) return null;
     const { feeds, ports } = await loadFeedsFile();
     const feed = feeds.find((f) => f.id === id);
     if (!feed || feed.source.kind !== "push") return null;
-    const secrets = await secretsStore.getSecrets(SECRET_SLOT(id));
-    const pw = secrets.password ?? "";
+    const pw = await this.pushPassword(feed);
     const lan = getLanIp();
-    const protocol = feed.source.protocol;
+    const protocol = protocolOverride ?? feed.source.protocol;
     if (protocol === "srt") {
       return { protocol, address: `srt://${lan}:${ports.srt}?streamid=publish:${id}:video:${pw}`, password: pw };
     }
@@ -868,31 +963,58 @@ class VideoService {
     return { protocol, address: `http://${lan}:${serverPort()}/video/${id}/whip`, password: `video:${pw}` };
   }
 
-  /** Writes a fresh password, reconciles the relay so it takes effect, then
-   *  kicks whoever is currently publishing — a new password does not by
-   *  itself drop an already-connected device (relay-facts.md), so without
-   *  the kick the OLD stream would keep going under the password just
-   *  replaced. The kick is best-effort, logged the same way reconcileRelay()
-   *  is: nobody publishing right now is not a failure, and a relay that
-   *  cannot be reached for it is already reported by reconcileRelay() or the
-   *  status poll. */
-  async newPushPassword(id: string): Promise<{ protocol: PushProtocol; address: string; password: string } | null> {
+  /**
+   * Writes a fresh password, reconciles the relay so it takes effect, then
+   * kicks whoever is currently publishing — a new password does not by
+   * itself drop an already-connected device (relay-facts.md), so without
+   * the kick the OLD stream would keep going under the password just
+   * replaced. The kick is attempted only while the supervisor is running
+   * (R14d), best-effort and logged the same way reconcileRelay() is; its own
+   * outage run closes with ok() on a successful call, kicking someone or
+   * not.
+   *
+   * `applied`/`kicked` (R14d) let the editor say when a rotation has not
+   * actually taken hold yet, rather than showing a new password nothing is
+   * enforcing: `applied` is false only when a relay IS running and the
+   * reconcile itself failed (true, vacuously, with no relay to apply to —
+   * there is nothing wrong to report); `kicked` is true only when an actual
+   * publisher was dropped.
+   *
+   * One rotation, one summary log line, without the password either side of
+   * it: what happened to whoever was connected. The kick's own
+   * failure/recovery lines (above) are separate facts about the RELAY, not
+   * about this one rotation.
+   */
+  async newPushPassword(
+    id: string,
+  ): Promise<{ protocol: PushProtocol; address: string; password: string; applied: boolean; kicked: boolean } | null> {
     if (!FEED_ID_PATTERN.test(id)) return null;
     const { feeds } = await loadFeedsFile();
     const feed = feeds.find((f) => f.id === id);
     if (!feed || feed.source.kind !== "push") return null;
     await secretsStore.setSecret(SECRET_SLOT(id), "password", generatePushPassword());
-    await this.reconcileRelay();
-    if (this.relay) {
+    const applied = await this.reconcileRelay();
+
+    let kicked = false;
+    if (this.relay && this.supervisor?.status().state === "running") {
       try {
-        await this.relay.kickPublisher(id);
+        kicked = await this.relay.kickPublisher(id);
+        const decision = this.pollOutage.ok("push-kick", Date.now());
+        if (decision.log) console.log(`[video] kicking a publisher is working again${scrub(decision.note)}`);
       } catch (err) {
         const message = errorMessage(err);
         const decision = this.pollOutage.fail("push-kick", message, Date.now());
         if (decision.log) console.warn(`[video] could not kick the previous publisher: ${scrub(message)}${scrub(decision.note)}`);
       }
     }
-    return this.pushAddress(id);
+
+    console.log(
+      `[video] ${scrub(feed.name)}: new publish password; ${scrub(kicked ? "dropped the current publisher" : "nothing was publishing")}`,
+    );
+
+    const address = await this.pushAddress(id);
+    if (!address) return null; // the feed vanished mid-rotation — nothing left to report against
+    return { ...address, applied, kicked };
   }
 
   // ── Feeds ─────────────────────────────────────────────────────────────
@@ -933,7 +1055,7 @@ class VideoService {
     }
     await this.publish();
     await this.reconcileRelay();
-    return { ok: true, feed: this.view(added) };
+    return { ok: true, feed: await this.view(added) };
   }
 
   async updateFeed(id: string, body: unknown): Promise<Result> {
@@ -954,15 +1076,22 @@ class VideoService {
     // key (see main/types/video.ts). Only feedIdFor(), at creation, mints one.
     const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
 
-    await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
-
+    // The feed store write happens FIRST, updateFeedSecret() second — R14c.
+    // The reverse order (this used to run the secret change BEFORE the
+    // store write) meant a store write that failed left a feed whose file
+    // still named the OLD kind sitting behind a secret already changed to
+    // match the NEW one: a push -> pull PATCH whose store write failed had
+    // already cleared the push password, though the feed on disk was still
+    // push. A failure here (the store write itself) is thrown, unhandled —
+    // exactly as it was before this reordering.
     await videoFeedsStore.update((current) => ({
       ...current,
       feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
     }));
+    await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
     await this.publish();
     await this.reconcileRelay();
-    return { ok: true, feed: this.view(feed) };
+    return { ok: true, feed: await this.view(feed) };
   }
 
   /**

@@ -31,6 +31,9 @@ export interface VideoRelay {
   status(): Promise<RelayPath[]>;
   /** Same-origin playback URLs for a feed. */
   playback(feedId: string): { whep: string; hls: string };
-  /** Drop whoever is publishing to a feed, so a new password takes effect now. */
-  kickPublisher(feedId: string): Promise<void>;
+  /** Drop whoever is publishing to a feed, so a new password takes effect
+   *  now. Resolves true when a publisher was actually dropped, false when
+   *  nobody was publishing — R14d needs the distinction to tell the
+   *  operator which one happened, not just that the call did not throw. */
+  kickPublisher(feedId: string): Promise<boolean>;
 }

@@ -26,6 +26,7 @@ const NOT_READY: RelayPath = {
 
 const base: FeedStateInput = {
   kind: "pull",
+  relayUp: true,
   path: undefined,
   bframesMark: undefined,
   recentlyRequested: false,
@@ -101,15 +102,32 @@ test("push, not ready, seen before -> offline, lastSeenAt", () => {
   });
 });
 
-test("no path at all (relay down) -> offline, lastSeenAt", () => {
-  assert.deepEqual(feedState({ ...base, kind: "push", path: undefined, lastSeenAt: 9_000 }), {
+test("relay up, but no path at all for this feed -> offline, lastSeenAt", () => {
+  assert.deepEqual(feedState({ ...base, kind: "push", relayUp: true, path: undefined, lastSeenAt: 9_000 }), {
     state: "offline",
     lastSeenAt: 9_000,
   });
-  // Same for a pull feed, and regardless of recentlyRequested: no path at all
-  // is not the on-demand case the pull branch handles.
+  // Same for a pull feed, and regardless of recentlyRequested: no path at
+  // all is not the on-demand case the pull branch handles.
   assert.deepEqual(
-    feedState({ ...base, kind: "pull", path: undefined, recentlyRequested: true, lastSeenAt: 9_000 }),
+    feedState({ ...base, kind: "pull", relayUp: true, path: undefined, recentlyRequested: true, lastSeenAt: 9_000 }),
     { state: "offline", lastSeenAt: 9_000 },
   );
+});
+
+// ── R14a: the relay itself not being up (off, starting, or never attached — "video switched off") ──
+
+test("relay not up -> standby, whatever path/kind/lastSeenAt say — never a red offline for something nobody has asked about yet", () => {
+  assert.deepEqual(feedState({ ...base, relayUp: false, kind: "pull", path: undefined }), { state: "standby" });
+  assert.deepEqual(feedState({ ...base, relayUp: false, kind: "push", path: undefined, lastSeenAt: 9_000 }), {
+    state: "standby",
+  });
+  // Even with a (necessarily stale) path present, or recentlyRequested set —
+  // the relay being off governs, not any leftover input from before it went off.
+  assert.deepEqual(feedState({ ...base, relayUp: false, kind: "pull", path: READY, recentlyRequested: true }), {
+    state: "standby",
+  });
+  assert.deepEqual(feedState({ ...base, relayUp: false, kind: "push", path: NOT_READY, lastSeenAt: 5_000 }), {
+    state: "standby",
+  });
 });

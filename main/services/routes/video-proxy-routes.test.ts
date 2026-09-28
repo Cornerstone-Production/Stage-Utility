@@ -55,7 +55,7 @@ const fakeRelay: VideoRelay = {
   reconcile: async () => {},
   status: async () => [],
   playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-  kickPublisher: async () => {},
+  kickPublisher: async () => false,
 };
 
 /** Forces videoService's published snapshot to refresh — relayTarget() reads
