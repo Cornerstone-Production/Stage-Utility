@@ -79,7 +79,7 @@ export interface VideoFeedView {
   id: string;
   name: string;
   kind: VideoSourceKind;
-  /** One line for the page's list, e.g. "rtsp://10.0.40.21:8554/stream2". */
+  /** One line for the page's list, e.g. "rtsp://192.0.2.21:8554/stream2". */
   sourceLine: string;
   source: VideoSource;
   play: FeedPlay;

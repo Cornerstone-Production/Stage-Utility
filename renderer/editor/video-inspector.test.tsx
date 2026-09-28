@@ -37,8 +37,8 @@ const FEEDS_STATE = {
   relay: { state: "off" as const },
   kinds: ["pull", "push", "embed", "external"],
   feeds: [
-    { id: "program", name: "Program (IMAG)", kind: "pull", sourceLine: "rtsp://10.0.40.21:8554/stream2", source: { kind: "pull", url: "rtsp://10.0.40.21:8554/stream2", username: "" }, play: { via: "relay", whep: "/whep/program", hls: "/hls/program" }, status: { state: "live" } },
-    { id: "lobby", name: "Lobby cam", kind: "pull", sourceLine: "rtsp://10.0.40.22:8554/stream1", source: { kind: "pull", url: "rtsp://10.0.40.22:8554/stream1", username: "" }, play: { via: "relay", whep: "/whep/lobby", hls: "/hls/lobby" }, status: { state: "offline" } },
+    { id: "program", name: "Program (IMAG)", kind: "pull", sourceLine: "rtsp://192.0.2.21:8554/stream2", source: { kind: "pull", url: "rtsp://192.0.2.21:8554/stream2", username: "" }, play: { via: "relay", whep: "/whep/program", hls: "/hls/program" }, status: { state: "live" } },
+    { id: "lobby", name: "Lobby cam", kind: "pull", sourceLine: "rtsp://192.0.2.22:8554/stream1", source: { kind: "pull", url: "rtsp://192.0.2.22:8554/stream1", username: "" }, play: { via: "relay", whep: "/whep/lobby", hls: "/hls/lobby" }, status: { state: "offline" } },
   ],
 };
 

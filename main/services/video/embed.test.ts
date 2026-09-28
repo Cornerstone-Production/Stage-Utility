@@ -9,7 +9,7 @@ test("a channel URL becomes its UC id", () => {
   );
 });
 test("a handle is refused with where to find the id", () => {
-  const r = normalizeEmbedRef("youtube-channel", "@cornerstone");
+  const r = normalizeEmbedRef("youtube-channel", "@example");
   assert.equal(r.ok, false);
   assert.match((r as { error: string }).error, /starts with UC/);
 });
