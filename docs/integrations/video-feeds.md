@@ -4,6 +4,26 @@ Shows camera and program video in layouts and on Home — the **Video** widget's
 source. Feeds themselves are set up once on the **Video feeds** page, under
 **Screens** in the sidebar.
 
+## The relay and its switch
+
+A pull or push feed (below) plays through Stage Utility's own video relay —
+MediaMTX, behind an adapter, run as a child of this server. It appears as its
+own **Video feeds** card under Integrations, with a link back to this page
+rather than a settings form: the switch, every feed and the relay's ports all
+live here and in Advanced instead.
+
+The switch runs the relay only while it is on AND at least one pull or push
+feed exists — an embed or external feed plays either way, since neither one
+needs it. The first time it starts, it downloads the pinned MediaMTX release
+(about 27 MB, 55 MB once extracted); the status line at the top of this page
+says so before that first download, then shows a progress bar while it runs.
+Once running it names the version and its ports (RTMP and SRT inbound, UDP for
+video to screens); if it cannot start — a busy port, a failed download — the
+line says why and when it retries, and names where to place a downloaded
+archive by hand if the download itself is what failed. The relay's ports live
+on their own card in **Advanced**, reachable from this line's "Change ports in
+Advanced" — saving them restarts the relay if it is running.
+
 ## What a feed is
 
 A feed is a name and a source, `{id, name, source}`. The `id` is a slug of the
