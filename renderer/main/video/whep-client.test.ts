@@ -83,3 +83,58 @@ test("a 404 closes the peer connection and rejects", async () => {
   const pc = FakePeerConnection.instances.at(-1);
   assert.equal(pc?.closed, true, "expected the peer connection to be closed on a non-201 response");
 });
+
+test("an absolute, cross-origin endpoint's relative Location resolves against THAT origin, not the page's — Important 8", async () => {
+  stubPeerConnection();
+  const calls: { method: string; url: string }[] = [];
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    calls.push({ method, url: String(input) });
+    if (method === "POST") {
+      return {
+        status: 201,
+        // A relative path — exactly what MediaMTX sends — that must resolve
+        // against the RELAY's origin, never against window.location.href
+        // (this app's own origin, "http://localhost:8788/").
+        headers: { get: (h: string) => (h === "Location" ? "/whep/9f8e7d6c" : null) },
+        text: async () => "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n",
+      } as unknown as Response;
+    }
+    return { status: 200, ok: true, headers: { get: () => null }, text: async () => "" } as unknown as Response;
+  }) as typeof fetch;
+
+  const session = await startWhep("http://relay.example.org:8890/whep", video);
+  await session.stop();
+
+  const del = calls.find((c) => c.method === "DELETE");
+  assert.ok(del, "expected a DELETE call");
+  const url = new URL(del!.url);
+  assert.equal(url.origin, "http://relay.example.org:8890", "the DELETE went to this app's own origin instead of the relay's");
+  assert.equal(url.pathname, "/whep/9f8e7d6c");
+});
+
+test("a 201 whose answer cannot be read closes the peer connection, DELETEs the session, and rethrows — Minor 7", async () => {
+  stubPeerConnection();
+  const calls: { method: string; url: string }[] = [];
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    calls.push({ method, url: String(input) });
+    if (method === "POST") {
+      return {
+        status: 201,
+        headers: { get: (h: string) => (h === "Location" ? "/video/p/whep/leaked" : null) },
+        text: async () => {
+          throw new Error("body already consumed");
+        },
+      } as unknown as Response;
+    }
+    return { status: 200, ok: true, headers: { get: () => null }, text: async () => "" } as unknown as Response;
+  }) as typeof fetch;
+
+  await assert.rejects(() => startWhep("/video/p/whep", video), /body already consumed/);
+
+  const pc = FakePeerConnection.instances.at(-1);
+  assert.equal(pc?.closed, true, "expected the peer connection closed rather than left open");
+  const del = calls.find((c) => c.method === "DELETE");
+  assert.ok(del, "expected the relay told to drop the session the 201 already created, not left to leak until its own timeout");
+});
