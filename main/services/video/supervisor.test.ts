@@ -459,10 +459,10 @@ describe("RelaySupervisor", () => {
       // path that could leave `this.child` pointing somewhere other than
       // the one child whose exit is still pending. This proves the exit
       // closure's own identity check as a second, independent layer of
-      // defense, by reaching past the public API to force exactly that
-      // state — the shape the reviewer's reproduction actually corrupted
-      // (this.child reassigned to a newer child while an older child,
-      // SIGTERMed by killLeftover, was still on its way out).
+      // defense, by reaching past the public API to force exactly the state
+      // that once corrupted this (this.child reassigned to a newer child
+      // while an older child, SIGTERMed by killLeftover, was still on its
+      // way out).
       const decoy = makeFakeChild(999999);
       (sup as unknown as { child: FakeChild }).child = decoy;
 

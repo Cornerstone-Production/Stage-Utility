@@ -205,9 +205,9 @@ export class RelaySupervisor extends EventEmitter {
    * reads relay.pid, finds the CURRENT child's own pid (this run already
    * wrote it) matching this same binary, and SIGTERMs its own healthy
    * child as if it were left over from a previous run — then spawn a
-   * second child on top of it. Reproduced in review: `killed via
-   * killLeftover during 2nd start(): [[1000,'SIGTERM']], children spawned
-   * total: 2`. Call stop() first to restart with a clean state.
+   * second child on top of it. Confirmed by forcing exactly this sequence:
+   * `killed via killLeftover during 2nd start(): [[1000,'SIGTERM']], children
+   * spawned total: 2`. Call stop() first to restart with a clean state.
    *
    * The check and the "starting" state it sets both happen before the
    * first `await`, so two start() calls issued back to back (neither
@@ -378,12 +378,13 @@ export class RelaySupervisor extends EventEmitter {
   }
 
   /**
-   * `setStatus()` — and so the "status" event — fires before "exit". A
-   * listener reacting to "exit" (kept for existing callers) can then trust
-   * `status()` already reflects where this process landed, rather than
-   * whatever it was on its way out; video-service.ts's own R12g fix depends
-   * on this order to reset its "not answering" verdict against the RIGHT
-   * process before "exit" ever reaches it.
+   * `setStatus()` assigns `this.current` before it emits "status", so any
+   * listener reading `status()` from inside its own handler always sees the
+   * value it was just told about, never the one it is replacing. "exit" is
+   * emitted after "status" for the same reason, one step further out: a
+   * listener reacting to "exit" (kept for existing callers) can trust
+   * `status()` already reflects where this process landed, not whatever it
+   * was on its way out.
    */
   private onExit(code: number | null): void {
     this.clearHealthyTimer();

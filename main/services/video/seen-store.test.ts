@@ -109,3 +109,22 @@ test("forgetSeen clears a feed from memory and disk", async () => {
   await noteSeen("forget-cam", 6);
   assert.deepEqual((await videoSeenStore.reload())["forget-cam"], 6);
 });
+
+test("a forgetSeen whose write rejects leaves the in-memory value in place — a restart must not see the key vanish only to come back stale", async () => {
+  await noteSeen("stale-cam", 7);
+  const realUpdate = asFailable.update.bind(videoSeenStore);
+  asFailable.update = async () => {
+    throw new Error("disk full");
+  };
+  try {
+    await assert.rejects(forgetSeen("stale-cam"), /disk full/);
+  } finally {
+    asFailable.update = realUpdate;
+  }
+  // The disk copy still has the old value (the write never landed), so the
+  // in-memory Map must still agree with it — deleting it here would make a
+  // later loadSeen() (after a restart) read the value straight back in,
+  // silently undoing the removal removeFeed() already told the caller about.
+  assert.equal(lastSeenAt("stale-cam"), 7, "forgetSeen must not forget in memory what it failed to forget on disk");
+  assert.deepEqual((await videoSeenStore.reload())["stale-cam"], 7);
+});

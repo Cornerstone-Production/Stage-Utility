@@ -87,13 +87,21 @@ export async function flushSeen(feedId: string): Promise<void> {
  * id again (feedIdFor() is deterministic from the name), and it has no
  * history of its own. Without this, re-adding a push feed under the same
  * name would read "offline, last seen <old>" instead of "waiting".
+ *
+ * The in-memory entry is deleted only AFTER the disk write succeeds. Deleting
+ * it first (as an earlier version of this function did) forgets it in
+ * memory even when the write REJECTS — the disk copy still has the old
+ * value, and a restart's loadSeen() reads that stale key straight back in,
+ * making the removal silently undone by the next process start. The write
+ * can still throw; the caller decides what to do with that (see
+ * video-service.ts's forgetSeenSafely()).
  */
 export async function forgetSeen(feedId: string): Promise<void> {
-  seen.delete(feedId);
-  lastWrittenAt.delete(feedId);
   await videoSeenStore.update((current) => {
     if (!(feedId in current)) return current; // nothing to remove — no write
     const { [feedId]: _removed, ...rest } = current;
     return rest;
   });
+  seen.delete(feedId);
+  lastWrittenAt.delete(feedId);
 }
