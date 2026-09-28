@@ -477,6 +477,8 @@ neither is a 400.
 | PATCH | `/api/video/feeds/:id` | Update a feed. Any field omitted from the body keeps its current value; a field present is validated as on POST |
 | DELETE | `/api/video/feeds/:id` | Remove a feed. A layout still pointed at it keeps the binding and renders it as offline |
 | GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
+| GET | `/api/video/feeds/:id/push` | A push feed's paste-ready address: `{protocol, address, password}`. `404` for an unknown id or a feed that is not `push` |
+| POST | `/api/video/feeds/:id/push/new-password` | Replaces the feed's publish password, reconciles the relay, and kicks whoever is currently publishing so the old password stops working at once. Same shape as the GET above |
 
 Playback is proxied on Stage Utility's own origin, not under `/api`, because
 the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,

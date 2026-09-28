@@ -17,12 +17,15 @@ already pointed at it.
 |---|---|
 | YouTube or Resi player | The platform's own embed, muted |
 | Another WebRTC or HLS address | Something already serving WHEP or HLS, played as given |
-| Pull from a device (RTSP, SRT, HLS) | Not available in this version |
-| The device pushes to Stage Utility (SRT, RTMP, WHIP) | Not available in this version |
+| Pull from a device (RTSP, SRT, HLS) | Stage Utility's relay fetches it |
+| The device pushes to Stage Utility (SRT, RTMP, WHIP) | The device connects to Stage Utility's relay |
 
-Only the first two kinds can be added right now. Pulling a feed from a camera
-or encoder on the network, and letting a device push to Stage Utility, are not
-available in this version.
+The last two kinds go through Stage Utility's own video relay (MediaMTX,
+behind an adapter — see the relay status line at the top of the Video feeds
+page). A password protects each: never shown back to the browser once saved,
+and never carried in the feed list, `video:state`, or any broadcast — only a
+push feed's own address and password (below) are ever returned, and only for
+that one feed.
 
 ### YouTube or Resi
 
@@ -55,6 +58,39 @@ holds for 10 seconds starts the delay over.
 
 The address may not carry a username or password (`https://user:pass@…`):
 browsers refuse to play one, so it is refused when the feed is saved.
+
+### Pull from a device
+
+For an RTSP, SRT or HLS address on the LAN — a camera or encoder's own output.
+**Address**, then **Username and password** if the device needs them. The
+relay only dials the address while something is actually showing the feed
+(a Video widget on screen, or the editor's own preview); nothing else keeps
+it connected. Leaving the password field blank on an edit leaves whatever
+password is already stored — clearing it takes an explicit edit back to
+blank, not just never touching the field.
+
+A Magewell Ultra Stream can serve one feed to Stage Utility this way while
+its first output keeps streaming to Resi: turn on the Ultra Stream's RTSP
+server as its second output.
+
+### The device pushes to Stage Utility
+
+For a device that connects outward — OBS, a hardware encoder, ProPresenter's
+own output. Choose **How it connects**: SRT, RTMP, or WHIP (OBS). Saving the
+feed mints a random password, shown once the feed exists under **Paste this
+into the device** — the exact address to paste, with **Copy** — and
+**Password**.
+
+The password is part of the SRT and RTMP addresses already (a device pushing
+without it is refused); for WHIP it is OBS's Bearer Token, entered separately
+under Settings, Stream, Service WHIP. **New password** replaces it and drops
+whatever is currently connected, so the old password stops working
+immediately rather than at the device's next reconnect.
+
+If the device sends B-frames, WebRTC cannot carry the picture and Stage
+Utility falls back to HLS — a few seconds behind instead of under one. The
+editor says so, with the OBS setting that fixes it (Settings, Output,
+Streaming: Profile baseline, or Keyframe interval 1 s with B-frames 0).
 
 ## The Video feeds page
 
