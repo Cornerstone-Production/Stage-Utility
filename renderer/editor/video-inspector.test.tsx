@@ -16,8 +16,10 @@ const teardown = installRenderDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
-const { VideoConfig } = await import("./inspector.js");
+const { Inspector, VideoConfig } = await import("./inspector.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { DEFAULT_STAGE_STATE } = await import("../main/test-render-ctx.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -42,9 +44,12 @@ const FEEDS_STATE = {
   ],
 };
 
-/** Stubs /api/video/state; everything else is an empty 200. */
+/** Stubs /api/video/state (and /api/state, for the full Inspector);
+ *  everything else is an empty 200. */
 function stubVideoState() {
-  return stubFetchWithLog((url) => (url.includes("/api/video/state") ? ok(FEEDS_STATE) : ok({})));
+  return stubFetchWithLog((url) =>
+    url.includes("/api/video/state") ? ok(FEEDS_STATE) : url.endsWith("/api/state") ? ok(DEFAULT_STAGE_STATE) : ok({}),
+  );
 }
 
 async function mount(config: Config, onConfig: (c: LayoutObjectConfig) => void) {
@@ -93,6 +98,19 @@ describe("VideoConfig — Feed", () => {
       const feedSelect = container.querySelectorAll("select")[0] as HTMLSelectElement;
       fireEvent.change(feedSelect, { target: { value: "program" } });
       assert.deepEqual(patched, { ...DEFAULT_CONFIG, feedId: "program" });
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("'Choose a feed' stores null, not an empty id", async () => {
+    const f = stubVideoState();
+    try {
+      let patched: LayoutObjectConfig | null = null;
+      const { container } = await mount({ ...DEFAULT_CONFIG, feedId: "program" }, (c) => { patched = c; });
+      const feedSelect = container.querySelectorAll("select")[0] as HTMLSelectElement;
+      fireEvent.change(feedSelect, { target: { value: "" } });
+      assert.deepEqual(patched, { ...DEFAULT_CONFIG, feedId: null });
     } finally {
       f.restore();
     }
@@ -190,6 +208,72 @@ describe("VideoConfig — the callout", () => {
     try {
       const { getByText } = await mount(DEFAULT_CONFIG, () => {});
       assert.ok(getByText(/Always muted, with no controls/));
+    } finally {
+      f.restore();
+    }
+  });
+});
+
+describe("the full Inspector, for a Video object", () => {
+  // The whole Inspector, not VideoConfig alone: the switch arm that renders
+  // VideoConfig, and the isText list that keeps the text-style rows off a
+  // picture, live in it and in nothing smaller.
+  async function mountInspector() {
+    const o: LayoutObject = { id: "v1", x: 0.1, y: 0.1, w: 0.5, h: 0.5, z: 0, config: DEFAULT_CONFIG };
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const noop = () => {};
+    const utils = render(
+      React.createElement(
+        QueryClientProvider,
+        { client: qc },
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(Inspector, {
+            o,
+            canvas: { width: 1920, height: 1080 },
+            parentW: 1920,
+            parentH: 1080,
+            nested: false,
+            locked: false,
+            slotsViews: [],
+            onGeom: noop,
+            onStyle: noop,
+            onResetLook: noop,
+            onConfig: noop,
+            onReorder: noop,
+            onDuplicate: noop,
+            onRemove: noop,
+            onReparentOut: noop,
+            onToggleLock: noop,
+            onSaveGroup: noop,
+            onSnapToGrid: noop,
+          }),
+        ),
+      ),
+    );
+    await settle();
+    await settle();
+    return utils;
+  }
+
+  test("renders the Video section", async () => {
+    const f = stubVideoState();
+    try {
+      const { queryByRole } = await mountInspector();
+      assert.equal(!!queryByRole("button", { name: "Fill the box" }), true, "the Video section is missing from the Inspector");
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("offers no text styling for a picture", async () => {
+    const f = stubVideoState();
+    try {
+      const { queryByText } = await mountInspector();
+      for (const label of ["Font size", "Weight", "Color"]) {
+        assert.equal(!!queryByText(label, { exact: true }), false, `a Video object offers "${label}"`);
+      }
     } finally {
       f.restore();
     }
