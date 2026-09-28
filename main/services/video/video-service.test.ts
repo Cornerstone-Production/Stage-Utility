@@ -1259,10 +1259,11 @@ test("attaching a new relay without detaching first replaces the old one's liste
   videoService.attachRelay(relayB, supervisorB); // no explicit detach in between
 
   try {
+    // "line" and "status" are the only two events attachRelay() subscribes to.
     assert.equal(supervisorA.listenerCount("line"), 0, "the old supervisor's line listener must be removed");
-    assert.equal(supervisorA.listenerCount("spawned"), 0, "and its spawned listener");
-    assert.equal(supervisorA.listenerCount("exit"), 0, "and its exit listener");
+    assert.equal(supervisorA.listenerCount("status"), 0, "and its status listener");
     assert.equal(supervisorB.listenerCount("line"), 1, "the new supervisor must be the one actually listened to");
+    assert.equal(supervisorB.listenerCount("status"), 1, "for its status events too");
   } finally {
     await videoService.detachRelay();
   }
