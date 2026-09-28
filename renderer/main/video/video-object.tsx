@@ -4,8 +4,8 @@
 // for a phase and wires the DOM (the <video> element, on-screen gating, the
 // preview pause) around it.
 //
-// Always muted, no controls: the widget has no audio track and no scrub bar
-// to hide (see global-constraints.md).
+// Always muted, no controls: video only, never audio, and nothing on a stage
+// display for anyone to scrub or pause.
 
 import { useCallback, useMemo, useRef, useState, type ErrorInfo } from "react";
 
@@ -116,7 +116,7 @@ function VideoObjectBody({
     feed,
     feedDeleted,
     video: videoEl,
-    allowHls: true, // PR 1: always on; a later PR wires the per-screen switch.
+    allowHls: true, // Always on until a screen has its own "Use HLS on this screen" switch.
     onLog,
   });
 
@@ -209,9 +209,9 @@ function StateText({ big, small }: { big: string; small: string }) {
 function ConnectingBody({ name }: { name: string }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ gap: 6 }}>
-      {/* mockup-v2.html's own `.pulse`/`@keyframes pulse` (1.2s, 0.25 to 1) —
-          not the app's su-history-pulse-dot (1.6s, 1 to 0.4): the mockup is
-          the spec here, and the two read as noticeably different beats. */}
+      {/* The approved design's own pulse (1.2s, 0.25 to 1) — not the app's
+          su-history-pulse-dot (1.6s, 1 to 0.4): the two read as noticeably
+          different beats, and the design is the spec here. */}
       <span
         className="video-connecting-pulse inline-block rounded-full"
         style={{ width: 10, height: 10, background: "rgba(255,255,255,0.45)" }}

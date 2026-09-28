@@ -218,8 +218,8 @@ class VideoService {
       if (!v.layout) continue;
       let uses = false;
       walkLayoutObjects(v.layout.objects, (o) => {
-        // Read structurally: the `video` config member lands in Task 4, and a
-        // view written by a newer build may carry types this one does not know.
+        // Read structurally: a view written by a newer build may carry object
+        // types, or config fields, this one does not know.
         const c = o.config as { type: string; feedId?: unknown };
         if (c.type === "video" && c.feedId === id) uses = true;
       });

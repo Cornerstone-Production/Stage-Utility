@@ -10,7 +10,7 @@
 // NOT covered here, and why: jsdom loads no stylesheet and reports every
 // offsetHeight/getBoundingClientRect as zero, so this file proves no layout,
 // spacing or the picture's visual framing — only that the right text and
-// controls are in the DOM. The live picture (VideoObject, from Task 5) never
+// controls are in the DOM. The live picture (VideoObject) never
 // attempts a real WebRTC/HLS session in this environment: jsdom defines
 // neither RTCPeerConnection nor MediaSource, so choose-playback.ts's own
 // capability check resolves every fixture feed here to "embed" (no network at

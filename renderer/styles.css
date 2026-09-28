@@ -410,10 +410,10 @@
   .su-history-pulse-dot {
     animation: su-history-pulse-dot 1.6s ease-in-out infinite;
   }
-  /* The Video widget's "Connecting to {feed}" dot — mockup-v2.html's own
-     `.pulse`/`@keyframes pulse` values (1.2s, 0.25 to 1), kept as its own
-     rule rather than reused from su-history-pulse-dot above: the mockup is
-     the spec for this widget, and the two beats read as visibly different. */
+  /* The Video widget's "Connecting to {feed}" dot — the approved design's own
+     pulse (1.2s, 0.25 to 1), kept as its own rule rather than reused from
+     su-history-pulse-dot above: the design is the spec for this widget, and
+     the two beats read as visibly different. */
   @keyframes video-connecting-pulse {
     0%, 100% { opacity: 0.25; }
     50%      { opacity: 1; }

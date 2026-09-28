@@ -254,7 +254,7 @@ const RESTYLED: Record<string, Record<string, unknown>> = {
   "notes": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
   "checklist": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
 
-  // ── The readouts stop shipping an alignment (Phase 7 Task 9) ───────────────
+  // ── The readouts stop shipping an alignment ───────────────────────────────
   //
   // Every preset above spreads TEXT(), which writes `textAlign: "center"`. So
   // every readout ever created stored a centre alignment as a side effect of
@@ -345,7 +345,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
   // The other two things Home draws. They existed as bespoke panels; making them
   // objects is what lets the Home tab's own editor govern the whole page with
-  // one mechanism (Phase 7, Task 6).
+  // one mechanism.
   // Renamed when it was split: it drew recording and SPL too, and does not any
   // more. The type id stays so no stored layout has to move.
   { type: "home-live-status", label: "Service timer", group: "PCO / service", after: "home-next-service" },

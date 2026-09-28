@@ -5,11 +5,12 @@
 // SENDS, not what a helper returns.
 //
 // NOT covered here, and why: jsdom loads no stylesheet and reports every
-// offsetHeight/getBoundingClientRect as zero, so the corner name-tag's
-// placement, the "N s behind" badge's position, and the connecting pulse's
-// animation are unverifiable from this file — and were NOT checked in a real
-// browser either in this round; that is a real gap, said plainly rather than
-// implied to be covered somewhere it is not (see task-5-report.md).
+// offsetHeight/getBoundingClientRect as zero, so the corner name tag's
+// placement, the "N s behind" badge's position and the connecting pulse's
+// animation cannot be seen from this file. They are checked in Chromium
+// instead, against the approved design: a stage display playing all three
+// states, and the pulse's computed animation. What this file asserts is that
+// each is rendered, and when.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
