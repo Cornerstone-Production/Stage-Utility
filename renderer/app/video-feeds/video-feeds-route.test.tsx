@@ -645,6 +645,26 @@ test("each row says how its feed plays", async () => {
   }
 });
 
+test("R14 round 3 item 4: a delayed relay row's meta line says \"a few seconds behind\", never a figure nothing computes; a live row still says \"under 1 s behind\"", async () => {
+  const g = stubGlobals({
+    ...makeState([
+      pushFeed({ id: "feed-live", name: "Live push", status: { state: "live", width: 1920, height: 1080 } }),
+      pullFeed({ id: "feed-delayed", name: "Delayed pull", status: { state: "delayed", delayedBecause: "b-frames" } }),
+    ]),
+    kinds: ALL_KINDS,
+  });
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText("WebRTC · under 1 s behind"), true, "expected the design's own live text, unchanged");
+    assert.equal(!!screen.queryByText("HLS · a few seconds behind"), true);
+    assert.equal(!!screen.queryByText(/about 4 s/), false, "a specific figure nothing in this pipeline computes must never appear");
+  } finally {
+    g.restore();
+  }
+});
+
 test("the editor says which layouts use the selected feed", async () => {
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
   try {
@@ -1169,6 +1189,61 @@ test("R14 round 2 item 6: New password during an unsaved preview re-fetches the 
       screen.getByRole("button", { name: "WHIP (OBS)" }).getAttribute("aria-pressed"),
       "true",
       "the segmented control itself must still show WHIP",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("R14 round 3 item 1: switching protocol while a rotation is in flight still shows the rotation's own note once it resolves", async () => {
+  let releaseRotation: ((r: { status: number; body: unknown }) => void) | null = null;
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS, relay: RUNNING_RELAY },
+    {
+      onNewPushPassword: () =>
+        new Promise((resolve) => {
+          releaseRotation = resolve;
+        }),
+      onPushAddress: (id, protocol) => ({
+        status: 200,
+        body: { protocol: protocol ?? "srt", address: `http://192.168.1.50:8788/video/${id}/${protocol}`, password: `${protocol}pw` },
+      }),
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    await settle();
+
+    // Flip the segmented control WHILE the rotation is still held — this
+    // bumps the request counter (via load()'s own re-fetch), which must
+    // supersede the DATA the rotation carries but never the rotation's own
+    // note about what happened to the previous publisher.
+    fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
+    await settle();
+    await settle();
+
+    releaseRotation!({
+      status: 200,
+      body: {
+        protocol: "srt",
+        address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:freshpw",
+        password: "freshpw",
+        applied: false,
+        kicked: "none",
+      },
+    });
+    await settle();
+    await settle();
+
+    assert.ok(
+      screen.getByText("The relay did not take the new password yet; it will on its next start"),
+      "expected the rotation's own note to still show, even though the control was flipped mid-flight",
     );
   } finally {
     g.restore();

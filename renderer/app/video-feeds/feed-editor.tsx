@@ -573,10 +573,17 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
     const seq = ++requestSeq.current;
     try {
       const r = await invoke<PushAddress & RotationResult>("video:newPushPassword", { id: feedId });
-      if (seq !== requestSeq.current) return; // an even newer request landed first — drop it
+      // The rotation's own report — what happened to whoever was
+      // publishing — describes THIS call, never "whatever the control
+      // currently shows," so it must never be dropped just because the
+      // control was flipped to a different protocol while the request was
+      // in flight (R14 round 3 item 1: the staleness check used to return
+      // before either of these ran at all). Only the DATA a later request
+      // could already have replaced is gated by the counter below.
       setRotation({ applied: r.applied, kicked: r.kicked });
       setError(null);
       setCopyHint(null);
+      if (seq !== requestSeq.current) return; // a newer request already owns the data shown now
       if (protocol === r.protocol) {
         // The control is showing the feed's own saved protocol — r's own
         // answer already IS that protocol's fresh address; no second round
@@ -593,7 +600,9 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
         void load();
       }
     } catch (err) {
-      if (seq !== requestSeq.current) return;
+      // Same reasoning as above: a rotation failure IS the report worth
+      // showing, regardless of what is being previewed by the time it
+      // arrives.
       setError(errorMessage(err));
     } finally {
       setRotating(false);

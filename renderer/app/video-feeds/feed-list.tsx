@@ -69,16 +69,19 @@ function FeedPill({ feed }: { feed: VideoFeedView }) {
  * played exactly as given with no health to report.
  *
  * A relay (pull/push) feed shows how it plays plus its resolution once the
- * relay reports it: "WebRTC · under 1 s behind" while live, or "HLS · about
- * 4 s behind" once B-frames or an unsupported codec pushes it onto HLS — the
- * design's own number for that case (mockup-v2.html's "Delayed about 4 s."
- * callout; the server's own comment for a B-frames close gives a 2-to-6 s
- * RANGE, not a single figure, so there is no more precise number to show
- * here). No frame rate: neither FeedStatus nor the relay's own runtime API
- * reports one anywhere in this pipeline (feed-state.ts, relay.ts's
- * RelayPath) — the approved mockup's sample "30 fps" is sample copy with no
- * real data behind it, so it is left out here rather than invented. A feed
- * that is standby, waiting or offline has nothing to say yet.
+ * relay reports it: "WebRTC · under 1 s behind" while live (the design's own
+ * text), or "HLS · a few seconds behind" once B-frames or an unsupported
+ * codec pushes it onto HLS — R14 round 3 item 4: no build in this pipeline
+ * computes an actual figure (feed-state.ts, relay.ts's RelayPath carry no
+ * such number; the server's own comment for a B-frames close gives a 2-to-6 s
+ * RANGE, not a single one), and a delayed row's own hint right below this
+ * line already says "a few seconds late" (b-frames-copy.ts) — a specific
+ * "about 4 s" here directly above it was never a real measurement and
+ * disagreed with its own neighbor. No frame rate either: neither FeedStatus
+ * nor the relay's own runtime API reports one anywhere in this pipeline —
+ * the approved mockup's sample "30 fps" is sample copy with no real data
+ * behind it, so it is left out here rather than invented. A feed that is
+ * standby, waiting or offline has nothing to say yet.
  */
 export function feedMeta(feed: VideoFeedView): string[] {
   const s = feed.source;
@@ -91,7 +94,7 @@ export function feedMeta(feed: VideoFeedView): string[] {
   if (feed.play.via === "relay") {
     const status = feed.status;
     if (status.state === "live" || status.state === "delayed") {
-      const meta = [status.state === "live" ? "WebRTC · under 1 s behind" : "HLS · about 4 s behind"];
+      const meta = [status.state === "live" ? "WebRTC · under 1 s behind" : "HLS · a few seconds behind"];
       if (status.width && status.height) meta.push(`${status.width} × ${status.height}`);
       return meta;
     }
