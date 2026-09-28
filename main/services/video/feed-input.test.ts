@@ -56,3 +56,10 @@ test("external refuses a username or password in the address, like pull", () => 
     assert.match((r as { error: string }).error, /username and password out of the address/, url);
   }
 });
+test("a name may be 60 characters after trimming, not 61", () => {
+  const src = { kind: "external", url: "http://h/cam/whep" };
+  assert.equal(parseFeedInput({ name: ` ${"a".repeat(60)} `, source: src }, PR1).ok, true);
+  const r = parseFeedInput({ name: "a".repeat(61), source: src }, PR1);
+  assert.equal(r.ok, false);
+  assert.equal((r as { error: string }).error, "Name must be 1–60 characters.");
+});

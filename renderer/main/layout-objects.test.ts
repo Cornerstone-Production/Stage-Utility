@@ -642,3 +642,18 @@ describe("embedded view default font size", () => {
     assert.equal(defaultStyle("view-embed" as LayoutObjectType).fontSize, EMBED_FONT_FRACTION);
   });
 });
+
+describe("the Video object's defaults", () => {
+  test("a new one points at no feed, fits the whole picture, shows its name and says when it is offline", () => {
+    assert.deepEqual(LAYOUT_OBJECTS.video.config(), {
+      type: "video",
+      feedId: null,
+      fit: "contain",
+      showLabel: true,
+      whenOffline: "message",
+    });
+  });
+  test("it takes a large Home card", () => {
+    assert.equal(LAYOUT_OBJECTS.video.homeSize, "l");
+  });
+});

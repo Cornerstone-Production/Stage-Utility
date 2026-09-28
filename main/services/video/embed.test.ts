@@ -41,3 +41,15 @@ test("resi embeds override existing mute and autoplay to true", () => {
   assert.equal(resi.searchParams.get("autoplay"), "true");
   assert.equal(resi.searchParams.get("mute"), "true");
 });
+test("a Resi player must be exactly control.resi.io, over https, under /webplayer/", () => {
+  for (const bad of [
+    "http://control.resi.io/webplayer/video.html?id=1",
+    "https://evilcontrol.resi.io/webplayer/video.html?id=1",
+    "https://control.resi.io.example/webplayer/video.html?id=1",
+    "https://resi.io/webplayer/video.html?id=1",
+    "https://control.resi.io/other/video.html?id=1",
+  ]) {
+    assert.equal(normalizeEmbedRef("resi", bad).ok, false, bad);
+  }
+  assert.equal(normalizeEmbedRef("resi", "https://control.resi.io/webplayer/video.html?id=1").ok, true);
+});
