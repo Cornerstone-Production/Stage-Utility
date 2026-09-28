@@ -90,7 +90,10 @@ export interface VideoFeedView {
 export type RelayStatus =
   | { state: "off" }
   | { state: "downloading"; receivedBytes: number; totalBytes: number }
-  | { state: "starting"; version: string }
+  /** `version` is null until the relay's own startup banner has been parsed
+   *  out of its log — a freshly spawned process is "starting" before it has
+   *  printed a line, not after. */
+  | { state: "starting"; version: string | null }
   | { state: "running"; version: string; ports: VideoPorts }
   | { state: "failing"; reason: string; retryAt: number | null; placeArchiveAt?: string };
 

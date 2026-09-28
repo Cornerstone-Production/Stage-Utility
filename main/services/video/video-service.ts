@@ -19,7 +19,7 @@ import { externalProtocol, parseFeedInput } from "./feed-input.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { RelayLogWatcher } from "./relay-log.js";
 import type { RelayPath, VideoRelay } from "./relay.js";
-import { lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
+import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
 import type { SupervisorStatus } from "./supervisor.js";
 import type {
   FeedPlay,
@@ -130,31 +130,57 @@ class VideoService {
   private relay: VideoRelay | null = null;
   private supervisor: RelaySupervisorLike | null = null;
   private lineListener: ((text: string) => void) | null = null;
+  private spawnedListener: (() => void) | null = null;
+  private exitListener: (() => void) | null = null;
   /** Parses the supervisor's raw stdout/stderr lines into B-frames marks.
    *  Owned here rather than read off the supervisor: supervisor.ts keeps its
    *  own copy for its own exit-reason bookkeeping, and "line" is the only
    *  parsed event it re-exports. */
   private readonly logWatcher = new RelayLogWatcher();
+  /**
+   * Bumped on every attachRelay()/detachRelay(). A poll captures the
+   * generation it started under and checks it again after every await —
+   * cheaper and more complete than comparing `this.relay` by identity, and
+   * it is also what makes pollOnce()'s reentry guard per-ATTACHMENT rather
+   * than global: a boolean guard here (an earlier version's design) let an
+   * old relay's still-in-flight poll block the NEW relay's own first read
+   * after a detach+reattach, because the boolean stayed "true" across the
+   * swap. See pollingGeneration below.
+   */
+  private relayGeneration = 0;
+  /** True while a poll for `relayGeneration` is in flight. Compared against
+   *  the CURRENT generation, not just truthiness, so a stale poll finishing
+   *  late can never block — or clear — a newer generation's own guard. */
+  private pollingGeneration: number | null = null;
+  /** Set by reportPollFailure()/reportPollSuccess() on every poll result —
+   *  overrides the supervisor's own status in relayStatus(), because a
+   *  supervisor that still reports "running" is not the same fact as a relay
+   *  actually answering: a hung process is running and not answering both. */
+  private relayNotAnswering = false;
 
   // ── The last poll's answer, and what is derived from it ─────────────────
   private lastPaths = new Map<string, RelayPath>();
   private readonly bframesMarks = new Map<string, BFramesMark>();
+  /** Feed ids whose relay log reported a B-frames close while the feed's own
+   *  path was not yet ready (an on-demand pull feed the relay had not
+   *  finished dialling) — resolved the next time a poll sees that path
+   *  ready, in settleFeeds(). See R12c. */
+  private readonly pendingBFrames = new Set<string>();
   /** The readyTime a B-frames mark was last ANNOUNCED at, per feed — so the
    *  same still-open session does not repeat the log line every time the
    *  relay logs another closed WebRTC attempt against it. */
   private readonly bframesAnnouncedAt = new Map<string, string | null>();
   /** Epoch ms a WHEP/HLS request last named a feed — task 13's noteRequested(). */
   private readonly requestedAt = new Map<string, number>();
-  /** The last FeedState logged for each feed, so "is live"/"went offline"
-   *  fire on the transition only. */
+  /** The last FeedState logged for each feed, so "is live"/"is delayed"/
+   *  "went offline" fire on the transition only. */
   private readonly lastLoggedState = new Map<string, FeedState | null>();
-  /** A relay that stops answering is one line per OUTAGE, not one per poll. */
+  /** One shared log, two streak keys: "relay-status" for the relay not
+   *  answering a poll, "seen-store" for the seen store failing to write —
+   *  different facts, each its own outage rather than one per poll. */
   private readonly pollOutage = new OutageLog();
 
   private pollTimer: NodeJS.Timeout | null = null;
-  /** Guards against an overlapping poll: a slow relay.status() taking longer
-   *  than STATUS_POLL_MS must not stack a second request behind it. */
-  private polling = false;
 
   allowedKinds(): ReadonlySet<VideoSourceKind> {
     return new Set<VideoSourceKind>(["embed", "external"]);
@@ -162,15 +188,15 @@ class VideoService {
 
   private relayStatus(ports: VideoPorts): RelayStatus {
     if (!this.supervisor) return { state: "off" };
+    if (this.relayNotAnswering) return { state: "failing", reason: "The relay is not answering", retryAt: null };
     const status = this.supervisor.status();
-    const version = this.supervisor.version() ?? "";
     switch (status.state) {
       case "off":
         return { state: "off" };
       case "starting":
-        return { state: "starting", version };
+        return { state: "starting", version: this.supervisor.version() };
       case "running":
-        return { state: "running", version, ports };
+        return { state: "running", version: this.supervisor.version() ?? "", ports };
       case "failing":
         return { state: "failing", reason: status.reason, retryAt: status.retryAt };
     }
@@ -270,24 +296,55 @@ class VideoService {
 
   // ── The relay: attached once by task 15, polled while watched ───────────
 
-  /** Give the service a relay and its supervisor. Safe to call again after
-   *  detachRelay() (a reconfigure that rebuilds both). */
+  /** Give the service a relay and its supervisor. Safe to call again with no
+   *  detachRelay() first — the previous relay's listeners are removed here,
+   *  never left to leak (Minor #8), but nothing is published for that half:
+   *  a caller replacing one relay with another wants ONE settled state at
+   *  the end, not an intermediate "off" broadcast between the two. */
   attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike): void {
+    if (this.relay) this.detachInternal();
+    this.relayGeneration++;
     this.relay = relay;
     this.supervisor = supervisor;
     this.lineListener = (text: string) => this.handleLine(text);
+    // R12b: starting and failing-with-retry must reach video:state as soon
+    // as the supervisor itself knows them, not only on the next poll tick —
+    // a poll may be minutes away if nothing is watching yet when the relay
+    // first spawns.
+    this.spawnedListener = () => void this.publish();
+    this.exitListener = () => void this.publish();
     supervisor.on("line", this.lineListener);
+    supervisor.on("spawned", this.spawnedListener);
+    supervisor.on("exit", this.exitListener);
     this.subscriptionsChanged();
   }
 
-  /** Stop polling and forget the relay. Its last known paths go with it: "no
-   *  path" is exactly how feedState() reads a relay it cannot ask. */
-  detachRelay(): void {
-    if (this.supervisor && this.lineListener) this.supervisor.off("line", this.lineListener);
+  /** Stop polling, forget the relay, and publish the result — the page and
+   *  every widget are told the relay is off, not left showing whatever it
+   *  last reported. */
+  async detachRelay(): Promise<void> {
+    this.detachInternal();
+    await this.publish();
+  }
+
+  /** The cleanup half of detachRelay(), split out so attachRelay() can reuse
+   *  it when replacing a relay without an intermediate publish — see
+   *  attachRelay()'s own comment. */
+  private detachInternal(): void {
+    if (this.supervisor) {
+      if (this.lineListener) this.supervisor.off("line", this.lineListener);
+      if (this.spawnedListener) this.supervisor.off("spawned", this.spawnedListener);
+      if (this.exitListener) this.supervisor.off("exit", this.exitListener);
+    }
+    this.relayGeneration++;
     this.relay = null;
     this.supervisor = null;
     this.lineListener = null;
+    this.spawnedListener = null;
+    this.exitListener = null;
+    this.relayNotAnswering = false;
     this.stopPolling();
+    // "No path" is exactly how feedState() reads a relay it cannot ask.
     this.lastPaths = new Map();
   }
 
@@ -317,66 +374,152 @@ class VideoService {
   }
 
   private async pollOnce(): Promise<void> {
-    if (!this.relay || this.polling) return;
+    if (!this.relay) return;
+    const generation = this.relayGeneration;
+    // Per-GENERATION, not a plain boolean: a boolean guard here let an old
+    // relay's still-in-flight poll block a brand new relay's own first read
+    // after a fast detach+reattach, because the flag stayed "true" across
+    // the swap and nothing ever cleared it for the new attachment. Minor #4.
+    if (this.pollingGeneration === generation) return;
+    this.pollingGeneration = generation;
     const relay = this.relay;
-    this.polling = true;
     try {
       let paths: RelayPath[];
       try {
         paths = await relay.status();
       } catch (err) {
-        if (this.relay === relay) this.reportPollFailure(err);
+        if (this.relayGeneration !== generation) return; // this relay was detached mid-request
+        this.reportPollFailure(err);
+        // R12a: a relay that stops answering is not "the last known paths,
+        // still", because nothing here can any longer tell a genuinely live
+        // feed from one the relay simply stopped reporting on. Every pull/
+        // push feed reads "no path" until the next successful poll.
+        this.lastPaths = new Map();
+        await this.settleFeeds();
         return;
       }
-      // detachRelay() ran while the request was in flight — this answer is
-      // for a relay the service no longer has.
-      if (this.relay !== relay) return;
+      if (this.relayGeneration !== generation) return; // this relay was detached mid-request
       this.reportPollSuccess();
       this.lastPaths = new Map(paths.map((p) => [p.name, p]));
-
-      const { feeds } = await loadFeedsFile();
-      const now = Date.now();
-      for (const feed of feeds) {
-        const kind = feed.source.kind;
-        if (kind !== "pull" && kind !== "push") continue;
-        const path = this.lastPaths.get(feed.id);
-        if (path?.ready) await noteSeen(feed.id, now);
-        this.logTransition(feed, this.relayFeedStatus(feed.id, kind));
-      }
-
-      await this.publish();
+      await this.settleFeeds();
     } finally {
-      this.polling = false;
+      if (this.pollingGeneration === generation) this.pollingGeneration = null;
     }
   }
 
+  /** Every pull/push feed's status, derived from the poll that just ran (or
+   *  just failed) — logged on transition, seen-stored while ready, and
+   *  published once, whether the poll succeeded or not. */
+  private async settleFeeds(): Promise<void> {
+    const { feeds } = await loadFeedsFile();
+    const now = Date.now();
+    for (const feed of feeds) {
+      const kind = feed.source.kind;
+      if (kind !== "pull" && kind !== "push") continue;
+      const path = this.lastPaths.get(feed.id);
+
+      if (path?.ready && this.pendingBFrames.has(feed.id)) {
+        this.pendingBFrames.delete(feed.id);
+        await this.bindBFramesMark(feed, path.readyTime);
+      }
+
+      const status = this.relayFeedStatus(feed.id, kind);
+      if (path?.ready) await this.recordSeen(feed.id, now);
+
+      const leftReady = this.logTransition(feed, status);
+      // Item 9: noteSeen()'s own write is throttled to once a minute, so the
+      // TRUE last-seen moment can sit in memory only, up to a minute stale on
+      // disk, right when a feed drops — flush it the moment that happens.
+      if (leftReady) await this.flushSeenSafely(feed.id);
+    }
+    await this.publish();
+  }
+
   private reportPollFailure(err: unknown): void {
+    this.relayNotAnswering = true;
     const message = errorMessage(err);
     const decision = this.pollOutage.fail("relay-status", message, Date.now());
     if (decision.log) console.warn(`[video] the relay is not answering: ${scrub(message)}${scrub(decision.note)}`);
   }
 
   private reportPollSuccess(): void {
+    this.relayNotAnswering = false;
     const decision = this.pollOutage.ok("relay-status", Date.now());
     if (decision.log) console.log(`[video] the relay is answering again${scrub(decision.note)}`);
   }
 
-  /** "is live"/"went offline" on the transition only — never on every poll,
-   *  and never on a feed's first-ever sighting going the other way (a fresh
-   *  server has nothing to call a transition FROM). */
-  private logTransition(feed: VideoFeed, status: FeedStatus): void {
+  /** Important #3: a rejected seen-store write must never abort the poll it
+   *  happened inside of (the transition still has to log and publish), and
+   *  must never surface as an unhandled rejection — it is reported the same
+   *  way a relay that stops answering is, one line per outage. */
+  private async recordSeen(feedId: string, at: number): Promise<void> {
+    try {
+      await noteSeen(feedId, at);
+      this.reportSeenStoreSuccess();
+    } catch (err) {
+      this.reportSeenStoreFailure(err);
+    }
+  }
+
+  private async flushSeenSafely(feedId: string): Promise<void> {
+    try {
+      await flushSeen(feedId);
+      this.reportSeenStoreSuccess();
+    } catch (err) {
+      this.reportSeenStoreFailure(err);
+    }
+  }
+
+  private reportSeenStoreFailure(err: unknown): void {
+    const message = errorMessage(err);
+    const decision = this.pollOutage.fail("seen-store", message, Date.now());
+    if (decision.log) console.warn(`[video] could not save the last-seen time: ${scrub(message)}${scrub(decision.note)}`);
+  }
+
+  private reportSeenStoreSuccess(): void {
+    const decision = this.pollOutage.ok("seen-store", Date.now());
+    if (decision.log) console.log(`[video] saving the last-seen time is working again${scrub(decision.note)}`);
+  }
+
+  /** "1920×1080 H264", "H264" alone, or "" when nothing about the picture is
+   *  known — never "undefined×undefined undefined": a ready path with no
+   *  video track yet is a real, reachable state, not a bug to paper over. */
+  private pictureText(status: FeedStatus): string {
+    const dims = status.width && status.height ? `${status.width}×${status.height}` : null;
+    return [dims, status.codec].filter((part): part is string => Boolean(part)).join(" ");
+  }
+
+  /**
+   * "is live"/"is delayed"/"went offline" on the transition only — never on
+   * every poll, and "went offline" never on a feed's first-ever sighting (a
+   * fresh server has nothing to call a transition FROM).
+   *
+   * @returns whether this update left a ready (live/delayed) state — the
+   *   caller flushes the seen store's throttled write on exactly that
+   *   transition (Item 9), so this decides it once rather than the caller
+   *   re-deriving the same prev/next comparison a second time.
+   */
+  private logTransition(feed: VideoFeed, status: FeedStatus): boolean {
     const prev = this.lastLoggedState.get(feed.id);
     this.lastLoggedState.set(feed.id, status.state);
-    if (prev === status.state) return;
-    if (status.state === "live") {
-      console.log(
-        `[video] ${scrub(feed.name)} is live (${scrub(status.width)}×${scrub(status.height)} ${scrub(status.codec)})`,
-      );
-      return;
+    const wasReady = prev === "live" || prev === "delayed";
+    const isReady = status.state === "live" || status.state === "delayed";
+
+    if (prev !== status.state) {
+      const picture = this.pictureText(status);
+      const parens = picture ? ` (${picture})` : "";
+      if (status.state === "live") {
+        console.log(`[video] ${scrub(feed.name)} is live${scrub(parens)}`);
+      } else if (status.state === "delayed" && status.delayedBecause === "codec") {
+        // Not the "b-frames" reason: bindBFramesMark() already announces
+        // that one, with more useful advice than a plain state-change line
+        // could carry — logging both here would say the same thing twice.
+        console.log(`[video] ${scrub(feed.name)} is delayed${scrub(parens)} — an unsupported codec`);
+      } else if (status.state === "offline" && prev !== undefined && prev !== "offline") {
+        console.log(`[video] ${scrub(feed.name)} went offline`);
+      }
     }
-    if (status.state === "offline" && prev !== undefined && prev !== "offline") {
-      console.log(`[video] ${scrub(feed.name)} went offline`);
-    }
+    return wasReady && !isReady;
   }
 
   private handleLine(text: string): void {
@@ -384,19 +527,37 @@ class VideoService {
     if (event?.kind === "b-frames") void this.markBFrames(event.path);
   }
 
-  /** The relay's log just reported a WebRTC session on `feedId` closing for
-   *  B-frames. The mark's readyTime is the LATEST poll's for this path — see
-   *  feed-state.ts's BFramesMark — set synchronously so a poll racing this
-   *  async function's own feed-name lookup still sees it immediately. */
+  /**
+   * The relay's log just reported a WebRTC session on `feedId` closing for
+   * B-frames. `feedId` is parsed straight out of the relay's own log text —
+   * Minor #5 — so it is checked against the CURRENT feed list before it
+   * becomes a Map key or reaches a log line: an orphaned relay path (a feed
+   * deleted before the relay reconciled) must never be logged raw.
+   *
+   * If the feed's own path is not yet ready, this is an on-demand pull feed
+   * the relay dialled, read for a moment, and closed for B-frames — all
+   * before this service's own poll caught up with a readyTime to bind the
+   * mark to. Remembered as PENDING (R12c) and resolved the next time a poll
+   * sees that path ready, in settleFeeds().
+   */
   private async markBFrames(feedId: string): Promise<void> {
-    const readyTime = this.lastPaths.get(feedId)?.readyTime ?? null;
-    this.bframesMarks.set(feedId, { readyTime });
-    if (this.bframesAnnouncedAt.get(feedId) === readyTime) return; // already said, for this same session
-    this.bframesAnnouncedAt.set(feedId, readyTime);
     const { feeds } = await loadFeedsFile();
-    const name = feeds.find((f) => f.id === feedId)?.name ?? feedId;
+    const feed = feeds.find((f) => f.id === feedId);
+    if (!feed) return;
+    const path = this.lastPaths.get(feedId);
+    if (path?.ready) {
+      await this.bindBFramesMark(feed, path.readyTime);
+    } else {
+      this.pendingBFrames.add(feedId);
+    }
+  }
+
+  private async bindBFramesMark(feed: VideoFeed, readyTime: string | null): Promise<void> {
+    this.bframesMarks.set(feed.id, { readyTime });
+    if (this.bframesAnnouncedAt.get(feed.id) === readyTime) return; // already said, for this same session
+    this.bframesAnnouncedAt.set(feed.id, readyTime);
     console.log(
-      `[video] ${scrub(name)} sends B-frames, so screens play it over HLS, 2 to 6 s behind. ` +
+      `[video] ${scrub(feed.name)} sends B-frames, so screens play it over HLS, 2 to 6 s behind. ` +
         `Turn B-frames off on the device for under a second.`,
     );
   }
@@ -501,8 +662,13 @@ class VideoService {
     this.lastPaths.delete(id);
     this.bframesMarks.delete(id);
     this.bframesAnnouncedAt.delete(id);
+    this.pendingBFrames.delete(id);
     this.requestedAt.delete(id);
     this.lastLoggedState.delete(id);
+    // Minor #6: without this, a re-added feed under the same name (a new
+    // feed, minting the same deterministic id) reads "offline, last seen
+    // <old>" instead of "waiting" — the old feed's history, not its own.
+    await forgetSeen(id);
     await this.publish();
     return true;
   }

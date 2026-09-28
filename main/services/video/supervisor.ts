@@ -5,9 +5,9 @@
 // stdout and stderr line by line, and — on any exit that is not a stop() —
 // schedules another spawn with backoff from 1 s to 60 s. There is no ceiling
 // on retries: a misconfigured relay stays in `failing`, forever retried,
-// rather than ever going quiet. task 15 owns turning `status()` into the
-// page's relay state, and reconciling paths once the relay's own API answers
-// (task 11).
+// rather than ever going quiet. Turning `status()` into the page's relay
+// state lives in video-service.ts; reconciling paths once the relay's own
+// API answers lives in relay.ts.
 
 import { execFile, spawn as nodeSpawn } from "node:child_process";
 import { EventEmitter } from "node:events";

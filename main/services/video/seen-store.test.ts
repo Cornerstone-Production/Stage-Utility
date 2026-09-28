@@ -6,7 +6,14 @@ import * as path from "node:path";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-seen-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { videoSeenStore, loadSeen, lastSeenAt, noteSeen, SEEN_WRITE_INTERVAL_MS } = await import("./seen-store.js");
+const { videoSeenStore, loadSeen, lastSeenAt, noteSeen, flushSeen, forgetSeen, SEEN_WRITE_INTERVAL_MS } = await import(
+  "./seen-store.js"
+);
+
+/** Casts to the same shape the existing video-service.test.ts uses to fake a
+ *  store failure (`secretsStore as unknown as { setSecret: ... }`), so a
+ *  rejecting write can be simulated without touching the real filesystem. */
+const asFailable = videoSeenStore as unknown as { update: (...a: unknown[]) => Promise<unknown> };
 
 test("a feed nothing has ever noted reads null", () => {
   assert.equal(lastSeenAt("never-seen"), null);
@@ -54,4 +61,51 @@ test("loadSeen populates the in-memory Map from whatever is already on disk", as
   assert.equal(lastSeenAt("restored-cam"), null, "not yet loaded");
   await loadSeen();
   assert.equal(lastSeenAt("restored-cam"), 42);
+});
+
+test("a write that rejects does not mark the feed written — the next call retries rather than being throttled away", async () => {
+  const realUpdate = asFailable.update.bind(videoSeenStore);
+  asFailable.update = async () => {
+    throw new Error("disk full");
+  };
+  try {
+    await assert.rejects(noteSeen("failing-cam", 0), /disk full/);
+  } finally {
+    asFailable.update = realUpdate;
+  }
+  // The in-memory value still advanced (noteSeen()'s whole synchronous-read
+  // point), but nothing reached disk, and — the actual bug — the throttle
+  // must not have been armed by the failed attempt either.
+  assert.equal(lastSeenAt("failing-cam"), 0);
+  await noteSeen("failing-cam", 1); // 1 ms later: inside the window IF the failed write had counted
+  assert.deepEqual((await videoSeenStore.reload())["failing-cam"], 1, "a retry right after a failed write must not be throttled");
+});
+
+test("flushSeen writes the current in-memory value regardless of the throttle", async () => {
+  await noteSeen("flush-cam", 0);
+  await noteSeen("flush-cam", SEEN_WRITE_INTERVAL_MS - 1); // inside the window, suppressed
+  assert.deepEqual((await videoSeenStore.reload())["flush-cam"], 0, "the throttle must still be suppressing this, or the next line proves nothing");
+
+  await flushSeen("flush-cam");
+  assert.deepEqual((await videoSeenStore.reload())["flush-cam"], SEEN_WRITE_INTERVAL_MS - 1);
+});
+
+test("flushSeen on a feed nothing has ever noted is a no-op", async () => {
+  await flushSeen("never-flushed-cam");
+  assert.equal((await videoSeenStore.reload())["never-flushed-cam"], undefined);
+});
+
+test("forgetSeen clears a feed from memory and disk", async () => {
+  await noteSeen("forget-cam", 5);
+  assert.equal(lastSeenAt("forget-cam"), 5);
+  assert.deepEqual((await videoSeenStore.reload())["forget-cam"], 5);
+
+  await forgetSeen("forget-cam");
+  assert.equal(lastSeenAt("forget-cam"), null);
+  assert.equal((await videoSeenStore.reload())["forget-cam"], undefined);
+
+  // And the throttle itself is forgotten — a fresh note right away is not
+  // "inside the window" of a write that no longer exists.
+  await noteSeen("forget-cam", 6);
+  assert.deepEqual((await videoSeenStore.reload())["forget-cam"], 6);
 });
