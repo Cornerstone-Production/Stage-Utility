@@ -4,9 +4,10 @@
 // `{ signal }` listener removal is the real thing, not a simulation of it), a
 // fake <video> handing back a stored requestVideoFrameCallback, and
 // node:test's fake timers for the connect, first-frame, drop-grace and
-// backoff windows — plus one test that renders `useVideoSession` itself (via
-// `renderHook`), for the backoff-reset behaviour that only exists at the
-// hook layer and cannot be proven against `startPlaybackAttempt` alone.
+// backoff windows — plus a few tests that render `useVideoSession` itself
+// (via `renderHook`), for behaviour that only exists at the hook layer and
+// cannot be proven against `startPlaybackAttempt` alone: the backoff reset,
+// and routing a real relay/external feed view through to the right verdict.
 //
 // `NodeEvent` is captured before jsdom is installed below, and used for
 // every `dispatchEvent(new NodeEvent(...))` in this file: jsdom's own
@@ -542,3 +543,89 @@ test("the backoff counter resets after a first frame, not just after the FIRST d
   }
 });
 
+// ── routing a real feed view to the right verdict on a WHEP refusal ────────
+//
+// The tests above set `relayManaged` on `startPlaybackAttempt`'s `choice` by
+// hand — real proof of the ROUTING lives one layer up, in `computeVerdict`,
+// which derives that flag from `feed.play.via`. Flipping the derivation to
+// either constant left every test above green, because none of them drive a
+// real feed view through `useVideoSession` itself.
+
+test("a real relay feed view whose WHEP answer refuses the offer (415) is treated as webrtc-unusable", async () => {
+  const g = stubGlobals({ status: 415 });
+  const video = new FakeVideo();
+  const feed: VideoFeedView = {
+    id: "f",
+    name: "F",
+    kind: "pull",
+    sourceLine: "",
+    source: { kind: "pull", url: "rtsp://x", username: "" },
+    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
+    status: { state: "live" },
+  };
+  const logs: string[] = [];
+  try {
+    renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        onLog: (r) => logs.push(r),
+      }),
+    );
+    await act(async () => {
+      await flush();
+    });
+
+    assert.ok(
+      logs.some((l) => l.includes("unusable")),
+      "expected a relay's outright refusal to be treated as a verdict about the stream, not the network",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("a real external WHEP feed view whose answer refuses the offer (415) retries instead", async () => {
+  const g = stubGlobals({ status: 415 });
+  const video = new FakeVideo();
+  const feed: VideoFeedView = {
+    id: "f",
+    name: "F",
+    kind: "external",
+    sourceLine: "",
+    source: { kind: "external", url: "http://h/whep" },
+    play: { via: "external", url: "http://h/whep", protocol: "whep" },
+    status: { state: null },
+  };
+  const logs: string[] = [];
+  try {
+    renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        onLog: (r) => logs.push(r),
+      }),
+    );
+    await act(async () => {
+      await flush();
+    });
+
+    assert.ok(
+      logs.some((l) => l.includes("retrying in")),
+      "expected an external feed's refusal to retry — it has no HLS to fall back to",
+    );
+    assert.equal(
+      logs.some((l) => l.includes("unusable")),
+      false,
+      "an external feed's health cannot be reported, so a refusal there must not be treated as a stream verdict",
+    );
+  } finally {
+    g.restore();
+  }
+});
