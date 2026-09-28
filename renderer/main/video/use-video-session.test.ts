@@ -15,6 +15,7 @@ import { after, afterEach, mock, test } from "node:test";
 import type { VideoFeedView } from "@main/types/video";
 import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection, NodeEvent } from "../../test-fixtures/fake-peer-connection.js";
+import { FakeHls, installFakeHls } from "../../test-fixtures/fake-hls.js";
 
 const teardown = installRenderDom();
 
@@ -999,5 +1000,99 @@ test("a relay feed on HLS after a WebRTC refusal tries WebRTC again after WEBRTC
     proto.canPlayType = realCanPlayType;
     mock.timers.reset();
     g.restore();
+  }
+});
+
+// ── HLS: its failures, its delayed phase, and a superseded attempt ──────────
+
+test("a fatal hls.js error drops the attempt (retried), never a webrtc verdict", async () => {
+  const undoHls = installFakeHls();
+  const video = new FakeVideo();
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    await flush();
+    FakeHls.last!.raise({ fatal: true, details: "manifestLoadError", type: "networkError" });
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: "hls.js: manifestLoadError" }]);
+    assert.equal(FakeHls.last!.calls.at(-1), "destroy", "the failed hls.js instance must be destroyed");
+  } finally {
+    undoHls();
+  }
+});
+
+test("the <video> element's own error drops a native HLS attempt", async () => {
+  const video = new FakeVideo();
+  const { calls, cb } = makeCallbacks();
+  startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+  await flush();
+  assert.equal(video.src, "/video/p/index.m3u8", "expected the native branch (Node has no MediaSource)");
+  video.fireError();
+  assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: "the <video> element reported an error" }]);
+  assert.equal(video.src, "", "the native source must be detached");
+});
+
+test("an HLS frame is the delayed phase, with hls.js's latency rounded for the badge", async () => {
+  const undoHls = installFakeHls();
+  mock.timers.enable({ apis: ["setInterval"] });
+  const video = new FakeVideo();
+  const { calls, cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    await flush();
+    video.fireFrame();
+    assert.deepEqual(calls, [
+      { fn: "onPhase", arg: "connecting" },
+      { fn: "onPhase", arg: "delayed" },
+      { fn: "onLatency", arg: "3" },
+    ]);
+    FakeHls.last!.latency = 5.6;
+    mock.timers.tick(1000);
+    assert.deepEqual(calls.at(-1), { fn: "onLatency", arg: "6" }, "the badge follows hls.js's latency every second");
+    attempt.stop();
+  } finally {
+    mock.timers.reset();
+    undoHls();
+  }
+});
+
+test("a WHEP attempt stopped while its answer is applied still DELETEs the session it created", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const { calls, cb } = makeCallbacks();
+  try {
+    let attempt: ReturnType<typeof startPlaybackAttempt> | undefined;
+    // The caller moves on (a new feed, the widget off screen) after the relay
+    // answered 201 but before the answer was applied: the session exists on
+    // the relay, and the attempt that owns it has already ended.
+    FakePeerConnection.onSetRemoteDescription = () => attempt?.stop();
+    attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    await flush();
+    assert.equal(g.calls.filter((c) => c.method === "DELETE").length, 1, "the superseded session was left on the relay");
+    assert.equal(FakePeerConnection.instances[0]!.closed, true);
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [], "a superseded attempt reports nothing");
+  } finally {
+    g.restore();
+  }
+});
+
+test("an HLS attempt stopped while hls.js is still loading destroys the instance it then builds", async () => {
+  let loaded!: () => void;
+  const gate = new Promise<void>((resolve) => (loaded = resolve));
+  const undoHls = installFakeHls(async () => {
+    await gate;
+    return { default: FakeHls };
+  });
+  const video = new FakeVideo();
+  const { calls, cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    attempt.stop();
+    loaded();
+    await flush();
+    assert.deepEqual(FakeHls.last?.calls, ["loadSource /video/p/index.m3u8", "attachMedia", "destroy"]);
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), []);
+  } finally {
+    undoHls();
   }
 });

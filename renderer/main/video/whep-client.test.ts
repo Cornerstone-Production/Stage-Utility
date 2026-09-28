@@ -59,6 +59,15 @@ test("a 404 closes the peer connection and rejects", async () => {
   assert.equal(pc?.closed, true, "expected the peer connection to be closed on a non-201 response");
 });
 
+test("a POST that fails outright closes the peer connection and rethrows", async () => {
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () => {
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+
+  await assert.rejects(() => startWhep("/video/p/whep", video), /fetch failed/);
+  assert.equal(FakePeerConnection.instances.at(-1)?.closed, true, "a failed POST left the peer connection open");
+});
+
 test("an absolute, cross-origin endpoint's relative Location resolves against THAT origin, not the page's", async () => {
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
