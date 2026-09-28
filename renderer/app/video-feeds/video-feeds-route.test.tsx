@@ -97,6 +97,10 @@ interface FetchStubOptions {
   onAddFeed?: (body: unknown) => FeedResponse;
   /** Answers a video:updateFeed PATCH. Same default reasoning. */
   onUpdateFeed?: (id: string, body: unknown) => FeedResponse;
+  /** Answers a video:removeFeed DELETE. Default: 200. */
+  onRemoveFeed?: () => FeedResponse;
+  /** What video:feedUsage reports. Default: two layouts. */
+  usage?: { viewId: string; name: string }[];
 }
 
 /** Every request the page makes, matched by method and path — including the
@@ -115,7 +119,7 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ layouts: [{ viewId: "v1", name: "Stage confidence" }, { viewId: "v2", name: "Home" }] }),
+        json: async () => ({ layouts: opts.usage ?? [{ viewId: "v1", name: "Stage confidence" }, { viewId: "v2", name: "Home" }] }),
         text: async () => "",
       } as unknown as Response;
     }
@@ -129,7 +133,8 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
     if (method === "DELETE" && one) {
-      return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => "" } as unknown as Response;
+      const r = opts.onRemoveFeed?.() ?? { status: 200, body: { ok: true } };
+      return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
     return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as unknown as Response;
   }) as typeof fetch;
@@ -319,7 +324,7 @@ test("a refused save shows the server's error text under the buttons, and nothin
       'expected Save to have settled back from "Saving…", not stay stuck',
     );
     assert.equal(
-      g.calls.some((c) => c.method === "POST"),
+      g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/video/feeds")),
       false,
       "expected video:updateFeed (a PATCH), not video:addFeed — this feed already exists",
     );
@@ -441,5 +446,45 @@ test("Cancel while creating a new feed returns to the previously selected feed",
     );
   } finally {
     g.restore();
+  }
+});
+
+test("a Delete the server refuses shows its error, and the feed stays", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), {
+    onRemoveFeed: () => ({ status: 500, body: { error: "The feed store could not be written." } }),
+  });
+  try {
+    mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText("The feed store could not be written."), true, "a refused delete must say why");
+    assert.equal(screen.getAllByText("Program (IMAG)").length > 0, true);
+  } finally {
+    g.restore();
+  }
+});
+
+test("the Source dropdown offers exactly the kinds video:state reports", async () => {
+  for (const kinds of [["embed", "external"], ["external"]] as const) {
+    const g = stubGlobals({ ...makeState([externalFeed()]), kinds: [...kinds] });
+    try {
+      const { container } = mount();
+      await settle();
+      await settle();
+      const select = container.querySelector('select[aria-label="Source"]') as HTMLSelectElement | null;
+      assert.equal(!!select, true, "expected a Source select");
+      const offered = [...select!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
+      assert.deepEqual(offered, [...kinds], `kinds ${kinds.join(",")}`);
+    } finally {
+      g.restore();
+      cleanup();
+      __resetReplayCacheForTests();
+    }
   }
 });
