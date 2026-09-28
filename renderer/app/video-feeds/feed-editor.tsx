@@ -49,6 +49,17 @@ const EMBED_PLAYER_LABEL: Record<EmbedPlayer, string> = {
   resi: "Resi embed",
 };
 
+/** What the editor says under an embed's fields: whose player it is, and why
+ *  it is not for the stage. Resi's delay is not stated because nothing here
+ *  has measured it. */
+const EMBED_CALLOUT: Record<EmbedPlayer, string> = {
+  "youtube-channel":
+    "Plays in YouTube's own player, 5 to 15 seconds behind, and only while the stream is public or unlisted. Good for a lobby, not for the stage.",
+  "youtube-video":
+    "Plays in YouTube's own player, 5 to 15 seconds behind, and only while the stream is public or unlisted. Good for a lobby, not for the stage.",
+  resi: "Plays in Resi's own player. Good for a lobby, not for the stage.",
+};
+
 /** The field label under the Player select follows the player, per the mockup. */
 const EMBED_FIELD_LABEL: Record<EmbedPlayer, string> = {
   "youtube-channel": "Channel",
@@ -291,10 +302,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       </FieldGroup>
 
       {draft.kind === "embed" && (
-        <p className="rounded-lg border border-line bg-fill px-3 py-2 text-caption1 text-fg-muted">
-          Plays in YouTube&apos;s own player, 5 to 15 seconds behind, and only while the stream is public or unlisted.
-          Good for a lobby, not for the stage.
-        </p>
+        <p className="rounded-lg border border-line bg-fill px-3 py-2 text-caption1 text-fg-muted">{EMBED_CALLOUT[draft.embedPlayer]}</p>
       )}
 
       <div className="flex items-center gap-2">

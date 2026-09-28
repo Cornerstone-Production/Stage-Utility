@@ -529,3 +529,21 @@ test("after a rename the editor's heading shows the new name before any push arr
     g.restore();
   }
 });
+
+test("the embed callout names the player: YouTube's delay for YouTube, Resi's own sentence for Resi", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText(/Plays in YouTube's own player, 5 to 15 seconds behind/), true);
+
+    const player = container.querySelector('select[aria-label="Player"]') as HTMLSelectElement;
+    fireEvent.change(player, { target: { value: "resi" } });
+    await settle();
+    assert.equal(!!screen.queryByText("Plays in Resi's own player. Good for a lobby, not for the stage."), true);
+    assert.equal(!!screen.queryByText(/YouTube's own player/), false, "a Resi player must not be described as YouTube's");
+  } finally {
+    g.restore();
+  }
+});
