@@ -151,3 +151,32 @@ test("a PATCH whose name is not text is refused with the name rule, and the name
   assert.equal(s.feeds.find((f) => f.id === id)?.name, "Side stage");
   assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
 });
+
+test("add, update and remove each push video:state, and current() carries it", async () => {
+  const { addBroadcastListener } = await import("../broadcaster.js");
+  const { videoService } = await import("../video/video-service.js");
+  const frames: { names: string[]; rev: number }[] = [];
+  addBroadcastListener((channel, payload) => {
+    if (channel !== "video:state") return;
+    const s = payload as { rev: number; feeds: { name: string }[] };
+    frames.push({ rev: s.rev, names: s.feeds.map((f) => f.name) });
+  });
+  const current = () => videoService.current().feeds.map((f) => f.name);
+
+  const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "Choir loft", source: EMBED.source } });
+  const id = (made.json as { feed: { id: string } }).feed.id;
+  assert.equal(frames.length, 1, "expected a push after the add");
+  assert.ok(frames[0]!.names.includes("Choir loft"));
+  assert.ok(current().includes("Choir loft"), "current() must carry the added feed for the hello burst");
+
+  await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { name: "Choir" } });
+  assert.equal(frames.length, 2, "expected a push after the update");
+  assert.ok(frames[1]!.names.includes("Choir") && !frames[1]!.names.includes("Choir loft"));
+  assert.ok(current().includes("Choir"));
+
+  await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" });
+  assert.equal(frames.length, 3, "expected a push after the remove");
+  assert.equal(frames[2]!.names.includes("Choir"), false);
+  assert.equal(current().includes("Choir"), false);
+  assert.ok(frames[0]!.rev < frames[1]!.rev && frames[1]!.rev < frames[2]!.rev, "each push advances rev");
+});
