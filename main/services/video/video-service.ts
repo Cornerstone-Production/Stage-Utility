@@ -172,10 +172,12 @@ class VideoService {
    *  the CURRENT generation, not just truthiness, so a stale poll finishing
    *  late can never block — or clear — a newer generation's own guard. */
   private pollingGeneration: number | null = null;
-  /** Set by reportPollFailure()/reportPollSuccess() on every poll result —
-   *  overrides the supervisor's own status in relayStatus(), because a
-   *  supervisor that still reports "running" is not the same fact as a relay
-   *  actually answering: a hung process is running and not answering both. */
+  /** Set by reportPollFailure(), which pollOnce() calls only for a failure
+   *  pollFailureIsNews() lets through; cleared by reportPollSuccess() and by
+   *  every supervisor status change. Overrides the supervisor's own status in
+   *  relayStatus(), because a supervisor that still reports "running" is not
+   *  the same fact as a relay actually answering: a hung process is running
+   *  and not answering both. */
   private relayNotAnswering = false;
 
   // ── The last poll's answer, and what is derived from it ─────────────────
@@ -219,8 +221,9 @@ class VideoService {
    * no such thing as "the current attempt's own banner" to check for during
    * this state — a poll landing inside "starting" can only be asking a
    * process that either does not exist yet or belongs to a previous run.
-   * Within `running`, the override itself is further held off for
-   * RELAY_BOOT_GRACE_MS after `since` — see reportPollFailure().
+   * Within `running`, the flag is only ever set once RELAY_BOOT_GRACE_MS have
+   * passed since `since`: pollOnce() reports a failure only when
+   * pollFailureIsNews() says so.
    */
   private relayStatus(ports: VideoPorts): RelayStatus {
     if (!this.supervisor) return { state: "off" };
@@ -471,7 +474,7 @@ class VideoService {
         // counter. Either way this answer is about a process this service
         // no longer has, and must change nothing.
         if (this.relayGeneration !== generation) return;
-        if (!this.withinBootGrace()) this.reportPollFailure(err);
+        if (this.pollFailureIsNews()) this.reportPollFailure(err);
         // A relay that stops answering is not "the last known paths,
         // still", because nothing here can any longer tell a genuinely live
         // feed from one the relay simply stopped reporting on. Every pull/
@@ -527,16 +530,18 @@ class VideoService {
     await this.publish();
   }
 
-  /** Whether the supervisor reports "running" but is still inside its own
-   *  boot grace window — MediaMTX's API is not necessarily open the instant
-   *  the supervisor marks it "running" (that happens the moment the child
-   *  is spawned), so a poll failing in the first RELAY_BOOT_GRACE_MS after
-   *  `since` is the process still coming up, not a failure worth a flag or
-   *  a line. */
-  private withinBootGrace(): boolean {
-    if (!this.supervisor) return false;
-    const status = this.supervisor.status();
-    return status.state === "running" && Date.now() - status.since < RELAY_BOOT_GRACE_MS;
+  /**
+   * Whether a failed poll says something the supervisor has not: only while
+   * it reports the process "running" and RELAY_BOOT_GRACE_MS have passed
+   * since `since`. While "starting" there is no child to answer yet; in a
+   * crash backoff ("failing") the supervisor has already logged the exit and
+   * carries its own reason; and inside the grace window MediaMTX may not have
+   * opened its API yet, because the supervisor marks a process "running" the
+   * moment it spawns. pollOnce() never polls an "off" supervisor at all.
+   */
+  private pollFailureIsNews(): boolean {
+    const status = this.supervisor?.status();
+    return status?.state === "running" && Date.now() - status.since >= RELAY_BOOT_GRACE_MS;
   }
 
   private reportPollFailure(err: unknown): void {

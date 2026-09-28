@@ -913,7 +913,7 @@ test("the service does not poll while the supervisor is off, so a relay switched
   }
 });
 
-test("a relay the supervisor already reports failing keeps its own reason, not \"not answering\"", async () => {
+test("a relay the supervisor already reports failing keeps its own reason, and logs no \"not answering\" line", async () => {
   const relay = fakeRelay(async () => {
     throw new Error("ECONNREFUSED");
   });
@@ -922,15 +922,25 @@ test("a relay the supervisor already reports failing keeps its own reason, not \
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
+  const warns: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+
   try {
     await pollOnce(); // also fails to answer — the supervisor's own diagnosis still wins
     assert.deepEqual(videoService.current().relay, { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 });
+    assert.deepEqual(
+      warns.filter((l) => l.includes("not answering")),
+      [],
+      "the supervisor has already logged why it is failing; a poll must not add a second line",
+    );
   } finally {
+    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
 
-test("the \"not answering\" override never applies while starting, even with a version left over from a previous run", async () => {
+test("the \"not answering\" override never applies while starting, even with a version left over from a previous run, and logs nothing", async () => {
   const relay = fakeRelay(async () => {
     throw new Error("ECONNREFUSED");
   });
@@ -940,6 +950,10 @@ test("the \"not answering\" override never applies while starting, even with a v
   videoPollDeps.inDemand = () => false;
   videoService.attachRelay(relay, supervisor);
 
+  const warns: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+
   try {
     await pollOnce(); // fails to answer — there is no live child yet to BE "not answering"
     assert.deepEqual(
@@ -947,7 +961,9 @@ test("the \"not answering\" override never applies while starting, even with a v
       { state: "starting", version: "v1.21.1" },
       "starting must never read as failing, however long ago the leftover version was logged",
     );
+    assert.deepEqual(warns.filter((l) => l.includes("not answering")), [], "a relay still starting has nothing to answer with yet");
   } finally {
+    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -1187,6 +1203,48 @@ test("against a real supervisor: the not-answering flag does not carry over into
     await videoService.detachRelay();
     await sup.stop();
     await videoService.removeFeed(id);
+  }
+});
+
+test("against a real supervisor: a poll failing during its crash backoff logs no \"not answering\" line after the supervisor's own exit line", async () => {
+  const children: FakeChild[] = [];
+  const sup = new RelaySupervisor({
+    spawnImpl: () => {
+      const c = new FakeChild();
+      children.push(c);
+      return c;
+    },
+    psImpl: async () => null,
+  });
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(
+    fakeRelay(async () => {
+      throw new Error("ECONNREFUSED");
+    }),
+    sup,
+  );
+
+  const warns: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+
+  try {
+    await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
+    children[0].emit("exit", 1); // the process crashes; the supervisor backs off 1 s before respawning
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(sup.status().state, "failing", "the supervisor must be in its backoff, or this proves nothing");
+    assert.equal(warns.filter((l) => l.includes("relay exited")).length, 1, "the supervisor reports the crash itself");
+
+    await pollOnce(); // fails: nothing is listening until the respawn
+    assert.deepEqual(
+      warns.filter((l) => l.includes("not answering")),
+      [],
+      "a poll during the supervisor's own backoff must not repeat the crash as a second line",
+    );
+  } finally {
+    console.warn = realWarn;
+    await videoService.detachRelay();
+    await sup.stop();
   }
 });
 
