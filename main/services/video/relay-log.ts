@@ -6,7 +6,7 @@ const READING = /\[WebRTC\] \[session ([0-9a-f]+)\] is reading from path '([^']+
 const BFRAMES = /\[WebRTC\] \[session ([0-9a-f]+)\] closed: WebRTC doesn't support H264 streams with B-frames/;
 const CLOSED = /\[WebRTC\] \[session ([0-9a-f]+)\] (?:closed|destroyed)/;
 const VERSION = /INF MediaMTX (v\d+\.\d+\.\d+)/;
-const ERROR = /(?:ERR: | ERR )(.+)$/;
+const ERROR = /(?:^ERR: | ERR )(.+)$/;
 
 export class RelayLogWatcher {
   private sessions = new Map<string, string>();

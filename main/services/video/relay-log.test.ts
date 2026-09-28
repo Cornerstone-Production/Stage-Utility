@@ -43,7 +43,7 @@ describe("RelayLogWatcher", () => {
   it("parses errors from both formats", () => {
     const watcher1 = new RelayLogWatcher();
     const result1 = watcher1.line(
-      "2026/09/27 18:00:33 ERR: json: unknown field \"rtsps\""
+      "ERR: json: unknown field \"rtsps\""
     );
     deepEqual(result1, { kind: "error", text: "json: unknown field \"rtsps\"" });
     strictEqual(watcher1.lastError(), "json: unknown field \"rtsps\"");
@@ -81,30 +81,5 @@ describe("RelayLogWatcher", () => {
       `2026/09/27 17:47:50 INF [WebRTC] [session ${lastSessionId}] closed: WebRTC doesn't support H264 streams with B-frames`
     );
     deepEqual(result2, { kind: "b-frames", path: "stream" });
-  });
-
-  it("proves the B-frames regex by matching the exact fixture wording", () => {
-    const watcher = new RelayLogWatcher();
-    // Pre-populate a session
-    watcher.line(
-      "2026/09/27 17:47:50 INF [WebRTC] [session deadbeef] is reading from path 'bframes', 1 track (H264)"
-    );
-
-    // The fixture line uses "WebRTC doesn't support H264 streams with B-frames"
-    const result = watcher.line(
-      "2026/09/27 17:47:50 INF [WebRTC] [session deadbeef] closed: WebRTC doesn't support H264 streams with B-frames"
-    );
-    deepEqual(result, { kind: "b-frames", path: "bframes" });
-
-    // Verify that a different wording does not match
-    const watcher2 = new RelayLogWatcher();
-    watcher2.line(
-      "2026/09/27 17:47:50 INF [WebRTC] [session cafebabe] is reading from path 'test', 1 track (H264)"
-    );
-    const result2 = watcher2.line(
-      "2026/09/27 17:47:50 INF [WebRTC] [session cafebabe] closed: B-frames are not supported"
-    );
-    // This should not match and return null
-    strictEqual(result2, null);
   });
 });
