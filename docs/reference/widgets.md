@@ -519,16 +519,38 @@ once changes every screen. See [Layout editor](layout-editor.md) for containers.
 | Widget | What it shows | Source |
 |---|---|---|
 | **NDI video** | An NDI source from the network | NDI |
-| **Video** | A live camera or program feed, chosen by id | The Video feeds page (the relay) |
+| **Video** | A live camera or program feed, chosen by id | The Video feeds page |
 
 NDI needs the native client. The web build ignores this widget.
 
-**Video** points at a feed set up once on the Video feeds page under Screens —
-renaming a feed there does not break a widget bound to it, since the binding is
-the feed's id, not its name. Always muted, with no controls. **Fit** chooses
-between showing the whole picture and filling the box; **Show feed name** draws
-its name over the picture; **When the feed is offline** picks between a message,
-your logo, or nothing at all.
+**Video** points at a feed set up once on the [Video feeds](../integrations/video-feeds.md)
+page under Screens — renaming a feed there does not break a widget bound to it,
+since the binding is the feed's id, not its name. Always muted, with no
+controls, and it only opens a connection while it is actually on screen and the
+tab is visible. **Feed** picks which one it plays. **Fit** chooses between
+showing the whole picture (letterboxed) and filling the box (cropped). **Show
+feed name** draws the feed's name over the picture. **When the feed is
+offline** picks what shows in its place: a message, your Branding logo, or
+nothing at all.
+
+A YouTube or Resi feed plays in the platform's own player. A feed pointed at
+another WebRTC or HLS address plays over HLS when the address ends in `.m3u8`,
+or over WebRTC otherwise — Stage Utility cannot see either kind's health, so a
+failed attempt just retries the same method rather than switching to the
+other.
+
+| State | Shown as |
+|---|---|
+| No feed chosen | "Choose a feed" (in the layout editor only) |
+| Connecting | A pulsing dot and "Connecting to \<feed name\>" |
+| Live | The picture |
+| Live, over HLS | The picture, with a badge counting how many seconds behind live it is |
+| Offline | Your **When the feed is offline** setting |
+| Can't play here | "This screen can't play video" |
+
+**Offline** is what shows when a widget's feed has been deleted from the Video
+feeds page while a layout still points at it. **Can't play here** is this
+screen's browser lacking WebRTC or HLS support for the feed's address.
 
 ---
 

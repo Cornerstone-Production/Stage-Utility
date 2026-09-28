@@ -28,7 +28,7 @@ done. Dismiss it and it stays dismissed.
 |---|---|
 | — | **Home** |
 | Content | **ScriptView**, **Patch** |
-| Screens | **Screens** |
+| Screens | **Screens**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Branding**, **Advanced** |
