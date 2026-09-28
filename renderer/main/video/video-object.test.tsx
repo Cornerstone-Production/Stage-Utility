@@ -18,6 +18,7 @@ import { act } from "react";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
+import { installFakeHls } from "../../test-fixtures/fake-hls.js";
 
 const teardown = installRenderDom();
 
@@ -361,6 +362,154 @@ test("whenOffline: logo with no app logo configured shows the message state", as
     await settle();
 
     assert.equal(!!screen.queryByText(`${feed.name} is offline`), true, "expected the message state with no logo to draw from");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── what the picture shows over itself ────────────────────────────────────
+//
+// jsdom's <video> has no requestVideoFrameCallback; this puts one on its
+// prototype that hands each registration back, so a test can deliver "a
+// frame" to whichever attempt is watching.
+
+function captureFrames(): { fire: () => void; restore: () => void } {
+  const proto = window.HTMLVideoElement.prototype as unknown as {
+    requestVideoFrameCallback?: (cb: () => void) => number;
+    cancelVideoFrameCallback?: (h: number) => void;
+  };
+  const pending: (() => void)[] = [];
+  proto.requestVideoFrameCallback = (cb) => pending.push(cb);
+  proto.cancelVideoFrameCallback = () => {};
+  return {
+    fire: () => {
+      for (const cb of pending.splice(0)) cb();
+    },
+    restore: () => {
+      delete proto.requestVideoFrameCallback;
+      delete proto.cancelVideoFrameCallback;
+    },
+  };
+}
+
+const EXTERNAL_HLS = makeFeed({
+  kind: "external",
+  sourceLine: "http://192.0.2.60/obs/index.m3u8",
+  source: { kind: "external", url: "http://192.0.2.60/obs/index.m3u8" },
+  play: { via: "external", url: "http://192.0.2.60/obs/index.m3u8", protocol: "hls" },
+  status: { state: null },
+});
+
+const EMBED = makeFeed({
+  kind: "embed",
+  source: { kind: "embed", player: "youtube-channel", ref: "UCabcdefghijklmnopqrstuv" },
+  play: { via: "embed", src: "https://www.youtube.com/embed/live_stream?channel=UCabcdefghijklmnopqrstuv&autoplay=1&mute=1&controls=0&playsinline=1" },
+  status: { state: "embed" },
+});
+
+/** The corner name tag: a span whose whole text is the feed's name (the
+ *  Connecting line carries the name too, inside a longer sentence). */
+const nameTag = (name: string) => screen.queryAllByText(name, { exact: true }).length > 0;
+
+async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}) {
+  const g = stubGlobals(makeState([feed]));
+  const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false }));
+  await settle();
+  await settle();
+  act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+  await settle();
+  await settle();
+  return { ...utils, g };
+}
+
+test("the <video> is muted and has no controls", async () => {
+  const { container, g } = await renderOnScreen(makeFeed());
+  try {
+    const video = container.querySelector("video");
+    assert.equal(!!video, true, "expected a <video> for a relay feed");
+    assert.equal(video!.muted, true, "the <video> must be muted");
+    assert.equal(video!.controls, false, "the <video> must show no controls");
+  } finally {
+    g.restore();
+  }
+});
+
+test("an embed's iframe takes no pointer events, so a tap on a screen cannot pause or unmute it", async () => {
+  const { container, g } = await renderOnScreen(EMBED);
+  try {
+    const iframe = container.querySelector("iframe");
+    assert.equal(!!iframe, true, "expected an iframe");
+    assert.equal(iframe!.style.pointerEvents, "none");
+  } finally {
+    g.restore();
+  }
+});
+
+test("the name tag shows over a playing picture, and not with Show feed name off", async () => {
+  let r = await renderOnScreen(EMBED);
+  try {
+    assert.equal(nameTag(EMBED.name), true, "expected the name tag over an embed");
+  } finally {
+    r.g.restore();
+    cleanup();
+  }
+  r = await renderOnScreen(EMBED, { showLabel: false });
+  try {
+    assert.equal(nameTag(EMBED.name), false, "Show feed name off must hide the tag");
+  } finally {
+    r.g.restore();
+  }
+});
+
+test("the name tag waits for a picture: none while connecting, one once a frame arrives", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(makeFeed());
+  try {
+    assert.equal(!!screen.queryByText(`Connecting to ${makeFeed().name}`), true, "expected the Connecting state first");
+    assert.equal(nameTag(makeFeed().name), false, "no name tag over the Connecting state");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(nameTag(makeFeed().name), true, "expected the name tag once the picture is live");
+    assert.equal(!!screen.queryByText(`Connecting to ${makeFeed().name}`), false, "the cover must lift on the first frame");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("an HLS picture carries the \"N s behind\" badge", async () => {
+  const frames = captureFrames();
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(EXTERNAL_HLS);
+  try {
+    assert.equal(!!screen.queryByText(/s behind$/), false, "no badge before a frame");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText("3 s behind"), true, "expected the badge with hls.js's latency, rounded");
+  } finally {
+    undoHls();
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("a WebRTC picture carries no badge", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(makeFeed());
+  try {
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText(/s behind$/), false, "a WebRTC picture is not behind");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("a feed id the loaded list does not name shows the offline message without a name", async () => {
+  const { g } = await renderOnScreen(makeFeed({ id: "some-other-feed" }));
+  try {
+    assert.equal(!!screen.queryByText("This feed is offline"), true, "a deleted feed reads as offline");
   } finally {
     g.restore();
   }
