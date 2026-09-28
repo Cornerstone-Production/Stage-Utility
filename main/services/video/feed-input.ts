@@ -7,6 +7,14 @@ function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
   return typeof v === "string" && (list as readonly string[]).includes(v);
 }
 
+/** A username or password inside the address itself. Refused for every kind
+ *  that takes an address: stored there it would sit in the config store and
+ *  go out on video:state to every screen, and a browser refuses to fetch an
+ *  address that carries one, so it could never play either. */
+function hasUserinfo(u: URL): boolean {
+  return u.username !== "" || u.password !== "";
+}
+
 export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
@@ -50,6 +58,10 @@ export function parseFeedInput(
       if (u.protocol !== "http:" && u.protocol !== "https:") {
         return { ok: false, error: "External URL must be http or https." };
       }
+      // Not pull's "their own fields" wording: this kind has no such fields.
+      if (hasUserinfo(u)) {
+        return { ok: false, error: "Take the username and password out of the address: browsers refuse to play one that carries them." };
+      }
       return { ok: true, name, source: { kind: "external", url: source.url } };
     } catch {
       return { ok: false, error: "External URL is invalid." };
@@ -73,7 +85,7 @@ export function parseFeedInput(
       return { ok: false, error: "Pull source protocol must be rtsp, rtsps, srt, http, or https." };
     }
 
-    if (url.username || url.password) {
+    if (hasUserinfo(url)) {
       return { ok: false, error: "Put the username and password in their own fields, not the address." };
     }
 

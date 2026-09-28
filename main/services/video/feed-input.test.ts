@@ -49,3 +49,10 @@ test("external protocol follows the path", () => {
   assert.equal(externalProtocol("https://h/live/index.m3u8?t=1"), "hls");
   assert.equal(externalProtocol("http://h/cam/whep"), "whep");
 });
+test("external refuses a username or password in the address, like pull", () => {
+  for (const url of ["https://user:pw@cdn.example/live/index.m3u8", "http://user@h/cam/whep"]) {
+    const r = parseFeedInput({ name: "X", source: { kind: "external", url } }, PR1);
+    assert.equal(r.ok, false, url);
+    assert.match((r as { error: string }).error, /username and password out of the address/, url);
+  }
+});
