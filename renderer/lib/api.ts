@@ -337,6 +337,7 @@ export type IpcChannel =
   | "video:newPushPassword"
   | "video:pushAddress"
   | "video:removeFeed"
+  | "video:setPorts"
   | "video:state"
   | "video:updateFeed"
   | "views:add"
@@ -858,6 +859,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       const id = p.id as string;
       return post<T>(`/api/video/feeds/${encodeURIComponent(id)}/push/new-password`);
     }
+    case "video:setPorts":
+      return patch<T>("/api/video/ports", p);
 
     // ── Views (content) ──────────────────────────────────────────────────
     case "views:add":
