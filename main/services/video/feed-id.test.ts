@@ -12,3 +12,7 @@ test("capped at 40 and still valid", () => {
 test("prototype names are ordinary ids", () => {
   assert.equal(feedIdFor("__proto__", new Set()), "proto");
 });
+test("accents fold into their letters rather than splitting the word", () => {
+  assert.equal(feedIdFor("Résumé cam", new Set()), "resume-cam");
+  assert.equal(feedIdFor("Façade Ñandú", new Set()), "facade-nandu");
+});
