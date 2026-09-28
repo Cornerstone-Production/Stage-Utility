@@ -41,5 +41,6 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     if (r.ok) json(res, { feed: r.feed });
     else if (r.error === "not-found") error(res, "No such feed", 404);
     else error(res, r.error);
+    return;
   }
 }

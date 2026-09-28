@@ -53,6 +53,24 @@ test("an id outside the pattern is 404, not a lookup", async () => {
   }
 });
 
+test("__proto__ and constructor are refused as DELETE and PATCH targets, and change nothing", async () => {
+  const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: EMBED });
+  assert.equal(made.status, 201);
+  const before = (await callRoute(videoRoutes, "/api/video/state")).json;
+
+  for (const id of ["__proto__", "constructor"]) {
+    const patched = await callRoute(videoRoutes, `/api/video/feeds/${encodeURIComponent(id)}`, { method: "PATCH", body: { name: "x" } });
+    assert.equal(patched.status, 404, `PATCH ${id}`);
+    const deleted = await callRoute(videoRoutes, `/api/video/feeds/${encodeURIComponent(id)}`, { method: "DELETE" });
+    assert.equal(deleted.status, 404, `DELETE ${id}`);
+  }
+
+  const after = (await callRoute(videoRoutes, "/api/video/state")).json;
+  assert.deepEqual(after, before, "neither refused id ever touched the feed list");
+
+  assert.equal((await callRoute(videoRoutes, "/api/video/feeds/online-stream", { method: "DELETE" })).status, 200);
+});
+
 test("usage names the layouts that place the feed, inside containers too", async () => {
   const box = { x: 0, y: 0, w: 1, h: 1 };
   await fs.writeFile(

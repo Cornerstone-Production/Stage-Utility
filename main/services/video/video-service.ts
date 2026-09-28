@@ -31,6 +31,28 @@ export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
  *  `feeds` array at all. */
 const feedsOf = (current: VideoFeedsFile): VideoFeed[] => (Array.isArray(current.feeds) ? current.feeds : []);
 
+/**
+ * The object updateFeed re-validates a PATCH against: `existing`'s name and
+ * source, each replaced by whatever the body supplies, PLUS the body's
+ * `password` carried through untouched.
+ *
+ * Exported so a test can prove `password` survives this merge without needing
+ * to widen allowedKinds() to "pull" (the only kind a password applies to, and
+ * one this build does not offer pre-relay) or exercise the whole update path
+ * through secretsStore. It used to be built inline as `{ name, source }`,
+ * which quietly dropped a `password` in the PATCH body — harmless while only
+ * embed/external are offered, since neither kind ever produces one, but silent
+ * data loss the day a pull feed's password is changed on an existing feed.
+ */
+export function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; source: unknown; password: unknown } {
+  const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  return {
+    name: typeof obj.name === "string" ? obj.name : existing.name,
+    source: obj.source !== undefined ? obj.source : existing.source,
+    password: obj.password,
+  };
+}
+
 class VideoService {
   private rev = 0;
 
@@ -134,13 +156,10 @@ class VideoService {
     const existing = feeds.find((f) => f.id === id);
     if (!existing) return { ok: false, error: "not-found" };
 
-    const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
-    const name = typeof obj.name === "string" ? obj.name : existing.name;
-    const source = obj.source !== undefined ? obj.source : existing.source;
     // Re-running parseFeedInput is what makes a name-only PATCH ({ name }) valid
     // without a second copy of the name rules: it is this same call with the
-    // existing source handed back unchanged.
-    const parsed = parseFeedInput({ name, source }, this.allowedKinds());
+    // existing source (and, now, the body's own password) handed back through.
+    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds());
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
     // The id never changes on update — it is the layout binding's permanent
