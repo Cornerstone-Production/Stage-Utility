@@ -62,6 +62,7 @@ const KIND_LABEL: Record<UnresolvableRef["kind"], string> = {
   sensource: "a people counter zone",
   propresenter: "a ProPresenter instance",
   output: "a screen",
+  "video-feed": "a video feed",
 };
 
 function review(bundle: ViewBundle): Review {

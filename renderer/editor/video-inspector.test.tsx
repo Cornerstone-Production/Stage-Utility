@@ -97,6 +97,30 @@ describe("VideoConfig — Feed", () => {
       f.restore();
     }
   });
+
+  test("a deleted feed renders without throwing, still offering 'Choose a feed' and the live feeds", async () => {
+    // A feed removed on the Video feeds page after this object was bound to it —
+    // video:state no longer lists it, but the object's own config still names
+    // it. The native <select> this repo's Select renders (see select.tsx)
+    // handles a stored value with no matching option by synthesising one
+    // labelled "<value> · not found" rather than silently resetting the field
+    // or throwing, so this is a real behaviour to pin, not a defensive guess.
+    const f = stubVideoState();
+    try {
+      const { container } = await mount({ ...DEFAULT_CONFIG, feedId: "deleted-feed" }, () => {});
+      const feedSelect = container.querySelectorAll("select")[0] as HTMLSelectElement;
+      const optionLabels = [...feedSelect.querySelectorAll("option")].map((o) => o.textContent);
+      assert.deepEqual(optionLabels, [
+        "Choose a feed",
+        "Program (IMAG)",
+        "Lobby cam",
+        "deleted-feed · not found",
+      ]);
+      assert.equal(feedSelect.value, "deleted-feed", "the missing feed's binding was silently cleared");
+    } finally {
+      f.restore();
+    }
+  });
 });
 
 describe("VideoConfig — Fit", () => {

@@ -102,10 +102,15 @@ reason: it watches an output id, and an output is a screen configured on this
 install. The file carries no outputs at all, so every screen tile in an
 imported wall arrives unbound, whatever it was pointed at on the source.
 
-Objects bound to absent gear or a missing screen **keep their bindings** and
-render as unconfigured. Nothing is silently cleared. The import report lists
-them by name, grouped by what they need, and each entry opens the editor for
-the view holding it.
+A **Video** widget's feed is set up the same way: on the Video feeds page, per
+install. The file carries no feeds either, so a Video widget arrives pointed
+at nothing, whatever feed it played on the source — set it again after
+import.
+
+Objects bound to absent gear, a missing screen or a missing feed **keep their
+bindings** and render as unconfigured. Nothing is silently cleared. The import
+report lists them by name, grouped by what they need, and each entry opens the
+editor for the view holding it.
 
 ### What resolves anyway
 
