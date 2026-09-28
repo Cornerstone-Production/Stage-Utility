@@ -1,8 +1,45 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
-import { mergedFeedPatch } from "./video-service.js";
-import type { VideoFeed } from "../../types/video.js";
+import type { VideoFeed, VideoSourceKind } from "../../types/video.js";
+
+// Before any store is constructed: every import below builds its stores
+// against this directory, never the default data folder.
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-service-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+const { mergedFeedPatch, videoService, SECRET_SLOT } = await import("./video-service.js");
+const { secretsStore } = await import("../secrets.js");
+const { configSnapshot } = await import("../config-snapshot.js");
+
+/** Offers every kind for the duration of `fn`: this build offers only embed
+ *  and external, and a password only exists for pull. */
+async function withAllKinds<T>(fn: () => Promise<T>): Promise<T> {
+  const svc = videoService as unknown as { allowedKinds: () => ReadonlySet<VideoSourceKind> };
+  svc.allowedKinds = () => new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
+  try {
+    return await fn();
+  } finally {
+    delete (svc as { allowedKinds?: unknown }).allowedKinds;
+  }
+}
+
+test("a config snapshot never carries a feed's password", async () => {
+  const password = "correct-horse-battery-staple";
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Lobby cam", source: { kind: "pull", url: "rtsp://192.0.2.10:8554/s", username: "admin" }, password }),
+  );
+  assert.ok(made.ok, "expected the pull feed to be added");
+  const id = (made as { feed: { id: string } }).feed.id;
+  assert.equal((await secretsStore.getSecrets(SECRET_SLOT(id))).password, password, "the seed never reached the secrets store");
+
+  const snapshot = await configSnapshot.build();
+  const serialized = JSON.stringify(snapshot);
+  assert.ok(serialized.includes(`"${id}"`), "the snapshot must carry the feed itself, or this proves nothing");
+  assert.equal(serialized.includes(password), false, "a feed password reached a config snapshot");
+});
 
 // mergedFeedPatch is what updateFeed re-validates a PATCH against. It used to
 // be built inline as `{ name, source }`, dropping a body's top-level
