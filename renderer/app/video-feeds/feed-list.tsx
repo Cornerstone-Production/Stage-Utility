@@ -8,6 +8,7 @@ import type { FeedState, VideoFeedView } from "@main/types/video";
 
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 
 /**
  * The row's pill: its text, its tint and its dot, or null for a feed this
@@ -99,19 +100,17 @@ export function feedMeta(feed: VideoFeedView): string[] {
 }
 
 /**
- * R14g: the design's per-row B-frames hint (mockup-v2.html's `.hint` span,
+ * R14k: the design's per-row B-frames hint (mockup-v2.html's `.hint` span,
  * distinct from the muted meta line above it) — null for anything else,
  * including a codec-delayed feed (no per-row hint text is specified for
- * that case). Same OBS-vs-device wording as the editor's own warning
- * callout (feed-editor.tsx's delayWarning): "OBS" only for a push feed set
- * to WHIP, "the device" otherwise, since neither a pull camera nor a push
- * feed on SRT/RTMP is necessarily OBS.
+ * that case). The exact sentence the editor's own callout shares
+ * (b-frames-copy.ts) — "OBS" only for a push feed set to WHIP, "The
+ * device" otherwise, since neither a pull camera nor a push feed on
+ * SRT/RTMP is necessarily OBS.
  */
 export function bFramesHint(feed: VideoFeedView): string | null {
   if (feed.status.state !== "delayed" || feed.status.delayedBecause !== "b-frames") return null;
-  const isObsWhip = feed.source.kind === "push" && feed.source.protocol === "whip";
-  const who = isObsWhip ? "OBS" : "The device";
-  return `${who} is sending B-frames — a few seconds late.`;
+  return bFramesSentence(isObsWhipFeed(feed));
 }
 
 export function FeedList({

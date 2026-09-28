@@ -26,11 +26,12 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js"
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ConfirmHost } = await import("../../components/ui/index.js");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
+const { COPIED_LABEL_MS } = await import("./feed-editor.js");
 
 // VideoState/VideoFeedView are NOT ambient globals (unlike LayoutObject and
 // LayoutObjectConfig) — see video-object.test.tsx's own note on this.
@@ -129,11 +130,15 @@ interface FetchStubOptions {
   usage?: { viewId: string; name: string }[] | "fail";
   /** Answers a video:pushAddress GET, keyed by feed id and the `?protocol=`
    *  query param the client sends (R14g-a's preview) — undefined when the
-   *  request carried none. Default: a plain SRT address carrying "testpw". */
-  onPushAddress?: (id: string, protocol: string | undefined) => FeedResponse;
+   *  request carried none. Default: a plain SRT address carrying "testpw".
+   *  May return a Promise instead — R14 round 2 item 6's stale-response
+   *  tests hold one call open on purpose, to prove a LATER request's answer
+   *  landing first is not clobbered once the held one finally resolves. */
+  onPushAddress?: (id: string, protocol: string | undefined) => FeedResponse | Promise<FeedResponse>;
   /** Answers a video:newPushPassword POST, keyed by feed id. Default: the
-   *  same address with "rotatedpw" in place of "testpw". */
-  onNewPushPassword?: (id: string) => FeedResponse;
+   *  same address with "rotatedpw" in place of "testpw". May also return a
+   *  Promise — same reason as onPushAddress above. */
+  onNewPushPassword?: (id: string) => FeedResponse | Promise<FeedResponse>;
 }
 
 /** Every request the page makes, matched by method and path — including the
@@ -167,20 +172,20 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
     if (method === "GET" && push) {
       const id = decodeURIComponent(push[1]!);
       const requestedProtocol = new URL(url, "http://localhost").searchParams.get("protocol") ?? undefined;
-      const r = opts.onPushAddress?.(id, requestedProtocol) ?? {
+      const r = await (opts.onPushAddress?.(id, requestedProtocol) ?? {
         status: 200,
         body: {
           protocol: requestedProtocol ?? "srt",
           address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:testpw`,
           password: "testpw",
         },
-      };
+      });
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
     const newPassword = url.match(/\/api\/video\/feeds\/([^/]+)\/push\/new-password$/);
     if (method === "POST" && newPassword) {
       const id = decodeURIComponent(newPassword[1]!);
-      const r = opts.onNewPushPassword?.(id) ?? {
+      const r = await (opts.onNewPushPassword?.(id) ?? {
         status: 200,
         body: {
           protocol: "srt",
@@ -189,7 +194,7 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
           applied: true,
           kicked: "none",
         },
-      };
+      });
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
     const one = url.match(/\/api\/video\/feeds\/([^/]+)$/);
@@ -856,7 +861,11 @@ test("Copy falls back to selecting the address and prompting Ctrl+C/Cmd+C — js
   }
 });
 
-test("R14g: a push feed set to WHIP shows the OBS-specific B-frames fix text; a pull feed (never necessarily OBS) shows the generic device text instead; a live feed shows neither", async () => {
+// R14k: the shared B-frames sentence (b-frames-copy.ts), verbatim.
+const WHIP_HINT = "OBS is sending B-frames, so screens get this feed a few seconds late. Turn them off for under-a-second playback.";
+const DEVICE_HINT = "The device is sending B-frames, so screens get this feed a few seconds late. Turn them off on the device for under-a-second playback.";
+
+test("R14k: a push feed set to WHIP shows the OBS-specific callout and list hint; a pull feed (never necessarily OBS) shows the generic device wording instead, in the SAME two places; a live feed shows neither", async () => {
   const g = stubGlobals({
     ...makeState([pushFeed({ id: "feed-whip-delayed", name: "OBS delayed", source: { kind: "push", protocol: "whip" }, status: { state: "delayed", delayedBecause: "b-frames" } })]),
     kinds: ALL_KINDS,
@@ -865,21 +874,27 @@ test("R14g: a push feed set to WHIP shows the OBS-specific B-frames fix text; a 
     mount();
     await settle();
     await settle();
-    // getByText/queryByText match a single element's own text, and the
-    // headline sits inside its own <b> nested in the callout's <p> — a
-    // regex loose enough to match the <p>'s full text ALSO matches the <b>
-    // inside it, "multiple elements" either way. document.body.textContent
-    // sidesteps that; what is being proven is presence, not which element.
-    const body = document.body.textContent ?? "";
-    assert.ok(body.includes("Delayed about 4 s."), "expected the design's headline");
-    assert.ok(body.includes("OBS is sending B-frames"), "expected OBS named for a push+WHIP feed");
-    assert.ok(body.includes("Keyframe interval 1 s with B-frames 0"), "expected the OBS-specific fix text");
+    // Scoped to the editor pane and the list row SEPARATELY — both carry the
+    // shared sentence at once here (there is only one feed, selected), so a
+    // regression in either location alone must still fail its own assertion.
+    const asideText = screen.getByLabelText("Feed settings").textContent ?? "";
+    assert.ok(asideText.includes("Delayed a few seconds."), "expected the design's headline");
+    assert.ok(asideText.includes(WHIP_HINT), "expected the shared WHIP sentence in the callout");
+    assert.ok(asideText.includes("In OBS: Settings, Output, Streaming, set Profile to baseline, or Keyframe interval 1 s with B-frames 0."), "expected the OBS-specific fix sentence");
+
+    // "OBS delayed" names both the list row AND the editor's own <h2> for the
+    // selected feed — only the row's own copy has a <button> ancestor.
+    const row = screen.getAllByText("OBS delayed").map((el) => el.closest("button")).find((b) => b !== null);
+    assert.ok(row);
+    const rowText = row!.textContent ?? "";
+    assert.ok(rowText.includes(WHIP_HINT), "expected the SAME shared sentence in the list row's own hint");
+    assert.equal(rowText.includes("In OBS:"), false, "the list row's hint must not carry the OBS fix instructions — only the callout does");
   } finally {
     g.restore();
   }
 
   const g2 = stubGlobals({
-    ...makeState([pullFeed({ status: { state: "delayed", delayedBecause: "b-frames" } })]),
+    ...makeState([pullFeed({ name: "Pull delayed", status: { state: "delayed", delayedBecause: "b-frames" } })]),
     kinds: ALL_KINDS,
   });
   try {
@@ -888,10 +903,14 @@ test("R14g: a push feed set to WHIP shows the OBS-specific B-frames fix text; a 
     mount();
     await settle();
     await settle();
-    const body2 = document.body.textContent ?? "";
-    assert.ok(body2.includes("the device is sending B-frames"), "expected \"the device\", never OBS, for a pull feed");
-    assert.equal(body2.includes("OBS is sending"), false, "a pull feed must never be called OBS");
-    assert.equal(body2.includes("Keyframe interval"), false, "the OBS-specific Settings path must not appear for a non-WHIP feed");
+    const asideText = screen.getByLabelText("Feed settings").textContent ?? "";
+    assert.ok(asideText.includes(DEVICE_HINT), "expected \"The device\", never OBS, for a pull feed");
+    assert.equal(asideText.includes("OBS is sending"), false, "a pull feed must never be called OBS");
+    assert.equal(asideText.includes("Keyframe interval"), false, "the OBS-specific Settings path must not appear for a non-WHIP feed");
+
+    const row = screen.getAllByText("Pull delayed").map((el) => el.closest("button")).find((b) => b !== null);
+    assert.ok(row);
+    assert.ok((row!.textContent ?? "").includes(DEVICE_HINT), "expected the same device sentence in the list row's own hint");
   } finally {
     g2.restore();
   }
@@ -906,7 +925,7 @@ test("R14g: a push feed set to WHIP shows the OBS-specific B-frames fix text; a 
     mount();
     await settle();
     await settle();
-    assert.equal(screen.queryByText(/Delayed about/), null, "a live feed must show no delay warning");
+    assert.equal(screen.queryByText(/Delayed a few seconds/), null, "a live feed must show no delay warning");
   } finally {
     g3.restore();
   }
@@ -1052,13 +1071,116 @@ test("R14g-a: flipping the segmented control before Save re-fetches the OTHER pr
   }
 });
 
-test("R14g: Copy's button label flips to \"Copied\" — exercised here via the plain-HTTP fallback path, which jsdom always takes (no navigator.clipboard)", async () => {
-  // The secure-clipboard branch (real \"Copied\" on success) is not
-  // reachable in jsdom at all — navigator.clipboard is undefined here,
-  // the same as Stage Utility's own prod (see the Copy-fallback test above)
-  // — so this only proves the button's OWN label is "Copy", never
-  // silently "Copied" from a stale render, and that clicking it does not
-  // throw. The actual flip is confirmed in the browser drive.
+test("R14 round 2 item 6: a stale preview response landing late must not clobber a newer one — a request counter drops it", async () => {
+  let heldRelease: ((r: { status: number; body: unknown }) => void) | null = null;
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+    {
+      onPushAddress: (id, protocol) => {
+        if (protocol === "srt" && !heldRelease) {
+          // The INITIAL mount load — held until the test releases it, well
+          // after the WHIP preview below has already resolved.
+          return new Promise((resolve) => {
+            heldRelease = resolve;
+          });
+        }
+        return {
+          status: 200,
+          body: { protocol: protocol ?? "srt", address: `http://192.168.1.50:8788/video/${id}/${protocol}`, password: `${protocol}pw` },
+        };
+      },
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    // The initial srt load is held — nothing to assert on it yet.
+
+    fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+    let password = screen.getByLabelText("Password") as HTMLInputElement;
+    assert.equal(password.value, "whippw");
+
+    heldRelease!({
+      status: 200,
+      body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:initialpw", password: "initialpw" },
+    });
+    await settle();
+    await settle();
+
+    password = screen.getByLabelText("Password") as HTMLInputElement;
+    assert.equal(
+      password.value,
+      "whippw",
+      "a stale (older) response landing late must not overwrite the newer preview — under the bug it does",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("R14 round 2 item 6: New password during an unsaved preview re-fetches the address for the protocol the control shows, rather than flipping to the saved one", async () => {
+  let rotated = false;
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+    {
+      onPushAddress: (id, protocol) => ({
+        status: 200,
+        body: {
+          protocol: protocol ?? "srt",
+          address: `http://192.168.1.50:8788/video/${id}/${protocol}`,
+          password: rotated ? "freshpw" : "oldpw",
+        },
+      }),
+      onNewPushPassword: () => {
+        rotated = true;
+        return {
+          status: 200,
+          body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:freshpw", password: "freshpw", applied: true, kicked: "none" },
+        };
+      },
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+    let password = screen.getByLabelText("Password") as HTMLInputElement;
+    assert.equal(password.value, "oldpw", "sanity: the preview shows the OLD password before any rotation");
+
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    await settle();
+    await settle();
+
+    const address = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+    password = screen.getByLabelText("Password") as HTMLInputElement;
+    assert.ok(address.value.startsWith("http://"), `expected the control's OWN protocol (WHIP), not the saved SRT one: ${address.value}`);
+    assert.equal(password.value, "freshpw", "expected the re-preview to carry the freshly rotated password");
+    assert.equal(
+      screen.getByRole("button", { name: "WHIP (OBS)" }).getAttribute("aria-pressed"),
+      "true",
+      "the segmented control itself must still show WHIP",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("the Copy button reads \"Copy\" before any click, never stale \"Copied\" from an earlier render", async () => {
+  // This proves only the button's OWN starting label — the secure-clipboard
+  // flip itself needs navigator.clipboard/isSecureContext stubbed, which the
+  // dedicated test below does; jsdom's own default (both undefined) is
+  // exactly Stage Utility's own plain-HTTP LAN deployment, so this test's
+  // scope is real, not a stand-in for the flip.
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
@@ -1066,6 +1188,61 @@ test("R14g: Copy's button label flips to \"Copied\" — exercised here via the p
     await settle();
     await screen.findByLabelText("Paste this into the device");
     assert.ok(screen.getByRole("button", { name: "Copy" }), "expected the button to read \"Copy\" before any click");
+  } finally {
+    g.restore();
+  }
+});
+
+test("R14k item 2: the secure-clipboard Copy path flips the button to \"Copied\" and reverts after COPIED_LABEL_MS — stubbing navigator.clipboard and isSecureContext, which jsdom does not provide on its own", async () => {
+  Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await settle();
+    await settle();
+    assert.ok(screen.getByRole("button", { name: "Copied" }), "expected the label to flip once the secure copy resolves");
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, COPIED_LABEL_MS + 50));
+    });
+    assert.ok(screen.getByRole("button", { name: "Copy" }), "expected the label to revert after COPIED_LABEL_MS");
+  } finally {
+    g.restore();
+    delete (window as { isSecureContext?: unknown }).isSecureContext;
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+});
+
+test("R14k item 2: blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" hint", async () => {
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+    const addressInput = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await settle();
+    assert.ok(screen.getByText("Press Ctrl+C / Cmd+C to copy"), "expected the fallback hint to show first");
+
+    fireEvent.blur(addressInput);
+    await settle();
+    // A boolean, never the raw element: on failure `assert.equal` renders a
+    // diff of both operands, and a live DOM node's circular parent/owner
+    // references make that diff pathologically slow (tens of seconds, not a
+    // bug in the app — a footgun in the assertion itself, discovered by this
+    // test's own red proof, and worth calling out rather than only working
+    // around it here).
+    assert.equal(
+      !!screen.queryByText("Press Ctrl+C / Cmd+C to copy"),
+      false,
+      "expected blurring the address field to clear the fallback hint",
+    );
   } finally {
     g.restore();
   }

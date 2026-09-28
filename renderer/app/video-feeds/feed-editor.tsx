@@ -36,6 +36,7 @@ import { Segmented } from "../../editor/inspector-rows";
 import { invoke } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
 import { VideoObject } from "../../main/video/video-object";
+import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
   pull: "Pull from a device (RTSP, SRT, HLS)",
@@ -64,28 +65,24 @@ const PUSH_DESCRIPTION: Record<PushProtocol, string> = {
  * WebRTC — null for anything else, including "delayed" via an embed/
  * external source, which this build never reports.
  *
- * R14g: `<b>Delayed about N s.</b>` then the hint sentence, then the fix —
- * matching mockup-v2.html's own template. "OBS" and its specific Settings
- * path apply only to a push feed set to WHIP: that is the one case this
- * app KNOWS the device is OBS. A pull camera, or a push feed on SRT/RTMP,
- * says "the device" and a protocol-agnostic fix, since it is very possibly
- * not OBS at all (a Magewell, ProPresenter's own output, anything else that
- * can push or be pulled from). Exported for the list row's own hint line
- * (feed-list.tsx), which needs the same OBS-vs-device wording.
+ * R14k: `<b>Delayed a few seconds.</b>` then the shared B-frames sentence
+ * (b-frames-copy.ts, also used by the list row's own hint), then — WHIP
+ * only — the OBS-specific fix. A pull camera, or a push feed on SRT/RTMP,
+ * gets no third sentence at all: R14k's own copy for that case is exactly
+ * the shared sentence, nothing more, since neither is necessarily OBS (a
+ * Magewell, ProPresenter's own output, anything else that can push or be
+ * pulled from).
  */
 export function delayWarning(feed: VideoFeedView): { headline: string; body: string } | null {
   const status = feed.status;
   if (status.state !== "delayed") return null;
-  const isObsWhip = feed.source.kind === "push" && feed.source.protocol === "whip";
-  const who = isObsWhip ? "OBS" : "the device";
+  const isObsWhip = isObsWhipFeed(feed);
   if (status.delayedBecause === "b-frames") {
-    const fix = isObsWhip
-      ? "In OBS: Settings, Output, Streaming, set Profile to baseline, or Keyframe interval 1 s with B-frames 0."
-      : "Turn off B-frames on the device — Baseline profile, or a 1 s keyframe interval with B-frames 0, if it offers the choice.";
-    return { headline: "Delayed about 4 s.", body: `${who} is sending B-frames, so screens see it a few seconds late. ${fix}` };
+    const fix = isObsWhip ? " In OBS: Settings, Output, Streaming, set Profile to baseline, or Keyframe interval 1 s with B-frames 0." : "";
+    return { headline: "Delayed a few seconds.", body: `${bFramesSentence(isObsWhip)}${fix}` };
   }
   return {
-    headline: "Delayed about 4 s.",
+    headline: "Delayed a few seconds.",
     body: `${status.codec ?? "This"} video is not supported over WebRTC, so screens see it over HLS instead.`,
   };
 }
@@ -514,7 +511,7 @@ interface RotationResult {
 }
 
 /** How long the Copy button's label reads "Copied" before reverting — R14g. */
-const COPIED_LABEL_MS = 1400;
+export const COPIED_LABEL_MS = 1400;
 
 /**
  * A push feed's paste-ready address and password: "Paste this into the
@@ -540,14 +537,27 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   const [copyHint, setCopyHint] = useState<string | null>(null);
   const [justCopied, setJustCopied] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
+  /** R14 round 2 item 6: every request this component makes — a preview
+   *  load() or a rotation — takes a ticket, and a response is applied only
+   *  if its own ticket is still the newest one issued. Without this, two
+   *  requests in flight together apply in WHATEVER ORDER THEY RESOLVE, not
+   *  the order they were ISSUED in: flipping the segmented control to
+   *  preview a protocol, then clicking New password before that preview's
+   *  own GET has returned, could have the (fast) rotation land first and
+   *  then the (slower) STALE preview overwrite it right back — showing an
+   *  address the rotation had already replaced. */
+  const requestSeq = useRef(0);
 
   const load = useCallback(() => {
+    const seq = ++requestSeq.current;
     return invoke<PushAddress>("video:pushAddress", { id: feedId, protocol }).then(
       (r) => {
+        if (seq !== requestSeq.current) return; // superseded by a newer request — drop it
         setData(r);
         setError(null);
       },
       (err: unknown) => {
+        if (seq !== requestSeq.current) return;
         logReadFailure("video", "the push address", err);
         setError("Couldn't read the push address.");
       },
@@ -560,19 +570,30 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
 
   async function handleNewPassword() {
     setRotating(true);
+    const seq = ++requestSeq.current;
     try {
       const r = await invoke<PushAddress & RotationResult>("video:newPushPassword", { id: feedId });
-      // The rotation response is always the feed's own SAVED protocol,
-      // which can differ from an unsaved preview above — shown directly
-      // rather than re-fetched in the PREVIEWED protocol, so what is on
-      // screen is always exactly what newPushPassword just confirmed, with
-      // no second round trip that could show a stale password if it lands
-      // out of order.
-      setData({ protocol: r.protocol, address: r.address, password: r.password });
+      if (seq !== requestSeq.current) return; // an even newer request landed first — drop it
       setRotation({ applied: r.applied, kicked: r.kicked });
       setError(null);
       setCopyHint(null);
+      if (protocol === r.protocol) {
+        // The control is showing the feed's own saved protocol — r's own
+        // answer already IS that protocol's fresh address; no second round
+        // trip needed.
+        setData({ protocol: r.protocol, address: r.address, password: r.password });
+      } else {
+        // The control is previewing a DIFFERENT, unsaved protocol — R14
+        // round 2 item 6. Showing r's own (saved-protocol) address here
+        // would show an address for a protocol the control does not even
+        // have selected, so the control and the address field would stop
+        // matching. Re-preview the protocol the control shows, now with the
+        // fresh password. Safe to land out of order: the request counter
+        // above drops it if a newer request has since started.
+        void load();
+      }
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       setError(errorMessage(err));
     } finally {
       setRotating(false);
