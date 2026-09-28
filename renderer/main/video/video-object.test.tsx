@@ -7,9 +7,9 @@
 // NOT covered here, and why: jsdom loads no stylesheet and reports every
 // offsetHeight/getBoundingClientRect as zero, so the corner name-tag's
 // placement, the "N s behind" badge's position, and the connecting pulse's
-// animation are unverifiable from this file. Checked in a real browser
-// instead (see task-5-report.md) rather than asserted here against numbers
-// jsdom cannot produce.
+// animation are unverifiable from this file — and were NOT checked in a real
+// browser either in this round; that is a real gap, said plainly rather than
+// implied to be covered somewhere it is not (see task-5-report.md).
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
@@ -135,20 +135,40 @@ function stubGlobals(state: VideoState) {
   const realFetch = globalThis.fetch;
   const realPc = (globalThis as unknown as { RTCPeerConnection?: unknown }).RTCPeerConnection;
   const realIo = (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
+  const realAbortController = globalThis.AbortController;
+  const realAbortSignal = globalThis.AbortSignal;
   globalThis.fetch = fn;
   (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePeerConnection;
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = StubObserver;
+  // jsdom's OWN AbortController/AbortSignal, not Node's: a jsdom-rendered
+  // <video>'s addEventListener validates a `{ signal }` option's realm, and
+  // the widget's real playback code builds `new AbortController()` from
+  // whatever is on globalThis at the time — Node's version is structurally
+  // identical but fails jsdom's `instanceof AbortSignal` check, so every
+  // attempt appeared to "drop" instantly with that exact message. Scoped to
+  // THIS test file rather than test-dom.ts: swapping it there broke an
+  // unrelated clock test elsewhere in the suite in a way this file's narrow
+  // fix does not.
+  globalThis.AbortController = window.AbortController;
+  globalThis.AbortSignal = window.AbortSignal;
   return {
     calls,
     restore() {
       globalThis.fetch = realFetch;
       (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = realPc;
       (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = realIo;
+      globalThis.AbortController = realAbortController;
+      globalThis.AbortSignal = realAbortSignal;
     },
   };
 }
 
-const whepCalls = (calls: { method: string; url: string }[]) => calls.filter((c) => c.url.includes("/whep") && c.method !== "GET");
+// Every request to a FEED's playback endpoint — not only a WHEP POST/DELETE,
+// so a future HLS or other /video/<id>/... call is caught by the same
+// assertion — excluding the state-list read, which legitimately fires
+// regardless of the preview/on-screen gates (see use-video-state.ts).
+const feedCalls = (calls: { method: string; url: string }[]) =>
+  calls.filter((c) => c.url.includes("/video/") && !c.url.includes("/api/video/state"));
 
 /**
  * `settle()` (test-dom.ts) awaits a REAL `setTimeout(…, 0)` to hand off to
@@ -182,18 +202,24 @@ test("preview route: paused, and nothing is requested until Play is pressed", as
     await settle();
     await settle();
 
-    assert.equal(!!screen.queryByText("Video paused in preview"), true, "expected the preview-paused copy");
-    assert.deepEqual(whepCalls(g.calls), [], "expected no request to a feed's playback endpoint before Play is pressed");
-
-    const play = screen.getByText("Play");
-    act(() => play.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    // Play only lifts the preview gate; the on-screen gate is separate, so this
-    // still needs an intersecting observer before a request can go out.
+    // Fired BEFORE the no-request check, so the on-screen gate is already
+    // open — the ONLY thing left withholding a request is the preview gate
+    // itself. Checking this with the observer still non-intersecting would
+    // pass for the wrong reason: removing the preview gate outright would
+    // stay green here, because the on-screen gate alone already blocks it.
     act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
     await settle();
     await settle();
 
-    assert.ok(whepCalls(g.calls).length > 0, "expected Play to start the session it had withheld");
+    assert.equal(!!screen.queryByText("Video paused in preview"), true, "expected the preview-paused copy");
+    assert.deepEqual(feedCalls(g.calls), [], "expected no request to a feed's playback endpoint before Play is pressed, even on screen");
+
+    const play = screen.getByText("Play");
+    act(() => play.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await settle();
+    await settle();
+
+    assert.ok(feedCalls(g.calls).length > 0, "expected Play to start the session it had withheld");
   } finally {
     g.restore();
     history.pushState({}, "", originalPath);
@@ -208,13 +234,13 @@ test("off screen: no request; on screen: one POST; off again past the teardown: 
     await settleFake();
     await settleFake();
 
-    assert.deepEqual(whepCalls(g.calls), [], "expected no request while off screen");
+    assert.deepEqual(feedCalls(g.calls), [], "expected no request while off screen");
 
     act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
     await settleFake();
     await settleFake();
 
-    assert.equal(whepCalls(g.calls).filter((c) => c.method === "POST").length, 1, "expected exactly one POST once on screen");
+    assert.equal(feedCalls(g.calls).filter((c) => c.method === "POST").length, 1, "expected exactly one POST once on screen");
 
     act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
     act(() => {
@@ -224,7 +250,7 @@ test("off screen: no request; on screen: one POST; off again past the teardown: 
     await settleFake();
 
     assert.equal(
-      whepCalls(g.calls).filter((c) => c.method === "DELETE").length,
+      feedCalls(g.calls).filter((c) => c.method === "DELETE").length,
       1,
       "expected the session DELETEd once the teardown delay passed off screen",
     );
@@ -245,7 +271,7 @@ test("a hidden document behaves like off screen", async () => {
     act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
     await settleFake();
     await settleFake();
-    assert.equal(whepCalls(g.calls).filter((c) => c.method === "POST").length, 1, "expected the on-screen POST first");
+    assert.equal(feedCalls(g.calls).filter((c) => c.method === "POST").length, 1, "expected the on-screen POST first");
 
     Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
     act(() => document.dispatchEvent(new Event("visibilitychange")));
@@ -256,7 +282,7 @@ test("a hidden document behaves like off screen", async () => {
     await settleFake();
 
     assert.equal(
-      whepCalls(g.calls).filter((c) => c.method === "DELETE").length,
+      feedCalls(g.calls).filter((c) => c.method === "DELETE").length,
       1,
       "expected a hidden document to tear the session down exactly like scrolling off screen",
     );
@@ -270,7 +296,7 @@ test("a hidden document behaves like off screen", async () => {
   }
 });
 
-test("an embed feed renders an iframe with mute=1 and no <video>", async () => {
+test("an embed feed renders an iframe with mute=1 and no <video>; off screen removes it", async () => {
   const feed = makeFeed({
     kind: "embed",
     source: { kind: "embed", player: "youtube-channel", ref: "UCabcdefghijklmnopqrstuv" },
@@ -278,22 +304,40 @@ test("an embed feed renders an iframe with mute=1 and no <video>", async () => {
     status: { state: "embed" },
   });
   const g = stubGlobals(makeState([feed]));
+  mock.timers.enable({ apis: ["setTimeout"] });
   try {
     const { container } = render(
       React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }),
     );
-    await settle();
-    await settle();
+    await settleFake();
+    await settleFake();
 
     act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
-    await settle();
-    await settle();
+    await settleFake();
+    await settleFake();
 
+    // Never a DOM node as an assert operand below — node:assert inspects
+    // `actual` to build a failure message, and stringifying a live jsdom
+    // element does not terminate in any useful time (a failing assertion
+    // like that hung this exact suite for 20+ seconds before every query here
+    // was coerced to a boolean first).
     const iframe = container.querySelector("iframe");
     assert.ok(iframe, "expected an iframe for an embed feed");
     assert.ok(iframe?.getAttribute("src")?.includes("mute=1"), "expected the embed src to carry mute=1");
-    assert.equal(container.querySelector("video"), null, "an embed feed must render no <video> element");
+    assert.equal(!!container.querySelector("video"), false, "an embed feed must render no <video> element");
+
+    // An iframe has no on-screen concept of its own: left mounted, it keeps
+    // decoding a YouTube/Resi stream off screen and in a hidden tab.
+    act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+
+    assert.equal(!!container.querySelector("iframe"), false, "expected the iframe removed once off screen past the teardown delay");
   } finally {
+    mock.timers.reset();
     g.restore();
   }
 });
