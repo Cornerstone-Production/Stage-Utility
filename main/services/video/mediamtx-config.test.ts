@@ -58,7 +58,10 @@ describe("relayConfig", () => {
     strictEqual(READER_USER.pass, "");
     deepEqual(READER_USER.ips, ["127.0.0.1", "::1"]);
     strictEqual(READER_USER.permissions.length, 2);
-    deepEqual(READER_USER.permissions[0], { action: "read", path: "*" });
-    deepEqual(READER_USER.permissions[1], { action: "api", path: "*" });
+    // Empty, not "*" — MediaMTX treats "*" as a literal path name (confirmed
+    // against the real v1.21.1 binary, task-13-report.md), which never
+    // matches a real feed id.
+    deepEqual(READER_USER.permissions[0], { action: "read", path: "" });
+    deepEqual(READER_USER.permissions[1], { action: "api", path: "" });
   });
 });

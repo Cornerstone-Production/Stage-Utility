@@ -11,9 +11,15 @@ export const READER_USER: RelayUser = {
   user: "any",
   pass: "",
   ips: ["127.0.0.1", "::1"],
+  // An EMPTY path means "any path" — confirmed against the real v1.21.1
+  // binary (task-13-report.md): `path: "*"` authenticates against the LITERAL
+  // path name "*", which no real feed is ever named, so every WHEP/WHIP read
+  // and HLS request 401'd. The shipped mediamtx.yml says the same thing
+  // ("An empty path means any path") but nothing here had driven a read
+  // through the real binary before Task 13's proxy did.
   permissions: [
-    { action: "read", path: "*" },
-    { action: "api", path: "*" },
+    { action: "read", path: "" },
+    { action: "api", path: "" },
   ],
 };
 
