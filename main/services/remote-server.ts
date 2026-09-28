@@ -8,7 +8,6 @@ import * as fs from "fs/promises";
 import { scrub } from "./scrub.js";
 import * as http from "http";
 import * as net from "net";
-import * as os from "os";
 import * as path from "path";
 import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
@@ -29,6 +28,7 @@ import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./hist
 import { serverPort } from "./server-port.js";
 import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
 import { getUserDataPath } from "./app-paths.js";
+import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { logRoutes } from "./routes/log-routes.js";
@@ -160,19 +160,6 @@ const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function getLanIp(): string {
-  const interfaces = os.networkInterfaces();
-  for (const ifaces of Object.values(interfaces)) {
-    if (!ifaces) continue;
-    for (const iface of ifaces) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return "127.0.0.1";
-}
 
 function cors(res: http.ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
