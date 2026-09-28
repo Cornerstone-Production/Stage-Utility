@@ -84,3 +84,31 @@ test("a non-object body falls back to the existing feed entirely", () => {
   assert.deepEqual(merged.source, EXISTING.source);
   assert.equal(merged.password, undefined);
 });
+
+test("parallel adds of one name get distinct ids", async () => {
+  const body = { name: "Stage cam", source: { kind: "external", url: "http://192.0.2.20/cam/whep" } };
+  const results = await Promise.all([videoService.addFeed(body), videoService.addFeed(body), videoService.addFeed(body)]);
+  const ids = results.map((r) => (r as { ok: true; feed: { id: string } }).feed.id).sort();
+  assert.deepEqual(ids, ["stage-cam", "stage-cam-2", "stage-cam-3"]);
+  const stored = (await videoService.state()).feeds.filter((f) => f.name === "Stage cam").map((f) => f.id).sort();
+  assert.deepEqual(stored, ids, "the store must hold each feed once, under the id its add returned");
+});
+
+test("an add whose password cannot be saved takes the feed back out and rejects", async () => {
+  const store = secretsStore as unknown as { setSecret: (...a: unknown[]) => Promise<void> };
+  store.setSecret = async () => {
+    throw new Error("disk full");
+  };
+  try {
+    await assert.rejects(
+      withAllKinds(() =>
+        videoService.addFeed({ name: "Balcony cam", source: { kind: "pull", url: "rtsp://192.0.2.30/s", username: "" }, password: "pw" }),
+      ),
+      /disk full/,
+    );
+  } finally {
+    delete (store as { setSecret?: unknown }).setSecret;
+  }
+  const names = (await videoService.state()).feeds.map((f) => f.name);
+  assert.equal(names.includes("Balcony cam"), false, "a feed was left in the store with no password behind it");
+});

@@ -135,17 +135,33 @@ class VideoService {
     const parsed = parseFeedInput(body, this.allowedKinds());
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
-    const { feeds } = await loadFeedsFile();
-    const id = feedIdFor(parsed.name, new Set(feeds.map((f) => f.id)));
-    const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
+    // The id is chosen INSIDE the store's queued update, against the list as
+    // it stands at that moment. Chosen from a read taken before it, two adds
+    // of one name in flight together both saw the same list and both took the
+    // same id.
+    let feed: VideoFeed | undefined;
+    await videoFeedsStore.update((current) => {
+      const feeds = feedsOf(current);
+      feed = { id: feedIdFor(parsed.name, new Set(feeds.map((f) => f.id))), name: parsed.name, source: parsed.source };
+      return { ...current, feeds: [...feeds, feed] };
+    });
+    if (!feed) throw new Error("[video] the feed store's update never ran");
+    const added = feed;
 
-    // Before the store write: a feed visible with no password behind it is
-    // worse than a password saved for a feed that never gets created.
-    if (parsed.password) await secretsStore.setSecret(SECRET_SLOT(id), "password", parsed.password);
-
-    await videoFeedsStore.update((current) => ({ ...current, feeds: [...feedsOf(current), feed] }));
+    // The password goes in under the id the update chose. The feed is not
+    // published until it has: a feed visible with no password behind it is
+    // worse than one that never appears, so a failed write takes the feed
+    // back out and the failure goes to the caller.
+    if (parsed.password) {
+      try {
+        await secretsStore.setSecret(SECRET_SLOT(added.id), "password", parsed.password);
+      } catch (err) {
+        await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
+        throw err;
+      }
+    }
     await this.publish();
-    return { ok: true, feed: this.view(feed) };
+    return { ok: true, feed: this.view(added) };
   }
 
   async updateFeed(id: string, body: unknown): Promise<Result> {
