@@ -533,10 +533,10 @@ function PushAddressFields({ feedId }: { feedId: string }) {
             ref={addressRef}
             aria-label="Paste this into the device"
             readOnly
-            className="font-mono text-caption1"
+            className="min-w-0 flex-1 font-mono text-caption1"
             value={data.address}
           />
-          <Button type="button" variant="transparent" size="small" onClick={handleCopy}>
+          <Button type="button" variant="transparent" size="small" className="shrink-0" onClick={handleCopy}>
             Copy
           </Button>
         </div>
@@ -545,8 +545,15 @@ function PushAddressFields({ feedId }: { feedId: string }) {
 
       <StackedField label="Password">
         <div className="flex gap-2">
-          <Input aria-label="Password" readOnly className="font-mono text-caption1" value={data.password} />
-          <Button type="button" variant="transparent" size="small" onClick={() => void handleNewPassword()} disabled={rotating}>
+          <Input aria-label="Password" readOnly className="min-w-0 flex-1 font-mono text-caption1" value={data.password} />
+          <Button
+            type="button"
+            variant="transparent"
+            size="small"
+            className="shrink-0 whitespace-nowrap"
+            onClick={() => void handleNewPassword()}
+            disabled={rotating}
+          >
             {rotating ? "…" : "New password"}
           </Button>
         </div>
