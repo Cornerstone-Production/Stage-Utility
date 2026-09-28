@@ -156,9 +156,11 @@ function VideoObjectBody({
           {/* An OPAQUE cover, never `opacity: 0` on the <video> itself: an
               invisible-but-still-"visible" video may never fire
               requestVideoFrameCallback in every browser, which would time
-              every attempt out before a frame had a chance to arrive. */}
-          {!isEmbed && !showingPicture && (
-            <div className="absolute inset-0" style={{ background: "#0a0a0a" }}>
+              every attempt out before a frame had a chance to arrive. Omitted
+              entirely for "nothing": the mockup's offline-nothing state is
+              transparent over the box, not a covered one with empty content. */}
+          {!isEmbed && !showingPicture && !(phase === "offline" && config.whenOffline === "nothing") && (
+            <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
               {phase === "waiting" && <StateText big="Waiting for the source" small="Nothing is sending to this feed yet" />}
               {phase === "connecting" && <ConnectingBody name={name} />}
               {phase === "offline" && <OfflineBody mode={config.whenOffline ?? "message"} name={name} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />}
@@ -219,13 +221,14 @@ function StateText({ big, small }: { big: string; small: string }) {
 function ConnectingBody({ name }: { name: string }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ gap: 6 }}>
-      {/* Reuses the app's own opacity-pulse keyframe (styles.css) rather than
-          adding an 11th near-identical one for a single dot. */}
+      {/* mockup-v2.html's own `.pulse`/`@keyframes pulse` (1.2s, 0.25 to 1) —
+          not the app's su-history-pulse-dot (1.6s, 1 to 0.4): the mockup is
+          the spec here, and the two read as noticeably different beats. */}
       <span
-        className="su-history-pulse-dot inline-block rounded-full"
+        className="video-connecting-pulse inline-block rounded-full"
         style={{ width: 10, height: 10, background: "rgba(255,255,255,0.45)" }}
       />
-      <span style={{ color: "rgba(255,255,255,0.70)", fontSize: "clamp(10px, 1.4cqw, 13px)" }}>Connecting to {name}</span>
+      <span style={{ color: "rgba(255,255,255,0.45)", fontSize: "clamp(10px, 1.4cqw, 13px)" }}>Connecting to {name}</span>
     </div>
   );
 }
@@ -242,7 +245,9 @@ function OfflineBody({
   appLogoMonochrome: boolean;
 }) {
   if (mode === "nothing") return null;
-  if (mode === "logo") {
+  // R-T5f: "logo" with no app logo configured has nothing to draw — falls
+  // through to the message state rather than an empty covered box.
+  if (mode === "logo" && appLogo) {
     return (
       <div className="absolute inset-0 flex items-center justify-center">
         <BrandLogo logo={appLogo} monochrome={appLogoMonochrome} style={{ width: "22%", aspectRatio: "1", color: "white" }} />
@@ -260,7 +265,10 @@ function PreviewPausedBody({ name, onPlay }: { name: string; onPlay: () => void 
   return (
     <div
       className="absolute inset-0 flex items-center justify-center"
-      style={{ background: "repeating-linear-gradient(135deg, #161616 0 10px, #1c1c1c 10px 20px)" }}
+      style={{
+        background: "repeating-linear-gradient(135deg, #161616 0 10px, #1c1c1c 10px 20px)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
     >
       <div className="flex flex-col items-center" style={{ gap: 6, color: "rgba(255,255,255,0.7)" }}>
         <span style={{ fontSize: "clamp(10px, 1.4cqw, 13px)" }}>{name}</span>

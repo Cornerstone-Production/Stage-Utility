@@ -368,3 +368,23 @@ test("a render error inside the player shows the can't-play state, and a sibling
     g.restore();
   }
 });
+
+test("whenOffline: logo with no app logo configured shows the message state — R-T5f", async () => {
+  const feed = makeFeed({ status: { state: "offline" } });
+  const g = stubGlobals(makeState([feed]));
+  try {
+    render(
+      React.createElement(VideoObject, {
+        ...makeObject({ whenOffline: "logo" }),
+        appLogo: null,
+        appLogoMonochrome: false,
+      }),
+    );
+    await settle();
+    await settle();
+
+    assert.equal(!!screen.queryByText(`${feed.name} is offline`), true, "expected the message state with no logo to draw from");
+  } finally {
+    g.restore();
+  }
+});
