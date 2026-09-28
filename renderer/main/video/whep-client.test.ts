@@ -1,8 +1,9 @@
 // renderer/main/video/whep-client.test.ts — a fake RTCPeerConnection and a fake
 // fetch on globalThis (assigned per test), no jsdom: nothing here touches the
 // DOM beyond a plain object standing in for the <video> element. Most tests
-// never fire `ontrack` at all; the two that do (Minor 8, below) fire it
-// directly rather than through a real MediaStream/track dispatch.
+// never fire `ontrack` at all; the two that do (a superseded attempt's late
+// track, below) fire it directly rather than through a real MediaStream/track
+// dispatch.
 
 import { strict as assert } from "node:assert";
 import { afterEach, test } from "node:test";
@@ -12,7 +13,7 @@ import { startWhep } from "./whep-client.js";
 // window.location.href resolves a RELATIVE `url` argument into an absolute
 // WHEP endpoint (an absolute `url`, e.g. an external feed's, is untouched by
 // this) — not, any longer, where a Location header resolves; that is against
-// the endpoint itself now (Important 8, see whep-client.ts's deleteSession).
+// the endpoint itself now (see whep-client.ts's deleteSession).
 (globalThis as unknown as { window: unknown }).window = { location: { href: "http://localhost:8788/" } };
 
 class FakePeerConnection {
@@ -87,7 +88,7 @@ test("a 404 closes the peer connection and rejects", async () => {
   assert.equal(pc?.closed, true, "expected the peer connection to be closed on a non-201 response");
 });
 
-test("an absolute, cross-origin endpoint's relative Location resolves against THAT origin, not the page's — Important 8", async () => {
+test("an absolute, cross-origin endpoint's relative Location resolves against THAT origin, not the page's", async () => {
   stubPeerConnection();
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
@@ -116,7 +117,7 @@ test("an absolute, cross-origin endpoint's relative Location resolves against TH
   assert.equal(url.pathname, "/whep/9f8e7d6c");
 });
 
-test("a 201 whose answer cannot be read closes the peer connection, DELETEs the session, and rethrows — Minor 7", async () => {
+test("a 201 whose answer cannot be read closes the peer connection, DELETEs the session, and rethrows", async () => {
   stubPeerConnection();
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
@@ -142,7 +143,7 @@ test("a 201 whose answer cannot be read closes the peer connection, DELETEs the 
   assert.ok(del, "expected the relay told to drop the session the 201 already created, not left to leak until its own timeout");
 });
 
-// ── Minor 8: a superseded attempt's late track ──────────────────────────────
+// ── a superseded attempt's late track ────────────────────────────────────
 //
 // A separate, minimal FakePeerConnection: these two tests need to fire
 // `ontrack` from INSIDE `setRemoteDescription`, to reproduce the real window
@@ -193,7 +194,7 @@ function stubFetchFor(path: string) {
   }) as typeof fetch;
 }
 
-test("a normal ontrack after stop() does not touch srcObject — Minor 8", async () => {
+test("a normal ontrack after stop() does not touch srcObject", async () => {
   (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePcWithTrackHook;
   onSetRemoteDescription = null;
   stubFetchFor("/v/whep/x");
@@ -208,7 +209,7 @@ test("a normal ontrack after stop() does not touch srcObject — Minor 8", async
   assert.equal(video.srcObject, null, "a track delivered after stop() must not set srcObject");
 });
 
-test("a session aborted while setRemoteDescription is in flight must not let its late track overwrite the replacement's stream — Minor 8", async () => {
+test("a session aborted while setRemoteDescription is in flight must not let its late track overwrite the replacement's stream", async () => {
   (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = FakePcWithTrackHook;
   stubFetchFor("/v/whep/x");
   const video = { srcObject: null as unknown } as unknown as HTMLVideoElement;

@@ -23,7 +23,7 @@ import { startHls, type HlsSession } from "./hls-player";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
 
 /**
- * R-T5d: a relay feed's WHEP answer in this set means the encoder cannot be
+ * A relay feed's WHEP answer in this set means the encoder cannot be
  * carried over WebRTC AT ALL (an unsupported codec/profile, a malformed
  * offer this relay's build rejects) — a verdict about the STREAM, not the
  * network, so it falls back to HLS. Everything else (404 while a push feed's
@@ -84,6 +84,10 @@ function stopActiveSession(session: ActiveSession | null): void {
   else session.s.stop();
 }
 
+export type PlaybackAttemptChoice =
+  | { method: "webrtc"; url: string; relayManaged: boolean }
+  | { method: "hls"; url: string };
+
 /**
  * One attempt at playing `choice` into `video`. Every exit path — a frame
  * timeout, a connect timeout, a mid-stream drop, an hls.js fatal error, the
@@ -93,10 +97,6 @@ function stopActiveSession(session: ActiveSession | null): void {
  * already-stopped session (no double DELETE) and can never report a second,
  * contradictory outcome.
  */
-export type PlaybackAttemptChoice =
-  | { method: "webrtc"; url: string; relayManaged: boolean }
-  | { method: "hls"; url: string };
-
 export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAttemptChoice, cb: AttemptCallbacks): PlaybackAttempt {
   const controller = new AbortController();
   let ended = false;
@@ -132,7 +132,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
     const s = session;
     session = null;
     stopActiveSession(s);
-    // R-T5e: a non-null srcObject takes precedence over `src` on a <video>
+    // A non-null srcObject takes precedence over `src` on a <video>
     // element, so leaving a WebRTC attempt's MediaStream attached after it
     // ends would play that dead stream's last frame forever instead of the
     // HLS fallback about to attach via `src`.
@@ -250,7 +250,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
       })
       .catch((err: unknown) => {
         if (ended) return;
-        // R-T5d: a relay feed's WHEP answer refusing the offer outright
+        // A relay feed's WHEP answer refusing the offer outright
         // (400/406/415/422) is a verdict about the STREAM — this encoder
         // cannot be carried over WebRTC at all — so it falls back to HLS
         // like any other webrtc-unusable verdict. An external feed's
@@ -265,7 +265,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
       });
   } else {
     cb.onPhase("connecting");
-    video.srcObject = null; // R-T5e: a non-null srcObject takes precedence over `src` in the element
+    video.srcObject = null; // a non-null srcObject takes precedence over `src` in the element
     startHls(choice.url, video, {
       onFatal: (why) => {
         if (!ended) onDroppedAfterFrame(`hls.js: ${why}`);

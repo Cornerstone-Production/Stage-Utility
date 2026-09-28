@@ -369,7 +369,7 @@ test("a render error inside the player shows the can't-play state, and a sibling
   }
 });
 
-test("whenOffline: logo with no app logo configured shows the message state — R-T5f", async () => {
+test("whenOffline: logo with no app logo configured shows the message state", async () => {
   const feed = makeFeed({ status: { state: "offline" } });
   const g = stubGlobals(makeState([feed]));
   try {

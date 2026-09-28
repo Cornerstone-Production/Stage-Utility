@@ -244,9 +244,10 @@ function OfflineBody({
   appLogo: string | null;
   appLogoMonochrome: boolean;
 }) {
-  if (mode === "nothing") return null;
-  // R-T5f: "logo" with no app logo configured has nothing to draw — falls
-  // through to the message state rather than an empty covered box.
+  // "logo" with no app logo configured has nothing to draw — falls through
+  // to the message state rather than an empty covered box. "nothing" never
+  // reaches here at all: the caller skips the covering wrapper entirely for
+  // that mode, so the offline state is genuinely transparent over the video.
   if (mode === "logo" && appLogo) {
     return (
       <div className="absolute inset-0 flex items-center justify-center">

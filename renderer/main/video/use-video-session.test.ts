@@ -1,6 +1,6 @@
 // renderer/main/video/use-video-session.test.ts — startPlaybackAttempt's state
-// machine, driven directly with a fake RTCPeerConnection dispatching real
-// `connectionstatechange`/`error` events (it extends the real EventTarget, so
+// machine, driven directly with a fake RTCPeerConnection dispatching a real
+// `connectionstatechange` event (it extends the real EventTarget, so
 // `{ signal }` listener removal is the real thing, not a simulation of it), a
 // fake <video> handing back a stored requestVideoFrameCallback, and
 // node:test's fake timers for the connect, first-frame, drop-grace and
@@ -108,7 +108,7 @@ type FetchBehavior = "succeed" | "reject" | "hang" | { status: number };
  *  unless the test settles them) — for proving a hung POST is bounded by the
  *  connect timeout rather than left open forever. `getHangingSignal()` is for
  *  proving the connect timeout actually ABORTS the hung request's own
- *  signal, not merely its own app-level callback (Minor 6). */
+ *  signal, not merely its own app-level callback. */
 function stubFetch(behavior: FetchBehavior) {
   const calls: { method: string; url: string }[] = [];
   let hangingSignal: AbortSignal | undefined;
@@ -242,7 +242,7 @@ test("never connects: the post-handshake connect timeout is webrtc-unusable, not
   }
 });
 
-test("a POST that never gets a reply is dropped (retried), never marked webrtc-unusable — Important 1", async () => {
+test("a POST that never gets a reply is dropped (retried), never marked webrtc-unusable", async () => {
   const g = stubGlobals("hang");
   mock.timers.enable({ apis: ["setTimeout"] });
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
@@ -266,7 +266,7 @@ test("a POST that never gets a reply is dropped (retried), never marked webrtc-u
   }
 });
 
-test("a POST that rejects immediately is dropped (retried) with the real error, not webrtc-unusable — Important 1", async () => {
+test("a POST that rejects immediately is dropped (retried) with the real error, not webrtc-unusable", async () => {
   const g = stubGlobals("reject");
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
@@ -283,7 +283,7 @@ test("a POST that rejects immediately is dropped (retried) with the real error, 
   }
 });
 
-test("disconnected then failed, then a full recovery before the grace period: no spurious drop — Important 5", async () => {
+test("disconnected then failed, then a full recovery before the grace period: no spurious drop", async () => {
   // A guard against exactly ONE onDropped firing (disconnected -> failed
   // scheduling a SECOND drop timer without clearing the first) is not
   // provable this way: the outer `ended` latch already swallows a second
@@ -353,9 +353,9 @@ test("stop() ends the attempt cleanly: exactly one DELETE, no further callbacks"
   }
 });
 
-// ── R-T5d: relay refusals fall back to HLS; everything else retries ───────
+// ── a relay feed's refusal falls back to HLS; everything else retries ────
 
-test("a relay feed's WHEP refusal (415) is webrtc-unusable — falls back to HLS — R-T5d", async () => {
+test("a relay feed's WHEP refusal (415) is webrtc-unusable — falls back to HLS", async () => {
   const g = stubGlobals({ status: 415 });
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
@@ -373,7 +373,7 @@ test("a relay feed's WHEP refusal (415) is webrtc-unusable — falls back to HLS
   }
 });
 
-test("a relay feed's WHEP 404 retries — a waiting push feed answers 404 until something sends — R-T5d", async () => {
+test("a relay feed's WHEP 404 retries — a waiting push feed answers 404 until something sends", async () => {
   const g = stubGlobals({ status: 404 });
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
@@ -387,7 +387,7 @@ test("a relay feed's WHEP 404 retries — a waiting push feed answers 404 until 
   }
 });
 
-test("an external WHEP feed's 415 still retries — it has no HLS to fall back to — R-T5d", async () => {
+test("an external WHEP feed's 415 still retries — it has no HLS to fall back to", async () => {
   const g = stubGlobals({ status: 415 });
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
@@ -405,9 +405,9 @@ test("an external WHEP feed's 415 still retries — it has no HLS to fall back t
   }
 });
 
-// ── R-T5e: srcObject is cleared, never left dangling for HLS to inherit ────
+// ── srcObject is cleared, never left dangling for HLS to inherit ─────────
 
-test("srcObject is cleared once a WebRTC attempt ends, and again before HLS starts — R-T5e", async () => {
+test("srcObject is cleared once a WebRTC attempt ends", async () => {
   const g = stubGlobals({ status: 415 }); // relay refusal -> webrtc-unusable -> the hook would retry via HLS
   const raw = new FakeVideo();
   const untyped = raw as unknown as { srcObject: unknown };
@@ -427,32 +427,37 @@ test("srcObject is cleared once a WebRTC attempt ends, and again before HLS star
 test("srcObject is cleared before an HLS attempt starts, even if something set it since", async () => {
   const g = stubGlobals("succeed");
   const raw = new FakeVideo();
-  const untyped = raw as unknown as { srcObject: unknown; canPlayType: () => string };
+  const untyped = raw as unknown as {
+    srcObject: unknown;
+    canPlayType: () => string;
+    removeAttribute: (name: string) => void;
+    load: () => void;
+  };
   const video = raw as unknown as HTMLVideoElement & FakeVideo;
   const { cb } = makeCallbacks();
+  let attempt: ReturnType<typeof startPlaybackAttempt> | undefined;
   try {
     untyped.srcObject = "leftover-from-a-webrtc-attempt";
-    // startHls's native branch needs `canPlayType`; absent here, it takes the
-    // hls.js branch instead — set to "" for the same reason FakeVideo omits
-    // requestVideoFrameCallback in some tests: forcing a specific code path.
-    untyped.canPlayType = () => "";
-    const attempt = startPlaybackAttempt(video, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    // "maybe"/"probably" takes startHls's NATIVE branch (`video.src = url`):
+    // real hls.js is never imported, so there is no internal Hls instance
+    // left running past this test that a cleanup would need to reach for.
+    // An ABSENT canPlayType is a different case entirely — it throws, since
+    // startHls calls it unconditionally.
+    untyped.canPlayType = () => "maybe";
+    untyped.removeAttribute = () => {};
+    untyped.load = () => {};
+    attempt = startPlaybackAttempt(video, { method: "hls", url: "/video/p/index.m3u8" }, cb);
     await flush();
     assert.equal(untyped.srcObject, null, "expected srcObject cleared before HLS attaches — a non-null one takes precedence over `src`");
-    // hls.js schedules its own internal timers once attached; left running
-    // past this test, one touches `self` after this FILE's own jsdom
-    // teardown, surfacing as an uncaught exception on a LATER, unrelated
-    // test. destroy()ing it here is what a real widget's unmount does too.
-    attempt.stop();
-    await flush();
   } finally {
+    attempt?.stop();
     g.restore();
   }
 });
 
-// ── Minor 6: the connect timeout must abort the underlying fetch itself ────
+// ── the connect timeout must abort the underlying fetch itself ───────────
 
-test("the connect timeout aborts the hung POST's own signal, not only its app-level callback — Minor 6", async () => {
+test("the connect timeout aborts the hung POST's own signal, not only its app-level callback", async () => {
   const g = stubGlobals("hang");
   mock.timers.enable({ apis: ["setTimeout"] });
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
@@ -473,13 +478,13 @@ test("the connect timeout aborts the hung POST's own signal, not only its app-le
   }
 });
 
-// ── Important 4 / R-T5a: the backoff counter resets on a first frame ───────
+// ── the backoff counter resets on a first frame ──────────────────────────
 //
 // Only provable through `useVideoSession` itself — the backoff EXPONENT is
 // held in the hook's own `attemptCountRef`, across repeated calls to
 // `startPlaybackAttempt`, which a test of that function alone cannot see.
 
-test("the backoff counter resets after a first frame, not just after the FIRST drop — Important 4", async () => {
+test("the backoff counter resets after a first frame, not just after the FIRST drop", async () => {
   const g = stubGlobals("succeed");
   mock.timers.enable({ apis: ["setTimeout"] });
   const logs: string[] = [];
@@ -536,3 +541,4 @@ test("the backoff counter resets after a first frame, not just after the FIRST d
     g.restore();
   }
 });
+

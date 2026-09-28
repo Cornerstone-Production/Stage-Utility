@@ -13,7 +13,8 @@ export interface WhepSession {
 /** A non-201 answer, carrying the status so a caller can tell "this relay
  *  feed's encoder cannot be carried over WebRTC at all" (400/406/415/422 —
  *  fall back to HLS) from "try again" (404 while a push feed's source has
- *  not connected yet, or a 5xx) — see R-T5d in use-video-session.ts. */
+ *  not connected yet, or a 5xx) — see use-video-session.ts's
+ *  RELAY_WEBRTC_REFUSAL_STATUSES. */
 export class WhepError extends Error {
   readonly status: number;
   constructor(status: number) {
