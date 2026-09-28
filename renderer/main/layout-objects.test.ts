@@ -388,6 +388,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // `notes` already claims to sit directly after `action-button`, and that claim
   // is a pinned fact about what shipped.
   { type: "cue-button", label: "Cue button", group: "Control", after: "checklist" },
+  // The Video feeds page's own widget: a live camera or program feed, named by
+  // id. Sits after the logo, the last of the plain Layout media types.
+  { type: "video", label: "Video", group: "Layout", after: "brand-logo" },
 ];
 
 /**

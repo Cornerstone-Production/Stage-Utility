@@ -1,0 +1,173 @@
+// The Video widget's inspector section: Feed, Fit, Show feed name and When
+// offline — the four settings the mockup's Layout editor tab shows.
+//
+// Driven through the real VideoConfig component with a stubbed fetch, not
+// reasoned about: a control that renders is not a control that patches the
+// right field, and the whole reason this file exists is a Fit toggle whose
+// onChange writes the wrong key or nothing at all.
+
+import { strict as assert } from "node:assert";
+import { after, afterEach, describe, test } from "node:test";
+
+import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
+
+const teardown = installRenderDom();
+
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const React = await import("react");
+const { VideoConfig } = await import("./inspector.js");
+const { TooltipProvider } = await import("../components/ui/index.js");
+
+after(() => unmountAndTeardown(cleanup, teardown));
+afterEach(() => cleanup());
+
+type Config = Extract<LayoutObjectConfig, { type: "video" }>;
+
+const DEFAULT_CONFIG: Config = {
+  type: "video",
+  feedId: null,
+  fit: "contain",
+  showLabel: true,
+  whenOffline: "message",
+};
+
+const FEEDS_STATE = {
+  rev: 1,
+  relay: { state: "off" as const },
+  kinds: ["pull", "push", "embed", "external"],
+  feeds: [
+    { id: "program", name: "Program (IMAG)", kind: "pull", sourceLine: "rtsp://10.0.40.21:8554/stream2", source: { kind: "pull", url: "rtsp://10.0.40.21:8554/stream2", username: "" }, play: { via: "relay", whep: "/whep/program", hls: "/hls/program" }, status: { state: "live" } },
+    { id: "lobby", name: "Lobby cam", kind: "pull", sourceLine: "rtsp://10.0.40.22:8554/stream1", source: { kind: "pull", url: "rtsp://10.0.40.22:8554/stream1", username: "" }, play: { via: "relay", whep: "/whep/lobby", hls: "/hls/lobby" }, status: { state: "offline" } },
+  ],
+};
+
+/** Stubs /api/video/state; everything else is an empty 200. */
+function stubVideoState() {
+  return stubFetchWithLog((url) => (url.includes("/api/video/state") ? ok(FEEDS_STATE) : ok({})));
+}
+
+async function mount(config: Config, onConfig: (c: LayoutObjectConfig) => void) {
+  const utils = render(
+    React.createElement(
+      TooltipProvider,
+      null,
+      React.createElement(VideoConfig, { c: config, onConfig }),
+    ),
+  );
+  await settle();
+  await settle();
+  return utils;
+}
+
+describe("VideoConfig — Feed", () => {
+  test("offers 'Choose a feed' plus every feed from video:state", async () => {
+    const f = stubVideoState();
+    try {
+      const { container } = await mount(DEFAULT_CONFIG, () => {});
+      const selects = container.querySelectorAll("select");
+      const feedSelect = selects[0];
+      const optionLabels = [...feedSelect.querySelectorAll("option")].map((o) => o.textContent);
+      assert.deepEqual(optionLabels, ["Choose a feed", "Program (IMAG)", "Lobby cam"]);
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("a stored feed id shows that feed selected once the read lands", async () => {
+    const f = stubVideoState();
+    try {
+      const { container } = await mount({ ...DEFAULT_CONFIG, feedId: "lobby" }, () => {});
+      const feedSelect = container.querySelectorAll("select")[0] as HTMLSelectElement;
+      assert.equal(feedSelect.value, "lobby");
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("picking a feed patches feedId and nothing else", async () => {
+    const f = stubVideoState();
+    try {
+      let patched: LayoutObjectConfig | null = null;
+      const { container } = await mount(DEFAULT_CONFIG, (c) => { patched = c; });
+      const feedSelect = container.querySelectorAll("select")[0] as HTMLSelectElement;
+      fireEvent.change(feedSelect, { target: { value: "program" } });
+      assert.deepEqual(patched, { ...DEFAULT_CONFIG, feedId: "program" });
+    } finally {
+      f.restore();
+    }
+  });
+});
+
+describe("VideoConfig — Fit", () => {
+  // THE guard this file exists for. Break the toggle's onChange (comment out
+  // the RED case below) and this must go red — see the commit body for the
+  // failing message observed in this session.
+  test("clicking 'Fill the box' patches exactly { fit: \"cover\" }", async () => {
+    const f = stubVideoState();
+    try {
+      let patched: LayoutObjectConfig | null = null;
+      const { getByRole } = await mount(DEFAULT_CONFIG, (c) => { patched = c; });
+      fireEvent.click(getByRole("button", { name: "Fill the box" }));
+      assert.deepEqual(patched, { ...DEFAULT_CONFIG, fit: "cover" });
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("clicking 'Fit whole picture' patches back to contain", async () => {
+    const f = stubVideoState();
+    try {
+      let patched: LayoutObjectConfig | null = null;
+      const { getByRole } = await mount({ ...DEFAULT_CONFIG, fit: "cover" }, (c) => { patched = c; });
+      fireEvent.click(getByRole("button", { name: "Fit whole picture" }));
+      assert.deepEqual(patched, { ...DEFAULT_CONFIG, fit: "contain" });
+    } finally {
+      f.restore();
+    }
+  });
+});
+
+describe("VideoConfig — Show feed name", () => {
+  test("defaults on, and toggling off patches showLabel: false only", async () => {
+    const f = stubVideoState();
+    try {
+      let patched: LayoutObjectConfig | null = null;
+      const { getByRole } = await mount(DEFAULT_CONFIG, (c) => { patched = c; });
+      const sw = getByRole("switch");
+      assert.equal(sw.getAttribute("aria-checked"), "true");
+      fireEvent.click(sw);
+      assert.deepEqual(patched, { ...DEFAULT_CONFIG, showLabel: false });
+    } finally {
+      f.restore();
+    }
+  });
+});
+
+describe("VideoConfig — When the feed is offline", () => {
+  test("defaults to 'Say it is offline', and picking 'Show nothing' patches whenOffline only", async () => {
+    const f = stubVideoState();
+    try {
+      let patched: LayoutObjectConfig | null = null;
+      const { container } = await mount(DEFAULT_CONFIG, (c) => { patched = c; });
+      const offlineSelect = container.querySelectorAll("select")[1] as HTMLSelectElement;
+      assert.equal(offlineSelect.value, "message");
+      fireEvent.change(offlineSelect, { target: { value: "nothing" } });
+      assert.deepEqual(patched, { ...DEFAULT_CONFIG, whenOffline: "nothing" });
+    } finally {
+      f.restore();
+    }
+  });
+});
+
+describe("VideoConfig — the callout", () => {
+  test("always says muted, no controls, and where a struggling screen reports", async () => {
+    const f = stubVideoState();
+    try {
+      const { getByText } = await mount(DEFAULT_CONFIG, () => {});
+      assert.ok(getByText(/Always muted, with no controls/));
+    } finally {
+      f.restore();
+    }
+  });
+});

@@ -64,6 +64,7 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
+import { useVideoState } from "../main/video/use-video-state";
 import { gameOptions } from "../main/scores-object";
 import { STREAMER_FOR, sourceOptions } from "../app/recording-status";
 import { formatClock } from "../lib/clock-format";
@@ -331,6 +332,60 @@ export function RossTalkButtonConfig({
         ),
       )}
       <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+    </>
+  );
+}
+
+/**
+ * Inspector controls for the Video widget: which feed, how it fits the box,
+ * whether its name shows, and what to do while it is offline.
+ *
+ * Reads the feed list itself, via useVideoState — so it is fetched only while a
+ * Video object is the one being edited, the same reason the server only polls
+ * the relay while something is watching (see
+ * renderer/main/video/use-video-state.ts). Exported for video-inspector.test.tsx.
+ */
+export function VideoConfig({
+  c,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "video" }>;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  const video = useVideoState();
+  const feeds = video?.feeds ?? [];
+  return (
+    <>
+      <RowSelect
+        label="Feed"
+        hint="Feeds are set up once on the Video feeds page. Change a feed there and every layout using it follows."
+        value={c.feedId ?? ""}
+        options={[{ value: "", label: "Choose a feed" }, ...feeds.map((f) => ({ value: f.id, label: f.name }))]}
+        onChange={(v) => onConfig({ ...c, feedId: v || null })}
+      />
+      <RowToggle
+        label="Fit"
+        value={c.fit ?? "contain"}
+        options={[
+          { value: "contain", label: "Fit whole picture" },
+          { value: "cover", label: "Fill the box" },
+        ]}
+        onChange={(v) => onConfig({ ...c, fit: v })}
+      />
+      <RowSwitch label="Show feed name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+      <RowSelect
+        label="When the feed is offline"
+        value={c.whenOffline ?? "message"}
+        options={[
+          { value: "message", label: "Say it is offline" },
+          { value: "logo", label: "Show the logo" },
+          { value: "nothing", label: "Show nothing" },
+        ]}
+        onChange={(v) => onConfig({ ...c, whenOffline: v as "message" | "logo" | "nothing" })}
+      />
+      <p className="text-caption2 text-fg-muted leading-snug">
+        Always muted, with no controls. A screen that can't keep up reports it on the Screens page.
+      </p>
     </>
   );
 }
@@ -691,7 +746,7 @@ export function Inspector({
   // canvas), so embedding it would draw four cards stacked at whatever filler
   // coordinates happen to be in the file.
   const embedViews = screensListViews(stageState?.views ?? []);
-  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
+  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid", "video"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
   const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
@@ -918,6 +973,7 @@ export function Inspector({
           onChange={(v) => onConfig({ ...c, showStatus: v })}
         />
       )}
+      {c.type === "video" && <VideoConfig c={c} onConfig={onConfig} />}
       {c.type === "service-order" && (
         <>
           <RowToggle

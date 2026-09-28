@@ -101,6 +101,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "slots-grid": ["readout"],
   text: ["readout"],
   "transcript-strip": ["readout"],
+  video: ["readout"],
   "view-embed": ["readout"],
   "wireless-summary": ["readout"],
   // Home's cards. Readouts on a wall, and on the shell they drill through to

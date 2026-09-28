@@ -519,8 +519,16 @@ once changes every screen. See [Layout editor](layout-editor.md) for containers.
 | Widget | What it shows | Source |
 |---|---|---|
 | **NDI video** | An NDI source from the network | NDI |
+| **Video** | A live camera or program feed, chosen by id | The Video feeds page (the relay) |
 
 NDI needs the native client. The web build ignores this widget.
+
+**Video** points at a feed set up once on the Video feeds page under Screens —
+renaming a feed there does not break a widget bound to it, since the binding is
+the feed's id, not its name. Always muted, with no controls. **Fit** chooses
+between showing the whole picture and filling the box; **Show feed name** draws
+its name over the picture; **When the feed is offline** picks between a message,
+your logo, or nothing at all.
 
 ---
 

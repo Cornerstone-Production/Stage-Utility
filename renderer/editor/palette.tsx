@@ -37,6 +37,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   shape: SquareIcon,
   image: ImageIcon,
   "brand-logo": SparklesIcon,
+  video: VideoIcon,
   text: TypeIcon,
   clock: ClockIcon,
   "countdown-timer": TimerIcon,

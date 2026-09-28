@@ -977,6 +977,16 @@ export type LayoutObjectConfig =
        *  while it is unrouted or blacked out. Absent = on. */
       showStatus?: boolean;
     }
+  // A live video feed from the Video feeds page, by id. Always muted, no
+  // controls. Absent fit = "contain", absent showLabel = on, absent whenOffline
+  // = "message".
+  | {
+      type: "video";
+      feedId: string | null;
+      fit?: "contain" | "cover";
+      showLabel?: boolean;
+      whenOffline?: "message" | "logo" | "nothing";
+    }
   | { type: "container" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];

@@ -307,6 +307,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: BARE,
     homeSize: "s",
   },
+  video: {
+    label: "Video",
+    blurb: "A live camera or program feed",
+    group: "Layout",
+    config: () => ({ type: "video", feedId: null, fit: "contain", showLabel: true, whenOffline: "message" }),
+    style: BARE,
+    homeSize: "l",
+  },
 
   // Text & time
   text: {

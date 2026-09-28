@@ -69,6 +69,7 @@ export const LAYOUT_OBJECT_TYPES = [
   "stream-status",
   "text",
   "transcript-strip",
+  "video",
   "view-embed",
   "wireless-channel",
   "wireless-summary",

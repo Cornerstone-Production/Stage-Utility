@@ -501,7 +501,6 @@ describe("IPC channel wiring", () => {
       ["video:addFeed", "the Video feeds page that calls this ships in a later task of the video-feeds plan; the route and channel land first"],
       ["video:feedUsage", "same as video:addFeed — its caller is the Video feeds page, not yet built"],
       ["video:removeFeed", "same as video:addFeed — its caller is the Video feeds page, not yet built"],
-      ["video:state", "same as video:addFeed — its caller is the Video widget and the Video feeds page, not yet built"],
       ["video:updateFeed", "same as video:addFeed — its caller is the Video feeds page, not yet built"],
       ["views:reorder", "manual view ordering came out with the settings window; the route stays as the documented POST /api/views/reorder"],
       ["window:closeSettings", "Escape closed the settings WINDOW; Settings is routes inside the app now, so there is nothing to close to"],
