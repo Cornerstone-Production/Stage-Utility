@@ -14,7 +14,7 @@ import { after, afterEach, mock, test } from "node:test";
 
 import type { VideoFeedView } from "@main/types/video";
 import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
-import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
+import { FAKE_SDP, FakePeerConnection, installFakePeerConnection, NodeEvent } from "../../test-fixtures/fake-peer-connection.js";
 
 const teardown = installRenderDom();
 
@@ -25,6 +25,7 @@ import {
   RETRY_MIN_MS,
   startPlaybackAttempt,
   useVideoSession,
+  WEBRTC_RETRY_AFTER_MS,
 } from "./use-video-session.js";
 const { renderHook, act, cleanup } = await import("@testing-library/react");
 
@@ -58,6 +59,21 @@ class FakeVideo extends EventTarget {
   fireFrame(): void {
     this.frameCb?.();
   }
+  /** Simulates the element's own `error` event. */
+  fireError(): void {
+    this.dispatchEvent(new NodeEvent("error"));
+  }
+  // What startHls's native branch touches (Node has no MediaSource, so an HLS
+  // attempt here always takes it).
+  src = "";
+  srcObject: unknown = null;
+  canPlayType(): string {
+    return "maybe";
+  }
+  removeAttribute(name: string): void {
+    if (name === "src") this.src = "";
+  }
+  load(): void {}
 }
 
 type FetchBehavior = "succeed" | "reject" | "hang" | { status: number };
@@ -650,6 +666,159 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
       "an external feed's health cannot be reported, so a refusal there must not be treated as a stream verdict",
     );
   } finally {
+    g.restore();
+  }
+});
+
+// ── an external feed always retries; a relay feed's WebRTC verdict expires ──
+//
+// An external WHEP feed has no HLS to fall back to, so a "WebRTC unusable"
+// verdict for it used to leave the widget on "This screen can't play video"
+// until the page reloaded — even once the endpoint was healthy again. Every
+// such verdict for a non-relay feed is a retry with backoff instead. A relay
+// feed does fall back to HLS, and that verdict is not forever either: after
+// WEBRTC_RETRY_AFTER_MS on HLS it tries WebRTC again.
+
+const EXTERNAL_WHEP: VideoFeedView = {
+  id: "cam",
+  name: "Cam",
+  kind: "external",
+  sourceLine: "",
+  source: { kind: "external", url: "http://h/cam/whep" },
+  play: { via: "external", url: "http://h/cam/whep", protocol: "whep" },
+  status: { state: null },
+};
+
+/** Each way startPlaybackAttempt can decide WebRTC is unusable, driven to
+ *  the point of that decision. */
+const UNUSABLE_PATHS: { name: string; drive: (pc: FakePeerConnection, video: FakeVideo) => void }[] = [
+  { name: "the post-handshake connect timer", drive: () => mock.timers.tick(CONNECT_TIMEOUT_MS) },
+  {
+    name: "connected, but no frame in time",
+    drive: (pc) => {
+      pc.setConnectionState("connected");
+      mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    },
+  },
+  { name: "failed before it ever connected", drive: (pc) => pc.setConnectionState("failed") },
+  {
+    name: "connected, then failed before a frame",
+    drive: (pc) => {
+      pc.setConnectionState("connected");
+      pc.setConnectionState("failed");
+    },
+  },
+  { name: "the <video> element's error before a frame", drive: (_pc, video) => video.fireError() },
+];
+
+for (const path of UNUSABLE_PATHS) {
+  test(`an external WHEP feed retries, never "webrtc unusable": ${path.name}`, async () => {
+    const g = stubGlobals("succeed");
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const video = new FakeVideo();
+    const { calls, cb } = makeCallbacks();
+    try {
+      startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "http://h/cam/whep", relayManaged: false }, cb);
+      await flush();
+      path.drive(FakePeerConnection.instances[0]!, video);
+      await flush();
+      assert.deepEqual(calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn), ["onDropped"]);
+    } finally {
+      mock.timers.reset();
+      g.restore();
+    }
+  });
+
+  test(`a relay feed still falls back to HLS: ${path.name}`, async () => {
+    const g = stubGlobals("succeed");
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const video = new FakeVideo();
+    const { calls, cb } = makeCallbacks();
+    try {
+      startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+      await flush();
+      path.drive(FakePeerConnection.instances[0]!, video);
+      await flush();
+      assert.deepEqual(calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn), ["onWebrtcUnusable"]);
+    } finally {
+      mock.timers.reset();
+      g.restore();
+    }
+  });
+}
+
+test("through the hook: an external WHEP feed that never connects shows Offline and retries, never can't-play", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo();
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    act(() => {
+      mock.timers.tick(CONNECT_TIMEOUT_MS);
+    });
+    assert.equal(result.current.phase, "offline", "an external feed with no fallback must wait to retry, not give up");
+
+    await act(async () => {
+      mock.timers.tick(RETRY_MIN_MS);
+      await flush();
+    });
+    const posts = g.calls.filter((c) => c.method === "POST");
+    assert.equal(posts.length, 2, "expected a second WHEP attempt after the backoff");
+    assert.equal(result.current.phase, "connecting");
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a relay feed on HLS after a WebRTC refusal tries WebRTC again after WEBRTC_RETRY_AFTER_MS", async () => {
+  const g = stubGlobals({ status: 415 });
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo();
+  const feed: VideoFeedView = {
+    id: "f",
+    name: "F",
+    kind: "pull",
+    sourceLine: "",
+    source: { kind: "pull", url: "rtsp://x", username: "" },
+    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
+    status: { state: "live" },
+  };
+  const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
+  // browserCaps() asks a jsdom <video>, which plays no HLS, and Node has no
+  // MediaSource: without this the fallback is "can't play", not HLS.
+  const proto = Object.getPrototypeOf(document.createElement("video")) as { canPlayType: (t: string) => string };
+  const realCanPlayType = proto.canPlayType;
+  proto.canPlayType = () => "maybe";
+  try {
+    renderHook(() =>
+      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(whepPosts(), 1);
+    assert.equal(video.src, "/video/f/index.m3u8", "expected the refusal to fall back to HLS");
+
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS - 1);
+      await flush();
+    });
+    assert.equal(whepPosts(), 1, "WebRTC must not be retried before WEBRTC_RETRY_AFTER_MS");
+
+    await act(async () => {
+      mock.timers.tick(1);
+      await flush();
+    });
+    assert.equal(whepPosts(), 2, "expected WebRTC tried again once WEBRTC_RETRY_AFTER_MS had passed on HLS");
+  } finally {
+    proto.canPlayType = realCanPlayType;
+    mock.timers.reset();
     g.restore();
   }
 });

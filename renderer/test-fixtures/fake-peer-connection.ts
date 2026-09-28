@@ -14,7 +14,9 @@
 // evaluated before the file body calls installDom, so the constructor captured
 // below is always Node's own.
 
-const NodeEvent = globalThis.Event;
+/** Node's own Event constructor, for a test dispatching into any Node
+ *  EventTarget (a fake <video> too) after installDom has replaced the global. */
+export const NodeEvent = globalThis.Event;
 
 /** What the fake's createOffer and every stubbed WHEP answer carry. */
 export const FAKE_SDP = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n";

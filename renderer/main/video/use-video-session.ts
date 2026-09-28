@@ -43,6 +43,10 @@ export const FIRST_FRAME_TIMEOUT_MS = 5000;
 export const HLS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 export const RETRY_MIN_MS = 1000;
 export const RETRY_MAX_MS = 30_000;
+/** How long a relay feed plays over HLS after WebRTC proved unusable on this
+ *  screen before WebRTC is tried again: the verdict is about a moment (a
+ *  blocked port, an encoder's settings), not about the screen for ever. */
+export const WEBRTC_RETRY_AFTER_MS = 5 * 60 * 1000;
 /** How long a webrtc connectionState of failed/disconnected must persist, once
  *  a session was already showing a picture, before it counts as dropped. */
 export const DROP_GRACE_MS = 3000;
@@ -53,11 +57,13 @@ interface AttemptCallbacks {
   onPhase: (phase: "connecting" | "live" | "delayed") => void;
   onLatency: (seconds: number | null) => void;
   /**
-   * WebRTC genuinely cannot be carried on THIS screen for THIS feed: it
+   * WebRTC cannot be carried on THIS screen for THIS relay feed: it
    * connected but no frame ever arrived, or a working handshake never
    * reached "connected" — a verdict about the browser/network path, not
-   * about whether the far end is reachable at all. Permanent until the feed
-   * or screen changes; the caller stops offering webrtc.
+   * about whether the far end is reachable at all. The caller plays HLS
+   * instead, for WEBRTC_RETRY_AFTER_MS. Only ever reported for a relay feed:
+   * anything else has no HLS to fall back to, so the same evidence arrives
+   * as `onDropped` and is retried with backoff.
    */
   onWebrtcUnusable: (reason: string) => void;
   /**
@@ -140,6 +146,14 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
     after?.();
   };
 
+  /** A "WebRTC can't carry it here" verdict. A relay feed falls back to HLS
+   *  on it; any other feed has nothing to fall back to, so for it the same
+   *  evidence is a failure like any other and is retried with backoff —
+   *  marking an external feed unusable left it on "can't play" until reload,
+   *  even once its endpoint was healthy again. */
+  const webrtcUnusable = (reason: string) =>
+    end(() => (choice.method === "webrtc" && choice.relayManaged ? cb.onWebrtcUnusable(reason) : cb.onDropped(reason)));
+
   /**
    * Arms the first-frame watch. Called the moment a source is attached — the
    * WHEP answer applied, the HLS source loaded — and never from a connection
@@ -184,7 +198,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
     clearTimeout(frameTimer);
     frameTimer = setTimeout(() => {
       if (gotFirstFrame) return;
-      if (choice.method === "webrtc") end(() => cb.onWebrtcUnusable("connected, but no frame ever arrived"));
+      if (choice.method === "webrtc") webrtcUnusable("connected, but no frame ever arrived");
       else end(() => cb.onDropped("no frame arrived over HLS"));
     }, timeoutMs);
   };
@@ -217,7 +231,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
         connectTimer = setTimeout(() => {
           if (gotFirstFrame) return;
           const why = whep.pc.connectionState === "connected" ? "connected, but no frame ever arrived" : "never connected after a successful handshake";
-          end(() => cb.onWebrtcUnusable(why));
+          webrtcUnusable(why);
         }, CONNECT_TIMEOUT_MS);
         whep.pc.addEventListener(
           "connectionstatechange",
@@ -247,9 +261,9 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
                 // B-frames case waitForFirstFrame's own timeout reports) —
                 // worded differently from the branch below, which never
                 // connected at all.
-                end(() => cb.onWebrtcUnusable(`connection ${s} before a frame ever arrived`));
+                webrtcUnusable(`connection ${s} before a frame ever arrived`);
               } else {
-                end(() => cb.onWebrtcUnusable(`connection ${s} before it ever connected`));
+                webrtcUnusable(`connection ${s} before it ever connected`);
               }
             }
           },
@@ -265,7 +279,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
           () => {
             if (ended) return;
             if (gotFirstFrame) onDroppedAfterFrame("the <video> element reported an error");
-            else end(() => cb.onWebrtcUnusable("the <video> element reported an error before a frame arrived"));
+            else webrtcUnusable("the <video> element reported an error before a frame arrived");
           },
           { signal: controller.signal },
         );
@@ -280,7 +294,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
         // cannot report its health", main/types/video.ts) and gets no HLS to
         // fall back to regardless, so every failure there retries instead.
         if (choice.relayManaged && err instanceof WhepError && RELAY_WEBRTC_REFUSAL_STATUSES.has(err.status)) {
-          end(() => cb.onWebrtcUnusable(`the relay refused this feed over WebRTC (${err.message})`));
+          webrtcUnusable(`the relay refused this feed over WebRTC (${err.message})`);
           return;
         }
         end(() => cb.onDropped(errorMessage(err)));
@@ -399,6 +413,14 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   const onLogRef = useLatestRef(input.onLog);
 
   const [webrtcFailed, setWebrtcFailed] = useState(false);
+  // The verdict expires: after WEBRTC_RETRY_AFTER_MS on HLS, WebRTC is tried
+  // again. Clearing it changes the verdict, so the attempt effect below stops
+  // the HLS session and starts a WebRTC one; a second refusal sets it again.
+  useEffect(() => {
+    if (!webrtcFailed) return undefined;
+    const t = setTimeout(() => setWebrtcFailed(false), WEBRTC_RETRY_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [webrtcFailed]);
   const [attemptPhase, setAttemptPhase] = useState<"connecting" | "live" | "delayed" | "offline">("connecting");
   const [latency, setLatency] = useState<number | null>(null);
   // Purely a "try again" SIGNAL for the effect below — bumped only when a
