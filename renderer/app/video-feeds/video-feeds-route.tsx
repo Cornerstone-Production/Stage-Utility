@@ -20,6 +20,8 @@
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
 
+import type { VideoFeedView } from "@main/types/video";
+
 import { FieldSet } from "../../components/ui";
 import { useVideoState } from "../../main/video/use-video-state";
 import { FeedEditor } from "./feed-editor";
@@ -29,6 +31,15 @@ export function VideoFeedsRoute() {
   const state = useVideoState();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
+  /**
+   * The feed a Save just returned, kept until `state.feeds` (the hydrate, or
+   * the video:state push a successful save also triggers server-side) is
+   * known to contain it. Without this, the moment between `onSaved` firing
+   * and that push landing had `selectedId` pointing at an id `state.feeds`
+   * didn't have YET — `feeds.find` failed, and the editor fell back to
+   * `feeds[0]`, flashing to some OTHER feed right after a save.
+   */
+  const [pendingFeed, setPendingFeed] = useState<VideoFeedView | null>(null);
 
   if (!state) {
     return (
@@ -39,10 +50,13 @@ export function VideoFeedsRoute() {
   }
 
   const feeds = state.feeds;
+  const fromList = creatingNew ? null : (feeds.find((f) => f.id === selectedId) ?? null);
   // Null covers both "explicitly creating one" and "there is nothing to
   // select yet" (an empty list) — either way the editor's isNew form is what
   // belongs on screen.
-  const selected = creatingNew ? null : (feeds.find((f) => f.id === selectedId) ?? feeds[0] ?? null);
+  const selected = creatingNew
+    ? null
+    : (fromList ?? (pendingFeed && pendingFeed.id === selectedId ? pendingFeed : null) ?? feeds[0] ?? null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -56,15 +70,22 @@ export function VideoFeedsRoute() {
           selectedId={selected?.id ?? null}
           onSelect={(id) => {
             setCreatingNew(false);
+            setPendingFeed(null);
             setSelectedId(id);
           }}
-          onAddFeed={() => setCreatingNew(true)}
+          onAddFeed={() => {
+            setCreatingNew(true);
+            setPendingFeed(null);
+          }}
         />
         <FeedEditor
           // Keyed by what's selected, so switching feeds (or starting a new
           // one) remounts with a fresh draft rather than carrying over the
           // previous feed's unsaved edits — Cancel handles reverting THIS
-          // feed's edits; this handles moving to a different one.
+          // feed's edits; this handles moving to a different one. NOT keyed
+          // off pendingFeed vs. fromList — both share the selected feed's id,
+          // so the pushed list catching up to match pendingFeed does not
+          // itself force a remount and discard any further in-progress edit.
           key={selected?.id ?? "new"}
           feed={selected}
           isNew={selected === null}
@@ -74,11 +95,14 @@ export function VideoFeedsRoute() {
           onSaved={(feed) => {
             setCreatingNew(false);
             setSelectedId(feed.id);
+            setPendingFeed(feed);
           }}
           onDeleted={() => {
             setCreatingNew(false);
+            setPendingFeed(null);
             setSelectedId(null);
           }}
+          onCancelNew={() => setCreatingNew(false)}
         />
       </FieldSet>
     </div>

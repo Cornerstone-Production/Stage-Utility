@@ -81,16 +81,33 @@ function makeState(feeds: VideoFeedView[]): VideoState {
 interface Call {
   method: string;
   url: string;
+  /** The parsed JSON body a POST/PATCH sent, for asserting exactly what
+   *  Save's request carried — undefined for a body-less request. */
+  body?: unknown;
+}
+
+interface FeedResponse {
+  status: number;
+  body: unknown;
+}
+
+interface FetchStubOptions {
+  /** Answers a video:addFeed POST. Default: a bare 201 with an empty feed —
+   *  fine for tests that only check ORDERING, not the response shape. */
+  onAddFeed?: (body: unknown) => FeedResponse;
+  /** Answers a video:updateFeed PATCH. Same default reasoning. */
+  onUpdateFeed?: (id: string, body: unknown) => FeedResponse;
 }
 
 /** Every request the page makes, matched by method and path — including the
  *  order they happen in, which the delete-ordering test below depends on. */
-function stubFetch(state: VideoState) {
+function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
   const calls: Call[] = [];
   const fn = (async (input: string | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const url = String(input);
-    calls.push({ method, url });
+    const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+    calls.push({ method, url, body });
     if (method === "GET" && url.endsWith("/api/video/state")) {
       return { ok: true, status: 200, json: async () => state, text: async () => "" } as unknown as Response;
     }
@@ -102,7 +119,16 @@ function stubFetch(state: VideoState) {
         text: async () => "",
       } as unknown as Response;
     }
-    if (method === "DELETE" && /\/api\/video\/feeds\/[^/]+$/.test(url)) {
+    if (method === "POST" && url.endsWith("/api/video/feeds")) {
+      const r = opts.onAddFeed?.(body) ?? { status: 201, body: { feed: {} } };
+      return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
+    }
+    const one = url.match(/\/api\/video\/feeds\/([^/]+)$/);
+    if (method === "PATCH" && one) {
+      const r = opts.onUpdateFeed?.(decodeURIComponent(one[1]!), body) ?? { status: 200, body: { feed: {} } };
+      return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
+    }
+    if (method === "DELETE" && one) {
       return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => "" } as unknown as Response;
     }
     return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as unknown as Response;
@@ -110,8 +136,8 @@ function stubFetch(state: VideoState) {
   return { fn, calls };
 }
 
-function stubGlobals(state: VideoState) {
-  const { fn, calls } = stubFetch(state);
+function stubGlobals(state: VideoState, opts: FetchStubOptions = {}) {
+  const { fn, calls } = stubFetch(state, opts);
   const realFetch = globalThis.fetch;
   const realIo = (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
   globalThis.fetch = fn;
@@ -246,6 +272,172 @@ test("cancelling the delete confirmation never calls video:removeFeed", async ()
       g.calls.some((c) => c.method === "DELETE"),
       false,
       "video:removeFeed must not fire when the confirm is dismissed",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("a refused save shows the server's error text under the buttons, and nothing reads as saved", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), {
+    onUpdateFeed: () => ({ status: 400, body: { error: "Name must be 1–60 characters." } }),
+  });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    const nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    assert.ok(nameInput, "expected a Name input");
+    fireEvent.change(nameInput, { target: { value: "" } });
+
+    const saveButton = screen.getByRole("button", { name: "Save" });
+    fireEvent.click(saveButton);
+    await settle();
+    await settle();
+
+    const errorEl = screen.getByText("Name must be 1–60 characters.");
+    assert.ok(errorEl, "expected the server's refusal text on the page");
+    assert.ok(
+      saveButton.compareDocumentPosition(errorEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "expected the error to render AFTER (below) the Save/Cancel/Delete row",
+    );
+
+    // Nothing reads as saved: video:state was never re-read (no push in this
+    // environment either — EventSource is a no-op stub), so the list still
+    // shows the feed's ORIGINAL, unsaved-over name.
+    // "Program (IMAG)" renders twice — the list row, and the editor's own
+    // heading (which reads the ORIGINAL feed prop, never the local draft) —
+    // so this checks presence rather than a single match.
+    assert.ok(
+      screen.getAllByText("Program (IMAG)").length > 0,
+      "expected the list to still show the feed's original name",
+    );
+    assert.equal(
+      screen.getByRole("button", { name: "Save" }).textContent,
+      "Save",
+      'expected Save to have settled back from "Saving…", not stay stuck',
+    );
+    assert.equal(
+      g.calls.some((c) => c.method === "POST"),
+      false,
+      "expected video:updateFeed (a PATCH), not video:addFeed — this feed already exists",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("Add feed then Save calls video:addFeed with the form's name and source", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), {
+    onAddFeed: () => ({
+      status: 201,
+      body: {
+        feed: embedFeed({
+          id: "feed-new",
+          name: "New feed",
+          source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" },
+        }),
+      },
+    }),
+  });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+
+    const channelInput = container.querySelector('input[aria-label="Channel"]') as HTMLInputElement;
+    assert.ok(channelInput, "expected the embed Channel field on a fresh draft (kinds[0] is \"embed\")");
+    fireEvent.change(channelInput, { target: { value: "UC1234567890123456789012" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+
+    const addCall = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/feeds"));
+    assert.ok(addCall, "expected a video:addFeed request");
+    assert.deepEqual(
+      addCall!.body,
+      { name: "New feed", source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" } },
+      "expected the request body to carry the form's own name and source, not a placeholder",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
+test("the just-saved feed stays selected until the pushed list contains it — the editor never flips to another feed", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), {
+    onAddFeed: () => ({
+      status: 201,
+      body: {
+        feed: embedFeed({
+          id: "feed-new",
+          name: "Online stream",
+          source: { kind: "embed", player: "youtube-channel", ref: "UC9876543210987654321098" },
+        }),
+      },
+    }),
+  });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+
+    const channelInput = container.querySelector('input[aria-label="Channel"]') as HTMLInputElement;
+    fireEvent.change(channelInput, { target: { value: "UC9876543210987654321098" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+
+    // The stub's video:state NEVER includes "feed-new" — there is no real SSE
+    // push in this environment (EventSource is a no-op stub) — so this is the
+    // strongest form of the regression: the list truly never catches up
+    // during the test, and the editor must still show the feed Save's own
+    // response returned, never fall back to feeds[0] ("Program (IMAG)").
+    const nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    assert.equal(nameInput.value, "Online stream", "expected the editor to keep showing the just-saved feed");
+  } finally {
+    g.restore();
+  }
+});
+
+test("Cancel while creating a new feed returns to the previously selected feed", async () => {
+  const g = stubGlobals(
+    makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" }), externalFeed({ id: "feed-2", name: "Lobby relay" })]),
+  );
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+
+    // feed-1 is selected by default (feeds[0]) — explicitly select feed-2 so
+    // this proves Cancel restores the ACTUAL previous selection, not just a
+    // fallback to whichever feed happens to be first in the list.
+    fireEvent.click(screen.getByText("Lobby relay"));
+    await settle();
+    let nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    assert.equal(nameInput.value, "Lobby relay", "expected feed-2 selected before starting a new feed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    assert.equal(nameInput.value, "New feed", "expected a blank draft after Add feed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await settle();
+
+    nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    assert.equal(
+      nameInput.value,
+      "Lobby relay",
+      "expected Cancel to return to feed-2 (exiting new-feed mode), not stay on a blank draft or fall back to feed-1",
     );
   } finally {
     g.restore();

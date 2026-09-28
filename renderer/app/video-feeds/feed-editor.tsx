@@ -105,15 +105,23 @@ export interface FeedEditorProps {
   appLogoMonochrome: boolean;
   onSaved: (feed: VideoFeedView) => void;
   onDeleted: () => void;
+  /**
+   * Cancel happened. Always called, whether or not this draft was a new
+   * feed: it is a no-op on the caller's side when it wasn't (creatingNew was
+   * already false), and it is what lets Cancel on a fresh draft exit back to
+   * whatever was selected before "Add feed" — see video-feeds-route.tsx.
+   */
+  onCancelNew: () => void;
 }
 
-export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted }: FeedEditorProps) {
+export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew }: FeedEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(feed, kinds));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function handleCancel() {
+    onCancelNew();
     setDraft(draftFrom(feed, kinds));
     setError(null);
   }
@@ -286,8 +294,6 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         </p>
       )}
 
-      {error && <ErrorNote>{error}</ErrorNote>}
-
       <div className="flex items-center gap-2">
         <Button variant="accent" size="small" onClick={() => void handleSave()} disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -307,6 +313,8 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           </Button>
         )}
       </div>
+
+      {error && <ErrorNote>{error}</ErrorNote>}
     </div>
   );
 }

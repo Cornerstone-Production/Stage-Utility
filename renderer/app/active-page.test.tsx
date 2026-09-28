@@ -122,7 +122,7 @@ describe("every registered route resolves a title", () => {
     // an added route plus a removed one from no change at all — a sorted list
     // also merges cleanly when two branches each add a different route.
     // 22 since /scriptview split into the tablet's page and /scriptview/manage,
-    // plus /video-feeds (Task 6 of the video-feeds plan).
+    // plus /video-feeds, the Screens-adjacent page for camera and program feeds.
     assert.deepEqual(
       [...REGISTERED].sort(),
       [
