@@ -644,6 +644,68 @@ test("R12a / Important #1: a poll that fails clears lastPaths and reports the re
   }
 });
 
+test("R12a follow-up: a stopped relay reads off, not \"not answering\", even when a poll against it fails", async () => {
+  // Nothing has started yet — a poll failing here (nothing is listening on
+  // the API port) is not news, and must not be read as the relay failing.
+  const relay = fakeRelay(async () => {
+    throw new Error("ECONNREFUSED");
+  });
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "off" };
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor);
+
+  try {
+    await pollOnce();
+    assert.deepEqual(videoService.current().relay, { state: "off" });
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("R12a follow-up: a relay the supervisor already reports failing keeps its own reason, not \"not answering\"", async () => {
+  const relay = fakeRelay(async () => {
+    throw new Error("ECONNREFUSED");
+  });
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 };
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor);
+
+  try {
+    await pollOnce(); // also fails to answer — the supervisor's own diagnosis still wins
+    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 });
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("R12a follow-up: the \"starting\" override waits for the relay's own banner, not just any failed poll", async () => {
+  const relay = fakeRelay(async () => {
+    throw new Error("ECONNREFUSED");
+  });
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "starting" };
+  supervisor.ver = null; // no banner parsed yet
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor);
+
+  try {
+    await pollOnce();
+    assert.deepEqual(
+      videoService.current().relay,
+      { state: "starting", version: null },
+      "a poll failing before the relay has even logged its banner is normal, not a failure to report",
+    );
+
+    supervisor.ver = "v1.21.1"; // the relay has now logged its startup banner
+    await pollOnce(); // still fails to answer
+    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "The relay is not answering", retryAt: null });
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
 test("R12b: the attached supervisor's spawned/exit events publish immediately, without waiting for a poll", async () => {
   const relay = fakeRelay(async () => []);
   const supervisor = new FakeSupervisor();

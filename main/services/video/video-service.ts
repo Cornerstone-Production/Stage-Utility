@@ -186,19 +186,35 @@ class VideoService {
     return new Set<VideoSourceKind>(["embed", "external"]);
   }
 
+  /**
+   * The "not answering" override applies only while the supervisor itself
+   * reports `running`, or `starting` past its own first banner (`version()`
+   * no longer null) — never while it is `off` (a poll can fail simply
+   * because nothing has started yet, which is not news) and never while it
+   * is already `failing` (the supervisor's own reason and retryAt are a
+   * better answer than a generic "not answering", and a poll against a
+   * process mid-backoff failing too is not a second fact).
+   */
   private relayStatus(ports: VideoPorts): RelayStatus {
     if (!this.supervisor) return { state: "off" };
-    if (this.relayNotAnswering) return { state: "failing", reason: "The relay is not answering", retryAt: null };
     const status = this.supervisor.status();
     switch (status.state) {
       case "off":
         return { state: "off" };
-      case "starting":
-        return { state: "starting", version: this.supervisor.version() };
-      case "running":
-        return { state: "running", version: this.supervisor.version() ?? "", ports };
       case "failing":
         return { state: "failing", reason: status.reason, retryAt: status.retryAt };
+      case "starting": {
+        const version = this.supervisor.version();
+        if (this.relayNotAnswering && version !== null) {
+          return { state: "failing", reason: "The relay is not answering", retryAt: null };
+        }
+        return { state: "starting", version };
+      }
+      case "running":
+        if (this.relayNotAnswering) {
+          return { state: "failing", reason: "The relay is not answering", retryAt: null };
+        }
+        return { state: "running", version: this.supervisor.version() ?? "", ports };
     }
   }
 
