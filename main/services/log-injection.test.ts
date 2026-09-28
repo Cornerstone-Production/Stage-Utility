@@ -145,6 +145,9 @@ const REQUEST_FACING = [
   "service-timeline-recorder.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
+  // file's own "is live"/"went offline"/B-frames log lines on a transition.
+  "video/video-service.ts",
   "view-import.ts",
   // The channel title on a successful Connect comes back from Google, not the
   // operator, but it is still external data reaching a log line.
@@ -379,6 +382,9 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "service-timeline-recorder.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
+    // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
+    // file's own "is live"/"went offline"/B-frames log lines on a transition.
+    path.join(HERE, "video/video-service.ts"),
     // Every value on its three log lines comes out of an UPLOADED FILE — the
     // service type name and id, a patch sheet's name, a variant's name. It
     // logged nothing at all before the plan import, which is when it acquired
