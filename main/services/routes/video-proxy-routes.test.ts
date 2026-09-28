@@ -384,7 +384,11 @@ describe("once the relay is attached and running", () => {
     assert.equal(seen.path, "/cam/whip");
     assert.equal(seen.headers.authorization, "Bearer video:s3cret");
 
-    const refused = await callRoute(videoProxyRoutes, `/video/${lobbyId}/whip`, { method: "POST" });
+    // fetchSu, not callRoute — same reasoning as the unknown-feed-id and
+    // bad-filename cases below: callRoute's fake response has no `.on()`,
+    // so a bug that let this fall through to forwardToUpstream() would
+    // throw there rather than let the received-count assertion run.
+    const refused = await fetchSu(`/video/${lobbyId}/whip`, { method: "POST" });
     assert.equal(refused.status, 404, "a pull feed has nothing listening for a WHIP offer");
     assert.equal(received.length, receivedCountBefore + 1, "the refused request must never have reached the fake relay");
   });
@@ -488,15 +492,22 @@ describe("once the relay is attached and running", () => {
   });
 
   test("GET /video/nope/whep is 404 — an unknown feed id, never reaching upstream", async () => {
+    // fetchSu, not callRoute: callRoute's fake response has no `.on()` —
+    // a bug that let this fall through to forwardToUpstream() would throw
+    // there (TypeError, not a clean 404) before the received-count
+    // assertion below ever ran, so callRoute could never actually observe
+    // it. The real server can.
     const receivedCountBefore = received.length;
-    const res = await callRoute(videoProxyRoutes, "/video/nope/whep");
+    const res = await fetchSu("/video/nope/whep");
     assert.equal(res.status, 404);
     assert.equal(received.length, receivedCountBefore);
   });
 
   test("a file name outside the HLS pattern is 404, claimed by this module rather than forwarded to an upstream that would otherwise answer 200", async () => {
+    // fetchSu, not callRoute — same reasoning as the unknown-feed-id case
+    // just above.
     const receivedCountBefore = received.length;
-    const res = await callRoute(videoProxyRoutes, `/video/${camId}/config.json`);
+    const res = await fetchSu(`/video/${camId}/config.json`);
     assert.equal(res.status, 404);
     assert.equal(received.length, receivedCountBefore, "a bug that let this fall through to the relay would show up as a 200, not a 404 — see the fake upstream's own catch-all");
   });
