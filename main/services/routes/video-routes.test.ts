@@ -94,3 +94,47 @@ test("usage names the layouts that place the feed, inside containers too", async
   const r = await callRoute(videoRoutes, "/api/video/feeds/cam/usage");
   assert.deepEqual(r.json, { layouts: [{ viewId: "v1", name: "Stage confidence" }] });
 });
+
+/** Offers every kind for the duration of `fn`: this build offers only embed
+ *  and external, and a password only exists for pull. */
+async function withAllKinds<T>(fn: () => Promise<T>): Promise<T> {
+  const { videoService } = await import("../video/video-service.js");
+  const svc = videoService as unknown as { allowedKinds: () => ReadonlySet<string> };
+  svc.allowedKinds = () => new Set(["pull", "push", "embed", "external"]);
+  try {
+    return await fn();
+  } finally {
+    delete (svc as { allowedKinds?: unknown }).allowedKinds;
+  }
+}
+
+test("a PATCH's password reaches the feed's secrets slot", async () => {
+  const { secretsStore } = await import("../secrets.js");
+  await withAllKinds(async () => {
+    const made = await callRoute(videoRoutes, "/api/video/feeds", {
+      method: "POST",
+      body: { name: "Pulpit cam", source: { kind: "pull", url: "rtsp://192.0.2.40:8554/s", username: "admin" } },
+    });
+    assert.equal(made.status, 201);
+    const id = (made.json as { feed: { id: string } }).feed.id;
+
+    const patched = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { password: "new-password" } });
+    assert.equal(patched.status, 200);
+    assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, "new-password", "the PATCH's password was dropped");
+
+    assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+  });
+});
+
+test("a PATCH carrying a source replaces it, and keeps the name", async () => {
+  const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name: "Foyer", source: EMBED.source } });
+  const id = (made.json as { feed: { id: string } }).feed.id;
+  const patched = await callRoute(videoRoutes, `/api/video/feeds/${id}`, {
+    method: "PATCH",
+    body: { source: { kind: "external", url: "http://192.0.2.50/foyer/index.m3u8" } },
+  });
+  assert.equal(patched.status, 200);
+  const feed = (patched.json as { feed: { name: string; source: { kind: string } } }).feed;
+  assert.deepEqual([feed.name, feed.source.kind], ["Foyer", "external"]);
+  assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
+});

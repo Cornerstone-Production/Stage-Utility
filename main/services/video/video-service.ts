@@ -34,17 +34,11 @@ const feedsOf = (current: VideoFeedsFile): VideoFeed[] => (Array.isArray(current
 /**
  * The object updateFeed re-validates a PATCH against: `existing`'s name and
  * source, each replaced by whatever the body supplies, PLUS the body's
- * `password` carried through untouched.
- *
- * Exported so a test can prove `password` survives this merge without needing
- * to widen allowedKinds() to "pull" (the only kind a password applies to, and
- * one this build does not offer pre-relay) or exercise the whole update path
- * through secretsStore. It used to be built inline as `{ name, source }`,
- * which quietly dropped a `password` in the PATCH body — harmless while only
- * embed/external are offered, since neither kind ever produces one, but silent
- * data loss the day a pull feed's password is changed on an existing feed.
+ * `password` carried through untouched — built inline as `{ name, source }`
+ * it silently dropped a pull feed's new password. Guarded through the real
+ * route in video-routes.test.ts.
  */
-export function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; source: unknown; password: unknown } {
+function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; source: unknown; password: unknown } {
   const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   return {
     name: typeof obj.name === "string" ? obj.name : existing.name,
