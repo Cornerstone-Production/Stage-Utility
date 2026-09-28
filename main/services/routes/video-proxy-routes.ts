@@ -22,24 +22,37 @@ import { scrub } from "../scrub.js";
 import { videoService } from "../video/video-service.js";
 import { type RouteCtx, error, readRawBody } from "./context.js";
 
-/** WHEP/WHIP signalling is a handful of round trips over an SDP offer/answer
- *  — long enough to survive a slow network, short enough that a hung relay
- *  is reported rather than left to hold the request open indefinitely. */
-const WHEP_WHIP_TIMEOUT_MS = 10_000;
-/** LL-HLS's blocking playlist reload holds the request open until the next
- *  part is ready — the relay-facts fixture models 2 s of that. 30 s covers a
- *  real stall without the client waiting forever on a relay that has hung. */
-const HLS_TIMEOUT_MS = 30_000;
+/**
+ * WHEP/WHIP and HLS timeouts, and the request-body cap — mutable so a test
+ * can shrink a timeout to milliseconds rather than actually waiting 10 s or
+ * 30 s for one (see video-proxy-routes.test.ts's timeout tests), the same
+ * seam video-service.ts's own `videoPollDeps` is for its poll interval.
+ * Restored by every test that touches it; production never assigns to it.
+ */
+export const proxyTimeouts = {
+  /** WHEP/WHIP signalling is a handful of round trips over an SDP
+   *  offer/answer — long enough to survive a slow network, short enough
+   *  that a hung relay is reported rather than left to hold the request
+   *  open indefinitely. */
+  whepWhip: 10_000,
+  /** LL-HLS's blocking playlist reload holds the request open until the
+   *  next part is ready — the relay-facts fixture models 2 s of that. 30 s
+   *  covers a real stall without the client waiting forever on a relay
+   *  that has hung. */
+  hls: 30_000,
+};
 /** A WHEP/WHIP body is an SDP offer/answer, at most a few KB. 64 KB is
  *  headroom for that, not an invitation to send more — see context.ts's own
  *  MAX_* constants for the reasoning: an unauthenticated LAN POST must never
  *  accumulate without bound. */
 const MAX_PROXY_BODY_BYTES = 64 * 1024;
 
-/** MediaMTX's WHEP/WHIP session ids are UUIDs. Constrained so a malformed
- *  Location this proxy did not expect is dropped rather than forwarded, and
- *  so a `/whep/<session>` request whose session carries a `/` cannot smuggle
- *  a second path segment into the upstream request. */
+/** MediaMTX's WHEP/WHIP session ids are UUIDs. A REQUEST session outside
+ *  this is "invalid" before it ever becomes an upstream path segment (a
+ *  `/whep/<session>` whose session carries a `/` could otherwise smuggle a
+ *  second path segment into the upstream request); an ANSWER's Location
+ *  carrying a session outside this is dropped rather than forwarded
+ *  verbatim onto a browser — see rewriteLocation. */
 const SESSION_PATTERN = /^[A-Za-z0-9-]+$/;
 /** The three extensions MediaMTX's HLS server answers — see decisions.md's
  *  proxy-routes row. No `/` in the class, so a percent-encoded traversal
@@ -70,11 +83,20 @@ type Parsed =
  *     path IS this module's territory and this module says so.
  *   - a Parsed request — refused or forwarded from here, by relayTarget().
  *
- * A `..` segment can never reach either "ours" outcome: the WHATWG URL
- * parser that built `pathname` already collapsed it before this ever ran
- * (confirmed against Node's URL — `/video/cam/../../v3/paths/list` arrives
- * here as `/v3/paths/list`, "unclaimed" by construction), so there is no
- * separate traversal case to parse for.
+ * `pathname` is what `new URL(req.url, base)` already produced (remote-server.ts,
+ * and this module's own test harness both build it the same way), which
+ * collapses a `..` segment before this ever runs — confirmed against Node's
+ * URL parser AND, because a raw client is not obliged to go through that
+ * parser client-side the way `fetch` does, against a raw `http.request`
+ * whose `path` option is sent unnormalized: the server's own `new URL()`
+ * still collapses it on the way in (video-proxy-routes.test.ts's own
+ * traversal cases drive exactly that, through a real socket, not a
+ * client library that would normalize the attempt away before ever
+ * sending it). So `/video/cam/../../v3/paths/list` arrives here as
+ * `/v3/paths/list`, "unclaimed" by construction — there is no separate
+ * traversal case to parse for at THIS layer; a `%`-encoded attempt that
+ * survives normalization (`..%2Fsecret.m3u8`) is what HLS_FILE_PATTERN and
+ * SESSION_PATTERN exist to refuse instead.
  */
 function parseRequest(pathname: string): Parsed | "unclaimed" | "invalid" {
   if (!pathname.startsWith(PREFIX)) return "unclaimed";
@@ -115,21 +137,35 @@ function upstreamPath(target: { path: string }, parsed: Parsed, search: string):
  * browser resolves a redirect against the CURRENT origin, which is Stage
  * Utility's, not the relay's loopback port it can never reach directly.
  *
- * Only a Location that actually starts with this feed's own relay-root
- * prefix is rewritten; anything else is dropped rather than forwarded
- * verbatim onto a browser.
+ * For `whep`/`whip` the WHOLE shape is checked — `/<feedId>/<kind>/<session>`,
+ * with `session` validated against SESSION_PATTERN — not only the leading
+ * `/<feedId>/`: a prefix-only check would forward a malformed Location the
+ * relay never actually documented as answering with, verbatim, onto a
+ * browser. HLS has no session segment of its own to check this way (a
+ * cookie-check redirect's target is a filename and a query string, not a
+ * UUID), so only the feed-id prefix applies there.
  */
-function rewriteLocation(location: string, feedId: string): string | null {
+function rewriteLocation(location: string, feedId: string, kind: "whep" | "whip" | "hls"): string | null {
   const prefix = `/${feedId}/`;
-  return location.startsWith(prefix) ? `/video/${location.slice(1)}` : null;
+  if (!location.startsWith(prefix)) return null;
+  if (kind === "hls") return `/video/${location.slice(1)}`;
+  const rest = location.slice(prefix.length);
+  const kindPrefix = `${kind}/`;
+  if (!rest.startsWith(kindPrefix)) return null;
+  const session = rest.slice(kindPrefix.length);
+  return SESSION_PATTERN.test(session) ? `/video/${location.slice(1)}` : null;
 }
 
 /** One shared log, keyed per feed: a relay outage touching five feeds is five
  *  independent facts (a viewer of feed A gets no news about feed B), and a
  *  flapping relay for one feed still collapses to one line per outage rather
  *  than one per request — the same shape video-service.ts's own pollOutage
- *  uses for the relay-status poll. */
-const proxyOutage = new OutageLog();
+ *  uses for the relay-status poll. Exported so a test can shrink its settle
+ *  window (settleAfter()) and clear it between cases (forget()), the same
+ *  way video-service.test.ts reaches its own OutageLog through a cast —
+ *  this one needs no cast, being a plain module binding rather than a
+ *  private class field. */
+export const proxyOutage = new OutageLog();
 
 function reportProxyFailure(feedId: string, err: unknown): void {
   const message = errorMessage(err);
@@ -169,6 +205,14 @@ function forwardedHeaders(req: http.IncomingMessage, bodyLength: number | null):
  * an LL-HLS blocking-reload response sit open for seconds without this
  * holding the whole body in memory first.
  *
+ * A relay failure is reported through reportProxyFailure() whether it
+ * happens before the upstream connects (upstreamReq's own "error") or after
+ * (upstreamRes's, a relay dying mid-segment) — EXCEPT when the VIEWER left
+ * first: `clientGone` is set the moment this proxy's own response closes,
+ * before the upstream request is torn down as a result, so the failure that
+ * destroying it then raises is never mistaken for the relay's own. A viewer
+ * navigating off mid-hold is not news about the relay.
+ *
  * An upstream error before any header has reached the client is a 502 with
  * the message; once headers are sent, the status line is already committed
  * and the only honest move left is to tear the response down.
@@ -184,6 +228,7 @@ function forwardToUpstream(
 ): Promise<void> {
   return new Promise((resolve) => {
     const { req, res, method } = c;
+    let clientGone = false;
     const upstreamReq = http.request(
       {
         host: target.host,
@@ -201,14 +246,20 @@ function forwardToUpstream(
           if (v !== undefined) outHeaders[h] = v;
         }
         const location = upstreamRes.headers.location;
-        const rewritten = typeof location === "string" ? rewriteLocation(location, feedId) : null;
+        const rewritten = typeof location === "string" ? rewriteLocation(location, feedId, kind) : null;
         if (rewritten) outHeaders.location = rewritten;
         // A playlist or segment must never be cached: LL-HLS advances the
         // same file names across a stream's lifetime (relay-facts.md).
         if (kind === "hls") outHeaders["cache-control"] = "no-store";
         res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
         upstreamRes.pipe(res);
-        upstreamRes.on("error", () => {
+        upstreamRes.on("error", (err) => {
+          // A relay dying mid-segment IS news, same as a failure before any
+          // header went out — reported through the SAME outage key, unless
+          // this is really the viewer's own departure surfacing here (the
+          // close handler below destroyed upstreamReq, which can carry the
+          // failure through to the response it already started).
+          if (!clientGone) reportProxyFailure(feedId, err);
           res.destroy();
           resolve();
         });
@@ -220,12 +271,16 @@ function forwardToUpstream(
       upstreamReq.destroy(new Error("The video relay did not answer in time"));
     });
     upstreamReq.on("error", (err) => {
+      // The client leaving first is the ordinary shape a held HLS request
+      // ends in — the close handler below sets clientGone and destroys
+      // this same request, which is what raises this error. Nothing here
+      // is news about the RELAY, so it is not reported, and — since the
+      // response is already gone with the client — not answered either.
+      if (clientGone) {
+        resolve();
+        return;
+      }
       reportProxyFailure(feedId, err);
-      // "with the message" (task-13-brief.md) only while the status line is
-      // still ours to write: once headers are sent, or the client itself is
-      // already gone (the close handler below reaches here too, by
-      // destroying this same request), the answer is no longer this proxy's
-      // to give and the only honest move left is to tear it down.
       if (res.headersSent || res.writableEnded || res.destroyed) res.destroy();
       else error(res, errorMessage(err), 502);
       resolve();
@@ -233,15 +288,19 @@ function forwardToUpstream(
     // A client that goes away mid-stream — a screen navigating off, a
     // held LL-HLS reload the browser gave up on — must not leave the
     // upstream half of the pipe running. Harmless once the exchange has
-    // already finished normally: destroying an ended request is a no-op.
-    res.on("close", () => upstreamReq.destroy());
+    // already finished normally: destroying an ended request is a no-op,
+    // and clientGone is checked above, not acted on again here.
+    res.on("close", () => {
+      clientGone = true;
+      upstreamReq.destroy();
+    });
     if (body) upstreamReq.end(body);
     else upstreamReq.end();
   });
 }
 
 export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
-  const { req, res, pathname, url } = c;
+  const { req, res, pathname, url, method } = c;
   const parsed = parseRequest(pathname);
   if (parsed === "unclaimed") return;
   if (parsed === "invalid") {
@@ -255,16 +314,6 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
-  // Told on every WHEP POST (a viewer asking to watch) and every playlist
-  // GET (the fallback HLS player asking) — never on a session DELETE/PATCH
-  // or a segment fetch, which say nothing new about demand. Bookkeeping
-  // only: a failure here must never stand between a viewer and the stream,
-  // so it is reported through the same outage log as a forwarding failure
-  // rather than left to reject unnoticed.
-  if ((parsed.kind === "whep" && parsed.session === null) || (parsed.kind === "hls" && parsed.file.endsWith(".m3u8"))) {
-    void videoService.noteRequested(parsed.feedId).catch((err) => reportProxyFailure(parsed.feedId, err));
-  }
-
   // Buffered, not piped: the only way to guarantee an over-cap body "never
   // reaches upstream" (task-13-brief.md) is to finish reading it before the
   // upstream connection even opens. Safe to buffer at this size — an SDP
@@ -272,7 +321,19 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
   // streams because a held blocking-reload response can run to seconds.
   const body = parsed.kind === "hls" ? null : Buffer.from(await readRawBody(req, MAX_PROXY_BODY_BYTES));
 
+  // Demand is recorded AFTER the body check (an over-cap POST never reaches
+  // here at all — readRawBody has already thrown) and only for the two
+  // requests that actually mean "someone is asking to watch": a WHEP POST
+  // creating a session, and a playlist GET — never a DELETE/PATCH against
+  // an existing session, a WHIP push, or a segment fetch, none of which say
+  // anything new about a VIEWER's demand. relayTarget() above has already
+  // confirmed `parsed.feedId` names a real feed this kind can serve, so
+  // markRequested() needs no validation of its own — see its own comment.
+  const isWhepCreate = parsed.kind === "whep" && parsed.session === null && method === "POST";
+  const isPlaylistGet = parsed.kind === "hls" && parsed.file.endsWith(".m3u8") && method === "GET";
+  if (isWhepCreate || isPlaylistGet) videoService.markRequested(parsed.feedId);
+
   const path = upstreamPath(target, parsed, url.search);
-  const timeoutMs = parsed.kind === "hls" ? HLS_TIMEOUT_MS : WHEP_WHIP_TIMEOUT_MS;
+  const timeoutMs = parsed.kind === "hls" ? proxyTimeouts.hls : proxyTimeouts.whepWhip;
   await forwardToUpstream(c, target, path, timeoutMs, body, parsed.feedId, parsed.kind);
 }

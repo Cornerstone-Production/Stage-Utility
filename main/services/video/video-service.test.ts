@@ -97,8 +97,8 @@ test("removeFeed refuses an id outside FEED_ID_PATTERN, even for a feed stored u
 // alongside the service's own polling. What is covered: the demand gate,
 // the dedupe on publish(), the live/delayed/offline transition log lines,
 // the B-frames mark (bound immediately when the path is already ready, or
-// left pending until a later poll sees it ready), noteRequested()'s
-// validation, relayStatus()'s mapping from the supervisor's own status
+// left pending until a later poll sees it ready), markRequested()'s effect,
+// relayStatus()'s mapping from the supervisor's own status
 // (including its "starting" window and the "not answering" verdict's scope
 // to a single process), a failing poll's behaviour, the seen store's
 // write-failure handling, and the guard against a stale in-flight poll.
@@ -657,15 +657,17 @@ test("a relay that stops answering warns once per outage; recovery logs once aft
   }
 });
 
-test("noteRequested only records a real feed id, taken from the feed list — never an arbitrary string", async () => {
+test("markRequested moves a not-ready pull feed off standby — its only observable effect", async () => {
+  // Validation lives at the call site now (relayTarget(), which the proxy
+  // calls before markRequested() — see video-proxy-routes.ts and its own
+  // relayTarget-refusal tests): markRequested() itself is a trusted,
+  // synchronous setter with nothing to reject, so there is no "unknown id"
+  // or "pattern-failing id" case left to prove here.
   const made = await withAllKinds(() =>
     videoService.addFeed({ name: "Gym cam", source: { kind: "pull", url: "rtsp://192.0.2.52/s", username: "" } }),
   );
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
-
-  await videoService.noteRequested("../../etc/passwd"); // fails FEED_ID_PATTERN outright
-  await videoService.noteRequested("not-a-real-feed"); // pattern-valid, but not in the feed list
 
   const relay = fakeRelay(async () => [notReadyPath({ name: id })]);
   const supervisor = new FakeSupervisor();
@@ -675,9 +677,9 @@ test("noteRequested only records a real feed id, taken from the feed list — ne
   try {
     await pollOnce();
     let feed = (await videoService.state()).feeds.find((f) => f.id === id);
-    assert.equal(feed?.status.state, "standby", "an untracked id must not count as a request for the real feed");
+    assert.equal(feed?.status.state, "standby", "nothing has asked for this feed yet");
 
-    await videoService.noteRequested(id);
+    videoService.markRequested(id);
     await pollOnce();
     feed = (await videoService.state()).feeds.find((f) => f.id === id);
     assert.equal(feed?.status.state, "offline", "a real request must move a not-ready pull feed off standby");
@@ -771,6 +773,55 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
     supervisor.current = { state: "running", since: Date.now() };
     await (videoService as unknown as { publish(): Promise<void> }).publish();
     assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, path: `/${id}` });
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+// R13a (fix round 1): relayTarget must forward to the ports the RUNNING
+// relay was actually STARTED with, never the store's current ports — a
+// ports change (PR 2's PATCH /api/video/ports) writes the store at once,
+// but the relay process itself keeps listening on its old ports until it
+// restarts, and a poll landing in that gap must not point the proxy at a
+// port nothing is listening on yet.
+test("relayTarget uses the ports the relay was attached with, even after the store's own ports change under it", async () => {
+  const { videoFeedsStore } = await import("./feed-store.js");
+  const made = await withAllKinds(() =>
+    videoService.addFeed({ name: "Dock cam", source: { kind: "pull", url: "rtsp://192.0.2.70/s", username: "" } }),
+  );
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+
+  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997 };
+  const relay = fakeRelay(async () => []);
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(relay, supervisor, OLD_PORTS);
+  try {
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(
+      videoService.relayTarget(id, "hls"),
+      { host: "127.0.0.1", port: OLD_PORTS.hls, path: `/${id}` },
+      "sanity: the relay's own attach-time ports before anything changes",
+    );
+
+    // The operator changes ports in the store — the relay itself has not
+    // restarted and is still bound to OLD_PORTS.
+    await videoFeedsStore.update((current) => ({
+      ...current,
+      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 },
+    }));
+    // A poll/publish after the store write — the moment R13a's bug pointed
+    // the proxy at a port the relay was not actually listening on.
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+
+    assert.deepEqual(
+      videoService.relayTarget(id, "whep"),
+      { host: "127.0.0.1", port: OLD_PORTS.webrtcHttp, path: `/${id}/whep` },
+      "the relay has not restarted — the proxy must still reach it on the port it actually opened",
+    );
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: OLD_PORTS.hls, path: `/${id}` });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);

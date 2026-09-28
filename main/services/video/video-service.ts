@@ -6,6 +6,7 @@
 import { EventEmitter } from "node:events";
 
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
+import { DEFAULT_VIDEO_PORTS } from "../../types/video.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
@@ -145,6 +146,18 @@ class VideoService {
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
   private supervisor: RelaySupervisorLike | null = null;
+  /**
+   * The ports the CURRENT relay process was actually started with — pinned
+   * at attachRelay(), never re-read from the store while the same process
+   * keeps running. relayStatus()'s "running" ports come from here, not from
+   * loadFeedsFile(): a `PATCH /api/video/ports` change (PR 2) writes the
+   * store immediately but the relay itself keeps listening on its OLD ports
+   * until it restarts, so a poll landing between that write and the restart
+   * must still answer the ports the relay is actually reachable on — R13a's
+   * finding was relayTarget() pointing the proxy at a store's brand-new
+   * port nothing was listening on yet.
+   */
+  private attachedPorts: VideoPorts | null = null;
   private lineListener: ((text: string) => void) | null = null;
   /** The ONE event the service reacts to for the supervisor's own lifecycle
    *  — a single listener rather than separate "spawned"/"exit" ones, so a
@@ -195,7 +208,7 @@ class VideoService {
    *  same still-open session does not repeat the log line every time the
    *  relay logs another closed WebRTC attempt against it. */
   private readonly bframesAnnouncedAt = new Map<string, string | null>();
-  /** Epoch ms a WHEP/HLS request last named a feed — see noteRequested(). */
+  /** Epoch ms a WHEP/HLS request last named a feed — see markRequested(). */
   private readonly requestedAt = new Map<string, number>();
   /** The last FeedState logged for each feed, so "is live"/"is delayed"/
    *  "went offline" fire on the transition only. */
@@ -226,7 +239,7 @@ class VideoService {
    * passed since `since`: pollOnce() reports a failure only when
    * pollFailureIsNews() says so.
    */
-  private relayStatus(ports: VideoPorts): RelayStatus {
+  private relayStatus(): RelayStatus {
     if (!this.supervisor) return { state: "off" };
     const status = this.supervisor.status();
     switch (status.state) {
@@ -240,7 +253,11 @@ class VideoService {
         if (this.relayNotAnswering) {
           return { state: "failing", reason: "The relay is not answering", retryAt: null };
         }
-        return { state: "running", version: this.supervisor.version() ?? "", ports };
+        // attachRelay() always sets attachedPorts in the same call that sets
+        // supervisor, so a "running" supervisor implies this is non-null —
+        // the || fallback exists only so a test double that skips attachRelay
+        // cannot crash this on a type the compiler already guarantees.
+        return { state: "running", version: this.supervisor.version() ?? "", ports: this.attachedPorts ?? DEFAULT_VIDEO_PORTS };
     }
   }
 
@@ -295,10 +312,13 @@ class VideoService {
   }
 
   async state(): Promise<VideoState> {
-    const { feeds, ports } = await loadFeedsFile();
+    // Only `feeds` comes from the store now — the running relay's OWN
+    // ports come from attachedPorts (relayStatus()'s own comment), not from
+    // whatever the store currently holds.
+    const { feeds } = await loadFeedsFile();
     return {
       rev: this.rev,
-      relay: this.relayStatus(ports),
+      relay: this.relayStatus(),
       kinds: [...this.allowedKinds()],
       feeds: feeds.map((f) => this.view(f)),
     };
@@ -338,16 +358,20 @@ class VideoService {
 
   // ── The relay: attached when video is switched on, polled while watched ─
 
-  /** Give the service a relay and its supervisor. Safe to call again with no
-   *  detachRelay() first — the previous relay's listeners are removed here,
-   *  never left to leak, but nothing is published for that half: a caller
-   *  replacing one relay with another wants ONE settled state at the end,
-   *  not an intermediate "off" broadcast between the two. */
-  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike): void {
+  /** Give the service a relay and its supervisor, and the ports THIS
+   *  process was actually started with (defaulted for a caller — a test,
+   *  today; nothing in production calls this yet — that does not care).
+   *  Safe to call again with no detachRelay() first — the previous relay's
+   *  listeners are removed here, never left to leak, but nothing is
+   *  published for that half: a caller replacing one relay with another
+   *  wants ONE settled state at the end, not an intermediate "off"
+   *  broadcast between the two. */
+  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS): void {
     if (this.relay) this.detachInternal();
     this.relayGeneration++;
     this.relay = relay;
     this.supervisor = supervisor;
+    this.attachedPorts = ports;
     this.lineListener = (text: string) => this.handleLine(text);
     // Starting and failing-with-retry must reach video:state as soon as the
     // supervisor itself knows them, not only on the next poll tick — a poll
@@ -380,6 +404,7 @@ class VideoService {
     this.relayGeneration++;
     this.relay = null;
     this.supervisor = null;
+    this.attachedPorts = null;
     this.lineListener = null;
     this.statusListener = null;
     this.relayNotAnswering = false;
@@ -694,20 +719,21 @@ class VideoService {
   }
 
   /**
-   * The playback proxy calls this on every WHEP POST and playlist GET,
-   * so an on-demand pull feed nothing has watched for RECENT_REQUEST_MS reads
-   * as "standby" rather than "offline" — see feed-state.ts.
+   * The playback proxy calls this on a WHEP POST creating a session and a
+   * playlist GET, so an on-demand pull feed nothing has watched for
+   * RECENT_REQUEST_MS reads as "standby" rather than "offline" — see
+   * feed-state.ts.
    *
-   * `feedId` is whatever the proxy read off the URL, so it is validated
-   * against the CURRENT feed list before it ever becomes a Map key: an
-   * unbounded set of attacker strings each minting an entry is the
-   * request-keyed-map problem this avoids by construction, not only by using
-   * a Map instead of a plain object.
+   * Synchronous and unvalidated ON PURPOSE: the only caller is
+   * video-proxy-routes.ts, and only after `relayTarget(feedId, kind)` has
+   * already confirmed `feedId` names a real feed of a kind that route can
+   * serve — re-validating here would be a second copy of exactly that
+   * check, done on every request instead of once. `feedId` must never reach
+   * this from anywhere that has not already done that: it becomes a Map key
+   * unchecked, which is the request-keyed-map problem this repo has been
+   * bitten by, avoided here by construction rather than by validation.
    */
-  async noteRequested(feedId: string): Promise<void> {
-    if (!FEED_ID_PATTERN.test(feedId)) return;
-    const { feeds } = await loadFeedsFile();
-    if (!feeds.some((f) => f.id === feedId)) return;
+  markRequested(feedId: string): void {
     this.requestedAt.set(feedId, Date.now());
   }
 

@@ -2,7 +2,7 @@
 // from the last poll of the relay and what the service already knows.
 //
 // Pure: no I/O, no clock read. The service decides "recently requested" (from
-// noteRequested()) and "last seen" (from seen-store.ts) and hands them in, so
+// markRequested()) and "last seen" (from seen-store.ts) and hands them in, so
 // every row of the state table below is a plain input -> output check with
 // nothing to fake but a clock.
 
@@ -30,7 +30,7 @@ export interface FeedStateInput {
   bframesMark: BFramesMark | undefined;
   /** A pull feed's source is dialled by the relay only while something is
    *  watching; the service tracks whether a WHEP/HLS request named this feed
-   *  within RECENT_REQUEST_MS (video-service.ts's noteRequested()). */
+   *  within RECENT_REQUEST_MS (video-service.ts's markRequested()). */
   recentlyRequested: boolean;
   /** Epoch ms this feed was last confirmed live, from the seen store; null if
    *  never. */
