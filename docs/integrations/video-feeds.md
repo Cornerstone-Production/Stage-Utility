@@ -22,10 +22,12 @@ already pointed at it.
 
 The last two kinds go through Stage Utility's own video relay (MediaMTX,
 behind an adapter — see the relay status line at the top of the Video feeds
-page). A password protects each: never shown back to the browser once saved,
-and never carried in the feed list, `video:state`, or any broadcast — only a
-push feed's own address and password (below) are ever returned, and only for
-that one feed.
+page). A push feed always has a password; a pull feed's is optional, set
+only if the device asks for one. Either way it is never shown back to the
+browser once saved, and never carried in the feed list, `video:state`, or
+any broadcast — only a push feed's own address and password (below) are
+ever returned, and only for that one feed. The pull editor says "A password
+is saved" once one is stored, without showing it, and offers Clear.
 
 ### YouTube or Resi
 
@@ -65,9 +67,10 @@ For an RTSP, SRT or HLS address on the LAN — a camera or encoder's own output.
 **Address**, then **Username and password** if the device needs them. The
 relay only dials the address while something is actually showing the feed
 (a Video widget on screen, or the editor's own preview); nothing else keeps
-it connected. Leaving the password field blank on an edit leaves whatever
-password is already stored — clearing it takes an explicit edit back to
-blank, not just never touching the field.
+it connected. Once a password is stored, the field says "A password is
+saved. Type to replace it, or clear it." with a **Clear** button that
+removes it at once; typing a new one and saving replaces it, and leaving
+the field untouched on an edit leaves whatever is already stored.
 
 A Magewell Ultra Stream can serve one feed to Stage Utility this way while
 its first output keeps streaming to Resi: turn on the Ultra Stream's RTSP
@@ -76,21 +79,27 @@ server as its second output.
 ### The device pushes to Stage Utility
 
 For a device that connects outward — OBS, a hardware encoder, ProPresenter's
-own output. Choose **How it connects**: SRT, RTMP, or WHIP (OBS). Saving the
-feed mints a random password, shown once the feed exists under **Paste this
-into the device** — the exact address to paste, with **Copy** — and
-**Password**.
+own output. Choose **How it connects**: SRT, RTMP, or WHIP (OBS) — switching
+it before saving previews that protocol's own address below, with the same
+password, so there is no need to save just to see what each one looks like.
+Saving the feed mints a random password, shown once the feed exists under
+**Paste this into the device** — the exact address to paste, with **Copy**
+(its label reads "Copied" for a moment after) — and **Password**.
 
 The password is part of the SRT and RTMP addresses already (a device pushing
 without it is refused); for WHIP it is OBS's Bearer Token, entered separately
 under Settings, Stream, Service WHIP. **New password** replaces it and drops
 whatever is currently connected, so the old password stops working
-immediately rather than at the device's next reconnect.
+immediately rather than at the device's next reconnect. If the relay cannot
+be reached to apply it, or cannot drop the current connection, the editor
+says so rather than claiming it worked.
 
 If the device sends B-frames, WebRTC cannot carry the picture and Stage
 Utility falls back to HLS — a few seconds behind instead of under one. The
-editor says so, with the OBS setting that fixes it (Settings, Output,
-Streaming: Profile baseline, or Keyframe interval 1 s with B-frames 0).
+editor says so. For a feed set to WHIP this names OBS specifically, with its
+own fix (Settings, Output, Streaming: Profile baseline, or Keyframe interval
+1 s with B-frames 0); a pull camera or an SRT/RTMP push feed is not
+necessarily OBS, so the same message names "the device" instead.
 
 ## The Video feeds page
 
