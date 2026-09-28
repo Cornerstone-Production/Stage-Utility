@@ -5,10 +5,13 @@
 
 export interface WhepSession {
   pc: RTCPeerConnection;
-  /** Closes locally, then tells the relay. `ok: false` when the relay could not
+  /** Tells the relay, then closes locally. `ok: false` when the relay could not
    *  be told; it times the session out itself, so an unmount can ignore it. */
   stop: () => Promise<{ ok: boolean }>;
 }
+
+/** How long a DELETE may hold the peer connection open before it closes anyway. */
+export const DELETE_CAP_MS = 3000;
 
 /** A non-201 answer, carrying the status so a caller can tell "this relay
  *  feed's encoder cannot be carried over WebRTC at all" (400/406/415/422 —
@@ -28,14 +31,33 @@ export class WhepError extends Error {
  *  NOT against the page's own origin. `location` is usually a path relative
  *  to the relay (an external feed's endpoint can be a different host
  *  entirely), and resolving it against `window.location.href` sent the
- *  DELETE to this app's own origin instead of the relay's. Best-effort: a
- *  session the relay never heard the DELETE for times out on its own. */
+ *  DELETE to this app's own origin instead of the relay's. Best-effort, and
+ *  capped at DELETE_CAP_MS: a session the relay never heard the DELETE for
+ *  times out on its own. */
 async function deleteSession(endpoint: URL, location: string): Promise<{ ok: boolean }> {
+  const abort = new AbortController();
+  const cap = setTimeout(() => abort.abort(), DELETE_CAP_MS);
   try {
-    const r = await fetch(new URL(location, endpoint), { method: "DELETE" });
+    const r = await fetch(new URL(location, endpoint), { method: "DELETE", signal: abort.signal });
     return { ok: r.ok };
   } catch {
     return { ok: false };
+  } finally {
+    clearTimeout(cap);
+  }
+}
+
+/**
+ * Ends a session the relay created: the DELETE first, and the peer connection
+ * closed only once it has been answered (or given up on). MediaMTX answers a
+ * DELETE for a session whose peer connection already closed with 404 — 200
+ * before the close — so closing first turned every teardown into a failed one.
+ */
+async function endSession(pc: RTCPeerConnection, endpoint: URL, location: string | null): Promise<{ ok: boolean }> {
+  try {
+    return location ? await deleteSession(endpoint, location) : { ok: true };
+  } finally {
+    pc.close();
   }
 }
 
@@ -88,18 +110,15 @@ export async function startWhep(url: string, video: HTMLVideoElement, opts?: { s
     // dangling because reading OUR half of the answer failed would leak it
     // on the relay until its own timeout, one more than every other exit.
     stopped = true;
-    pc.close();
-    if (location) void deleteSession(endpoint, location);
+    await endSession(pc, endpoint, location);
     throw err;
   }
 
   return {
     pc,
-    async stop() {
+    stop() {
       stopped = true;
-      pc.close();
-      if (!location) return { ok: true };
-      return deleteSession(endpoint, location);
+      return endSession(pc, endpoint, location);
     },
   };
 }

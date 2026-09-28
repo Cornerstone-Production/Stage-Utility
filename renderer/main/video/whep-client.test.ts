@@ -6,7 +6,7 @@
 // dispatch.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
 
 import { startWhep } from "./whep-client.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
@@ -166,4 +166,85 @@ test("a session aborted while setRemoteDescription is in flight must not let its
   await session.stop();
 
   assert.equal(video.srcObject, "B", "the abandoned session's late track must not overwrite the newer attempt's stream");
+});
+
+// ── the DELETE reaches the relay before the peer connection closes ────────
+//
+// MediaMTX answers a DELETE for a session whose peer connection has already
+// closed with 404 (checked against v1.21.1: 200 before the close, 404 after),
+// so closing first turned every teardown into a failed one.
+
+function stubDeleteWith(answer: (init?: RequestInit) => Promise<Response>) {
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (_input: string | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        status: 201,
+        headers: { get: (h: string) => (h === "Location" ? "/video/p/whep/abcd" : null) },
+        text: async () => FAKE_SDP,
+      } as unknown as Response;
+    }
+    FakePeerConnection.log.push(init?.method ?? "GET");
+    return answer(init);
+  }) as typeof fetch;
+}
+
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("stop() waits for the DELETE's answer before closing the peer connection", async () => {
+  let answer!: (r: Response) => void;
+  stubDeleteWith(() => new Promise<Response>((resolve) => (answer = resolve)));
+
+  const session = await startWhep("/video/p/whep", video);
+  const pc = FakePeerConnection.instances.at(-1)!;
+  const stopping = session.stop();
+  await flush();
+
+  assert.deepEqual(FakePeerConnection.log, ["DELETE"], "the DELETE must be sent first");
+  assert.equal(pc.closed, false, "the peer connection closed while the DELETE was still in flight");
+
+  answer({ ok: true, status: 200 } as Response);
+  assert.deepEqual(await stopping, { ok: true });
+  assert.deepEqual(FakePeerConnection.log, ["DELETE", "close"]);
+});
+
+test("a bad answer DELETEs the session before closing the peer connection", async () => {
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (_input: string | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        status: 201,
+        headers: { get: (h: string) => (h === "Location" ? "/video/p/whep/leaked" : null) },
+        text: async () => {
+          throw new Error("body already consumed");
+        },
+      } as unknown as Response;
+    }
+    FakePeerConnection.log.push(init?.method ?? "GET");
+    return { ok: true, status: 200 } as Response;
+  }) as typeof fetch;
+
+  await assert.rejects(() => startWhep("/video/p/whep", video), /body already consumed/);
+  assert.deepEqual(FakePeerConnection.log, ["DELETE", "close"]);
+});
+
+test("a DELETE that never answers still closes the peer connection after the cap", async () => {
+  // Never answers, but rejects on abort the way the real fetch does.
+  stubDeleteWith(
+    (init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }),
+  );
+  const session = await startWhep("/video/p/whep", video);
+  const pc = FakePeerConnection.instances.at(-1)!;
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const stopping = session.stop();
+    await flush();
+    assert.equal(pc.closed, false);
+    mock.timers.tick(3000);
+    assert.deepEqual(await stopping, { ok: false });
+    assert.equal(pc.closed, true, "a hung DELETE must not hold the peer connection open");
+  } finally {
+    mock.timers.reset();
+  }
 });
