@@ -22,6 +22,7 @@ import {
   PaletteIcon,
   PlugIcon,
   SlidersHorizontalIcon,
+  VideoIcon,
   ZapIcon,
 } from "lucide-react";
 
@@ -37,6 +38,7 @@ import { HomeRoute } from "./home/home-route";
 import { ScreensRoute } from "./screens/screens-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
+import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
 import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
   AdvancedRoute,
@@ -71,6 +73,13 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "Every physical screen, what it shows, and whether it is on.",
     icon: <MonitorIcon className="size-4" />,
     Component: ScreensRoute,
+  },
+  {
+    path: "/video-feeds",
+    label: "Video feeds",
+    description: "Camera and program feeds for layouts and Home.",
+    icon: <VideoIcon className="size-4" />,
+    Component: VideoFeedsRoute,
   },
   {
     // The OPERATOR's launcher, in the shell. The same page at /scriptview is
@@ -183,7 +192,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // "output" in its description is XLR, not a display.
   { label: "Content", paths: ["/scriptview/manage", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/screens"] },
+  { label: "Screens", paths: ["/screens", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.
