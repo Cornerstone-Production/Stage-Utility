@@ -20,6 +20,16 @@ import { useVideoState } from "./use-video-state";
 
 const HIDDEN_TEARDOWN_MS = 3000;
 
+/** What the "N s behind" badge (top left) and the name tag (bottom left)
+ *  share: the corner, and type that scales with the widget's own width. */
+const CORNER_LABEL = {
+  left: 8,
+  fontSize: "clamp(9px, 1.3cqw, 13px)",
+  lineHeight: "clamp(11px, 1.6cqw, 15px)",
+  padding: "clamp(2px, 0.4cqw, 4px) clamp(4px, 0.7cqw, 8px)",
+  borderRadius: 4,
+} as const;
+
 type VideoObjectConfig = Extract<LayoutObjectConfig, { type: "video" }>;
 
 function isPreviewRoute(): boolean {
@@ -169,20 +179,7 @@ function VideoObjectBody({
             </div>
           )}
           {!isEmbed && phase === "delayed" && latency !== null && (
-            <span
-              className="absolute"
-              style={{
-                left: 8,
-                top: 8,
-                background: "rgba(0,0,0,0.6)",
-                color: "#ffca16",
-                fontSize: "clamp(9px, 1.3cqw, 13px)",
-                lineHeight: "clamp(11px, 1.6cqw, 15px)",
-                padding: "clamp(2px, 0.4cqw, 4px) clamp(4px, 0.7cqw, 8px)",
-                borderRadius: 4,
-                fontWeight: 600,
-              }}
-            >
+            <span className="absolute" style={{ ...CORNER_LABEL, top: 8, background: "rgba(0,0,0,0.6)", color: "#ffca16", fontWeight: 600 }}>
               {latency} s behind
             </span>
           )}
@@ -191,17 +188,7 @@ function VideoObjectBody({
       {showTag && (
         <span
           className="absolute"
-          style={{
-            left: 8,
-            bottom: 8,
-            background: "rgba(0,0,0,0.55)",
-            color: "rgba(255,255,255,0.92)",
-            fontSize: "clamp(9px, 1.3cqw, 13px)",
-            lineHeight: "clamp(11px, 1.6cqw, 15px)",
-            padding: "clamp(2px, 0.4cqw, 4px) clamp(4px, 0.7cqw, 8px)",
-            borderRadius: 4,
-            fontWeight: 500,
-          }}
+          style={{ ...CORNER_LABEL, bottom: 8, background: "rgba(0,0,0,0.55)", color: "rgba(255,255,255,0.92)", fontWeight: 500 }}
         >
           {name}
         </span>
