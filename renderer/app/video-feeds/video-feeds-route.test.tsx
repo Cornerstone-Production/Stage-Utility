@@ -505,3 +505,27 @@ test("one layout is \"1 layout\", not \"1 layouts\"", async () => {
     g.restore();
   }
 });
+
+test("after a rename the editor's heading shows the new name before any push arrives", async () => {
+  const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), {
+    onUpdateFeed: (id, body) => ({
+      status: 200,
+      body: { feed: embedFeed({ id, name: (body as { patch: { name: string } }).patch?.name ?? (body as { name: string }).name }) },
+    }),
+  });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    const nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "Main program" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+    // No push arrives in this environment (EventSource is a no-op stub), so
+    // the list still carries the old name: the heading must not.
+    assert.equal(!!screen.queryByRole("heading", { name: "Main program" }), true, "the heading still shows the name from before the save");
+  } finally {
+    g.restore();
+  }
+});
