@@ -2073,6 +2073,48 @@ test("item 5: a change landing between the loop's own last dirty check and recon
   }
 });
 
+test("item 2: a rejecting reconcileOnce still clears reconcileRunning — a later reconcileRelay() call still runs a pass, not wedged behind a stuck flag", async () => {
+  const reconciled: RelayFeed[][] = [];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(recordingRelay(reconciled), supervisor);
+
+  const made = await videoService.addFeed({ name: "Reject-once push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  reconciled.length = 0; // addFeed's own reconcile already ran once
+
+  // reconcileOnce() catches its own errors internally and returns false —
+  // it never actually rejects today. This simulates the case where it does
+  // anyway (a future change, or anything outside its own try/catch), which
+  // is exactly the shape reconcileLoop()'s own try/finally has to survive.
+  const svc = videoService as unknown as { reconcileOnce(): Promise<boolean>; reconcileRelay(): Promise<boolean> };
+  const realOnce = svc.reconcileOnce.bind(videoService);
+  let calls = 0;
+  svc.reconcileOnce = async () => {
+    calls++;
+    if (calls === 1) throw new Error("reconcileOnce rejected");
+    return realOnce();
+  };
+
+  try {
+    await assert.rejects(svc.reconcileRelay());
+    // If reconcileRunning were left stuck true, this would just fold in
+    // (set reconcileDirty) and await the SAME already-rejected chain,
+    // rather than ever running a fresh pass.
+    await videoService.updateFeed(id, { name: "Reject-once push 2" });
+    assert.equal(
+      reconciled.length,
+      1,
+      "expected a later reconcileRelay() call to actually run a pass, not be wedged behind a stuck flag",
+    );
+  } finally {
+    svc.reconcileOnce = realOnce;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async () => {
   const made = await videoService.addFeed({ name: "Snapshot restore", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);

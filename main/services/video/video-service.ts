@@ -946,21 +946,26 @@ class VideoService {
    * That is "the plan is computed inside the chain": never captured before
    * entering it.
    *
-   * R14 round 2 item 5: `reconcileRunning` is cleared INSIDE reconcileLoop()
-   * itself, in the same synchronous step as its own last dirty check — not
-   * in a `.finally()` chained on here, which used to leave a gap between
-   * "the loop just decided dirty is false and is about to return" and "the
-   * `.finally()` callback actually runs, one microtask later" (JS runs a
-   * `.finally()` reaction only once the current microtask queue gets to it,
-   * never in the same tick as the function it is attached to returning). A
-   * caller landing in exactly that gap sees `reconcileRunning` still true,
-   * correctly folds in by setting `reconcileDirty` and awaiting
-   * `reconcileChain` — but the loop has already committed to returning, so
-   * nothing was ever going to check that flag again, and the change it
-   * carried was silently dropped once the `.finally()` cleared the flag
-   * out from under it. Clearing it as part of the same synchronous
-   * check-then-clear-then-recheck removes the gap rather than narrowing it:
-   * nothing can run between two statements with no `await` between them.
+   * `reconcileRunning` is cleared INSIDE reconcileLoop() itself, in a plain
+   * try/finally around the do/while — not in a `.finally()` chained onto
+   * this method's own returned promise, which is what an earlier version of
+   * this fix did. That mattered: a `.finally()` reaction on a PROMISE is a
+   * separate microtask, so it used to run one tick after the loop had
+   * already decided to exit — a caller's own reconcileRelay() call landing
+   * in exactly that gap saw `reconcileRunning` still true, correctly folded
+   * in by setting `reconcileDirty`, and awaited `reconcileChain` — but the
+   * loop had already committed to returning, so nothing was ever going to
+   * check that flag again, and the change it carried was silently dropped.
+   * A `finally` block INSIDE the same function has no such gap: it runs
+   * synchronously, in the same tick the do/while's condition decides to
+   * exit, with no `await` in between for anything else to run in. It also
+   * clears the flag even if reconcileOnce() itself rejects instead of
+   * returning false (it currently never does — its own try/catch inside
+   * reports the failure and returns false — but nothing guarantees a future
+   * change keeps that true), which an earlier version of this method did
+   * not guard: an unhandled rejection skipped straight past the clearing
+   * statement, wedging every later reconcileRelay() call behind a flag
+   * that would never come back down.
    */
   private reconcileRelay(): Promise<boolean> {
     if (this.reconcileRunning) {
@@ -974,15 +979,13 @@ class VideoService {
 
   private async reconcileLoop(): Promise<boolean> {
     let applied: boolean;
-    for (;;) {
-      this.reconcileDirty = false;
-      applied = await this.reconcileOnce();
-      if (this.reconcileDirty) continue;
-      // No `await` between here and the recheck below — see this method's
-      // own comment on why that is what actually closes the gap.
+    try {
+      do {
+        this.reconcileDirty = false;
+        applied = await this.reconcileOnce();
+      } while (this.reconcileDirty);
+    } finally {
       this.reconcileRunning = false;
-      if (!this.reconcileDirty) break;
-      this.reconcileRunning = true; // a caller landed in the gap after all — one more pass catches it
     }
     return applied;
   }
