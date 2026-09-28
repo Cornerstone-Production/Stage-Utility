@@ -266,7 +266,7 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
               } else if (hasConnected) {
                 // Reached "connected" at least once, but a frame never
                 // arrived before it dropped again (the same shape as the
-                // B-frames case waitForFirstFrame's own timeout reports) —
+                // B-frames case firstFrameDeadline's own timeout reports) —
                 // worded differently from the branch below, which never
                 // connected at all.
                 webrtcUnusable(`connection ${s} before a frame ever arrived`);
