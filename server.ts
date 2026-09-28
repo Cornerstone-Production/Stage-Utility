@@ -82,6 +82,7 @@ import { stageController } from "./main/services/stage-controller.js";
 import { cacheMaintenance } from "./main/services/cache-maintenance.js";
 import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
+import { videoService } from "./main/services/video/video-service.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -110,6 +111,7 @@ await streamStartStore.init();
 await stageController.init();
 await integrationManager.init();
 await baptismTimerService.init();
+await videoService.init();
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 

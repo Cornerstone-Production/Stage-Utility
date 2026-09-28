@@ -133,6 +133,10 @@ const REQUEST_FACING = [
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
+  // Logs nothing today — every routes/ file is walked, so a new one forces this
+  // decision rather than being found the day it first logs a feed name or a URL
+  // typed into a POST /api/video/feeds body.
+  "routes/video-routes.ts",
   "routes/view-routes.ts",
   // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
   // carry-over lines. A title is typed into Planning Center and arrives here in
