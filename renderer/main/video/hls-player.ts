@@ -1,10 +1,28 @@
-// renderer/main/video/hls-player.ts — native HLS where the browser has it
-// (Safari, iPad), hls.js elsewhere, imported only when a feed needs it.
+// renderer/main/video/hls-player.ts — hls.js wherever Media Source Extensions
+// exist, native HLS only where they do not (older iOS), hls.js imported only
+// when a feed needs it.
+//
+// hls.js first, not native first: Chrome now answers canPlayType for HLS with
+// "maybe", and its native player fails on the relay's low-latency HLS (one
+// frame, then a demuxer error) where hls.js plays the same playlist in the
+// same browser. Safari has MSE too, so it takes hls.js as well.
+
+import { mseAvailable } from "./choose-playback";
 
 export interface HlsSession {
   stop: () => void;
   /** Seconds behind the live edge, for the "N s behind" badge. */
   latencySeconds: () => number | null;
+}
+
+type HlsModule = typeof import("hls.js");
+const importHls = (): Promise<HlsModule> => import("hls.js");
+let loadHls = importHls;
+
+/** Tests hand in a stand-in for hls.js, which under Node has no MediaSource
+ *  to attach to; null puts the real import back. */
+export function __setHlsLoaderForTests(load: (() => Promise<HlsModule>) | null): void {
+  loadHls = load ?? importHls;
 }
 
 /** `onFatal`: a fatal hls.js error (`Hls.Events.ERROR` with `data.fatal`),
@@ -16,7 +34,7 @@ export async function startHls(
   video: HTMLVideoElement,
   opts?: { onFatal?: (why: string) => void },
 ): Promise<HlsSession> {
-  if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
+  if (!mseAvailable()) {
     video.src = url;
     return {
       stop() { video.removeAttribute("src"); video.load(); },
@@ -26,7 +44,7 @@ export async function startHls(
       },
     };
   }
-  const { default: Hls } = await import("hls.js");
+  const { default: Hls } = await loadHls();
   const hls = new Hls({ lowLatencyMode: true, backBufferLength: 10 });
   if (opts?.onFatal) {
     hls.on(Hls.Events.ERROR, (_event, data) => {

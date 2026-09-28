@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { choosePlayback } from "./choose-playback.js";
+import { browserCaps, choosePlayback } from "./choose-playback.js";
 
 const RELAY = { via: "relay", whep: "/video/p/whep", hls: "/video/p/index.m3u8" } as const;
 const CAPS = { webrtc: true, nativeHls: false, mse: true };
@@ -40,4 +40,18 @@ test("external HLS obeys the switch", () => {
   const ext = { ...base, play: { via: "external", url: "http://h/x.m3u8", protocol: "hls" } as const };
   assert.equal(choosePlayback(ext).method, "hls");
   assert.equal(choosePlayback({ ...ext, allowHls: false }).method, "none");
+});
+
+test("browserCaps counts ManagedMediaSource as MSE, so a screen with only that can still play HLS", () => {
+  const g = globalThis as unknown as { document?: unknown; ManagedMediaSource?: unknown; MediaSource?: unknown };
+  const realDocument = g.document;
+  g.document = { createElement: () => ({ canPlayType: () => "" }) };
+  g.ManagedMediaSource = class {};
+  try {
+    assert.equal(g.MediaSource, undefined, "this test needs a runtime with no MediaSource of its own");
+    assert.equal(browserCaps().mse, true);
+  } finally {
+    delete g.ManagedMediaSource;
+    g.document = realDocument;
+  }
 });

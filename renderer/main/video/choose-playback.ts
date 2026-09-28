@@ -37,11 +37,21 @@ export function choosePlayback(i: PlaybackInput): PlaybackChoice {
   return webrtcOk ? { method: "webrtc", url: p.whep } : hls(p.hls);
 }
 
+/**
+ * Media Source Extensions in either form: `MediaSource`, or `ManagedMediaSource`,
+ * which is all an iPhone on iOS 17.1 or later has. hls.js uses whichever exists,
+ * so either one means hls.js can play here.
+ */
+export function mseAvailable(): boolean {
+  const g = globalThis as { MediaSource?: unknown; ManagedMediaSource?: unknown };
+  return typeof g.MediaSource === "function" || typeof g.ManagedMediaSource === "function";
+}
+
 export function browserCaps(): PlaybackInput["caps"] {
   const v = document.createElement("video");
   return {
     webrtc: typeof RTCPeerConnection === "function",
     nativeHls: v.canPlayType("application/vnd.apple.mpegurl") !== "",
-    mse: typeof MediaSource === "function",
+    mse: mseAvailable(),
   };
 }

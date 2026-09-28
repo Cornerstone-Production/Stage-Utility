@@ -464,11 +464,10 @@ test("srcObject is cleared before an HLS attempt starts, even if something set i
   let attempt: ReturnType<typeof startPlaybackAttempt> | undefined;
   try {
     untyped.srcObject = "leftover-from-a-webrtc-attempt";
-    // "maybe"/"probably" takes startHls's NATIVE branch (`video.src = url`):
-    // real hls.js is never imported, so there is no internal Hls instance
-    // left running past this test that a cleanup would need to reach for.
-    // An ABSENT canPlayType is a different case entirely — it throws, since
-    // startHls calls it unconditionally.
+    // Node has no MediaSource, so startHls takes its NATIVE branch
+    // (`video.src = url`): real hls.js is never imported, and there is no
+    // internal Hls instance left running past this test for a cleanup to
+    // reach for.
     untyped.canPlayType = () => "maybe";
     untyped.removeAttribute = () => {};
     untyped.load = () => {};
