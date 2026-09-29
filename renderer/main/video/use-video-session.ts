@@ -58,6 +58,8 @@ export const WEBRTC_RETRY_AFTER_MS = 5 * 60 * 1000;
 /** How long a webrtc connectionState of failed/disconnected must persist, once
  *  a session was already showing a picture, before it counts as dropped. */
 export const DROP_GRACE_MS = 3000;
+/** How often the decoded-frame count is read while waiting for a first frame. */
+export const FRAME_POLL_MS = 200;
 
 export type SessionPhase = "connecting" | "waiting" | "live" | "delayed" | "offline" | "cant-play";
 
@@ -167,12 +169,23 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
    * WHEP answer applied, the HLS source loaded — and never from a connection
    * state event: a picture that is decoding lifts the cover whatever state
    * events were or were not observed. Idempotent.
+   *
+   * Two signals, whichever comes first. requestVideoFrameCallback is the
+   * prompt one, but it runs only in a rendering step, and a page in a
+   * covered, minimized or napping window gets few of those or none while the
+   * element goes on decoding and the deadlines below go on running — on its
+   * own it read a decoding picture as "no frame ever arrived". The decoded-
+   * frame count does not wait for rendering; it counts only once it moves,
+   * since an element keeps an earlier source's count.
    */
   let watching = false;
   const watchForFirstFrame = () => {
     if (watching) return;
     watching = true;
-    const v = video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+    const v = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+      getVideoPlaybackQuality?: () => { totalVideoFrames: number };
+    };
     const markFrame = () => {
       if (ended || gotFirstFrame) return;
       gotFirstFrame = true;
@@ -192,12 +205,14 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
         cb.onPhase("live");
       }
     };
-    if (typeof v.requestVideoFrameCallback === "function") {
-      frameCbHandle = v.requestVideoFrameCallback(markFrame);
-    } else {
+    if (typeof v.requestVideoFrameCallback === "function") frameCbHandle = v.requestVideoFrameCallback(markFrame);
+    if (typeof v.getVideoPlaybackQuality === "function") {
+      let seen = v.getVideoPlaybackQuality().totalVideoFrames;
       pollInterval = setInterval(() => {
-        if (v.getVideoPlaybackQuality().totalVideoFrames > 0) markFrame();
-      }, 200);
+        const decoded = v.getVideoPlaybackQuality!().totalVideoFrames;
+        if (decoded > seen) markFrame();
+        seen = decoded;
+      }, FRAME_POLL_MS);
     }
   };
 

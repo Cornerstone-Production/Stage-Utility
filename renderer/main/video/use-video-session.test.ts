@@ -23,6 +23,7 @@ import {
   CONNECT_TIMEOUT_MS,
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
+  FRAME_POLL_MS,
   RESET_AFTER_PLAYING_MS,
   RETRY_MAX_MS,
   RETRY_MIN_MS,
@@ -64,8 +65,10 @@ class FakeVideo extends EventTarget {
   cancelVideoFrameCallback(): void {
     this.frameCb = undefined;
   }
+  /** What getVideoPlaybackQuality() reports as decoded so far. */
+  decodedFrames = 0;
   getVideoPlaybackQuality(): { totalVideoFrames: number } {
-    return { totalVideoFrames: 0 };
+    return { totalVideoFrames: this.decodedFrames };
   }
   /** Simulates the browser delivering a decoded frame. */
   fireFrame(): void {
@@ -396,6 +399,68 @@ test("a frame with no connectionstatechange ever dispatched still goes live, and
       "a live session must not be failed by the connect timer",
     );
     attempt.stop();
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+// requestVideoFrameCallback runs only in a rendering step. A page in a
+// covered, minimized or napping window gets few rendering steps or none,
+// while the element goes on decoding and this attempt's own deadlines go on
+// running, so the decoded-frame count is watched as well.
+
+test("a picture that decodes while the page is not being rendered still lifts the cover", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    // Frames decode; no rendering step ever runs the frame callback.
+    for (let i = 0; i < 5; i++) {
+      video.decodedFrames += 6;
+      mock.timers.tick(FRAME_POLL_MS);
+    }
+    mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+
+    assert.deepEqual(
+      calls.filter((c) => c.fn === "onPhase").map((c) => c.arg),
+      ["connecting", "live"],
+      "a picture that is decoding must lift the cover whether or not the page renders",
+    );
+    assert.deepEqual(
+      calls.filter((c) => c.fn === "onWebrtcUnusable" || c.fn === "onDropped").map((c) => c.fn),
+      [],
+      "a decoding picture must never be read as no frame ever arriving",
+    );
+    attempt.stop();
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a decoded-frame count left from an earlier source is not a first frame", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  video.decodedFrames = 500; // the element's last picture, not this attempt's
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(
+      calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn),
+      ["onWebrtcUnusable"],
+      "a count that does not move is no frame, whatever its value",
+    );
   } finally {
     mock.timers.reset();
     g.restore();
