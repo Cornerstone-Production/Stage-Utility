@@ -30,6 +30,7 @@ import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-st
 import type { SupervisorStatus } from "./supervisor.js";
 import {
   DEFAULT_VIDEO_PORTS,
+  PUSH_PROTOCOL_LABEL,
   type FeedPlay,
   type FeedState,
   type FeedStatus,
@@ -434,7 +435,7 @@ class VideoService {
       s.kind === "pull" || s.kind === "external"
         ? s.url
         : s.kind === "push"
-          ? { srt: "SRT", rtmp: "RTMP", whip: "WHIP (OBS)" }[s.protocol]
+          ? PUSH_PROTOCOL_LABEL[s.protocol]
           : s.ref;
     return `${SOURCE_LINE_KIND[s.kind]} · ${detail}`;
   }

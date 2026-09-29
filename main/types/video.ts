@@ -6,6 +6,13 @@
 export const PUSH_PROTOCOLS = ["srt", "rtmp", "whip"] as const;
 export type PushProtocol = (typeof PUSH_PROTOCOLS)[number];
 
+/** How each push protocol is named on the page and in a feed's source line. */
+export const PUSH_PROTOCOL_LABEL: Record<PushProtocol, string> = {
+  srt: "SRT",
+  rtmp: "RTMP",
+  whip: "WHIP (OBS)",
+};
+
 /** What newPushPassword()'s kick attempt did, three ways rather than a
  *  boolean — "none" and "failed" are both "nothing got dropped," but only
  *  one of them means a device really was pushing and stayed connected

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "@main/services/errors";
 import {
   EMBED_PLAYERS,
+  PUSH_PROTOCOL_LABEL,
   PUSH_PROTOCOLS,
   type EmbedPlayer,
   type KickResult,
@@ -43,12 +44,6 @@ const KIND_LABEL: Record<VideoSourceKind, string> = {
   push: "The device pushes to Stage Utility (SRT, RTMP, WHIP)",
   embed: "YouTube or Resi player",
   external: "Another WebRTC or HLS address",
-};
-
-const PUSH_PROTOCOL_LABEL: Record<PushProtocol, string> = {
-  srt: "SRT",
-  rtmp: "RTMP",
-  whip: "WHIP (OBS)",
 };
 
 /** The description under "Paste this into the device" — OBS needs the
