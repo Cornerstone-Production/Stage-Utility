@@ -34,12 +34,14 @@ is backed up; it is runtime data, rebuilt the same way on a fresh machine:
 | `downloads/` | The verified archive |
 | `v1.21.1/` | The extracted binary, in a folder named for the version. Extracted beside it and renamed into place, so it is whole or absent; one without a runnable binary is removed and extracted again |
 | `mediamtx.yml` | The relay's config, written fresh at every start and before every restart. Readable by this server's user only (0600): it holds every push feed's publish password and the password for the relay's own API |
-| `relay.pid` | The running relay's process id, so the next start can find a relay left behind by a server that was killed | Once extracted it is reused on every later
-start, with no re-download and no re-check. A machine with no internet access
-can skip the download entirely: place the exact archive the failing status
-line names in `video-relay/downloads` in the data folder by hand, and it is
-checked against the same checksum before it is ever run — a wrong or
-corrupted file is refused, not extracted.
+| `relay.pid` | The running relay's process id, so the next start can find a relay left behind by a server that was killed |
+
+Once extracted it is reused on every later start, with no re-download and no
+re-check. A machine with no internet access can skip the download entirely:
+place the exact archive the failing status line names in
+`video-relay/downloads` in the data folder by hand, and it is checked against
+the same checksum before it is ever run — a wrong or corrupted file is
+refused, not extracted.
 
 | Install | Data folder |
 |---|---|
