@@ -85,6 +85,10 @@ export function relayConnectionState(relay: RelayStatus): { state: ConnectionSta
  *  video:state broadcast, and a feed-store re-read, on every chunk. */
 const DOWNLOAD_PROGRESS_THROTTLE_MS = 500;
 
+/** How much of a pre-launch failure's reason, and of where to place the
+ *  archive by hand, reaches the log. */
+const LOG_REASON_MAX = 1_000;
+
 /**
  * RelaySupervisorLike (video-service.ts) plus the two lifecycle methods
  * video-service.ts never calls itself — it only ever receives an
@@ -380,7 +384,9 @@ export class RelayLifecycle {
     // every LAN client reads names it relative to the data folder
     // (video-service.ts's relayStatus()).
     const byHand = placeArchiveAt && assetName ? ` (to place it by hand: ${assetName} in ${placeArchiveAt})` : "";
-    if (decision.log) console.warn(`[video] ${scrub(logReason)}${scrub(byHand)}${scrub(decision.note)}`);
+    // Wider than scrub()'s default: a checksum failure alone carries a path
+    // and two 64-character hashes, and the hand-place folder follows it.
+    if (decision.log) console.warn(`[video] ${scrub(logReason, LOG_REASON_MAX)}${scrub(byHand, LOG_REASON_MAX)}${scrub(decision.note)}`);
     if (kind === "unsupported") {
       videoService.setPreAttachStatus({ state: "failing", reason, kind, retryAt: null, placeArchiveAt, assetName });
       return;

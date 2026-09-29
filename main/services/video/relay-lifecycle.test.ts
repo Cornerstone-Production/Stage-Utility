@@ -345,6 +345,27 @@ test("the supervisor is handed a rewrite for every respawn: the feeds and push p
 // port. The leftover is stopped BEFORE the port check, or the check finds
 // the relay's own ports taken — by the relay — and fails every retry, never
 // reaching the supervisor that would have stopped it.
+// A checksum failure names the file, both hashes and where to place the
+// archive by hand — well past scrub()'s default 200 characters, which cut the
+// line off mid-path and mid-hash.
+test("a long pre-launch failure reaches the log whole: path, both hashes, where to place it", async (t: TestContext) => {
+  const logs = captureConsole(t, "warn");
+  const downloads = path.join(TMP, "video-relay", "downloads");
+  const reason =
+    `hand-placed archive at ${path.join(downloads, "mediamtx_v1.21.1_linux_arm64.tar.gz")} does not match the pinned checksum ` +
+    `(expected ${"a".repeat(64)}, got ${"b".repeat(64)})`;
+  const { deps } = makeDeps({
+    ensureBinary: async () => ({ ok: false, reason, placeArchiveAt: downloads, assetName: "mediamtx_v1.21.1_linux_arm64.tar.gz" }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => logs.some((l) => l.includes("hand-placed archive")));
+  const line = logs.find((l) => l.includes("hand-placed archive"))!;
+  assert.ok(line.includes(`got ${"b".repeat(64)})`), `the line was cut short: ${line}`);
+  assert.ok(line.endsWith(`in ${downloads})`), `the hand-place folder was cut short: ${line}`);
+});
+
 test("a leftover relay is stopped before the port check, so its ports read free", async () => {
   let leftoverRunning = true;
   const { deps, supervisors } = makeDeps({
