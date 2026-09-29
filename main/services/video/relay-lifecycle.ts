@@ -100,6 +100,7 @@ export interface RelayLifecycleSupervisor extends RelaySupervisorLike {
 }
 
 export interface RelayLifecycleDeps {
+  loadFeedsFile: typeof loadFeedsFile;
   ensureBinary: (opts?: EnsureBinaryOptions) => ReturnType<typeof ensureBinary>;
   busyPorts: (ports: VideoPorts) => Promise<BusyPort[]>;
   makeSupervisor: () => RelayLifecycleSupervisor;
@@ -107,6 +108,7 @@ export interface RelayLifecycleDeps {
 }
 
 const REAL_DEPS: RelayLifecycleDeps = {
+  loadFeedsFile,
   ensureBinary,
   busyPorts,
   makeSupervisor: () => new RelaySupervisor(),
@@ -222,35 +224,44 @@ export class RelayLifecycle {
   }
 
   private async hasRelayFeeds(): Promise<boolean> {
-    const { feeds } = await loadFeedsFile();
+    const { feeds } = await this.deps.loadFeedsFile();
     return feeds.some((f) => f.source.kind === "pull" || f.source.kind === "push");
   }
 
   /**
    * Appends `fn` to the internal chain and returns at once — see the file
-   * header for why no public caller ever awaits the chain itself. A
-   * rejection is not expected (every pre-supervisor step startRelay() takes
-   * is inside its own try/catch — see item 3's own comment there), but a
-   * caught one here is what keeps a hypothetical future one from wedging
-   * every later call behind a permanently-rejected chain.
+   * header for why no public caller ever awaits the chain itself.
    *
-   * `.then(fn).catch(onRejected)` — NOT `.then(fn, onRejected)`. The second
-   * argument to a single `.then()` call catches a rejection of the promise
-   * it is called ON (the PREVIOUS link), never a rejection `fn` itself
-   * produces; `.then(fn, onRejected)` leaves fn's own throw uncaught by
-   * anything at THIS link, so it propagates outward and poisons the very
-   * next enqueue() call instead — that call's `onRejected` fires (catching
-   * what it takes to be "the previous step" failing) and its OWN `fn` is
-   * skipped entirely, silently dropping one real, queued call for every one
-   * that failed. Confirmed empirically (a three-call chain where the first
-   * throws: with `.then(fn, onRejected)` the second call's fn never runs at
-   * all; with `.then(fn).catch(onRejected)` every fn runs, in order,
-   * regardless of what came before).
+   * A step can reject outside every try/catch startRelay() has: reading the
+   * feed store to decide whether the relay is wanted at all. That is a
+   * failed attempt like any other (stepFailed), so the relay says it is
+   * failing and tries again — never silence, and never a "Next try at" that
+   * has passed with nothing scheduled behind it.
+   *
+   * `.then(fn).catch(onRejected)`, not `.then(fn, onRejected)`: the second
+   * argument to one `.then()` catches the PREVIOUS link's rejection, never
+   * fn's own, so fn's throw would reach the next enqueue() instead and skip
+   * that call's fn entirely.
    */
   private enqueue(fn: () => Promise<void>): void {
-    this.chain = this.chain.then(fn).catch((err: unknown) => {
-      console.error(`[video] an internal relay-lifecycle step failed unexpectedly: ${scrub(errorMessage(err))}`);
-    });
+    this.chain = this.chain.then(fn).catch((err: unknown) => this.stepFailed(err));
+  }
+
+  /** A rejected step (see enqueue): failing with why while the relay is not
+   *  up, and in every case the wanted-state check tried again on the backoff. */
+  private stepFailed(err: unknown): void {
+    const reason = `could not start the relay: ${errorMessage(err)}`;
+    if (!this.isUp()) {
+      this.failPreSupervisor(reason, "spawn", undefined, undefined);
+      return;
+    }
+    const decision = this.prelaunchOutage.fail("relay-step", reason, Date.now());
+    if (decision.log) console.warn(`[video] ${scrub(reason)}${scrub(decision.note)}`);
+    const delay = restartDelayMs(this.attempt);
+    this.attempt++;
+    this.clearRetryTimer();
+    this.retryTimer = setTimeout(() => this.enqueue(() => this.reconcileWanted()), delay);
+    this.retryTimer.unref?.();
   }
 
   /** integration-manager.ts's applyVideo(): video's own enabled flag. */
@@ -441,7 +452,7 @@ export class RelayLifecycle {
         return;
       }
 
-      const { ports } = await loadFeedsFile();
+      const { ports } = await this.deps.loadFeedsFile();
       const busy = await this.deps.busyPorts(ports);
       if (busy.length > 0) {
         const { reason, logReason } = busyPortReason(busy);

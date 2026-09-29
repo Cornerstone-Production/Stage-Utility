@@ -20,7 +20,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 
 const { RelayLifecycle, relayConnectionState } = await import("./relay-lifecycle.js");
 const { videoService } = await import("./video-service.js");
-const { videoFeedsStore } = await import("./feed-store.js");
+const { videoFeedsStore, loadFeedsFile: loadRealFeedsFile } = await import("./feed-store.js");
 const { restartDelayMs } = await import("./supervisor.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 
@@ -37,14 +37,14 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 const OBS_STUDIO = { kind: "process" as const, program: "OBS Studio", pid: 812 };
 
 /** Real wall-clock polling, never affected by a test's own mocked
- *  setTimeout: the start sequence's first-ever secretsStore call generates
- *  an encryption key (real crypto), and a single settle() is not always
- *  enough past that. */
+ *  setTimeout or Date (performance.now() is neither): the start sequence's
+ *  first-ever secretsStore call generates an encryption key (real crypto),
+ *  and a single settle() is not always enough past that. */
 async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
-  const start = Date.now();
+  const start = performance.now();
   for (;;) {
     if (predicate()) return;
-    if (Date.now() - start > timeoutMs) throw new Error("waitUntil() timed out");
+    if (performance.now() - start > timeoutMs) throw new Error("waitUntil() timed out");
     await settle();
   }
 }
@@ -102,6 +102,7 @@ function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
   const order: string[] = [];
   const supervisors: FakeSupervisor[] = [];
   const deps: RelayLifecycleDeps = {
+    loadFeedsFile: loadRealFeedsFile,
     ensureBinary: async () => {
       order.push("ensureBinary");
       return { ok: true, path: "/fake/mediamtx" };
@@ -601,26 +602,63 @@ test("PROBE F: a busy port, then a ports change that fixes it — retries immedi
 // takes to be "the previous step" failing) and its OWN fn is skipped
 // entirely, silently dropping one real, queued call for every one that
 // failed.
-test("PROBE G: a rejected chain step (supervisor.stop() throwing) does not drop the NEXT queued call", async (t: TestContext) => {
+// A step on the lifecycle's own chain can reject outside every try/catch
+// the start sequence has — reading the feed store to decide whether the
+// relay is wanted at all. The chain must survive it (the next queued call
+// still runs), and the relay must say it is failing and try again, never
+// sit silent, or keep showing a "Next try at" that has already passed.
+test("a step that rejects on the chain reports failing and is tried again — the next call is never dropped", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { deps, supervisors } = makeDeps();
+  let reads = 0;
+  const { deps, supervisors } = makeDeps({
+    loadFeedsFile: async () => {
+      reads++;
+      if (reads === 1) throw new Error("EIO: i/o error, read");
+      return loadRealFeedsFile();
+    },
+  });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
+  await waitUntil(() => videoService.current().relay.state === "failing");
+  const failing = (await videoService.state()).relay as { reason: string; retryAt: number | null };
+  assert.match(failing.reason, /EIO: i\/o error, read/);
+  assert.notEqual(failing.retryAt, null, "a rejected step must be tried again");
+
+  t.mock.timers.tick(restartDelayMs(0));
   await waitUntil(() => supervisors.length > 0);
   assert.equal((await videoService.state()).relay.state, "running");
+});
 
-  supervisors[0]!.stopRejectsOnce = true;
-  lifecycle.setEnabled(false); // stopRelay() -> supervisor.stop() rejects
-  await settle();
-  await settle();
-
-  // The very next queued call — switching back on — must still run, not be
-  // silently skipped because the previous one rejected.
+test("a retry whose own step rejects shows the new failure and a new next try, never the passed one", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  let busyCalls = 0;
+  let failNextRead = false;
+  const { deps, supervisors } = makeDeps({
+    busyPorts: async () => (++busyCalls === 1 ? [{ port: 1935, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
+    loadFeedsFile: async () => {
+      if (failNextRead) {
+        failNextRead = false;
+        throw new Error("EIO: i/o error, read");
+      }
+      return loadRealFeedsFile();
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await waitUntil(() => supervisors.length > 1);
-  assert.equal(supervisors.length, 2, "the second setEnabled(true) was dropped — no fresh supervisor was ever created");
-  assert.equal((await videoService.state()).relay.state, "running");
+  await waitUntil(() => videoService.current().relay.state === "failing");
+  const first = (await videoService.state()).relay as { reason: string; retryAt: number };
+  assert.match(first.reason, /Port 1935/);
+
+  failNextRead = true; // the retry's own "is the relay wanted" read
+  t.mock.timers.tick(restartDelayMs(0));
+  await waitUntil(() => /EIO/.test((videoService.current().relay as { reason?: string }).reason ?? ""));
+  const second = (await videoService.state()).relay as { reason: string; retryAt: number };
+  assert.ok(second.retryAt > first.retryAt, `the next try must move on from the one that passed (${first.retryAt} -> ${second.retryAt})`);
+
+  t.mock.timers.tick(restartDelayMs(1));
+  await waitUntil(() => supervisors.length > 0);
 });
 
 // item 13 (findings-t15-r3.md): a rejected supervisor.stop() inside
