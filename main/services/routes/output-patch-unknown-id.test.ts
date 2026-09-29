@@ -13,31 +13,11 @@
 // added the same way is caught by the same shape.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, it } from "node:test";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-output-unknown-id-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+import { outputRouteHarness } from "../fixtures/output-routes.js";
 
-const { viewRoutes } = await import("./view-routes.js");
-const { callRoute } = await import("./route-harness.js");
-const { stageController } = await import("../stage-controller.js");
-
-type Mutable = { state: { views: View[]; outputs: Output[]; [k: string]: unknown }; broadcast: () => void };
-const ctl = stageController as unknown as Mutable;
-ctl.broadcast = () => {};
-
-beforeEach(() => {
-  ctl.state = {
-    ...ctl.state,
-    views: [{ id: "v1", name: "Mic board", kind: "slots", createdAt: "" }] as View[],
-    outputs: [{ id: "wall", name: "Stage wall", viewId: "v1" }] as Output[],
-  };
-  (stageController as unknown as { recomputeResolved: () => void }).recomputeResolved();
-});
+const { viewRoutes, callRoute, stageController } = await outputRouteHarness("stage-output-unknown-id-");
 
 const FIELDS: [name: string, body: Record<string, unknown>][] = [
   ["name", { name: "New Name" }],

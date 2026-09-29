@@ -5,34 +5,15 @@
 // is the HTTP boundary alone: the body the route accepts, the 400 it gives a
 // malformed one, and that a successful PATCH hands back a display that would
 // actually read the change — the resolved descriptor the kiosk reads, not just
-// the raw Output the request patched.
+// the raw Output the request patched. An id naming no display is
+// output-patch-unknown-id.test.ts's, for every field at once.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, it } from "node:test";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-allowhls-route-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+import { outputRouteHarness } from "../fixtures/output-routes.js";
 
-const { viewRoutes } = await import("./view-routes.js");
-const { callRoute } = await import("./route-harness.js");
-const { stageController } = await import("../stage-controller.js");
-
-type Mutable = { state: { views: View[]; outputs: Output[]; [k: string]: unknown }; broadcast: () => void };
-const ctl = stageController as unknown as Mutable;
-ctl.broadcast = () => {};
-
-beforeEach(() => {
-  ctl.state = {
-    ...ctl.state,
-    views: [{ id: "v1", name: "Mic board", kind: "slots", createdAt: "" }] as View[],
-    outputs: [{ id: "wall", name: "Stage wall", viewId: "v1" }] as Output[],
-  };
-  (stageController as unknown as { recomputeResolved: () => void }).recomputeResolved();
-});
+const { viewRoutes, callRoute, stageController } = await outputRouteHarness("stage-allowhls-route-");
 
 type PatchResponse = { outputs: Output[]; resolvedByOutput: Record<string, { allowHls: boolean }> };
 
@@ -68,14 +49,6 @@ describe("PATCH /api/outputs/:id — allowHls", () => {
       true,
       "a rejected request must not have flipped the output's HLS setting",
     );
-  });
-
-  it("refuses an id that names no output with a clean 400 — same as hideTopBar, locked and blackout", async () => {
-    // See output-patch-unknown-id.test.ts for all four fields together; this
-    // just confirms allowHls's own request goes through the same caught shape.
-    const r = await callRoute(viewRoutes, "/api/outputs/nowhere", { method: "PATCH", body: { allowHls: false } });
-    assert.equal(r.status, 400);
-    assert.match((r.json as { error?: string })?.error ?? "", /not found/i);
   });
 
   it("combines with the other output flags in one request, same as hideTopBar does", async () => {
