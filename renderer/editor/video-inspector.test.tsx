@@ -230,7 +230,7 @@ describe("VideoConfig — When the feed is offline", () => {
 });
 
 describe("VideoConfig — the callout", () => {
-  test("always says muted, no controls, and where a struggling screen reports", async () => {
+  test("always says the widget is muted, with no controls", async () => {
     const f = stubVideoState();
     try {
       const { getByText } = await mount(DEFAULT_CONFIG, () => {});
