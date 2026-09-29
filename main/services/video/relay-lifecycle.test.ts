@@ -288,6 +288,41 @@ test("ensureBinary, then busyPorts, then the config file (0o600, real publish us
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
+test("every start makes a fresh API password: in the config's API user, and handed to the relay client", async () => {
+  const handed: string[] = [];
+  const { deps, supervisors } = makeDeps({
+    makeRelay: (_port, apiPassword) => {
+      handed.push(apiPassword);
+      return fakeRelay();
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  const apiUserIn = async (configPath: string) => {
+    const config = JSON.parse(await fs.readFile(configPath, "utf8")) as {
+      authInternalUsers: { user: string; pass: string; ips: string[]; permissions: { action: string }[] }[];
+    };
+    const withApi = config.authInternalUsers.filter((u) => u.permissions.some((p) => p.action === "api"));
+    assert.equal(withApi.length, 1, "exactly one user may use the relay's API");
+    assert.deepEqual(withApi[0]!.ips, ["127.0.0.1", "::1"]);
+    return withApi[0]!.pass;
+  };
+
+  lifecycle.setEnabled(true);
+  await waitUntil(() => handed.length === 1);
+  const first = await apiUserIn(supervisors[0]!.startCalls[0]!.configPath);
+  assert.equal(first, handed[0], "the relay client must authenticate with the password its relay was started with");
+  assert.ok(first.length >= 24, `a guessable API password: ${first}`);
+
+  lifecycle.setEnabled(false);
+  await waitUntil(() => videoService.current().relay.state === "off");
+  lifecycle.setEnabled(true);
+  await waitUntil(() => handed.length === 2);
+  const second = await apiUserIn(supervisors[1]!.startCalls[0]!.configPath);
+  assert.equal(second, handed[1]);
+  assert.notEqual(second, first, "a new relay start must not reuse the last start's API password");
+});
+
 // ── PROBE D / item 3: a throw anywhere in the pre-supervisor steps must
 //    never wedge starting=true forever ─────────────────────────────────────
 

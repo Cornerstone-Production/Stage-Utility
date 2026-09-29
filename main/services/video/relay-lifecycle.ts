@@ -33,6 +33,7 @@
 // a feed removed the instant the switch is flicked is never raced against
 // the flick itself.
 
+import { randomBytes } from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 
@@ -50,7 +51,7 @@ import { MediaMtxRelay } from "./mediamtx-relay.js";
 import { MEDIAMTX_VERSION } from "./mediamtx-pin.js";
 import { holderPhrase } from "../port-holder.js";
 import { busyPorts, type BusyPort } from "./port-check.js";
-import { publishUsers } from "./reconcile-plan.js";
+import { relayUsers } from "./reconcile-plan.js";
 import type { VideoRelay } from "./relay.js";
 import { RelaySupervisor, restartDelayMs, type SupervisorStatus } from "./supervisor.js";
 import { videoService, type RelaySupervisorLike } from "./video-service.js";
@@ -100,14 +101,14 @@ export interface RelayLifecycleDeps {
   ensureBinary: (opts?: EnsureBinaryOptions) => ReturnType<typeof ensureBinary>;
   busyPorts: (ports: VideoPorts) => Promise<BusyPort[]>;
   makeSupervisor: () => RelayLifecycleSupervisor;
-  makeRelay: (apiPort: number) => VideoRelay;
+  makeRelay: (apiPort: number, apiPassword: string) => VideoRelay;
 }
 
 const REAL_DEPS: RelayLifecycleDeps = {
   ensureBinary,
   busyPorts,
   makeSupervisor: () => new RelaySupervisor(),
-  makeRelay: (apiPort) => new MediaMtxRelay(apiPort),
+  makeRelay: (apiPort, apiPassword) => new MediaMtxRelay(apiPort, apiPassword),
 };
 
 /** The one busy port named in a failing reason — every one of the six is
@@ -436,10 +437,13 @@ export class RelayLifecycle {
         return;
       }
 
+      // Made fresh for every start: the relay's API accepts this server's
+      // own client and nothing else (mediamtx-config.ts's apiUser).
+      const apiPassword = randomBytes(24).toString("base64url");
       const configPath = path.join(relayDir(), "mediamtx.yml");
       try {
         const feeds = await videoService.relayFeeds();
-        const config = relayConfig({ ports, lanIp: getLanIp(), users: publishUsers(feeds) });
+        const config = relayConfig({ ports, lanIp: getLanIp(), users: relayUsers(feeds, apiPassword) });
         await fsp.mkdir(relayDir(), { recursive: true });
         // 0o600, as secrets.ts's own atomicWrite() calls write: the config
         // holds every push feed's live publish password in the clear.
@@ -475,7 +479,7 @@ export class RelayLifecycle {
         // forever, and every later setEnabled()/feedsChanged() believed the
         // relay was already up and never tried again.
         this.supervisor = supervisor;
-        videoService.attachRelay(this.deps.makeRelay(ports.api), supervisor, ports);
+        videoService.attachRelay(this.deps.makeRelay(ports.api, apiPassword), supervisor, ports);
         this.startReadinessPoll();
         // item 6 (findings-t15-r3.md): reset ONLY here, once attach has
         // genuinely succeeded — resetting it before this try (as it used

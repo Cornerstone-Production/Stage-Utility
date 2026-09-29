@@ -7,21 +7,27 @@ export interface RelayUser {
   permissions: { action: "publish" | "read" | "api"; path: string }[];
 }
 
+/** Anyone on loopback may read — the playback proxy is the one reader. Not
+ *  the API: that belongs to API_USER alone, so nothing else on this machine
+ *  can read a pull feed's credentialed source from /v3/config/paths/list or
+ *  reconfigure the relay. */
 export const READER_USER: RelayUser = {
   user: "any",
   pass: "",
   ips: ["127.0.0.1", "::1"],
   // An EMPTY path means "any path" — confirmed against the real v1.21.1
-  // binary (task-13-report.md): `path: "*"` authenticates against the LITERAL
-  // path name "*", which no real feed is ever named, so every WHEP/WHIP read
-  // and HLS request 401'd. The shipped mediamtx.yml says the same thing
-  // ("An empty path means any path") but nothing here had driven a read
-  // through the real binary before Task 13's proxy did.
-  permissions: [
-    { action: "read", path: "" },
-    { action: "api", path: "" },
-  ],
+  // binary: `path: "*"` authenticates against the LITERAL path name "*",
+  // which no feed is ever named, so every WHEP/WHIP read and HLS request
+  // answered 401.
+  permissions: [{ action: "read", path: "" }],
 };
+
+/** The one user the relay's API accepts: this server's own MediaMtxRelay,
+ *  from loopback, with a password made fresh for every relay start
+ *  (relay-lifecycle.ts) and never written anywhere but the 0600 config. */
+export function apiUser(pass: string): RelayUser {
+  return { user: "stage-utility", pass, ips: ["127.0.0.1", "::1"], permissions: [{ action: "api", path: "" }] };
+}
 
 export function relayConfig({
   ports,

@@ -5,7 +5,7 @@
 // alone" is tested against plain objects. mediamtx-relay.ts is the only
 // thing that turns a plan into HTTP calls.
 
-import { READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
 import type { RelayFeed } from "./relay.js";
 
 /** The subset of a MediaMTX path's config this app ever sets. `GET
@@ -112,6 +112,14 @@ export function publishUsers(feeds: RelayFeed[]): RelayUser[] {
     }))
     .sort((a, b) => a.permissions[0].path.localeCompare(b.permissions[0].path));
   return [READER_USER, ...pushUsers];
+}
+
+/** Every user the relay holds: publishUsers(), then the API's own user.
+ *  One list for the config file a relay starts from and for every
+ *  reconcile's users patch alike — a patch without the API user would lock
+ *  this server out of the relay it just configured. */
+export function relayUsers(feeds: RelayFeed[], apiPassword: string): RelayUser[] {
+  return [...publishUsers(feeds), apiUser(apiPassword)];
 }
 
 /** True when `current` already carries every key `wanted` sets, at the same

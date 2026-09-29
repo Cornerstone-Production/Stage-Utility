@@ -75,7 +75,7 @@ The relay listens on six ports, all editable on that same card in
 | Video to screens | 8189 | UDP | The LAN | WebRTC media for every relay feed a screen plays, however it was ingested |
 | WebRTC signalling | 8889 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | HLS | 8888 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
-| Relay API | 9997 | TCP | 127.0.0.1 only | Only this server ever calls it |
+| Relay API | 9997 | TCP | 127.0.0.1 only | Only this server ever calls it, with a password made fresh at every relay start; nothing else on the machine can read or change the relay's paths, a pull feed's address among them |
 
 If the server sits behind a firewall, or the gear it talks to is on another
 VLAN, two directions matter — the loopback-only three never need a rule,

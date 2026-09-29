@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import * as http from "node:http";
 import { afterEach, before, after, describe, it } from "node:test";
 
-import { READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
 import type { RelayFeed } from "./relay.js";
 
@@ -35,6 +35,10 @@ interface Call {
 let server: http.Server;
 let port = 0;
 let calls: Call[] = [];
+/** What every request must carry, as the relay's API user — the fake
+ *  refuses anything else with 401, as the real relay does. */
+const API_PASSWORD = "test-api-password";
+const API_AUTH = `Basic ${Buffer.from(`${apiUser(API_PASSWORD).user}:${API_PASSWORD}`).toString("base64")}`;
 let configPaths: Map<string, Record<string, unknown>>;
 let globalConfig: { authInternalUsers: RelayUser[] };
 let runtimePaths: Record<string, unknown>[];
@@ -75,6 +79,7 @@ before(async () => {
       const method = req.method ?? "GET";
       const url = req.url ?? "";
       calls.push({ method, url, body });
+      if (req.headers.authorization !== API_AUTH) return send(res, 401, { error: "authentication error" });
       handle(method, url, body, res);
     });
   });
@@ -163,6 +168,7 @@ const PUSH: RelayFeed = { id: "obs1", kind: "push", password: "hunter2" };
 /** READER_USER as the relay itself stores it after a patch: `ips` in CIDR,
  *  same as globalConfig's ground truth below (see the PATCH handler). */
 const STORED_READER_USER = { ...READER_USER, ips: ["127.0.0.1/32", "::1/128"] };
+const STORED_API_USER = { ...apiUser(API_PASSWORD), ips: ["127.0.0.1/32", "::1/128"] };
 
 describe("MediaMtxRelay.reconcile", () => {
   it("patches authInternalUsers BEFORE every path write — an add, a replace AND a remove alike", async () => {
@@ -173,7 +179,7 @@ describe("MediaMtxRelay.reconcile", () => {
     configPaths.set("cam1", { ...PATH_EXTRAS, source: "rtsp://stale-host/s", sourceOnDemand: true });
     configPaths.set("orphan", { ...PATH_EXTRAS, source: "rtsp://gone/x", sourceOnDemand: true });
 
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([PULL, PUSH]);
 
     const writes = calls.filter((c) => c.method !== "GET");
@@ -200,15 +206,32 @@ describe("MediaMtxRelay.reconcile", () => {
     assert.deepEqual(globalConfig.authInternalUsers, [
       STORED_READER_USER,
       { user: "video", pass: "hunter2", ips: [], permissions: [{ action: "publish", path: "obs1" }] },
+      STORED_API_USER,
     ]);
     assert.equal(configPaths.get("cam1")?.source, "rtsp://admin:p%40ss@h/s");
     assert.equal(configPaths.get("obs1")?.source, "publisher");
     assert.equal(configPaths.has("orphan"), false);
   });
 
+  it("every call carries the API user's credentials — without them the relay refuses it", async () => {
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    await relay.reconcile([PULL, PUSH]);
+    await relay.status();
+    assert.ok(calls.length > 0);
+    const wrong = new MediaMtxRelay(port, "not-the-password");
+    await assert.rejects(() => wrong.status(), /authentication error/);
+  });
+
+  it("keeps the API user in every users patch, so a reconcile never locks itself out", async () => {
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    await relay.reconcile([PUSH]);
+    assert.deepEqual(globalConfig.authInternalUsers.at(-1), STORED_API_USER);
+    await relay.status(); // still allowed after the patch
+  });
+
   it("forwards a pull feed's folded URL unchanged, including an SRT passphrase in the query", async () => {
     const srtPull: RelayFeed = { id: "cam2", kind: "pull", source: "srt://h:9000?streamid=x&passphrase=p%40ss" };
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([srtPull]);
     assert.equal(configPaths.get("cam2")?.source, "srt://h:9000?streamid=x&passphrase=p%40ss");
   });
@@ -219,7 +242,7 @@ describe("MediaMtxRelay.reconcile", () => {
     // unchanged READER_USER look different on the second GET, and
     // MediaMtxRelay must tolerate it. (A push feed's password is a
     // different story — see the redaction test below.)
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([PULL]);
     calls = [];
 
@@ -235,7 +258,7 @@ describe("MediaMtxRelay.reconcile", () => {
     // re-sends it — deliberately: the alternative (ignoring `pass` in the
     // comparison) would also skip a GENUINE password rotation, since
     // nothing else about that user changes either.
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([PUSH]);
     calls = [];
 
@@ -251,7 +274,7 @@ describe("MediaMtxRelay.reconcile", () => {
   });
 
   it("restores every path after the relay restarts and its runtime state clears", async () => {
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([PULL, PUSH]);
     assert.equal(configPaths.size, 2);
 
@@ -266,11 +289,12 @@ describe("MediaMtxRelay.reconcile", () => {
     assert.deepEqual(globalConfig.authInternalUsers, [
       STORED_READER_USER,
       { user: "video", pass: "hunter2", ips: [], permissions: [{ action: "publish", path: "obs1" }] },
+      STORED_API_USER,
     ]);
   });
 
   it("adds, replaces and removes in one call", async () => {
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     const orphan: RelayFeed = { id: "orphan", kind: "pull", source: "rtsp://gone/x" };
     await relay.reconcile([PULL, orphan]);
     assert.equal(configPaths.size, 2);
@@ -286,7 +310,7 @@ describe("MediaMtxRelay.reconcile", () => {
 
   it("a non-2xx answer throws an Error carrying the relay's error text", async () => {
     failPathsList = true;
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await assert.rejects(
       () => relay.reconcile([PULL]),
       (err: Error) => {
@@ -306,7 +330,7 @@ describe("MediaMtxRelay.reconcile", () => {
   it("strips a user:pass@ userinfo out of the relay's own error text before it becomes this module's Error message", async () => {
     failPathsList = true;
     failPathsListWith = "'rtsp://admin:s3c%!z(MISSING)zret@192.0.2.1/s' is not a valid URL";
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await assert.rejects(
       () => relay.reconcile([PULL]),
       (err: Error) => {
@@ -320,7 +344,7 @@ describe("MediaMtxRelay.reconcile", () => {
 
   it("an answer that is not JSON never carries its body into the Error message", async () => {
     rawPathsListBody = "srt://192.0.2.5:9000?passphrase=SECRETPASS123 refused";
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await assert.rejects(
       () => relay.reconcile([PULL]),
       (err: Error) => {
@@ -334,7 +358,7 @@ describe("MediaMtxRelay.reconcile", () => {
   it("strips an SRT pull's passphrase out of the relay's own error text", async () => {
     failPathsList = true;
     failPathsListWith = "'srt://ho%zzst:9000?passphrase=SECRETPASS123' is not a valid URL";
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await assert.rejects(
       () => relay.reconcile([PULL]),
       (err: Error) => {
@@ -365,7 +389,7 @@ describe("MediaMtxRelay.status", () => {
         readers: [],
       },
     ];
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     const status = await relay.status();
     assert.deepEqual(status, [
       {
@@ -391,35 +415,35 @@ describe("MediaMtxRelay.status", () => {
 describe("MediaMtxRelay.kickPublisher", () => {
   it("an rtmpConn publisher is kicked at /v3/rtmpconns/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "rtmpConn", id: "conn-1" } }];
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     assert.equal(await relay.kickPublisher("cam1"), true);
     assert.ok(calls.some((c) => c.method === "POST" && c.url === "/v3/rtmpconns/kick/conn-1"));
   });
 
   it("an srtConn publisher is kicked at /v3/srtconns/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "srtConn", id: "conn-2" } }];
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     assert.equal(await relay.kickPublisher("cam1"), true);
     assert.ok(calls.some((c) => c.method === "POST" && c.url === "/v3/srtconns/kick/conn-2"));
   });
 
   it("a webRTCSession publisher is kicked at /v3/webrtcsessions/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "webRTCSession", id: "conn-3" } }];
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     assert.equal(await relay.kickPublisher("cam1"), true);
     assert.ok(calls.some((c) => c.method === "POST" && c.url === "/v3/webrtcsessions/kick/conn-3"));
   });
 
   it("is a no-op when nobody is publishing, and reports false — never mistaken for a drop that happened", async () => {
     runtimePaths = [{ name: "cam1", ready: false, readyTime: null, source: null }];
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     assert.equal(await relay.kickPublisher("cam1"), false);
     assert.equal(calls.filter((c) => c.method === "POST").length, 0);
   });
 
   it("throws for a source type outside the three mapped ones", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "rtspSession", id: "conn-9" } }];
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     await assert.rejects(
       () => relay.kickPublisher("cam1"),
       (err: Error) => {
@@ -433,7 +457,7 @@ describe("MediaMtxRelay.kickPublisher", () => {
 
 describe("MediaMtxRelay.playback", () => {
   it("is same-origin relay-proxy paths", () => {
-    const relay = new MediaMtxRelay(port);
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
     assert.deepEqual(relay.playback("cam1"), { whep: "/video/cam1/whep", hls: "/video/cam1/index.m3u8" });
   });
 });

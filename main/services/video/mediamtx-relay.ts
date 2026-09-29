@@ -35,10 +35,10 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import { publishUsers, planReconcile } from "./reconcile-plan.js";
+import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
-import type { RelayUser } from "./mediamtx-config.js";
+import { apiUser, type RelayUser } from "./mediamtx-config.js";
 
 const REQUEST_TIMEOUT_MS = 5000;
 
@@ -85,15 +85,33 @@ function canonicalUsers(users: RelayUser[]): RelayUser[] {
   return users.map((user) => ({ ...user, ips: user.ips.map(canonicalIp) }));
 }
 
+/** For the users comparison only: the API user's password as the relay
+ *  answers it back ("<redacted>", like every non-empty one). It never
+ *  changes for the life of a MediaMtxRelay, so unlike a push feed's it needs
+ *  no re-patch to stay right, and a reader-only relay still converges. */
+function withApiPassRedacted(users: RelayUser[]): RelayUser[] {
+  const name = apiUser("").user;
+  return users.map((u) => (u.user === name && u.pass ? { ...u, pass: "<redacted>" } : u));
+}
+
 /** MediaMTX, driven through its own control API. The only implementation of
- *  VideoRelay; everything else in the app sees relay.ts's interface. */
+ *  VideoRelay; everything else in the app sees relay.ts's interface. Every
+ *  call authenticates as the API user (mediamtx-config.ts's apiUser), with
+ *  the password its relay was started with. */
 export class MediaMtxRelay implements VideoRelay {
-  constructor(private readonly apiPort: number) {}
+  private readonly authorization: string;
+
+  constructor(
+    private readonly apiPort: number,
+    private readonly apiPassword: string,
+  ) {
+    this.authorization = `Basic ${Buffer.from(`${apiUser(apiPassword).user}:${apiPassword}`).toString("base64")}`;
+  }
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const res = await fetch(`http://127.0.0.1:${this.apiPort}${path}`, {
       method,
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: body === undefined ? { Authorization: this.authorization } : { Authorization: this.authorization, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -127,9 +145,9 @@ export class MediaMtxRelay implements VideoRelay {
       return { name, conf };
     });
 
-    const desiredUsers = publishUsers(feeds);
+    const desiredUsers = relayUsers(feeds, this.apiPassword);
     const currentUsers = global.authInternalUsers ?? [];
-    if (!isDeepStrictEqual(canonicalUsers(desiredUsers), canonicalUsers(currentUsers))) {
+    if (!isDeepStrictEqual(canonicalUsers(withApiPassRedacted(desiredUsers)), canonicalUsers(currentUsers))) {
       await this.request("PATCH", "/v3/config/global/patch", { authInternalUsers: desiredUsers });
     }
 
