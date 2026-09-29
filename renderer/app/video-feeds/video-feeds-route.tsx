@@ -93,7 +93,7 @@ export function VideoFeedsRoute() {
   return (
     <FieldSet>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-line px-4 py-3.5">
-        <h1 className="text-subheadline font-semibold text-fg">Video feeds</h1>
+        <h2 className="text-subheadline font-semibold text-fg">Video feeds</h2>
         <RelayPill relay={state.relay} />
         <span className="text-caption1 text-fg-muted">Shows camera and program feeds in layouts and on Home</span>
         <RelaySwitch enabled={videoEnabled} toggling={toggling} onToggle={toggleVideo} />

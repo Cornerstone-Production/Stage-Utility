@@ -612,6 +612,21 @@ test("a Delete the server refuses shows its error, and the feed stays", async ()
   }
 });
 
+// The shell's top bar already draws the page's name as its h1 (page-title.tsx);
+// the card's own heading is a level below, as sibling pages' cards are.
+test("the card's heading is a level 2: the page has one h1, the shell's", async () => {
+  const g = stubGlobals(makeState([]));
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    assert.equal(container.querySelectorAll("h1").length, 0, "the page drew a second h1 beside the shell's");
+    assert.equal(!!screen.queryByRole("heading", { level: 2, name: "Video feeds" }), true);
+  } finally {
+    g.restore();
+  }
+});
+
 test("the Source dropdown offers exactly the kinds video:state reports", async () => {
   for (const kinds of [["embed", "external"], ["external"]] as const) {
     const g = stubGlobals({ ...makeState([externalFeed()]), kinds: [...kinds] });
