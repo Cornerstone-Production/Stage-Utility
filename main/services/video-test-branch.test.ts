@@ -18,6 +18,7 @@ process.env.STAGE_UTILITY_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "video-te
 const { integrationManager } = await import("./integration-manager.js");
 const { videoService } = await import("./video/video-service.js");
 const { videoFeedsStore } = await import("./video/feed-store.js");
+const { relayLifecycle } = await import("./video/relay-lifecycle.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../types/video.js");
 const { fakeRelay } = await import("./fixtures/fake-relay.js");
 
@@ -99,6 +100,54 @@ test("video test: downloading answers with the SAME wording as the connection ro
   const r = await integrationManager.test("video");
   assert.equal(r.ok, false);
   assert.equal(r.message, "Downloading MediaMTX v1.21.1 (19%)");
+});
+
+test("video test: a failure inside test() unrelated to the relay never overwrites the row", async () => {
+  // Wire relay-lifecycle's OWN connection listener straight to the row, the
+  // way applyVideo() does — without it this suite's states map is just a
+  // seeded record with nothing keeping it in sync with the real relay, and
+  // the bug this guards (Test corrupting the row on an unrelated failure)
+  // could not be observed at all. Not applyVideo() itself: that also calls
+  // relayLifecycle.setEnabled(), which races this test's own direct
+  // attachRelay() below to report the row's very first state.
+  try {
+    relayLifecycle.setConnectionListener((state, message) =>
+      (integrationManager as unknown as { setConnectionState(id: string, connection: string, message: string | null): void }).setConnectionState(
+        "video",
+        state,
+        message,
+      ),
+    );
+
+    videoService.attachRelay(fakeRelay(), new FakeSupervisor() as unknown as RelaySupervisorLike, DEFAULT_VIDEO_PORTS);
+    await (videoService as unknown as { publish: () => Promise<void> }).publish();
+    assert.equal(states.get("video")?.connection, "connected", "the relay's real state must reach the row before the failure");
+
+    // videoService.state() failing — a feed-store read failure, say — not a
+    // relay problem, and something Test must still answer the caller about.
+    const originalState = videoService.state.bind(videoService);
+    videoService.state = (async () => {
+      throw new Error("feed store read failed");
+    }) as typeof videoService.state;
+    try {
+      const r = await integrationManager.test("video");
+      assert.equal(r.ok, false);
+      assert.equal(r.message, "feed store read failed");
+    } finally {
+      videoService.state = originalState;
+    }
+
+    assert.equal(states.get("video")?.connection, "connected", "a Test failure unrelated to the relay must not leave the row wrong");
+
+    // The ordinary channel still works: a fresh publish (as the next
+    // STATUS_POLL_MS tick would produce) still reports the relay's real state.
+    await (videoService as unknown as { publish: () => Promise<void> }).publish();
+    assert.equal(states.get("video")?.connection, "connected", "the row must read the relay's real state on the next video:state publish");
+  } finally {
+    // Never leaked to a later test: relayLifecycle is the module singleton,
+    // and every other test in this file relies on nothing being wired here.
+    relayLifecycle.setConnectionListener(() => {});
+  }
 });
 
 // outOfBandSetup()'s own
