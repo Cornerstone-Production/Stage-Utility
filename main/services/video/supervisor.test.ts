@@ -42,14 +42,19 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * killCalls so a test can assert what stop() actually sent.
  */
 interface FakeChild extends EventEmitter {
-  pid: number;
+  // number | undefined, matching the real SupervisedChild interface: node's
+  // own child_process leaves pid undefined when spawn() never actually
+  // created a process at all — the one shape item 9 (findings-t15-r3.md)
+  // reads as a genuine spawn failure, distinct from an 'error' on a child
+  // that DID spawn (a failed kill(), say).
+  pid: number | undefined;
   stdout: PassThrough;
   stderr: PassThrough;
   kill(signal?: NodeJS.Signals | number): boolean;
   killCalls: Array<NodeJS.Signals | number | undefined>;
 }
 
-function makeFakeChild(pid: number): FakeChild {
+function makeFakeChild(pid: number | undefined): FakeChild {
   const killCalls: Array<NodeJS.Signals | number | undefined> = [];
   return Object.assign(new EventEmitter(), {
     pid,
@@ -69,6 +74,22 @@ function fakeSpawn(): { spawnImpl: SpawnImpl; children: FakeChild[] } {
   let nextPid = 1000;
   const spawnImpl: SpawnImpl = () => {
     const child = makeFakeChild(nextPid++);
+    children.push(child);
+    return child;
+  };
+  return { spawnImpl, children };
+}
+
+/** Like fakeSpawn(), but the FIRST child has no pid at all — node's own
+ *  shape for "spawn() never created a process", the genuine spawn-failure
+ *  case. Every later spawn (a retry) gets a real one. */
+function fakeSpawnFirstHasNoPid(): { spawnImpl: SpawnImpl; children: FakeChild[] } {
+  const children: FakeChild[] = [];
+  let nextPid = 1000;
+  let first = true;
+  const spawnImpl: SpawnImpl = () => {
+    const child = makeFakeChild(first ? undefined : nextPid++);
+    first = false;
     children.push(child);
     return child;
   };
@@ -127,6 +148,7 @@ describe("RelaySupervisor", () => {
       state: "failing",
       reason: 'json: unknown field "rtsps"',
       retryAt: START + 1000,
+      neverStarted: false,
     } satisfies SupervisorStatus);
 
     t.mock.timers.tick(1000);
@@ -139,19 +161,21 @@ describe("RelaySupervisor", () => {
   // node's own spawn() failed, and reports it ONLY through 'error'. An
   // EventEmitter with no 'error' listener THROWS on that event, which would
   // crash this entire server over one bad path.
-  it("a spawn failure ('error', never 'exit') reports failing and still retries — an unlistened 'error' would otherwise crash the process", async (t) => {
+  it("a spawn failure ('error' on a pid-less child, never 'exit') reports failing and still retries — an unlistened 'error' would otherwise crash the process", async (t) => {
     enableClock(t);
-    const { spawnImpl, children } = fakeSpawn();
+    const { spawnImpl, children } = fakeSpawnFirstHasNoPid();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
 
     await sup.start("mediamtx", "config.yml");
     assert.equal(children.length, 1);
+    assert.equal(children[0]!.pid, undefined, "precondition: this child never actually spawned");
 
     children[0]!.emit("error", Object.assign(new Error("spawn mediamtx ENOENT"), { code: "ENOENT" }));
     assert.deepEqual(sup.status(), {
       state: "failing",
       reason: "could not start: spawn mediamtx ENOENT",
       retryAt: START + 1000,
+      neverStarted: true,
     } satisfies SupervisorStatus);
 
     t.mock.timers.tick(1000);
@@ -161,7 +185,7 @@ describe("RelaySupervisor", () => {
 
   it("a spawn failure's 'exit' (code null, per Node's own docs) is not reported a second time", async (t) => {
     enableClock(t);
-    const { spawnImpl, children } = fakeSpawn();
+    const { spawnImpl, children } = fakeSpawnFirstHasNoPid();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
     await sup.start("mediamtx", "config.yml");
 
@@ -175,6 +199,32 @@ describe("RelaySupervisor", () => {
     // TWO more children instead of one.
     t.mock.timers.tick(1000);
     assert.equal(children.length, 2, `expected exactly one restart, got ${children.length - 1}`);
+  });
+
+  // item 9 (findings-t15-r3.md): 'error' fires for reasons OTHER than a
+  // spawn failure too — a failed kill() (EPERM, say) on a child that DID
+  // spawn (a real pid). That must not be relabeled "could not start" —
+  // the process is (or was) genuinely running.
+  it("an 'error' on a child that DID spawn (a real pid — a failed kill(), say) is not read as a spawn failure", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+    assert.notEqual(children[0]!.pid, undefined, "precondition: this child DID spawn");
+
+    const warns: string[] = [];
+    t.mock.method(console, "warn", (m: string) => warns.push(m));
+    children[0]!.emit("error", Object.assign(new Error("kill EPERM"), { code: "EPERM" }));
+
+    assert.deepEqual(
+      sup.status(),
+      { state: "running", since: START } satisfies SupervisorStatus,
+      "an error on an already-running child must not flip status to failing",
+    );
+    assert.ok(
+      warns.some((w) => w.includes("the relay's own process reported an error") && w.includes("kill EPERM")),
+      `expected the error to be logged, got: ${JSON.stringify(warns)}`,
+    );
   });
 
   // R14j: a real v1.21.1 binary given a malformed pull source echoed the

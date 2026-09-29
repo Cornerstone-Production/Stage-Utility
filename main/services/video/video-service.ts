@@ -319,11 +319,19 @@ class VideoService {
       case "off":
         return { state: "off" };
       case "failing":
-        // The supervisor's OWN crash-loop backoff — a child process ran and
-        // exited, unlike every kind relay-lifecycle.ts's own
-        // failPreSupervisor() reports, none of which ever got as far as a
-        // child existing at all. See RelayFailureKind's own comment.
-        return { state: "failing", reason: status.reason, kind: "crash-loop", retryAt: status.retryAt };
+        // item 9 (findings-t15-r3.md): status.neverStarted is true ONLY
+        // for a genuine spawn failure (node's own spawn() never created a
+        // process at all) — that is a PRE-process kind, same as every
+        // failPreSupervisor() kind, matching the standby ruling: nothing
+        // could have received a source. Every other supervisor "failing"
+        // status is the crash-loop it always was — a child process ran and
+        // exited. See RelayFailureKind's own comment.
+        return {
+          state: "failing",
+          reason: status.reason,
+          kind: status.neverStarted ? "spawn" : "crash-loop",
+          retryAt: status.retryAt,
+        };
       case "starting":
         return { state: "starting", version: this.supervisor.version() };
       case "running":

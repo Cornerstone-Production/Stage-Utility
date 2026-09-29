@@ -868,7 +868,7 @@ test("relay status maps the supervisor's status and version onto the wire shape,
       assert.ok(running.ports.rtmp > 0, "running must carry the configured ports");
     }
 
-    supervisor.current = { state: "failing", reason: "port in use", retryAt: 12345 };
+    supervisor.current = { state: "failing", reason: "port in use", retryAt: 12345, neverStarted: false };
     assert.deepEqual((await videoService.state()).relay, { state: "failing", reason: "port in use", kind: "crash-loop", retryAt: 12345 });
   } finally {
     await videoService.detachRelay();
@@ -1078,7 +1078,7 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
     throw new Error("ECONNREFUSED");
   });
   const supervisor = new FakeSupervisor();
-  supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 };
+  supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555, neverStarted: false };
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
@@ -1103,7 +1103,7 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
 test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed with no path as offline, not standby — it is up enough to have an opinion", async () => {
   const relay = fakeRelay(async () => []);
   const supervisor = new FakeSupervisor();
-  supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 };
+  supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555, neverStarted: false };
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
@@ -1142,6 +1142,33 @@ test("item 14: a PRE-supervisor failure (a busy port, no process has ever run) r
     );
   } finally {
     videoService.setPreAttachStatus(null);
+    await videoService.removeFeed((made as { feed: { id: string } }).feed.id);
+  }
+});
+
+// item 9 (findings-t15-r3.md): a spawn failure (the supervisor's own
+// child 'error' with no pid) used to surface as "failing" with kind
+// "crash-loop" — the SAME kind as a process that genuinely ran and
+// exited — so a feed read "offline" even though nothing could ever have
+// reached a source. neverStarted distinguishes the two; this is the
+// spawn-failure half, reading standby like every other pre-process kind.
+test("item 9: a spawn failure (neverStarted) reads kind 'spawn' and a feed as standby, not crash-loop/offline", async () => {
+  const relay = fakeRelay(async () => []);
+  const supervisor = new FakeSupervisor();
+  supervisor.current = { state: "failing", reason: "could not start: spawn mediamtx ENOENT", retryAt: 55555, neverStarted: true };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+
+  const made = await videoService.addFeed({ name: "Spawn-failure push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  try {
+    const snap = await videoService.state();
+    assert.equal(snap.relay.state, "failing");
+    if (snap.relay.state === "failing") assert.equal(snap.relay.kind, "spawn");
+    const feed = snap.feeds.find((f) => f.id === (made as { feed: { id: string } }).feed.id);
+    assert.equal(feed?.status.state, "standby", "a spawn failure means nothing ever ran — never offline");
+  } finally {
+    await videoService.detachRelay();
     await videoService.removeFeed((made as { feed: { id: string } }).feed.id);
   }
 });
@@ -1242,7 +1269,7 @@ test("the attached supervisor's status events publish immediately, without waiti
     assert.deepEqual(frames.at(-1)?.relay, { state: "starting", version: null });
 
     const before = frames.length;
-    supervisor.current = { state: "failing", reason: "boom", retryAt: 999 };
+    supervisor.current = { state: "failing", reason: "boom", retryAt: 999, neverStarted: false };
     supervisor.emit("status", supervisor.current);
     await new Promise((r) => setTimeout(r, 20));
     assert.ok(frames.length > before, "every status event must publish, not only the first");
@@ -1275,7 +1302,7 @@ test("an in-flight SUCCESS against a process the supervisor has since reported f
     hold = true;
     const inFlight = pollOnce(); // request sent to the process now about to be reported crashed
 
-    supervisor.current = { state: "failing", reason: "crashed", retryAt: 1 };
+    supervisor.current = { state: "failing", reason: "crashed", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current);
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(
@@ -1313,7 +1340,7 @@ test("an in-flight REJECTION against the old process, landing after a respawn, d
   try {
     const inFlight = pollOnce(); // against the old (hung) process
 
-    supervisor.current = { state: "failing", reason: "crashed", retryAt: 1 };
+    supervisor.current = { state: "failing", reason: "crashed", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current);
     supervisor.current = { state: "running", since: 2 };
     supervisor.emit("status", supervisor.current); // respawned
@@ -1353,7 +1380,7 @@ test("a status change alone, with no detach, still lets the next poll run even w
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(calls, 1);
 
-    supervisor.current = { state: "failing", reason: "crashed", retryAt: 1 };
+    supervisor.current = { state: "failing", reason: "crashed", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current); // bumps the generation with no detach at all
     await new Promise((r) => setTimeout(r, 10));
 
@@ -1379,7 +1406,7 @@ test("a status event to a non-running state clears lastPaths immediately — a d
     assert.equal(videoService.current().feeds.find((f) => f.id === id)?.status.state, "live");
 
     // The supervisor's OWN crash detection reports failing — no new poll has run.
-    supervisor.current = { state: "failing", reason: "crashed", retryAt: 123 };
+    supervisor.current = { state: "failing", reason: "crashed", retryAt: 123, neverStarted: false };
     supervisor.emit("status", supervisor.current);
     await new Promise((r) => setTimeout(r, 20));
 

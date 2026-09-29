@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
+import { scrub } from "../scrub.js";
 import { relayDir } from "./acquire.js";
 import { RelayLogWatcher } from "./relay-log.js";
 
@@ -49,7 +50,13 @@ export type SupervisorStatus =
   | { state: "off" }
   | { state: "starting" }
   | { state: "running"; since: number }
-  | { state: "failing"; reason: string; retryAt: number };
+  /** `neverStarted`: true only for a genuine spawn failure (node's own
+   *  spawn() never created a process at all — ENOENT, EACCES) — the ONE
+   *  case nothing could have received a source, matching the standby
+   *  ruling (item 9, findings-t15-r3.md); false for a real child that ran
+   *  and exited, which video-service.ts's own kind mapping reads as
+   *  "offline" instead. */
+  | { state: "failing"; reason: string; retryAt: number; neverStarted: boolean };
 
 /**
  * The slice of `child_process.spawn`'s return value the supervisor actually
@@ -374,8 +381,17 @@ export class RelaySupervisor extends EventEmitter {
     let handledBySpawnError = false;
     child.once("error", (err: Error) => {
       if (this.child !== child) return;
-      handledBySpawnError = true;
-      this.onExit(null, `could not start: ${errorMessage(err)}`);
+      // item 9 (findings-t15-r3.md): 'error' is not ALWAYS a spawn
+      // failure — a failed kill() (EPERM, say) fires it on an ALREADY-
+      // RUNNING child too. `child.pid` is undefined ONLY when node's own
+      // spawn() never actually created a process; that is the one case
+      // this is a spawn failure at all.
+      if (child.pid === undefined) {
+        handledBySpawnError = true;
+        this.onExit(null, `could not start: ${errorMessage(err)}`);
+        return;
+      }
+      console.warn(`[video] the relay's own process reported an error: ${scrub(errorMessage(err))}`);
     });
     child.once("exit", (code: number | null) => {
       // A second, independent layer beyond start()'s re-entrancy guard: if
@@ -450,7 +466,7 @@ export class RelaySupervisor extends EventEmitter {
     const reason = lastError ?? `exit code ${code}`;
     const delay = restartDelayMs(this.attempt);
     this.attempt += 1;
-    this.setStatus({ state: "failing", reason, retryAt: Date.now() + delay });
+    this.setStatus({ state: "failing", reason, retryAt: Date.now() + delay, neverStarted: spawnError !== undefined });
     this.emit("exit", code, lastError);
 
     const result = this.outage.fail("relay", reason, Date.now());
