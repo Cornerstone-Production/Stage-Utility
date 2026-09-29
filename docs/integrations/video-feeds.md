@@ -24,12 +24,15 @@ needs it. The status line at the top of this page reflects exactly that:
 | On | At least one | — | Downloading: a progress bar. Starting: says so. Running: the version and its ports (RTMP and SRT inbound, UDP for video to screens) |
 
 If it cannot start — a busy port, a failed download, a config write that
-failed — the line says why and when it retries, and names where to place a
-downloaded archive by hand if the download itself is what failed. The relay's
-ports live on their own card in **Advanced**, reachable from this line's
-"Change ports in Advanced" (shown while running or failing, since a busy port
-is exactly when it is most useful) — saving them restarts the relay if it is
-running, unless the six values did not actually change.
+failed, an unsupported platform — the line says why, and names where to
+place a downloaded archive by hand if the download itself is what failed.
+Every reason but an unsupported platform also says when it retries; an
+unsupported platform never will, so the line never invites waiting for one.
+The relay's ports live on their own card in **Advanced**, reachable from
+this line's "Change ports in Advanced" while running, or failing on a busy
+port specifically — the one failure that page can actually fix — saving
+them restarts the relay if it is running, unless the six values did not
+actually change.
 
 ## What a feed is
 
