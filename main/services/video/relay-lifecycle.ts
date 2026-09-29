@@ -41,7 +41,7 @@ import { getLanIp } from "../lan-ip.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import type { ConnectionState } from "../../types/integrations.js";
-import type { RelayStatus, VideoPorts } from "../../types/video.js";
+import type { RelayFailureKind, RelayStatus, VideoPorts } from "../../types/video.js";
 import { atomicWrite } from "../write-queue.js";
 import { ensureBinary, relayDir, type EnsureBinaryOptions } from "./acquire.js";
 import { loadFeedsFile } from "./feed-store.js";
@@ -208,14 +208,29 @@ export class RelayLifecycle {
     return feeds.some((f) => f.source.kind === "pull" || f.source.kind === "push");
   }
 
-  /** Appends `fn` to the internal chain and returns at once — see the file
-   *  header for why no public caller ever awaits the chain itself. A
-   *  rejection is not expected (every pre-supervisor step startRelay() takes
-   *  is inside its own try/catch — see item 3's own comment there), but a
-   *  caught one here is what keeps a hypothetical future one from wedging
-   *  every later call behind a permanently-rejected chain. */
+  /**
+   * Appends `fn` to the internal chain and returns at once — see the file
+   * header for why no public caller ever awaits the chain itself. A
+   * rejection is not expected (every pre-supervisor step startRelay() takes
+   * is inside its own try/catch — see item 3's own comment there), but a
+   * caught one here is what keeps a hypothetical future one from wedging
+   * every later call behind a permanently-rejected chain.
+   *
+   * `.then(fn).catch(onRejected)` — NOT `.then(fn, onRejected)`. The second
+   * argument to a single `.then()` call catches a rejection of the promise
+   * it is called ON (the PREVIOUS link), never a rejection `fn` itself
+   * produces; `.then(fn, onRejected)` leaves fn's own throw uncaught by
+   * anything at THIS link, so it propagates outward and poisons the very
+   * next enqueue() call instead — that call's `onRejected` fires (catching
+   * what it takes to be "the previous step" failing) and its OWN `fn` is
+   * skipped entirely, silently dropping one real, queued call for every one
+   * that failed. Confirmed empirically (a three-call chain where the first
+   * throws: with `.then(fn, onRejected)` the second call's fn never runs at
+   * all; with `.then(fn).catch(onRejected)` every fn runs, in order,
+   * regardless of what came before).
+   */
   private enqueue(fn: () => Promise<void>): void {
-    this.chain = this.chain.then(fn, (err: unknown) => {
+    this.chain = this.chain.then(fn).catch((err: unknown) => {
       console.error(`[video] an internal relay-lifecycle step failed unexpectedly: ${scrub(errorMessage(err))}`);
     });
   }
@@ -283,6 +298,16 @@ export class RelayLifecycle {
     // there is truly nothing to stop.
     const wasActive = this.isUp() || this.retryTimer !== null;
     await this.stopRelay();
+    // The relay is no longer wanted at all — forget any pre-supervisor
+    // outage in progress. Without this, switching off mid-outage (a busy
+    // port, say) and back on into the SAME busy port read as one
+    // continuing run to prelaunchOutage, which had already spoken its one
+    // "first failure" line for the FIRST switch-on and stayed quiet
+    // (`spokenAt` still holds this exact reason) for the second — an
+    // operator retrying after "fixing" the port, or just flipping the
+    // switch again, got total silence on a second, freshly-relevant
+    // failure. `forget()` is a no-op when nothing was failing.
+    this.prelaunchOutage.forget();
     if (wasActive) console.log(`[video] relay stopped (${this.enabled ? "no relay feeds" : "video switched off"})`);
   }
 
@@ -296,20 +321,42 @@ export class RelayLifecycle {
     this.readinessTimer = null;
   }
 
-  /** A failure before any supervisor exists — nothing to hand a "failing"
-   *  SupervisorStatus, so relayStatus() is told directly through
-   *  setPreAttachStatus(). Retried on the same backoff schedule the
-   *  supervisor itself uses (restartDelayMs) once one is running. Routed
-   *  through prelaunchOutage so a port conflict or a download failure logs
-   *  once per outage — first failure, a reminder past its own floor, one
-   *  recovery line — never once per retry. */
-  private failPreSupervisor(reason: string, placeArchiveAt: string | undefined, assetName: string | undefined): void {
+  /**
+   * A failure before any supervisor exists — nothing to hand a "failing"
+   * SupervisorStatus, so relayStatus() is told directly through
+   * setPreAttachStatus(). Routed through prelaunchOutage so a port conflict
+   * or a download failure logs once per outage — first failure, a reminder
+   * past its own floor, one recovery line — never once per retry.
+   *
+   * `kind: "unsupported"` never retries: no pinned asset exists for this
+   * platform/arch, full stop, so a backoff timer here would retry forever
+   * against a fact that cannot change. Every other kind retries on the same
+   * backoff schedule the supervisor itself uses (restartDelayMs) once one is
+   * running.
+   */
+  private failPreSupervisor(
+    reason: string,
+    kind: RelayFailureKind,
+    placeArchiveAt: string | undefined,
+    assetName: string | undefined,
+  ): void {
     this.starting = false;
-    const delay = restartDelayMs(this.attempt);
-    this.attempt++;
-    videoService.setPreAttachStatus({ state: "failing", reason, retryAt: Date.now() + delay, placeArchiveAt, assetName });
     const decision = this.prelaunchOutage.fail("relay-prelaunch", reason, Date.now());
     if (decision.log) console.warn(`[video] ${scrub(reason)}${scrub(decision.note)}`);
+    if (kind === "unsupported") {
+      videoService.setPreAttachStatus({ state: "failing", reason, kind, retryAt: null, placeArchiveAt, assetName });
+      return;
+    }
+    const delay = restartDelayMs(this.attempt);
+    this.attempt++;
+    videoService.setPreAttachStatus({
+      state: "failing",
+      reason,
+      kind,
+      retryAt: Date.now() + delay,
+      placeArchiveAt,
+      assetName,
+    });
     this.clearRetryTimer();
     this.retryTimer = setTimeout(() => this.enqueue(() => this.reconcileWanted()), delay);
     this.retryTimer.unref?.();
@@ -354,7 +401,11 @@ export class RelayLifecycle {
 
       const ensured = await this.deps.ensureBinary({ onProgress, onDownloadStart });
       if (!ensured.ok) {
-        this.failPreSupervisor(ensured.reason, ensured.placeArchiveAt, ensured.assetName ?? undefined);
+        // ensureBinary's own assetName is null for exactly one case — no
+        // pinned asset exists for this platform/arch at all — and that is
+        // also the one kind that never retries (item 16).
+        const kind: RelayFailureKind = ensured.assetName === null ? "unsupported" : "download";
+        this.failPreSupervisor(ensured.reason, kind, ensured.placeArchiveAt, ensured.assetName ?? undefined);
         return;
       }
 
@@ -370,7 +421,7 @@ export class RelayLifecycle {
       const { ports } = await loadFeedsFile();
       const busy = await this.deps.busyPorts(ports);
       if (busy.length > 0) {
-        this.failPreSupervisor(busyPortReason(busy), undefined, undefined);
+        this.failPreSupervisor(busyPortReason(busy), "port-conflict", undefined, undefined);
         return;
       }
 
@@ -383,7 +434,7 @@ export class RelayLifecycle {
         // holds every push feed's live publish password in the clear.
         await atomicWrite(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
       } catch (err) {
-        this.failPreSupervisor(`could not write the relay's config: ${errorMessage(err)}`, undefined, undefined);
+        this.failPreSupervisor(`could not write the relay's config: ${errorMessage(err)}`, "config-write", undefined, undefined);
         return;
       }
 
@@ -395,20 +446,37 @@ export class RelayLifecycle {
       } catch (err) {
         supervisor.off("status", this.statusListener);
         this.statusListener = null;
-        this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, undefined, undefined);
+        this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, "spawn", undefined, undefined);
         return;
       }
 
       this.attempt = 0;
-      this.supervisor = supervisor;
       this.currentPorts = ports;
       this.starting = false;
       const recovered = this.prelaunchOutage.ok("relay-prelaunch", Date.now());
       if (recovered.log) console.log(`[video] the relay's pre-launch checks are passing again${recovered.note}`);
-      videoService.attachRelay(this.deps.makeRelay(ports.api), supervisor, ports);
-      this.startReadinessPoll();
+      try {
+        // item 7: this.supervisor is set ONLY once attachRelay() has
+        // actually taken it — not the moment supervisor.start() itself
+        // succeeds. Setting it earlier (before this try) made isUp() true
+        // the instant this line ran, so a throw from makeRelay()/
+        // attachRelay() below left this.supervisor pointing at a
+        // supervisor with a real, running, UNATTACHED child — isUp() true
+        // forever, and every later setEnabled()/feedsChanged() believed the
+        // relay was already up and never tried again.
+        this.supervisor = supervisor;
+        videoService.attachRelay(this.deps.makeRelay(ports.api), supervisor, ports);
+        this.startReadinessPoll();
+      } catch (err) {
+        this.supervisor = null;
+        this.currentPorts = null;
+        supervisor.off("status", this.statusListener);
+        this.statusListener = null;
+        await supervisor.stop().catch(() => {});
+        this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, "spawn", undefined, undefined);
+      }
     } catch (err) {
-      this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, undefined, undefined);
+      this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, "spawn", undefined, undefined);
     }
   }
 

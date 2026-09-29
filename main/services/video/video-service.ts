@@ -211,6 +211,12 @@ class VideoService {
    * port nothing was listening on yet.
    */
   private attachedPorts: VideoPorts | null = null;
+  /** Whether the connection row has already been told THIS attachment's
+   *  version — see handleLine()'s own comment. Reset on every
+   *  attachRelay()/detachInternal(), since a fresh attachment (a genuinely
+   *  new supervisor, even one whose PREVIOUS run already knew a version) is
+   *  a fresh announcement, not a foregone one. */
+  private versionAnnounced = false;
   private lineListener: ((text: string) => void) | null = null;
   /** The ONE event the service reacts to for the supervisor's own lifecycle
    *  — a single listener rather than separate "spawned"/"exit" ones, so a
@@ -313,12 +319,16 @@ class VideoService {
       case "off":
         return { state: "off" };
       case "failing":
-        return { state: "failing", reason: status.reason, retryAt: status.retryAt };
+        // The supervisor's OWN crash-loop backoff — a child process ran and
+        // exited, unlike every kind relay-lifecycle.ts's own
+        // failPreSupervisor() reports, none of which ever got as far as a
+        // child existing at all. See RelayFailureKind's own comment.
+        return { state: "failing", reason: status.reason, kind: "crash-loop", retryAt: status.retryAt };
       case "starting":
         return { state: "starting", version: this.supervisor.version() };
       case "running":
         if (this.relayNotAnswering) {
-          return { state: "failing", reason: "The relay is not answering", retryAt: null };
+          return { state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null };
         }
         // attachRelay() requires ports and sets attachedPorts in the same
         // call that sets supervisor, so a "running" supervisor GUARANTEES
@@ -338,16 +348,23 @@ class VideoService {
   }
 
   private relayFeedStatus(feedId: string, kind: "pull" | "push"): FeedStatus {
-    // R14a/R14i: "up" is running WITH at least one poll answered since it
-    // last reached running (never true fresh out of "starting", where the
-    // relay may not have opened its API yet — see RELAY_BOOT_GRACE_MS's own
-    // reasoning), or failing (it WAS running, and reporting on this feed's
-    // path, a moment ago, whatever the CURRENT process has or has not
-    // answered). Off, starting, or a running relay nothing has polled yet
-    // all mean nothing here can yet tell a down source from one nobody has
-    // asked about, which feedState() reads as standby rather than offline.
-    const relayState = this.relayStatus().state;
-    const relayUp = (relayState === "running" && this.polledSinceRunning) || relayState === "failing";
+    // R14a/R14i, and item 14 (findings-t15-r2.md): "up" is running WITH at
+    // least one poll answered since it last reached running (never true
+    // fresh out of "starting", where the relay may not have opened its API
+    // yet — see RELAY_BOOT_GRACE_MS's own reasoning), or failing IN A WAY
+    // THAT MEANS A PROCESS ACTUALLY RAN — "crash-loop" (it exited) or
+    // "not-answering" (one is running; its API just is not) — never the
+    // five pre-supervisor kinds (a busy port, a failed download, a config
+    // write that failed, a spawn that failed, an unsupported platform),
+    // none of which ever got as far as a child existing for a source to
+    // have reached. Off, starting, a running relay nothing has polled yet,
+    // or a pre-supervisor failure all mean nothing here can yet tell a down
+    // source from one nobody has asked about, which feedState() reads as
+    // standby rather than offline.
+    const relay = this.relayStatus();
+    const relayUp =
+      (relay.state === "running" && this.polledSinceRunning) ||
+      (relay.state === "failing" && (relay.kind === "crash-loop" || relay.kind === "not-answering"));
     return feedState({
       kind,
       relayUp,
@@ -529,6 +546,13 @@ class VideoService {
     // `this.supervisor` is null — but cleared anyway so it cannot survive
     // stale into a later detach that leaves it behind.
     this.preAttachStatus = null;
+    // A fresh attachment is a fresh announcement — even a supervisor whose
+    // PREVIOUS run already knew a version (it survives a crash-respawn,
+    // never reset by the supervisor itself) gets the row told about THIS
+    // attachment explicitly, from the unconditional publish() at the end of
+    // this method; version() already being non-null here just means
+    // handleLine() has nothing further to do for it.
+    this.versionAnnounced = supervisor.version() !== null;
     this.lineListener = (text: string) => this.handleLine(text);
     // Starting and failing-with-retry must reach video:state as soon as the
     // supervisor itself knows them, not only on the next poll tick — a poll
@@ -576,6 +600,7 @@ class VideoService {
     this.statusListener = null;
     this.relayNotAnswering = false;
     this.polledSinceRunning = false;
+    this.versionAnnounced = false;
     this.stopPolling();
     // "No path" is exactly how feedState() reads a relay it cannot ask.
     this.lastPaths = new Map();
@@ -850,6 +875,19 @@ class VideoService {
   private handleLine(text: string): void {
     const event = this.logWatcher.line(text);
     if (event?.kind === "b-frames") void this.markBFrames(event.path);
+    // item 1 (findings-t15-r2.md): the supervisor's own version() is
+    // updated (supervisor.ts's attachReader()) BEFORE this listener ever
+    // runs, so the moment the relay's startup banner is the line just read,
+    // version() already reflects it. Without this, the connection row —
+    // driven entirely off publish() — kept showing "connected" with no
+    // version at all until SOME OTHER change happened to call publish()
+    // again, which could be minutes away or never with nobody watching the
+    // Video feeds page: current() (the SSE hello burst) genuinely never
+    // updates it otherwise.
+    if (!this.versionAnnounced && this.supervisor?.version()) {
+      this.versionAnnounced = true;
+      void this.publish();
+    }
   }
 
   /**
@@ -1103,6 +1141,14 @@ class VideoService {
       await this.relay.reconcile(await this.relayFeeds());
       const decision = this.pollOutage.ok("reconcile", Date.now());
       if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
+      // item 1: the readiness poll (relay-lifecycle.ts's startReadinessPoll)
+      // stops calling this the MOMENT it first succeeds — its own one
+      // chance to catch the connection row up if handleLine() somehow
+      // hasn't already. publish() itself is the guard against noise: it
+      // only broadcasts when something actually changed, so a reconcile
+      // that runs for an unrelated reason (a feed CRUD, a ports save) costs
+      // nothing extra here on every OTHER success.
+      void this.publish();
       return true;
     } catch (err) {
       const message = errorMessage(err);

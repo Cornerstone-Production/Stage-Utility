@@ -100,6 +100,33 @@ export interface VideoFeedView {
   hasPassword?: boolean;
 }
 
+/**
+ * Which failing case this is — separate from `reason` (free text an operator
+ * reads) because two different UI/logic decisions turn on knowing the CASE,
+ * not the words:
+ *
+ * - "Change ports in Advanced" only helps a `port-conflict`; showing it for
+ *   an unsupported platform or a download failure sends the operator to a
+ *   page with nothing to fix.
+ * - A pull/push feed reads "offline" rather than "standby" only once a relay
+ *   PROCESS has actually run in this outage — true for `crash-loop` (a child
+ *   ran and exited) and `not-answering` (one is running; its API just is
+ *   not), never for the other five, all raised before any child exists at
+ *   all (relay-lifecycle.ts's own pre-supervisor sequence never gets far
+ *   enough to have spawned anything a source could have reached).
+ *
+ * `unsupported` is the one kind that never retries (no pinned asset exists
+ * for this platform/arch, ever) — `retryAt` is always null for it.
+ */
+export type RelayFailureKind =
+  | "port-conflict"
+  | "download"
+  | "config-write"
+  | "spawn"
+  | "unsupported"
+  | "crash-loop"
+  | "not-answering";
+
 export type RelayStatus =
   | { state: "off" }
   | { state: "downloading"; receivedBytes: number; totalBytes: number }
@@ -117,7 +144,14 @@ export type RelayStatus =
    *  guessing from whether `placeArchiveAt` looks like a bare directory or a
    *  full file path). The renderer never derives it by splitting
    *  `placeArchiveAt` on "/" — that breaks on Windows. */
-  | { state: "failing"; reason: string; retryAt: number | null; placeArchiveAt?: string; assetName?: string };
+  | {
+      state: "failing";
+      reason: string;
+      kind: RelayFailureKind;
+      retryAt: number | null;
+      placeArchiveAt?: string;
+      assetName?: string;
+    };
 
 export interface VideoState {
   rev: number;

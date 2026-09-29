@@ -51,6 +51,11 @@ class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
   ver: string | null = null;
   startCalls: { binary: string; configPath: string }[] = [];
   stopCalls = 0;
+  /** item 6/7: one real supervisor.stop() (or, for item 7, makeRelay/
+   *  attachRelay) throwing is not a hypothetical — a leftover-kill EPERM,
+   *  say — and every caller's OWN reaction to it is what these two items
+   *  guard. */
+  stopRejectsOnce = false;
   status(): SupervisorStatus {
     return this.current;
   }
@@ -67,6 +72,10 @@ class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
   }
   async stop(): Promise<void> {
     this.stopCalls++;
+    if (this.stopRejectsOnce) {
+      this.stopRejectsOnce = false;
+      throw new Error("stop blew up");
+    }
     this.setStatus({ state: "off" });
   }
 }
@@ -333,11 +342,17 @@ test("PROBE A: a busy port, then switched off — the failing status clears and 
   lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  // waitUntil() against current()'s synchronous snapshot, not a bare
+  // settle(): under a full-suite run's real CPU contention, a single
+  // macrotask tick is not always enough for this chain (ensureBinary ->
+  // busyPorts -> failPreSupervisor -> publish) to have actually settled by
+  // the time the assertion runs — confirmed by this exact test flaking
+  // once in a full-suite run and passing every time alone.
+  await waitUntil(() => videoService.current().relay.state === "failing");
   assert.equal((await videoService.state()).relay.state, "failing");
 
   lifecycle.setEnabled(false);
-  await settle();
+  await waitUntil(() => videoService.current().relay.state === "off");
   assert.equal((await videoService.state()).relay.state, "off", "the failing status must clear once switched off");
   assert.equal(seen.at(-1)?.state, "disconnected");
 
@@ -502,6 +517,100 @@ test("PROBE F: a busy port, then a ports change that fixes it — retries immedi
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
+// item 6 (findings-t15-r2.md): `this.chain.then(fn, onRejected)` catches a
+// rejection of the PREVIOUS link, never of `fn` itself — so when a queued
+// call's own fn rejects, the rejection propagates unhandled and poisons the
+// very NEXT enqueue() call: that one's onRejected fires (catching what it
+// takes to be "the previous step" failing) and its OWN fn is skipped
+// entirely, silently dropping one real, queued call for every one that
+// failed.
+test("PROBE G: a rejected chain step (supervisor.stop() throwing) does not drop the NEXT queued call", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running");
+
+  supervisors[0]!.stopRejectsOnce = true;
+  lifecycle.setEnabled(false); // stopRelay() -> supervisor.stop() rejects
+  await settle();
+  await settle();
+
+  // The very next queued call — switching back on — must still run, not be
+  // silently skipped because the previous one rejected.
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 1);
+  assert.equal(supervisors.length, 2, "the second setEnabled(true) was dropped — no fresh supervisor was ever created");
+  assert.equal((await videoService.state()).relay.state, "running");
+});
+
+// item 7 (findings-t15-r2.md): this.supervisor used to be assigned before
+// makeRelay()/attachRelay() ran, so a throw from either left this.supervisor
+// pointing at a supervisor with a real, running, UNATTACHED child — isUp()
+// true forever, and every later setEnabled()/feedsChanged() believed the
+// relay was already up and never tried again.
+test("item 7: a throw from attachRelay stops the orphaned supervisor and lets the NEXT attempt actually retry", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let throwOnce = true;
+  const { deps, supervisors } = makeDeps({
+    makeRelay: () => {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error("makeRelay blew up");
+      }
+      return fakeRelay();
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  // Real wall-clock polling, not settle() — the catch this test is
+  // exercising is several awaits deep inside startRelay() (ensureBinary,
+  // busyPorts, the config write, supervisor.start(), THEN this one), and
+  // itself awaits supervisor.stop() — see waitUntil()'s own comment.
+  await waitUntil(() => supervisors.length > 0 && supervisors[0]!.stopCalls > 0);
+
+  // The first supervisor DID start (a real child would be running) but was
+  // never attached — it must have been stopped, not left running unattached.
+  assert.equal(supervisors.length, 1);
+  assert.equal(supervisors[0]!.stopCalls, 1, "the orphaned supervisor was never stopped");
+  assert.equal((await videoService.state()).relay.state, "failing");
+
+  // The scheduled retry must actually retry — not see isUp() still true
+  // from the orphaned supervisor and give up forever.
+  t.mock.timers.tick(restartDelayMs(0));
+  await waitUntil(() => supervisors.length > 1);
+  assert.equal((await videoService.state()).relay.state, "running");
+});
+
+// item 12 (findings-t15-r2.md, PROBE H): prelaunchOutage was never reset
+// when the relay was no longer wanted, so a SECOND busy-port outage after
+// switching off and back on read as a continuation of the FIRST (still
+// inside its own `spokenAt` window) and stayed silent.
+test("PROBE H: a busy-port outage, switch off, switch back on into the SAME busy port — the second outage logs too", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  // waitUntil(), not a bare settle() — see PROBE A's own comment on why:
+  // this exact assertion flaked in a full-suite run and passed every time
+  // run alone.
+  await waitUntil(() => videoService.current().relay.state === "failing");
+
+  lifecycle.setEnabled(false);
+  await waitUntil(() => videoService.current().relay.state === "off");
+  lifecycle.setEnabled(true);
+  await waitUntil(() => videoService.current().relay.state === "failing");
+
+  const busyLines = logs.filter((l) => l.includes("Port 1935 is in use by OBS Studio"));
+  assert.equal(busyLines.length, 2, `expected the SECOND switch-on's outage to log its own first failure too, got: ${JSON.stringify(busyLines)}`);
+});
+
 // ── 10. The readiness poll: backs off between retries, stops on a
 //    successful reconcile alone ─────────────────────────────────────────────
 
@@ -532,7 +641,7 @@ test("the readiness poll backs off with restartDelayMs between retries while the
 
 test("the readiness poll stops on a successful reconcile ALONE, even before the version is known", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { deps, supervisors } = makeDeps();
+  const { deps, order, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
@@ -543,6 +652,30 @@ test("the readiness poll stops on a successful reconcile ALONE, even before the 
   await settle();
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "running");
+
+  // item 11 (findings-t15-r2.md): relay.state === "running" alone stays
+  // green even if the poll were re-gated on loggedStartedThisRun instead of
+  // the reconcile itself — the supervisor's OWN status is already
+  // "running" regardless of whether the poll noticed and stopped. Counting
+  // reconcile calls is the only thing that catches that regression: ticking
+  // well past several more backoff windows must add NONE.
+  const reconcileCallsAtStop = order.filter((o) => o === "reconcile").length;
+  assert.equal(reconcileCallsAtStop, 1, "reconcile ran more than once before the poll had any reason to retry");
+  // Several ticks, each with a settle() — a mocked clock's tick() advances
+  // time synchronously, but startReadinessPoll()'s own tick() is async
+  // (awaits reconcileRelay()); a bare tick() with no settle() in between
+  // asserts before that continuation has actually run, which is exactly
+  // how this assertion stayed green with the re-gating bug reintroduced —
+  // its own reconcile call had not happened yet by the time it ran.
+  for (let i = 0; i < 8; i++) {
+    t.mock.timers.tick(30_000);
+    await settle();
+  }
+  assert.equal(
+    order.filter((o) => o === "reconcile").length,
+    reconcileCallsAtStop,
+    "the readiness poll kept ticking after its first success — it did not actually stop",
+  );
 });
 
 // ── 6/9: relayConnectionState — the one place a RelayStatus becomes the
@@ -569,11 +702,11 @@ test("relayConnectionState maps every RelayStatus to the integration row, never 
     { state: "connected", message: null },
   );
   assert.deepEqual(
-    relayConnectionState({ state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: null }),
+    relayConnectionState({ state: "failing", reason: "Port 1935 is in use by OBS.", kind: "port-conflict", retryAt: null }),
     { state: "error", message: "Port 1935 is in use by OBS." },
   );
   assert.deepEqual(
-    relayConnectionState({ state: "failing", reason: "The relay is not answering", retryAt: null }),
+    relayConnectionState({ state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null }),
     { state: "error", message: "The relay is not answering" },
   );
 });
@@ -595,6 +728,35 @@ test("the connection listener is told every transition, ending in error for a fa
     seen.some((s) => s.state === "error" && s.message === "Port 1935 is in use by OBS Studio."),
     JSON.stringify(seen),
   );
+});
+
+// item 1 (findings-t15-r2.md): the connection row never reached "connected /
+// MediaMTX <version>" when the banner arrived AFTER attach — nothing
+// published when the version became known, so the row stuck on "connected"
+// with a blank version until some UNRELATED change happened to publish
+// again. PROBE C's own real sequence: attach while version() is still
+// null, THEN the banner line arrives.
+test("item 1: the connection row catches up to the version once the banner line arrives, with no other change forcing it", async () => {
+  const seen: { state: string; message: string | null }[] = [];
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running");
+  assert.equal(
+    seen.filter((s) => s.state === "connected" && s.message !== null).length,
+    0,
+    "the row already shows a version before the banner has even arrived",
+  );
+
+  // The banner: supervisor.ts's real attachReader() updates version() BEFORE
+  // emitting "line" — this is that same order, on the fake.
+  supervisors[0]!.ver = "v1.21.1";
+  supervisors[0]!.emit("line", "INF MediaMTX v1.21.1, using config config.yml");
+
+  await waitUntil(() => seen.some((s) => s.state === "connected" && s.message === "MediaMTX v1.21.1"));
 });
 
 // ── 9: ensureBinary's discriminator reaches the wire unchanged ─────────────
@@ -635,6 +797,41 @@ test("an unsupported platform (assetName: null) never invents a hand-place path"
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "failing");
   assert.equal((relay as { assetName?: string }).assetName, undefined);
+});
+
+// item 16 (findings-t15-r2.md, Ruling): an unsupported platform never
+// retries — no pinned asset exists for this platform/arch, ever, so a
+// backoff timer here would retry forever against a fact that cannot
+// change, and the page must show no "Next try at" either.
+test("item 16: an unsupported platform never retries — no 'Next try at', and ensureBinary is never called again", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let ensureBinaryCalls = 0;
+  const { deps } = makeDeps({
+    ensureBinary: async () => {
+      ensureBinaryCalls++;
+      return {
+        ok: false,
+        reason: "Video relay is not available for win32 arm64.",
+        placeArchiveAt: "/data/video-relay/downloads",
+        assetName: null,
+      };
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+
+  const relay = (await videoService.state()).relay;
+  assert.equal(relay.state, "failing");
+  assert.equal((relay as { retryAt: number | null }).retryAt, null, "an unsupported platform must show no retry time");
+  assert.equal(ensureBinaryCalls, 1);
+
+  // Tick well past every backoff this class ever schedules (its cap is
+  // 60 s) — a real retry timer would have fired several times by now.
+  t.mock.timers.tick(120_000);
+  await settle();
+  assert.equal(ensureBinaryCalls, 1, "ensureBinary was called again — a retry was scheduled for a platform that can never fix itself");
 });
 
 // ── 5 (log wording): the two stop reasons, and the started line ───────────

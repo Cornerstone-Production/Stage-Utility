@@ -869,7 +869,7 @@ test("relay status maps the supervisor's status and version onto the wire shape,
     }
 
     supervisor.current = { state: "failing", reason: "port in use", retryAt: 12345 };
-    assert.deepEqual((await videoService.state()).relay, { state: "failing", reason: "port in use", retryAt: 12345 });
+    assert.deepEqual((await videoService.state()).relay, { state: "failing", reason: "port in use", kind: "crash-loop", retryAt: 12345 });
   } finally {
     await videoService.detachRelay();
   }
@@ -981,7 +981,7 @@ test("a poll that fails clears lastPaths and reports the relay as failing to ans
       "offline",
       "a relay that stops answering must not go on showing a stale live feed",
     );
-    assert.deepEqual(failed.relay, { state: "failing", reason: "The relay is not answering", retryAt: null });
+    assert.deepEqual(failed.relay, { state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null });
 
     await videoService.detachRelay();
     assert.deepEqual(videoService.current().relay, { state: "off" });
@@ -1039,7 +1039,7 @@ test("a poll that fails after the supervisor's own boot grace window flips the r
 
   try {
     await pollOnce();
-    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "The relay is not answering", retryAt: null });
+    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null });
     assert.equal(warns.filter((l) => l.includes("not answering")).length, 1);
   } finally {
     console.warn = realWarn;
@@ -1088,7 +1088,7 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
 
   try {
     await pollOnce(); // also fails to answer — the supervisor's own diagnosis still wins
-    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555 });
+    assert.deepEqual(videoService.current().relay, { state: "failing", reason: "Port 1935 is in use by OBS.", kind: "crash-loop", retryAt: 55555 });
     assert.deepEqual(
       warns.filter((l) => l.includes("not answering")),
       [],
@@ -1114,6 +1114,34 @@ test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed wi
     assert.equal(feed?.status.state, "offline", "failing counts as \"up\" for R14a — the relay has an opinion, even a bad one");
   } finally {
     await videoService.detachRelay();
+    await videoService.removeFeed((made as { feed: { id: string } }).feed.id);
+  }
+});
+
+// item 14 (findings-t15-r2.md, Ruling): the OPPOSITE case from the test
+// above — "failing" reported through setPreAttachStatus() (a busy port, a
+// failed download — relay-lifecycle.ts's own pre-supervisor sequence, which
+// never got as far as a child process existing at all) must NOT count as
+// "up" for R14a: nothing could ever have received a source, so a feed reads
+// standby, never a red "offline" implying its device stopped sending.
+test("item 14: a PRE-supervisor failure (a busy port, no process has ever run) reads a feed as standby, never offline", async () => {
+  videoService.setPreAttachStatus({
+    state: "failing",
+    reason: "Port 1935 is in use by OBS Studio.",
+    kind: "port-conflict",
+    retryAt: 55555,
+  });
+  const made = await videoService.addFeed({ name: "Pre-supervisor push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  try {
+    const feed = (await videoService.state()).feeds.find((f) => f.id === (made as { feed: { id: string } }).feed.id);
+    assert.equal(
+      feed?.status.state,
+      "standby",
+      "no process has ever run in this outage — nothing could have received a source",
+    );
+  } finally {
+    videoService.setPreAttachStatus(null);
     await videoService.removeFeed((made as { feed: { id: string } }).feed.id);
   }
 });
@@ -1218,7 +1246,7 @@ test("the attached supervisor's status events publish immediately, without waiti
     supervisor.emit("status", supervisor.current);
     await new Promise((r) => setTimeout(r, 20));
     assert.ok(frames.length > before, "every status event must publish, not only the first");
-    assert.deepEqual(frames.at(-1)?.relay, { state: "failing", reason: "boom", retryAt: 999 });
+    assert.deepEqual(frames.at(-1)?.relay, { state: "failing", reason: "boom", kind: "crash-loop", retryAt: 999 });
   } finally {
     await videoService.detachRelay();
   }
@@ -1361,7 +1389,7 @@ test("a status event to a non-running state clears lastPaths immediately — a d
       "offline",
       "a dead process's feed must not still read live just because no poll has run against it yet",
     );
-    assert.deepEqual(snap.relay, { state: "failing", reason: "crashed", retryAt: 123 });
+    assert.deepEqual(snap.relay, { state: "failing", reason: "crashed", kind: "crash-loop", retryAt: 123 });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
