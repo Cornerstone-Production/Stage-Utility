@@ -9,7 +9,8 @@ import { strict as assert } from "node:assert";
 import { mock, test } from "node:test";
 
 import { DEFAULT_SETTLE_MS } from "@main/services/repeat-log";
-import { createSampler, trackDelta } from "./playback-stats.js";
+import { DRAIN_TIMEOUT_MS } from "./playback-reports.js";
+import { createSampler, STATS_READ_TIMEOUT_MS, trackDelta } from "./playback-stats.js";
 
 /** Most tests here are not about logging at all. */
 const noLog = () => {};
@@ -355,6 +356,33 @@ test("recovery after a persistent rejection logs once, once the success has sett
 
     await sampler.sample();
     assert.equal(logs.length, 2, "a second successful read afterward must not log again");
+  } finally {
+    sampler.stop();
+    mock.timers.reset();
+  }
+});
+
+test("webrtc: a getStats() that never answers is a failed read — null once STATS_READ_TIMEOUT_MS passes, logged once per outage", async () => {
+  // The presence heartbeat gives up on the whole drain at 2 s; a read that
+  // hangs has to give up sooner and say so, or the other widgets' reports go
+  // with it and nothing anywhere says why the screen stopped reporting.
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const logs: string[] = [];
+  const pc = { getStats: () => new Promise(() => {}) } as unknown as RTCPeerConnection;
+  const sampler = createSampler("feed-1", "Program (IMAG)", { via: "webrtc", pc }, video, (r) => logs.push(r));
+  try {
+    assert.ok(STATS_READ_TIMEOUT_MS < DRAIN_TIMEOUT_MS, "a hung read must give up before the heartbeat gives up on every widget");
+    for (let i = 0; i < 2; i++) {
+      let result: unknown = "pending";
+      void sampler.sample().then((r) => {
+        result = r;
+      });
+      mock.timers.tick(STATS_READ_TIMEOUT_MS);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(result, null, "a read that never answers must resolve null once the timeout passes");
+    }
+    assert.deepEqual(logs, ["Program (IMAG): could not read playback stats: getStats() did not answer within 1.5 s"]);
   } finally {
     sampler.stop();
     mock.timers.reset();

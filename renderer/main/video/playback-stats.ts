@@ -18,6 +18,12 @@ import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
 import type { VideoPlaybackReport } from "@main/types/video";
 
+/** How long one stats read may take before it counts as a failed read. Under
+ *  the presence heartbeat's own limit on the whole drain (DRAIN_TIMEOUT_MS in
+ *  playback-reports.ts), so one widget whose getStats() hangs is left out on
+ *  its own, and logged, rather than taking every widget's report with it. */
+export const STATS_READ_TIMEOUT_MS = 1_500;
+
 /** One ever-increasing counter, read across repeated calls as the delta since
  *  the last one. A value lower than the last reading is a fresh session's own
  *  counter restarting at (or near) zero, not negative frames — the delta for
@@ -62,6 +68,21 @@ type StatsEntry = {
  *  report, never logged (see `createSampler`). Rethrows a `getStats()`
  *  failure itself: the caller, not this function, knows whether that is
  *  teardown noise or a real outage worth telling the operator about. */
+/** `read`, or a rejection once STATS_READ_TIMEOUT_MS passes without it. A
+ *  result landing after that is dropped: the next read's deltas count what
+ *  this one missed. */
+async function inTime<T>(read: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`getStats() did not answer within ${STATS_READ_TIMEOUT_MS / 1000} s`)), STATS_READ_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([read, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null> {
   const report = await pc.getStats();
   let found: RawCounts | null = null;
@@ -161,7 +182,7 @@ export function createSampler(
   // otherwise, for the rest of the session whatever later reports carry.
   let stallSource: "freezeCount" | "waiting" | null = source.via === "hls" ? "waiting" : null;
   const statsOutage = new OutageLog();
-  const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? readWebrtcCounts(source.pc) : Promise.resolve(readHlsCounts(video)));
+  const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? inTime(readWebrtcCounts(source.pc)) : Promise.resolve(readHlsCounts(video)));
 
   return {
     sample: async () => {
