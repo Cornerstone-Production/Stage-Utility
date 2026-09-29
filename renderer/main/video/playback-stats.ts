@@ -40,9 +40,10 @@ interface RawCounts {
   /** WebRTC only, and only when the browser reports one — Chrome's
    *  `inbound-rtp` video report carries a receiver-side freeze count;
    *  `readHlsCounts` never sets this. Undefined, never 0, when the report
-   *  carries no such field at all: `createSampler` reads that as "this
-   *  browser does not report freezes" and falls back to `waiting` events,
-   *  which a genuine zero-freezes reading must not be confused with. */
+   *  carries no such field at all: on a session's first report,
+   *  `createSampler` reads that as "this browser does not report freezes"
+   *  and counts `waiting` events instead, which a genuine zero-freezes
+   *  reading must not be confused with. */
   freezeCount?: number;
 }
 
@@ -148,14 +149,17 @@ export function createSampler(
   const decodedDelta = trackDelta();
   const droppedDelta = trackDelta();
   // `waiting`-event count, as a delta — the only source on HLS, and
-  // WebRTC's own fallback when this browser reports no freezeCount at all
-  // (see the return below).
+  // WebRTC's own fallback when this browser reports no freezeCount at all.
   const stallsDelta = trackDelta();
   // WebRTC's own freeze-count delta, kept separate from stallsDelta above:
   // the two count different underlying events (a receiver-side freeze vs a
-  // `waiting` DOM event) and must never be summed or confused mid-session —
-  // whichever source a session starts on is the one it stays on.
+  // `waiting` DOM event) and must never be summed or swapped mid-session.
   const freezeCountDelta = trackDelta();
+  // Which of the two this session's stalls come from. HLS is always
+  // `waiting`. WebRTC latches on the first sample that carries an
+  // inbound-rtp video report: freezeCount if that report has one, `waiting`
+  // otherwise, for the rest of the session whatever later reports carry.
+  let stallSource: "freezeCount" | "waiting" | null = source.via === "hls" ? "waiting" : null;
   const statsOutage = new OutageLog();
   const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? readWebrtcCounts(source.pc) : Promise.resolve(readHlsCounts(video)));
 
@@ -184,11 +188,13 @@ export function createSampler(
       if (!raw) return null;
       // A `<video>` playing a MediaStream (WebRTC) never fires `waiting`
       // when the stream starves, so Chrome's own receiver-side freeze count
-      // is the real source of stalls there; fall back to the `waiting`
-      // count on a browser whose `inbound-rtp` report carries none (or on
-      // HLS, which always uses `waiting` — see readHlsCounts).
+      // is the real source of stalls there; `waiting` is the fallback for a
+      // browser whose `inbound-rtp` report carries none. A later report
+      // missing freezeCount on a freezeCount session reads as no stalls,
+      // leaving the tracker's baseline where the last reading put it.
+      stallSource ??= raw.freezeCount !== undefined ? "freezeCount" : "waiting";
       const stallCount =
-        source.via === "webrtc" && raw.freezeCount !== undefined ? freezeCountDelta(raw.freezeCount) : stallsDelta(stalls);
+        stallSource === "waiting" ? stallsDelta(stalls) : raw.freezeCount === undefined ? 0 : freezeCountDelta(raw.freezeCount);
       return {
         feedId,
         via: source.via,

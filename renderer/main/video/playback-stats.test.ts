@@ -162,6 +162,54 @@ test("webrtc: an absent freezeCount falls back to counting `waiting` events", as
   }
 });
 
+/** getStats() answering each report in turn, each exactly as given — a
+ *  report without `freezeCount` carries no such key at all. */
+function fakePcSequence(reports: Record<string, number>[]) {
+  let call = 0;
+  return {
+    getStats: async () => {
+      const r = reports[Math.min(call, reports.length - 1)]!;
+      call += 1;
+      return new Map([["in", { type: "inbound-rtp", kind: "video", ...r }]]);
+    },
+  } as unknown as RTCPeerConnection;
+}
+
+test("webrtc: a session that started on freezeCount stays on it when a later report carries none", async () => {
+  const pc = fakePcSequence([
+    { framesDecoded: 300, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 1 },
+    { framesDecoded: 600, framesDropped: 0, frameWidth: 1920, frameHeight: 1080 },
+    { framesDecoded: 900, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 4 },
+  ]);
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
+  try {
+    assert.equal((await sampler.sample())!.stalls, 1);
+    video.dispatchEvent(new Event("waiting"));
+    video.dispatchEvent(new Event("waiting"));
+    assert.equal((await sampler.sample())!.stalls, 0, "a report missing freezeCount must not switch this session to counting `waiting`");
+    assert.equal((await sampler.sample())!.stalls, 3, "freezeCount resumes from its own last reading");
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("webrtc: a session that started on `waiting` stays on it when a later report carries freezeCount", async () => {
+  const pc = fakePcSequence([
+    { framesDecoded: 300, framesDropped: 0, frameWidth: 1920, frameHeight: 1080 },
+    { framesDecoded: 600, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 5 },
+  ]);
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
+  try {
+    assert.equal((await sampler.sample())!.stalls, 0);
+    video.dispatchEvent(new Event("waiting"));
+    assert.equal((await sampler.sample())!.stalls, 1, "a report that starts carrying freezeCount must not switch this session off `waiting`");
+  } finally {
+    sampler.stop();
+  }
+});
+
 // ── createSampler: hls ───────────────────────────────────────────────────
 
 class FakeHlsVideoEl extends EventTarget {
