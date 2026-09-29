@@ -219,10 +219,16 @@ export async function toggleIntegration(
   id: string,
   enabled: boolean,
   {
+    label,
     onBeforeMove,
     setBusy,
     onStateChange,
   }: {
+    /** The integration's own display name — item 4 (findings-t15-r2.md): a
+     *  failed toggle used to read "Failed to enable: <error>", with no
+     *  saying WHICH integration; every caller has this on hand already
+     *  (the descriptor its own card or dialog is already showing). */
+    label: string;
     /** Called before the state comes back — the moment to record card positions. */
     onBeforeMove?: () => void;
     setBusy: (busy: boolean) => void;
@@ -235,7 +241,14 @@ export async function toggleIntegration(
     onStateChange(await ipc<IntegrationState>("integrations:setEnabled", { id, enabled }));
   } catch (err) {
     console.error("[IntegrationsPanel:toggle]", id, enabled, err);
-    toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+    // errorMessage(), never String(err) — on a real Error (every ipc()
+    // failure is one; see api.ts's apiFetch()) String() produces
+    // "Error: <message>", a stray prefix an operator reads as part of the
+    // reason rather than what it is. Three more call sites in this same
+    // file had the identical bug (Failed to save, Refresh failed, the Test
+    // connection result) — grepped for every `String(err)` here and fixed
+    // all four together, not just the one item 4 named.
+    toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${errorMessage(err)}`);
   } finally {
     setBusy(false);
   }
@@ -517,7 +530,7 @@ export function IntegrationDialog({
       return true;
     } catch (err) {
       console.error("[IntegrationsPanel:save] error", err);
-      toast.error(`Failed to save: ${String(err)}`);
+      toast.error(`Failed to save: ${errorMessage(err)}`);
       return false;
     } finally {
       setIsSaving(false);
@@ -526,6 +539,7 @@ export function IntegrationDialog({
 
   const toggleEnabled = (enabled: boolean) =>
     toggleIntegration(descriptor.id, enabled, {
+      label: descriptor.label,
       onBeforeMove,
       setBusy: setToggling,
       onStateChange,
@@ -537,7 +551,7 @@ export function IntegrationDialog({
       await ipc("stage:refresh");
       toast.success("Plan refreshed from PCO.");
     } catch (err) {
-      toast.error(`Refresh failed: ${String(err)}`);
+      toast.error(`Refresh failed: ${errorMessage(err)}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -578,7 +592,7 @@ export function IntegrationDialog({
       setTestResult(result);
     } catch (err) {
       console.error("[IntegrationsPanel:test] error", err);
-      setTestResult({ ok: false, message: String(err) });
+      setTestResult({ ok: false, message: errorMessage(err) });
     } finally {
       setIsTesting(false);
     }
@@ -1001,11 +1015,12 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   const handleToggle = useCallback(
     (id: string, enabled: boolean) =>
       toggleIntegration(id, enabled, {
+        label: data?.descriptors.find((d) => d.id === id)?.label ?? id,
         onBeforeMove: captureCardPositions,
         setBusy: (busy) => setTogglingId(busy ? id : null),
         onStateChange: handleStateChange,
       }),
-    [captureCardPositions, handleStateChange],
+    [captureCardPositions, handleStateChange, data],
   );
 
   if (isLoading) {
@@ -1059,7 +1074,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   return (
     <div className={cn("flex flex-col gap-2.5", className)} ref={setSlideHost}>
       {live.length === 0 ? (
-        // "0 of 16 connected" is a useless thing to lead a fresh install with,
+        // "0 of N connected" is a useless thing to lead a fresh install with,
         // so the sentence replaces the count rather than sitting under it.
         // "open any card" names the interaction, which is not obvious from a card
         // that no longer looks like a form.

@@ -142,6 +142,12 @@ interface FetchStubOptions {
    *  same address with "rotatedpw" in place of "testpw". May also return a
    *  Promise — same reason as onPushAddress above. */
   onNewPushPassword?: (id: string) => FeedResponse | Promise<FeedResponse>;
+  /** The "video" integration's own `enabled` flag, as GET /api/integrations
+   *  answers it — the page's switch (useIntegrations()) reads this, never
+   *  video:state's own relay.state (see RelaySwitch's own comment: off both
+   *  when the switch is off AND when it is on with no relay feed yet).
+   *  Default false. */
+  videoIntegrationEnabled?: boolean;
 }
 
 /** Every request the page makes, matched by method and path — including the
@@ -155,6 +161,29 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
     calls.push({ method, url, body });
     if (method === "GET" && url.endsWith("/api/video/state")) {
       return { ok: true, status: 200, json: async () => state, text: async () => "" } as unknown as Response;
+    }
+    if (method === "GET" && url.endsWith("/api/integrations")) {
+      const body = {
+        descriptors: [{ id: "video", label: "Video feeds" }],
+        states: [
+          {
+            id: "video",
+            enabled: opts.videoIntegrationEnabled ?? false,
+            connection: "disconnected",
+            message: null,
+            config: {},
+          },
+        ],
+      };
+      return { ok: true, status: 200, json: async () => body, text: async () => "" } as unknown as Response;
+    }
+    if (method === "POST" && url.endsWith("/api/integrations/video/enabled")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "video", enabled: (body as { enabled: boolean }).enabled, connection: "disconnected", message: null, config: {} }),
+        text: async () => "",
+      } as unknown as Response;
     }
     if (method === "GET" && /\/api\/video\/feeds\/[^/]+\/usage$/.test(url)) {
       if (opts.usage === "fail") throw new TypeError("fetch failed");
@@ -246,6 +275,37 @@ beforeEach(() => {
   __resetReplayCacheForTests();
 });
 afterEach(() => cleanup());
+
+// item 3 (findings-t15-r2.md): a route-level test that the page's switch
+// sends integrations:setEnabled with { id: "video", enabled } THROUGH THE
+// PAGE — driven against the real route component, a real fetch stub and a
+// real click, never toggleVideo()/toggleIntegration() called directly as a
+// unit. The switch's own visual reflection of `enabled` is relay-status.test.tsx's;
+// this is the one thing that file cannot cover — that the PAGE actually
+// wires it to the real endpoint with the real id.
+test("the switch sends POST /api/integrations/video/enabled with { enabled: true } — through the page, not a component callback", async () => {
+  const g = stubGlobals(makeState([]), { videoIntegrationEnabled: false });
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    const sw = screen.getByRole("switch", { name: "Video feeds on" });
+    assert.equal(sw.getAttribute("aria-checked"), "false", "precondition: the switch starts off");
+    fireEvent.click(sw);
+    await settle();
+    await settle();
+
+    // integrations:setEnabled's channel payload is { id, enabled } — api.ts's
+    // own case puts `id` in the URL path and only `{ enabled }` in the body,
+    // so the URL is what proves "video" reached the real endpoint at all.
+    const call = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/integrations/video/enabled"));
+    assert.ok(call, `no POST to /api/integrations/video/enabled — calls were: ${JSON.stringify(g.calls.map((c) => `${c.method} ${c.url}`))}`);
+    assert.deepEqual(call!.body, { enabled: true });
+  } finally {
+    g.restore();
+  }
+});
 
 test("both feeds render, the embed row's pill names its player, the external row has none, and Source swaps the editor's fields", async () => {
   const g = stubGlobals(makeState([embedFeed(), externalFeed()]));

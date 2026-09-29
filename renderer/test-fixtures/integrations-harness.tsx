@@ -69,6 +69,11 @@ export function blankState(id: string, over: Partial<IntegrationState> = {}): In
 export function installFakeServer(
   overrides: Record<string, Partial<IntegrationState>> = {},
   routes: Record<string, unknown> = {},
+  /** Make ONE integration's enable/disable POST fail once, with this error
+   *  text in the body apiFetch() reads (`{error: string}` — see api.ts's
+   *  own apiFetch()) — for a test proving what the caller does with a real
+   *  failure, never a happy-path assumption. */
+  failEnabledFor?: { id: string; error: string },
 ): FakeServer {
   const getRoutes = { ...GET_ROUTES, ...routes };
   const states = new Map<string, IntegrationState>(
@@ -76,6 +81,7 @@ export function installFakeServer(
   );
   const posts: { path: string; body: unknown }[] = [];
   const unhandled: string[] = [];
+  let enabledFailuresLeft = failEnabledFor ? 1 : 0;
 
   const g = globalThis as unknown as Record<string, unknown>;
   const prevFetch = g.fetch;
@@ -83,6 +89,8 @@ export function installFakeServer(
 
   const json = (value: unknown): Response =>
     ({ ok: true, status: 200, statusText: "OK", json: async () => value }) as unknown as Response;
+  const errorResponse = (message: string): Response =>
+    ({ ok: false, status: 500, statusText: "Internal Server Error", json: async () => ({ error: message }) }) as unknown as Response;
 
   g.fetch = async (input: unknown, init?: { method?: string; body?: string }): Promise<Response> => {
     const path = String(input);
@@ -98,6 +106,10 @@ export function installFakeServer(
     const enabled = /^\/api\/integrations\/([^/]+)\/enabled$/.exec(path);
     if (enabled) {
       const id = decodeURIComponent(enabled[1]);
+      if (failEnabledFor && id === failEnabledFor.id && enabledFailuresLeft > 0) {
+        enabledFailuresLeft--;
+        return errorResponse(failEnabledFor.error);
+      }
       const next = { ...states.get(id)!, enabled: (body as { enabled: boolean }).enabled };
       states.set(id, next);
       return json(next);
@@ -165,7 +177,7 @@ export function installFakeServer(
  * the same turn the cache changes. `idle()` below asks the cache, so on a busy
  * machine its poll timer and that notification come due in the same tick, the
  * poll wins by having been armed first, `act()` finds nothing to flush, and the
- * page is still its skeleton: sixteen cards expected, none found. Beta CI on
+ * page is still its skeleton: every card expected, none found. Beta CI on
  * ef6458e7 lost that race in integrations-visibility after a year of winning it.
  *
  * Notify synchronously instead. The cache going idle and React learning of it
@@ -390,7 +402,7 @@ export function settleFor(ms = 0): Promise<void> {
 /**
  * `idle()`, with the whole wait inside one act() scope.
  *
- * Mounting the panel puts sixteen cards on the page, and their Switch
+ * Mounting the panel puts every card on the page, and their Switch
  * primitives settle their own state while idle()'s plain setTimeout poll
  * runs — outside any act scope, that is where the great majority of this
  * file family's escaped updates came from.

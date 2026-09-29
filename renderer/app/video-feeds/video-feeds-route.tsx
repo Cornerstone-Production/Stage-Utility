@@ -81,7 +81,7 @@ export function VideoFeedsRoute() {
     void toggleIntegration(
       "video",
       enabled,
-      { setBusy: setToggling, onStateChange: (_next: IntegrationState) => {} },
+      { label: "Video feeds", setBusy: setToggling, onStateChange: (_next: IntegrationState) => {} },
     );
   }
 
