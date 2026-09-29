@@ -1243,6 +1243,55 @@ test("R14 round 2 item 6: a stale preview response landing late must not clobber
   }
 });
 
+// A rotation and a preview each report their own failure. A rotation that
+// was already in flight, landing successfully after a newer preview failed,
+// must not clear the preview's error: nothing about that preview succeeded.
+test("a slow rotation that succeeds after a newer preview failed leaves the preview's error on screen", async () => {
+  let releaseRotation: ((r: { status: number; body: unknown }) => void) | null = null;
+  const g = stubGlobals(
+    { ...makeState([pushFeed()]), kinds: ALL_KINDS },
+    {
+      onPushAddress: (id, protocol) =>
+        protocol === "whip"
+          ? { status: 500, body: { error: "relay read failed" } }
+          : {
+              status: 200,
+              body: { protocol: "srt", address: `srt://192.168.1.50:8890?streamid=publish:${id}:video:testpw`, password: "testpw" },
+            },
+      onNewPushPassword: () =>
+        new Promise((resolve) => {
+          releaseRotation = resolve;
+        }),
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+    fireEvent.click(screen.getByRole("button", { name: "New password" }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
+    await settle();
+    await settle();
+    assert.equal(!!screen.queryByText("Couldn't read the push address."), true, "expected the failed preview's error");
+
+    releaseRotation!({
+      status: 200,
+      body: { protocol: "srt", address: "srt://192.168.1.50:8890?streamid=publish:feed-push:video:rotatedpw", password: "rotatedpw", applied: true, kicked: "none" },
+    });
+    await settle();
+    await settle();
+    assert.equal(
+      !!screen.queryByText("Couldn't read the push address."),
+      true,
+      "the rotation's success cleared an error about a different request",
+    );
+  } finally {
+    g.restore();
+  }
+});
+
 test("R14 round 2 item 6: New password during an unsaved preview re-fetches the address for the protocol the control shows, rather than flipping to the saved one", async () => {
   let rotated = false;
   const g = stubGlobals(

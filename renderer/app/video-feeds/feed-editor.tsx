@@ -536,7 +536,10 @@ export const COPIED_LABEL_MS = 1400;
  */
 function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string; protocol: PushProtocol; relayRunning: boolean }) {
   const [data, setData] = useState<PushAddress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // One slot each: a rotation landing after a newer preview failed must
+  // not clear that preview's error, nor a preview a rotation's.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [rotationError, setRotationError] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
   const [rotation, setRotation] = useState<RotationResult | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
@@ -559,12 +562,12 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
       (r) => {
         if (seq !== requestSeq.current) return; // superseded by a newer request — drop it
         setData(r);
-        setError(null);
+        setLoadError(null);
       },
       (err: unknown) => {
         if (seq !== requestSeq.current) return;
         logReadFailure("video", "the push address", err);
-        setError("Couldn't read the push address.");
+        setLoadError("Couldn't read the push address.");
       },
     );
   }, [feedId, protocol]);
@@ -586,7 +589,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
       // before either of these ran at all). Only the DATA a later request
       // could already have replaced is gated by the counter below.
       setRotation({ applied: r.applied, kicked: r.kicked });
-      setError(null);
+      setRotationError(null);
       setCopyHint(null);
       if (seq !== requestSeq.current) return; // a newer request already owns the data shown now
       if (protocol === r.protocol) {
@@ -608,7 +611,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
       // Same reasoning as above: a rotation failure IS the report worth
       // showing, regardless of what is being previewed by the time it
       // arrives.
-      setError(errorMessage(err));
+      setRotationError(errorMessage(err));
     } finally {
       setRotating(false);
     }
@@ -642,7 +645,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   // fields on screen, with the error under Password and New password still
   // pressable — only a failed INITIAL load (nothing to show at all) falls
   // back to a bare ErrorNote.
-  if (error && !data) return <ErrorNote>{error}</ErrorNote>;
+  if (loadError && !data) return <ErrorNote>{loadError}</ErrorNote>;
   if (!data) return null;
 
   // A note only for a RUNNING relay — with none running (video switched off,
@@ -697,7 +700,8 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
       </StackedField>
 
       {rotationNote && <p className="text-caption1 text-warn-11">{rotationNote}</p>}
-      {error && <ErrorNote>{error}</ErrorNote>}
+      {loadError && <ErrorNote>{loadError}</ErrorNote>}
+      {rotationError && <ErrorNote>{rotationError}</ErrorNote>}
     </>
   );
 }
