@@ -1353,8 +1353,10 @@ class IntegrationManager {
     await this.applyResi();
     await this.applyYouTube();
     // Start (or leave off) the video relay, per its own enabled flag and
-    // whatever pull/push feeds already exist.
-    await this.applyVideo();
+    // whatever pull/push feeds already exist. Not awaited: applyVideo()
+    // itself returns at once and the relay comes up (or doesn't) in the
+    // background — see its own comment.
+    this.applyVideo();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
@@ -1433,7 +1435,10 @@ class IntegrationManager {
       followedTeams: scoresStore.get().favourites.length,
       // current(), not state(): getStates() is synchronous and this runs on
       // every broadcast — see current()'s own comment on why it exists.
-      videoFeeds: videoService.current().feeds.length,
+      // Only a pull or push feed needs the relay at all — an embed or
+      // external feed plays with video switched off, so it must not count
+      // toward "configured" any more than it counts toward starting one.
+      videoFeeds: videoService.current().feeds.filter((f) => f.kind === "pull" || f.kind === "push").length,
     };
   }
 
@@ -2015,6 +2020,13 @@ class IntegrationManager {
         return result;
       }
 
+      if (id === "video") {
+        const relay = (await videoService.state()).relay;
+        if (relay.state === "running") return { ok: true, message: `MediaMTX ${relay.version}` };
+        if (relay.state === "failing") return { ok: false, message: relay.reason };
+        return { ok: false, message: "The video relay is not running." };
+      }
+
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
       const msg = errorMessage(err);
@@ -2414,13 +2426,21 @@ class IntegrationManager {
    * exists, which relay-lifecycle.ts decides for itself on every feed
    * change (video-service.ts's own feedsChangedListener hook) — nothing
    * here re-checks that.
+   *
+   * setEnabled() itself returns at once — the whole start sequence,
+   * including a first-ever download, runs in the background and reports
+   * through the connection listener above. NOT awaited, unlike every other
+   * applier: awaiting it here used to make init() (boot) wait up to five
+   * minutes for a download, a throwing ensureBinary fail boot entirely, and
+   * the switch's own HTTP request (this same call, from setEnabled() below)
+   * outlive the renderer's 15 s timeout.
    */
-  private async applyVideo(): Promise<void> {
+  private applyVideo(): void {
     relayLifecycle.setConnectionListener((state, message) => {
       this.setConnectionState("video", state, message);
       this.broadcastStates();
     });
-    await relayLifecycle.setEnabled(this.states.get("video")?.enabled === true);
+    relayLifecycle.setEnabled(this.states.get("video")?.enabled === true);
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */
