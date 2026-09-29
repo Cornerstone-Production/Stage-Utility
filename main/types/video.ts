@@ -107,6 +107,29 @@ export interface VideoFeedView {
 }
 
 /**
+ * One Video widget instance's playback health, carried in the presence
+ * heartbeat's `video` field alongside every other instance currently showing
+ * a picture — never one per feed: two widgets playing the same feed each
+ * report their own numbers.
+ *
+ * `decoded`, `dropped` and `stalls` are deltas since the LAST report, not the
+ * session's running total, so two heartbeats can be summed or charted without
+ * re-deriving a rate from two cumulative reads — a counter that goes
+ * backwards (a fresh session replacing the one being sampled) contributes a
+ * zero delta rather than a negative one. `width`/`height` are the frame's
+ * current size, never a delta.
+ */
+export interface VideoPlaybackReport {
+  feedId: string;
+  via: "webrtc" | "hls";
+  decoded: number;
+  dropped: number;
+  stalls: number;
+  width: number;
+  height: number;
+}
+
+/**
  * Which failing case this is — separate from `reason` (free text an operator
  * reads) because two different UI/logic decisions turn on knowing the CASE,
  * not the words:
