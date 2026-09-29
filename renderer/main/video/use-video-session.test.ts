@@ -1527,7 +1527,12 @@ test("a probe beside a live HLS picture is never sampled: sample() stays via 'hl
     assert.equal(video.srcObject, probeStream, "expected the picture moved onto the probe's stream");
 
     // The adopted session is a NEW attempt: a fresh sampler, counters at
-    // zero — not the huge numbers the probe was already carrying.
+    // zero — not the huge numbers the probe was already carrying. `9999` is
+    // an exaggerated stand-in to make the mechanism obvious here; in
+    // production the real backlog at adoption is bounded by the probe's own
+    // poll (PROBE_POLL_MS = 500ms — it adopts the instant that poll sees any
+    // frame at all), so it is on the order of half a second of frames, not
+    // this test's magnitude.
     const afterAdopt = await result.current.sample();
     assert.equal(afterAdopt?.via, "webrtc", "expected the swap to webrtc reflected in the report");
     assert.equal(afterAdopt?.decoded, 9999, "the first read of a NEW sampler is its own baseline, not a delta against nothing");

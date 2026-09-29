@@ -92,7 +92,11 @@ export interface PlaybackSampler {
  * Every counter starts at zero: a fresh sampler is built for every new
  * attempt, including a swap between methods (HLS handing over to an adopted
  * WebRTC session), so the first report after any swap is a delta against
- * zero, never against the session it replaced.
+ * zero, never against the session it replaced. For an adopted WebRTC
+ * session specifically, that first delta is everything decoded since the
+ * PROBE's own session started, not since the swap — bounded by the probe's
+ * own adoption poll (`PROBE_POLL_MS` in use-video-session.ts), so in
+ * practice on the order of one poll interval's worth of frames.
  *
  * `onLog` hears about `getStats()` itself rejecting — a DIFFERENT problem
  * from "no inbound-rtp report yet" (legitimately silent, see
