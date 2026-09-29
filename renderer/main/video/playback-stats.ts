@@ -14,6 +14,8 @@
 // already polls), and "getStats() rejected: skip this sample" only makes
 // sense measured at the moment a report is actually built.
 
+import { errorMessage } from "@main/services/errors";
+import { OutageLog } from "@main/services/repeat-log";
 import type { VideoPlaybackReport } from "@main/types/video";
 
 /** One ever-increasing counter, read across repeated calls as the delta since
@@ -39,17 +41,13 @@ interface RawCounts {
 
 type StatsEntry = { type?: string; kind?: string; framesDecoded?: number; framesDropped?: number; frameWidth?: number; frameHeight?: number };
 
-/** `pc.getStats()`'s one inbound-rtp video report. Null when `getStats()`
- *  itself rejects (most often a connection already closing) or carries no
- *  such report yet — either way the caller skips this sample rather than
- *  reporting zeros that are not really a reading. */
+/** `pc.getStats()`'s one inbound-rtp video report, or null when the call
+ *  succeeded but carries no such report yet — legitimately nothing to
+ *  report, never logged (see `createSampler`). Rethrows a `getStats()`
+ *  failure itself: the caller, not this function, knows whether that is
+ *  teardown noise or a real outage worth telling the operator about. */
 async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null> {
-  let report: RTCStatsReport;
-  try {
-    report = await pc.getStats();
-  } catch {
-    return null;
-  }
+  const report = await pc.getStats();
   let found: RawCounts | null = null;
   report.forEach((r: StatsEntry) => {
     if (r.type === "inbound-rtp" && r.kind === "video") {
@@ -89,8 +87,28 @@ export interface PlaybackSampler {
  * attempt, including a swap between methods (HLS handing over to an adopted
  * WebRTC session), so the first report after any swap is a delta against
  * zero, never against the session it replaced.
+ *
+ * `onLog` hears about `getStats()` itself rejecting — a DIFFERENT problem
+ * from "no inbound-rtp report yet" (legitimately silent, see
+ * `readWebrtcCounts`) or from a dropped PICTURE (`use-video-session.ts`'s own
+ * `OutageLog`-backed streak, keyed on the feed, for `onDropped`/
+ * `onWebrtcUnusable`). This sampler gets its OWN `OutageLog`, not a share of
+ * that one: the two are orthogonal (stats can fail to read while the picture
+ * plays perfectly, or vice versa), and a shared run's settle window would
+ * have a live picture's stats failure wait out an unrelated playback drop
+ * before ever announcing recovery. Scoped to THIS sampler's own lifetime —
+ * exactly like every other counter here, a fresh attempt's fresh sampler
+ * starts a fresh run, never carrying a prior attempt's outage forward.
  */
-export function createSampler(feedId: string, via: "webrtc" | "hls", video: HTMLVideoElement, pc?: RTCPeerConnection): PlaybackSampler {
+export function createSampler(
+  feedId: string,
+  name: string,
+  via: "webrtc" | "hls",
+  video: HTMLVideoElement,
+  onLog: (reason: string) => void,
+  pc?: RTCPeerConnection,
+): PlaybackSampler {
+  let stopped = false;
   let stalls = 0;
   const onWaiting = () => {
     stalls += 1;
@@ -100,11 +118,27 @@ export function createSampler(feedId: string, via: "webrtc" | "hls", video: HTML
   const decodedDelta = trackDelta();
   const droppedDelta = trackDelta();
   const stallsDelta = trackDelta();
+  const statsOutage = new OutageLog();
   const read = (): Promise<RawCounts | null> => (via === "webrtc" ? readWebrtcCounts(pc!) : Promise.resolve(readHlsCounts(video)));
 
   return {
     sample: async () => {
-      const raw = await read();
+      let raw: RawCounts | null;
+      try {
+        raw = await read();
+      } catch (err) {
+        // Stopped between the call going out and its rejection landing: the
+        // session is closing on purpose, and `getStats()` failing on a
+        // closed/closing RTCPeerConnection is the expected shape of that,
+        // not an outage worth telling the operator about.
+        if (!stopped) {
+          const d = statsOutage.fail("", errorMessage(err), Date.now());
+          if (d.log) onLog(`${name}: could not read playback stats: ${errorMessage(err)}${d.note}`);
+        }
+        return null;
+      }
+      const d = statsOutage.ok("", Date.now());
+      if (d.log) onLog(`${name}: playback stats readable again${d.note}`);
       if (!raw) return null;
       return {
         feedId,
@@ -116,6 +150,9 @@ export function createSampler(feedId: string, via: "webrtc" | "hls", video: HTML
         height: raw.height,
       };
     },
-    stop: () => video.removeEventListener("waiting", onWaiting),
+    stop: () => {
+      stopped = true;
+      video.removeEventListener("waiting", onWaiting);
+    },
   };
 }
