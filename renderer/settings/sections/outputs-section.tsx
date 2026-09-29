@@ -414,7 +414,15 @@ export function OutputRow({ output, views, baseUrl, online, struggles, canRemove
                 Use HLS on this screen
               </DropdownMenu.CheckboxItem>
               {output.allowHls === false && (
-                <p className="px-2 pb-1.5 text-caption1 text-fg-subtle">
+                // w-48 matches menuContent()'s own min-w-48 exactly, so this
+                // wraps within the width the menu already commits to rather
+                // than growing it to the sentence's own unwrapped length —
+                // over the card at ~460px instead of the menu's own ~230px,
+                // caught driving this menu in a real browser. pl-[1.875rem]
+                // is the row's own px-2 (8px) plus the indicator column's
+                // width and gap (14px + 8px), so the caption starts under
+                // the LABEL text, not under the checkmark.
+                <p className="w-48 whitespace-normal pl-[1.875rem] pr-2 pb-1.5 text-caption1 text-fg-subtle">
                   Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here.
                 </p>
               )}
