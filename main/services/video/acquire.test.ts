@@ -77,6 +77,7 @@ test("no asset for this platform/arch: refused by name, no filesystem touched", 
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.reason, `Video relay is not available for ${process.platform} ${process.arch}.`);
+  assert.equal(result.assetName, null, "no pinned asset exists for this platform — nothing to place by hand, ever");
   await assert.rejects(fs.access(path.join(relayDir(), "downloads")), "no filesystem touched");
 });
 
@@ -102,6 +103,7 @@ test("a downloaded archive whose hash does not match is refused, deleted, and ne
   assert.match(result.reason, /checksum mismatch for mediamtx-mismatch\.tar\.gz/);
   assert.match(result.reason, new RegExp(wrongSha));
   assert.equal(result.placeArchiveAt, path.join(downloadsDir, "mediamtx-mismatch.tar.gz"));
+  assert.equal(result.assetName, "mediamtx-mismatch.tar.gz", "a real asset exists — the archive can be placed by hand");
   assert.equal(extractCalls, 0, "extract must never run once the checksum fails");
 
   // Neither the final name nor the .part survive a failed verification.
@@ -115,7 +117,8 @@ test("a hand-placed archive that matches is verified and extracted without calli
   const { archivePath, sha256 } = await buildArchive(downloadsDir, "mediamtx-handplaced-ok.tar.gz");
   const assets = new Map([[KEY, asset("mediamtx-handplaced-ok.tar.gz", sha256)]]);
 
-  const result = await ensureBinary({ assets, fetchImpl: throwIfCalled() });
+  let downloadStarts = 0;
+  const result = await ensureBinary({ assets, fetchImpl: throwIfCalled(), onDownloadStart: () => downloadStarts++ });
 
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -127,6 +130,7 @@ test("a hand-placed archive that matches is verified and extracted without calli
   }
   // The archive itself is untouched — it was already in place.
   await fs.access(archivePath);
+  assert.equal(downloadStarts, 0, "a verified hand-placed archive is not a download");
 });
 
 test("a hand-placed archive that does not match is refused, named in the reason, and left in place", async () => {
@@ -143,6 +147,7 @@ test("a hand-placed archive that does not match is refused, named in the reason,
   assert.ok(result.reason.includes(archivePath), "the operator's file path must be named in the reason");
   assert.match(result.reason, /does not match the pinned checksum/);
   assert.equal(result.placeArchiveAt, archivePath);
+  assert.equal(result.assetName, "mediamtx-handplaced-bad.tar.gz");
   // The operator's file is never deleted, matched or not.
   await fs.access(archivePath);
 });
@@ -219,6 +224,7 @@ test("a fresh download that matches the pin is verified, extracted, and made exe
   const assets = new Map([[KEY, asset("mediamtx-happy.tar.gz", sha256)]]);
 
   const progress: Array<[number, number]> = [];
+  let downloadStarts = 0;
   const result = await ensureBinary({
     assets,
     fetchImpl: (async (url: string) => {
@@ -226,6 +232,7 @@ test("a fresh download that matches the pin is verified, extracted, and made exe
       return new Response(bytes);
     }) as unknown as typeof fetch,
     onProgress: (received, total) => progress.push([received, total]),
+    onDownloadStart: () => downloadStarts++,
   });
 
   assert.equal(result.ok, true);
@@ -241,6 +248,7 @@ test("a fresh download that matches the pin is verified, extracted, and made exe
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-happy.tar.gz.part")));
   assert.ok(progress.length > 0, "onProgress must fire at least once");
   assert.equal(progress[progress.length - 1][0], bytes.byteLength);
+  assert.equal(downloadStarts, 1, "onDownloadStart must fire exactly once for a real download");
 });
 
 test("a download over 64 MB is refused by actual bytes received, not a spoofed Content-Length", async () => {

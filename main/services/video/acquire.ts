@@ -50,6 +50,18 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+/** Whether the pinned binary is already extracted on this machine — used for
+ *  the "off" status line's own copy (main/types/video.ts's `binaryPresent`):
+ *  "never downloaded yet" (show the download-size sentence) needs telling
+ *  apart from "downloaded once, just switched off since" (say nothing),
+ *  which `relay.state === "off"` alone cannot do. `false` for a platform/arch
+ *  with no pinned asset at all — there is nothing to have extracted. */
+export async function relayBinaryPresent(): Promise<boolean> {
+  const asset = ASSETS.get(`${process.platform}-${process.arch}`);
+  if (!asset) return false;
+  return exists(path.join(relayDir(), MEDIAMTX_VERSION, asset.exe));
+}
+
 async function sha256OfFile(filePath: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk as Buffer);
@@ -111,6 +123,14 @@ async function downloadToPart(
 export interface EnsureBinaryOptions {
   fetchImpl?: typeof fetch;
   onProgress?: (received: number, total: number) => void;
+  /** Fired the moment a real network download is about to start (after the
+   *  already-extracted, and hand-placed-archive, checks both come up empty)
+   *  — never on a retry that reused a cached binary or a verified hand-placed
+   *  archive. The caller (relay-lifecycle.ts) decides whether THIS call is
+   *  worth a log line; this module has no notion of "retry" to gate it on
+   *  itself, and used to log unconditionally, once per attempt rather than
+   *  once per download streak. */
+  onDownloadStart?: () => void;
   /** Test seam: a fake pin table so a test can inject its own SHA-256 and
    *  asset name without touching the real pin. Defaults to ASSETS. */
   assets?: typeof ASSETS;
@@ -120,7 +140,17 @@ export interface EnsureBinaryOptions {
   extract?: ExtractFn;
 }
 
-type EnsureBinaryResult = { ok: true; path: string } | { ok: false; reason: string; placeArchiveAt: string };
+/**
+ * `assetName` says which failure this is, rather than a caller guessing from
+ * whether `placeArchiveAt` looks like a bare directory or a full file path:
+ * `null` for "no pinned asset exists for this platform/arch at all" (nothing
+ * to place by hand, ever); the real asset's file name for every other
+ * failure, all of which DO have a specific archive the operator could place
+ * at `placeArchiveAt`.
+ */
+type EnsureBinaryResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: string; placeArchiveAt: string; assetName: string | null };
 
 async function extractAndFinish(
   archivePath: string,
@@ -136,6 +166,7 @@ async function extractAndFinish(
       ok: false,
       reason: `extracting ${asset.name} failed: ${errorMessage(err)}`,
       placeArchiveAt: archivePath,
+      assetName: asset.name,
     };
   }
   if (process.platform !== "win32") {
@@ -146,6 +177,7 @@ async function extractAndFinish(
         ok: false,
         reason: `could not make ${exePath} executable: ${errorMessage(err)}`,
         placeArchiveAt: archivePath,
+        assetName: asset.name,
       };
     }
   }
@@ -176,6 +208,7 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
       ok: false,
       reason: `Video relay is not available for ${process.platform} ${process.arch}.`,
       placeArchiveAt: downloadsDir,
+      assetName: null,
     };
   }
 
@@ -195,13 +228,14 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
         ok: false,
         reason: `hand-placed archive at ${archivePath} does not match the pinned checksum (expected ${asset.sha256}, got ${got})`,
         placeArchiveAt: archivePath,
+        assetName: asset.name,
       };
     }
     return extractAndFinish(archivePath, versionDir, asset, exePath, extract);
   }
 
   await fsp.mkdir(downloadsDir, { recursive: true });
-  console.log(`[video] downloading MediaMTX ${MEDIAMTX_VERSION} (${asset.name})`);
+  opts.onDownloadStart?.();
   const downloaded = await downloadToPart(
     downloadUrlFor(asset),
     partPath,
@@ -211,7 +245,7 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
   );
   if (!downloaded.ok) {
     await fsp.unlink(partPath).catch(() => {});
-    return { ok: false, reason: downloaded.reason, placeArchiveAt: archivePath };
+    return { ok: false, reason: downloaded.reason, placeArchiveAt: archivePath, assetName: asset.name };
   }
   if (downloaded.sha256 !== asset.sha256) {
     await fsp.unlink(partPath).catch(() => {});
@@ -222,6 +256,7 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
       ok: false,
       reason: `checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${downloaded.sha256}`,
       placeArchiveAt: archivePath,
+      assetName: asset.name,
     };
   }
   await fsp.rename(partPath, archivePath);
