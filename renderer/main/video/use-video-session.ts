@@ -252,7 +252,7 @@ export function startPlaybackAttempt(
   const onDroppedAfterFrame = (reason: string) => end(() => cb.onDropped(reason));
 
   if (choice.method === "webrtc") {
-    cb.onPhase("connecting");
+    if (!adopt) cb.onPhase("connecting");
     // Covers the WHOLE handshake (offer, POST, answer) — a POST that never
     // gets a reply must not hang "Connecting..." forever. Firing here is a
     // NETWORK failure, not a verdict on whether this browser can carry
@@ -687,24 +687,26 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     const choice = attemptChoice;
     const current = feedRef.current;
 
-    // Legitimately part of the same side effect as the lines below, not a
-    // "this could have been a derived render value" case the rule exists to
-    // catch: a NEW attempt is genuinely starting (WHEP/HLS, real timers,
-    // real listeners), and its visible state must reset to match.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAttemptPhase("connecting");
-    setLatency(null);
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let heldTimer: ReturnType<typeof setTimeout> | undefined;
-    const name = current?.name ?? "this feed";
-    const key = current?.id ?? "";
-
     // A probe's proven session, taken by the WebRTC attempt it was probed
     // for and closed by anything else.
     const adopted = adoptedRef.current;
     adoptedRef.current = null;
     const adopt = adopted && choice.method === "webrtc" && adopted.url === choice.url ? adopted : undefined;
     if (adopted && !adopt) void adopted.session.stop();
+
+    // Legitimately part of the same side effect as the lines below, not a
+    // "this could have been a derived render value" case the rule exists to
+    // catch: a NEW attempt is genuinely starting (WHEP/HLS, real timers,
+    // real listeners), and its visible state must reset to match — except
+    // for an adopted session, whose frames are already flowing: a Connecting
+    // cover there would flash over the picture it is about to show.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLatency(null);
+    if (!adopt) setAttemptPhase("connecting");
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let heldTimer: ReturnType<typeof setTimeout> | undefined;
+    const name = current?.name ?? "this feed";
+    const key = current?.id ?? "";
 
     const attemptHandle = startPlaybackAttempt(
       video,

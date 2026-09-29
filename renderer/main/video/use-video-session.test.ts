@@ -1213,6 +1213,11 @@ test("a probe whose frames arrive is adopted: the picture moves to that session 
     });
     assert.equal(video.srcObject, probeStream, "expected the picture moved onto the probe's own stream");
     assert.equal(video.src, "", "expected HLS stopped once WebRTC carries the picture");
+    assert.notEqual(
+      result.current.phase,
+      "connecting",
+      "an adopted session is already carrying frames: no Connecting cover while the element picks it up",
+    );
     assert.equal(whepPosts(), 2, "the probe's session is the one kept — no second connection");
     assert.equal(g.calls.filter((c) => c.method === "DELETE").length, 0, "the adopted session must not be torn down");
     assert.equal(probe.closed, false);
