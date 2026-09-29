@@ -6,6 +6,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  classifyWindow,
   CLEAR_AFTER_MS,
   DROPPED_FRACTION,
   MAX_COUNT_PER_REPORT,
@@ -30,6 +31,15 @@ test("the constants this window is built from", () => {
   assert.equal(DROPPED_FRACTION, 0.05);
   assert.equal(STALLS_IN_WINDOW, 3);
   assert.equal(CLEAR_AFTER_MS, 60_000);
+});
+
+test("classifyWindow: which of the two thresholds a window's totals cross", () => {
+  assert.deepEqual(classifyWindow({ decoded: 1000, dropped: 50, stalls: 2 }), { droppedBad: false, stallsBad: false }, "exactly 5% and 2 stalls cross neither");
+  assert.deepEqual(classifyWindow({ decoded: 1000, dropped: 51, stalls: 2 }), { droppedBad: true, stallsBad: false });
+  assert.deepEqual(classifyWindow({ decoded: 1000, dropped: 0, stalls: 3 }), { droppedBad: false, stallsBad: true });
+  assert.deepEqual(classifyWindow({ decoded: 1000, dropped: 51, stalls: 3 }), { droppedBad: true, stallsBad: true });
+  assert.deepEqual(classifyWindow({ decoded: 0, dropped: 1, stalls: 0 }), { droppedBad: true, stallsBad: false }, "any drop with nothing decoded is over the line");
+  assert.deepEqual(classifyWindow({ decoded: 0, dropped: 0, stalls: 0 }), { droppedBad: false, stallsBad: false });
 });
 
 test("dropped fraction: exactly 5% is not struggling, just over 5% is", () => {

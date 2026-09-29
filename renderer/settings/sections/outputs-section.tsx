@@ -29,7 +29,7 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
-import { DROPPED_FRACTION, STALLS_IN_WINDOW } from "@main/services/video/playback-health";
+import { classifyWindow } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -61,15 +61,10 @@ interface ScreenStruggle {
 }
 
 /**
- * The mockup's Home/Screens `.struggle` box, in the app's own warn callout
- * classes — the exact ones the feed editor's own delay warning uses
- * (feed-editor.tsx), so the two surfaces read as one design rather than two
- * shades of amber.
- *
- * Which sentences show turns on which threshold the EPISODE itself crossed
- * — the same two playback-health.ts struggles a pair on, recomputed here
- * from its frozen numbers rather than trusted as a given, since an episode
- * this box is handed can be a mixed one (both crossed):
+ * The warning box's sentences after its bold lead, chosen by which threshold
+ * the EPISODE itself crossed — classifyWindow(), the same rule
+ * playback-health.ts struggles a pair on, applied to the episode's frozen
+ * numbers, since an episode can be a mixed one (both crossed):
  *
  * - Dropped fraction crossed: the dropped-frames sentence, plus the
  *   resolution sentence once the feed is taller than 720p (a Pi 4's own
@@ -81,30 +76,33 @@ interface ScreenStruggle {
  * - Both crossed: the dropped/resolution sentences as above, with a
  *   trailing stall sentence appended.
  */
-function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
-  const droppedBad =
-    struggle.decodedInWindow === 0
-      ? struggle.droppedInWindow > 0
-      : struggle.droppedInWindow / struggle.decodedInWindow > DROPPED_FRACTION;
-  const stallsBad = struggle.stallsInWindow >= STALLS_IN_WINDOW;
-
-  const sentences: string[] = [];
+export function struggleSentences(struggle: Omit<ScreenStruggle, "feedId" | "feedName">): string[] {
+  const { droppedBad, stallsBad } = classifyWindow({
+    decoded: struggle.decodedInWindow,
+    dropped: struggle.droppedInWindow,
+    stalls: struggle.stallsInWindow,
+  });
   if (!droppedBad && stallsBad) {
-    sentences.push(`This screen stalled ${struggle.stallsInWindow} times in the last minute; check its network.`);
-  } else {
-    sentences.push(`This screen dropped ${struggle.droppedInWindow} frames in the last minute.`);
-    if (struggle.height > 720) {
-      sentences.push(
-        `The feed is ${struggle.width} × ${struggle.height}; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.`,
-      );
-    }
-    if (stallsBad) {
-      sentences.push(`It stalled ${struggle.stallsInWindow} times; check this screen's network.`);
-    }
+    return [`This screen stalled ${struggle.stallsInWindow} times in the last minute; check its network.`];
   }
+  const sentences = [`This screen dropped ${struggle.droppedInWindow} frames in the last minute.`];
+  if (struggle.height > 720) {
+    sentences.push(`The feed is ${struggle.width} × ${struggle.height}; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.`);
+  }
+  if (stallsBad) sentences.push(`It stalled ${struggle.stallsInWindow} times; check this screen's network.`);
+  return sentences;
+}
+
+/**
+ * The mockup's Home/Screens `.struggle` box, in the app's own warn callout
+ * classes — the exact ones the feed editor's own delay warning uses
+ * (feed-editor.tsx), so the two surfaces read as one design rather than two
+ * shades of amber. Its sentences are struggleSentences()'s.
+ */
+function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
   return (
     <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
-      <span className="font-semibold">Struggling with {struggle.feedName}.</span> {sentences.join(" ")}
+      <span className="font-semibold">Struggling with {struggle.feedName}.</span> {struggleSentences(struggle).join(" ")}
     </p>
   );
 }

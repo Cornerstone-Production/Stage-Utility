@@ -19,8 +19,8 @@ import type { ScreenVideoHealth, VideoPlaybackReport } from "../../types/video.j
  *  it is read as gone rather than merely quiet. */
 export const WINDOW_MS = 60_000;
 /** `dropped / decoded` strictly ABOVE this is struggling — 51 dropped of
- *  1000 decoded (5.1%) is; 50 (exactly 5%) is not. See isBadWindow()'s own
- *  comment for why this is `>`, not `>=`. */
+ *  1000 decoded (5.1%) is; 50 (exactly 5%) is not. See classifyWindow()'s
+ *  own comment for why this is `>`, not `>=`. */
 export const DROPPED_FRACTION = 0.05;
 /** This many stalls or more within the window is struggling on its own,
  *  whatever the dropped fraction says. */
@@ -117,7 +117,7 @@ interface Pair {
   episode: { dropped: number; decoded: number; stalls: number; width: number; height: number } | null;
 }
 
-interface Totals {
+export interface Totals {
   decoded: number;
   dropped: number;
   stalls: number;
@@ -127,13 +127,13 @@ interface Totals {
  * A single comparable measure of how bad ONE window's totals are, used only
  * to decide whether a later window inside the same episode becomes the new
  * peak (see Pair.episode's own comment) — never to decide struggling itself,
- * which stays isBadWindow()'s own `>`/`>=` rules.
+ * which stays classifyWindow()'s own `>`/`>=` rules.
  *
  * Both axes are normalized against their OWN threshold (1.0 is exactly the
- * line isBadWindow() itself would still call struggling on that axis alone),
- * so a window that is mildly over on both counts can still lose to one that
- * is badly over on just one, and a stall-only episode's peak is judged
- * purely on stalls without a zero dropped-fraction pulling it down.
+ * line classifyWindow() draws on that axis), so a window that is mildly over
+ * on both counts can still lose to one that is badly over on just one, and a
+ * stall-only episode's peak is judged purely on stalls without a zero
+ * dropped-fraction pulling it down.
  */
 function severity(totals: Totals): number {
   const droppedRatio =
@@ -157,17 +157,28 @@ function sumSamples(samples: readonly Sample[]): Totals {
 }
 
 /**
- * Whether this window's own totals are bad enough to (re)arm the sticky
- * flag — never read directly as `struggling` itself; see `Pair.lastBadAt`.
+ * Which of the two thresholds one window's totals cross: more than
+ * DROPPED_FRACTION of decoded frames dropped, and STALLS_IN_WINDOW stalls or
+ * more. The one statement of the struggle rule — isBadWindow() below arms the
+ * sticky flag on either, and the Screens card (outputs-section.tsx) picks its
+ * sentences by which, so the two cannot disagree on where the lines are.
  *
  * `>`, not `>=`: 50 dropped of 1000 decoded is exactly 5% and must read as
  * NOT struggling; 51 is 5.1% and must. Flip this to `>=` and the "50
  * dropped: not struggling" case goes red — that is the guard's own proof.
  */
+export function classifyWindow(totals: Totals): { droppedBad: boolean; stallsBad: boolean } {
+  return {
+    droppedBad: totals.decoded === 0 ? totals.dropped > 0 : totals.dropped / totals.decoded > DROPPED_FRACTION,
+    stallsBad: totals.stalls >= STALLS_IN_WINDOW,
+  };
+}
+
+/** Whether this window's own totals are bad enough to (re)arm the sticky
+ *  flag — never read directly as `struggling` itself; see `Pair.lastBadAt`. */
 function isBadWindow(totals: Totals): boolean {
-  if (totals.stalls >= STALLS_IN_WINDOW) return true;
-  if (totals.decoded === 0) return totals.dropped > 0;
-  return totals.dropped / totals.decoded > DROPPED_FRACTION;
+  const { droppedBad, stallsBad } = classifyWindow(totals);
+  return droppedBad || stallsBad;
 }
 
 /** Whether the sticky flag reads true AT `at`, given the pair's own

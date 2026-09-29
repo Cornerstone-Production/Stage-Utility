@@ -26,7 +26,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, waitFor, within } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
-const { OutputRow, OutputsSection } = await import("./outputs-section.js");
+const { OutputRow, OutputsSection, struggleSentences } = await import("./outputs-section.js");
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 
@@ -121,6 +121,25 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"]) {
     ),
   );
 }
+
+test("struggleSentences: dropped frames, stalls alone, both, and the 720p line", () => {
+  const drops = { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 };
+  assert.deepEqual(struggleSentences(drops), [
+    "This screen dropped 240 frames in the last minute.",
+    "The feed is 1920 × 1080; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.",
+  ]);
+  assert.deepEqual(struggleSentences({ ...drops, width: 1280, height: 720 }), ["This screen dropped 240 frames in the last minute."], "720p and below: no resolution line");
+  assert.deepEqual(struggleSentences({ ...drops, droppedInWindow: 0, stallsInWindow: 5 }), ["This screen stalled 5 times in the last minute; check its network."], "stalls alone lead, with no decode advice even above 720p");
+  assert.deepEqual(struggleSentences({ ...drops, stallsInWindow: 3, width: 1280, height: 720 }), [
+    "This screen dropped 240 frames in the last minute.",
+    "It stalled 3 times; check this screen's network.",
+  ]);
+  assert.deepEqual(
+    struggleSentences({ ...drops, droppedInWindow: 50, stallsInWindow: 3 }),
+    ["This screen stalled 3 times in the last minute; check its network."],
+    "exactly 5% dropped is under the line the server struggles a pair on, so stalls alone lead",
+  );
+});
 
 test("a screen with nothing struggling shows no warning box at all", () => {
   renderRow([]);
