@@ -368,9 +368,9 @@ class VideoService {
         // (node's own spawn() never created a process at all) — a
         // PRE-process kind, same as every failPreSupervisor() kind, so its
         // feeds read "standby": nothing could have received a source. Every
-        // other supervisor "failing"
-        // status is the crash-loop it always was — a child process ran and
-        // exited. See RelayFailureKind's own comment.
+        // other supervisor "failing" status is the crash-loop it always was
+        // — a child process ran and exited. See RelayFailureKind's own
+        // comment.
         return {
           state: "failing",
           reason: status.reason,
