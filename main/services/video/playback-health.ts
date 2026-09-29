@@ -336,6 +336,9 @@ export class PlaybackHealth {
     for (const byFeed of this.pairs.values()) {
       for (const pair of byFeed.values()) {
         const ageOutAt = pair.reportedAt + WINDOW_MS;
+        // No "still in the future" check here, unlike clearAt below: a past
+        // ageOutAt is a pair still waiting to be swept, so firing at once is
+        // right, and the sweep removes it, so it cannot fire again.
         if (earliest === null || ageOutAt < earliest) earliest = ageOutAt;
         if (pair.lastBadAt !== null) {
           const clearAt = pair.lastBadAt + CLEAR_AFTER_MS;
