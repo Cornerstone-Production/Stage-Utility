@@ -162,6 +162,12 @@ export class RelayLifecycle {
   private attempt = 0;
   private retryTimer: NodeJS.Timeout | null = null;
   private readinessTimer: NodeJS.Timeout | null = null;
+  /** Bumped by stopReadinessPoll(): a readiness tick that was waiting on its
+   *  reconcile when the poll stopped finds it moved on, and neither re-arms
+   *  nor keeps the next poll from starting. */
+  private readinessRun = 0;
+  /** Whether a poll of the current run is armed or has a tick in flight. */
+  private readinessPolling = false;
   /** Set once the started-relay log line has fired for the CURRENT
    *  startRelay() call — see startReadinessPoll()'s own comment. Reset only
    *  by startRelay() itself, never by a mere crash-and-respawn: the
@@ -346,6 +352,8 @@ export class RelayLifecycle {
   }
 
   private stopReadinessPoll(): void {
+    this.readinessRun++;
+    this.readinessPolling = false;
     if (this.readinessTimer) clearTimeout(this.readinessTimer);
     this.readinessTimer = null;
   }
@@ -546,8 +554,16 @@ export class RelayLifecycle {
    *  listener (registered in attachRelay(), and — for every transition
    *  after the very first — always in time to see it). */
   private onSupervisorStatus(status: SupervisorStatus): void {
-    if (status.state === "running") this.startReadinessPoll();
-    else this.stopReadinessPoll();
+    // Only once attached: the first "running" arrives from inside
+    // supervisor.start(), before attachRelay(), when a reconcile has no relay
+    // to reach and answers true for nothing — startRelay() starts that
+    // first poll itself, after the attach. Every later "running" is a
+    // respawn whose empty relay needs its paths again.
+    if (status.state === "running") {
+      if (this.supervisor) this.startReadinessPoll();
+    } else {
+      this.stopReadinessPoll();
+    }
   }
 
   /**
@@ -570,10 +586,13 @@ export class RelayLifecycle {
    * succeed.
    */
   private startReadinessPoll(): void {
-    if (this.readinessTimer) return;
+    if (this.readinessPolling) return;
+    this.readinessPolling = true;
+    const run = this.readinessRun;
     let attempt = 0;
     const tick = async () => {
       this.readinessTimer = null;
+      if (run !== this.readinessRun) return;
       if (!this.loggedStartedThisRun) {
         const version = this.supervisor?.version();
         const ports = this.currentPorts;
@@ -586,7 +605,11 @@ export class RelayLifecycle {
         }
       }
       const applied = await videoService.reconcileRelay();
-      if (applied) return; // the API has answered — nothing left to retry
+      if (run !== this.readinessRun) return; // stopped while this tick waited
+      if (applied) {
+        this.readinessPolling = false; // the API has answered — nothing left to retry
+        return;
+      }
       attempt++;
       this.readinessTimer = setTimeout(() => void tick(), restartDelayMs(attempt));
       this.readinessTimer.unref?.();

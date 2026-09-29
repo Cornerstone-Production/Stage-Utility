@@ -898,6 +898,64 @@ test("the readiness poll backs off with restartDelayMs between retries while the
   await waitUntil(() => reconcileCalls === 3);
 });
 
+// Stop landing while a readiness tick is still waiting on its reconcile: the
+// tick must not re-arm once it comes back, and the NEXT start must run its
+// own poll rather than find the stale timer and assume one is going.
+test("a stop during an in-flight readiness tick cancels it, and the next start runs its own poll", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const calls: string[] = [];
+  let releaseFirst!: () => void;
+  const { deps, supervisors } = makeDeps({
+    makeRelay: () => {
+      const relayNo = supervisors.length;
+      return fakeRelay(async () => {
+        calls.push(`reconcile relay ${relayNo}`);
+        if (relayNo === 1 && calls.length === 1) {
+          await new Promise<void>((resolve) => (releaseFirst = resolve));
+          throw new Error("relay unreachable");
+        }
+      });
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => calls.length === 1); // the first tick, now in flight
+
+  lifecycle.setEnabled(false);
+  await waitUntil(() => videoService.current().relay.state === "off");
+  releaseFirst(); // the in-flight reconcile comes back failed, after the stop
+  await settle();
+  await settle();
+
+  // Switched straight back on, with no time passing: the new relay's own
+  // poll must make its first attempt at once. A stale timer re-armed by the
+  // stopped tick made startReadinessPoll() believe a poll was already
+  // going, so the new relay waited out the old one's backoff instead.
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length === 2);
+  await waitUntil(() => calls.includes("reconcile relay 2"));
+
+  // And the stopped tick never comes back: nothing re-armed it, so once the
+  // new relay has answered, no stale timer reconciles it again later.
+  t.mock.timers.tick(60_000);
+  await settle();
+  await settle();
+  assert.deepEqual(calls, ["reconcile relay 1", "reconcile relay 2"], "the stopped relay's readiness tick re-armed and ran again");
+});
+
+test("a respawned relay is reconciled again: its paths went with the process that exited", async () => {
+  let reconciles = 0;
+  const { deps, supervisors } = makeDeps({ makeRelay: () => fakeRelay(async () => void reconciles++) });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => reconciles === 1);
+  supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000, neverStarted: false });
+  supervisors[0]!.setStatus({ state: "running", since: Date.now() });
+  await waitUntil(() => reconciles === 2);
+});
+
 test("a normal start logs no reconcile failure: the first attempt lands before the relay's API is open", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const lines: string[] = [];
