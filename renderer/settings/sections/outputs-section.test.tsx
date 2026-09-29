@@ -226,6 +226,29 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
   assert.equal(screen.queryByText(/Struggling with Stage PTZ/) === null, true, "a feed reporting clean on the same screen must get no box");
 });
 
+test("OutputsSection builds the box from the pair's episode, not its live window, when the two differ", async () => {
+  // The live window has diluted to 60 of 1000 at 720p with no stalls; the
+  // episode, the worst minute of this struggle, was 240 dropped at 1080p with
+  // 4 stalls. Every number in the box must be the episode's.
+  stubVideoState(
+    videoState([
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 60, decodedInWindow: 1000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 } },
+    ]),
+  );
+  render(
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS })),
+  );
+
+  await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
+  const box = screen.getByText(/Struggling with Program \(IMAG\)\./).parentElement!;
+  assert.equal(
+    box.textContent,
+    "Struggling with Program (IMAG). This screen dropped 240 frames in the last minute. " +
+      "The feed is 1920 × 1080; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p. " +
+      "It stalled 4 times; check this screen's network.",
+  );
+});
+
 test("OutputsSection routes each screen's own struggles to its own card — a second, healthy screen shows no box for the first screen's struggle", async () => {
   const OTHER: Output = { id: "display-2", name: "Right Mic Display", viewId: null };
   stubVideoState(
