@@ -98,7 +98,7 @@ export function feedMeta(feed: VideoFeedView, screens: readonly ScreenVideoHealt
   if (s.kind === "embed") {
     meta.push(s.player === "resi" ? "Plays in Resi's own player" : "Plays in YouTube's own player · 5 to 15 s behind");
   } else if (feed.play.via === "external") {
-    meta.push(`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see its health");
+    meta.push(`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see whether its source is live");
   } else if (feed.play.via === "relay") {
     const status = feed.status;
     if (status.state === "live" || status.state === "delayed") {

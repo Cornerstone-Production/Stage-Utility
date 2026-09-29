@@ -768,7 +768,7 @@ test("each row says how its feed plays", async () => {
     assert.equal(!!screen.queryByText("Plays in YouTube's own player · 5 to 15 s behind"), true);
     assert.equal(!!screen.queryByText("Plays in Resi's own player"), true);
     assert.equal(!!screen.queryByText("WebRTC, played as given"), true);
-    assert.equal(!!screen.queryByText("Stage Utility cannot see its health"), true);
+    assert.equal(!!screen.queryByText("Stage Utility cannot see whether its source is live"), true);
     assert.equal(!!screen.queryByText("Other address · https://relay.example.org/feed.whep"), true, "the source line is shown as the server built it");
   } finally {
     g.restore();

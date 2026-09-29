@@ -246,7 +246,7 @@ A pull or push feed's status pill reflects what the relay currently knows:
 An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
 platform it plays through; Stage Utility cannot see whether that platform's
 own stream is actually live. An external feed shows no pill at all — Stage
-Utility cannot see its health either way.
+Utility cannot see whether its source is live.
 
 ## The Video feeds page
 

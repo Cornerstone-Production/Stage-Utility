@@ -535,10 +535,11 @@ nothing at all.
 
 A YouTube or Resi feed plays in the platform's own player. A feed pointed at
 another WebRTC or HLS address plays over HLS when the address ends in `.m3u8`,
-or over WebRTC otherwise. Stage Utility cannot see either kind's health, so a
-failed attempt retries the same method rather than switching to the other,
-after a delay that starts at 1 second and doubles to 30; playback that holds
-for 10 seconds starts the delay over. It never gives up on such a feed.
+or over WebRTC otherwise. Stage Utility cannot see whether either kind's
+source is live, so a failed attempt retries the same method rather than
+switching to the other, after a delay that starts at 1 second and doubles to
+30; playback that holds for 10 seconds starts the delay over. It never gives
+up on such a feed.
 
 | State | Shown as |
 |---|---|
