@@ -45,6 +45,9 @@ let failPathsList = false;
  *  fixed "relay is not ready" — for R14b's credential-stripping test, which
  *  needs to control exactly what the relay's own error text says. */
 let failPathsListWith: string | null = null;
+/** When set, `GET /v3/config/paths/list` answers 500 with this raw text,
+ *  which is not JSON. */
+let rawPathsListBody: string | null = null;
 
 function bootState(): void {
   configPaths = new Map();
@@ -52,6 +55,7 @@ function bootState(): void {
   runtimePaths = [];
   failPathsList = false;
   failPathsListWith = null;
+  rawPathsListBody = null;
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
@@ -89,6 +93,11 @@ afterEach(() => {
 
 function handle(method: string, url: string, body: unknown, res: http.ServerResponse): void {
   if (method === "GET" && url === "/v3/config/paths/list") {
+    if (rawPathsListBody !== null) {
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end(rawPathsListBody);
+      return;
+    }
     if (failPathsList) return send(res, 500, { error: failPathsListWith ?? "relay is not ready" });
     const items = [...configPaths.entries()].map(([name, conf]) => ({ name, ...conf }));
     return send(res, 200, { items });
@@ -304,6 +313,33 @@ describe("MediaMtxRelay.reconcile", () => {
         assert.equal(err.message, "'rtsp://192.0.2.1/s' is not a valid URL");
         assert.equal(err.message.includes("admin"), false, "the username must not survive either");
         assert.equal(err.message.includes("s3c"), false, "no fragment of the password may survive");
+        return true;
+      },
+    );
+  });
+
+  it("an answer that is not JSON never carries its body into the Error message", async () => {
+    rawPathsListBody = "srt://192.0.2.5:9000?passphrase=SECRETPASS123 refused";
+    const relay = new MediaMtxRelay(port);
+    await assert.rejects(
+      () => relay.reconcile([PULL]),
+      (err: Error) => {
+        assert.equal(err.message.includes("SECRETPASS123"), false, `the body reached the Error message: ${err.message}`);
+        assert.equal(err.message, "MediaMTX answered 500, not JSON");
+        return true;
+      },
+    );
+  });
+
+  it("strips an SRT pull's passphrase out of the relay's own error text", async () => {
+    failPathsList = true;
+    failPathsListWith = "'srt://ho%zzst:9000?passphrase=SECRETPASS123' is not a valid URL";
+    const relay = new MediaMtxRelay(port);
+    await assert.rejects(
+      () => relay.reconcile([PULL]),
+      (err: Error) => {
+        assert.equal(err.message.includes("SECRETPASS123"), false, "the passphrase must not reach an Error message");
+        assert.equal(err.message, "'srt://ho%zzst:9000?passphrase=<redacted>' is not a valid URL");
         return true;
       },
     );

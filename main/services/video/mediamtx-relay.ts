@@ -98,7 +98,14 @@ export class MediaMtxRelay implements VideoRelay {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const text = await res.text();
-    const data: unknown = text.length > 0 ? JSON.parse(text) : undefined;
+    let data: unknown;
+    try {
+      data = text.length > 0 ? JSON.parse(text) : undefined;
+    } catch {
+      // JSON.parse's own message quotes the start of the body, which is
+      // relay text this module has not vetted — never the Error's message.
+      throw new Error(`MediaMTX answered ${res.status}, not JSON`);
+    }
     if (!res.ok) {
       const message =
         data !== null && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"

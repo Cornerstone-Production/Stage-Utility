@@ -247,6 +247,11 @@ from the server:
 - A push feed's password rotating, and whether it dropped the device that
   was connected.
 
+The relay's own error text can echo a feed's address back, so before any of
+it reaches `/log`, the status line or an API error, a username and password
+in the address, an SRT `passphrase`, a `pass` or `pwd` query value, and the
+password in an SRT `streamid` are all stripped.
+
 Each screen writes its own `[video]` lines from the browser:
 
 - A feed failing on a screen, once per failing streak: its first failure and

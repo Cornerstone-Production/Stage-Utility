@@ -71,6 +71,13 @@ describe("RelayLogWatcher", () => {
     strictEqual(watcher.lastError()?.includes("s3c"), false, "no fragment of the password may survive");
   });
 
+  it("strips an SRT pull's passphrase out of an ERR line before it becomes lastError()", () => {
+    const watcher = new RelayLogWatcher();
+    watcher.line("2026/09/28 21:40:02 ERR [API] 'srt://ho%zzst:9000?passphrase=SECRETPASS123' is not a valid URL");
+    strictEqual(watcher.lastError()?.includes("SECRETPASS123"), false, "the passphrase must not survive into an exit reason");
+    strictEqual(watcher.lastError(), "[API] 'srt://ho%zzst:9000?passphrase=<redacted>' is not a valid URL");
+  });
+
   it("maintains session map with 256-entry limit", () => {
     const watcher = new RelayLogWatcher();
 
