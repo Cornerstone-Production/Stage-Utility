@@ -375,6 +375,10 @@ class VideoService {
    *  sparse calls never show, so a run never closed and the next outage's
    *  first line was swallowed as a repeat. Here a success ends the run. */
   private readonly sparseOutage = new OutageLog(0);
+  /** A screen's playback report failing to record, keyed by outputId: once
+   *  per outage per screen, and once when it records again. The default
+   *  settle window suits a heartbeat every 10 s. */
+  private readonly playbackRecordOutage = new OutageLog();
   /** Whether this relay process's API has answered anything yet — a poll or
    *  a reconcile. Reset with polledSinceRunning, on every status change. */
   private relayAnswered = false;
@@ -1684,15 +1688,25 @@ class VideoService {
    *    screen's reports.
    *
    * Fire-and-forget on purpose, like every other caller of `void
-   * this.publish()` in this file: the presence route does not await it.
-   * Failures are logged, not thrown into the void — see recordPlaybackReportsAsync's
-   * own catch.
+   * this.publish()` in this file: the presence route does not await it, and
+   * a report that cannot be recorded must not fail the heartbeat that
+   * carried it. A failure is logged once per outage per screen, naming the
+   * screen, and its recovery once — never a line per heartbeat.
    */
   recordPlaybackReports(outputId: string, reports: VideoPlaybackReport[], now = Date.now()): void {
-    if (!stageController.getOutputs().some((o) => o.id === outputId)) return;
-    void this.recordPlaybackReportsAsync(outputId, reports, now).catch((err) => {
-      console.warn(`[video] could not record ${scrub(outputId)}'s playback report: ${scrub(errorMessage(err))}`);
-    });
+    const output = stageController.getOutputs().find((o) => o.id === outputId);
+    if (!output) return;
+    void this.recordPlaybackReportsAsync(outputId, reports, now).then(
+      () => {
+        const d = this.playbackRecordOutage.ok(outputId, now);
+        if (d.log) console.log(`[video] recording ${scrub(output.name)}'s playback reports is working again${scrub(d.note)}`);
+      },
+      (err: unknown) => {
+        const message = errorMessage(err);
+        const d = this.playbackRecordOutage.fail(outputId, message, now);
+        if (d.log) console.warn(`[video] could not record ${scrub(output.name)}'s playback report: ${scrub(message)}${scrub(d.note)}`);
+      },
+    );
   }
 
   /**

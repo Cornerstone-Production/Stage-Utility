@@ -123,6 +123,42 @@ test("recordPlaybackReports publishes only when playbackHealth.record() reports 
   }
 });
 
+test("a report that cannot be recorded logs once per outage naming the screen, and once when it records again", async (t: TestContext) => {
+  const id = await addRelayFeed("Unrecordable feed");
+  const warnings = captureConsole(t, "warn");
+  const lines = captureConsole(t, "log");
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  const health = (videoService as unknown as { playbackHealth: { record: (...args: unknown[]) => boolean } }).playbackHealth;
+  const realRecord = health.record;
+  health.record = () => {
+    throw new Error("disk on fire");
+  };
+  try {
+    for (let i = 0; i < 3; i++) {
+      assert.doesNotThrow(() => videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id })]), "a failed record must not fail the heartbeat");
+      await settle();
+      t.mock.timers.tick(10_000);
+    }
+    assert.deepEqual(warnings.filter((l) => l.includes("playback report")), [
+      `[video] could not record ${OUTPUT_NAME}'s playback report: disk on fire`,
+    ]);
+
+    health.record = realRecord;
+    // A success is news once it has held for the settle window.
+    for (let i = 0; i < 14; i++) {
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id })]);
+      await settle();
+      t.mock.timers.tick(10_000);
+    }
+    assert.deepEqual(lines.filter((l) => l.includes("playback reports is working again")), [
+      `[video] recording ${OUTPUT_NAME}'s playback reports is working again after 3 failed attempts (2 min)`,
+    ]);
+  } finally {
+    health.record = realRecord;
+    await videoService.removeFeed(id);
+  }
+});
+
 test("removeFeed forgets that feed's playback health — a struggling feed deleted and re-added under the same name does not inherit the old one's struggling read", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   captureConsole(t, "log"); // this test crosses into struggling on purpose; not asserting on the line

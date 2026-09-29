@@ -367,9 +367,10 @@ from the server:
 - A screen struggling with a feed — dropped frames and stalls, in the last
   minute — the moment its window crosses the threshold above, and playing it
   smoothly again the moment it clears; each once, not repeated while it stays
-  true. `could not record <screen>'s playback report` on every heartbeat
-  whose numbers could not be saved — a report lost is a report lost, so this
-  has no recovery line of its own.
+  true. `could not record <screen>'s playback report` when a screen's
+  numbers cannot be saved, once per outage for each screen, and `recording
+  <screen>'s playback reports is working again` once they have saved again
+  for two minutes. The heartbeat itself still counts either way.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password
