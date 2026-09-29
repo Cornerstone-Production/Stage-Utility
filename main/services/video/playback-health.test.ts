@@ -87,12 +87,76 @@ test("samples older than 60 s leave the window's own totals, whether or not the 
   h.record("out1", [report({ decoded: 500, dropped: 10, stalls: 1 })], t0);
   assert.equal(h.snapshot(t0)[0]?.decodedInWindow, 500);
 
-  const t1 = t0 + WINDOW_MS + 1;
-  h.record("out1", [report({ decoded: 20, dropped: 0, stalls: 0 })], t1);
-  const entry = h.snapshot(t1)[0]!;
-  assert.equal(entry.decodedInWindow, 20, "the t0 sample must have aged out of the window's own sum");
+  // A keep-alive heartbeat well inside the window, refreshing `reportedAt`
+  // so the PAIR ITSELF is not swept away by t0+WINDOW_MS — sweepStale()
+  // (run at the top of every record()) removes a pair whose own reportedAt
+  // is WINDOW_MS old, and a record() call exactly then would otherwise
+  // delete the whole pair and recreate it fresh with only the new sample,
+  // which reads decodedInWindow=20 for a reason that has nothing to do with
+  // SAMPLE-level pruning — the thing this test means to prove. The
+  // keep-alive is what isolates "one old sample left the window's own sum"
+  // from "the pair itself aged out and came back new".
+  h.record("out1", [report({ decoded: 20, dropped: 0, stalls: 0 })], t0 + 30_000);
+
+  const entry = h.snapshot(t0 + WINDOW_MS)[0]!;
+  assert.equal(entry.decodedInWindow, 20, "the t0 sample must have aged out of the window's own sum; only the keep-alive's own 20 remains");
   assert.equal(entry.droppedInWindow, 0);
   assert.equal(entry.stallsInWindow, 0);
+});
+
+test("the sticky clock re-arms only on a sample that is ITSELF bad — a stall at t0 then clean heartbeats clears exactly 60 s after the stall, not later", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 300, dropped: 0, stalls: 3 })], t0);
+  assert.equal(h.snapshot(t0)[0]?.struggling, true, "sanity: 3 stalls struggles on their own");
+
+  // Clean heartbeats every 10 s. The stall sample stays INSIDE the 60 s
+  // window (and so isBadWindow() keeps reading true off it) for several of
+  // these — re-arming on that alone, rather than on the NEW sample itself
+  // being bad, is exactly the bug: it would push the clear boundary out
+  // past 60 s after the stall for as long as the stall sample is still
+  // inside the window at all.
+  for (let i = 1; i <= 5; i++) {
+    h.record("out1", [report({ decoded: 300, dropped: 0, stalls: 0 })], t0 + i * 10_000);
+  }
+  assert.equal(h.snapshot(t0 + 50_000)[0]?.struggling, true, "sanity: still inside 60 s of the stall");
+
+  h.record("out1", [report({ decoded: 300, dropped: 0, stalls: 0 })], t0 + CLEAR_AFTER_MS);
+  assert.equal(h.snapshot(t0 + CLEAR_AFTER_MS)[0]?.struggling, false, "exactly 60 s after the stall, with only clean heartbeats since, clears it");
+});
+
+test("the sticky clock re-arms only on a sample that is ITSELF bad — a dropping sample followed by clean ones clears 60 s after the LAST dropping one, not later", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  // Six heartbeats that are each, on their own, over the line (30 of 300 is
+  // 10%), 10 s apart — each one is itself bad, so each correctly re-arms.
+  let now = t0;
+  for (let i = 0; i < 6; i++) {
+    h.record("out1", [report({ decoded: 300, dropped: 30 })], now);
+    now += 10_000;
+  }
+  const lastDroppingAt = t0 + 5 * 10_000; // the sixth (and last) dropping sample
+  assert.equal(h.snapshot(now)[0]?.struggling, true, "sanity: still struggling right after the last dropping sample");
+
+  // From here on, every heartbeat is clean. It must clear exactly 60 s
+  // after the LAST dropping sample, not 60 s after the first (which the old
+  // "re-arm on cumulative badness" rule stretched out to, since the window
+  // stayed over 5% for a while as more of the six dropping samples were
+  // still inside it) and not later either.
+  for (let t = now; t <= lastDroppingAt + CLEAR_AFTER_MS; t += 10_000) {
+    h.record("out1", [report({ decoded: 300, dropped: 0 })], t);
+  }
+  assert.equal(h.snapshot(lastDroppingAt + CLEAR_AFTER_MS)[0]?.struggling, false, "60 s after the LAST dropping sample, with nothing bad since, clears it");
+});
+
+test("a burst of 1000 heartbeats holds a bounded number of samples, merging into the newest rather than dropping — the running totals still sum every one of them", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  for (let i = 0; i < 1000; i++) {
+    h.record("out1", [report({ decoded: 1, dropped: 0, stalls: 0 })], t0 + i); // 1 ms apart — all inside one WINDOW_MS span
+  }
+  const entry = h.snapshot(t0 + 999)[0]!;
+  assert.equal(entry.decodedInWindow, 1000, "merging into the newest sample must still SUM every heartbeat's own count, never drop the excess");
 });
 
 test("a pair that stops reporting drops out of snapshot after WINDOW_MS", () => {

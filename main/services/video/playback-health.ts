@@ -33,6 +33,14 @@ export const CLEAR_AFTER_MS = 60_000;
  *  unbounded array. */
 export const MAX_REPORTS = 32;
 
+/** Samples held per pair, capped — see the merge branch in record(). A LAN
+ *  client posting a valid outputId and feed id in a tight loop would
+ *  otherwise grow one pair's own array for a full WINDOW_MS, and every
+ *  record() call for it is linear in that array's length. 30 is generous for
+ *  the real cadence (one heartbeat per ~10 s, so a full 60 s window holds
+ *  about 6 in practice) while still bounding a hostile burst. */
+export const MAX_SAMPLES_PER_PAIR = 30;
+
 /** One report's deltas, timestamped — never a running total, the same way
  *  VideoPlaybackReport itself never is. */
 interface Sample {
@@ -215,9 +223,33 @@ export class PlaybackHealth {
       const wasStruggling = existing?.struggling ?? false;
 
       const samples = this.pruneSamples(existing?.samples ?? [], now);
-      samples.push({ at: now, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls });
+      // At the cap, merge into the newest held sample rather than growing
+      // further — see MAX_SAMPLES_PER_PAIR's own comment. Summing the counts
+      // keeps sumSamples() exact; the merged entry's own `at` becomes `now`,
+      // which is what "the newest" means for a future prune.
+      if (samples.length >= MAX_SAMPLES_PER_PAIR) {
+        const newest = samples[samples.length - 1]!;
+        samples[samples.length - 1] = {
+          at: now,
+          decoded: newest.decoded + r.decoded,
+          dropped: newest.dropped + r.dropped,
+          stalls: newest.stalls + r.stalls,
+        };
+      } else {
+        samples.push({ at: now, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls });
+      }
       const totals = sumSamples(samples);
-      const lastBadAt = isBadWindow(totals) ? now : (existing?.lastBadAt ?? null);
+      // Re-arm only when THIS sample itself is bad — not merely when the
+      // cumulative window still reads bad, which a clean sample can do for
+      // as long as an OLDER bad one is still inside it. Without the
+      // `sampleIsBad` half, a single stall (or dropped frame) at t0 followed
+      // by clean heartbeats every 10 s keeps re-arming on EVERY one of them
+      // for as long as isBadWindow() stays true from the original sample
+      // alone — pushing the clear boundary out well past 60 s after the
+      // actual last bad sample, exactly the "clears 80 s after the last
+      // dropping sample" bug this guards.
+      const sampleIsBad = r.dropped > 0 || r.stalls > 0;
+      const lastBadAt = sampleIsBad && isBadWindow(totals) ? now : (existing?.lastBadAt ?? null);
       const isStruggling = isStrugglingAt(lastBadAt, now);
 
       byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, lastBadAt, struggling: isStruggling });
