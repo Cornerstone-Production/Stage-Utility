@@ -26,10 +26,15 @@ needs it. The status line at the top of this page reflects exactly that:
 
 The first time it is needed, the switch downloads that pinned MediaMTX
 release, checks it against a fixed SHA-256 checksum, and extracts it with the
-system's own `tar` into the data folder's `video-relay` directory — the
-archive under its `downloads` subfolder, the extracted binary under a folder
-named for the version. None of this is backed up; it is runtime data, rebuilt
-the same way on a fresh machine. Once extracted it is reused on every later
+system's own `tar` into the data folder's `video-relay` directory. None of it
+is backed up; it is runtime data, rebuilt the same way on a fresh machine:
+
+| In `video-relay` | What it is |
+|---|---|
+| `downloads/` | The verified archive |
+| `v1.21.1/` | The extracted binary, in a folder named for the version. Extracted beside it and renamed into place, so it is whole or absent; one without a runnable binary is removed and extracted again |
+| `mediamtx.yml` | The relay's config, written fresh at every start and before every restart. Readable by this server's user only (0600): it holds every push feed's publish password and the password for the relay's own API |
+| `relay.pid` | The running relay's process id, so the next start can find a relay left behind by a server that was killed | Once extracted it is reused on every later
 start, with no re-download and no re-check. A machine with no internet access
 can skip the download entirely: place the exact archive the failing status
 line names in `video-relay/downloads` in the data folder by hand, and it is
@@ -65,6 +70,12 @@ failed, an unsupported platform — the line says why, and names where to
 place a downloaded archive by hand if the download itself is what failed.
 Every reason but an unsupported platform also says when it retries; an
 unsupported platform never will, so the line never invites waiting for one.
+The integration's test, `POST /api/integrations/video/test`, answers from
+the relay itself: `MediaMTX v1.21.1` while it is running, otherwise the same
+reason the status line gives (starting, downloading, why it is failing, or
+that it is not running). The Video feeds dialog under Integrations has no
+Test button of its own, having no settings to test.
+
 The relay's ports live on their own card in **Advanced**, reachable from
 this line's "Change ports in Advanced" while running, or failing on a busy
 port specifically — the one failure that page can actually fix — saving
@@ -221,7 +232,7 @@ A pull or push feed's status pill reflects what the relay currently knows:
 | Live, delayed | Playing, but only over HLS — a few seconds behind, from B-frames (above) or an unsupported codec |
 | Standby | Nothing to report yet: video is off, the relay is still starting, or — once it is up — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks |
 | Waiting for source | A push feed nothing has ever sent to |
-| Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked for that did not come up within the relay's 10-second dial, for 15 seconds after |
+| Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked for that did not come up within the relay's 10-second dial, for 15 seconds after, and any pull or push feed the running relay has no path for (it could not be set up on the relay — see `could not reconcile` under Logging) |
 
 An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
 platform it plays through; Stage Utility cannot see whether that platform's
@@ -260,17 +271,35 @@ screen; a Pi 5 or a computer handles 1080p.
 The relay itself writes `[video]` lines to [`/log`](../ops/updates-and-logs.md)
 from the server:
 
-- Starting (with its version and its RTMP/SRT/UDP ports), exiting, and
-  restarting with backoff — a failing streak's start and its recovery, each
-  logged once, not on every retry.
+- `relay started: MediaMTX v1.21.1, RTMP 1935, SRT 8890, video to screens
+  UDP 8189`, once for each relay process, once its API has answered — so a
+  restart after a crash is announced too, and a process that dies before it
+  ever answers is not.
+- An exit — `relay exited with code 1: <its last error>` or `relay killed by
+  SIGKILL` — and when it restarts; a failing streak's start and its recovery,
+  each once, not on every retry. `relay could not rewrite its config` when a
+  restart cannot write `mediamtx.yml`, retried the same way.
+- `relay stopped`, and why: video switched off, or no pull or push feed left.
 - Downloading the pinned MediaMTX release, and a checksum that does not
   match — from a fresh download or a hand-placed archive — refused rather
-  than run.
-- A busy port, naming who is holding it.
-- Each feed going live, delayed or offline, on the transition only.
+  than run, with where to place the archive by hand.
+- A busy port, naming the program holding it and its process id.
+- `stopped a relay left over from the last run (pid N)`, or that it would
+  not stop, which also stops this start.
+- `the relay is not answering`: a running relay whose API has not answered a
+  status read for 10 seconds, and `the relay is answering again`.
+- `could not reconcile the relay`: its paths or publish users could not be
+  set, once the relay's API had answered at least once (never for the first
+  moment of a start, before it has opened), and `reconciling the relay is
+  working again` on the next success.
+- `proxy to relay failed for <feed>`: a screen's or OBS's request the relay
+  did not answer, once per outage per feed, and `is answering again`.
+- Each feed going live or delayed, and `went offline` once per outage, only
+  for a feed that was showing a picture.
 - B-frames detected on a feed, with which setting to change.
 - A push feed's password rotating, and whether it dropped the device that
-  was connected.
+  was connected; `made a new publish password (none was stored)` for a push
+  feed that had lost its password, which its device then needs.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password

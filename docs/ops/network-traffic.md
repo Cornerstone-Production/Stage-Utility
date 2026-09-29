@@ -78,7 +78,10 @@ them.
 
 Planning Center, and whatever an embed or external feed points at — a YouTube
 or Resi player reaches its own platform, and an external feed reaches whatever
-address it names. Every other integration is LAN-only, and so is a pull or
+address it names. Once, the first time video is switched on with a pull or
+push feed, the server downloads the pinned MediaMTX release from GitHub
+(about 27 MB), unless the archive was placed by hand; see
+[Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). Every other integration is LAN-only, and so is a pull or
 push feed: its picture passes through Stage Utility's own relay, but never any
 further than the network the encoders and screens are already on. NDI is the
 one path that skips the app entirely — discovered and received peer-to-peer by
