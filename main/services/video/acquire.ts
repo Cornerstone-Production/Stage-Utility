@@ -17,7 +17,7 @@ import { promisify } from "node:util";
 
 import { getUserDataPath } from "../app-paths.js";
 import { errorMessage } from "../errors.js";
-import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
+import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,7 +57,7 @@ async function exists(p: string): Promise<boolean> {
  *  which `relay.state === "off"` alone cannot do. `false` for a platform/arch
  *  with no pinned asset at all — there is nothing to have extracted. */
 export async function relayBinaryPresent(): Promise<boolean> {
-  const asset = ASSETS.get(`${process.platform}-${process.arch}`);
+  const asset = assetFor();
   if (!asset) return false;
   return usableBinary(path.join(relayDir(), MEDIAMTX_VERSION, asset.exe));
 }
@@ -66,7 +66,7 @@ export async function relayBinaryPresent(): Promise<boolean> {
  *  hand, or left by an earlier download — whether or not it is extracted.
  *  Not verified here: ensureBinary checks it against the pin before use. */
 export async function relayArchivePresent(): Promise<boolean> {
-  const asset = ASSETS.get(`${process.platform}-${process.arch}`);
+  const asset = assetFor();
   if (!asset) return false;
   return exists(path.join(relayDir(), "downloads", asset.name));
 }
@@ -243,7 +243,7 @@ async function extractAndFinish(
  */
 export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<EnsureBinaryResult> {
   const assets = opts.assets ?? ASSETS;
-  const asset = assets.get(`${process.platform}-${process.arch}`) ?? null;
+  const asset = assetFor(process.platform, process.arch, assets);
   const downloadsDir = path.join(relayDir(), "downloads");
 
   if (!asset) {

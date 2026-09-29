@@ -30,10 +30,15 @@ export const ASSETS: ReadonlyMap<string, MediaMtxAsset> = new Map([
   ["win32-x64", { name: "mediamtx_v1.21.1_windows_amd64.zip", sha256: "faa97974861eb75a68b5aa326c78e7e7a6f670b5ef191bace78e715130381f23", exe: "mediamtx.exe" }],
 ]);
 
-/** The pinned asset for this platform/arch, or null when MediaMTX ships no
- *  release for it (e.g. Windows on arm64, or anything 32-bit). */
-export function assetFor(platform: NodeJS.Platform, arch: string): MediaMtxAsset | null {
-  return ASSETS.get(`${platform}-${arch}`) ?? null;
+/** The pinned asset for a platform/arch — this machine's by default — or
+ *  null when MediaMTX ships no release for it (e.g. Windows on arm64, or
+ *  anything 32-bit). `assets` is a test's own pin table. */
+export function assetFor(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+  assets: ReadonlyMap<string, MediaMtxAsset> = ASSETS,
+): MediaMtxAsset | null {
+  return assets.get(`${platform}-${arch}`) ?? null;
 }
 
 export function downloadUrlFor(asset: MediaMtxAsset): string {
