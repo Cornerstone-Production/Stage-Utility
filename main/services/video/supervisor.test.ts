@@ -134,6 +134,49 @@ describe("RelaySupervisor", () => {
     assert.deepEqual(sup.status(), { state: "running", since: START + 1000 } satisfies SupervisorStatus);
   });
 
+  // item 15 (findings-t15-r2.md): a bad binary path (ENOENT — the pinned
+  // release moved or was never extracted) never reaches 'exit' at all —
+  // node's own spawn() failed, and reports it ONLY through 'error'. An
+  // EventEmitter with no 'error' listener THROWS on that event, which would
+  // crash this entire server over one bad path.
+  it("a spawn failure ('error', never 'exit') reports failing and still retries — an unlistened 'error' would otherwise crash the process", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+
+    await sup.start("mediamtx", "config.yml");
+    assert.equal(children.length, 1);
+
+    children[0]!.emit("error", Object.assign(new Error("spawn mediamtx ENOENT"), { code: "ENOENT" }));
+    assert.deepEqual(sup.status(), {
+      state: "failing",
+      reason: "could not start: spawn mediamtx ENOENT",
+      retryAt: START + 1000,
+    } satisfies SupervisorStatus);
+
+    t.mock.timers.tick(1000);
+    assert.equal(children.length, 2, "the 1 s backoff must end in another spawn attempt");
+    assert.deepEqual(sup.status(), { state: "running", since: START + 1000 } satisfies SupervisorStatus);
+  });
+
+  it("a spawn failure's 'exit' (code null, per Node's own docs) is not reported a second time", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+
+    children[0]!.emit("error", Object.assign(new Error("spawn mediamtx ENOENT"), { code: "ENOENT" }));
+    const afterError = sup.status();
+    children[0]!.emit("exit", null, null);
+    assert.deepEqual(sup.status(), afterError, "the trailing 'exit' changed status — the failure was counted twice");
+
+    // If BOTH 'error' and 'exit' had each scheduled their own restart timer,
+    // ticking past the single 1 s backoff once would fire both, spawning
+    // TWO more children instead of one.
+    t.mock.timers.tick(1000);
+    assert.equal(children.length, 2, `expected exactly one restart, got ${children.length - 1}`);
+  });
+
   // R14j: a real v1.21.1 binary given a malformed pull source echoed the
   // WHOLE credentialed URL back in its own ERR line — this is what the
   // supervisor turns into both its exit reason (status.reason) and the
