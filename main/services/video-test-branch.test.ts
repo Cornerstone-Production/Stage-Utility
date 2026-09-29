@@ -108,3 +108,41 @@ test("video test: downloading answers with the SAME wording as the connection ro
   assert.equal(r.ok, false);
   assert.equal(r.message, "Downloading MediaMTX v1.21.1 (19%)");
 });
+
+// item 1 (findings-t15-r3.md): outOfBandSetup()'s own
+// `.filter((f) => f.kind === "pull" || f.kind === "push")` had no test at
+// all — every integration-manager test seeded a synthetic setup object
+// (empty-schema-configured.test.ts) rather than exercising the real
+// computation against real feeds, so deleting the filter left every test
+// in the suite green. This drives it through the real
+// videoFeedsStore/getStates() path.
+test("video with only embed/external feeds is not configured; a pull or push feed makes it configured", async () => {
+  // videoService.addFeed(), not a raw store write: outOfBandSetup() reads
+  // videoService.current() — a cached snapshot that only refreshes through
+  // videoService's own publish(), which only a real addFeed()/etc. call
+  // triggers. A direct store write left the snapshot stale and the second
+  // half of this exact test failing for the wrong reason (confirmed
+  // directly before switching to this).
+  const yt = await videoService.addFeed({
+    name: "YouTube",
+    source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" },
+  });
+  const ext = await videoService.addFeed({ name: "External", source: { kind: "external", url: "https://example.com/x.m3u8" } });
+  assert.ok(yt.ok && ext.ok);
+  try {
+    const before = integrationManager.getStates().find((s) => s.id === "video");
+    assert.equal(before?.configured, false, "embed/external feeds alone must not count as configured");
+
+    const pull = await videoService.addFeed({ name: "Camera", source: { kind: "pull", url: "rtsp://192.0.2.1/x", username: "" } });
+    assert.ok(pull.ok);
+    try {
+      const after = integrationManager.getStates().find((s) => s.id === "video");
+      assert.equal(after?.configured, true, "a pull feed alongside the embed/external ones must count as configured");
+    } finally {
+      if (pull.ok) await videoService.removeFeed(pull.feed.id);
+    }
+  } finally {
+    if (yt.ok) await videoService.removeFeed(yt.feed.id);
+    if (ext.ok) await videoService.removeFeed(ext.feed.id);
+  }
+});
