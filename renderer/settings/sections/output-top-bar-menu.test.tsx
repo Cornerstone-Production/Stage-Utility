@@ -74,6 +74,7 @@ function cardFor(kind: ViewKind | null) {
     views,
     baseUrl: "http://display.invalid",
     online: false,
+    struggles: [],
     canRemove: true,
     iconKey: "display-1",
     onRename: noop,

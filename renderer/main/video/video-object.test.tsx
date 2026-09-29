@@ -65,6 +65,7 @@ function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state:
     binaryPresent: true,
     archivePresent: true,
     feeds,
+    screens: [],
   };
 }
 

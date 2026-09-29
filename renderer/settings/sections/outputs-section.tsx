@@ -29,15 +29,60 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
+import { STALLS_IN_WINDOW } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useSortableRow } from "../../lib/use-sortable-row";
+import { useVideoState } from "../../main/video/use-video-state";
 
 
 const UNROUTED = "__none__";
 // A sentinel, never a stored value: picking it opens the new-view dialog.
 const NEW_VIEW = "__new__";
+
+/** ScreenVideoHealth reduced to what the card's warning box needs to say —
+ *  computed once in OutputsSection from video:state's `screens` and `feeds`,
+ *  never read off VideoState directly in OutputRow, so a test can hand the
+ *  row a plain object with no server behind it at all. */
+interface ScreenStruggle {
+  feedId: string;
+  feedName: string;
+  droppedInWindow: number;
+  stallsInWindow: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The mockup's Home/Screens `.struggle` box, in the app's own warn callout
+ * classes — the exact ones the feed editor's own delay warning uses
+ * (feed-editor.tsx), so the two surfaces read as one design rather than two
+ * shades of amber.
+ *
+ * Always the dropped-frames sentence; the resolution sentence only once the
+ * feed is taller than 720p (a Pi 4's own ceiling — see the mockup's "a Pi 4
+ * plays 1280 × 720 smoothly"); the stall sentence only when stalls
+ * themselves crossed STALLS_IN_WINDOW — the same threshold
+ * playback-health.ts struggles the pair on, so this never blames the
+ * network for a stall count that was not actually why the pair is here.
+ */
+function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
+  const sentences: string[] = [`This screen dropped ${struggle.droppedInWindow} frames in the last minute.`];
+  if (struggle.height > 720) {
+    sentences.push(
+      `The feed is ${struggle.width} × ${struggle.height}; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.`,
+    );
+  }
+  if (struggle.stallsInWindow >= STALLS_IN_WINDOW) {
+    sentences.push(`It stalled ${struggle.stallsInWindow} times; check this screen's network.`);
+  }
+  return (
+    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+      <span className="font-semibold">Struggling with {struggle.feedName}.</span> {sentences.join(" ")}
+    </p>
+  );
+}
 
 interface OutputRowProps {
   output: Output;
@@ -46,6 +91,11 @@ interface OutputRowProps {
   baseUrl: string;
   /** Whether a live kiosk page is currently connected for this output. */
   online: boolean;
+  /** This screen's own currently-struggling feeds — usually zero or one,
+   *  more than one only for a layout with several Video widgets at once.
+   *  Empty, never undefined, so the card never needs an extra branch for
+   *  "no video state yet". */
+  struggles: ScreenStruggle[];
   canRemove: boolean;
   onRename: (name: string) => void;
   /** This display's icon tint, or undefined for the theme default. */
@@ -114,7 +164,7 @@ export function resolveIconEntry(
   return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
 }
 
-export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   // Both bar items below are about a strip that only some kinds draw. Offering
@@ -421,6 +471,14 @@ export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor
         )}
       </div>
 
+      {/* A screen currently struggling with a feed, and what to change — see
+          ScreenStruggleBox's own comment. Under the preview, as the
+          approved mockup's Home/Screens tab has it. Usually zero or one; a
+          layout with several Video widgets can show more than one box. */}
+      {struggles.map((s) => (
+        <ScreenStruggleBox key={s.feedId} struggle={s} />
+      ))}
+
       {/* What it shows, and the way into its layout. The two controls an
           operator actually reaches for. */}
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
@@ -684,6 +742,28 @@ export function OutputsSection({
     [],
   );
 
+  // Every screen's own struggling feeds, keyed by outputId — the same
+  // change-driven video:state channel the Video feeds page and every Video
+  // widget already subscribe to (use-video-state.ts), never a second fetch
+  // path. Only the STRUGGLING entries: a screen playing every feed cleanly
+  // gets no box at all.
+  const video = useVideoState();
+  const strugglesByOutput = new Map<string, ScreenStruggle[]>();
+  for (const health of video?.screens ?? []) {
+    if (!health.struggling) continue;
+    const feed = video?.feeds.find((f) => f.id === health.feedId);
+    const list = strugglesByOutput.get(health.outputId) ?? [];
+    list.push({
+      feedId: health.feedId,
+      feedName: feed?.name ?? health.feedId,
+      droppedInWindow: health.droppedInWindow,
+      stallsInWindow: health.stallsInWindow,
+      width: health.width,
+      height: health.height,
+    });
+    strugglesByOutput.set(health.outputId, list);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -721,6 +801,7 @@ export function OutputsSection({
                 views={views}
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
+                struggles={strugglesByOutput.get(output.id) ?? []}
                 canRemove={outputs.length > 1}
                 iconColor={icon.value}
                 iconKey={icon.key}

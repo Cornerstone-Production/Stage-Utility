@@ -108,6 +108,7 @@ export function VideoFeedsRoute() {
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_360px]">
         <FeedList
           feeds={feeds}
+          screens={state.screens}
           selectedId={selected?.id ?? null}
           onSelect={(id) => {
             setCreatingNew(false);

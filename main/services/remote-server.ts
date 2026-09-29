@@ -54,6 +54,7 @@ import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { overlaidTimeline } from "./history-item-times.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { videoService } from "./video/video-service.js";
+import { parseVideoReports } from "./video/playback-health.js";
 import { stageController } from "./stage-controller.js";
 import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
@@ -1064,6 +1065,13 @@ export class RemoteServer {
           void recordDisplayScreen(outputId, body.deviceId, body.screen).then((failed) => {
             if (failed) console.warn("[displays] could not record screen size:", failed);
           });
+          // `video` is refused WHOLE on anything malformed (parseVideoReports)
+          // and reads the same as it being absent at all — both mean nothing
+          // to record this heartbeat. recordPlaybackReports() checks outputId
+          // against a real output itself, and drops any report naming a feed
+          // id this build no longer holds one report at a time.
+          const reports = parseVideoReports(body.video);
+          if (reports && reports.length > 0) videoService.recordPlaybackReports(outputId, reports);
         }
       }
       json(res, { ok: outputId != null });

@@ -4,7 +4,7 @@
 
 import { PlusIcon } from "lucide-react";
 
-import type { FeedState, VideoFeedView } from "@main/types/video";
+import type { FeedState, ScreenVideoHealth, VideoFeedView } from "@main/types/video";
 
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
@@ -82,24 +82,31 @@ function FeedPill({ feed }: { feed: VideoFeedView }) {
  * the approved mockup's sample "30 fps" is sample copy with no real data
  * behind it, so it is left out here rather than invented. A feed that is
  * standby, waiting or offline has nothing to say yet.
+ *
+ * `screens` adds one more line, whatever the state above: "On N screens" —
+ * distinct outputIds currently reporting this feed's id in VideoState.screens,
+ * struggling or not. Only a relay feed a widget can actually measure ever
+ * has any (embed/external report no playback at all — see
+ * VideoPlaybackReport's own comment), so the line is simply absent for
+ * those rather than ever reading "On 0 screens".
  */
-export function feedMeta(feed: VideoFeedView): string[] {
+export function feedMeta(feed: VideoFeedView, screens: readonly ScreenVideoHealth[]): string[] {
   const s = feed.source;
+  const meta: string[] = [];
   if (s.kind === "embed") {
-    return [s.player === "resi" ? "Plays in Resi's own player" : "Plays in YouTube's own player · 5 to 15 s behind"];
-  }
-  if (feed.play.via === "external") {
-    return [`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see its health"];
-  }
-  if (feed.play.via === "relay") {
+    meta.push(s.player === "resi" ? "Plays in Resi's own player" : "Plays in YouTube's own player · 5 to 15 s behind");
+  } else if (feed.play.via === "external") {
+    meta.push(`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see its health");
+  } else if (feed.play.via === "relay") {
     const status = feed.status;
     if (status.state === "live" || status.state === "delayed") {
-      const meta = [status.state === "live" ? "WebRTC · under 1 s behind" : "HLS · a few seconds behind"];
+      meta.push(status.state === "live" ? "WebRTC · under 1 s behind" : "HLS · a few seconds behind");
       if (status.width && status.height) meta.push(`${status.width} × ${status.height}`);
-      return meta;
     }
   }
-  return [];
+  const onScreens = new Set(screens.filter((sc) => sc.feedId === feed.id).map((sc) => sc.outputId)).size;
+  if (onScreens > 0) meta.push(`On ${onScreens} screen${onScreens === 1 ? "" : "s"}`);
+  return meta;
 }
 
 /**
@@ -118,11 +125,13 @@ export function bFramesHint(feed: VideoFeedView): string | null {
 
 export function FeedList({
   feeds,
+  screens,
   selectedId,
   onSelect,
   onAddFeed,
 }: {
   feeds: readonly VideoFeedView[];
+  screens: readonly ScreenVideoHealth[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onAddFeed: () => void;
@@ -131,7 +140,7 @@ export function FeedList({
     <div className="flex min-w-0 flex-col">
       {feeds.length === 0 && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
       {feeds.map((feed) => {
-        const meta = feedMeta(feed);
+        const meta = feedMeta(feed, screens);
         const hint = bFramesHint(feed);
         return (
           <button

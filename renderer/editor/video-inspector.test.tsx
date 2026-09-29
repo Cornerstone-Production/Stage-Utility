@@ -45,6 +45,7 @@ const FEEDS_STATE = {
     { id: "program", name: "Program (IMAG)", kind: "pull", sourceLine: "rtsp://192.0.2.21:8554/stream2", source: { kind: "pull", url: "rtsp://192.0.2.21:8554/stream2", username: "" }, play: { via: "relay", whep: "/whep/program", hls: "/hls/program" }, status: { state: "live" } },
     { id: "lobby", name: "Lobby cam", kind: "pull", sourceLine: "rtsp://192.0.2.22:8554/stream1", source: { kind: "pull", url: "rtsp://192.0.2.22:8554/stream1", username: "" }, play: { via: "relay", whep: "/whep/lobby", hls: "/hls/lobby" }, status: { state: "offline" } },
   ],
+  screens: [],
 };
 
 /** Stubs /api/video/state (and /api/state, for the full Inspector);

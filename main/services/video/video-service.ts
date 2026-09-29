@@ -15,6 +15,7 @@ import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { secretsStore } from "../secrets.js";
 import { serverPort } from "../server-port.js";
+import { stageController } from "../stage-controller.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
 import { embedSrc } from "./embed.js";
@@ -22,6 +23,7 @@ import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput } from "./feed-input.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
+import { pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { RelayLogWatcher } from "./relay-log.js";
@@ -37,9 +39,11 @@ import {
   type KickResult,
   type PushProtocol,
   type RelayStatus,
+  type ScreenVideoHealth,
   type VideoFeed,
   type VideoFeedsFile,
   type VideoFeedView,
+  type VideoPlaybackReport,
   type VideoPorts,
   type VideoSourceKind,
   type VideoState,
@@ -181,7 +185,11 @@ class VideoService {
     binaryPresent: false,
     archivePresent: false,
     feeds: [],
+    screens: [],
   };
+
+  /** Every screen's rolling playback window — see playback-health.ts. */
+  private readonly playbackHealth = new PlaybackHealth();
 
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
@@ -492,6 +500,7 @@ class VideoService {
       binaryPresent: await relayBinaryPresent(),
       archivePresent: await relayArchivePresent(),
       feeds: await Promise.all(feeds.map((f) => this.view(f))),
+      screens: this.playbackHealth.snapshot(Date.now()),
     };
   }
 
@@ -1546,6 +1555,10 @@ class VideoService {
     this.pendingBFramesAt.delete(id);
     this.requestedAt.delete(id);
     this.lastLoggedState.delete(id);
+    // Same reasoning, every output: a re-added feed under the same name
+    // must not read struggling for up to a minute on a build that has never
+    // actually measured the new feed's playback.
+    this.playbackHealth.forgetFeed(id);
     // Without this, a re-added feed under the same name (a new feed,
     // minting the same deterministic id) reads "offline, last seen <old>"
     // instead of "waiting" — the old feed's history, not its own.
@@ -1569,6 +1582,88 @@ class VideoService {
       if (uses) out.push({ viewId: v.id, name: v.name });
     }
     return out;
+  }
+
+  // ── Screen health, fed by the presence heartbeat ─────────────────────────
+
+  /**
+   * A presence heartbeat's `video` field — already refusal-checked WHOLE
+   * (parseVideoReports) by the caller (remote-server.ts's presence route);
+   * `reports` here is never itself malformed, only possibly stale. Two
+   * checks specific to this build's CURRENT state happen here rather than
+   * there, so they stay covered by the same test that exercises everything
+   * else this service knows:
+   *
+   *  - `outputId` must name a real output in stageController's own list —
+   *    an unclaimed browser tab, or a screen since removed, polling this
+   *    route with an id nothing recognises must not seed a screen entry
+   *    nothing could ever clear.
+   *  - a report naming a feed id this build no longer holds (a just-deleted
+   *    feed's widget catching up with one more heartbeat) is dropped one
+   *    report at a time — unlike parseVideoReports's own whole-array
+   *    refusal, this is never a reason to throw away the rest of the
+   *    screen's reports.
+   *
+   * Logs the flip only — "struggling" the moment a pair's sticky flag turns
+   * true, "playing smoothly again" the moment it turns back false — and
+   * publishes exactly when playbackHealth.record() says the snapshot
+   * actually changed, never on every heartbeat from a screen playing
+   * cleanly.
+   */
+  recordPlaybackReports(outputId: string, reports: VideoPlaybackReport[], now = Date.now()): void {
+    if (!stageController.getOutputs().some((o) => o.id === outputId)) return;
+    const knownFeedIds = new Set(this.snapshot.feeds.map((f) => f.id));
+    const filtered = reports.filter((r) => knownFeedIds.has(r.feedId));
+    // The last snapshot actually PUBLISHED, not a fresh playbackHealth.snapshot()
+    // taken here — see logPlaybackFlips's own comment for why a fresh read at
+    // this same `now` is exactly the wrong "before" to diff against.
+    const before = this.snapshot.screens;
+    const changed = this.playbackHealth.record(outputId, filtered, now);
+    if (!changed) return;
+    this.logPlaybackFlips(before, now);
+    void this.publish();
+  }
+
+  /**
+   * recordPlaybackReports()'s own before/after diff, split out for its own
+   * comment: logged on the flip only, from either side —
+   * `[video] <screen> is struggling with <feed>: dropped <n> of <m>
+   * frames, <s> stalls in the last minute` the moment a pair's sticky flag
+   * turns true, `[video] <screen> is playing <feed> smoothly again` the
+   * moment it turns back false. A struggling pair that simply stops
+   * reporting (ages out of the window) is neither — nothing said it
+   * recovered — so it logs nothing; `snapshot()` just stops carrying it.
+   *
+   * `before` MUST be the last state this service actually told a client
+   * about (`this.snapshot.screens`), never a fresh `playbackHealth.snapshot()`
+   * taken at the SAME `now` this call is about to record at: the sticky flag
+   * clears purely from elapsed time, with no call landing at the exact
+   * moment it happens, so a fresh read of the OLD state at the NEW `now`
+   * would already show the clear too — comparing two readings that agree by
+   * construction and missing the transition entirely. `this.snapshot.screens`
+   * is frozen from whenever it was last actually published, which is exactly
+   * "what a client still believes right now".
+   */
+  private logPlaybackFlips(before: readonly ScreenVideoHealth[], now: number): void {
+    const beforeByPair = new Map(before.map((h) => [pairKey(h.outputId, h.feedId), h] as const));
+    const after = this.playbackHealth.snapshot(now);
+    const outputs = stageController.getOutputs();
+    const screenName = (id: string) => outputs.find((o) => o.id === id)?.name ?? id;
+    const feedName = (id: string) => this.snapshot.feeds.find((f) => f.id === id)?.name ?? id;
+
+    for (const health of after) {
+      const prev = beforeByPair.get(pairKey(health.outputId, health.feedId));
+      const wasStruggling = prev?.struggling ?? false;
+      if (health.struggling && !wasStruggling) {
+        const total = health.decodedInWindow + health.droppedInWindow;
+        console.log(
+          `[video] ${scrub(screenName(health.outputId))} is struggling with ${scrub(feedName(health.feedId))}: ` +
+            `dropped ${scrub(health.droppedInWindow)} of ${scrub(total)} frames, ${scrub(health.stallsInWindow)} stalls in the last minute`,
+        );
+      } else if (!health.struggling && wasStruggling) {
+        console.log(`[video] ${scrub(screenName(health.outputId))} is playing ${scrub(feedName(health.feedId))} smoothly again`);
+      }
+    }
   }
 }
 

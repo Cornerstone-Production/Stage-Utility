@@ -130,6 +130,40 @@ export interface VideoPlaybackReport {
 }
 
 /**
+ * One (output, feed) pair's playback health over the last rolling minute —
+ * computed server-side (main/services/video/playback-health.ts) from every
+ * VideoPlaybackReport that pair has sent, and carried in VideoState.screens
+ * so the Screens page can warn about a screen without asking the relay
+ * itself anything: presence heartbeats already carry the numbers.
+ *
+ * One entry per (outputId, feedId), never per widget instance — two widgets
+ * on one screen playing the same feed are folded into a single pair, the
+ * same way `VideoPlaybackReport`'s own comment describes them arriving.
+ */
+export interface ScreenVideoHealth {
+  outputId: string;
+  feedId: string;
+  via: "webrtc" | "hls";
+  /** Sticky: set the moment the rolling window crosses a threshold, held for
+   *  CLEAR_AFTER_MS after the last sample that kept it true — never a bare
+   *  re-read of the instantaneous window fraction, which a later CLEAN
+   *  sample's own decoded count would otherwise dilute back under threshold
+   *  while the bad sample that caused it is still sitting in the window. */
+  struggling: boolean;
+  droppedInWindow: number;
+  decodedInWindow: number;
+  stallsInWindow: number;
+  /** The frame's current size, as of the pair's last report — never a delta,
+   *  same as VideoPlaybackReport's own width/height. */
+  width: number;
+  height: number;
+  /** Epoch ms of this pair's last report. snapshot() drops a pair once
+   *  `now - reportedAt >= WINDOW_MS`: nothing has reported it in a minute,
+   *  so it is not read as "clean" — it is gone. */
+  reportedAt: number;
+}
+
+/**
  * Which failing case this is — separate from `reason` (free text an operator
  * reads) because two different UI/logic decisions turn on knowing the CASE,
  * not the words:
@@ -209,4 +243,9 @@ export interface VideoState {
    *  up from it rather than naming a download that will not happen. */
   archivePresent: boolean;
   feeds: VideoFeedView[];
+  /** Every (output, feed) pair a presence heartbeat has reported playback
+   *  for in the last rolling minute — struggling or not, so the feed list's
+   *  "On N screens" can count every screen actually showing a feed, not only
+   *  the struggling ones. See ScreenVideoHealth's own comment. */
+  screens: ScreenVideoHealth[];
 }
