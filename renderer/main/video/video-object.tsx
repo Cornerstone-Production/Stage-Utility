@@ -7,7 +7,7 @@
 // Always muted, no controls: video only, never audio, and nothing on a stage
 // display for anyone to scrub or pause.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ErrorInfo } from "react";
 
 import { BrandLogo } from "../../components/brand-logo";
 import { ErrorBoundary } from "../../components/ui/error-boundary-view";
@@ -145,12 +145,14 @@ function VideoObjectBody({
   // nothing needs that reset for what's ON screen — the video element itself
   // is what shows the stale cover getting torn down, and this widget has no
   // picture to report once inactive regardless of what `phase` still reads.
-  // Keyed on the widget instance, not the feed, so two widgets playing the
-  // same feed report separately.
+  // Keyed on the widget instance — neither the feed nor the layout object id
+  // — so two widgets playing the same feed report separately, and so do an
+  // embed tile and its expanded copy, which draw one object id twice.
+  const instanceKey = useId();
   useEffect(() => {
     if (!active || isEmbed || !showingPicture) return undefined;
-    return registerPlayback(objectId, sample);
-  }, [objectId, active, isEmbed, showingPicture, sample]);
+    return registerPlayback(instanceKey, sample);
+  }, [instanceKey, active, isEmbed, showingPicture, sample]);
 
   if (!config.feedId) {
     return (

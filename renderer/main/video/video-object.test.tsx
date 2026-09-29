@@ -711,6 +711,37 @@ test("an embed feed's picture never registers — Stage Utility cannot measure a
   }
 });
 
+test("two instances of one layout object each report, and unmounting one leaves the other reporting", async () => {
+  // An embed tile and its expanded copy draw the same layout object twice,
+  // under the same object id.
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    const obj = makeObject();
+    const copy = (key: string) => React.createElement(VideoObject, { key, ...obj, appLogo: null, appLogoMonochrome: false, allowHls: true });
+    const { rerender } = render(React.createElement("div", null, copy("tile"), copy("expanded")));
+    await settle();
+    await settle();
+    act(() => {
+      for (const o of StubObserver.instances) o.cb([{ isIntersecting: true }]);
+    });
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+    assert.equal((await drainReports()).length, 2, "each rendered instance must report, not one per object id");
+
+    rerender(React.createElement("div", null, copy("tile")));
+    await settle();
+    await settle();
+    assert.equal(anyPlaying(), true, "the instance still on screen must still be registered");
+    assert.equal((await drainReports()).length, 1, "the instance still on screen must still report");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
 test("two widget instances playing the same feed register under two separate keys, each reported", async () => {
   const frames = captureFrames();
   const g = stubGlobals(makeState([makeFeed()]));

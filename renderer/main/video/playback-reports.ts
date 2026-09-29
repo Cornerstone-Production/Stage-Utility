@@ -5,8 +5,10 @@
 // a relay or external feed's picture (never an embed, whose playback Stage
 // Utility cannot measure at all), and calls the returned unregister function
 // the moment it stops — on unmount, or when the picture it was showing goes
-// away. Keyed by WIDGET INSTANCE, not by feed: two widgets playing the same
-// feed are two keys, two samples, two reports.
+// away. Keyed by WIDGET INSTANCE (video-object.tsx's useId()), not by feed
+// or layout object: two widgets playing the same feed, or an embed tile and
+// its expanded copy drawing one object twice, are two keys, two samples, two
+// reports.
 
 import type { VideoPlaybackReport } from "@main/types/video";
 
@@ -34,10 +36,10 @@ function notifyIfFlipped(wasPlaying: boolean): void {
 }
 
 /** Registers `sample` under `key`. Returns the unregister function — call it
- *  on unmount or the moment playback stops. Re-registering the same key (a
- *  fast remount) replaces the entry; the OLDER registration's own unregister
- *  is then a no-op, so it can never evict the newer one that has already
- *  taken its place. */
+ *  on unmount or the moment playback stops. Re-registering the same key (the
+ *  same instance's effect running again with a new sampler) replaces the
+ *  entry; the OLDER registration's own unregister is then a no-op, so it can
+ *  never evict the newer one that has already taken its place. */
 export function registerPlayback(key: string, sample: Sample): () => void {
   const wasPlaying = anyPlaying();
   registry.set(key, sample);
