@@ -199,14 +199,14 @@ describe("the HLS switch", () => {
       "expected the exact hint copy under the switch once it is off",
     );
 
-    // Driving this exact menu in a real browser showed the unwrapped
-    // sentence widening the whole menu from ~230px to ~460px, over the card:
-    // the caption needs a width bound of its own, not just text.
+    // An unbounded caption sizes the whole menu to its own sentence, about
+    // twice the menu's width and over the card, so it needs a width rule of
+    // its own, not just wrapping text.
     const caption = screen.getByText(/^Off, this screen plays only WebRTC\./);
     assert.ok(caption.className.includes("whitespace-normal"), "the caption must be allowed to wrap");
     assert.ok(
-      caption.className.includes("w-48"),
-      "the caption must be bounded to the menu's own width (menuContent()'s min-w-48), not sized by its own longest line",
+      caption.className.includes("w-0") && caption.className.includes("min-w-full"),
+      "the caption must add nothing to the menu's width and fill it, not size the menu by its own longest line",
     );
   });
 
