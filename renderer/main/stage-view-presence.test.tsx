@@ -48,6 +48,25 @@ const presencePosts: { at: number; body: Record<string, unknown> }[] = [];
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// `performance.now()`, faked by hand the same way poll-transport.test.ts's
+// own `perfNow` is — mock.timers has no "performance" API to enable (Node
+// does not support it), only "setTimeout" and "Date". Installed before
+// stage-view.tsx is imported, for the same reason the fetch stub above is.
+// tick() below advances this in lockstep with mock.timers' own clock for
+// every ordinary case, where wall-clock and monotonic time move together;
+// the wall-clock-jump test is the one place they are meant to disagree, and
+// drives mock.timers' Date forward with setTime() instead, which — unlike
+// tick() — never touches this.
+let perfNow = 0;
+(globalThis as unknown as { performance: { now: () => number } }).performance = { now: () => perfNow };
+
+/** Advances both mock.timers' own clock (setTimeout/Date) and the faked
+ *  performance.now() by the same amount. */
+function tick(ms: number): void {
+  perfNow += ms;
+  mock.timers.tick(ms);
+}
+
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { StageView } = await import("./stage-view.js");
@@ -102,6 +121,7 @@ afterEach(async () => {
 
 test("nothing playing: the heartbeat's slow (60s) cadence, and no video field", async () => {
   mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  perfNow = 0;
   try {
     window.history.replaceState({}, "", "/display-1");
     await act(async () => {
@@ -115,13 +135,13 @@ test("nothing playing: the heartbeat's slow (60s) cadence, and no video field", 
     assert.equal("video" in presencePosts[0]!.body, false, "expected no video field with nothing registered");
 
     await act(async () => {
-      mock.timers.tick(59_999);
+      tick(59_999);
       await flush();
     });
     assert.equal(presencePosts.length, 1, "the slow cadence must not fire early");
 
     await act(async () => {
-      mock.timers.tick(1);
+      tick(1);
       await flush();
     });
     assert.equal(presencePosts.length, 2, "expected the second ping at 60s");
@@ -133,6 +153,7 @@ test("nothing playing: the heartbeat's slow (60s) cadence, and no video field", 
 
 test("something playing: the heartbeat speeds up to VIDEO_HEARTBEAT_MS and carries a video field; unregistering slows it back down", async () => {
   mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  perfNow = 0;
   try {
     window.history.replaceState({}, "", "/display-1");
     await act(async () => {
@@ -151,13 +172,13 @@ test("something playing: the heartbeat speeds up to VIDEO_HEARTBEAT_MS and carri
     const unregister = registerPlayback("obj-1", async () => report);
 
     await act(async () => {
-      mock.timers.tick(VIDEO_HEARTBEAT_MS - 1);
+      tick(VIDEO_HEARTBEAT_MS - 1);
       await flush();
     });
     assert.equal(presencePosts.length, 1, "must not fire before VIDEO_HEARTBEAT_MS");
 
     await act(async () => {
-      mock.timers.tick(1);
+      tick(1);
       await flush();
     });
     assert.equal(presencePosts.length, 2, "expected the sped-up ping at VIDEO_HEARTBEAT_MS, not 60s later");
@@ -169,26 +190,26 @@ test("something playing: the heartbeat speeds up to VIDEO_HEARTBEAT_MS and carri
     unregister();
 
     await act(async () => {
-      mock.timers.tick(VIDEO_HEARTBEAT_MS - 1);
+      tick(VIDEO_HEARTBEAT_MS - 1);
       await flush();
     });
     assert.equal(presencePosts.length, 2, "the pending ping must not fire early");
 
     await act(async () => {
-      mock.timers.tick(1);
+      tick(1);
       await flush();
     });
     assert.equal(presencePosts.length, 3, "unregistering must keep the pending ping, not push it out to 60s");
     assert.equal("video" in presencePosts[2]!.body, false, "expected no video field once unregistered");
 
     await act(async () => {
-      mock.timers.tick(59_999);
+      tick(59_999);
       await flush();
     });
     assert.equal(presencePosts.length, 3, "after that ping, nothing playing is the slow cadence again");
 
     await act(async () => {
-      mock.timers.tick(1);
+      tick(1);
       await flush();
     });
     assert.equal(presencePosts.length, 4, "expected the next ping 60s after the last one");
@@ -199,6 +220,7 @@ test("something playing: the heartbeat speeds up to VIDEO_HEARTBEAT_MS and carri
 
 test("a picture flapping between playing and not still pings at least every 60s", async () => {
   mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  perfNow = 0;
   try {
     window.history.replaceState({}, "", "/display-1");
     await act(async () => {
@@ -220,7 +242,7 @@ test("a picture flapping between playing and not still pings at least every 60s"
       // when its timer fired rather than the end of a long tick.
       for (let t = 0; t < ms; t += 1000) {
         await act(async () => {
-          mock.timers.tick(1000);
+          tick(1000);
           await flush();
         });
       }
@@ -244,6 +266,7 @@ test("a picture flapping between playing and not still pings at least every 60s"
 
 test("a playback sampler that never answers delays the heartbeat by at most 2 s, and the beat goes without video", async () => {
   mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  perfNow = 0;
   const unregister = registerPlayback("obj-1", () => new Promise(() => {}));
   try {
     window.history.replaceState({}, "", "/display-1");
@@ -256,7 +279,7 @@ test("a playback sampler that never answers delays the heartbeat by at most 2 s,
     assert.equal(presencePosts.length, 0, "sanity: the mount ping is waiting on the sampler");
 
     await act(async () => {
-      mock.timers.tick(2_000);
+      tick(2_000);
       await flush();
     });
     assert.equal(presencePosts.length, 1, "the mount ping must go out 2 s later, not wait on the sampler forever");
@@ -266,12 +289,12 @@ test("a playback sampler that never answers delays the heartbeat by at most 2 s,
     // mock tick runs every callback at the tick's END time, so a timer set
     // inside one long tick would land late.
     await act(async () => {
-      mock.timers.tick(VIDEO_HEARTBEAT_MS - 2_000);
+      tick(VIDEO_HEARTBEAT_MS - 2_000);
       await flush();
     });
     assert.equal(presencePosts.length, 1, "sanity: the next ping is waiting on the sampler");
     await act(async () => {
-      mock.timers.tick(2_000);
+      tick(2_000);
       await flush();
     });
     assert.equal(presencePosts.length, 2, "the next ping must go out within the interval plus 2 s");
@@ -283,8 +306,68 @@ test("a playback sampler that never answers delays the heartbeat by at most 2 s,
   }
 });
 
+test("a wall-clock jump forward after mount does not stop a playing flip from bringing the ping forward", async () => {
+  // setTimeout only, NOT "Date": mock.timers runs Date and setTimeout off one
+  // shared internal clock, so jumping Date through it (setTime()) also makes
+  // every ALREADY-SCHEDULED timer read as overdue and fire on the very next
+  // tick — which is not what a real wall-clock step does at all (a real
+  // browser's setTimeout is driven by its own scheduler, never by
+  // Date.now()). Date.now() is faked by hand instead, fully independent of
+  // setTimeout's own clock (tick() below) — the actual independence an NTP
+  // correction has from a real timer queue.
+  mock.timers.enable({ apis: ["setTimeout"] });
+  perfNow = 0;
+  let fakeDateNow = 0;
+  const originalDateNow = Date.now;
+  Date.now = () => fakeDateNow;
+  try {
+    window.history.replaceState({}, "", "/display-1");
+    await act(async () => {
+      render(
+        React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(TooltipProvider, null, React.createElement(StageView))),
+      );
+      await flush();
+    });
+    assert.equal(presencePosts.length, 1, "expected the initial ping on mount");
+    // Nothing playing yet: the pending ping is the slow 60s one.
+
+    // An NTP correction on a Pi with no clock battery: the wall clock steps
+    // forward with no real (monotonic) time having passed. performance.now()
+    // (perfNow) and setTimeout's own clock (tick()) are untouched.
+    fakeDateNow = 10 * 60_000;
+
+    // Video starts playing: onAnyPlayingChange fires, and the pending ping
+    // must be brought forward to VIDEO_HEARTBEAT_MS — a Date.now()-based
+    // deadline reads the jumped clock as already past whatever the new
+    // candidate is and keeps the stale 60s wait instead, so the ping never
+    // speeds up at all.
+    const report = { feedId: "feed-1", via: "hls" as const, decoded: 30, dropped: 1, stalls: 0, width: 1920, height: 1080 };
+    const unregister = registerPlayback("obj-1", async () => report);
+    try {
+      await act(async () => {
+        tick(VIDEO_HEARTBEAT_MS - 1);
+        await flush();
+      });
+      assert.equal(presencePosts.length, 1, "must not fire before VIDEO_HEARTBEAT_MS");
+
+      await act(async () => {
+        tick(1);
+        await flush();
+      });
+      assert.equal(presencePosts.length, 2, "expected the sped-up ping at VIDEO_HEARTBEAT_MS after the flip, not the stale 60s wait");
+      assert.deepEqual(presencePosts[1]!.body.video, [report]);
+    } finally {
+      unregister();
+    }
+  } finally {
+    Date.now = originalDateNow;
+    mock.timers.reset();
+  }
+});
+
 test("a preview never heartbeats, playing video or not", async () => {
   mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  perfNow = 0;
   try {
     window.history.replaceState({}, "", "/preview-v1");
     const unregister = registerPlayback("obj-1", async () => ({
@@ -298,7 +381,7 @@ test("a preview never heartbeats, playing video or not", async () => {
         await flush();
       });
       await act(async () => {
-        mock.timers.tick(10 * 60_000);
+        tick(10 * 60_000);
         await flush();
       });
       assert.equal(presencePosts.length, 0, "a preview iframe must never heartbeat, video playing or not");

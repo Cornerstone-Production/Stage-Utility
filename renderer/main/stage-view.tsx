@@ -517,7 +517,14 @@ export function StageView() {
       })().catch(() => {});
     };
     const schedule = () => {
-      const now = Date.now();
+      // performance.now(), not Date.now(): the deadline math below compares
+      // this call's candidate against a PREVIOUS call's `dueAt`, and only a
+      // monotonic clock keeps that comparison meaningful across a wall-clock
+      // step (NTP catching up on a Pi with no clock battery). Date.now()
+      // jumping mid-session reads a stale `dueAt` as already past whatever
+      // the new candidate is, so a faster cadence (a widget starting to
+      // play) never gets to bring the pending ping forward.
+      const now = performance.now();
       const at = now + intervalMs();
       if (dueAt !== null && dueAt <= at) return;
       clearTimeout(timer);
