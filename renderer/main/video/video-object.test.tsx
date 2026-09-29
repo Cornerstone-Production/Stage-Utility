@@ -543,7 +543,7 @@ test("a feed id the loaded list does not name shows removed copy, not the come-b
 function waitingCover(): string | null {
   for (const [big, small] of [
     ["Waiting for the source", "Nothing is sending to this feed yet"],
-    ["Video is off", "Turn it on on the Video feeds page"],
+    ["Video is off", "Turn video on to play this feed"],
     ["Waiting for the video relay", "It is starting up"],
   ] as const) {
     if (screen.queryByText(big)) return screen.queryByText(small) ? `${big} / ${small}` : `${big} / (no second line)`;
@@ -571,7 +571,7 @@ test("a standby pull feed with video switched off says video is off, and asks fo
   const { g } = await renderOnScreen(PULL_STANDBY, {}, { state: "off" });
   try {
     assert.deepEqual(feedCalls(g.calls), [], "nothing answers a playback request while the relay is off");
-    assert.equal(waitingCover(), "Video is off / Turn it on on the Video feeds page");
+    assert.equal(waitingCover(), "Video is off / Turn video on to play this feed");
   } finally {
     g.restore();
   }

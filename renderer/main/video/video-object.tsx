@@ -237,7 +237,7 @@ function VideoObjectBody({
  */
 function waitingText(relay: RelayStatus["state"] | undefined): { big: string; small: string } {
   if (relay === "running") return { big: "Waiting for the source", small: "Nothing is sending to this feed yet" };
-  if (relay === "off") return { big: "Video is off", small: "Turn it on on the Video feeds page" };
+  if (relay === "off") return { big: "Video is off", small: "Turn video on to play this feed" };
   return { big: "Waiting for the video relay", small: "It is starting up" };
 }
 
