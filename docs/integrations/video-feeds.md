@@ -254,6 +254,9 @@ Each screen writes its own `[video]` lines from the browser:
   (with how many attempts and for how long), and a line when it is playing
   again after holding for 10 seconds. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
+- A relay feed falling back to HLS on a screen because WebRTC did not carry
+  it there, once per outage, and a line when WebRTC is carrying it again.
+  Its retries every 5 minutes are not logged.
 - A Video widget crashing, with the error. The rest of the layout keeps
   drawing.
 

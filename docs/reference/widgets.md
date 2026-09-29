@@ -550,6 +550,11 @@ for 10 seconds starts the delay over. It never gives up on such a feed.
 | Offline | Your **When the feed is offline** setting |
 | Can't play here | "This screen can't play video" |
 
+A relay feed that falls back to HLS because WebRTC failed on this screen
+tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
+place, and moves over only once WebRTC is carrying frames — the picture never
+drops for the attempt.
+
 A pull feed reading standby is connected to all the same: the relay dials a
 pull feed's source only once something asks to watch it, so the widget's own
 request is what brings it up.

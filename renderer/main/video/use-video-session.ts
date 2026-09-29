@@ -9,10 +9,14 @@
 //    `choice` into one <video> element. It owns every timer and listener for
 //    that attempt and reports exactly one terminal outcome — never a retry
 //    decision, never React state.
+//  - `probeWebrtc` is a plain function too: a WebRTC session opened beside a
+//    playing HLS picture, into no element, to learn whether WebRTC carries the
+//    feed here again. A probe that sees frames hands its session to the next
+//    attempt, so the picture moves over without a second connection.
 //  - `useVideoSession` is the hook: it decides WHEN to start an attempt (feed
 //    known, on screen, not paused), holds the WebRTC-viability verdict and the
-//    backoff counter across attempts, and turns each attempt's outcome into
-//    render state.
+//    backoff counter across attempts, runs the probe while that verdict
+//    stands, and turns each attempt's outcome into render state.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
@@ -55,6 +59,11 @@ export const STREAK_REMIND_MS = 5 * 60 * 1000;
  *  screen before WebRTC is tried again: the verdict is about a moment (a
  *  blocked port, an encoder's settings), not about the screen for ever. */
 export const WEBRTC_RETRY_AFTER_MS = 5 * 60 * 1000;
+/** How long a WebRTC probe beside a playing HLS picture has to show frames:
+ *  the handshake's window plus a first frame's. */
+export const PROBE_TIMEOUT_MS = CONNECT_TIMEOUT_MS + FIRST_FRAME_TIMEOUT_MS;
+/** How often a probe reads its peer connection's frame count. */
+export const PROBE_POLL_MS = 500;
 /** How long a webrtc connectionState of failed/disconnected must persist, once
  *  a session was already showing a picture, before it counts as dropped. */
 export const DROP_GRACE_MS = 3000;
@@ -104,6 +113,15 @@ export type PlaybackAttemptChoice =
   | { method: "webrtc"; url: string; relayManaged: boolean }
   | { method: "hls"; url: string };
 
+/** A WebRTC session a probe already proved is carrying frames, handed to the
+ *  attempt that replaces the HLS picture: its stream goes straight onto the
+ *  widget's <video>, with no second connection. */
+export interface AdoptedWebrtc {
+  url: string;
+  session: WhepSession;
+  stream: MediaStream;
+}
+
 /**
  * One attempt at playing `choice` into `video`. Every exit path — a frame
  * timeout, a connect timeout, a mid-stream drop, an hls.js fatal error, the
@@ -113,7 +131,12 @@ export type PlaybackAttemptChoice =
  * already-stopped session (no double DELETE) and can never report a second,
  * contradictory outcome.
  */
-export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAttemptChoice, cb: AttemptCallbacks): PlaybackAttempt {
+export function startPlaybackAttempt(
+  video: HTMLVideoElement,
+  choice: PlaybackAttemptChoice,
+  cb: AttemptCallbacks,
+  adopt?: AdoptedWebrtc,
+): PlaybackAttempt {
   const controller = new AbortController();
   let ended = false;
   let gotFirstFrame = false;
@@ -237,7 +260,13 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
     connectTimer = setTimeout(() => {
       end(() => cb.onDropped("no response to the connection offer"));
     }, CONNECT_TIMEOUT_MS);
-    startWhep(choice.url, video, { signal: controller.signal })
+    const answered = adopt
+      ? Promise.resolve(adopt.session).then((whep) => {
+          if (!ended) video.srcObject = adopt.stream;
+          return whep;
+        })
+      : startWhep(choice.url, video, { signal: controller.signal });
+    answered
       .then((whep) => {
         if (ended) {
           void whep.stop();
@@ -356,6 +385,82 @@ export function startPlaybackAttempt(video: HTMLVideoElement, choice: PlaybackAt
   return { stop: () => end() };
 }
 
+/**
+ * A second WebRTC session, opened beside a playing HLS picture, to learn
+ * whether WebRTC carries this relay feed on this screen again — played into
+ * an element that is never mounted, so the picture on screen is not touched.
+ * Frames are read off the peer connection's own stats (frames received), which
+ * count whether or not anything renders them. `onUsable` hands over the live
+ * session and its stream for the caller to adopt; `onUnusable` says why not,
+ * with the session already closed. Exactly one of the two, once.
+ */
+export function probeWebrtc(
+  url: string,
+  cb: { onUsable: (adopted: AdoptedWebrtc) => void; onUnusable: (reason: string) => void },
+): { stop: () => void } {
+  const controller = new AbortController();
+  const sink = document.createElement("video");
+  let done = false;
+  let session: WhepSession | null = null;
+  let poll: ReturnType<typeof setInterval> | undefined;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const settle = (): boolean => {
+    if (done) return false;
+    done = true;
+    clearTimeout(deadline);
+    clearInterval(poll);
+    controller.abort();
+    return true;
+  };
+  const fail = (reason: string) => {
+    if (!settle()) return;
+    const s = session;
+    session = null;
+    sink.srcObject = null;
+    if (s) void s.stop();
+    cb.onUnusable(reason);
+  };
+  deadline = setTimeout(() => fail("no frame arrived"), PROBE_TIMEOUT_MS);
+  startWhep(url, sink, { signal: controller.signal })
+    .then((whep) => {
+      if (done) {
+        void whep.stop();
+        return;
+      }
+      session = whep;
+      whep.pc.addEventListener(
+        "connectionstatechange",
+        () => {
+          const state = whep.pc.connectionState;
+          if (state === "failed" || state === "closed") fail(`connection ${state}`);
+        },
+        { signal: controller.signal },
+      );
+      poll = setInterval(() => {
+        void whep.pc.getStats().then((report) => {
+          let frames = 0;
+          report.forEach((r: { type?: string; kind?: string; framesReceived?: number; framesDecoded?: number }) => {
+            if (r.type === "inbound-rtp" && r.kind === "video") frames = Math.max(frames, r.framesReceived ?? 0, r.framesDecoded ?? 0);
+          });
+          const stream = sink.srcObject;
+          if (frames === 0 || !(stream && typeof stream === "object") || !settle()) return;
+          sink.srcObject = null;
+          cb.onUsable({ url, session: whep, stream: stream as MediaStream });
+        });
+      }, PROBE_POLL_MS);
+    })
+    .catch((err: unknown) => fail(errorMessage(err)));
+  return {
+    stop: () => {
+      if (!settle()) return;
+      const s = session;
+      session = null;
+      sink.srcObject = null;
+      if (s) void s.stop();
+    },
+  };
+}
+
 // ---------------------------------------------------------------- the hook
 //
 // `computeVerdict` decides what to show WITHOUT ever touching a timer, a
@@ -453,15 +558,14 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   const feedRef = useLatestRef(feed);
   const onLogRef = useLatestRef(input.onLog);
 
+  // Set when WebRTC proved unusable on this screen for this relay feed, so
+  // it plays over HLS. Cleared only by a probe that saw WebRTC frames (the
+  // probe effect below), which hands its session over in `adoptedRef`.
   const [webrtcFailed, setWebrtcFailed] = useState(false);
-  // The verdict expires: after WEBRTC_RETRY_AFTER_MS on HLS, WebRTC is tried
-  // again. Clearing it changes the verdict, so the attempt effect below stops
-  // the HLS session and starts a WebRTC one; a second refusal sets it again.
-  useEffect(() => {
-    if (!webrtcFailed) return undefined;
-    const t = setTimeout(() => setWebrtcFailed(false), WEBRTC_RETRY_AFTER_MS);
-    return () => clearTimeout(t);
-  }, [webrtcFailed]);
+  const adoptedRef = useRef<AdoptedWebrtc | null>(null);
+  // Whether the fallback has been logged and WebRTC has not held since: the
+  // line is written once per outage, never once per probe.
+  const webrtcOutageRef = useRef(false);
   const [attemptPhase, setAttemptPhase] = useState<"connecting" | "live" | "delayed" | "offline">("connecting");
   const [latency, setLatency] = useState<number | null>(null);
   // Purely a "try again" SIGNAL for the effect below — bumped only when a
@@ -513,6 +617,56 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     [attemptKey],
   );
 
+  // The WebRTC address to probe while this relay feed is on HLS only because
+  // WebRTC failed here — never while the relay itself says WebRTC cannot
+  // carry it (B-frames), which a probe cannot change.
+  const probeUrl = useMemo(() => {
+    if (!webrtcFailed || !feed || feed.play.via !== "relay") return null;
+    const without = choosePlayback({ play: feed.play, status: feed.status, caps: browserCaps(), allowHls, webrtcFailed: false });
+    return without.method === "webrtc" ? without.url : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [webrtcFailed, playKey, delayedBecause, allowHls]);
+
+  useEffect(() => {
+    if (!active || !probeUrl) return undefined;
+    const name = feedRef.current?.name ?? "this feed";
+    let probe: { stop: () => void } | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        probe = probeWebrtc(probeUrl, {
+          onUsable: (adopted) => {
+            probe = null;
+            adoptedRef.current = adopted;
+            setWebrtcFailed(false);
+          },
+          onUnusable: (reason) => {
+            probe = null;
+            // The browser console only: the fallback itself is already on
+            // the log, and a probe failing again says nothing new.
+            console.debug(`[video] "${name}" still cannot use WebRTC on this screen (${reason}); staying on HLS`);
+            schedule();
+          },
+        });
+      }, WEBRTC_RETRY_AFTER_MS);
+    };
+    schedule();
+    return () => {
+      clearTimeout(timer);
+      probe?.stop();
+    };
+  }, [active, probeUrl, feedRef]);
+
+  // A probe's session handed over but never taken — the widget went off
+  // screen or away in between — is closed rather than left open on the relay.
+  useEffect(
+    () => () => {
+      void adoptedRef.current?.session.stop();
+      adoptedRef.current = null;
+    },
+    [],
+  );
+
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
 
   const phase: SessionPhase =
@@ -545,35 +699,52 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     const name = current?.name ?? "this feed";
     const key = current?.id ?? "";
 
-    const attemptHandle = startPlaybackAttempt(video, choice, {
-      onPhase: (p) => {
-        setAttemptPhase(p);
-        if ((p === "live" || p === "delayed") && heldTimer === undefined) {
-          heldTimer = setTimeout(() => {
-            attemptCountRef.current = 0;
-            const d = streak().ok(key, Date.now());
-            if (d.log) onLogRef.current?.(`"${name}" is playing again on this screen${d.note}`);
-          }, RESET_AFTER_PLAYING_MS);
-        }
+    // A probe's proven session, taken by the WebRTC attempt it was probed
+    // for and closed by anything else.
+    const adopted = adoptedRef.current;
+    adoptedRef.current = null;
+    const adopt = adopted && choice.method === "webrtc" && adopted.url === choice.url ? adopted : undefined;
+    if (adopted && !adopt) void adopted.session.stop();
+
+    const attemptHandle = startPlaybackAttempt(
+      video,
+      choice,
+      {
+        onPhase: (p) => {
+          setAttemptPhase(p);
+          if ((p === "live" || p === "delayed") && heldTimer === undefined) {
+            heldTimer = setTimeout(() => {
+              attemptCountRef.current = 0;
+              const d = streak().ok(key, Date.now());
+              if (d.log) onLogRef.current?.(`"${name}" is playing again on this screen${d.note}`);
+              if (p === "live" && choice.method === "webrtc" && webrtcOutageRef.current) {
+                webrtcOutageRef.current = false;
+                onLogRef.current?.(`"${name}" plays over WebRTC again on this screen`);
+              }
+            }, RESET_AFTER_PLAYING_MS);
+          }
+        },
+        onLatency: setLatency,
+        onWebrtcUnusable: (reason) => {
+          if (!webrtcOutageRef.current) onLogRef.current?.(`WebRTC unusable for "${name}" on this screen: ${reason}`);
+          webrtcOutageRef.current = true;
+          setWebrtcFailed(true);
+        },
+        onDropped: (reason) => {
+          clearTimeout(heldTimer);
+          setAttemptPhase("offline");
+          const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** attemptCountRef.current);
+          attemptCountRef.current += 1;
+          const d = streak().fail(key, "dropped", Date.now());
+          if (d.log) onLogRef.current?.(`"${name}" failed on this screen (${reason}); retrying with backoff${d.note}`);
+          // The browser console only, never the server log: devtools shows
+          // Verbose on request, and a retry is not news on /log.
+          console.debug(`[video] "${name}" retrying in ${delay} ms (${reason})`);
+          retryTimer = setTimeout(() => setRetryToken((t) => t + 1), delay);
+        },
       },
-      onLatency: setLatency,
-      onWebrtcUnusable: (reason) => {
-        onLogRef.current?.(`WebRTC unusable for "${name}" on this screen: ${reason}`);
-        setWebrtcFailed(true);
-      },
-      onDropped: (reason) => {
-        clearTimeout(heldTimer);
-        setAttemptPhase("offline");
-        const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** attemptCountRef.current);
-        attemptCountRef.current += 1;
-        const d = streak().fail(key, "dropped", Date.now());
-        if (d.log) onLogRef.current?.(`"${name}" failed on this screen (${reason}); retrying with backoff${d.note}`);
-        // The browser console only, never the server log: devtools shows
-        // Verbose on request, and a retry is not news on /log.
-        console.debug(`[video] "${name}" retrying in ${delay} ms (${reason})`);
-        retryTimer = setTimeout(() => setRetryToken((t) => t + 1), delay);
-      },
-    });
+      adopt,
+    );
 
     return () => {
       clearTimeout(retryTimer);
