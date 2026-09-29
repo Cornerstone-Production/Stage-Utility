@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-relay-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { ensureBinary, relayDir } = await import("./acquire.js");
+const { ensureBinary, relayArchivePresent, relayDir } = await import("./acquire.js");
 const { assetFor, MEDIAMTX_VERSION } = await import("./mediamtx-pin.js");
 
 // No test here ever hits the network: every ensureBinary() call below passes
@@ -388,4 +388,17 @@ test("a download over 64 MB is refused by actual bytes received, not a spoofed C
   assert.equal(cancelled, true, "the over-cap stream must be cancelled, not read to completion");
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-oversized.tar.gz")));
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-oversized.tar.gz.part")));
+});
+
+test("relayArchivePresent: the pinned archive in video-relay/downloads, whether or not it is extracted", async (t) => {
+  await resetRelayDir();
+  const pinned = assetFor(process.platform, process.arch);
+  if (!pinned) {
+    t.skip("no pinned asset for this platform");
+    return;
+  }
+  assert.equal(await relayArchivePresent(), false);
+  await fs.mkdir(path.join(relayDir(), "downloads"), { recursive: true });
+  await fs.writeFile(path.join(relayDir(), "downloads", pinned.name), "placed by hand");
+  assert.equal(await relayArchivePresent(), true);
 });

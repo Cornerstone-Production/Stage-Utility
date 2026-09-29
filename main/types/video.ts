@@ -175,5 +175,9 @@ export interface VideoState {
    *  since" (say nothing) apart — `relay.state` alone cannot: both read
    *  "off". */
   binaryPresent: boolean;
+  /** Whether the pinned archive is already in video-relay/downloads (placed
+   *  by hand, say), extracted or not — so the "off" line says the relay sets
+   *  up from it rather than naming a download that will not happen. */
+  archivePresent: boolean;
   feeds: VideoFeedView[];
 }

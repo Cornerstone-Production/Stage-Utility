@@ -19,6 +19,7 @@ needs it. The status line at the top of this page reflects exactly that:
 | Switch | Relay feed | Binary on disk | Status line |
 |---|---|---|---|
 | Off | — | Not yet | Names the pinned MediaMTX release's download size (about 27 MB, 55 MB once extracted) |
+| Off | — | Archive placed by hand, not yet extracted | Says it sets up MediaMTX from the archive already in place |
 | Off | — | Already downloaded | Nothing — a switched-off relay that has run before needs no warning |
 | On | None yet | — | Says the relay starts once a feed pulls from a device or a device pushes to it |
 | On | At least one | — | Downloading: a progress bar. Starting: says so. Running: the version and its ports (RTMP and SRT inbound, UDP for video to screens) |

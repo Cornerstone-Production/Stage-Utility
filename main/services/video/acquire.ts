@@ -62,6 +62,15 @@ export async function relayBinaryPresent(): Promise<boolean> {
   return usableBinary(path.join(relayDir(), MEDIAMTX_VERSION, asset.exe));
 }
 
+/** Whether the pinned archive sits in `video-relay/downloads` — placed by
+ *  hand, or left by an earlier download — whether or not it is extracted.
+ *  Not verified here: ensureBinary checks it against the pin before use. */
+export async function relayArchivePresent(): Promise<boolean> {
+  const asset = ASSETS.get(`${process.platform}-${process.arch}`);
+  if (!asset) return false;
+  return exists(path.join(relayDir(), "downloads", asset.name));
+}
+
 /** A file with bytes in it that this process may run — not merely a name.
  *  An extract interrupted partway leaves the name with no bytes, and a file
  *  can lose its execute bit; neither is a binary to trust. */

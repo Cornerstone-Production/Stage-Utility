@@ -102,6 +102,7 @@ export function VideoFeedsRoute() {
         relay={state.relay}
         enabled={videoEnabled}
         binaryPresent={state.binaryPresent}
+        archivePresent={state.archivePresent}
         onChangePorts={changePorts}
       />
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_360px]">

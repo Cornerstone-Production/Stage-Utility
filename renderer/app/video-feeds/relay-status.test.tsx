@@ -38,6 +38,7 @@ function renderRow(
   overrides: {
     enabled?: boolean;
     binaryPresent?: boolean;
+    archivePresent?: boolean;
     toggling?: boolean;
     onToggle?: (v: boolean) => void;
     onChangePorts?: () => void;
@@ -52,6 +53,7 @@ function renderRow(
         relay={relay}
         enabled={enabled}
         binaryPresent={overrides.binaryPresent ?? false}
+        archivePresent={overrides.archivePresent ?? false}
         onChangePorts={overrides.onChangePorts ?? (() => {})}
       />
     </>,
@@ -93,6 +95,15 @@ describe("the off-state detail — item 6: enabled and binaryPresent both change
     assert.match(text, /downloads MediaMTX v1\.21\.1/);
     assert.match(text, /27 MB download/);
     assert.match(text, /55 MB on disk/);
+  });
+
+  // An archive placed by hand in video-relay/downloads is used as it is: no
+  // download happens, so the line must not promise one.
+  test("switched off, archive placed by hand but not extracted: sets up from it, no download named", () => {
+    renderRow({ state: "off" }, { enabled: false, binaryPresent: false, archivePresent: true });
+    const text = document.body.textContent ?? "";
+    assert.match(text, /Turning this on sets up MediaMTX v1\.21\.1 from the archive already in place\./);
+    assert.equal(/download/.test(text), false, `the line still names a download: ${text}`);
   });
 
   test("switched off, binary already present: says nothing at all, and renders no empty strip", () => {

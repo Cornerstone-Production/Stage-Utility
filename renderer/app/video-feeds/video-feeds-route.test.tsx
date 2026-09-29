@@ -105,7 +105,7 @@ function pushFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
 const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
 
 function makeState(feeds: VideoFeedView[]): VideoState {
-  return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, binaryPresent: true, feeds };
+  return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, binaryPresent: true, archivePresent: true, feeds };
 }
 
 interface Call {

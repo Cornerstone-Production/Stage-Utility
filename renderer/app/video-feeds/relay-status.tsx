@@ -81,6 +81,7 @@ export function RelayDetailRow({
   relay,
   enabled,
   binaryPresent,
+  archivePresent,
   onChangePorts,
 }: {
   relay: RelayStatus;
@@ -93,6 +94,8 @@ export function RelayDetailRow({
    *  yet" (show the download-size sentence) apart from "downloaded once,
    *  switched off since" (say nothing), which `relay.state` alone cannot. */
   binaryPresent: boolean;
+  /** Whether the pinned archive is already in place, extracted or not. */
+  archivePresent: boolean;
   onChangePorts: () => void;
 }) {
   // item 8: only a port conflict is something "Change ports in Advanced"
@@ -107,7 +110,7 @@ export function RelayDetailRow({
   // anything. RelayDetail takes no ref, no children and uses no hooks, so
   // calling it directly is exactly as safe as JSX would be, and actually
   // reads its return value.
-  const detail = RelayDetail({ relay, enabled, binaryPresent });
+  const detail = RelayDetail({ relay, enabled, binaryPresent, archivePresent });
   // item 5: this row used to render its bordered/padded strip
   // unconditionally, so "off, switched off, binary already downloaded" (the
   // one case with nothing to say — RelayDetail returns null and
@@ -129,16 +132,25 @@ function RelayDetail({
   relay,
   enabled,
   binaryPresent,
+  archivePresent,
 }: {
   relay: RelayStatus;
   enabled: boolean;
   binaryPresent: boolean;
+  archivePresent: boolean;
 }) {
   if (relay.state === "off") {
     if (enabled) {
       return <span className="inline-flex items-baseline gap-1.5">Video is on. The relay starts when a feed pulls from a device or a device pushes to it.</span>;
     }
     if (binaryPresent) return null;
+    if (archivePresent) {
+      return (
+        <span className="inline-flex items-baseline gap-1.5">
+          Turning this on sets up MediaMTX {MEDIAMTX_VERSION} from the archive already in place.
+        </span>
+      );
+    }
     return (
       <span className="inline-flex items-baseline gap-1.5">
         Turning this on downloads MediaMTX {MEDIAMTX_VERSION}, a {mb(MEDIAMTX_DOWNLOAD_BYTES)} MB download and{" "}

@@ -10,7 +10,7 @@ import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { getLanIp } from "../lan-ip.js";
-import { relayBinaryPresent } from "./acquire.js";
+import { relayArchivePresent, relayBinaryPresent } from "./acquire.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { secretsStore } from "../secrets.js";
@@ -175,6 +175,7 @@ class VideoService {
     kinds: [...this.allowedKinds()],
     ports: DEFAULT_VIDEO_PORTS,
     binaryPresent: false,
+    archivePresent: false,
     feeds: [],
   };
 
@@ -469,6 +470,7 @@ class VideoService {
       kinds: [...this.allowedKinds()],
       ports,
       binaryPresent: await relayBinaryPresent(),
+      archivePresent: await relayArchivePresent(),
       feeds: await Promise.all(feeds.map((f) => this.view(f))),
     };
   }
