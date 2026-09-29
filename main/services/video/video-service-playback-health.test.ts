@@ -64,6 +64,19 @@ async function settle(iterations = 20): Promise<void> {
   for (let i = 0; i < iterations; i++) await new Promise((resolve) => setImmediate(resolve));
 }
 
+/**
+ * Waits until `done()` holds, or fails after 5 s of wall-clock time. A
+ * heartbeat's publish runs fire-and-forget behind real file reads (the relay
+ * binary and archive checks in state()), so a fixed number of turns can end
+ * before it lands under load, and a frame count read then is short by one.
+ * performance.now(), not Date.now(): several tests here fake Date.
+ */
+async function settleUntil(done: () => boolean, what: string): Promise<void> {
+  const deadline = performance.now() + 5_000;
+  while (!done() && performance.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(done(), `timed out waiting for ${what}`);
+}
+
 test("recordPlaybackReports drops a report for an unknown feed id on its own, without refusing the rest of the heartbeat", async () => {
   const id = await addRelayFeed("Known feed");
   try {
@@ -95,6 +108,7 @@ test("recordPlaybackReports publishes only when playbackHealth.record() reports 
   try {
     const before = frames.length;
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 51 })]);
+    await settleUntil(() => frames.length >= before + 1, "the struggle to publish");
     await settle();
     assert.equal(frames.length, before + 1, "crossing into struggling must publish once");
 

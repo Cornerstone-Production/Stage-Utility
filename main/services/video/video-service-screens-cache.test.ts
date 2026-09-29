@@ -72,6 +72,19 @@ async function settle(iterations = 20): Promise<void> {
   for (let i = 0; i < iterations; i++) await new Promise((resolve) => setImmediate(resolve));
 }
 
+/**
+ * Waits until `done()` holds, or fails after 5 s of wall-clock time. A
+ * heartbeat's publish runs fire-and-forget behind real file reads (the relay
+ * binary and archive checks in state()), so a fixed number of turns can end
+ * before it lands under load, and a frame count read then is short by one.
+ * performance.now(), not Date.now(): several tests here fake Date.
+ */
+async function settleUntil(done: () => boolean, what: string): Promise<void> {
+  const deadline = performance.now() + 5_000;
+  while (!done() && performance.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(done(), `timed out waiting for ${what}`);
+}
+
 const pollOnce = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
 
 // ── The relay's own status poll must not broadcast on its own ─────────────
@@ -93,6 +106,7 @@ test("a healthy screen's own heartbeats, with the relay's status poll running al
     // legitimately one change (playback-health.test.ts covers that), and is
     // not what this test means to prove.
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id })]);
+    await settleUntil(() => frames.at(-1)?.screens.some((s) => s.feedId === id) === true, "the pair's first appearance to publish");
     await settle();
     const before = frames.length;
     const beforeStatusCalls = statusCalls.length;
@@ -128,9 +142,10 @@ test("twelve struggling heartbeats that each publish call the relay status liste
     // one moves the episode and publishes.
     for (let i = 0; i < 12; i++) {
       videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 60 + 40 * i })]);
-      await settle();
+      await settleUntil(() => frames.length === before + i + 1, `heartbeat ${i + 1}'s publish`);
       t.mock.timers.tick(1_000);
     }
+    await settle();
     assert.equal(frames.length, before + 12, "sanity: every heartbeat published");
     assert.equal(new Set(statusCalls.map((s) => JSON.stringify(s))).size, 1, "sanity: one distinct relay status throughout");
     assert.equal(statusCalls.length, 1, "the listener hears a relay status once, not once per video:state publish");
@@ -146,6 +161,7 @@ test("a struggling pair publishes when its episode moves, and not when only its 
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   try {
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 200 })]); // 20%: the episode
+    await settleUntil(() => frames.at(-1)?.screens.some((s) => s.feedId === id && s.struggling) === true, "the struggle to publish");
     await settle();
 
     const before = frames.length;
@@ -156,6 +172,7 @@ test("a struggling pair publishes when its episode moves, and not when only its 
 
     t.mock.timers.tick(1_000);
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 900 })]); // window 37%: worse
+    await settleUntil(() => frames.length >= before + 1, "the moved episode to publish");
     await settle();
     assert.equal(frames.length, before + 1, "an episode that moved publishes once");
     const health = (await videoService.state()).screens.find((s) => s.feedId === id);
@@ -179,7 +196,7 @@ test("a struggling pair that stops reporting entirely is published as gone once 
 
     // No further heartbeat at all — only the expiry timer can notice this.
     t.mock.timers.tick(WINDOW_MS);
-    await settle();
+    await settleUntil(() => frames.length > before, "the timer's publish");
 
     assert.ok(frames.length > before, "the timer firing must publish — a client with the page open must be told the pair is gone");
     assert.equal((await videoService.state()).screens.some((s) => s.feedId === id), false, "the pair itself must be gone once nothing has heartbeated it for a full WINDOW_MS");
@@ -267,8 +284,8 @@ test("a clean heartbeat after the expiry timer has already published the clear p
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 400, dropped: 0, stalls: 0 })]);
     await settle();
     t.mock.timers.tick(CLEAR_AFTER_MS - 30_000);
+    await settleUntil(() => frames.at(-1)?.screens.find((s) => s.feedId === id)?.struggling === false, "the timer's clear to publish");
     await settle();
-    assert.equal((await videoService.state()).screens.find((s) => s.feedId === id)?.struggling, false, "sanity: the timer published the clear");
 
     const before = frames.length;
     t.mock.timers.tick(10_000);
