@@ -271,13 +271,12 @@ const NOT_SCANNED = new Map<string, string>([
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
-  [
-    "video/acquire.ts",
-    "logs the pinned MediaMTX asset name and computed SHA-256 hashes, and the downloads/ " +
-      "path built from the asset name — all from the compiled-in pin table or the local " +
-      "filesystem, never from an HTTP request; the module handles no route. Audited, not " +
-      "just excused.",
-  ],
+  // video/acquire.ts is NOT here: item 2 (findings-t15-r2.md, this PR)
+  // removed its own two console.warn calls entirely — the caller
+  // (relay-lifecycle.ts, already in this map below) owns all logging for a
+  // checksum mismatch now, so acquire.ts itself no longer logs anything at
+  // all, and an exclusion for a file that has stopped logging is exactly
+  // the stale entry this guard's own second half catches.
   [
     "video/relay-lifecycle.ts",
     "logs the relay's own version (MediaMTX's startup banner, the same not-HTTP-data as " +

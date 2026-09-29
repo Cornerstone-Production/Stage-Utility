@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 
 import type { MediaMtxAsset } from "./mediamtx-pin.js";
@@ -102,13 +102,38 @@ test("a downloaded archive whose hash does not match is refused, deleted, and ne
   if (result.ok) return;
   assert.match(result.reason, /checksum mismatch for mediamtx-mismatch\.tar\.gz/);
   assert.match(result.reason, new RegExp(wrongSha));
-  assert.equal(result.placeArchiveAt, path.join(downloadsDir, "mediamtx-mismatch.tar.gz"));
+  assert.equal(result.placeArchiveAt, downloadsDir, "the bare directory, not a path repeating the asset name");
   assert.equal(result.assetName, "mediamtx-mismatch.tar.gz", "a real asset exists — the archive can be placed by hand");
   assert.equal(extractCalls, 0, "extract must never run once the checksum fails");
 
   // Neither the final name nor the .part survive a failed verification.
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-mismatch.tar.gz")));
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-mismatch.tar.gz.part")));
+});
+
+// item 2 (findings-t15-r2.md, PROBE I): a checksum mismatch used to
+// console.warn from INSIDE ensureBinary on every single call — 3 retries, 3
+// (or, with the hand-placed check ALSO firing its own line, 4) lines for
+// one ongoing failure. The caller (relay-lifecycle.ts) already owns "once
+// per outage" logging from the returned `reason`; acquire.ts logging its
+// own copy is a duplicate on every retry, not a second fact.
+test("PROBE I: a checksum mismatch retried three times never logs from inside ensureBinary itself", async (t: TestContext) => {
+  await resetRelayDir();
+  const { archivePath } = await buildArchive(path.join(TMP, "src-mismatch-repeat"), "mediamtx-mismatch-repeat.tar.gz");
+  const bytes = await fs.readFile(archivePath);
+  const wrongSha = "0".repeat(64);
+  const assets = new Map([[KEY, asset("mediamtx-mismatch-repeat.tar.gz", wrongSha)]]);
+  const warns: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => warns.push(msg));
+
+  for (let i = 0; i < 3; i++) {
+    const result = await ensureBinary({
+      assets,
+      fetchImpl: (async () => new Response(bytes)) as unknown as typeof fetch,
+    });
+    assert.equal(result.ok, false);
+  }
+  assert.deepEqual(warns, [], `ensureBinary itself must never log — got: ${JSON.stringify(warns)}`);
 });
 
 test("a hand-placed archive that matches is verified and extracted without calling fetchImpl", async () => {
@@ -146,7 +171,7 @@ test("a hand-placed archive that does not match is refused, named in the reason,
   if (result.ok) return;
   assert.ok(result.reason.includes(archivePath), "the operator's file path must be named in the reason");
   assert.match(result.reason, /does not match the pinned checksum/);
-  assert.equal(result.placeArchiveAt, archivePath);
+  assert.equal(result.placeArchiveAt, downloadsDir, "the bare directory, not a path repeating the asset name");
   assert.equal(result.assetName, "mediamtx-handplaced-bad.tar.gz");
   // The operator's file is never deleted, matched or not.
   await fs.access(archivePath);
@@ -187,7 +212,7 @@ test("a failing extract step is reported, not thrown, and leaves no binary behin
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.reason, /extracting mediamtx-extract-fails\.tar\.gz failed: tar exploded/);
-  assert.equal(result.placeArchiveAt, path.join(downloadsDir, "mediamtx-extract-fails.tar.gz"));
+  assert.equal(result.placeArchiveAt, downloadsDir, "the bare directory, not a path repeating the asset name");
   await assert.rejects(fs.access(path.join(relayDir(), MEDIAMTX_VERSION, EXE)));
 });
 

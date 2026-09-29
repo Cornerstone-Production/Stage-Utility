@@ -146,7 +146,15 @@ export interface EnsureBinaryOptions {
  * `null` for "no pinned asset exists for this platform/arch at all" (nothing
  * to place by hand, ever); the real asset's file name for every other
  * failure, all of which DO have a specific archive the operator could place
- * at `placeArchiveAt`.
+ * by hand.
+ *
+ * `placeArchiveAt` is ALWAYS the bare downloads DIRECTORY, never a file path
+ * — item 3 (findings-t15-r2.md): it used to be the full archive path for
+ * every failure except the unsupported-platform one, so the renderer's
+ * "place X at Y" read "place mediamtx.tar.gz at .../mediamtx.tar.gz",
+ * naming the same file twice. `assetName` and `placeArchiveAt` are sent as
+ * the two separate fields they are — "place <assetName> in
+ * <placeArchiveAt>" — never one path a caller has to split apart.
  */
 type EnsureBinaryResult =
   | { ok: true; path: string }
@@ -154,6 +162,7 @@ type EnsureBinaryResult =
 
 async function extractAndFinish(
   archivePath: string,
+  downloadsDir: string,
   versionDir: string,
   asset: MediaMtxAsset,
   exePath: string,
@@ -165,7 +174,7 @@ async function extractAndFinish(
     return {
       ok: false,
       reason: `extracting ${asset.name} failed: ${errorMessage(err)}`,
-      placeArchiveAt: archivePath,
+      placeArchiveAt: downloadsDir,
       assetName: asset.name,
     };
   }
@@ -176,7 +185,7 @@ async function extractAndFinish(
       return {
         ok: false,
         reason: `could not make ${exePath} executable: ${errorMessage(err)}`,
-        placeArchiveAt: archivePath,
+        placeArchiveAt: downloadsDir,
         assetName: asset.name,
       };
     }
@@ -223,15 +232,19 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
   if (await exists(archivePath)) {
     const got = await sha256OfFile(archivePath);
     if (got !== asset.sha256) {
-      console.warn(`[video] hand-placed ${archivePath} does not match the pinned checksum; left in place`);
+      // No logging here — this can be reached on every retry (relay-lifecycle.ts
+      // calls ensureBinary again on its own backoff), and the caller already
+      // owns "once per outage" logging through its own OutageLog, keyed on
+      // this exact `reason` string. A second log line here duplicated it on
+      // every single attempt instead of once.
       return {
         ok: false,
         reason: `hand-placed archive at ${archivePath} does not match the pinned checksum (expected ${asset.sha256}, got ${got})`,
-        placeArchiveAt: archivePath,
+        placeArchiveAt: downloadsDir,
         assetName: asset.name,
       };
     }
-    return extractAndFinish(archivePath, versionDir, asset, exePath, extract);
+    return extractAndFinish(archivePath, downloadsDir, versionDir, asset, exePath, extract);
   }
 
   await fsp.mkdir(downloadsDir, { recursive: true });
@@ -245,20 +258,20 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
   );
   if (!downloaded.ok) {
     await fsp.unlink(partPath).catch(() => {});
-    return { ok: false, reason: downloaded.reason, placeArchiveAt: archivePath, assetName: asset.name };
+    return { ok: false, reason: downloaded.reason, placeArchiveAt: downloadsDir, assetName: asset.name };
   }
   if (downloaded.sha256 !== asset.sha256) {
     await fsp.unlink(partPath).catch(() => {});
-    console.warn(
-      `[video] checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${downloaded.sha256}; deleted`,
-    );
+    // Same reasoning as the hand-placed check above — no logging here; the
+    // caller logs once per outage from the returned `reason`, not once per
+    // retry from this call.
     return {
       ok: false,
       reason: `checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${downloaded.sha256}`,
-      placeArchiveAt: archivePath,
+      placeArchiveAt: downloadsDir,
       assetName: asset.name,
     };
   }
   await fsp.rename(partPath, archivePath);
-  return extractAndFinish(archivePath, versionDir, asset, exePath, extract);
+  return extractAndFinish(archivePath, downloadsDir, versionDir, asset, exePath, extract);
 }
