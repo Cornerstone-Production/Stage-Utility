@@ -228,7 +228,8 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
   // container (matched by a fixed classname substring rather than a guessed
   // number of parentElement hops, which would break the moment the markup
   // between the name field and the card root changes shape).
-  const rightCard = screen.getByDisplayValue("Right Mic Display").closest('[class*="rounded-xl"]')!;
+  const rightCard = screen.getByDisplayValue("Right Mic Display").closest('[class*="rounded-xl"]') as HTMLElement;
+  assert.ok(rightCard, "expected the second screen's own card root");
   assert.equal(within(rightCard).queryByText(/Struggling with/), null, "the healthy second screen's own card must carry no box at all");
 });
 
