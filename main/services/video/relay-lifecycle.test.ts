@@ -23,14 +23,13 @@ const { videoService } = await import("./video-service.js");
 const { videoFeedsStore, loadFeedsFile: loadRealFeedsFile } = await import("./feed-store.js");
 const { restartDelayMs } = await import("./supervisor.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
+const { fakeRelay } = await import("../fixtures/fake-relay.js");
 
 type RelayLifecycleDeps = import("./relay-lifecycle.js").RelayLifecycleDeps;
 type RelayLifecycleSupervisor = import("./relay-lifecycle.js").RelayLifecycleSupervisor;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type LeftoverResult = import("./supervisor.js").LeftoverResult;
 type VideoFeed = import("../../types/video.js").VideoFeed;
-type VideoRelay = import("./relay.js").VideoRelay;
-type RelayFeed = import("./relay.js").RelayFeed;
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -84,14 +83,6 @@ class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
   }
 }
 
-function fakeRelay(reconcile: (feeds: RelayFeed[]) => Promise<void> = async () => {}): VideoRelay {
-  return {
-    reconcile,
-    status: async () => [],
-    playback: (feedId) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => false,
-  };
-}
 
 /** Every fake, with an ORDER log shared across all of them â€” the one thing
  *  carry item 2 (the start sequence) needs proof of. */
@@ -122,9 +113,9 @@ function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
       return s;
     },
     makeRelay: () =>
-      fakeRelay(async () => {
+      fakeRelay({ reconcile: async () => {
         order.push("reconcile");
-      }),
+      } }),
     ...overrides,
   };
   return { deps, order, supervisors };
@@ -903,10 +894,10 @@ test("the readiness poll backs off with restartDelayMs between retries while the
   let reconcileCalls = 0;
   const { deps, supervisors } = makeDeps({
     makeRelay: () =>
-      fakeRelay(async () => {
+      fakeRelay({ reconcile: async () => {
         reconcileCalls++;
         if (reconcileCalls < 4) throw new Error("relay unreachable");
-      }),
+      } }),
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -933,13 +924,13 @@ test("a stop during an in-flight readiness tick cancels it, and the next start r
   const { deps, supervisors } = makeDeps({
     makeRelay: () => {
       const relayNo = supervisors.length;
-      return fakeRelay(async () => {
+      return fakeRelay({ reconcile: async () => {
         calls.push(`reconcile relay ${relayNo}`);
         if (relayNo === 1 && calls.length === 1) {
           await new Promise<void>((resolve) => (releaseFirst = resolve));
           throw new Error("relay unreachable");
         }
-      });
+      } });
     },
   });
   const lifecycle = activate(new RelayLifecycle(deps));
@@ -971,7 +962,7 @@ test("a stop during an in-flight readiness tick cancels it, and the next start r
 
 test("a respawned relay is reconciled again: its paths went with the process that exited", async () => {
   let reconciles = 0;
-  const { deps, supervisors } = makeDeps({ makeRelay: () => fakeRelay(async () => void reconciles++) });
+  const { deps, supervisors } = makeDeps({ makeRelay: () => fakeRelay({ reconcile: async () => void reconciles++ }) });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
@@ -992,10 +983,10 @@ test("a normal start logs no reconcile failure: the first attempt lands before t
   let apiOpen = false;
   const { deps } = makeDeps({
     makeRelay: () => ({
-      ...fakeRelay(async () => {
+      ...fakeRelay({ reconcile: async () => {
         reconcileCalls++;
         if (!apiOpen) throw new Error("fetch failed");
-      }),
+      } }),
       status: async () => {
         if (!apiOpen) throw new Error("fetch failed");
         return [];
@@ -1262,9 +1253,9 @@ test("logs the relay started line with its version and ports, once per process â
   let versionKnown = false;
   const { deps, supervisors } = makeDeps({
     makeRelay: () =>
-      fakeRelay(async () => {
+      fakeRelay({ reconcile: async () => {
         if (!versionKnown) throw new Error("relay unreachable");
-      }),
+      } }),
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -1299,9 +1290,9 @@ test("a respawned process that exits before its API ever answers is not announce
   let apiOpen = true;
   const { deps, supervisors } = makeDeps({
     makeRelay: () =>
-      fakeRelay(async () => {
+      fakeRelay({ reconcile: async () => {
         if (!apiOpen) throw new Error("fetch failed");
-      }),
+      } }),
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);

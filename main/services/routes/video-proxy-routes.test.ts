@@ -34,8 +34,8 @@ const { videoProxyRoutes, proxyTimeouts, proxyOutage } = await import("./video-p
 const { callRoute } = await import("./route-harness.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
+const { fakeRelay } = await import("../fixtures/fake-relay.js");
 type SupervisorStatus = import("../video/supervisor.js").SupervisorStatus;
-type VideoRelay = import("../video/relay.js").VideoRelay;
 
 /** Structurally satisfies RelaySupervisorLike — an EventEmitter plus
  *  status()/version(). videoProxyRoutes never calls either method itself
@@ -51,12 +51,7 @@ class FakeSupervisor extends EventEmitter {
   }
 }
 
-const fakeRelay: VideoRelay = {
-  reconcile: async () => {},
-  status: async () => [],
-  playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-  kickPublisher: async () => false,
-};
+const relay = fakeRelay();
 
 /** Forces videoService's published snapshot to refresh — relayTarget() reads
  *  the snapshot, never the live relay, so a test that changes what the
@@ -331,7 +326,7 @@ describe("relay not running", () => {
 
 describe("once the relay is attached and running", () => {
   before(async () => {
-    videoService.attachRelay(fakeRelay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
     await publish();
   });
   after(async () => {
@@ -606,7 +601,7 @@ describe("once the relay is attached and running", () => {
 
 describe("a viewer leaving mid-hold", () => {
   before(async () => {
-    videoService.attachRelay(fakeRelay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
     await publish();
     proxyOutage.forget();
   });
@@ -647,7 +642,7 @@ describe("an unreachable relay", () => {
     deadPort = (probe.address() as AddressInfo).port;
     await new Promise<void>((r) => probe.close(() => r()));
 
-    videoService.attachRelay(fakeRelay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
     await publish();
     proxyOutage.forget();
   });
@@ -683,7 +678,7 @@ describe("an unreachable relay", () => {
       await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" }); // one failure, opens the outage
 
       // Point back at the real fake upstream — the relay "answering again".
-      videoService.attachRelay(fakeRelay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+      videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
       await publish();
       await new Promise((r) => setTimeout(r, 20)); // past the 1 ms settle window
 
@@ -700,7 +695,7 @@ describe("an unreachable relay", () => {
 
 describe("a relay that never answers", () => {
   before(async () => {
-    videoService.attachRelay(fakeRelay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
     await publish();
   });
   after(async () => {

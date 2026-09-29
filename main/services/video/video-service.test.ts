@@ -20,6 +20,7 @@ const { DEFAULT_SETTLE_MS } = await import("../repeat-log.js");
 const { RelaySupervisor } = await import("./supervisor.js");
 const { serverPort } = await import("../server-port.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
+const { fakeRelay } = await import("../fixtures/fake-relay.js");
 type RelayPath = import("./relay.js").RelayPath;
 type RelayFeed = import("./relay.js").RelayFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
@@ -166,14 +167,6 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function fakeRelay(status: () => Promise<RelayPath[]>): VideoRelay {
-  return {
-    reconcile: async () => {},
-    status,
-    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => false,
-  };
-}
 
 const readyPath = (overrides: Partial<RelayPath> = {}): RelayPath => ({
   name: "cam",
@@ -231,10 +224,10 @@ const callRejectA = (err: Error) => rejectA?.(err);
 
 test("nothing polls until something is watching; the timer starts, reads immediately, and stops when demand drops", async () => {
   let calls = 0;
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     calls++;
     return [];
-  });
+  } });
   const supervisor = new FakeSupervisor();
   tick = null;
   let everyMs = 0;
@@ -290,7 +283,7 @@ test("a poll broadcasts only when the relay's answer actually changes the snapsh
   });
 
   let answer: RelayPath[] = [readyPath({ name: id })];
-  const relay = fakeRelay(async () => answer);
+  const relay = fakeRelay({ status: async () => answer });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -318,7 +311,7 @@ test("logs a feed's live/offline transitions on the poll, once each — never on
   const id = (made as { feed: { id: string } }).feed.id;
 
   let answer: RelayPath[] = [readyPath({ name: id })];
-  const relay = fakeRelay(async () => answer);
+  const relay = fakeRelay({ status: async () => answer });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -355,7 +348,7 @@ test("a relay restart logs a live feed going offline once, not again as the new 
   let answer: RelayPath[] = [readyPath({ name: id })];
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(async () => answer), supervisor);
+  attach(fakeRelay({ status: async () => answer }), supervisor);
   const lines: string[] = [];
   const realLog = console.log;
   console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
@@ -385,7 +378,7 @@ test("a push feed that was never live logs nothing when the relay exits", async 
   const id = (made as { feed: { id: string } }).feed.id;
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(async () => [notReadyPath({ name: id })]), supervisor);
+  attach(fakeRelay({ status: async () => [notReadyPath({ name: id })] }), supervisor);
   const lines: string[] = [];
   const realLog = console.log;
   console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
@@ -413,7 +406,7 @@ test("logs a feed's entry into delayed too, and never prints an unknown picture"
 
   // H265 is "delayed" the moment it is seen ready — no B-frames mark needed.
   let answer: RelayPath[] = [readyPath({ name: id, video: { codec: "H265" } })];
-  const relay = fakeRelay(async () => answer);
+  const relay = fakeRelay({ status: async () => answer });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -454,7 +447,7 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   const readyTime = "2026-09-28T01:00:00Z";
-  const relay = fakeRelay(async () => [readyPath({ name: id, readyTime })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: id, readyTime })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -501,7 +494,7 @@ test("binding an ALREADY-ready B-frames mark publishes immediately, not waiting 
 
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(async () => [readyPath({ name: id, readyTime })]), supervisor);
+  attach(fakeRelay({ status: async () => [readyPath({ name: id, readyTime })] }), supervisor);
 
   const { addBroadcastListener } = await import("../broadcaster.js");
   const frames: { feeds: { id: string; status: { state: string } }[] }[] = [];
@@ -533,7 +526,7 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
   const readyTime = "2026-09-28T02:00:00Z";
 
   let answer: RelayPath[] = [notReadyPath({ name: id })];
-  const relay = fakeRelay(async () => answer);
+  const relay = fakeRelay({ status: async () => answer });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -595,7 +588,7 @@ test("a pending B-frames mark does not survive a detach — it cannot bind to a 
 
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(async () => [notReadyPath({ name: id })]), supervisor);
+  attach(fakeRelay({ status: async () => [notReadyPath({ name: id })] }), supervisor);
 
   const lines: string[] = [];
   const realLog = console.log;
@@ -611,7 +604,7 @@ test("a pending B-frames mark does not survive a detach — it cannot bind to a 
     await videoService.detachRelay(); // relay turned off / reconfigured
 
     // Hours later: a different relay, the device now reconfigured with B-frames off.
-    attach(fakeRelay(async () => [readyPath({ name: id, readyTime: "T9" })]), new FakeSupervisor());
+    attach(fakeRelay({ status: async () => [readyPath({ name: id, readyTime: "T9" })] }), new FakeSupervisor());
     await pollOnce();
 
     const feed = videoService.current().feeds.find((f) => f.id === id);
@@ -632,7 +625,7 @@ test("a pending B-frames mark expires after PENDING_MARK_TTL_MS without a ready 
   let answer: RelayPath[] = [notReadyPath({ name: id })];
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(async () => answer), supervisor);
+  attach(fakeRelay({ status: async () => answer }), supervisor);
 
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
 
@@ -667,7 +660,7 @@ test("a B-frames line for a path that is not a real feed is never logged, and ne
   // yet dropped it), so "orphaned-path" is reported READY by the relay even
   // though no feed of that id exists in the store — the realistic shape of
   // the bug, not merely an id nobody's poll has ever touched.
-  const relay = fakeRelay(async () => [readyPath({ name: "orphaned-path" })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: "orphaned-path" })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -696,10 +689,10 @@ test("a B-frames line for a path that is not a real feed is never logged, and ne
 
 test("a relay that stops answering warns once per outage; recovery logs once after the run truly settles", async (t) => {
   let fail = true;
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     if (fail) throw new Error("ECONNREFUSED");
     return [];
-  });
+  } });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -750,7 +743,7 @@ test("a requested pull feed reads standby while the relay dials it, offline once
   const made = await videoService.addFeed({ name: "Dial cam", source: { kind: "pull", url: "rtsp://192.0.2.53/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
-  const relay = fakeRelay(async () => [notReadyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: id })] });
   videoPollDeps.inDemand = () => false;
   attach(relay, new FakeSupervisor());
   t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
@@ -783,7 +776,7 @@ test("markRequested moves a not-ready pull feed off standby — its only observa
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const relay = fakeRelay(async () => [notReadyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: id })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -829,7 +822,7 @@ test("relayTarget refuses a pattern-failing id, an unknown id, and a kind an emb
 });
 
 test("relayTarget refuses whip on a pull feed and on a push feed whose own protocol is not whip", async () => {
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -869,7 +862,7 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
     assert.deepEqual(videoService.relayTarget(id, "whep"), { refuse: 503 });
     assert.deepEqual(videoService.relayTarget(id, "hls"), { refuse: 503 });
 
-    const relay = fakeRelay(async () => []);
+    const relay = fakeRelay({ status: async () => [] });
     const supervisor = new FakeSupervisor();
     supervisor.current = { state: "starting" };
     videoPollDeps.inDemand = () => false;
@@ -902,7 +895,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
   const id = (made as { feed: { id: string } }).feed.id;
 
   const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997 };
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor, OLD_PORTS);
@@ -937,7 +930,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
 });
 
 test("relay status maps the supervisor's status and version onto the wire shape, including a null starting version before the banner is parsed", async () => {
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -975,7 +968,7 @@ test("detachRelay reports the relay off and forgets its last known paths — a s
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: id })] });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "running", since: 1 };
   videoPollDeps.inDemand = () => false;
@@ -1006,7 +999,7 @@ test("detachRelay settles feeds — flushes the seen store, not just a bare publ
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: id })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -1054,10 +1047,10 @@ test("a poll that fails clears lastPaths and reports the relay as failing to ans
   const id = (made as { feed: { id: string } }).feed.id;
 
   let fail = false;
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     if (fail) throw new Error("ECONNREFUSED");
     return [readyPath({ name: id })];
-  });
+  } });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "running", since: 1 };
   videoPollDeps.inDemand = () => false;
@@ -1087,9 +1080,9 @@ test("a poll that fails clears lastPaths and reports the relay as failing to ans
 });
 
 test("a poll that fails within the supervisor's own boot grace window does not flip the relay to not answering, and logs nothing", async (t) => {
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     throw new Error("ECONNREFUSED");
-  });
+  } });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "running", since: 0 };
   videoPollDeps.inDemand = () => false;
@@ -1117,9 +1110,9 @@ test("a poll that fails within the supervisor's own boot grace window does not f
 });
 
 test("a poll that fails after the supervisor's own boot grace window flips the relay to not answering, and logs once", async (t) => {
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     throw new Error("ECONNREFUSED");
-  });
+  } });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "running", since: 0 };
   videoPollDeps.inDemand = () => false;
@@ -1144,10 +1137,10 @@ test("a poll that fails after the supervisor's own boot grace window flips the r
 
 test("the service does not poll while the supervisor is off, so a relay switched off produces no \"not answering\" line", async () => {
   let calls = 0;
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     calls++;
     throw new Error("ECONNREFUSED");
-  });
+  } });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "off" };
   videoPollDeps.inDemand = () => false;
@@ -1169,9 +1162,9 @@ test("the service does not poll while the supervisor is off, so a relay switched
 });
 
 test("a relay the supervisor already reports failing keeps its own reason, and logs no \"not answering\" line", async () => {
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     throw new Error("ECONNREFUSED");
-  });
+  } });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555, neverStarted: false };
   videoPollDeps.inDemand = () => false;
@@ -1199,7 +1192,7 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
 // row), so this server's data-folder path never does: a path inside it reads
 // relative to it, and the full path stays in the server log.
 test("a failing relay's reason and hand-place folder never carry the data-folder path", async () => {
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   supervisor.current = {
     state: "failing",
@@ -1237,7 +1230,7 @@ test("a failing relay's reason and hand-place folder never carry the data-folder
 });
 
 test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed with no path as offline, not standby — it is up enough to have an opinion", async () => {
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555, neverStarted: false };
   videoPollDeps.inDemand = () => false;
@@ -1289,7 +1282,7 @@ test("item 14: a PRE-supervisor failure (a busy port, no process has ever run) r
 // reached a source. neverStarted distinguishes the two; this is the
 // spawn-failure half, reading standby like every other pre-process kind.
 test("item 9: a spawn failure (neverStarted) reads kind 'spawn' and a feed as standby, not crash-loop/offline", async () => {
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "failing", reason: "could not start: spawn mediamtx ENOENT", retryAt: 55555, neverStarted: true };
   videoPollDeps.inDemand = () => false;
@@ -1310,7 +1303,7 @@ test("item 9: a spawn failure (neverStarted) reads kind 'spawn' and a feed as st
 });
 
 test("R14i: between the supervisor reaching running and the first successful poll, a relay feed stays standby with no \"went offline\" line; the first successful poll with no path for it is what flips it to offline, with exactly one line", async () => {
-  const relay = fakeRelay(async () => []); // no path ever matches this feed
+  const relay = fakeRelay({ status: async () => [] }); // no path ever matches this feed
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "off" };
   videoPollDeps.inDemand = () => false;
@@ -1358,9 +1351,9 @@ test("R14i: between the supervisor reaching running and the first successful pol
 });
 
 test("the \"not answering\" override never applies while starting, even with a version left over from a previous run, and logs nothing", async () => {
-  const relay = fakeRelay(async () => {
+  const relay = fakeRelay({ status: async () => {
     throw new Error("ECONNREFUSED");
-  });
+  } });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "starting" };
   supervisor.ver = "v1.21.1"; // leftover from a PREVIOUS run — version() never resets on its own
@@ -1386,7 +1379,7 @@ test("the \"not answering\" override never applies while starting, even with a v
 });
 
 test("the attached supervisor's status events publish immediately, without waiting for a poll", async () => {
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false; // no poll is running at all
   attach(relay, supervisor);
@@ -1425,9 +1418,8 @@ test("an in-flight SUCCESS against a process the supervisor has since reported f
   resolveA = null;
   videoPollDeps.inDemand = () => false;
   attach(
-    fakeRelay(() =>
-      hold ? new Promise<RelayPath[]>((resolve) => { resolveA = resolve; }) : Promise.resolve([readyPath({ name: id })]),
-    ),
+    fakeRelay({ status: () =>
+      hold ? new Promise<RelayPath[]>((resolve) => { resolveA = resolve; }) : Promise.resolve([readyPath({ name: id })]), }),
     supervisor,
   );
 
@@ -1467,7 +1459,7 @@ test("an in-flight REJECTION against the old process, landing after a respawn, d
   const supervisor = new FakeSupervisor();
   rejectA = null;
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(() => new Promise<RelayPath[]>((_resolve, reject) => { rejectA = reject; })), supervisor);
+  attach(fakeRelay({ status: () => new Promise<RelayPath[]>((_resolve, reject) => { rejectA = reject; }) }), supervisor);
 
   const warns: string[] = [];
   const realWarn = console.warn;
@@ -1503,11 +1495,11 @@ test("a status change alone, with no detach, still lets the next poll run even w
   let calls = 0;
   videoPollDeps.inDemand = () => false;
   attach(
-    fakeRelay(() => {
+    fakeRelay({ status: () => {
       calls++;
       if (calls === 1) return new Promise<RelayPath[]>(() => {}); // the first request never resolves
       return Promise.resolve([]);
-    }),
+    } }),
     supervisor,
   );
 
@@ -1532,7 +1524,7 @@ test("a status event to a non-running state clears lastPaths immediately — a d
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: id })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -1581,7 +1573,7 @@ test("against a real supervisor: an exit publishes failing at once, and running 
     if (recording && channel === "video:state") published.push((payload as { relay: { state: string } }).relay.state);
   });
   videoPollDeps.inDemand = () => false;
-  attach(fakeRelay(async () => []), sup);
+  attach(fakeRelay({ status: async () => [] }), sup);
   try {
     await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
     await new Promise((r) => setTimeout(r, 20));
@@ -1616,10 +1608,10 @@ test("against a real supervisor: the not-answering flag does not carry over into
   let apiUp = true;
   videoPollDeps.inDemand = () => false;
   attach(
-    fakeRelay(async () => {
+    fakeRelay({ status: async () => {
       if (!apiUp) throw new Error("ECONNREFUSED");
       return [readyPath({ name: id })];
-    }),
+    } }),
     sup,
   );
 
@@ -1668,9 +1660,9 @@ test("against a real supervisor: a poll failing during its crash backoff logs no
   });
   videoPollDeps.inDemand = () => false;
   attach(
-    fakeRelay(async () => {
+    fakeRelay({ status: async () => {
       throw new Error("ECONNREFUSED");
-    }),
+    } }),
     sup,
   );
 
@@ -1699,9 +1691,9 @@ test("against a real supervisor: a poll failing during its crash backoff logs no
 });
 
 test("attaching a new relay without detaching first replaces the old one's listeners rather than leaking them", async () => {
-  const relayA = fakeRelay(async () => []);
+  const relayA = fakeRelay({ status: async () => [] });
   const supervisorA = new FakeSupervisor();
-  const relayB = fakeRelay(async () => []);
+  const relayB = fakeRelay({ status: async () => [] });
   const supervisorB = new FakeSupervisor();
 
   videoPollDeps.inDemand = () => false;
@@ -1721,19 +1713,17 @@ test("attaching a new relay without detaching first replaces the old one's liste
 
 test("attaching a new relay while the old one's poll is still in flight does not block the new relay's first read", async () => {
   resolveA = null;
-  const relayA = fakeRelay(
-    () =>
+  const relayA = fakeRelay({ status: () =>
       new Promise<RelayPath[]>((resolve) => {
         resolveA = resolve;
-      }),
-  );
+      }), });
   const supervisorA = new FakeSupervisor();
 
   let bCalls = 0;
-  const relayB = fakeRelay(async () => {
+  const relayB = fakeRelay({ status: async () => {
     bCalls++;
     return [];
-  });
+  } });
   const supervisorB = new FakeSupervisor();
 
   const real = { ...videoPollDeps };
@@ -1765,14 +1755,14 @@ test("a stale in-flight SUCCESS from an already-detached relay is never applied,
   const id = (made as { feed: { id: string } }).feed.id;
 
   resolveA = null;
-  const relayA = fakeRelay(() => new Promise<RelayPath[]>((resolve) => { resolveA = resolve; }));
+  const relayA = fakeRelay({ status: () => new Promise<RelayPath[]>((resolve) => { resolveA = resolve; }) });
   videoPollDeps.inDemand = () => false;
   attach(relayA, new FakeSupervisor());
   const inFlight = pollOnce(); // A's status() is now pending, unawaited
 
   try {
     await videoService.detachRelay();
-    attach(fakeRelay(async () => [notReadyPath({ name: id })]), new FakeSupervisor());
+    attach(fakeRelay({ status: async () => [notReadyPath({ name: id })] }), new FakeSupervisor());
 
     // A's stale answer finally lands, claiming the feed IS ready — this is
     // the exact shape the staleness guard (the `this.relayGeneration !==
@@ -1796,7 +1786,7 @@ test("a stale in-flight REJECTION from an already-detached relay does not mark t
   rejectA = null;
   videoPollDeps.inDemand = () => false;
   attach(
-    fakeRelay(() => new Promise<RelayPath[]>((_resolve, reject) => { rejectA = reject; })),
+    fakeRelay({ status: () => new Promise<RelayPath[]>((_resolve, reject) => { rejectA = reject; }) }),
     new FakeSupervisor(),
   );
   const inFlight = pollOnce(); // A's status() is now pending, unawaited
@@ -1807,7 +1797,7 @@ test("a stale in-flight REJECTION from an already-detached relay does not mark t
 
   try {
     await videoService.detachRelay();
-    attach(fakeRelay(async () => [readyPath({ name: id })]), new FakeSupervisor());
+    attach(fakeRelay({ status: async () => [readyPath({ name: id })] }), new FakeSupervisor());
     await pollOnce(); // B answers on its own: feed live, relay running
 
     // A's stale FAILURE finally lands — this is the same staleness guard,
@@ -1841,7 +1831,7 @@ test("a seen-store write that rejects still lets the poll publish its transition
 
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
 
-  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: id })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -1907,7 +1897,7 @@ test("removeFeed forgets the seen store, so a re-added feed under the same name 
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const relay = fakeRelay(async () => [readyPath({ name: id })]);
+  const relay = fakeRelay({ status: async () => [readyPath({ name: id })] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -1925,7 +1915,7 @@ test("removeFeed forgets the seen store, so a re-added feed under the same name 
   // shape that distinguishes "waiting" from "offline"; with no relay at all,
   // every feed reads "no path", which is offline regardless of seen-store
   // history and would prove nothing either way.
-  const relay2 = fakeRelay(async () => [notReadyPath({ name: newId })]);
+  const relay2 = fakeRelay({ status: async () => [notReadyPath({ name: newId })] });
   const supervisor2 = new FakeSupervisor();
   attach(relay2, supervisor2);
   try {
@@ -1944,7 +1934,7 @@ test("the last-seen time is flushed to disk on the transition out of ready, not 
   const id = (made as { feed: { id: string } }).feed.id;
 
   let answer: RelayPath[] = [readyPath({ name: id })];
-  const relay = fakeRelay(async () => answer);
+  const relay = fakeRelay({ status: async () => answer });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -1975,14 +1965,12 @@ test("the last-seen time is flushed to disk on the transition out of ready, not 
 // ── Reconciling the relay on a feed change, push passwords and addresses ──
 
 function recordingRelay(reconciled: RelayFeed[][], opts: { kickPublisher?: (feedId: string) => Promise<boolean> } = {}): VideoRelay {
-  return {
+  return fakeRelay({
     reconcile: async (feeds) => {
       reconciled.push(feeds);
     },
-    status: async () => [],
-    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: opts.kickPublisher ?? (async () => false),
-  };
+    ...opts,
+  });
 }
 
 test("addFeed, updateFeed and removeFeed each reconcile the relay while it is attached and running, with a pull feed's credentials folded into its plan entry", async () => {
@@ -2069,7 +2057,7 @@ test("reconcile is skipped while the relay is attached but the supervisor is not
 // answered once, or the boot grace has passed with it still shut.
 test("a reconcile failing before this relay's API has ever answered, inside the boot grace, logs nothing", async (t) => {
   let fail = true;
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   relay.reconcile = async () => {
     if (fail) throw new Error("fetch failed");
   };
@@ -2097,7 +2085,7 @@ test("a reconcile failing before this relay's API has ever answered, inside the 
 
 test("once the relay's API has answered, a reconcile failure is news, and the next success closes the run", async (t) => {
   let fail = false;
-  const relay = fakeRelay(async () => []);
+  const relay = fakeRelay({ status: async () => [] });
   relay.reconcile = async () => {
     if (fail) throw new Error("relay unreachable");
   };
@@ -2130,14 +2118,11 @@ test("once the relay's API has answered, a reconcile failure is news, and the ne
 
 test("a reconcile failure is logged once per outage and never rejects addFeed/updateFeed — the feed store write is the source of truth", async () => {
   let fail = true;
-  const relay: VideoRelay = {
+  const relay = fakeRelay({
     reconcile: async () => {
       if (fail) throw new Error("relay unreachable");
     },
-    status: async () => [],
-    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => false,
-  };
+  });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -2260,7 +2245,7 @@ test("R14e: reconciles are single-flight — a change arriving mid-reconcile is 
   // unreachable (`never`) — a property on an object sidesteps that.
   const releaseFirst: { fn: (() => void) | null } = { fn: null };
   let firstCallStarted = false;
-  const relay: VideoRelay = {
+  const relay = fakeRelay({
     reconcile: async (feeds) => {
       if (!firstCallStarted) {
         firstCallStarted = true;
@@ -2274,10 +2259,7 @@ test("R14e: reconciles are single-flight — a change arriving mid-reconcile is 
       }
       reconciled.push(feeds);
     },
-    status: async () => [],
-    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => false,
-  };
+  });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -2570,14 +2552,11 @@ test("R14d: newPushPassword's applied shape — true with nothing to apply to, f
   await videoService.removeFeed(idNoRelay);
 
   // A running relay whose reconcile fails: applied false.
-  const failingRelay: VideoRelay = {
+  const failingRelay = fakeRelay({
     reconcile: async () => {
       throw new Error("relay unreachable");
     },
-    status: async () => [],
-    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => false,
-  };
+  });
   const supervisor1 = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(failingRelay, supervisor1);
@@ -2738,17 +2717,15 @@ test("item 1: a kick failure opens the push-kick outage, and a kick succeeding p
 
 test("R14d/item 9: newPushPassword reconciles BEFORE it kicks — the new password must already be live at the relay before the old connection is dropped", async () => {
   const order: string[] = [];
-  const relay: VideoRelay = {
+  const relay = fakeRelay({
     reconcile: async () => {
       order.push("reconcile");
     },
-    status: async () => [],
-    playback: (feedId: string) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
     kickPublisher: async () => {
       order.push("kick");
       return true;
     },
-  };
+  });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
@@ -2978,7 +2955,7 @@ test("attachRelay itself publishes the settled state — a caller must not need 
   try {
     const supervisor = new FakeSupervisor();
     supervisor.ver = "v1.21.1";
-    attach(fakeRelay(async () => []), supervisor);
+    attach(fakeRelay({ status: async () => [] }), supervisor);
     await waitForCount(seen, 1);
     assert.deepEqual(seen.at(-1), { state: "running", version: "v1.21.1", ports: DEFAULT_VIDEO_PORTS });
   } finally {
@@ -2999,7 +2976,7 @@ test("setPreAttachStatus reports a RelayStatus with no supervisor attached, and 
 test("attachRelay always wins over a stale setPreAttachStatus — a supervisor's own status is the only truth once one exists", async () => {
   videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 1, totalBytes: 2 });
   const supervisor = new FakeSupervisor();
-  attach(fakeRelay(async () => []), supervisor);
+  attach(fakeRelay({ status: async () => [] }), supervisor);
   try {
     assert.equal((await videoService.state()).relay.state, "running", "attachRelay must clear a stale pre-attach status");
   } finally {

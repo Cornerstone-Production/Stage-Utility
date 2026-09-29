@@ -19,9 +19,9 @@ const { integrationManager } = await import("./integration-manager.js");
 const { videoService } = await import("./video/video-service.js");
 const { videoFeedsStore } = await import("./video/feed-store.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../types/video.js");
+const { fakeRelay } = await import("./fixtures/fake-relay.js");
 
 type RelaySupervisorLike = import("./video/video-service.js").RelaySupervisorLike;
-type VideoRelay = import("./video/relay.js").VideoRelay;
 
 const states = (integrationManager as unknown as { states: Map<string, { id: string; enabled: boolean; connection: string; message: string | null; config: Record<string, unknown> }> }).states;
 
@@ -29,14 +29,6 @@ function seed(): void {
   states.set("video", { id: "video", enabled: true, connection: "disconnected", message: null, config: {} });
 }
 
-function fakeRelay(): VideoRelay {
-  return {
-    reconcile: async () => {},
-    status: async () => [],
-    playback: (feedId) => ({ whep: `/video/${feedId}/whep`, hls: `/video/${feedId}/index.m3u8` }),
-    kickPublisher: async () => false,
-  };
-}
 
 class FakeSupervisor {
   ver: string | null = "v1.21.1";
