@@ -3113,17 +3113,18 @@ export function LayoutRenderer({
   layout,
   ndiSource,
   interactive = false,
-  allowHls = true,
+  allowHls,
   surface,
   viewId,
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
   interactive?: boolean;
-  /** The real display's own "Use HLS on this screen" switch. Absent behaves as
-   *  allowed — the safe default, and what every caller but a real kiosk route
-   *  wants. */
-  allowHls?: boolean;
+  /** The real display's own "Use HLS on this screen" switch. Required, like
+   *  `viewId`: a kiosk route that forgot to pass the switch through would
+   *  otherwise play HLS on a screen set to refuse it. Every caller that is not
+   *  a real display passes true. */
+  allowHls: boolean;
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";

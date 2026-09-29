@@ -213,7 +213,7 @@ describe("the OUTERMOST view is on the chain too", () => {
   // stopped it. Seen in a browser, invisible to every unit test.
   test("a tile pointing at its own view draws the notice, not a second copy", async () => {
     await draw(React.createElement(LayoutRenderer, {
-      layout: SELF_VIEW.layout, viewId: "v-self", ndiSource: null, interactive: false,
+      layout: SELF_VIEW.layout, viewId: "v-self", ndiSource: null, interactive: false, allowHls: true,
     } as never));
 
     assert.ok(screen.getByText(/cannot contain itself/i), "the view embedded itself without a notice");

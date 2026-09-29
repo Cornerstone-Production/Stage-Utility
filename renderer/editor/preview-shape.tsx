@@ -99,6 +99,9 @@ export function ShapePreview({
             ndiSource={ndiSource}
             interactive={false}
             surface={surface}
+            // A preview is never the real screen a switched-off display would
+            // refuse HLS on.
+            allowHls
           />
         </div>
       </div>
