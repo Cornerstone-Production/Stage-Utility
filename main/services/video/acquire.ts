@@ -59,7 +59,21 @@ async function exists(p: string): Promise<boolean> {
 export async function relayBinaryPresent(): Promise<boolean> {
   const asset = ASSETS.get(`${process.platform}-${process.arch}`);
   if (!asset) return false;
-  return exists(path.join(relayDir(), MEDIAMTX_VERSION, asset.exe));
+  return usableBinary(path.join(relayDir(), MEDIAMTX_VERSION, asset.exe));
+}
+
+/** A file with bytes in it that this process may run — not merely a name.
+ *  An extract interrupted partway leaves the name with no bytes, and a file
+ *  can lose its execute bit; neither is a binary to trust. */
+async function usableBinary(exePath: string): Promise<boolean> {
+  try {
+    const st = await fsp.stat(exePath);
+    if (!st.isFile() || st.size === 0) return false;
+    if (process.platform !== "win32") await fsp.access(exePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false; // missing, or not runnable: extracted again
+  }
 }
 
 async function sha256OfFile(filePath: string): Promise<string> {
@@ -160,6 +174,16 @@ type EnsureBinaryResult =
   | { ok: true; path: string }
   | { ok: false; reason: string; placeArchiveAt: string; assetName: string | null };
 
+/** Where an extract is staged before it is renamed into place: beside the
+ *  version directory, so the rename stays on one filesystem. */
+const STAGING_SUFFIX = ".partial";
+
+/**
+ * Extracts into a staging directory and renames it into place only once the
+ * binary in it is there and runnable, so the version directory is either
+ * whole or absent — a crash mid-extract can never leave a partial one under
+ * the name the next start trusts.
+ */
 async function extractAndFinish(
   archivePath: string,
   downloadsDir: string,
@@ -168,44 +192,45 @@ async function extractAndFinish(
   exePath: string,
   extract: ExtractFn,
 ): Promise<EnsureBinaryResult> {
+  const staging = `${versionDir}${STAGING_SUFFIX}`;
+  const stagedExe = path.join(staging, asset.exe);
+  const failed = async (reason: string): Promise<EnsureBinaryResult> => {
+    await fsp.rm(staging, { recursive: true, force: true });
+    return { ok: false, reason, placeArchiveAt: downloadsDir, assetName: asset.name };
+  };
+  await fsp.rm(staging, { recursive: true, force: true });
   try {
-    await extract(archivePath, versionDir, asset.exe);
+    await extract(archivePath, staging, asset.exe);
   } catch (err) {
-    return {
-      ok: false,
-      reason: `extracting ${asset.name} failed: ${errorMessage(err)}`,
-      placeArchiveAt: downloadsDir,
-      assetName: asset.name,
-    };
+    return failed(`extracting ${asset.name} failed: ${errorMessage(err)}`);
   }
   if (process.platform !== "win32") {
     try {
-      await fsp.chmod(exePath, 0o755);
+      await fsp.chmod(stagedExe, 0o755);
     } catch (err) {
-      return {
-        ok: false,
-        reason: `could not make ${exePath} executable: ${errorMessage(err)}`,
-        placeArchiveAt: downloadsDir,
-        assetName: asset.name,
-      };
+      return failed(`could not make ${stagedExe} executable: ${errorMessage(err)}`);
     }
   }
+  if (!(await usableBinary(stagedExe))) return failed(`${asset.name} held no runnable ${asset.exe}`);
+  await fsp.rm(versionDir, { recursive: true, force: true });
+  await fsp.rename(staging, versionDir);
   return { ok: true, path: exePath };
 }
 
 /**
  * Makes sure the pinned MediaMTX binary is on disk, in this order:
  *
- *   1. Already extracted (`<version>/<exe>`) — used as-is, no fetch, no
- *      re-verification.
+ *   1. Already extracted (`<version>/<exe>`, there and runnable) — used
+ *      as-is, no fetch, no re-verification. A version directory without a
+ *      runnable binary is removed and extracted again.
  *   2. A hand-placed archive in `downloads/` — verified against the pinned
  *      checksum. A match extracts with no fetch; a mismatch is refused and
  *      left in place (it is the operator's file).
  *   3. Otherwise downloaded, verified, and extracted.
  *
  * Every failure returns `{ ok: false, reason, placeArchiveAt }` rather than
- * throwing — the caller (the relay's status) turns that straight into what
- * the page shows.
+ * throwing, whatever step it came from — the caller (the relay's status)
+ * turns that straight into what the page shows.
  */
 export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<EnsureBinaryResult> {
   const assets = opts.assets ?? ASSETS;
@@ -221,13 +246,31 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
     };
   }
 
+  // Every failure is returned, whatever step it came from — the relay's
+  // status is built from what this answers, and a throw would bypass it.
+  try {
+    return await ensureAsset(asset, downloadsDir, opts);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `could not set up MediaMTX ${MEDIAMTX_VERSION}: ${errorMessage(err)}`,
+      placeArchiveAt: downloadsDir,
+      assetName: asset.name,
+    };
+  }
+}
+
+async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: EnsureBinaryOptions): Promise<EnsureBinaryResult> {
   const versionDir = path.join(relayDir(), MEDIAMTX_VERSION);
   const exePath = path.join(versionDir, asset.exe);
   const archivePath = path.join(downloadsDir, asset.name);
   const partPath = `${archivePath}.part`;
   const extract = opts.extract ?? realExtract;
 
-  if (await exists(exePath)) return { ok: true, path: exePath };
+  if (await usableBinary(exePath)) return { ok: true, path: exePath };
+  // Anything else under the version's name is a partial extract, or a
+  // binary that lost its mode: removed, and extracted again below.
+  await fsp.rm(versionDir, { recursive: true, force: true });
 
   if (await exists(archivePath)) {
     const got = await sha256OfFile(archivePath);

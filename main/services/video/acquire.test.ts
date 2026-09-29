@@ -195,6 +195,83 @@ test("an already-extracted binary is used as-is, with no fetch", async () => {
   assert.equal(result.path, exePath);
 });
 
+// A binary is trusted only once it is there to run: a version directory left
+// half-written (the server stopped mid-extract) or holding a file that lost
+// its mode is removed and extracted again, and an extract lands in place in
+// one rename, so a crash can never leave a partial one under the real name.
+
+test("a version directory with no usable binary is removed and extracted again", async () => {
+  await resetRelayDir();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  const { sha256 } = await buildArchive(downloadsDir, "mediamtx-partial.tar.gz");
+  const assets = new Map([[KEY, asset("mediamtx-partial.tar.gz", sha256)]]);
+  const versionDir = path.join(relayDir(), MEDIAMTX_VERSION);
+  await fs.mkdir(versionDir, { recursive: true });
+  const exePath = path.join(versionDir, EXE);
+  await fs.writeFile(exePath, ""); // a crash mid-extract: the name, no bytes
+  await fs.writeFile(path.join(versionDir, "stray"), "left by the interrupted extract");
+
+  const result = await ensureBinary({ assets, fetchImpl: throwIfCalled() });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(await fs.readFile(exePath, "utf8"), "#!/bin/sh\necho fake-mediamtx\n");
+  await assert.rejects(fs.access(path.join(versionDir, "stray")), "the partial extract must be removed, not merged into");
+});
+
+test(
+  "a binary that is there but not executable is not trusted",
+  { skip: process.platform === "win32" ? "no execute bit on win32" : false },
+  async () => {
+    await resetRelayDir();
+    const downloadsDir = path.join(relayDir(), "downloads");
+    const { sha256 } = await buildArchive(downloadsDir, "mediamtx-nox.tar.gz");
+    const assets = new Map([[KEY, asset("mediamtx-nox.tar.gz", sha256)]]);
+    const versionDir = path.join(relayDir(), MEDIAMTX_VERSION);
+    await fs.mkdir(versionDir, { recursive: true });
+    const exePath = path.join(versionDir, EXE);
+    await fs.writeFile(exePath, "#!/bin/sh\necho lost-its-mode\n");
+    await fs.chmod(exePath, 0o644);
+
+    const result = await ensureBinary({ assets, fetchImpl: throwIfCalled() });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal((await fs.stat(exePath)).mode & 0o777, 0o755);
+    assert.equal(await fs.readFile(exePath, "utf8"), "#!/bin/sh\necho fake-mediamtx\n");
+  },
+);
+
+test("an extract that fails partway leaves nothing under the version's name", async () => {
+  await resetRelayDir();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  const { sha256 } = await buildArchive(downloadsDir, "mediamtx-midway.tar.gz");
+  const assets = new Map([[KEY, asset("mediamtx-midway.tar.gz", sha256)]]);
+  const result = await ensureBinary({
+    assets,
+    fetchImpl: throwIfCalled(),
+    extract: async (_archive, destDir, member) => {
+      await fs.mkdir(destDir, { recursive: true });
+      await fs.writeFile(path.join(destDir, member), "#!/bin/sh\n"); // half the file
+      throw new Error("tar: Unexpected EOF in archive");
+    },
+  });
+  assert.equal(result.ok, false);
+  await assert.rejects(fs.access(path.join(relayDir(), MEDIAMTX_VERSION)), "a failed extract left a version directory behind");
+  const leftovers = (await fs.readdir(relayDir())).filter((n) => n !== "downloads");
+  assert.deepEqual(leftovers, [], `a failed extract left its staging behind: ${leftovers.join(", ")}`);
+});
+
+// ensureBinary's contract is "every failure returns, never throws" — the
+// relay's status is built from what it returns.
+test("a filesystem failure outside the steps with their own handling is returned, not thrown", async () => {
+  await resetRelayDir();
+  await fs.mkdir(relayDir(), { recursive: true });
+  await fs.writeFile(path.join(relayDir(), "downloads"), "a file where the downloads folder goes");
+  const assets = new Map([[KEY, asset("mediamtx-nodir.tar.gz", "b".repeat(64))]]);
+  const result = await ensureBinary({ assets, fetchImpl: (async () => new Response("x")) as unknown as typeof fetch });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.reason, /could not set up MediaMTX/);
+  assert.equal(result.assetName, "mediamtx-nodir.tar.gz");
+});
+
 test("a failing extract step is reported, not thrown, and leaves no binary behind", async () => {
   await resetRelayDir();
   const downloadsDir = path.join(relayDir(), "downloads");
