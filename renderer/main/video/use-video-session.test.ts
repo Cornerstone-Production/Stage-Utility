@@ -886,7 +886,7 @@ test("an HLS-off screen logs the can't-play line once, not once per rerender", a
     await act(async () => {
       await flush();
     });
-    assert.deepEqual(logs, [`"Program" can't play on this screen: it needs HLS, and HLS is off here`]);
+    assert.deepEqual(logs, [`Program can't play on this screen: it needs HLS, and HLS is off here`]);
 
     // Three more renders off a fresh object each time (what a repeated
     // video:state push looks like) — same status, so the same outage.
@@ -931,7 +931,7 @@ test("recovers once the screen allows HLS again, with exactly one recovery line"
       await flush();
     });
     assert.equal(logs.length, 2, "expected exactly one recovery line");
-    assert.match(logs[1]!, /^"Program" can play on this screen again after \d+ failed attempts?/);
+    assert.match(logs[1]!, /^Program can play on this screen again after \d+ failed attempts?/);
 
     // Turning it off and on again a second time is a SECOND outage with its
     // own first line and its own recovery — not silence, and not a stale
@@ -945,7 +945,7 @@ test("recovers once the screen allows HLS again, with exactly one recovery line"
       await flush();
     });
     assert.equal(logs.length, 4, "expected a second outage to log its own start and its own recovery");
-    assert.equal(logs[2], `"Program" can't play on this screen: it needs HLS, and HLS is off here`);
+    assert.equal(logs[2], `Program can't play on this screen: it needs HLS, and HLS is off here`);
   } finally {
     undoHls();
     cleanup();

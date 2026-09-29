@@ -710,10 +710,15 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     const key = `${feedRef.current?.id ?? ""}:hls-off`;
     if (needsHls) {
       const d = streak().fail(key, "hls-off-here", Date.now());
-      if (d.log) onLogRef.current?.(`"${name}" can't play on this screen: it needs HLS, and HLS is off here${d.note}`);
+      // No quotes around the name here — unlike this file's other quoted
+      // transition lines, this one matches the widget's OWN failure-style
+      // lines (playback-stats.ts's "<name>: could not read playback stats"),
+      // since it is reporting the exact same "can't play" state the on-
+      // screen cover shows, which is never quoted either.
+      if (d.log) onLogRef.current?.(`${name} can't play on this screen: it needs HLS, and HLS is off here${d.note}`);
     } else {
       const d = streak().ok(key, Date.now());
-      if (d.log) onLogRef.current?.(`"${name}" can play on this screen again${d.note}`);
+      if (d.log) onLogRef.current?.(`${name} can play on this screen again${d.note}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, verdict.kind === "cant-play" ? verdict.reason : verdict.kind, feedRef, onLogRef]);
