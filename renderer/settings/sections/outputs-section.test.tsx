@@ -246,12 +246,17 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
 });
 
 test("OutputsSection builds the box from the pair's episode, not its live window, when the two differ", async () => {
-  // The live window has diluted to 60 of 1000 at 720p with no stalls; the
-  // episode, the worst minute of this struggle, was 240 dropped at 1080p with
-  // 4 stalls. Every number in the box must be the episode's.
+  // The live window shares the episode's 240 dropped but has decoded ten
+  // times as many frames (10000 vs the episode's 1000) with no stalls; the
+  // episode, the worst minute of this struggle, was 240 dropped of 1000
+  // decoded at 1080p with 4 stalls. Reading decodedInWindow off the live
+  // window would put the drop fraction at 2.4% (under the 5% line) instead
+  // of the episode's 24%, flipping the box to the stall-only line — so this
+  // also catches a regression that maps every field but that one from the
+  // episode. Every number in the box must be the episode's.
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 60, decodedInWindow: 1000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 } },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 240, decodedInWindow: 10000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 } },
     ]),
   );
   render(
