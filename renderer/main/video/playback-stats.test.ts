@@ -54,7 +54,7 @@ test("webrtc: decoded/dropped are deltas since the last sample; width/height are
     { framesDecoded: 90, framesDropped: 3, frameWidth: 1920, frameHeight: 1080 },
   ]);
   const video = new FakeVideoEl() as unknown as HTMLVideoElement;
-  const sampler = createSampler("feed-1", "Feed", "webrtc", video, noLog, pc);
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
   try {
     const first = await sampler.sample();
     assert.deepEqual(first, { feedId: "feed-1", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720 });
@@ -71,7 +71,7 @@ test("webrtc: a new session's counters starting over read as a zero delta, not n
     { framesDecoded: 4, framesDropped: 0, frameWidth: 1280, frameHeight: 720 }, // a fresh attempt's own counters
   ]);
   const video = new FakeVideoEl() as unknown as HTMLVideoElement;
-  const sampler = createSampler("feed-1", "Feed", "webrtc", video, noLog, pc);
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
   try {
     await sampler.sample();
     const report = await sampler.sample();
@@ -85,7 +85,7 @@ test("webrtc: a new session's counters starting over read as a zero delta, not n
 test("webrtc: no inbound-rtp video report at all is also skipped, not reported as zeros", async () => {
   const video = new FakeVideoEl() as unknown as HTMLVideoElement;
   const pc = { getStats: async () => new Map([["out", { type: "outbound-rtp", kind: "video" }]]) } as unknown as RTCPeerConnection;
-  const sampler = createSampler("feed-1", "Feed", "webrtc", video, noLog, pc);
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
   try {
     assert.equal(await sampler.sample(), null);
   } finally {
@@ -120,7 +120,7 @@ class FakeHlsVideoEl extends EventTarget {
 
 test("hls: totalVideoFrames/droppedVideoFrames are deltas; videoWidth/Height are the current size", async () => {
   const video = new FakeHlsVideoEl(1280, 720, 50, 2);
-  const sampler = createSampler("feed-2", "Feed", "hls", video as unknown as HTMLVideoElement, noLog);
+  const sampler = createSampler("feed-2", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
   try {
     const first = await sampler.sample();
     assert.deepEqual(first, { feedId: "feed-2", via: "hls", decoded: 50, dropped: 2, stalls: 0, width: 1280, height: 720 });
@@ -136,7 +136,7 @@ test("hls: totalVideoFrames/droppedVideoFrames are deltas; videoWidth/Height are
 
 test("a `waiting` event on the <video> counts as a stall, as a delta like any other counter", async () => {
   const video = new FakeHlsVideoEl(0, 0, 0, 0);
-  const sampler = createSampler("feed-3", "Feed", "hls", video as unknown as HTMLVideoElement, noLog);
+  const sampler = createSampler("feed-3", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
   try {
     video.dispatchEvent(new Event("waiting"));
     video.dispatchEvent(new Event("waiting"));
@@ -152,12 +152,12 @@ test("a `waiting` event on the <video> counts as a stall, as a delta like any ot
 
 test("stop() drops the `waiting` listener: a stall after stop() is never counted", async () => {
   const video = new FakeHlsVideoEl(0, 0, 0, 0);
-  const sampler = createSampler("feed-3", "Feed", "hls", video as unknown as HTMLVideoElement, noLog);
+  const sampler = createSampler("feed-3", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
   sampler.stop();
   video.dispatchEvent(new Event("waiting"));
   // A fresh sampler on the same element proves the old listener is gone: if it
   // were still attached, this stall would show up as 2, not 1.
-  const after = createSampler("feed-3", "Feed", "hls", video as unknown as HTMLVideoElement, noLog);
+  const after = createSampler("feed-3", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
   video.dispatchEvent(new Event("waiting"));
   const report = await after.sample();
   after.stop();
@@ -179,7 +179,7 @@ function rejectingPc(message = "getStats failed") {
 
 test("webrtc: getStats() rejecting skips that sample — null, never a throw into the caller", async () => {
   const video = new FakeVideoEl() as unknown as HTMLVideoElement;
-  const sampler = createSampler("feed-1", "Feed", "webrtc", video, noLog, rejectingPc());
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc: rejectingPc() }, video, noLog);
   try {
     const report = await sampler.sample();
     assert.equal(report, null);
@@ -191,7 +191,7 @@ test("webrtc: getStats() rejecting skips that sample — null, never a throw int
 test("a persistent getStats() rejection logs once across several heartbeats, not once per heartbeat", async () => {
   const video = new FakeVideoEl() as unknown as HTMLVideoElement;
   const logs: string[] = [];
-  const sampler = createSampler("feed-1", "Program (IMAG)", "webrtc", video, (r) => logs.push(r), rejectingPc("connection error"));
+  const sampler = createSampler("feed-1", "Program (IMAG)", { via: "webrtc", pc: rejectingPc("connection error") }, video, (r) => logs.push(r));
   try {
     await sampler.sample();
     await sampler.sample();
@@ -218,7 +218,7 @@ test("recovery after a persistent rejection logs once, once the success has sett
       return new Map([["in", { type: "inbound-rtp", kind: "video", framesDecoded: 1, framesDropped: 0, frameWidth: 0, frameHeight: 0 }]]);
     },
   } as unknown as RTCPeerConnection;
-  const sampler = createSampler("feed-1", "Program (IMAG)", "webrtc", video, (r) => logs.push(r), pc);
+  const sampler = createSampler("feed-1", "Program (IMAG)", { via: "webrtc", pc }, video, (r) => logs.push(r));
   try {
     await sampler.sample();
     await sampler.sample();
@@ -251,7 +251,7 @@ test("a rejection after stop() (the session closing on purpose) logs nothing", a
         resolveGetStats = () => reject(new Error("connection closed"));
       }),
   } as unknown as RTCPeerConnection;
-  const sampler = createSampler("feed-1", "Program (IMAG)", "webrtc", video, (r) => logs.push(r), pc);
+  const sampler = createSampler("feed-1", "Program (IMAG)", { via: "webrtc", pc }, video, (r) => logs.push(r));
   const pending = sampler.sample();
   sampler.stop(); // the attempt ends WHILE the getStats() call is still in flight
   resolveGetStats();

@@ -25,7 +25,7 @@ import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
 import { browserCaps, choosePlayback } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
-import { createSampler, type PlaybackSampler } from "./playback-stats";
+import { createSampler, type PlaybackSampler, type SampleSource } from "./playback-stats";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
 
 /**
@@ -758,10 +758,8 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           // session's (or a prior method's) baseline across the swap.
           samplerRef.current?.stop();
           const onStatsLog = (reason: string) => onLogRef.current?.(reason);
-          samplerRef.current =
-            activeSession.method === "webrtc"
-              ? createSampler(key, name, "webrtc", video, onStatsLog, activeSession.pc)
-              : createSampler(key, name, "hls", video, onStatsLog);
+          const source: SampleSource = activeSession.method === "webrtc" ? { via: "webrtc", pc: activeSession.pc } : { via: "hls" };
+          samplerRef.current = createSampler(key, name, source, video, onStatsLog);
         },
         onWebrtcUnusable: (reason) => {
           if (!webrtcOutageRef.current) onLogRef.current?.(`WebRTC unusable for "${name}" on this screen: ${reason}`);

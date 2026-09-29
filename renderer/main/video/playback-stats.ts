@@ -65,6 +65,11 @@ function readHlsCounts(video: HTMLVideoElement): RawCounts {
   return { decoded: q?.totalVideoFrames ?? 0, dropped: q?.droppedVideoFrames ?? 0, width: video.videoWidth, height: video.videoHeight };
 }
 
+/** What a sampler reads from — `pc` only exists on the `webrtc` arm, so the
+ *  type checker enforces "every webrtc caller has one," rather than
+ *  `createSampler` asserting it at runtime with a `pc!`. */
+export type SampleSource = { via: "webrtc"; pc: RTCPeerConnection } | { via: "hls" };
+
 export interface PlaybackSampler {
   /** This attempt's current report — decoded/dropped/stalls as deltas since
    *  the last call, width/height as they stand now. Null when nothing could
@@ -78,10 +83,11 @@ export interface PlaybackSampler {
 }
 
 /**
- * One sampler for the session actually on screen. `pc` is required for
- * `via: "webrtc"` (its `inbound-rtp` report is the source of truth there —
- * `getVideoPlaybackQuality()` on an element playing a MediaStream is not) and
- * ignored for `via: "hls"`.
+ * One sampler for the session actually on screen. `source.pc` is what
+ * `via: "webrtc"` reads from (its `inbound-rtp` report is the source of
+ * truth there — `getVideoPlaybackQuality()` on an element playing a
+ * MediaStream is not); `via: "hls"` reads `video` directly and carries no
+ * `pc` at all.
  *
  * Every counter starts at zero: a fresh sampler is built for every new
  * attempt, including a swap between methods (HLS handing over to an adopted
@@ -103,10 +109,9 @@ export interface PlaybackSampler {
 export function createSampler(
   feedId: string,
   name: string,
-  via: "webrtc" | "hls",
+  source: SampleSource,
   video: HTMLVideoElement,
   onLog: (reason: string) => void,
-  pc?: RTCPeerConnection,
 ): PlaybackSampler {
   let stopped = false;
   let stalls = 0;
@@ -119,7 +124,7 @@ export function createSampler(
   const droppedDelta = trackDelta();
   const stallsDelta = trackDelta();
   const statsOutage = new OutageLog();
-  const read = (): Promise<RawCounts | null> => (via === "webrtc" ? readWebrtcCounts(pc!) : Promise.resolve(readHlsCounts(video)));
+  const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? readWebrtcCounts(source.pc) : Promise.resolve(readHlsCounts(video)));
 
   return {
     sample: async () => {
@@ -142,7 +147,7 @@ export function createSampler(
       if (!raw) return null;
       return {
         feedId,
-        via,
+        via: source.via,
         decoded: decodedDelta(raw.decoded),
         dropped: droppedDelta(raw.dropped),
         stalls: stallsDelta(stalls),
