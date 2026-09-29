@@ -159,10 +159,9 @@ export class RelayLifecycle {
   /** The ports the CURRENT supervisor was started with — for the readiness
    *  poll's own "relay started" log line. Not threaded through every call
    *  as a parameter: the poll is armed from two places (a fresh start, and
-   *  the supervisor's own "running" status event) and both already know it
-   *  by the time they need it. */
+   *  a respawn's "running", handed on by video-service.ts) and both already
+   *  know it by the time they need it. */
   private currentPorts: VideoPorts | null = null;
-  private statusListener: ((status: SupervisorStatus) => void) | null = null;
   /** Pre-supervisor failure backoff (a busy port, a failed download, a
    *  config write that could not be written) — reset once those checks pass
    *  and a supervisor is created; the supervisor's OWN crash-loop backoff
@@ -499,15 +498,11 @@ export class RelayLifecycle {
       }
 
       const supervisor = this.deps.makeSupervisor();
-      this.statusListener = (status) => this.onSupervisorStatus(status);
-      supervisor.on("status", this.statusListener);
       try {
         // The same write before every respawn: this start's ports and API
         // password, and the feeds and push passwords as they are by then.
         await supervisor.start(ensured.path, configPath, writeConfig);
       } catch (err) {
-        supervisor.off("status", this.statusListener);
-        this.statusListener = null;
         this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, "spawn", undefined, undefined);
         return;
       }
@@ -539,8 +534,6 @@ export class RelayLifecycle {
       } catch (err) {
         this.supervisor = null;
         this.currentPorts = null;
-        supervisor.off("status", this.statusListener);
-        this.statusListener = null;
         let reason = `could not start the relay: ${errorMessage(err)}`;
         try {
           await supervisor.stop();
@@ -557,19 +550,22 @@ export class RelayLifecycle {
     }
   }
 
-  /** The supervisor's own status changing — spawn, crash-and-respawn, or a
-   *  stop. Manages the readiness poll only: the connection row is driven
-   *  entirely off video-service.ts's own publish() (handleRelayStatus,
-   *  above), which a status change reaches through video-service's OWN
-   *  listener (registered in attachRelay(), and — for every transition
-   *  after the very first — always in time to see it). */
-  private onSupervisorStatus(status: SupervisorStatus): void {
-    // Only once attached: the first "running" arrives from inside
-    // supervisor.start(), before attachRelay(), when a reconcile has no relay
-    // to reach and answers true for nothing — startRelay() starts that
-    // first poll itself, after the attach. Every later "running" is a
-    // respawn whose empty relay needs its paths again.
+  /** video-service.ts's setRelayProcessListener hook: the attached
+   *  supervisor's status changing — crash-and-respawn, or a stop. Manages the
+   *  readiness poll only; the connection row is handleRelayStatus()'s.
+   *
+   *  Heard through the service rather than as a second "status" listener on
+   *  the supervisor, so it always runs after the service has forgotten the
+   *  previous process. Called first, a respawn's reconcile captured the old
+   *  process's generation, and its success was discarded as stale: every
+   *  feed refused playback until something else reconciled. The service
+   *  attaches only after supervisor.start(), so the first "running" never
+   *  arrives here — startRelay() starts that poll itself. Public because it
+   *  is wired from outside this class, as handleRelayStatus() is. */
+  handleSupervisorStatus(status: SupervisorStatus): void {
     if (status.state === "running") {
+      // A relay this lifecycle did not start (one a test attaches to the
+      // service directly) is not its to reconcile.
       if (!this.supervisor) return;
       // A respawn is a new process: the log says it came up, as it did the
       // first one.
@@ -647,8 +643,6 @@ export class RelayLifecycle {
     this.currentPorts = null;
     this.starting = false;
     this.attempt = 0;
-    if (supervisor && this.statusListener) supervisor.off("status", this.statusListener);
-    this.statusListener = null;
     try {
       if (supervisor) await supervisor.stop();
     } catch (err) {
@@ -675,3 +669,4 @@ export const relayLifecycle = new RelayLifecycle();
 videoService.setFeedsChangedListener(() => relayLifecycle.feedsChanged());
 videoService.setPortsChangedListener(() => relayLifecycle.portsChanged());
 videoService.setRelayStatusListener((relay) => relayLifecycle.handleRelayStatus(relay));
+videoService.setRelayProcessListener((status) => relayLifecycle.handleSupervisorStatus(status));

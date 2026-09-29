@@ -208,6 +208,13 @@ class VideoService {
    *  recovering from it) reaches the row exactly the same way a supervisor
    *  event does, rather than only the page that happens to be open. */
   private relayStatusListener: ((relay: RelayStatus) => void) | null = null;
+  /** relay-lifecycle.ts's readiness poll, told of every status change of the
+   *  attached supervisor AFTER handleStatusChange() has forgotten the previous
+   *  process. The service is the supervisor's only "status" listener: a
+   *  second one called first could start a reconcile that captures the old
+   *  process's generation, and a success it then discards as stale left the
+   *  new process refusing every feed. */
+  private relayProcessListener: ((status: SupervisorStatus) => void) | null = null;
   /**
    * The ports the CURRENT relay process was actually started with — pinned
    * at attachRelay(), never re-read from the store while the same process
@@ -535,6 +542,12 @@ class VideoService {
     this.relayStatusListener = cb;
   }
 
+  /** relay-lifecycle.ts's hook for the attached supervisor's status — see the
+   *  field's own comment for why it goes through here. `null` clears it. */
+  setRelayProcessListener(cb: ((status: SupervisorStatus) => void) | null): void {
+    this.relayProcessListener = cb;
+  }
+
   /** `PATCH /api/video/ports`: validated, saved, and — only when the saved
    *  values actually changed — relay-lifecycle.ts told to restart an
    *  already-running relay on the new ones. */
@@ -738,6 +751,9 @@ class VideoService {
     this.requestedAt.clear();
     if (status.state !== "running") this.lastPaths = new Map();
     void this.settleFeeds();
+    // Last: a reconcile the readiness poll starts from here captures the
+    // generation just bumped, so its success counts for this process.
+    this.relayProcessListener?.(status);
   }
 
   /**

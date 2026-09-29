@@ -137,6 +137,7 @@ function activate(lifecycle: InstanceType<typeof RelayLifecycle>): InstanceType<
   videoService.setFeedsChangedListener(() => lifecycle.feedsChanged());
   videoService.setPortsChangedListener(() => lifecycle.portsChanged());
   videoService.setRelayStatusListener((relay) => lifecycle.handleRelayStatus(relay));
+  videoService.setRelayProcessListener((status) => lifecycle.handleSupervisorStatus(status));
   return lifecycle;
 }
 
@@ -151,6 +152,7 @@ afterEach(async () => {
   videoService.setFeedsChangedListener(null);
   videoService.setPortsChangedListener(null);
   videoService.setRelayStatusListener(null);
+  videoService.setRelayProcessListener(null);
   await videoService.detachRelay();
   videoService.setPreAttachStatus(null);
   await setRelayFeeds(0);
@@ -973,6 +975,31 @@ test("a respawned relay is reconciled again: its paths went with the process tha
   supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000, neverStarted: false });
   supervisors[0]!.setStatus({ state: "running", since: Date.now() });
   await waitUntil(() => reconciles === 2);
+});
+
+// The readiness poll's first tick starts from inside the supervisor's own
+// "running" event. A reconcile that succeeds on that first attempt must count
+// for the new process, whichever "status" listener the supervisor calls first.
+test("a respawn whose first reconcile succeeds serves its feeds, with no feed edit", async () => {
+  let reconciles = 0;
+  const { deps, supervisors } = makeDeps({ makeRelay: () => fakeRelay({ reconcile: async () => void reconciles++ }) });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1, "pull");
+  lifecycle.setEnabled(true);
+  await waitUntil(() => reconciles === 1);
+  await waitUntil(() => !("refuse" in videoService.relayTarget("f0", "whep")));
+
+  supervisors[0]!.setStatus({ state: "failing", reason: "killed by SIGKILL", retryAt: Date.now() + 1000, neverStarted: false });
+  supervisors[0]!.setStatus({ state: "running", since: Date.now() });
+  await waitUntil(() => reconciles === 2);
+  await waitUntil(() => videoService.current().relay.state === "running");
+  await settle();
+
+  assert.deepEqual(videoService.relayTarget("f0", "whep"), {
+    host: "127.0.0.1",
+    port: DEFAULT_VIDEO_PORTS.webrtcHttp,
+    path: "/f0/whep",
+  });
 });
 
 test("a normal start logs no reconcile failure: the first attempt lands before the relay's API is open", async (t: TestContext) => {
