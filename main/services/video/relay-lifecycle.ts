@@ -450,7 +450,6 @@ export class RelayLifecycle {
         return;
       }
 
-      this.attempt = 0;
       this.currentPorts = ports;
       this.starting = false;
       const recovered = this.prelaunchOutage.ok("relay-prelaunch", Date.now());
@@ -467,13 +466,37 @@ export class RelayLifecycle {
         this.supervisor = supervisor;
         videoService.attachRelay(this.deps.makeRelay(ports.api), supervisor, ports);
         this.startReadinessPoll();
+        // item 6 (findings-t15-r3.md): reset ONLY here, once attach has
+        // genuinely succeeded — resetting it before this try (as it used
+        // to) made a makeRelay/attachRelay that keeps throwing retry on
+        // the SAME 1 s floor forever (restartDelayMs(0) every time,
+        // confirmed empirically: 31 supervisors created and orphaned in
+        // 30 s of mocked time), rather than backing off like every other
+        // repeated pre-supervisor failure.
+        this.attempt = 0;
       } catch (err) {
         this.supervisor = null;
         this.currentPorts = null;
         supervisor.off("status", this.statusListener);
         this.statusListener = null;
-        await supervisor.stop().catch(() => {});
-        this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, "spawn", undefined, undefined);
+        let reason = `could not start the relay: ${errorMessage(err)}`;
+        try {
+          await supervisor.stop();
+        } catch (stopErr) {
+          // item 7 (findings-t15-r3.md): a failed stop() here used to be
+          // swallowed entirely (`.catch(() => {})`) — an orphaned
+          // supervisor whose OWN stop() throws (killLeftover()'s own
+          // EPERM, say) left nothing telling an operator the stop itself
+          // failed too, only the attach failure that triggered it. Logged
+          // once per outage, same as every other pre-supervisor failure,
+          // and folded into the reason the status/connection row shows —
+          // "keep the failure visible in status", not just the log.
+          const stopReason = `could not stop the orphaned relay process: ${errorMessage(stopErr)}`;
+          const decision = this.prelaunchOutage.fail("relay-prelaunch-stop", stopReason, Date.now());
+          if (decision.log) console.warn(`[video] ${scrub(stopReason)}${scrub(decision.note)}`);
+          reason = `${reason}; ${stopReason}`;
+        }
+        this.failPreSupervisor(reason, "spawn", undefined, undefined);
       }
     } catch (err) {
       this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, "spawn", undefined, undefined);
@@ -549,9 +572,25 @@ export class RelayLifecycle {
     this.attempt = 0;
     if (supervisor && this.statusListener) supervisor.off("status", this.statusListener);
     this.statusListener = null;
-    if (supervisor) await supervisor.stop();
-    await videoService.detachRelay();
-    videoService.setPreAttachStatus(null);
+    try {
+      if (supervisor) await supervisor.stop();
+    } catch (err) {
+      // item 13 (findings-t15-r3.md): a rejected stop() used to skip the
+      // detach/clear below entirely — this class had already forgotten
+      // the supervisor (this.supervisor is null, above), but videoService
+      // had NOT: it stayed attached to the same, now half-stopped
+      // supervisor object, reporting whatever ITS OWN status still said
+      // (typically "running" — the fake or real stop() that rejects never
+      // reaches its own setStatus({state:"off"})). Detach and clear
+      // unconditionally, in a finally, and log the failure once per
+      // outage rather than swallowing it.
+      const reason = `could not stop the relay: ${errorMessage(err)}`;
+      const decision = this.prelaunchOutage.fail("relay-stop", reason, Date.now());
+      if (decision.log) console.warn(`[video] ${scrub(reason)}${scrub(decision.note)}`);
+    } finally {
+      await videoService.detachRelay();
+      videoService.setPreAttachStatus(null);
+    }
   }
 }
 

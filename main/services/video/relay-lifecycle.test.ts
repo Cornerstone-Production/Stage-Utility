@@ -546,6 +546,36 @@ test("PROBE G: a rejected chain step (supervisor.stop() throwing) does not drop 
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
+// item 13 (findings-t15-r3.md): a rejected supervisor.stop() inside
+// stopRelay() used to skip detachRelay()/setPreAttachStatus(null)
+// entirely — this class had already forgotten the supervisor (its own
+// isUp() reads false), but videoService had NOT: it stayed attached to
+// the same, now half-stopped supervisor object, still reporting
+// "running" (the fake's own status never reaches "off" when stop()
+// throws before calling setStatus).
+test("item 13: a rejected stop() still detaches videoService and clears preAttachStatus, logging the failure once", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const warns: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => warns.push(msg));
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running");
+
+  supervisors[0]!.stopRejectsOnce = true;
+  lifecycle.setEnabled(false);
+  await waitUntil(() => videoService.current().relay.state === "off");
+  assert.equal(
+    (await videoService.state()).relay.state,
+    "off",
+    "videoService stayed attached to the half-stopped supervisor",
+  );
+  const stopFailureLines = warns.filter((w) => w.startsWith("[video] could not stop the relay"));
+  assert.equal(stopFailureLines.length, 1, `expected exactly one stop-failure line, got: ${JSON.stringify(warns)}`);
+});
+
 // item 7 (findings-t15-r2.md): this.supervisor used to be assigned before
 // makeRelay()/attachRelay() ran, so a throw from either left this.supervisor
 // pointing at a supervisor with a real, running, UNATTACHED child — isUp()
@@ -583,6 +613,120 @@ test("item 7: a throw from attachRelay stops the orphaned supervisor and lets th
   t.mock.timers.tick(restartDelayMs(0));
   await waitUntil(() => supervisors.length > 1);
   assert.equal((await videoService.state()).relay.state, "running");
+});
+
+// item 7 (findings-t15-r3.md): the orphaned supervisor's own stop() —
+// called from the SAME catch item 7 above added — used to be
+// `.catch(() => {})`, swallowing a failure there completely. A supervisor
+// that will not stop (killLeftover()'s own EPERM, say) is a second real
+// fact an operator needs, not silence.
+test("item 7: a stop() failure on the orphaned supervisor logs once and is folded into the failing reason, not swallowed", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const warns: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => warns.push(msg));
+  const supervisors: FakeSupervisor[] = [];
+  const { deps } = makeDeps({
+    makeSupervisor: () => {
+      const s = new FakeSupervisor();
+      s.stopRejectsOnce = true; // the orphan-cleanup stop() will reject
+      supervisors.push(s);
+      return s;
+    },
+    makeRelay: () => {
+      throw new Error("makeRelay blew up");
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => (videoService.current().relay as { reason?: string }).reason?.includes("could not stop") === true);
+
+  const relay = (await videoService.state()).relay;
+  assert.equal(relay.state, "failing");
+  if (relay.state === "failing") {
+    assert.match(relay.reason, /could not start the relay: makeRelay blew up/);
+    assert.match(relay.reason, /could not stop the orphaned relay process: stop blew up/);
+  }
+  // The console.warn line itself (the OutageLog-gated one, starting with
+  // it), not the (separate) combined failing-reason string that also
+  // mentions it — filtering on "includes" alone double-counted that one.
+  const stopFailureLines = warns.filter((w) => w.startsWith("[video] could not stop the orphaned relay process"));
+  assert.equal(stopFailureLines.length, 1, `expected exactly one stop-failure line, got: ${JSON.stringify(warns)}`);
+});
+
+// item 6 (findings-t15-r3.md, PROBE J): this.attempt used to reset to 0
+// the moment supervisor.start() itself succeeded, BEFORE the attach try —
+// so a makeRelay/attachRelay that keeps throwing always computed its
+// backoff from attempt 0 (a flat 1 s floor forever), never accumulating
+// like every other repeated pre-supervisor failure. Confirmed empirically
+// against the reviewer's own probe before fixing anything: 31 supervisors
+// created (and orphaned) in 30 s of mocked time.
+test("item 6: a makeRelay that keeps throwing backs off between retries, not a flat 1 s floor forever", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { deps, supervisors } = makeDeps({
+    makeRelay: () => {
+      throw new Error("makeRelay blew up");
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+
+  // Ticked in small, fixed steps with many settle() rounds after EACH one
+  // — not two large ticks with a fixed settle() budget in between. The
+  // chain a retry firing kicks off (ensureBinary -> busyPorts -> the
+  // config write -> supervisor.start -> attach -> catch -> stop()) needs
+  // more real event-loop turns to fully resolve than a modest, fixed
+  // settle() count reliably provides — confirmed directly: 400 rounds of
+  // settle() after one 1 s tick was NOT always enough for the chain
+  // triggered by that tick to finish, which made an earlier version of
+  // this test pass whether or not the bug it was meant to catch was
+  // present. Sampling supervisors.length every 1 s of mocked time for 30 s
+  // (mirroring the re-reviewer's own PROBE J) sidesteps needing to know
+  // exactly how many turns is "enough" — by second 30, every real
+  // continuation the mocked clock could have triggered by then has had
+  // ample real time to run.
+  const countAt: number[] = [];
+  for (let sec = 0; sec < 30; sec++) {
+    t.mock.timers.tick(1000);
+    for (let i = 0; i < 60; i++) await settle();
+    countAt.push(supervisors.length);
+  }
+  // Every supervisor created was also stopped — none left orphaned.
+  for (const s of supervisors) assert.equal(s.stopCalls, 1);
+
+  // The backoff schedule this class uses is 1, 2, 4, 8, 16, 30 (capped at
+  // 60 s but restartDelayMs caps at 60 — 30 s of ticking only reaches the
+  // 16 s rung), so at most 5 attempts land inside 30 s: at 1, 3, 7, 15,
+  // and 31 s (the last just past this window). A flat 1 s floor would
+  // instead produce one new supervisor on very nearly every second —
+  // roughly 30 over the same window.
+  assert.ok(
+    supervisors.length <= 6,
+    `expected at most ~5 attempts across 30 s of backoff, got ${supervisors.length} — the retry never backed off`,
+  );
+  assert.ok(supervisors.length >= 4, `expected the backoff schedule to have produced several attempts by 30 s, got ${supervisors.length}`);
+
+  // The gaps between when each new supervisor first appears: the very
+  // first attempt fires immediately (no backoff at all) and the second
+  // waits restartDelayMs(0) = 1 s, so the first TWO gaps are both "1" on
+  // this 1-second sampling grid — expected, not a bug. From the third
+  // attempt on the schedule doubles (2, 4, 8, ...); a flat 1 s floor would
+  // instead read "1" all the way through.
+  const firstSeenAt: number[] = [];
+  for (let i = 0; i < countAt.length; i++) {
+    if (countAt[i] !== (i > 0 ? countAt[i - 1] : 0)) firstSeenAt.push(i);
+  }
+  const gaps = firstSeenAt.map((x, i) => (i ? x - firstSeenAt[i - 1]! : x + 1));
+  assert.ok(
+    gaps.length >= 4,
+    `expected at least 4 sampled attempts to compute gaps from, got ${JSON.stringify(gaps)}`,
+  );
+  assert.deepEqual(gaps.slice(0, 2), [1, 1], `the first two attempts should be ~1 s apart, got ${JSON.stringify(gaps)}`);
+  assert.ok(
+    gaps.slice(2).every((g, i) => g > (i === 0 ? gaps[1]! : gaps[2 + i - 1]!)),
+    `retry gaps must grow from the third attempt on, got ${JSON.stringify(gaps)}`,
+  );
 });
 
 // item 12 (findings-t15-r2.md, PROBE H): prelaunchOutage was never reset
@@ -792,7 +936,11 @@ test("an unsupported platform (assetName: null) never invents a hand-place path"
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  // waitUntil(), not a bare settle() — item 10 (findings-t15-r3.md): the
+  // same chain PROBE A and PROBE H were hardened against (a single
+  // macrotask tick is not always enough for ensureBinary -> ... ->
+  // failPreSupervisor to have actually run under real CPU contention).
+  await waitUntil(() => videoService.current().relay.state === "failing");
 
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "failing");
@@ -901,7 +1049,7 @@ test("logs the relay started line once, with its version and ports, and never ag
   // only a fresh startRelay() (setEnabled/feedsChanged reaching a genuinely
   // new attempt) resets loggedStartedThisRun.
   logs.length = 0;
-  supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000 });
+  supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000, neverStarted: false });
   supervisors[0]!.setStatus({ state: "running", since: Date.now() });
   await settle();
   assert.equal(logs.filter((l) => l.includes("relay started")).length, 0, "a crash-respawn re-announced the relay as freshly started");
