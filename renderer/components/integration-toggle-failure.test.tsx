@@ -6,19 +6,14 @@
 // rendered toast text — never a unit test of toggleIntegration() in
 // isolation, since the bug was in what the operator's screen shows.
 //
-// NOT clean of "not wrapped in act" warnings, unlike every other file this
-// round touched: this is the only test anywhere in the suite that drives an
-// ASYNC failure (a rejected fetch) off a click on a full 17-card
-// IntegrationsPanel, and the toast/switch state settles across several
-// microtask hops testing-library's own act-wrapping does not fully cover —
-// confirmed unrelated to this fix (the warnings are identical whether the
-// toast reads "Failed to enable Video feeds: …" or the pre-fix "Failed to
-// enable: Error: …"). Investigated rather than ignored: wrapping the click
-// in `act()` (both sync and async forms) changes nothing, and the file's
-// own ~4.6 s runtime traces to the toast module's real 4 s auto-dismiss
-// timer outliving the test. The assertion itself is exact and real-DOM, so
-// left as the one file with this known noise rather than spending further
-// time chasing a warning with no effect on pass/fail.
+// The 50 "not wrapped in act" warnings this file used to print were my own
+// bug, not an unrelated jsdom quirk (item 4, findings-t15-r3.md, correcting
+// the paragraph that used to be here): integrationCard() polled the mount
+// for the card BEFORE actIdle() had let the initial `integrations:list`
+// query settle — every sibling file (integration-dialog.test.tsx,
+// integrations-visibility.test.tsx) calls actIdle() first, then
+// integrationCard(); this one had the two calls the wrong way round.
+// Swapped, and the file is clean.
 
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
@@ -60,8 +55,8 @@ describe("a failed toggle's toast", () => {
         </>,
       ),
     );
-    const card = await integrationCard(view.container, "video");
     await actIdle();
+    const card = await integrationCard(view.container, "video");
     const sw = card.querySelector<HTMLElement>('[aria-label="Enable Video feeds"]');
     assert.ok(sw, "no enable switch on the video card");
     act(() => {
