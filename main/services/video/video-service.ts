@@ -39,7 +39,6 @@ import {
   type KickResult,
   type PushProtocol,
   type RelayStatus,
-  type ScreenVideoHealth,
   type VideoFeed,
   type VideoFeedsFile,
   type VideoFeedView,
@@ -190,6 +189,24 @@ class VideoService {
 
   /** Every screen's rolling playback window — see playback-health.ts. */
   private readonly playbackHealth = new PlaybackHealth();
+  /**
+   * Which (outputId, feedId) pairs the "struggling"/"smoothly again" lines
+   * last announced as struggling — keyed by playback-health.ts's own
+   * pairKey(). NEVER read `this.snapshot.screens` for this: the relay's own
+   * status poll (STATUS_POLL_MS, while `video:state` is watched) calls
+   * publish() on its own schedule too, and that publish() recomputes
+   * `screens` fresh from `Date.now()` regardless of any presence heartbeat —
+   * including at the exact moment a pair's sticky flag clears from elapsed
+   * time alone. If a poll's own publish() lands in the gap between a pair's
+   * real recovery and the NEXT heartbeat, `this.snapshot.screens` already
+   * shows the pair clean by the time that heartbeat's recordPlaybackReports()
+   * runs, and comparing against it would silently swallow the "smoothly
+   * again" line — the state a client sees is still correct (it came from the
+   * poll's own publish), only the LOG of the transition is lost. This map is
+   * written ONLY by logPlaybackFlips(), so nothing else can ever get ahead of
+   * it — the same reasoning `lastLoggedState` below already applies to a
+   * feed's live/delayed/offline transitions. */
+  private readonly lastLoggedStruggling = new Map<string, boolean>();
 
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
@@ -1559,6 +1576,12 @@ class VideoService {
     // must not read struggling for up to a minute on a build that has never
     // actually measured the new feed's playback.
     this.playbackHealth.forgetFeed(id);
+    // And its own log bookkeeping — otherwise a re-added feed's first
+    // GENUINE struggling episode reads as "already announced" against a
+    // stale `true` from before the delete, and logs nothing.
+    for (const key of this.lastLoggedStruggling.keys()) {
+      if (key.endsWith(`\u0000${id}`)) this.lastLoggedStruggling.delete(key);
+    }
     // Without this, a re-added feed under the same name (a new feed,
     // minting the same deterministic id) reads "offline, last seen <old>"
     // instead of "waiting" — the old feed's history, not its own.
@@ -1614,46 +1637,44 @@ class VideoService {
     if (!stageController.getOutputs().some((o) => o.id === outputId)) return;
     const knownFeedIds = new Set(this.snapshot.feeds.map((f) => f.id));
     const filtered = reports.filter((r) => knownFeedIds.has(r.feedId));
-    // The last snapshot actually PUBLISHED, not a fresh playbackHealth.snapshot()
-    // taken here — see logPlaybackFlips's own comment for why a fresh read at
-    // this same `now` is exactly the wrong "before" to diff against.
-    const before = this.snapshot.screens;
     const changed = this.playbackHealth.record(outputId, filtered, now);
     if (!changed) return;
-    this.logPlaybackFlips(before, now);
+    this.logPlaybackFlips(now);
     void this.publish();
   }
 
   /**
-   * recordPlaybackReports()'s own before/after diff, split out for its own
+   * recordPlaybackReports()'s own log-flip driver, split out for its own
    * comment: logged on the flip only, from either side —
    * `[video] <screen> is struggling with <feed>: dropped <n> of <m>
    * frames, <s> stalls in the last minute` the moment a pair's sticky flag
    * turns true, `[video] <screen> is playing <feed> smoothly again` the
    * moment it turns back false. A struggling pair that simply stops
    * reporting (ages out of the window) is neither — nothing said it
-   * recovered — so it logs nothing; `snapshot()` just stops carrying it.
+   * recovered — so it logs nothing; `snapshot()` just stops carrying it,
+   * and `lastLoggedStruggling` keeps whatever it last held for that pair.
    *
-   * `before` MUST be the last state this service actually told a client
-   * about (`this.snapshot.screens`), never a fresh `playbackHealth.snapshot()`
-   * taken at the SAME `now` this call is about to record at: the sticky flag
-   * clears purely from elapsed time, with no call landing at the exact
-   * moment it happens, so a fresh read of the OLD state at the NEW `now`
-   * would already show the clear too — comparing two readings that agree by
-   * construction and missing the transition entirely. `this.snapshot.screens`
-   * is frozen from whenever it was last actually published, which is exactly
-   * "what a client still believes right now".
+   * Compared against `lastLoggedStruggling`, never against
+   * `this.snapshot.screens`: the relay's own status poll (STATUS_POLL_MS,
+   * while `video:state` is watched) calls publish() on its own schedule,
+   * which recomputes `screens` fresh from `Date.now()` regardless of any
+   * presence heartbeat. If that poll's own publish() lands in the gap
+   * between a pair's real recovery and the next heartbeat,
+   * `this.snapshot.screens` already shows the pair clean by the time THIS
+   * runs — comparing against it would silently swallow the "smoothly
+   * again" line even though playbackHealth.record() correctly reported a
+   * change. `lastLoggedStruggling` is written only here, so nothing else
+   * can ever get ahead of it — see its own field comment.
    */
-  private logPlaybackFlips(before: readonly ScreenVideoHealth[], now: number): void {
-    const beforeByPair = new Map(before.map((h) => [pairKey(h.outputId, h.feedId), h] as const));
+  private logPlaybackFlips(now: number): void {
     const after = this.playbackHealth.snapshot(now);
     const outputs = stageController.getOutputs();
     const screenName = (id: string) => outputs.find((o) => o.id === id)?.name ?? id;
     const feedName = (id: string) => this.snapshot.feeds.find((f) => f.id === id)?.name ?? id;
 
     for (const health of after) {
-      const prev = beforeByPair.get(pairKey(health.outputId, health.feedId));
-      const wasStruggling = prev?.struggling ?? false;
+      const key = pairKey(health.outputId, health.feedId);
+      const wasStruggling = this.lastLoggedStruggling.get(key) ?? false;
       if (health.struggling && !wasStruggling) {
         const total = health.decodedInWindow + health.droppedInWindow;
         console.log(
@@ -1663,6 +1684,7 @@ class VideoService {
       } else if (!health.struggling && wasStruggling) {
         console.log(`[video] ${scrub(screenName(health.outputId))} is playing ${scrub(feedName(health.feedId))} smoothly again`);
       }
+      this.lastLoggedStruggling.set(key, health.struggling);
     }
   }
 }

@@ -14,22 +14,40 @@
 // verification step.
 
 import { strict as assert } from "node:assert";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
+import { fakeRelay } from "../fixtures/fake-relay.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-playback-health-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 
-const { videoService } = await import("./video-service.js");
+const { videoService, videoPollDeps } = await import("./video-service.js");
 const { stageController } = await import("../stage-controller.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
+const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 
 type VideoPlaybackReport = import("../../types/video.js").VideoPlaybackReport;
 type VideoState = import("../../types/video.js").VideoState;
+type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
+type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
+
+/** The smallest RelaySupervisorLike that reports "running" — enough to let
+ *  attachRelay()/pollOnce() run without a real MediaMTX process. Copied
+ *  rather than imported: video-service.test.ts's own FakeSupervisor is not
+ *  exported, and this file needs only the "always running" shape. */
+class FakeSupervisor extends EventEmitter implements RelaySupervisorLike {
+  status(): SupervisorStatus {
+    return { state: "running", since: 1 };
+  }
+  version(): string | null {
+    return null;
+  }
+}
 
 // The one output stageController starts with, before any load() — see its
 // own constructor default. Read rather than hard-coded: PRIMARY_DISPLAY_ID
@@ -196,6 +214,79 @@ test("a screen name and a feed name carrying a control character are scrubbed be
     assert.ok(struggling, "expected a struggling line");
     assert.equal(struggling!.includes("\n"), false, "a raw newline from the feed name must never reach a log line");
   } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+// ── The relay's OWN status poll must never steal a heartbeat's flip ────────
+//
+// STATUS_POLL_MS runs its own publish() cycle whenever `video:state` is
+// watched, entirely independent of any presence heartbeat, and that
+// publish() recomputes `screens` fresh from Date.now(). Found live, driving
+// the real server: a struggling pair's recovery published correctly (the
+// Screens page would have shown it) but the "smoothly again" LINE never
+// printed, because the poll's own publish() had already updated
+// `this.snapshot.screens` to the recovered state by the time the next
+// heartbeat's own before/after diff ran against it — comparing two readings
+// that already agreed and missing the transition. This is the guard for
+// that: an intervening pollOnce() between the last bad sample and the
+// clearing heartbeat must not suppress the log line.
+test("an intervening relay status poll (its own publish, on its own schedule) does not swallow the recovery log line", async (t: TestContext) => {
+  const id = await addRelayFeed("Poll-interleaved feed");
+  const relay = fakeRelay({ status: async () => [] });
+  const supervisor = new FakeSupervisor();
+  const realInDemand = videoPollDeps.inDemand;
+  videoPollDeps.inDemand = () => false; // no timer; pollOnce() is called by hand below
+  const pollOnce = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  const lines = captureConsole(t, "log");
+  try {
+    videoService.attachRelay(relay, supervisor, DEFAULT_VIDEO_PORTS);
+    await settle();
+
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 51 })]);
+    await settle();
+
+    // Five clean heartbeats — still short of CLEAR_AFTER_MS (50 s in), so
+    // the pair is still genuinely struggling at the last one. Diluting fast
+    // so the sticky clock stays pinned to the first bad sample — see the
+    // "logs the struggling..." test above for why a large decoded count
+    // matters here.
+    for (let i = 0; i < 5; i++) {
+      t.mock.timers.tick(10_000);
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 10_000, dropped: 0, stalls: 0 })]);
+      await settle();
+    }
+
+    // Time alone now crosses CLEAR_AFTER_MS, with NO heartbeat in between —
+    // the relay's own status poll is the first thing to notice, on its own
+    // schedule, exactly the interleaving that reproduced the bug live.
+    t.mock.timers.tick(15_000);
+    await pollOnce();
+    await settle();
+    assert.equal(
+      (await videoService.state()).screens.find((s) => s.feedId === id)?.struggling,
+      false,
+      "sanity: the poll's own publish must already show the pair recovered",
+    );
+
+    // The next heartbeat is what must still log the recovery, despite the
+    // poll already having published the same fact with no log line of its
+    // own attached to it.
+    t.mock.timers.tick(10_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 10_000, dropped: 0, stalls: 0 })]);
+    await settle();
+
+    assert.deepEqual(
+      lines.filter((l) => l.includes("Poll-interleaved feed")),
+      [
+        `[video] ${OUTPUT_NAME} is struggling with Poll-interleaved feed: dropped 51 of 1051 frames, 0 stalls in the last minute`,
+        `[video] ${OUTPUT_NAME} is playing Poll-interleaved feed smoothly again`,
+      ],
+    );
+  } finally {
+    videoPollDeps.inDemand = realInDemand;
+    await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
