@@ -550,7 +550,7 @@ for 10 seconds starts the delay over. It never gives up on such a feed.
 | Live | The picture |
 | Live, over HLS | The picture, with a badge counting how many seconds behind live it is |
 | Offline | Your **When the feed is offline** setting |
-| Can't play here | "This screen can't play video" |
+| Can't play here | "This screen can't play video" and "\<feed name\> plays on the other screens" |
 
 A relay feed that falls back to HLS because WebRTC failed on this screen
 tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
