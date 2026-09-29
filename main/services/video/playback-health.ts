@@ -5,7 +5,12 @@
 // video-service.ts is the one caller: recordPlaybackReports() there parses a
 // presence heartbeat's `video` field with parseVideoReports() below, drops
 // any feed id this build no longer holds, then hands the rest to record().
-// snapshot() is folded into VideoState.screens on every publish.
+// snapshot() is read into a CACHED VideoState.screens exactly when record()
+// (or the one-shot expiry timer, over tick()) says something changed — never
+// on every publish, which used to make the relay's own 3 s status poll a
+// video:state broadcast on almost every heartbeat (`reportedAt` and the
+// window totals move every heartbeat and as samples age out, and the plain
+// diff every publish() already does saw that as a real change).
 
 import type { ScreenVideoHealth, VideoPlaybackReport } from "../../types/video.js";
 
@@ -314,6 +319,51 @@ export class PlaybackHealth {
       }
     }
     return out;
+  }
+
+  /**
+   * The earliest future moment ANY held pair's own state would change with
+   * NO further heartbeat: either it ages out of `snapshot()` entirely
+   * (`reportedAt + WINDOW_MS`), or a currently-struggling pair's sticky flag
+   * clears (`lastBadAt + CLEAR_AFTER_MS`) — whichever comes first, over every
+   * pair. `null` with nothing held. video-service.ts arms its one expiry
+   * timer to this and re-arms after every record() and after the timer
+   * itself fires — see its own comment for why this is a single timer over
+   * every pair rather than one per pair.
+   */
+  nextExpiryAt(now: number): number | null {
+    let earliest: number | null = null;
+    for (const byFeed of this.pairs.values()) {
+      for (const pair of byFeed.values()) {
+        const ageOutAt = pair.reportedAt + WINDOW_MS;
+        if (earliest === null || ageOutAt < earliest) earliest = ageOutAt;
+        if (pair.lastBadAt !== null) {
+          const clearAt = pair.lastBadAt + CLEAR_AFTER_MS;
+          // Only while still in the future: a pair that is not currently
+          // struggling already has clearAt in the past, and scheduling a
+          // timer for a moment that has already happened would fire at once,
+          // forever, for a fact nothing needs telling again.
+          if (clearAt > now && (earliest === null || clearAt < earliest)) earliest = clearAt;
+        }
+      }
+    }
+    return earliest;
+  }
+
+  /**
+   * Ages out stale pairs — actually removing them from the map, not merely
+   * excluding them from what is returned — and returns what `snapshot()`
+   * now says. This is the ONE caller with no heartbeat of its own behind it
+   * (video-service.ts's one-shot expiry timer): every other caller reaches
+   * `sweepStale()` through `record()`, which always has a fresh report to
+   * fold in. Without an actual sweep here, a pair nothing ever heartbeats
+   * again (a struggling screen that goes dark) would sit in memory forever —
+   * `snapshot()`'s own age check keeps it out of what any READER sees, but
+   * never frees it.
+   */
+  tick(now: number): ScreenVideoHealth[] {
+    this.sweepStale(now);
+    return this.snapshot(now);
   }
 }
 

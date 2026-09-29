@@ -168,6 +168,18 @@ test("a pair that stops reporting drops out of snapshot after WINDOW_MS", () => 
   assert.equal(h.snapshot(t0 + WINDOW_MS).length, 0, "a full window with nothing new is gone, not merely quiet");
 });
 
+test("record()'s changed flag: another output's pair aging out counts too — a heartbeat's own sweep is not scoped to its own output", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ feedId: "quiet" })], t0); // out1 then goes silent forever
+  assert.equal(h.record("out2", [report({ feedId: "steady" })], t0 + 1), true, "out2's own pair appearing is a change on its own — not what this proves");
+
+  // out2 keeps heartbeating cleanly (never a change of ITS OWN) for long
+  // enough that out1's pair ages out of the window in between.
+  assert.equal(h.record("out2", [report({ feedId: "steady" })], t0 + WINDOW_MS), true, "out1's pair aging out must still be reported as a change, even though out2's own heartbeat carries nothing new");
+  assert.equal(h.snapshot(t0 + WINDOW_MS).some((s) => s.feedId === "quiet"), false, "out1's pair is actually gone, not merely unreported this call");
+});
+
 test("record()'s changed flag: a pair appearing, or a flip, is a change", () => {
   const h = new PlaybackHealth();
   const t0 = 1_000_000;
