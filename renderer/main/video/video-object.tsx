@@ -7,7 +7,7 @@
 // Always muted, no controls: video only, never audio, and nothing on a stage
 // display for anyone to scrub or pause.
 
-import { useCallback, useMemo, useRef, useState, type ErrorInfo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo } from "react";
 
 import { BrandLogo } from "../../components/brand-logo";
 import { ErrorBoundary } from "../../components/ui/error-boundary-view";
@@ -15,6 +15,7 @@ import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
 import type { RelayStatus } from "@main/types/video";
 import { isPreviewSlug } from "../preview-url";
+import { registerPlayback } from "./playback-reports";
 import { useOnScreen } from "./use-on-screen";
 import { useVideoSession } from "./use-video-session";
 import { useVideoState } from "./use-video-state";
@@ -111,9 +112,10 @@ function VideoObjectBody({
 
   const [previewPaused, setPreviewPaused] = useState(isPreviewRoute);
   const onLog = useCallback((reason: string) => logToServer("video", reason), []);
+  const active = onScreen && !previewPaused;
 
-  const { phase, embedUrl, latency } = useVideoSession({
-    active: onScreen && !previewPaused,
+  const { phase, embedUrl, latency, sample } = useVideoSession({
+    active,
     feed,
     feedDeleted,
     video: videoEl,
@@ -127,6 +129,23 @@ function VideoObjectBody({
   const showingPicture = phase === "live" || phase === "delayed";
   const showLabel = config.showLabel !== false;
   const showTag = showLabel && !previewPaused && (isEmbed || showingPicture);
+
+  // Registered only while this instance is actually showing a relay or
+  // external feed's picture — never an embed, whose playback Stage Utility
+  // cannot measure at all, and not merely while attempting to connect: a
+  // widget stuck retrying is not "playing" for the presence heartbeat's
+  // purposes. `active` (not just `showingPicture`) is needed too: going off
+  // screen tears the attempt down (its sampler stops with it) but leaves
+  // `phase` sitting on its last value rather than resetting it, since
+  // nothing needs that reset for what's ON screen — the video element itself
+  // is what shows the stale cover getting torn down, and this widget has no
+  // picture to report once inactive regardless of what `phase` still reads.
+  // Keyed on the widget instance, not the feed, so two widgets playing the
+  // same feed report separately.
+  useEffect(() => {
+    if (!active || isEmbed || !showingPicture) return undefined;
+    return registerPlayback(objectId, sample);
+  }, [objectId, active, isEmbed, showingPicture, sample]);
 
   if (!config.feedId) {
     return (

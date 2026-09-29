@@ -28,6 +28,7 @@ const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { VideoObject } = await import("./video-object.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
+const { __resetPlaybackRegistryForTests, anyPlaying, drainReports } = await import("./playback-reports.js");
 
 // VideoState/VideoFeedView are NOT ambient globals (unlike LayoutObject and
 // LayoutObjectConfig, aliased in renderer/types.d.ts from main/types/stage —
@@ -105,10 +106,15 @@ function stubFetch(state: VideoState) {
  *  body is skipped and nothing here would ever go on screen. */
 class StubObserver {
   static last: StubObserver | null = null;
+  /** Every instance since the last reset — for a test rendering more than one
+   *  widget, where `.last` alone can only ever address the most recently
+   *  mounted one. */
+  static instances: StubObserver[] = [];
   readonly cb: (entries: { isIntersecting: boolean }[]) => void;
   constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
     this.cb = cb;
     StubObserver.last = this;
+    StubObserver.instances.push(this);
   }
   observe(): void {}
   disconnect(): void {}
@@ -171,7 +177,9 @@ async function settleFake(): Promise<void> {
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
+  __resetPlaybackRegistryForTests();
   StubObserver.last = null;
+  StubObserver.instances = [];
   FakePeerConnection.reset();
 });
 afterEach(() => cleanup());
@@ -597,6 +605,96 @@ test("a push feed waiting for its device, with the relay running, shows Waiting 
     assert.deepEqual(feedCalls(g.calls), [], "a push feed's waiting means there is nothing to connect to yet");
     assert.equal(waitingCover(), "Waiting for the source / Nothing is sending to this feed yet");
   } finally {
+    g.restore();
+  }
+});
+
+// ── registerPlayback: what actually reaches the presence heartbeat ─────────
+
+test("a live relay picture registers with the presence heartbeat; going off screen unregisters it", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected nothing registered before the widget is even on screen");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected nothing registered while still Connecting — not yet actually playing");
+
+    act(() => frames.fire());
+    await settleFake();
+    assert.equal(anyPlaying(), true, "expected the live picture registered");
+    const reports = await drainReports();
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.feedId, "feed-1");
+    assert.equal(reports[0]!.via, "webrtc");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected the widget unregistered once it went off screen");
+  } finally {
+    mock.timers.reset();
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("an embed feed's picture never registers — Stage Utility cannot measure an iframe's playback", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(EMBED);
+  try {
+    assert.ok(nameTag(EMBED.name), "expected the embed actually showing, for this to be a real test of the gate");
+    assert.equal(anyPlaying(), false, "an embed must never occupy a registry slot the heartbeat treats as 'playing'");
+    assert.deepEqual(await drainReports(), []);
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("two widget instances playing the same feed register under two separate keys, each reported", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    const objA = makeObject();
+    const objB = { o: { ...objA.o, id: "obj-2" }, config: objA.config };
+    render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement(VideoObject, { ...objA, appLogo: null, appLogoMonochrome: false }),
+        React.createElement(VideoObject, { ...objB, appLogo: null, appLogoMonochrome: false }),
+      ),
+    );
+    await settle();
+    await settle();
+    assert.equal(StubObserver.instances.length, 2, "expected one IntersectionObserver per widget instance");
+
+    act(() => {
+      for (const o of StubObserver.instances) o.cb([{ isIntersecting: true }]);
+    });
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+
+    const reports = await drainReports();
+    assert.equal(reports.length, 2, "expected one report PER WIDGET INSTANCE, not one per feed");
+    assert.deepEqual(
+      reports.map((r) => r.feedId),
+      ["feed-1", "feed-1"],
+    );
+  } finally {
+    frames.restore();
     g.restore();
   }
 });
