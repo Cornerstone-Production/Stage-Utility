@@ -6,6 +6,7 @@
 // 161-195. video-feeds-route.tsx renders RelayPill and RelaySwitch directly
 // into its own header row; RelayDetailRow is the strip beneath it.
 
+import type { ReactNode } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import type { RelayStatus } from "@main/types/video";
@@ -67,13 +68,18 @@ export function RelaySwitch({
   );
 }
 
+/** One item on the detail strip: text, maybe a bold value, baseline-aligned. */
+function Detail({ children }: { children: ReactNode }) {
+  return <span className="inline-flex items-baseline gap-1.5">{children}</span>;
+}
+
 function ChangePortsLink({ onChangePorts }: { onChangePorts: () => void }) {
   return (
-    <span className="inline-flex items-baseline gap-1.5">
+    <Detail>
       <button type="button" className="font-medium text-accent hover:underline" onClick={onChangePorts}>
         Change ports in Advanced
       </button>
-    </span>
+    </Detail>
   );
 }
 
@@ -141,21 +147,21 @@ function RelayDetail({
 }) {
   if (relay.state === "off") {
     if (enabled) {
-      return <span className="inline-flex items-baseline gap-1.5">Video is on. The relay starts when a feed pulls from a device or a device pushes to it.</span>;
+      return <Detail>Video is on. The relay starts when a feed pulls from a device or a device pushes to it.</Detail>;
     }
     if (binaryPresent) return null;
     if (archivePresent) {
       return (
-        <span className="inline-flex items-baseline gap-1.5">
+        <Detail>
           Turning this on sets up MediaMTX {MEDIAMTX_VERSION} from the archive already in place.
-        </span>
+        </Detail>
       );
     }
     return (
-      <span className="inline-flex items-baseline gap-1.5">
+      <Detail>
         Turning this on downloads MediaMTX {MEDIAMTX_VERSION}, a {mb(MEDIAMTX_DOWNLOAD_BYTES)} MB download and{" "}
         {mb(MEDIAMTX_DISK_BYTES)} MB on disk.
-      </span>
+      </Detail>
     );
   }
 
@@ -182,35 +188,35 @@ function RelayDetail({
     }
     case "starting":
       return (
-        <span className="inline-flex items-baseline gap-1.5">
+        <Detail>
           <Loader2Icon className="size-3.5 animate-spin text-accent" />
           Starting the relay
-        </span>
+        </Detail>
       );
     case "failing":
       return (
         <>
-          <span className="inline-flex items-baseline gap-1.5">{relay.reason}</span>
-          {relay.retryAt !== null && <span className="inline-flex items-baseline gap-1.5">Next try at {formatClock(relay.retryAt, { seconds: true })}</span>}
+          <Detail>{relay.reason}</Detail>
+          {relay.retryAt !== null && <Detail>Next try at {formatClock(relay.retryAt, { seconds: true })}</Detail>}
           {relay.assetName && relay.placeArchiveAt && (
-            <span className="inline-flex items-baseline gap-1.5">
+            <Detail>
               Or place {relay.assetName} in {relay.placeArchiveAt} in Stage Utility's data folder by hand.
-            </span>
+            </Detail>
           )}
         </>
       );
     case "running":
       return (
         <>
-          <span className="inline-flex items-baseline gap-1.5">
+          <Detail>
             Relay <b className="font-medium text-fg">MediaMTX {relay.version}</b>
-          </span>
-          <span className="inline-flex items-baseline gap-1.5">
+          </Detail>
+          <Detail>
             Inputs <b className="font-medium font-mono text-fg">RTMP {relay.ports.rtmp} · SRT {relay.ports.srt}</b>
-          </span>
-          <span className="inline-flex items-baseline gap-1.5">
+          </Detail>
+          <Detail>
             Video to screens <b className="font-medium font-mono text-fg">UDP {relay.ports.webrtcUdp}</b>
-          </span>
+          </Detail>
         </>
       );
     default:
