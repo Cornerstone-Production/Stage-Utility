@@ -1,8 +1,8 @@
-// Every one of the seventeen dialogs, opened.
+// Every one of this build's dialogs, opened.
 //
 // The page's whole shape now depends on the dialog: a card holds no form, so an
 // integration whose dialog throws or comes up empty has no settings at all. This
-// opens all seventeen against the real components and checks the things that
+// opens every one against the real components and checks the things that
 // differ between them — the wide variant, the footer actions, and the inbound
 // case that gets neither a switch nor a Save.
 
@@ -57,7 +57,7 @@ async function open(id: string) {
 const labels = (root: HTMLElement) =>
   [...root.querySelectorAll("button")].map((b) => b.textContent?.trim()).filter(Boolean);
 
-describe("all seventeen dialogs", () => {
+describe("every dialog", () => {
   for (const d of INTEGRATION_DESCRIPTOR_FIXTURE) {
     test(`${d.id} opens with its name and its settings`, async () => {
       const content = await open(d.id);
@@ -82,7 +82,7 @@ describe("all seventeen dialogs", () => {
 
   test("only the five repeater integrations render a panel that cannot wrap", async () => {
     // The direction integration-dialog-size.test.tsx cannot check on its own: it
-    // renders the five panels, this renders all seventeen BODIES. Between them,
+    // renders the five panels, this renders every BODY. Between them,
     // neither a missing marker nor a stray one can pass.
     const marked: string[] = [];
     for (const d of INTEGRATION_DESCRIPTOR_FIXTURE) {
@@ -96,6 +96,21 @@ describe("all seventeen dialogs", () => {
 });
 
 describe("the dialog footer", () => {
+  // item 3 (findings-t15-r2.md): the video card's bespoke panel replaces the
+  // form with "Open Video feeds" — this is the one place the finding's own
+  // "renders and navigates to /video-feeds" is checkable: an <a href> IS
+  // the navigation mechanism, so asserting the real, resolved href (not a
+  // stub prop, not a button with an onClick) proves a click actually goes
+  // there, the same way it would in a browser.
+  test("the video card's panel links to /video-feeds, a real anchor href — not a button, not a dead link", async () => {
+    const content = await open("video");
+    const link = [...content.querySelectorAll<HTMLAnchorElement>("a")].find(
+      (a) => a.textContent?.trim() === "Open Video feeds",
+    );
+    assert.ok(link, "no \"Open Video feeds\" anchor in the video card's panel");
+    assert.equal(link!.getAttribute("href"), "/video-feeds");
+  });
+
   test("an inbound integration gets no switch", async () => {
     const content = await open("companion");
     assertAbsent(
