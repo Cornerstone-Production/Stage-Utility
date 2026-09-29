@@ -893,8 +893,8 @@ class VideoService {
 
   /**
    * "is live"/"is delayed"/"went offline" on the transition only — never on
-   * every poll, and "went offline" never on a feed's first-ever sighting (a
-   * fresh server has nothing to call a transition FROM).
+   * every poll, and "went offline" only from live or delayed, so once per
+   * outage.
    *
    * @returns whether this update left a ready (live/delayed) state — the
    *   caller flushes the seen store's throttled write on exactly that
@@ -917,7 +917,11 @@ class VideoService {
         // that one, with more useful advice than a plain state-change line
         // could carry — logging both here would say the same thing twice.
         console.log(`[video] ${scrub(feed.name)} is delayed${scrub(parens)} — an unsupported codec`);
-      } else if (status.state === "offline" && prev !== undefined && prev !== "offline") {
+      } else if (status.state === "offline" && wasReady) {
+        // Only a feed that was showing a picture went offline. Offline from
+        // waiting (a push feed never sent to), from standby (a relay
+        // restarting, a pull feed not yet dialled) or again after one of
+        // those is the same outage, or none, and says nothing new.
         console.log(`[video] ${scrub(feed.name)} went offline`);
       }
     }

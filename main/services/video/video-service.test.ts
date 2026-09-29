@@ -345,6 +345,64 @@ test("logs a feed's live/offline transitions on the poll, once each — never on
   }
 });
 
+// "went offline" is news once per outage, and only for a feed that was
+// showing a picture: live or delayed, then offline.
+
+test("a relay restart logs a live feed going offline once, not again as the new relay comes up", async () => {
+  const made = await videoService.addFeed({ name: "Restart cam", source: { kind: "push", protocol: "rtmp" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let answer: RelayPath[] = [readyPath({ name: id })];
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(fakeRelay(async () => answer), supervisor);
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const settleStatus = () => new Promise((r) => setTimeout(r, 20));
+  try {
+    await pollOnce(); // live
+    supervisor.current = { state: "failing", reason: "exit code 1", retryAt: 1, neverStarted: false };
+    supervisor.emit("status", supervisor.current); // the relay exits: offline
+    await settleStatus();
+    supervisor.current = { state: "running", since: 2 };
+    supervisor.emit("status", supervisor.current); // respawned: standby until it answers
+    await settleStatus();
+    answer = [notReadyPath({ name: id })];
+    await pollOnce(); // the new relay answers: the device has not reconnected yet
+    assert.equal((await videoService.state()).feeds.find((f) => f.id === id)?.status.state, "offline");
+    assert.deepEqual(lines.filter((l) => l.includes("Restart cam went offline")), ["[video] Restart cam went offline"]);
+  } finally {
+    console.log = realLog;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a push feed that was never live logs nothing when the relay exits", async () => {
+  const made = await videoService.addFeed({ name: "Never-live push", source: { kind: "push", protocol: "srt" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(fakeRelay(async () => [notReadyPath({ name: id })]), supervisor);
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  try {
+    await pollOnce(); // waiting
+    supervisor.current = { state: "failing", reason: "exit code 1", retryAt: 1, neverStarted: false };
+    supervisor.emit("status", supervisor.current);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await videoService.state()).feeds.find((f) => f.id === id)?.status.state, "offline");
+    assert.deepEqual(lines.filter((l) => l.includes("Never-live push")), [], "waiting to offline is not going offline");
+  } finally {
+    console.log = realLog;
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("logs a feed's entry into delayed too, and never prints an unknown picture", async () => {
   // push, not pull: a not-ready pull feed nobody has requested reads
   // "standby" (a quieter, different fact — see feed-state.ts), and this test
@@ -1289,8 +1347,8 @@ test("R14i: between the supervisor reaching running and the first successful pol
     assert.equal(feed?.status.state, "offline", "the relay has now genuinely answered, and has no path for this feed");
     assert.equal(
       lines.filter((l) => l.includes("Boot window push went offline")).length,
-      1,
-      "exactly one line for the standby -> offline transition",
+      0,
+      "a feed that was never live did not go offline",
     );
   } finally {
     console.log = realLog;
