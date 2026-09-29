@@ -85,10 +85,12 @@ function FeedPill({ feed }: { feed: VideoFeedView }) {
  *
  * `screens` adds one more line, whatever the state above: "On N screens" —
  * distinct outputIds currently reporting this feed's id in VideoState.screens,
- * struggling or not. Only a relay feed a widget can actually measure ever
- * has any (embed/external report no playback at all — see
- * VideoPlaybackReport's own comment), so the line is simply absent for
- * those rather than ever reading "On 0 screens".
+ * struggling or not. A screen's own playback is a real measure whatever the
+ * feed's source is — video-object.tsx registers a sampler for any feed it is
+ * actually showing a picture from, embed excepted (a platform iframe Stage
+ * Utility cannot see into at all). An external feed can and does raise "On N
+ * screens" the same way a relay one does; only a feed with nothing currently
+ * playing it reads with no line at all, rather than ever "On 0 screens".
  */
 export function feedMeta(feed: VideoFeedView, screens: readonly ScreenVideoHealth[]): string[] {
   const s = feed.source;

@@ -381,6 +381,24 @@ test("\"On N screens\" counts DISTINCT outputIds reporting a feed, never raw scr
   }
 });
 
+test("\"On N screens\" shows for an external feed too — a screen's own playback is a real measure whatever the source", async () => {
+  const relay = externalFeed({ id: "feed-external", name: "Lobby relay" });
+  const g = stubGlobals(
+    makeState([relay], [
+      { outputId: "display-1", feedId: "feed-external", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now() },
+    ]),
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    assert.ok(screen.getByText("On 1 screen"), "an external feed's own screens count must show just like a relay feed's");
+  } finally {
+    g.restore();
+  }
+});
+
 test("Delete calls video:feedUsage BEFORE video:removeFeed, and the confirmation names the layouts", async () => {
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
   try {
