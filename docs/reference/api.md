@@ -471,7 +471,7 @@ neither is a 400.
 **Video feeds** — see [Video feeds](../integrations/video-feeds.md)
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/video/state` | `{rev, relay, kinds, ports, feeds}` — the same snapshot `video:state` pushes. `ports` is the SAVED set (what the next start uses); a running relay's own ports are under `relay.ports` and can differ for the moment between a ports save and the restart it triggers |
+| GET | `/api/video/state` | `{rev, relay, kinds, ports, binaryPresent, feeds}` — the same snapshot `video:state` pushes. `ports` is the SAVED set (what the next start uses); a running relay's own ports are under `relay.ports` and can differ for the moment between a ports save and the restart it triggers. `binaryPresent` is whether the pinned MediaMTX binary is already extracted on this machine, checked fresh on every read — it is what tells the Video feeds page's "off" status line apart: the download-size sentence only ever shows before the FIRST download, never again once it has one |
 | GET | `/api/video/feeds` | `{feeds}` |
 | PATCH | `/api/video/ports` | Saves the relay's six ports and restarts it if it is running. Body: `{rtmp, srt, webrtcUdp, webrtcHttp, hls, api}`, every value a whole number from 1024 to 65535 and all six different — `400` naming the rule otherwise. `200` with `{ports}` |
 | POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |

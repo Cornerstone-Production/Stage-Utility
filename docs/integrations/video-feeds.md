@@ -14,15 +14,22 @@ live here and in Advanced instead.
 
 The switch runs the relay only while it is on AND at least one pull or push
 feed exists — an embed or external feed plays either way, since neither one
-needs it. The first time it starts, it downloads the pinned MediaMTX release
-(about 27 MB, 55 MB once extracted); the status line at the top of this page
-says so before that first download, then shows a progress bar while it runs.
-Once running it names the version and its ports (RTMP and SRT inbound, UDP for
-video to screens); if it cannot start — a busy port, a failed download — the
-line says why and when it retries, and names where to place a downloaded
-archive by hand if the download itself is what failed. The relay's ports live
-on their own card in **Advanced**, reachable from this line's "Change ports in
-Advanced" — saving them restarts the relay if it is running.
+needs it. The status line at the top of this page reflects exactly that:
+
+| Switch | Relay feed | Binary on disk | Status line |
+|---|---|---|---|
+| Off | — | Not yet | Names the pinned MediaMTX release's download size (about 27 MB, 55 MB once extracted) |
+| Off | — | Already downloaded | Nothing — a switched-off relay that has run before needs no warning |
+| On | None yet | — | Says the relay starts once a feed pulls from a device or a device pushes to it |
+| On | At least one | — | Downloading: a progress bar. Starting: says so. Running: the version and its ports (RTMP and SRT inbound, UDP for video to screens) |
+
+If it cannot start — a busy port, a failed download, a config write that
+failed — the line says why and when it retries, and names where to place a
+downloaded archive by hand if the download itself is what failed. The relay's
+ports live on their own card in **Advanced**, reachable from this line's
+"Change ports in Advanced" (shown while running or failing, since a busy port
+is exactly when it is most useful) — saving them restarts the relay if it is
+running, unless the six values did not actually change.
 
 ## What a feed is
 
