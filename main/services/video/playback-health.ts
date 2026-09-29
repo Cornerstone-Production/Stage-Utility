@@ -241,12 +241,12 @@ export class PlaybackHealth {
    * @returns whether `snapshot()` would now read differently: a struggling
    *   flag flipped (here, or cleared by time in this call's sweep), a pair
    *   appeared, a pair left (aged out, this call or a previous one this
-   *   call's sweep just noticed), or a currently-
-   *   struggling pair's window totals moved — which is also every time its
-   *   `episode` peak could have moved, since the peak is derived from those
-   *   same totals; there is no separate check for "the peak moved" only.
-   *   video-service.ts publishes only then — never on every heartbeat from a
-   *   screen playing cleanly.
+   *   call's sweep just noticed), or a currently-struggling pair's
+   *   `episode` moved. A struggling pair's live window moving while its
+   *   episode holds is not a change: the Screens card and the log line read
+   *   the episode. video-service.ts publishes only then — never on every
+   *   heartbeat from a screen playing cleanly, nor from one struggling no
+   *   worse than its worst minute.
    */
   record(outputId: string, reports: readonly VideoPlaybackReport[], now: number): boolean {
     let changed = this.sweep(now);
@@ -328,11 +328,11 @@ export class PlaybackHealth {
         changed = true; // a pair appeared
       } else if (wasStruggling !== isStruggling) {
         changed = true; // the sticky flag flipped
-      } else if (isStruggling) {
-        const before = sumSamples(this.pruneSamples(existing.samples, now));
-        if (before.decoded !== totals.decoded || before.dropped !== totals.dropped || before.stalls !== totals.stalls) {
-          changed = true; // a struggling pair's totals moved
-        }
+      } else if (isStruggling && episode !== existing.episode) {
+        // The episode is replaced, never mutated, so a new object is exactly
+        // "the peak moved". The live window moving alone is not a change: the
+        // card and the log read the episode.
+        changed = true;
       }
     }
     return changed;

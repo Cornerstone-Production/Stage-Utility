@@ -346,18 +346,27 @@ test("record()'s changed flag: a pair appearing, or a flip, is a change", () => 
   assert.equal(h.record("out1", [report({ decoded: 1000, dropped: 51 })], t0 + 1), true, "crossing into struggling is a flip");
 });
 
-test("record()'s changed flag: a healthy pair's own totals climbing alone is NOT a change — only a STRUGGLING pair's totals moving is", () => {
+test("record()'s changed flag: a healthy pair's own totals climbing alone is NOT a change — only a STRUGGLING pair's episode moving is", () => {
   const h = new PlaybackHealth();
   const t0 = 1_000_000;
   h.record("out1", [report({ decoded: 500, dropped: 0 })], t0); // pair appears — not asserted here
-  // Still healthy: "totals moved" as a change is scoped to a struggling
-  // pair specifically, and nothing about a healthy pair's own decoded count
-  // is shown anywhere a client would need pushed a fresh copy of.
+  // Still healthy: nothing about a healthy pair's own decoded count is shown
+  // anywhere a client would need pushed a fresh copy of.
   assert.equal(h.record("out1", [report({ decoded: 500, dropped: 0 })], t0 + 1), false, "a healthy pair's totals moving alone is not a change");
 
   const s = new PlaybackHealth();
   s.record("out2", [report({ feedId: "f2", decoded: 1000, dropped: 51 })], t0); // struggling — not asserted here
-  assert.equal(s.record("out2", [report({ feedId: "f2", decoded: 100, dropped: 10 })], t0 + 1), true, "a struggling pair's own totals moving IS a change");
+  assert.equal(s.record("out2", [report({ feedId: "f2", decoded: 100, dropped: 10 })], t0 + 1), true, "a struggling pair's episode moving IS a change");
+});
+
+test("record()'s changed flag: a struggling pair's live window moving while its episode holds is NOT a change", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 200 })], t0); // 20%: struggling, the episode
+  // The window dilutes to 220 of 2000 (11%): still struggling, milder than
+  // the episode. The card and the log read the episode, so nothing to push.
+  assert.equal(h.record("out1", [report({ decoded: 1000, dropped: 20 })], t0 + 1), false, "a live window that moved while the episode held changes nothing a client reads");
+  assert.equal(h.snapshot(t0 + 1)[0]!.droppedInWindow, 220, "sanity: the live window did move");
 });
 
 test("record()'s changed flag: an all-zero heartbeat for an already-known pair changes nothing to publish about", () => {

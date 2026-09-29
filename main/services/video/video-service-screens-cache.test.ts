@@ -116,6 +116,55 @@ test("a healthy screen's own heartbeats, with the relay's status poll running al
   }
 });
 
+test("twelve struggling heartbeats that each publish call the relay status listener once, while the relay status never changes", async (t: TestContext) => {
+  const id = await addRelayFeed("Listener-quiet feed");
+  const statusCalls: RelayStatus[] = [];
+  videoService.setRelayStatusListener((s) => statusCalls.push(s));
+  captureConsole(t, "log"); // crosses into struggling on purpose; not asserting on the line
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  try {
+    const before = frames.length;
+    // Each heartbeat drops a larger share than the window so far, so every
+    // one moves the episode and publishes.
+    for (let i = 0; i < 12; i++) {
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 60 + 40 * i })]);
+      await settle();
+      t.mock.timers.tick(1_000);
+    }
+    assert.equal(frames.length, before + 12, "sanity: every heartbeat published");
+    assert.equal(new Set(statusCalls.map((s) => JSON.stringify(s))).size, 1, "sanity: one distinct relay status throughout");
+    assert.equal(statusCalls.length, 1, "the listener hears a relay status once, not once per video:state publish");
+  } finally {
+    videoService.setRelayStatusListener(null);
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a struggling pair publishes when its episode moves, and not when only its live window does", async (t: TestContext) => {
+  const id = await addRelayFeed("Episode-gated feed");
+  captureConsole(t, "log"); // crosses into struggling on purpose; not asserting on the line
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 200 })]); // 20%: the episode
+    await settle();
+
+    const before = frames.length;
+    t.mock.timers.tick(1_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 20 })]); // window 11%: milder
+    await settle();
+    assert.equal(frames.length, before, "a live window that moved while the episode held must not publish");
+
+    t.mock.timers.tick(1_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 900 })]); // window 37%: worse
+    await settle();
+    assert.equal(frames.length, before + 1, "an episode that moved publishes once");
+    const health = (await videoService.state()).screens.find((s) => s.feedId === id);
+    assert.deepEqual(health?.episode, { droppedInWindow: 1120, decodedInWindow: 3000, stallsInWindow: 0, width: 1920, height: 1080 });
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
 // ── The one-shot expiry timer, for a pair nothing heartbeats again ─────────
 
 test("a struggling pair that stops reporting entirely is published as gone once WINDOW_MS has passed, with no further heartbeat", async (t: TestContext) => {

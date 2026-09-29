@@ -258,12 +258,18 @@ class VideoService {
   private feedsChangedListener: (() => void) | null = null;
   private portsChangedListener: (() => void) | null = null;
   /** relay-lifecycle.ts's own connection-row mapping, fired with the fresh
-   *  RelayStatus on every publish() that actually changes — the ONE place
+   *  RelayStatus on every publish() whose relay status changed — the ONE place
    *  the integration manager's row is driven from, so a transition
    *  video-service discovers on its OWN poll (going "not answering", and
    *  recovering from it) reaches the row exactly the same way a supervisor
    *  event does, rather than only the page that happens to be open. */
   private relayStatusListener: ((relay: RelayStatus) => void) | null = null;
+  /** The RelayStatus last handed to relayStatusListener, as JSON — null
+   *  before the first, and again whenever the listener is replaced. A
+   *  publish that changes only `screens` or a feed must not tell the
+   *  connection row anything, since every call broadcasts
+   *  integrations:state-changed. */
+  private lastRelaySent: string | null = null;
   /** relay-lifecycle.ts's readiness poll, told of every status change of the
    *  attached supervisor AFTER handleStatusChange() has forgotten the previous
    *  process. The service is the supervisor's only "status" listener: a
@@ -599,6 +605,7 @@ class VideoService {
    *  comment. `null` clears it (a caller replacing the singleton in tests). */
   setRelayStatusListener(cb: ((relay: RelayStatus) => void) | null): void {
     this.relayStatusListener = cb;
+    this.lastRelaySent = null;
   }
 
   /** relay-lifecycle.ts's hook for the attached supervisor's status — see the
@@ -666,7 +673,11 @@ class VideoService {
     this.snapshot = { ...candidate, rev: this.rev };
     if (changed) {
       broadcast("video:state", this.snapshot);
-      this.relayStatusListener?.(this.snapshot.relay);
+      const relay = JSON.stringify(this.snapshot.relay);
+      if (this.relayStatusListener && relay !== this.lastRelaySent) {
+        this.lastRelaySent = relay;
+        this.relayStatusListener(this.snapshot.relay);
+      }
     }
   }
 
