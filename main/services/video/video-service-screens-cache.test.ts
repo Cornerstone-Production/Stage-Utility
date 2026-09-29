@@ -73,7 +73,7 @@ async function settle(iterations = 20): Promise<void> {
 
 const pollOnce = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
 
-// ── Item 1: the relay's own status poll must not broadcast on its own ──────
+// ── The relay's own status poll must not broadcast on its own ─────────────
 
 test("a healthy screen's own heartbeats, with the relay's status poll running alongside them, broadcast nothing beyond the pair's own first appearance — and never fire the relay status listener for a broadcast that never happened", async (t: TestContext) => {
   const id = await addRelayFeed("Poll-quiet feed");
@@ -115,7 +115,7 @@ test("a healthy screen's own heartbeats, with the relay's status poll running al
   }
 });
 
-// ── Item 2: the one-shot expiry timer, for a pair nothing heartbeats again ──
+// ── The one-shot expiry timer, for a pair nothing heartbeats again ─────────
 
 test("a struggling pair that stops reporting entirely is published as gone once WINDOW_MS has passed, with no further heartbeat", async (t: TestContext) => {
   const id = await addRelayFeed("Goes-dark feed");
@@ -172,7 +172,7 @@ test("a struggling pair's sticky flag clears at exactly CLEAR_AFTER_MS with no f
   }
 });
 
-// ── Item 5: lastLoggedStruggling must not outlive the pair it names ────────
+// ── lastLoggedStruggling must not outlive the pair it names ────────────────
 
 test("a pair that leaves while struggling and comes back later gets a FRESH struggling line, not silence from a stale prior announcement", async (t: TestContext) => {
   const id = await addRelayFeed("Comes-back-struggling feed");
@@ -222,7 +222,7 @@ test("a pair that leaves while struggling and comes back CLEAN logs no spurious 
   }
 });
 
-// ── Item 6: removeFeed()'s own lastLoggedStruggling cleanup ────────────────
+// ── removeFeed()'s own lastLoggedStruggling cleanup ─────────────────────────
 
 test("removeFeed's own lastLoggedStruggling cleanup: without it, a re-added feed's first genuine struggle is silently swallowed by the deleted one's stale announcement", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
@@ -251,7 +251,7 @@ test("removeFeed's own lastLoggedStruggling cleanup: without it, a re-added feed
   }
 });
 
-// ── Item 14: a heartbeat must not re-seed a pair the STORE has already lost ─
+// ── A heartbeat must not re-seed a pair the feed STORE has already lost ────
 
 test("a heartbeat naming a feed the feed STORE has already dropped is not recorded, even before video-service's own publish() has caught up", async () => {
   const id = await addRelayFeed("Racing feed");

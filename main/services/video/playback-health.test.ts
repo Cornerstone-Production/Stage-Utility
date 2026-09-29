@@ -194,9 +194,9 @@ test("record()'s changed flag: a healthy pair's own totals climbing alone is NOT
   const h = new PlaybackHealth();
   const t0 = 1_000_000;
   h.record("out1", [report({ decoded: 500, dropped: 0 })], t0); // pair appears — not asserted here
-  // Still healthy: the brief scopes "totals moved" to a struggling pair
-  // specifically, and nothing about a healthy pair's own decoded count is
-  // shown anywhere a client would need pushed a fresh copy of.
+  // Still healthy: "totals moved" as a change is scoped to a struggling
+  // pair specifically, and nothing about a healthy pair's own decoded count
+  // is shown anywhere a client would need pushed a fresh copy of.
   assert.equal(h.record("out1", [report({ decoded: 500, dropped: 0 })], t0 + 1), false, "a healthy pair's totals moving alone is not a change");
 
   const s = new PlaybackHealth();
