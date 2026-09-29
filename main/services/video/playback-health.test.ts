@@ -9,6 +9,7 @@ import {
   CLEAR_AFTER_MS,
   DROPPED_FRACTION,
   MAX_REPORTS,
+  MAX_SAMPLES_PER_PAIR,
   parseVideoReports,
   PlaybackHealth,
   STALLS_IN_WINDOW,
@@ -312,6 +313,7 @@ test("a burst of 1000 heartbeats holds a bounded number of samples, merging into
     h.record("out1", [report({ decoded: 1, dropped: 0, stalls: 0 })], t0 + i); // 1 ms apart — all inside one WINDOW_MS span
   }
   const entry = h.snapshot(t0 + 999)[0]!;
+  assert.equal(h.samplesHeld("out1", "feed-1"), MAX_SAMPLES_PER_PAIR, "1000 heartbeats inside one window must hold exactly the cap, not one sample each");
   assert.equal(entry.decodedInWindow, 1000, "merging into the newest sample must still SUM every heartbeat's own count, never drop the excess");
 });
 

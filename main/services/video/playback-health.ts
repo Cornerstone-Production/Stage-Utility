@@ -356,6 +356,11 @@ export class PlaybackHealth {
     }
   }
 
+  /** Exposed for tests: how many samples one pair currently holds. */
+  samplesHeld(outputId: string, feedId: string): number {
+    return this.pairs.get(outputId)?.get(feedId)?.samples.length ?? 0;
+  }
+
   /** Every currently-live pair's health, freshest first play order not
    *  guaranteed — video-service.ts and the Screens page both filter/group
    *  by outputId or feedId themselves. A pair whose last report is
