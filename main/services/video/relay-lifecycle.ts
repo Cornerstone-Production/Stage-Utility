@@ -8,20 +8,41 @@
 // check (port-check.ts), the config file (mediamtx-config.ts), the
 // supervisor (supervisor.ts), and reacting to an enable/disable flip, a feed
 // appearing or disappearing, or a ports save. integration-manager.ts drives
-// it through setEnabled(); it drives the manager's row back through
-// setConnectionListener().
+// it through setEnabled(); the manager's own row is driven back through
+// setConnectionListener(), but the MAPPING from a RelayStatus to that row
+// lives in exactly one place — relayConnectionState() below, fed by
+// video-service.ts's own setRelayStatusListener() hook, called on every
+// publish(). That is deliberate: video-service's status POLL can discover
+// "the relay stopped answering" (and recover from it) with no supervisor
+// event of its own to hang a report on, and the integration row has to learn
+// that the same way the Video feeds page's own status line does — from the
+// one published RelayStatus, not from a second, independently-triggered copy
+// of the same judgement.
 //
 // Every dependency is injected (constructor default: the real ones), so the
 // whole start/stop sequence is testable with fakes — the real download only
 // ever happens on the machine where video is actually switched on.
+//
+// Every public entry point (setEnabled, feedsChanged, portsChanged) returns
+// at once: the actual start/stop sequence — the download above all — runs
+// in the background and reports itself through the relay status and the
+// connection row. A caller that awaited the full sequence used to make
+// integration-manager.ts's boot wait up to five minutes for a first-ever
+// download, and made the switch's own HTTP request outlive the renderer's
+// timeout. Internally, every call is still serialized through one chain, so
+// a feed removed the instant the switch is flicked is never raced against
+// the flick itself.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 
 import { errorMessage } from "../errors.js";
 import { getLanIp } from "../lan-ip.js";
+import { OutageLog } from "../repeat-log.js";
+import { scrub } from "../scrub.js";
 import type { ConnectionState } from "../../types/integrations.js";
 import type { RelayStatus, VideoPorts } from "../../types/video.js";
+import { atomicWrite } from "../write-queue.js";
 import { ensureBinary, relayDir, type EnsureBinaryOptions } from "./acquire.js";
 import { loadFeedsFile } from "./feed-store.js";
 import { relayConfig } from "./mediamtx-config.js";
@@ -33,13 +54,12 @@ import type { VideoRelay } from "./relay.js";
 import { RelaySupervisor, restartDelayMs, type SupervisorStatus } from "./supervisor.js";
 import { videoService, type RelaySupervisorLike } from "./video-service.js";
 
-/** RelayStatus -> the integration manager's connection state, the same
- *  mapping for every source (ensureBinary's own progress, a pre-supervisor
- *  failure, or the supervisor's own status) — see reportCurrent() below,
- *  which reads `(await videoService.state()).relay` and hands it here rather
- *  than any caller re-deriving a RelayStatus of its own. Exported and pure,
- *  so the mapping itself is tested without a supervisor, a binary or a
- *  network call anywhere near it. */
+/** RelayStatus -> the integration manager's connection state, in exactly one
+ *  place (see the file header). Exported and pure, so the mapping itself is
+ *  tested without a supervisor, a binary or a network call anywhere near it.
+ *  `running` shows no version at all until one is genuinely known — a
+ *  supervisor mid-spawn, its banner not yet read, must never read as
+ *  "connected: MediaMTX " with nothing after it. */
 export function relayConnectionState(relay: RelayStatus): { state: ConnectionState; message: string | null } {
   switch (relay.state) {
     case "off":
@@ -51,21 +71,12 @@ export function relayConnectionState(relay: RelayStatus): { state: ConnectionSta
     case "starting":
       return { state: "connecting", message: "Starting the relay" };
     case "running":
-      return { state: "connected", message: `MediaMTX ${relay.version}` };
+      return { state: "connected", message: relay.version ? `MediaMTX ${relay.version}` : null };
     case "failing":
       return { state: "error", message: relay.reason };
   }
 }
 
-/** How often relay-lifecycle retries reconcileRelay() after a fresh start,
- *  until the relay's API answers once — see startReadinessPoll()'s own
- *  comment for why this cannot simply wait for videoService's own
- *  subscriber-gated poll. Once a second is frequent enough that an operator
- *  watching the page sees paths appear promptly, and infrequent enough that
- *  a relay taking a while to open its API costs nothing but a few failed,
- *  already-throttled reconcile attempts (OutageLog, under reconcileOnce()'s
- *  own "reconcile" key). */
-const RELAY_READINESS_POLL_MS = 1000;
 /** onProgress fires once per network chunk — several times a second on a
  *  fast link. Throttled to this so a 27 MB download does not turn into a
  *  video:state broadcast, and a feed-store re-read, on every chunk. */
@@ -116,6 +127,12 @@ export class RelayLifecycle {
    *  is scheduled — see isUp()'s own comment. */
   private starting = false;
   private supervisor: RelayLifecycleSupervisor | null = null;
+  /** The ports the CURRENT supervisor was started with — for the readiness
+   *  poll's own "relay started" log line. Not threaded through every call
+   *  as a parameter: the poll is armed from two places (a fresh start, and
+   *  the supervisor's own "running" status event) and both already know it
+   *  by the time they need it. */
+  private currentPorts: VideoPorts | null = null;
   private statusListener: ((status: SupervisorStatus) => void) | null = null;
   /** Pre-supervisor failure backoff (a busy port, a failed download, a
    *  config write that could not be written) — reset once those checks pass
@@ -132,11 +149,20 @@ export class RelayLifecycle {
    *  announcing "relay started" again on every crash loop would be exactly
    *  the noise CLAUDE.md's logging rule warns against. */
   private loggedStartedThisRun = false;
+  /** One failure, one line, one recovery line — for everything that can go
+   *  wrong before any supervisor exists (a busy port, a failed download, a
+   *  config write that could not be written). Keyed by nothing but its own
+   *  single run: a fresh streak starts once startRelay() reaches the
+   *  supervisor successfully, or the desire to run goes away entirely. */
+  private readonly prelaunchOutage = new OutageLog();
   /** Serializes setEnabled()/feedsChanged()/portsChanged()/the retry timer
    *  through one chain, so two calls landing close together (a feed removed
    *  right as the switch is flicked, say) are never interleaved mid-async —
    *  each one's own `wantRunning`/`isUp()` reads are only ever true for the
-   *  state as it stood once every earlier call had fully settled. */
+   *  state as it stood once every earlier call had fully settled. Never
+   *  awaited by a PUBLIC caller (see the file header) — only chained onto
+   *  internally, so the actual work always runs in order without ever
+   *  making setEnabled()/feedsChanged()/portsChanged() block on it. */
   private chain: Promise<void> = Promise.resolve();
 
   constructor(deps: RelayLifecycleDeps = REAL_DEPS) {
@@ -151,9 +177,13 @@ export class RelayLifecycle {
     this.onConn?.(state, message);
   }
 
-  private async reportCurrent(): Promise<void> {
-    const s = await videoService.state();
-    const { state, message } = relayConnectionState(s.relay);
+  /** video-service.ts's setRelayStatusListener hook — the ONE place a
+   *  published RelayStatus becomes the integration manager's connection row.
+   *  Public because it is wired from a callback registered outside this
+   *  class (module scope in production, a test's own `activate()` in
+   *  relay-lifecycle.test.ts). */
+  handleRelayStatus(relay: RelayStatus): void {
+    const { state, message } = relayConnectionState(relay);
     this.report(state, message);
   }
 
@@ -163,7 +193,12 @@ export class RelayLifecycle {
    *  exists (ensureBinary, the port check, writing the config); `supervisor
    *  !== null` covers everything after supervisor.start() succeeds,
    *  including its own "failing" backoff — that supervisor is still ours to
-   *  stop. */
+   *  stop. Does NOT cover a pre-supervisor failure's own backoff wait (no
+   *  supervisor, `starting` already false) — callers that also care about
+   *  THAT check `this.retryTimer` themselves; folding it in here made
+   *  isUp() true for a state startRelay() itself does not consider "up",
+   *  which is a different question than "is there a pending retry to
+   *  cancel". */
   private isUp(): boolean {
     return this.starting || this.supervisor !== null;
   }
@@ -173,43 +208,82 @@ export class RelayLifecycle {
     return feeds.some((f) => f.source.kind === "pull" || f.source.kind === "push");
   }
 
-  private enqueue(fn: () => Promise<void>): Promise<void> {
-    this.chain = this.chain.then(fn, fn);
-    return this.chain;
+  /** Appends `fn` to the internal chain and returns at once — see the file
+   *  header for why no public caller ever awaits the chain itself. A
+   *  rejection is not expected (every pre-supervisor step startRelay() takes
+   *  is inside its own try/catch — see item 3's own comment there), but a
+   *  caught one here is what keeps a hypothetical future one from wedging
+   *  every later call behind a permanently-rejected chain. */
+  private enqueue(fn: () => Promise<void>): void {
+    this.chain = this.chain.then(fn, (err: unknown) => {
+      console.error(`[video] an internal relay-lifecycle step failed unexpectedly: ${scrub(errorMessage(err))}`);
+    });
   }
 
   /** integration-manager.ts's applyVideo(): video's own enabled flag. */
-  setEnabled(enabled: boolean): Promise<void> {
+  setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    return this.enqueue(() => this.reconcileWanted());
+    this.enqueue(() => this.reconcileWanted());
   }
 
   /** video-service.ts's feedsChangedListener — a feed was added, changed or
    *  removed. */
-  feedsChanged(): Promise<void> {
-    return this.enqueue(() => this.reconcileWanted());
+  feedsChanged(): void {
+    this.enqueue(() => this.reconcileWanted());
   }
 
-  /** video-service.ts's portsChangedListener — PATCH /api/video/ports just
-   *  saved a new set. Restarts an already-running relay on them; a stopped
-   *  one simply starts on the new ports next time, since startRelay() always
-   *  reads them fresh from the store. */
-  portsChanged(): Promise<void> {
-    return this.enqueue(async () => {
-      if (!this.isUp()) return;
-      await this.stopRelay();
-      await this.reconcileWanted();
+  /**
+   * video-service.ts's portsChangedListener — PATCH /api/video/ports just
+   * saved a DIFFERENT set (video-service.ts's own setPorts() already skips
+   * calling this when nothing changed). Restarts an already-running relay on
+   * them; retries at once, rather than waiting out whatever backoff was
+   * already scheduled, when the relay was mid pre-supervisor failure (a busy
+   * port, most usefully — the operator just changed the ports to fix
+   * exactly that); does nothing at all when the relay is simply off, since
+   * a future start reads the new ports fresh from the store anyway.
+   */
+  portsChanged(): void {
+    this.enqueue(async () => {
+      const failingBackoff = !this.isUp() && this.retryTimer !== null;
+      if (!this.isUp() && !failingBackoff) return;
+
+      const stillWanted = this.enabled && (await this.hasRelayFeeds());
+      if (!stillWanted) {
+        // Not actually about the ports — video was switched off or the last
+        // feed removed at the same moment. The ordinary path names the
+        // real reason.
+        await this.reconcileWanted();
+        return;
+      }
+
+      console.log("[video] relay restarting on new ports");
+      if (this.isUp()) {
+        await this.stopRelay();
+      } else {
+        this.clearRetryTimer();
+        videoService.setPreAttachStatus(null);
+      }
+      this.attempt = 0;
+      await this.startRelay();
     });
   }
 
   private async reconcileWanted(): Promise<void> {
     const wantRunning = this.enabled && (await this.hasRelayFeeds());
-    if (wantRunning && !this.isUp()) {
-      await this.startRelay();
-    } else if (!wantRunning && this.isUp()) {
-      console.log(`[video] relay stopped (${this.enabled ? "no relay feeds" : "video switched off"})`);
-      await this.stopRelay();
+    if (wantRunning) {
+      if (!this.isUp()) await this.startRelay();
+      return;
     }
+    // Always run, whether or not isUp() is true: a pre-supervisor failure's
+    // own backoff wait (a busy port, say) already has `starting` false and
+    // no supervisor, so isUp() alone would miss it entirely — switching off,
+    // or removing the last feed, during exactly that wait used to leave the
+    // failing status and its retry timer running forever. stopRelay() is
+    // safe to call unconditionally; it is a no-op past its own cleanup when
+    // there is truly nothing to stop.
+    const wasActive = this.isUp() || this.retryTimer !== null;
+    await this.stopRelay();
+    if (wasActive) console.log(`[video] relay stopped (${this.enabled ? "no relay feeds" : "video switched off"})`);
   }
 
   private clearRetryTimer(): void {
@@ -218,143 +292,165 @@ export class RelayLifecycle {
   }
 
   private stopReadinessPoll(): void {
-    if (this.readinessTimer) clearInterval(this.readinessTimer);
+    if (this.readinessTimer) clearTimeout(this.readinessTimer);
     this.readinessTimer = null;
   }
 
   /** A failure before any supervisor exists — nothing to hand a "failing"
    *  SupervisorStatus, so relayStatus() is told directly through
    *  setPreAttachStatus(). Retried on the same backoff schedule the
-   *  supervisor itself uses (restartDelayMs) once one is running. */
-  private failPreSupervisor(reason: string, placeArchiveAt: string | undefined): void {
+   *  supervisor itself uses (restartDelayMs) once one is running. Routed
+   *  through prelaunchOutage so a port conflict or a download failure logs
+   *  once per outage — first failure, a reminder past its own floor, one
+   *  recovery line — never once per retry. */
+  private failPreSupervisor(reason: string, placeArchiveAt: string | undefined, assetName: string | undefined): void {
     this.starting = false;
     const delay = restartDelayMs(this.attempt);
     this.attempt++;
-    videoService.setPreAttachStatus({ state: "failing", reason, retryAt: Date.now() + delay, placeArchiveAt });
-    void this.reportCurrent();
+    videoService.setPreAttachStatus({ state: "failing", reason, retryAt: Date.now() + delay, placeArchiveAt, assetName });
+    const decision = this.prelaunchOutage.fail("relay-prelaunch", reason, Date.now());
+    if (decision.log) console.warn(`[video] ${scrub(reason)}${scrub(decision.note)}`);
     this.clearRetryTimer();
-    this.retryTimer = setTimeout(() => void this.enqueue(() => this.reconcileWanted()), delay);
+    this.retryTimer = setTimeout(() => this.enqueue(() => this.reconcileWanted()), delay);
     this.retryTimer.unref?.();
   }
 
+  /**
+   * The start sequence, in order: ensureBinary -> busyPorts -> the config
+   * file -> supervisor.start() -> attachRelay() -> the readiness poll.
+   *
+   * The WHOLE body is one try/catch: a throw from busyPorts, from
+   * hasRelayFeeds()'s own feed-store read, or from anywhere else that is not
+   * one of the three steps with their own more specific catch below, used to
+   * leave `starting` stuck true forever — no supervisor was ever created to
+   * undo it, and nothing else resets the flag. That wedged the whole
+   * lifecycle: every later setEnabled()/feedsChanged() saw isUp() already
+   * true and never tried again.
+   */
   private async startRelay(): Promise<void> {
     this.starting = true;
     this.loggedStartedThisRun = false;
-    this.report("connecting", "Starting the video relay");
+    // The one moment nothing else has anything to say yet: no supervisor,
+    // no download in progress. Reusing "starting" (rather than a new wire
+    // state) is deliberate — a real supervisor's own "starting" status
+    // (below, once one exists) means the same thing to an operator, and
+    // relayConnectionState() already renders both the same way.
+    videoService.setPreAttachStatus({ state: "starting", version: null });
 
-    let lastProgressAt = 0;
-    const onProgress = (received: number, total: number) => {
-      const now = Date.now();
-      if (received < total && now - lastProgressAt < DOWNLOAD_PROGRESS_THROTTLE_MS) return;
-      lastProgressAt = now;
-      videoService.setPreAttachStatus({ state: "downloading", receivedBytes: received, totalBytes: total });
-      void this.reportCurrent();
-    };
+    try {
+      let lastProgressAt = 0;
+      const onProgress = (received: number, total: number) => {
+        const now = Date.now();
+        if (received < total && now - lastProgressAt < DOWNLOAD_PROGRESS_THROTTLE_MS) return;
+        lastProgressAt = now;
+        videoService.setPreAttachStatus({ state: "downloading", receivedBytes: received, totalBytes: total });
+      };
+      const onDownloadStart = () => {
+        // Once per download STREAK, not once per retry: attempt is only
+        // ever 0 on the first pre-supervisor try since the last success (or
+        // the last time the desire to run went away entirely).
+        if (this.attempt === 0) console.log(`[video] downloading MediaMTX ${MEDIAMTX_VERSION}`);
+      };
 
-    const ensured = await this.deps.ensureBinary({ onProgress });
-    if (!ensured.ok) {
-      this.failPreSupervisor(ensured.reason, ensured.placeArchiveAt);
-      return;
-    }
+      const ensured = await this.deps.ensureBinary({ onProgress, onDownloadStart });
+      if (!ensured.ok) {
+        this.failPreSupervisor(ensured.reason, ensured.placeArchiveAt, ensured.assetName ?? undefined);
+        return;
+      }
 
-    // Video may have been switched off, or the last relay feed removed,
-    // while the download (or an already-cached binary check) ran — recheck
-    // before spawning anything.
-    if (!(this.enabled && (await this.hasRelayFeeds()))) {
+      // Video may have been switched off, or the last relay feed removed,
+      // while the download (or an already-cached binary check) ran —
+      // recheck before spawning anything.
+      if (!(this.enabled && (await this.hasRelayFeeds()))) {
+        this.starting = false;
+        videoService.setPreAttachStatus(null);
+        return;
+      }
+
+      const { ports } = await loadFeedsFile();
+      const busy = await this.deps.busyPorts(ports);
+      if (busy.length > 0) {
+        this.failPreSupervisor(busyPortReason(busy), undefined, undefined);
+        return;
+      }
+
+      const configPath = path.join(relayDir(), "mediamtx.yml");
+      try {
+        const feeds = await videoService.relayFeeds();
+        const config = relayConfig({ ports, lanIp: getLanIp(), users: publishUsers(feeds) });
+        await fsp.mkdir(relayDir(), { recursive: true });
+        // 0o600, as secrets.ts's own atomicWrite() calls write: the config
+        // holds every push feed's live publish password in the clear.
+        await atomicWrite(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+      } catch (err) {
+        this.failPreSupervisor(`could not write the relay's config: ${errorMessage(err)}`, undefined, undefined);
+        return;
+      }
+
+      const supervisor = this.deps.makeSupervisor();
+      this.statusListener = (status) => this.onSupervisorStatus(status);
+      supervisor.on("status", this.statusListener);
+      try {
+        await supervisor.start(ensured.path, configPath);
+      } catch (err) {
+        supervisor.off("status", this.statusListener);
+        this.statusListener = null;
+        this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, undefined, undefined);
+        return;
+      }
+
+      this.attempt = 0;
+      this.supervisor = supervisor;
+      this.currentPorts = ports;
       this.starting = false;
-      videoService.setPreAttachStatus(null);
-      void this.reportCurrent();
-      return;
-    }
-
-    const { ports } = await loadFeedsFile();
-    const busy = await this.deps.busyPorts(ports);
-    if (busy.length > 0) {
-      this.failPreSupervisor(busyPortReason(busy), undefined);
-      return;
-    }
-
-    const configPath = path.join(relayDir(), "mediamtx.yml");
-    try {
-      const feeds = await videoService.relayFeeds();
-      const config = relayConfig({ ports, lanIp: getLanIp(), users: publishUsers(feeds) });
-      await fsp.mkdir(relayDir(), { recursive: true });
-      await fsp.writeFile(configPath, JSON.stringify(config, null, 2), "utf8");
+      const recovered = this.prelaunchOutage.ok("relay-prelaunch", Date.now());
+      if (recovered.log) console.log(`[video] the relay's pre-launch checks are passing again${recovered.note}`);
+      videoService.attachRelay(this.deps.makeRelay(ports.api), supervisor, ports);
+      this.startReadinessPoll();
     } catch (err) {
-      this.failPreSupervisor(`could not write the relay's config: ${errorMessage(err)}`, undefined);
-      return;
+      this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, undefined, undefined);
     }
-
-    const supervisor = this.deps.makeSupervisor();
-    this.statusListener = (status) => this.onSupervisorStatus(status, ports);
-    supervisor.on("status", this.statusListener);
-
-    try {
-      await supervisor.start(ensured.path, configPath);
-    } catch (err) {
-      supervisor.off("status", this.statusListener);
-      this.statusListener = null;
-      this.failPreSupervisor(`could not start the relay: ${errorMessage(err)}`, undefined);
-      return;
-    }
-
-    this.attempt = 0;
-    this.supervisor = supervisor;
-    this.starting = false;
-    videoService.attachRelay(this.deps.makeRelay(ports.api), supervisor, ports);
-    this.startReadinessPoll(ports);
   }
 
-  /**
-   * The supervisor's own status changing — spawn, crash-and-respawn, or a
-   * stop this class itself did not initiate directly (there is none today,
-   * but the listener is what would see it). Reports the current connection
-   * state fresh from videoService.state() rather than mapping `status`
-   * itself: videoService.relayStatus() already folds in "not answering" and
-   * the attached ports, and re-deriving that switch here would be the exact
-   * duplication CLAUDE.md's "fixing a repeated pattern" warns about.
-   */
-  private onSupervisorStatus(status: SupervisorStatus, ports: VideoPorts): void {
-    void this.reportCurrent();
-    if (status.state === "running") this.startReadinessPoll(ports);
+  /** The supervisor's own status changing — spawn, crash-and-respawn, or a
+   *  stop. Manages the readiness poll only: the connection row is driven
+   *  entirely off video-service.ts's own publish() (handleRelayStatus,
+   *  above), which a status change reaches through video-service's OWN
+   *  listener (registered in attachRelay(), and — for every transition
+   *  after the very first — always in time to see it). */
+  private onSupervisorStatus(status: SupervisorStatus): void {
+    if (status.state === "running") this.startReadinessPoll();
     else this.stopReadinessPoll();
   }
 
   /**
-   * Retries reconcileRelay() (video-service.ts, public) once a second until
-   * it genuinely applies — the relay's API is not necessarily open the
-   * moment the supervisor reports "running" (the supervisor marks a process
-   * running the instant it spawns, well before MediaMTX has opened
-   * anything), and there is nothing else that would ever call reconcile at
-   * all if nobody has the Video feeds page open: videoService's own status
-   * poll is gated on a subscriber, but a push feed must still become
-   * reachable with nobody watching. Kept running for as long as the
-   * supervisor reports "running" and reconcile has not yet applied for THIS
-   * run — matching the supervisor's own "never give up" philosophy rather
-   * than abandoning the relay's paths to a single bounded attempt.
-   *
-   * Also where "relay started: …" is logged, once — not on the first tick
-   * unconditionally, because `supervisor.version()` is null until the
-   * relay's own startup banner line has actually been read (asynchronous,
-   * after the process starts writing to stdout), which a status of
-   * "running" alone does not guarantee has happened yet.
+   * Retries reconcileRelay() (video-service.ts, public) until it genuinely
+   * applies — the relay's API is not necessarily open the moment the
+   * supervisor reports "running" (the supervisor marks a process running the
+   * instant it spawns, well before MediaMTX has opened anything), and there
+   * is nothing else that would ever call reconcile at all if nobody has the
+   * Video feeds page open: video-service's own status poll is gated on a
+   * subscriber, but a push feed must still become reachable with nobody
+   * watching. The FIRST attempt runs immediately; every one after backs off
+   * with restartDelayMs, the same schedule the supervisor's own crash loop
+   * uses, rather than hammering a relay that is simply slow to open its API.
+   * Stops on a successful reconcile ALONE — not gated on the "started" log
+   * line below, which is a separate concern that piggybacks on the same
+   * tick. In practice the two are never in tension: MediaMTX's own startup
+   * banner (which sets the supervisor's version()) is the FIRST line it
+   * ever prints, always before "[API] started with listener" (relay-facts.md),
+   * so the version is already known by the time reconcile can possibly
+   * succeed.
    */
-  private startReadinessPoll(ports: VideoPorts): void {
+  private startReadinessPoll(): void {
     if (this.readinessTimer) return;
+    let attempt = 0;
     const tick = async () => {
+      this.readinessTimer = null;
       if (!this.loggedStartedThisRun) {
-        // Read fresh every tick, never a captured local: startRelay()'s own
-        // supervisor.start() can emit "running" (onSupervisorStatus, which
-        // calls startReadinessPoll()) SYNCHRONOUSLY, before this.supervisor is
-        // assigned — the real RelaySupervisor's spawnChild() sets its status
-        // the moment it spawns, reached through no further await once
-        // killLeftover() resolves. A closed-over `supervisor` local captured
-        // at that moment would be stuck on whatever this.supervisor held a
-        // MOMENT AGO (null, on a fresh start) forever after: this.readinessTimer
-        // being already set blocks every later call to this method from ever
-        // replacing it.
         const version = this.supervisor?.version();
-        if (version) {
+        const ports = this.currentPorts;
+        if (version && ports) {
           console.log(
             `[video] relay started: MediaMTX ${version}, RTMP ${ports.rtmp}, SRT ${ports.srt}, ` +
               `video to screens UDP ${ports.webrtcUdp}`,
@@ -363,30 +459,35 @@ export class RelayLifecycle {
         }
       }
       const applied = await videoService.reconcileRelay();
-      if (applied && this.loggedStartedThisRun) this.stopReadinessPoll();
+      if (applied) return; // the API has answered — nothing left to retry
+      attempt++;
+      this.readinessTimer = setTimeout(() => void tick(), restartDelayMs(attempt));
+      this.readinessTimer.unref?.();
     };
-    this.readinessTimer = setInterval(() => void tick(), RELAY_READINESS_POLL_MS);
-    this.readinessTimer.unref?.();
     void tick();
   }
 
   /** supervisor.stop(), then await videoService.detachRelay() — in that
-   *  order, per the plan's own start/stop sequence. */
+   *  order, per the plan's own start/stop sequence. Idempotent: safe to call
+   *  with nothing running (reconcileWanted()'s own !wantRunning branch
+   *  always calls this, whether or not isUp() is true — see its comment). */
   private async stopRelay(): Promise<void> {
     this.stopReadinessPoll();
     this.clearRetryTimer();
     const supervisor = this.supervisor;
     this.supervisor = null;
+    this.currentPorts = null;
     this.starting = false;
+    this.attempt = 0;
     if (supervisor && this.statusListener) supervisor.off("status", this.statusListener);
     this.statusListener = null;
     if (supervisor) await supervisor.stop();
     await videoService.detachRelay();
     videoService.setPreAttachStatus(null);
-    await this.reportCurrent();
   }
 }
 
 export const relayLifecycle = new RelayLifecycle();
-videoService.setFeedsChangedListener(() => void relayLifecycle.feedsChanged());
-videoService.setPortsChangedListener(() => void relayLifecycle.portsChanged());
+videoService.setFeedsChangedListener(() => relayLifecycle.feedsChanged());
+videoService.setPortsChangedListener(() => relayLifecycle.portsChanged());
+videoService.setRelayStatusListener((relay) => relayLifecycle.handleRelayStatus(relay));

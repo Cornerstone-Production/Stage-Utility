@@ -25,6 +25,7 @@ type RelayFeed = import("./relay.js").RelayFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type VideoPorts = import("../../types/video.js").VideoPorts;
+type RelayStatus = import("../../types/video.js").RelayStatus;
 type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
 
 /**
@@ -2616,6 +2617,79 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
     videoService.setPortsChangedListener(null);
     const { videoFeedsStore } = await import("./feed-store.js");
     await videoFeedsStore.update((current) => ({ ...current, ports: DEFAULT_VIDEO_PORTS }));
+  }
+});
+
+test("PROBE E: saving the SAME ports never fires the hook — an unchanged save must not restart a running relay and drop every publisher", async () => {
+  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
+  const calls: string[] = [];
+  try {
+    const setup = await videoService.setPorts(CHANGED);
+    assert.ok(setup.ok);
+
+    videoService.setPortsChangedListener(() => calls.push("changed"));
+    const again = await videoService.setPorts({ ...CHANGED });
+    assert.ok(again.ok);
+    assert.equal(calls.length, 0, "saving the identical six values again must not fire the restart hook");
+
+    const real = await videoService.setPorts(DEFAULT_VIDEO_PORTS);
+    assert.ok(real.ok);
+    assert.equal(calls.length, 1, "a genuine change must still fire it");
+  } finally {
+    videoService.setPortsChangedListener(null);
+    const { videoFeedsStore } = await import("./feed-store.js");
+    await videoFeedsStore.update((current) => ({ ...current, ports: DEFAULT_VIDEO_PORTS }));
+  }
+});
+
+/** setPreAttachStatus()/attachRelay() both call publish() fire-and-forget —
+ *  intentionally, so relay-lifecycle.ts's own callers are never made to wait
+ *  on it (item 1's own fix). A test therefore cannot rely on either call
+ *  having settled synchronously, or even after a single microtask: publish()
+ *  itself awaits a real feed-store read. Real wall-clock polling, bounded,
+ *  rather than a guessed number of ticks. */
+async function waitForCount(seen: unknown[], count: number, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (seen.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+test("setRelayStatusListener fires on every publish that actually changes the relay, with the fresh RelayStatus", async () => {
+  const seen: RelayStatus[] = [];
+  videoService.setRelayStatusListener((relay) => seen.push(relay));
+  try {
+    videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 1, totalBytes: 2 });
+    await waitForCount(seen, 1);
+    assert.deepEqual(seen.at(-1), { state: "downloading", receivedBytes: 1, totalBytes: 2 });
+
+    // The identical status again must not re-fire — publish() itself is
+    // gated on a real change, and the listener rides that same gate.
+    videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 1, totalBytes: 2 });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.length, 1, "an unchanged status must not re-fire the listener");
+
+    videoService.setPreAttachStatus(null);
+    await waitForCount(seen, 2);
+    assert.deepEqual(seen.at(-1), { state: "off" });
+  } finally {
+    videoService.setRelayStatusListener(null);
+    videoService.setPreAttachStatus(null);
+  }
+});
+
+test("attachRelay itself publishes the settled state — a caller must not need a SEPARATE trigger to have the row learn the relay just came up", async () => {
+  const seen: RelayStatus[] = [];
+  videoService.setRelayStatusListener((relay) => seen.push(relay));
+  try {
+    const supervisor = new FakeSupervisor();
+    supervisor.ver = "v1.21.1";
+    attach(fakeRelay(async () => []), supervisor);
+    await waitForCount(seen, 1);
+    assert.deepEqual(seen.at(-1), { state: "running", version: "v1.21.1", ports: DEFAULT_VIDEO_PORTS });
+  } finally {
+    videoService.setRelayStatusListener(null);
+    await videoService.detachRelay();
   }
 });
 

@@ -111,7 +111,13 @@ export type RelayStatus =
    *  anything. */
   | { state: "starting"; version: string | null }
   | { state: "running"; version: string; ports: VideoPorts }
-  | { state: "failing"; reason: string; retryAt: number | null; placeArchiveAt?: string };
+  /** `assetName` is set only once a real pinned asset exists to place —
+   *  never for "no asset for this platform/arch at all" (acquire.ts's
+   *  `ensureBinary` says which case it is directly, rather than a caller
+   *  guessing from whether `placeArchiveAt` looks like a bare directory or a
+   *  full file path). The renderer never derives it by splitting
+   *  `placeArchiveAt` on "/" — that breaks on Windows. */
+  | { state: "failing"; reason: string; retryAt: number | null; placeArchiveAt?: string; assetName?: string };
 
 export interface VideoState {
   rev: number;
@@ -125,5 +131,12 @@ export interface VideoState {
    *  triggers, which is exactly why the two are separate fields rather than
    *  one "ports" the running state alone carries. */
   ports: VideoPorts;
+  /** Whether the pinned MediaMTX binary is already extracted on this
+   *  machine — from relayDir's own versioned binary existing, checked fresh
+   *  on every read. Lets the "off" status line tell "never downloaded" (show
+   *  the download-size sentence) from "downloaded once, just switched off
+   *  since" (say nothing) apart — `relay.state` alone cannot: both read
+   *  "off". */
+  binaryPresent: boolean;
   feeds: VideoFeedView[];
 }

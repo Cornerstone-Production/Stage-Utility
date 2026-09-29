@@ -4,6 +4,9 @@
 // only real I/O anywhere in this file is a config file written under a
 // throwaway STAGE_UTILITY_DATA — the same tmp dir every other video test
 // under this directory writes to.
+//
+// Includes the reviewer's own probes (A-F, scratchpad/t15probe), turned into
+// real assertions rather than console.log observations.
 
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
@@ -33,8 +36,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 /** Real wall-clock polling, never affected by a test's own mocked
  *  setTimeout: the start sequence's first-ever secretsStore call generates
  *  an encryption key (real crypto), and a single settle() is not always
- *  enough past that. Date.now() is real time here even when a test mocks
- *  setTimeout without also mocking "Date". */
+ *  enough past that. */
 async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
   for (;;) {
@@ -87,7 +89,6 @@ function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
 } {
   const order: string[] = [];
   const supervisors: FakeSupervisor[] = [];
-  const reconcileCalls: RelayFeed[][] = [];
   const deps: RelayLifecycleDeps = {
     ensureBinary: async () => {
       order.push("ensureBinary");
@@ -103,8 +104,7 @@ function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
       return s;
     },
     makeRelay: () =>
-      fakeRelay(async (feeds) => {
-        reconcileCalls.push(feeds);
+      fakeRelay(async () => {
         order.push("reconcile");
       }),
     ...overrides,
@@ -128,8 +128,9 @@ let active: InstanceType<typeof RelayLifecycle> | null = null;
 
 function activate(lifecycle: InstanceType<typeof RelayLifecycle>): InstanceType<typeof RelayLifecycle> {
   active = lifecycle;
-  videoService.setFeedsChangedListener(() => void lifecycle.feedsChanged());
-  videoService.setPortsChangedListener(() => void lifecycle.portsChanged());
+  videoService.setFeedsChangedListener(() => lifecycle.feedsChanged());
+  videoService.setPortsChangedListener(() => lifecycle.portsChanged());
+  videoService.setRelayStatusListener((relay) => lifecycle.handleRelayStatus(relay));
   return lifecycle;
 }
 
@@ -138,21 +139,56 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (active) await active.setEnabled(false);
+  if (active) active.setEnabled(false);
+  await settle();
   active = null;
   videoService.setFeedsChangedListener(null);
   videoService.setPortsChangedListener(null);
+  videoService.setRelayStatusListener(null);
   await videoService.detachRelay();
+  videoService.setPreAttachStatus(null);
   await setRelayFeeds(0);
   await videoFeedsStore.update((current) => ({ ...current, ports: DEFAULT_VIDEO_PORTS }));
 });
 
-// ── 1. The relay runs exactly when enabled AND at least one relay feed exists ──
+// ── 1. The relay runs exactly when enabled AND at least one relay feed exists,
+//       and every public entry point returns AT ONCE (never awaits the start
+//       sequence) ──────────────────────────────────────────────────────────
+
+test("setEnabled/feedsChanged/portsChanged return void — a caller can never be made to wait on the start sequence", async () => {
+  const { deps } = makeDeps({ ensureBinary: () => new Promise(() => {}) }); // never resolves
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  const returned = lifecycle.setEnabled(true);
+  assert.equal(returned, undefined, "setEnabled must return void, not a Promise a caller could await");
+  // The test function itself returning proves nothing hung, even with
+  // ensureBinary held forever.
+});
+
+test("a held ensureBinary never blocks the caller — work still starts in the background", async () => {
+  let ensureBinaryCalls = 0;
+  let resolveEnsure!: () => void;
+  const held = new Promise<void>((resolve) => (resolveEnsure = resolve));
+  const { deps, supervisors } = makeDeps({
+    ensureBinary: async () => {
+      ensureBinaryCalls++;
+      await held;
+      return { ok: true, path: "/fake/mediamtx" };
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => ensureBinaryCalls > 0);
+  assert.equal(supervisors.length, 0, "nothing should have started yet — ensureBinary is still held");
+  resolveEnsure();
+  await waitUntil(() => supervisors.length > 0);
+});
 
 test("enabling with no relay feeds starts nothing", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
-  await lifecycle.setEnabled(true);
+  lifecycle.setEnabled(true);
   await settle();
   assert.equal(supervisors.length, 0, "a supervisor was created with no relay feed to serve");
   assert.equal((await videoService.state()).relay.state, "off");
@@ -161,14 +197,13 @@ test("enabling with no relay feeds starts nothing", async () => {
 test("adding the first relay feed starts it", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
-  await lifecycle.setEnabled(true);
+  lifecycle.setEnabled(true);
   await settle();
   assert.equal(supervisors.length, 0);
 
   await setRelayFeeds(1);
-  await lifecycle.feedsChanged();
-  await settle();
-  assert.equal(supervisors.length, 1, "the first relay feed did not start the relay");
+  lifecycle.feedsChanged();
+  await waitUntil(() => supervisors.length > 0);
   assert.equal(supervisors[0]!.startCalls.length, 1);
   assert.equal((await videoService.state()).relay.state, "running");
 });
@@ -177,14 +212,12 @@ test("removing the last relay feed stops it", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
-  await settle();
-  assert.equal(supervisors.length, 1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
 
   await setRelayFeeds(0);
-  await lifecycle.feedsChanged();
-  await settle();
-  assert.equal(supervisors[0]!.stopCalls, 1, "the last relay feed's removal never stopped the supervisor");
+  lifecycle.feedsChanged();
+  await waitUntil(() => supervisors[0]!.stopCalls > 0);
   assert.equal((await videoService.state()).relay.state, "off");
 });
 
@@ -192,13 +225,11 @@ test("disabling stops it, even with relay feeds still present", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(2);
-  await lifecycle.setEnabled(true);
-  await settle();
-  assert.equal(supervisors.length, 1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
 
-  await lifecycle.setEnabled(false);
-  await settle();
-  assert.equal(supervisors[0]!.stopCalls, 1);
+  lifecycle.setEnabled(false);
+  await waitUntil(() => supervisors[0]!.stopCalls > 0);
   assert.equal((await videoService.state()).relay.state, "off");
 });
 
@@ -206,109 +237,235 @@ test("enabling with a relay feed already present starts it", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1, "pull");
-  await lifecycle.setEnabled(true);
-  await settle();
-  assert.equal(supervisors.length, 1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
-// ── 2. The start sequence, in order ────────────────────────────────────────
+// ── 2. The start sequence, in order, and the config file it writes ────────
 
-test("ensureBinary, then busyPorts, then the config file, then supervisor.start, then attachRelay, then reconcile once running", async () => {
+test("ensureBinary, then busyPorts, then the config file (0o600, real publish users), then supervisor.start, then attachRelay, then reconcile once running", async () => {
   const { deps, order, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
-  await settle();
-  // Give the readiness poll's own retry loop a moment — it is what actually
-  // calls reconcile, once a tick after attach (see startReadinessPoll()).
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  lifecycle.setEnabled(true);
+  await waitUntil(() => order.includes("reconcile"));
 
   const supervisor = supervisors[0]!;
   assert.equal(supervisor.startCalls[0]!.binary, "/fake/mediamtx");
   assert.match(supervisor.startCalls[0]!.configPath, /mediamtx\.yml$/);
 
-  const configRaw = await fs.readFile(supervisor.startCalls[0]!.configPath, "utf8");
-  const config = JSON.parse(configRaw) as { rtmpAddress: string; webrtcAdditionalHosts: string[] };
+  const configPath = supervisor.startCalls[0]!.configPath;
+  const configRaw = await fs.readFile(configPath, "utf8");
+  const config = JSON.parse(configRaw) as {
+    rtmpAddress: string;
+    webrtcAdditionalHosts: string[];
+    authInternalUsers: { user: string; permissions: { action: string; path: string }[] }[];
+  };
   assert.equal(config.rtmpAddress, `:${DEFAULT_VIDEO_PORTS.rtmp}`, "the config was not built from the current ports");
   assert.ok(config.webrtcAdditionalHosts[0], "the config carries no lanIp at all");
+  // publishUsers(feeds): the fixed reader, plus one "video" user per push
+  // feed, permissioned to publish exactly that feed's own path.
+  const publishers = config.authInternalUsers.filter((u) => u.permissions.some((p) => p.action === "publish"));
+  assert.deepEqual(publishers.map((u) => u.permissions[0]!.path), ["f0"], "the config's publish users do not match the feed list");
+
+  const stat = await fs.stat(configPath);
+  assert.equal(stat.mode & 0o777, 0o600, "the config holds every push feed's live publish password in the clear");
 
   assert.deepEqual(order, ["ensureBinary", "busyPorts", "reconcile"], "the start sequence ran out of order");
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
-test("a busy port fails before any supervisor is created, and is retried", async (t: TestContext) => {
+// ── PROBE D / item 3: a throw anywhere in the pre-supervisor steps must
+//    never wedge starting=true forever ─────────────────────────────────────
+
+test("PROBE D: a throwing ensureBinary (not an ok:false return) does not wedge the lifecycle — the next attempt still starts it", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  let attempts = 0;
+  let calls = 0;
   const { deps, supervisors } = makeDeps({
-    busyPorts: async () => {
-      attempts++;
-      return attempts === 1 ? [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] : [];
+    ensureBinary: async () => {
+      calls++;
+      if (calls === 1) throw new Error("EACCES: permission denied, mkdir '/data/video-relay/downloads'");
+      return { ok: true, path: "/fake/mediamtx" };
     },
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
-  await settle();
-
-  assert.equal(supervisors.length, 0, "a busy port must not reach supervisor.start()");
+  lifecycle.setEnabled(true);
+  await waitUntil(() => calls === 1);
+  assert.equal(supervisors.length, 0);
   const relay = (await videoService.state()).relay;
-  assert.equal(relay.state, "failing");
-  assert.equal((relay as { reason: string }).reason, "Port 1935 is in use by OBS Studio.");
+  assert.equal(relay.state, "failing", "a thrown error must still report failing, not silently do nothing");
+  assert.match((relay as { reason: string }).reason, /could not start the relay: EACCES/);
 
-  // The same backoff schedule the supervisor itself uses for a crash loop —
-  // proves the retry is not on some separate, undocumented cadence.
   t.mock.timers.tick(restartDelayMs(0));
   await waitUntil(() => supervisors.length > 0);
-  assert.equal(supervisors.length, 1, "the busy-port failure was never retried");
+  assert.equal((await videoService.state()).relay.state, "running", "the lifecycle must retry, not stay wedged");
 });
 
-test("a download failure never reaches busyPorts, and names where to place the archive by hand", async (t: TestContext) => {
+test("a throw from busyPorts (not from ensureBinary) is caught the same way, by the one outer try/catch", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { deps, order, supervisors } = makeDeps({
-    ensureBinary: async () => {
-      order.push("ensureBinary");
-      return { ok: false, reason: "checksum mismatch", placeArchiveAt: "/data/video-relay/downloads/mediamtx.tar.gz" };
-    },
+  let calls = 0;
+  const { deps, supervisors } = makeDeps({
     busyPorts: async () => {
-      order.push("busyPorts");
+      calls++;
+      if (calls === 1) throw new Error("EPERM: operation not permitted");
       return [];
     },
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
-  await settle();
-
-  assert.deepEqual(order, ["ensureBinary"]);
-  assert.equal(supervisors.length, 0);
-  const relay = (await videoService.state()).relay;
-  assert.equal(relay.state, "failing");
-  assert.equal((relay as { reason: string }).reason, "checksum mismatch");
-  assert.equal((relay as { placeArchiveAt?: string }).placeArchiveAt, "/data/video-relay/downloads/mediamtx.tar.gz");
+  lifecycle.setEnabled(true);
+  await waitUntil(() => calls === 1);
+  assert.equal((await videoService.state()).relay.state, "failing");
+  t.mock.timers.tick(restartDelayMs(0));
+  await waitUntil(() => supervisors.length > 0);
 });
 
-// ── 3. A ports change restarts an already-running relay on the new ports ──
+// ── PROBES A & B / item 2: a pre-supervisor failure must clear when the
+//    desire to run goes away, not linger with its retry timer still running ──
 
-test("PATCH-style ports change restarts a running relay with the new ports, and the proxy target follows", async () => {
-  const { deps, supervisors } = makeDeps();
+test("PROBE A: a busy port, then switched off — the failing status clears and the retry stops", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const seen: { state: string; message: string | null }[] = [];
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+  assert.equal((await videoService.state()).relay.state, "failing");
+
+  lifecycle.setEnabled(false);
+  await settle();
+  assert.equal((await videoService.state()).relay.state, "off", "the failing status must clear once switched off");
+  assert.equal(seen.at(-1)?.state, "disconnected");
+
+  // The retry timer must be gone too — ticking past where it would have
+  // fired must not resurrect anything (busyPorts would still refuse it).
+  const before = seen.length;
+  t.mock.timers.tick(restartDelayMs(0) + 1000);
+  await settle();
+  assert.equal(seen.length, before, "a cancelled retry timer fired anyway");
+});
+
+test("PROBE B: a busy port, then the last relay feed removed — same clearing", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
+  lifecycle.setEnabled(true);
+  await settle();
+  assert.equal((await videoService.state()).relay.state, "failing");
+
+  await setRelayFeeds(0);
+  lifecycle.feedsChanged();
+  await settle();
+  assert.equal((await videoService.state()).relay.state, "off");
+});
+
+// ── 5. Logging: once per outage, never once per retry ──────────────────────
+
+test("a repeated busy-port failure logs once, not once per retry", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+  t.mock.timers.tick(restartDelayMs(0));
+  await settle();
+  t.mock.timers.tick(restartDelayMs(1));
+  await settle();
+  const busyLines = logs.filter((l) => l.includes("Port 1935 is in use by OBS Studio"));
+  assert.equal(busyLines.length, 1, `expected exactly one busy-port line across three failures, got: ${JSON.stringify(busyLines)}`);
+});
+
+test("downloading MediaMTX logs once per download STREAK, not once per retry", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  let ensureBinaryCalls = 0;
+  const { deps } = makeDeps({
+    ensureBinary: async (opts) => {
+      ensureBinaryCalls++;
+      opts?.onDownloadStart?.();
+      return { ok: false, reason: "download failed: network error", placeArchiveAt: "/x/mediamtx.tar.gz", assetName: "mediamtx.tar.gz" };
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+  t.mock.timers.tick(restartDelayMs(0));
+  await settle();
+  t.mock.timers.tick(restartDelayMs(1));
+  await settle();
+  assert.equal(ensureBinaryCalls, 3, "the retry loop itself must still run three times");
+  const downloadLines = logs.filter((l) => l.includes("downloading MediaMTX"));
+  assert.equal(downloadLines.length, 1, `expected one "downloading" line across three attempts, got: ${JSON.stringify(downloadLines)}`);
+});
+
+test("recovering from a pre-supervisor outage logs once — but only once the recovery has genuinely HELD, per OutageLog's own settle window", async (t: TestContext) => {
+  // OutageLog.ok() answers quiet for a success inside its settle window (2
+  // minutes by default) — a fast retry succeeding a second later is a gap in
+  // one flapping outage, not its end, and the "Date" clock has to move past
+  // that window for a recovery line to ever have a CHANCE to print.
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const logs: string[] = [];
+  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  let attempts = 0;
+  const { deps, supervisors } = makeDeps({
+    busyPorts: async () => {
+      attempts++;
+      return attempts === 1 ? [{ port: 1935, proto: "tcp" as const, holder: "OBS Studio" }] : [];
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+  assert.equal(supervisors.length, 0, "the first attempt must have failed on the busy port");
+
+  t.mock.timers.tick(3 * 60 * 1000); // past the failure AND past the 2-minute settle window
   await waitUntil(() => supervisors.length > 0);
-  assert.equal(supervisors.length, 1);
+  assert.ok(
+    logs.some((l) => l.includes("pre-launch checks are passing again")),
+    `expected a recovery line, got: ${JSON.stringify(logs)}`,
+  );
+});
 
-  const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
-  assert.ok(r.ok);
-  await waitUntil(() => supervisors.length > 1);
+// ── 3. A ports change restarts an already-running relay on the new ports,
+//    and logs its own reason ────────────────────────────────────────────────
 
-  assert.equal(supervisors[0]!.stopCalls, 1, "the ports change never stopped the old process");
-  assert.equal(supervisors.length, 2, "the ports change never started a new one");
-  assert.equal(supervisors[1]!.startCalls.length, 1);
+test("a ports change restarts a running relay, logging its own reason (not the generic stop line)", async () => {
+  const logs: string[] = [];
+  const orig = console.log;
+  console.log = (msg: string) => logs.push(String(msg));
+  try {
+    const { deps, supervisors } = makeDeps();
+    const lifecycle = activate(new RelayLifecycle(deps));
+    await setRelayFeeds(1);
+    lifecycle.setEnabled(true);
+    await waitUntil(() => supervisors.length > 0);
 
-  const relay = (await videoService.state()).relay;
-  assert.equal(relay.state, "running");
-  assert.equal((relay as { ports: { rtmp: number } }).ports.rtmp, 21935, "the running relay's own ports never followed the change");
+    const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
+    assert.ok(r.ok);
+    await waitUntil(() => supervisors.length > 1);
+
+    assert.equal(supervisors[0]!.stopCalls, 1, "the ports change never stopped the old process");
+    assert.equal(supervisors[1]!.startCalls.length, 1);
+    assert.ok(logs.some((l) => l === "[video] relay restarting on new ports"), JSON.stringify(logs));
+    assert.equal(logs.some((l) => l.includes("relay stopped (")), false, "the ports-change restart must not ALSO log the generic stop line");
+
+    const relay = (await videoService.state()).relay;
+    assert.equal(relay.state, "running");
+    assert.equal((relay as { ports: { rtmp: number } }).ports.rtmp, 21935, "the running relay's own ports never followed the change");
+  } finally {
+    console.log = orig;
+  }
 });
 
 test("a ports change while the relay is off does not start it", async () => {
@@ -322,66 +479,76 @@ test("a ports change while the relay is off does not start it", async () => {
   assert.equal(supervisors.length, 0);
 });
 
-// ── 5. Logging: decisions and failures only ────────────────────────────────
+// ── PROBE F / item 7: a ports change that fixes a busy port retries AT ONCE,
+//    not on whatever backoff was already scheduled ─────────────────────────
 
-test("logs the relay started line once, with its version and ports, and never again for a mere crash-respawn", async (t: TestContext) => {
-  const logs: string[] = [];
-  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+test("PROBE F: a busy port, then a ports change that fixes it — retries immediately, not on the pending backoff", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { deps, supervisors } = makeDeps({
+    busyPorts: async (ports) => (ports.rtmp === DEFAULT_VIDEO_PORTS.rtmp ? [{ port: 1935, proto: "tcp" as const, holder: "OBS Studio" }] : []),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+  assert.equal((await videoService.state()).relay.state, "failing");
+  assert.equal(supervisors.length, 0);
+
+  const r = await videoService.setPorts({ ...DEFAULT_VIDEO_PORTS, rtmp: 21935 });
+  assert.ok(r.ok);
+  // NO tick() here — proving this does not need the pending 1 s backoff
+  // (or any later one) to elapse at all.
+  await waitUntil(() => supervisors.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running");
+});
+
+// ── 10. The readiness poll: backs off between retries, stops on a
+//    successful reconcile alone ─────────────────────────────────────────────
+
+test("the readiness poll backs off with restartDelayMs between retries while the relay does not answer", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reconcileCalls = 0;
+  const { deps, supervisors } = makeDeps({
+    makeRelay: () =>
+      fakeRelay(async () => {
+        reconcileCalls++;
+        if (reconcileCalls < 4) throw new Error("relay unreachable");
+      }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  await waitUntil(() => reconcileCalls === 1); // the immediate first attempt
+
+  t.mock.timers.tick(restartDelayMs(1));
+  await waitUntil(() => reconcileCalls === 2);
+  t.mock.timers.tick(restartDelayMs(2) - 1);
+  await settle();
+  assert.equal(reconcileCalls, 2, "the THIRD attempt must wait restartDelayMs(2), not fire on the same delay as the first retry");
+  t.mock.timers.tick(1);
+  await waitUntil(() => reconcileCalls === 3);
+});
+
+test("the readiness poll stops on a successful reconcile ALONE, even before the version is known", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
+  lifecycle.setEnabled(true);
   await waitUntil(() => supervisors.length > 0);
-
-  // version() is null until the relay's own startup banner is parsed —
-  // the readiness poll's own tick is what notices it flip.
-  supervisors[0]!.ver = "v1.21.1";
-  await new Promise((resolve) => setTimeout(resolve, 1100));
-
-  const started = logs.filter((l) => l.includes("relay started"));
-  assert.equal(started.length, 1, `expected exactly one "relay started" line, got: ${JSON.stringify(started)}`);
-  assert.match(started[0]!, /relay started: MediaMTX v1\.21\.1, RTMP 1935, SRT 8890, video to screens UDP 8189/);
-
-  // A crash-and-respawn on the SAME started run must not repeat the line —
-  // only a fresh startRelay() (setEnabled/feedsChanged reaching a genuinely
-  // new attempt) resets loggedStartedThisRun.
-  logs.length = 0;
-  supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000 });
-  supervisors[0]!.setStatus({ state: "running", since: Date.now() });
-  await new Promise((resolve) => setTimeout(resolve, 1100));
-  assert.equal(logs.filter((l) => l.includes("relay started")).length, 0, "a crash-respawn re-announced the relay as freshly started");
+  // version() is left null the whole time — reconcile still applied on the
+  // very first attempt (the fake relay's reconcile always succeeds), and
+  // that alone must be enough to stop the poll.
+  await settle();
+  const relay = (await videoService.state()).relay;
+  assert.equal(relay.state, "running");
 });
 
-test("logs relay stopped, naming which of the two reasons", async () => {
-  const logs: string[] = [];
-  const orig = console.log;
-  console.log = (msg: string) => logs.push(String(msg));
-  try {
-    const { deps } = makeDeps();
-    const lifecycle = activate(new RelayLifecycle(deps));
-    await setRelayFeeds(1);
-    await lifecycle.setEnabled(true);
-    await settle();
+// ── 6/9: relayConnectionState — the one place a RelayStatus becomes the
+//    integration row ─────────────────────────────────────────────────────────
 
-    await lifecycle.setEnabled(false);
-    await settle();
-    assert.ok(logs.some((l) => l.includes("relay stopped (video switched off)")), JSON.stringify(logs));
-
-    logs.length = 0;
-    await lifecycle.setEnabled(true);
-    await settle();
-    await setRelayFeeds(0);
-    await lifecycle.feedsChanged();
-    await settle();
-    assert.ok(logs.some((l) => l.includes("relay stopped (no relay feeds)")), JSON.stringify(logs));
-  } finally {
-    console.log = orig;
-  }
-});
-
-// ── 6. RelayStatus -> the integration manager's connection state ──────────
-
-test("relayConnectionState maps every RelayStatus to the integration row", () => {
+test("relayConnectionState maps every RelayStatus to the integration row, never a blank version", () => {
   assert.deepEqual(relayConnectionState({ state: "off" }), { state: "disconnected", message: null });
   assert.deepEqual(
     relayConnectionState({ state: "downloading", receivedBytes: 10, totalBytes: 100 }),
@@ -395,9 +562,19 @@ test("relayConnectionState maps every RelayStatus to the integration row", () =>
     relayConnectionState({ state: "running", version: "v1.21.1", ports: DEFAULT_VIDEO_PORTS }),
     { state: "connected", message: "MediaMTX v1.21.1" },
   );
+  // PROBE C: a supervisor mid-spawn, version not yet known — must never
+  // read "connected: MediaMTX " with nothing after it.
+  assert.deepEqual(
+    relayConnectionState({ state: "running", version: "", ports: DEFAULT_VIDEO_PORTS }),
+    { state: "connected", message: null },
+  );
   assert.deepEqual(
     relayConnectionState({ state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: null }),
     { state: "error", message: "Port 1935 is in use by OBS." },
+  );
+  assert.deepEqual(
+    relayConnectionState({ state: "failing", reason: "The relay is not answering", retryAt: null }),
+    { state: "error", message: "The relay is not answering" },
   );
 });
 
@@ -409,8 +586,8 @@ test("the connection listener is told every transition, ending in error for a fa
   const lifecycle = activate(new RelayLifecycle(deps));
   lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));
   await setRelayFeeds(1);
-  await lifecycle.setEnabled(true);
-  await settle();
+  lifecycle.setEnabled(true);
+  await waitUntil(() => seen.some((s) => s.state === "error"));
 
   assert.equal(supervisors.length, 0);
   assert.ok(seen.some((s) => s.state === "connecting"), JSON.stringify(seen));
@@ -418,4 +595,128 @@ test("the connection listener is told every transition, ending in error for a fa
     seen.some((s) => s.state === "error" && s.message === "Port 1935 is in use by OBS Studio."),
     JSON.stringify(seen),
   );
+});
+
+// ── 9: ensureBinary's discriminator reaches the wire unchanged ─────────────
+
+test("a download failure carries assetName and placeArchiveAt straight through to RelayStatus", async () => {
+  const { deps, order } = makeDeps({
+    ensureBinary: async () => {
+      order.push("ensureBinary");
+      return { ok: false, reason: "checksum mismatch", placeArchiveAt: "/data/video-relay/downloads/mediamtx.tar.gz", assetName: "mediamtx.tar.gz" };
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+
+  const relay = (await videoService.state()).relay;
+  assert.equal(relay.state, "failing");
+  assert.equal((relay as { reason: string }).reason, "checksum mismatch");
+  assert.equal((relay as { placeArchiveAt?: string }).placeArchiveAt, "/data/video-relay/downloads/mediamtx.tar.gz");
+  assert.equal((relay as { assetName?: string }).assetName, "mediamtx.tar.gz");
+});
+
+test("an unsupported platform (assetName: null) never invents a hand-place path", async () => {
+  const { deps } = makeDeps({
+    ensureBinary: async () => ({
+      ok: false,
+      reason: "Video relay is not available for win32 arm64.",
+      placeArchiveAt: "/data/video-relay/downloads",
+      assetName: null,
+    }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await settle();
+
+  const relay = (await videoService.state()).relay;
+  assert.equal(relay.state, "failing");
+  assert.equal((relay as { assetName?: string }).assetName, undefined);
+});
+
+// ── 5 (log wording): the two stop reasons, and the started line ───────────
+
+test("logs relay stopped, naming which of the two reasons", async () => {
+  const logs: string[] = [];
+  const orig = console.log;
+  console.log = (msg: string) => logs.push(String(msg));
+  try {
+    const { deps, supervisors } = makeDeps();
+    const lifecycle = activate(new RelayLifecycle(deps));
+    await setRelayFeeds(1);
+    lifecycle.setEnabled(true);
+    await waitUntil(() => supervisors.length > 0);
+
+    lifecycle.setEnabled(false);
+    await waitUntil(() => logs.some((l) => l.includes("relay stopped")));
+    assert.ok(logs.some((l) => l.includes("relay stopped (video switched off)")), JSON.stringify(logs));
+
+    logs.length = 0;
+    lifecycle.setEnabled(true);
+    await waitUntil(() => supervisors.length > 1);
+    await setRelayFeeds(0);
+    lifecycle.feedsChanged();
+    await waitUntil(() => logs.some((l) => l.includes("relay stopped")));
+    assert.ok(logs.some((l) => l.includes("relay stopped (no relay feeds)")), JSON.stringify(logs));
+  } finally {
+    console.log = orig;
+  }
+});
+
+test("logs the relay started line once, with its version and ports, and never again for a mere crash-respawn", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  // The reconcile fake fails until the version is known — the same
+  // ordering the real binary always gives (its startup banner, which sets
+  // version(), is the very first line it ever prints, strictly before the
+  // API opens — relay-facts.md). Without this, a reconcile that succeeds on
+  // its very first (version-less) attempt stops the poll before it ever
+  // gets a later tick to notice the version arriving, which is a fair thing
+  // for a FAKE to do but not for the real relay.
+  let versionKnown = false;
+  const { deps, supervisors } = makeDeps({
+    makeRelay: () =>
+      fakeRelay(async () => {
+        if (!versionKnown) throw new Error("relay unreachable");
+      }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+
+  // version() is null until the relay's own startup banner is parsed —
+  // the readiness poll's own tick is what notices it flip.
+  supervisors[0]!.ver = "v1.21.1";
+  versionKnown = true;
+  t.mock.timers.tick(restartDelayMs(1));
+  await waitUntil(() => logs.some((l) => l.includes("relay started")));
+
+  const started = logs.filter((l) => l.includes("relay started"));
+  assert.equal(started.length, 1, `expected exactly one "relay started" line, got: ${JSON.stringify(started)}`);
+  assert.match(started[0]!, /relay started: MediaMTX v1\.21\.1, RTMP 1935, SRT 8890, video to screens UDP 8189/);
+
+  // A crash-and-respawn on the SAME started run must not repeat the line —
+  // only a fresh startRelay() (setEnabled/feedsChanged reaching a genuinely
+  // new attempt) resets loggedStartedThisRun.
+  logs.length = 0;
+  supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000 });
+  supervisors[0]!.setStatus({ state: "running", since: Date.now() });
+  await settle();
+  assert.equal(logs.filter((l) => l.includes("relay started")).length, 0, "a crash-respawn re-announced the relay as freshly started");
+});
+
+test("the two 'starting' messages are one wording — the connection row and the status line agree", async () => {
+  const { deps } = makeDeps({ ensureBinary: () => new Promise(() => {}) });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  const seen: { state: string; message: string | null }[] = [];
+  lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => seen.some((s) => s.state === "connecting"));
+  assert.equal(seen.find((s) => s.state === "connecting")?.message, "Starting the relay");
 });

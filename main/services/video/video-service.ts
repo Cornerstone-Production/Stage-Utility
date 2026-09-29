@@ -9,6 +9,7 @@ import { EventEmitter } from "node:events";
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { getLanIp } from "../lan-ip.js";
+import { relayBinaryPresent } from "./acquire.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { secretsStore } from "../secrets.js";
@@ -169,6 +170,7 @@ class VideoService {
     relay: { state: "off" },
     kinds: [...this.allowedKinds()],
     ports: DEFAULT_VIDEO_PORTS,
+    binaryPresent: false,
     feeds: [],
   };
 
@@ -190,6 +192,13 @@ class VideoService {
    *  for the ports one. */
   private feedsChangedListener: (() => void) | null = null;
   private portsChangedListener: (() => void) | null = null;
+  /** relay-lifecycle.ts's own connection-row mapping, fired with the fresh
+   *  RelayStatus on every publish() that actually changes — the ONE place
+   *  the integration manager's row is driven from, so a transition
+   *  video-service discovers on its OWN poll (going "not answering", and
+   *  recovering from it) reaches the row exactly the same way a supervisor
+   *  event does, rather than only the page that happens to be open. */
+  private relayStatusListener: ((relay: RelayStatus) => void) | null = null;
   /**
    * The ports the CURRENT relay process was actually started with — pinned
    * at attachRelay(), never re-read from the store while the same process
@@ -405,6 +414,7 @@ class VideoService {
       relay: this.relayStatus(),
       kinds: [...this.allowedKinds()],
       ports,
+      binaryPresent: await relayBinaryPresent(),
       feeds: await Promise.all(feeds.map((f) => this.view(f))),
     };
   }
@@ -442,19 +452,31 @@ class VideoService {
   }
 
   /** relay-lifecycle.ts's hook for "the stored ports changed" — setPorts()'s
-   *  own trigger to restart an already-running relay on the new ones. */
+   *  own trigger to restart an already-running relay on the new ones. Fired
+   *  only when they actually differ from what was already stored — an
+   *  operator re-saving the SAME six values must never restart a running
+   *  relay and drop every publisher over nothing. */
   setPortsChangedListener(cb: (() => void) | null): void {
     this.portsChangedListener = cb;
   }
 
-  /** `PATCH /api/video/ports`: validated, saved, and relay-lifecycle.ts told
-   *  to restart an already-running relay on the new ones. */
+  /** relay-lifecycle.ts's own connection-row mapping — see the field's own
+   *  comment. `null` clears it (a caller replacing the singleton in tests). */
+  setRelayStatusListener(cb: ((relay: RelayStatus) => void) | null): void {
+    this.relayStatusListener = cb;
+  }
+
+  /** `PATCH /api/video/ports`: validated, saved, and — only when the saved
+   *  values actually changed — relay-lifecycle.ts told to restart an
+   *  already-running relay on the new ones. */
   async setPorts(body: unknown): Promise<{ ok: true; ports: VideoPorts } | { ok: false; error: string }> {
     const parsed = parsePorts(body);
     if (!parsed.ok) return parsed;
+    const before = (await loadFeedsFile()).ports;
+    const changed = JSON.stringify(before) !== JSON.stringify(parsed.ports);
     await videoFeedsStore.update((current) => ({ ...current, ports: parsed.ports }));
     await this.publish();
-    this.portsChangedListener?.();
+    if (changed) this.portsChangedListener?.();
     return { ok: true, ports: parsed.ports };
   }
 
@@ -470,7 +492,10 @@ class VideoService {
     const changed = this.body(candidate) !== this.body(this.snapshot);
     if (changed) this.rev++;
     this.snapshot = { ...candidate, rev: this.rev };
-    if (changed) broadcast("video:state", this.snapshot);
+    if (changed) {
+      broadcast("video:state", this.snapshot);
+      this.relayStatusListener?.(this.snapshot.relay);
+    }
   }
 
   private body(s: VideoState): string {
@@ -485,15 +510,15 @@ class VideoService {
    *  that does not know what it started the relay on has no business
    *  attaching one — a silent default here is exactly the wrong-port bug
    *  class R13a fixed (see attachedPorts's own comment), just moved one
-   *  call site earlier. A ports change (PR 2's `PATCH /api/video/ports`)
-   *  takes effect only once the relay restarts on the new ones; whatever
-   *  restarts it must attachRelay() again with THOSE ports, not reuse the
-   *  old attachment.
+   *  call site earlier. A ports change (`PATCH /api/video/ports`) takes
+   *  effect only once the relay restarts on the new ones; whatever restarts
+   *  it must attachRelay() again with THOSE ports, not reuse the old
+   *  attachment.
    *  Safe to call again with no detachRelay() first — the previous relay's
-   *  listeners are removed here, never left to leak, but nothing is
-   *  published for that half: a caller replacing one relay with another
-   *  wants ONE settled state at the end, not an intermediate "off"
-   *  broadcast between the two. */
+   *  listeners are removed here, never left to leak, and NO intermediate
+   *  "off" is published for that half: a caller replacing one relay with
+   *  another gets ONE settled state at the end, published once below, not
+   *  an "off" broadcast between the two. */
   attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts): void {
     if (this.relay) this.detachInternal();
     this.relayGeneration++;
@@ -516,6 +541,12 @@ class VideoService {
     supervisor.on("line", this.lineListener);
     supervisor.on("status", this.statusListener);
     this.subscriptionsChanged();
+    // The relay is genuinely attached now — the ONE settled state the
+    // comment above promises. Without this, the connection row (driven
+    // entirely off publish() — see setRelayStatusListener) kept showing
+    // whatever it last reported before attach, until something ELSE
+    // happened to publish: a later crash, or a subscriber's own poll tick.
+    void this.publish();
   }
 
   /** Stop polling, forget the relay, and settle every feed's status — the
