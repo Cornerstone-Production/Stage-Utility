@@ -251,7 +251,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
     }
   }
 
-  /** Item 12: clears a pull feed's stored password immediately — sends
+  /** Clears a pull feed's stored password immediately — sends
    *  `password: ""` on its own, rather than waiting for the operator to
    *  also press Save. Only shown while a password IS stored and the
    *  operator has not started typing a replacement (see the field's own
@@ -371,16 +371,16 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
                 }}
               />
             </div>
-            {/* Item 12: the field itself never shows a stored password —
-                only THAT one is stored, via hasPassword, never the value.
-                Hidden the moment the operator starts typing a replacement,
-                since the message ("a password is saved") stops being true
-                the instant they are actively setting a new one. */}
             {/^srt:/i.test(draft.pullUrl.trim()) && (
               <span className="text-caption1 text-fg-subtle">
                 SRT takes a passphrase only, 10 to 80 characters: leave Username empty and put it in Password.
               </span>
             )}
+            {/* The field itself never shows a stored password — only THAT
+                one is stored, via hasPassword, never the value. Hidden the
+                moment the operator starts typing a replacement, since the
+                message ("a password is saved") stops being true the instant
+                they are actively setting a new one. */}
             {!isNew && feed?.source.kind === "pull" && feed.hasPassword && !pullPasswordTouched && (
               <div className="flex items-center justify-between gap-2">
                 <span className="text-caption1 text-fg-subtle">A password is saved. Type to replace it, or clear it.</span>
@@ -633,7 +633,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
     setCopyHint("Press Ctrl+C / Cmd+C to copy");
   }
 
-  // Item 11: an error from a ROTATION (data already loaded) keeps the
+  // An error from a ROTATION (data already loaded) keeps the
   // fields on screen, with the error under Password and New password still
   // pressable — only a failed INITIAL load (nothing to show at all) falls
   // back to a bare ErrorNote.

@@ -364,11 +364,11 @@ class VideoService {
       case "off":
         return { state: "off" };
       case "failing":
-        // status.neverStarted is true ONLY
-        // for a genuine spawn failure (node's own spawn() never created a
-        // process at all) — that is a PRE-process kind, same as every
-        // failPreSupervisor() kind, matching the standby ruling: nothing
-        // could have received a source. Every other supervisor "failing"
+        // status.neverStarted is true ONLY for a genuine spawn failure
+        // (node's own spawn() never created a process at all) — a
+        // PRE-process kind, same as every failPreSupervisor() kind, so its
+        // feeds read "standby": nothing could have received a source. Every
+        // other supervisor "failing"
         // status is the crash-loop it always was — a child process ran and
         // exited. See RelayFailureKind's own comment.
         return {

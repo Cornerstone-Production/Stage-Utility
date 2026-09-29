@@ -96,12 +96,10 @@ describe("every dialog", () => {
 });
 
 describe("the dialog footer", () => {
-  // The video card's bespoke panel replaces the
-  // form with "Open Video feeds" — this is the one place the finding's own
-  // "renders and navigates to /video-feeds" is checkable: an <a href> IS
-  // the navigation mechanism, so asserting the real, resolved href (not a
-  // stub prop, not a button with an onClick) proves a click actually goes
-  // there, the same way it would in a browser.
+  // The video card's bespoke panel replaces the form with "Open Video
+  // feeds". An <a href> IS the navigation mechanism, so asserting the real,
+  // resolved href (not a stub prop, not a button with an onClick) proves a
+  // click actually goes to /video-feeds, the same way it would in a browser.
   test("the video card's panel links to /video-feeds, a real anchor href — not a button, not a dead link", async () => {
     const content = await open("video");
     const link = [...content.querySelectorAll<HTMLAnchorElement>("a")].find(

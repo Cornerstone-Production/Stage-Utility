@@ -64,10 +64,9 @@ export type SupervisorStatus =
   | { state: "running"; since: number }
   /** `neverStarted`: true only for a genuine spawn failure (node's own
    *  spawn() never created a process at all — ENOENT, EACCES) — the ONE
-   *  case nothing could have received a source, matching the standby
-   *  ruling; false for a real child that ran
-   *  and exited, which video-service.ts's own kind mapping reads as
-   *  "offline" instead. */
+   *  case nothing could have received a source, so its feeds read
+   *  "standby"; false for a real child that ran and exited, which
+   *  video-service.ts's own kind mapping reads as "offline" instead. */
   | { state: "failing"; reason: string; retryAt: number; neverStarted: boolean };
 
 /**
