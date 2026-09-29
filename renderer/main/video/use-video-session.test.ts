@@ -416,7 +416,7 @@ test("through the hook: a frame with no 'connected' event puts the widget's phas
   };
   try {
     const { result } = renderHook(() =>
-      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -619,7 +619,7 @@ test("the retry delay grows 1, 2, 4, 8, 16 s and caps at 30 s across consecutive
   const video = new FakeVideo();
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -648,7 +648,7 @@ test("a failure right after a single frame still grows the delay — one frame i
   const video = new FakeVideo();
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_HLS, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_HLS, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -675,7 +675,7 @@ test("playback that holds for RESET_AFTER_PLAYING_MS restarts the backoff at RET
   const video = new FakeVideo();
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -716,6 +716,7 @@ test("a failing streak logs once, reminds at most every 5 minutes, and logs its 
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
+        relayRunning: true,
         onLog: (l) => logs.push(l),
       }),
     );
@@ -801,6 +802,7 @@ test("a real relay feed view whose WHEP answer refuses the offer (415) is treate
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
+        relayRunning: true,
         onLog: (r) => logs.push(r),
       }),
     );
@@ -838,6 +840,7 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
+        relayRunning: true,
         onLog: (r) => logs.push(r),
       }),
     );
@@ -854,6 +857,53 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
       false,
       "an external feed's health cannot be reported, so a refusal there must not be treated as a stream verdict",
     );
+  } finally {
+    g.restore();
+  }
+});
+
+test("a pull feed going from standby to live keeps the session its request opened", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const standby: VideoFeedView = {
+    id: "f",
+    name: "F",
+    kind: "pull",
+    sourceLine: "",
+    source: { kind: "pull", url: "rtsp://x", username: "" },
+    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
+    status: { state: "standby" },
+  };
+  const posts = () => g.calls.filter((c) => c.method === "POST").length;
+  const deletes = () => g.calls.filter((c) => c.method === "DELETE").length;
+  try {
+    const { rerender } = renderHook(
+      ({ feed }: { feed: VideoFeedView }) =>
+        useVideoSession({
+          active: true,
+          feed,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls: true,
+          relayRunning: true,
+        }),
+      { initialProps: { feed: standby } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(posts(), 1, "expected the standby pull feed's own WHEP POST");
+
+    // The request is what started the pull, so the relay now reports the
+    // feed live. Same method, same URL: the session already open is the one
+    // that made it live, and tearing it down for a fresh one drops the
+    // picture for nothing.
+    rerender({ feed: { ...standby, status: { state: "live", codec: "H264" } } });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(posts(), 1, "a status change that leaves the method and URL alone must not open a second session");
+    assert.equal(deletes(), 0, "the session that made the feed live must not be torn down");
   } finally {
     g.restore();
   }
@@ -933,7 +983,7 @@ test("through the hook: an external WHEP feed that never connects shows Offline 
   const video = new FakeVideo();
   try {
     const { result } = renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -977,7 +1027,7 @@ test("a relay feed on HLS after a WebRTC refusal tries WebRTC again after WEBRTC
   proto.canPlayType = () => "maybe";
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();

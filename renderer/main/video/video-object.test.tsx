@@ -54,10 +54,10 @@ function makeFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
 
 const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
 
-function makeState(feeds: VideoFeedView[]): VideoState {
+function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state: "running", version: "1.21.1", ports: TEST_PORTS }): VideoState {
   return {
     rev: 1,
-    relay: { state: "running", version: "1.21.1", ports: TEST_PORTS },
+    relay,
     kinds: ["pull", "push", "embed", "external"],
     ports: TEST_PORTS,
     binaryPresent: true,
@@ -416,8 +416,8 @@ const EMBED = makeFeed({
  *  Connecting line carries the name too, inside a longer sentence). */
 const nameTag = (name: string) => screen.queryAllByText(name, { exact: true }).length > 0;
 
-async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}) {
-  const g = stubGlobals(makeState([feed]));
+async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}, relay?: VideoState["relay"]) {
+  const g = stubGlobals(makeState([feed], relay));
   const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false }));
   await settle();
   await settle();
@@ -517,6 +517,51 @@ test("a feed id the loaded list does not name shows removed copy, not the come-b
     assert.equal(!!screen.queryByText("This feed was removed"), true, "a deleted feed must say it was removed");
     assert.equal(!!screen.queryByText("Choose another feed for this widget"), true, "expected the corrected second line");
     assert.equal(!!screen.queryByText("It will appear here when the source comes back"), false, "a deleted feed never comes back on its own");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── a feed nothing is sending to yet ─────────────────────────────────────
+//
+// A pull feed reads "standby" until something asks for it: the relay dials an
+// on-demand source only once a reader connects, so for a pull feed standby is
+// the reason to connect, not a reason to wait. Only a push feed's "waiting"
+// means there is nothing to connect to — and nothing answers while the relay
+// itself is not running.
+
+const PULL_STANDBY = makeFeed({ status: { state: "standby" } });
+
+test("a standby pull feed connects once on screen: the request is what starts the pull", async () => {
+  const { g } = await renderOnScreen(PULL_STANDBY);
+  try {
+    assert.equal(
+      feedCalls(g.calls).filter((c) => c.method === "POST").length,
+      1,
+      "expected a WHEP POST for a standby pull feed — without one the relay never dials the source",
+    );
+    assert.equal(!!screen.queryByText("Waiting for the source"), false, "a pull feed must not sit on Waiting");
+  } finally {
+    g.restore();
+  }
+});
+
+test("a standby pull feed while the relay is not running waits and asks for nothing", async () => {
+  const { g } = await renderOnScreen(PULL_STANDBY, {}, { state: "off" });
+  try {
+    assert.deepEqual(feedCalls(g.calls), [], "nothing answers a playback request while the relay is off");
+    assert.equal(!!screen.queryByText("Waiting for the source"), true, "expected the Waiting state");
+  } finally {
+    g.restore();
+  }
+});
+
+test("a push feed waiting for its device shows Waiting and asks for nothing", async () => {
+  const push = makeFeed({ kind: "push", source: { kind: "push", protocol: "rtmp" }, status: { state: "waiting" } });
+  const { g } = await renderOnScreen(push);
+  try {
+    assert.deepEqual(feedCalls(g.calls), [], "a push feed's waiting means there is nothing to connect to yet");
+    assert.equal(!!screen.queryByText("Waiting for the source"), true, "expected the Waiting state");
   } finally {
     g.restore();
   }

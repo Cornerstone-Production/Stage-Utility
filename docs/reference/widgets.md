@@ -544,10 +544,15 @@ for 10 seconds starts the delay over. It never gives up on such a feed.
 |---|---|
 | No feed chosen | "Choose a feed" |
 | Connecting | A pulsing dot and "Connecting to \<feed name\>" |
+| Waiting | "Waiting for the source" — a push feed nothing has sent to yet, or a relay feed while the relay is not running |
 | Live | The picture |
 | Live, over HLS | The picture, with a badge counting how many seconds behind live it is |
 | Offline | Your **When the feed is offline** setting |
 | Can't play here | "This screen can't play video" |
+
+A pull feed reading standby is connected to all the same: the relay dials a
+pull feed's source only once something asks to watch it, so the widget's own
+request is what brings it up.
 
 **Offline** is what shows when a widget's feed has been deleted from the Video
 feeds page while a layout still points at it, and while a feed that dropped

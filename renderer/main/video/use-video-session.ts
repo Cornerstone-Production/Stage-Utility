@@ -361,7 +361,13 @@ export type Verdict =
   | { kind: "cant-play" }
   | { kind: "attempt"; choice: PlaybackAttemptChoice };
 
-function computeVerdict(feedDeleted: boolean, feed: VideoFeedView | null, allowHls: boolean, webrtcFailed: boolean): Verdict {
+function computeVerdict(
+  feedDeleted: boolean,
+  feed: VideoFeedView | null,
+  allowHls: boolean,
+  webrtcFailed: boolean,
+  relayRunning: boolean,
+): Verdict {
   if (feedDeleted) return { kind: "deleted" };
   if (!feed) return { kind: "no-feed" };
 
@@ -371,7 +377,15 @@ function computeVerdict(feedDeleted: boolean, feed: VideoFeedView | null, allowH
   const isRelay = feed.play.via === "relay";
   if (isRelay) {
     const s = feed.status.state;
-    if (s === "waiting" || s === "standby") return { kind: "waiting" }; // confirmed: nothing is sending to this feed
+    // A push feed's "waiting": nothing has sent to it yet, so there is
+    // nothing to connect to.
+    if (s === "waiting") return { kind: "waiting" };
+    // "standby" is a pull feed nothing is watching, or any relay feed while
+    // the relay is not running. A pull feed's source is dialled on demand —
+    // only once a reader connects — so connecting is what starts it; waiting
+    // for it to go live first would wait for ever. With the relay not
+    // running nothing answers, so that still waits.
+    if (s === "standby" && !(feed.kind === "pull" && relayRunning)) return { kind: "waiting" };
     if (s === "offline") return { kind: "known-offline" }; // confirmed: it WAS live and is down now
     if (s === null) return { kind: "no-feed" }; // no status pushed yet — stay neutral, not a verdict either way
   }
@@ -401,6 +415,10 @@ export interface VideoSessionInput {
   video: HTMLVideoElement | null;
   /** The screen's "Use HLS on this screen" switch; true where it is not set. */
   allowHls: boolean;
+  /** Whether the relay is running (video:state's `relay`). A standby pull
+   *  feed is connected to only while it is: the playback proxy answers 503
+   *  otherwise. */
+  relayRunning: boolean;
   /** A line for the widget to put on the `[video]` log: every WebRTC
    *  fallback, and a failing streak's first failure, its reminders (at most
    *  every STREAK_REMIND_MS) and its recovery. Never once per retry. */
@@ -416,7 +434,7 @@ export interface VideoSessionResult {
 }
 
 export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
-  const { active, feed, feedDeleted, video, allowHls } = input;
+  const { active, feed, feedDeleted, video, allowHls, relayRunning } = input;
   const feedRef = useLatestRef(feed);
   const onLogRef = useLatestRef(input.onLog);
 
@@ -453,27 +471,31 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
 
   // Primitives, not `feed` itself: useVideoState hands back a NEW object on
   // every push, including one that changes nothing about THIS feed. An
-  // object-identity dependency on the ATTEMPT EFFECT would tear a live
-  // session down and rebuild it on every unrelated feed's update — the
-  // flapping this file exists to avoid. `verdict` is a useMemo, so ITS
-  // reference only changes when one of the primitives below actually does —
-  // and the attempt effect is keyed on `verdict` itself (not a separately
-  // derived "did the method/URL change" string), because a memo recompute
-  // whose choice happens to look the same (e.g. `delayedBecause` clearing
-  // while the feed was already choosing HLS for some other reason) is still
-  // a fresh verdict the effect must react to.
+  // object-identity dependency would tear a live session down and rebuild it
+  // on every unrelated feed's update — the flapping this file exists to
+  // avoid.
   const playKey = feed ? JSON.stringify(feed.play) : null;
   const statusState = feed?.status.state ?? null;
   const delayedBecause = feed?.status.delayedBecause ?? null;
+  const feedKind = feed?.kind ?? null;
 
-  // `feed` itself is read inside for its `play`/`status`; playKey/statusState/
-  // delayedBecause are the primitives that actually decide whether the
-  // verdict can differ, listed below instead of the object itself so a
-  // change to some OTHER feed cannot look like a dependency change here.
+  // `feed` itself is read inside for its `play`/`status`; the primitives
+  // listed are the ones that decide whether the verdict can differ.
   const verdict = useMemo(
-    () => computeVerdict(feedDeleted, feed, allowHls, webrtcFailed),
+    () => computeVerdict(feedDeleted, feed, allowHls, webrtcFailed, relayRunning),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [feedDeleted, playKey, statusState, delayedBecause, allowHls, webrtcFailed],
+    [feedDeleted, playKey, statusState, delayedBecause, feedKind, allowHls, webrtcFailed, relayRunning],
+  );
+  // The attempt effect is keyed on WHAT it plays — method, URL, and whether
+  // the relay manages it — never on the status that led there: a pull feed's
+  // own request is what takes it from standby to live, and restarting the
+  // session that did it would drop the picture it just brought up. A status
+  // that stops playing (offline, waiting) leaves "attempt" altogether, and
+  // one that changes the method (B-frames: WebRTC to HLS) changes this key.
+  const attemptKey = verdict.kind === "attempt" ? JSON.stringify(verdict.choice) : null;
+  const attemptChoice = useMemo<PlaybackAttemptChoice | null>(
+    () => (attemptKey === null ? null : (JSON.parse(attemptKey) as PlaybackAttemptChoice)),
+    [attemptKey],
   );
 
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
@@ -492,8 +514,8 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
               : attemptPhase;
 
   useEffect(() => {
-    if (!active || !video || verdict.kind !== "attempt") return undefined;
-    const choice = verdict.choice;
+    if (!active || !video || !attemptChoice) return undefined;
+    const choice = attemptChoice;
     const current = feedRef.current;
 
     // Legitimately part of the same side effect as the lines below, not a
@@ -543,7 +565,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       clearTimeout(heldTimer);
       attemptHandle.stop();
     };
-  }, [active, video, retryToken, verdict, feedRef, onLogRef]);
+  }, [active, video, retryToken, attemptChoice, feedRef, onLogRef]);
 
   return { phase, embedUrl, latency };
 }

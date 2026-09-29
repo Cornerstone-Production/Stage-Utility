@@ -117,6 +117,7 @@ function VideoObjectBody({
     feedDeleted,
     video: videoEl,
     allowHls: true, // Always on until a screen has its own "Use HLS on this screen" switch.
+    relayRunning: state?.relay.state === "running",
     onLog,
   });
 
