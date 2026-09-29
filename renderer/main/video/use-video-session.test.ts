@@ -845,6 +845,145 @@ test("a failing streak logs once, reminds at most every 5 minutes, and logs its 
   }
 });
 
+// ── the HLS-off switch's own outage line ────────────────────────────────
+//
+// A B-frame feed's verdict here is CANT-PLAY, never an attempt — nothing
+// retries, so there are no timers to drive; only a rerender (a fresh feed
+// object off a repeated status push) can make this fire twice.
+
+const B_FRAMES_FEED: VideoFeedView = {
+  id: "p",
+  name: "Program",
+  kind: "pull",
+  sourceLine: "",
+  source: { kind: "pull", url: "rtsp://x", username: "" },
+  play: { via: "relay", whep: "/video/p/whep", hls: "/video/p/index.m3u8" },
+  status: { state: "delayed", delayedBecause: "b-frames" },
+};
+
+test("an HLS-off screen logs the can't-play line once, not once per rerender", async () => {
+  // installFakeHls defines MediaSource, so this environment could otherwise
+  // play the HLS this feed needs — without it every rerender would read as
+  // can't-play for the environment's own sake, proving nothing about the
+  // switch.
+  const undoHls = installFakeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { rerender } = renderHook(
+      ({ feed }: { feed: VideoFeedView }) =>
+        useVideoSession({
+          active: true,
+          feed,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls: false,
+          relayRunning: true,
+          onLog: (l) => logs.push(l),
+        }),
+      { initialProps: { feed: B_FRAMES_FEED } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.deepEqual(logs, [`"Program" can't play on this screen: it needs HLS, and HLS is off here`]);
+
+    // Three more renders off a fresh object each time (what a repeated
+    // video:state push looks like) — same status, so the same outage.
+    for (let i = 0; i < 3; i++) {
+      rerender({ feed: { ...B_FRAMES_FEED, status: { state: "delayed", delayedBecause: "b-frames" } } });
+      await act(async () => {
+        await flush();
+      });
+    }
+    assert.equal(logs.length, 1, "a rerender carrying the same verdict is not news");
+  } finally {
+    undoHls();
+    cleanup();
+  }
+});
+
+test("recovers once the screen allows HLS again, with exactly one recovery line", async () => {
+  const undoHls = installFakeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { rerender } = renderHook(
+      ({ allowHls }: { allowHls: boolean }) =>
+        useVideoSession({
+          active: true,
+          feed: B_FRAMES_FEED,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls,
+          relayRunning: true,
+          onLog: (l) => logs.push(l),
+        }),
+      { initialProps: { allowHls: false } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 1, "expected the outage's first line");
+
+    rerender({ allowHls: true });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 2, "expected exactly one recovery line");
+    assert.match(logs[1]!, /^"Program" can play on this screen again after \d+ failed attempts?/);
+
+    // Turning it off and on again a second time is a SECOND outage with its
+    // own first line and its own recovery — not silence, and not a stale
+    // note carried over from the first.
+    rerender({ allowHls: false });
+    await act(async () => {
+      await flush();
+    });
+    rerender({ allowHls: true });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 4, "expected a second outage to log its own start and its own recovery");
+    assert.equal(logs[2], `"Program" can't play on this screen: it needs HLS, and HLS is off here`);
+  } finally {
+    undoHls();
+    cleanup();
+  }
+});
+
+test("a screen with HLS allowed logs nothing about the switch for the same feed", async () => {
+  const undoHls = installFakeHls();
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed: B_FRAMES_FEED,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        relayRunning: true,
+        onLog: (l) => logs.push(l),
+      }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(
+      logs.some((l) => l.includes("HLS is off here")),
+      false,
+      "an HLS-allowed screen must never log the HLS-off line",
+    );
+  } finally {
+    undoHls();
+    cleanup();
+    g.restore();
+  }
+});
+
 // ── routing a real feed view to the right verdict on a WHEP refusal ────────
 //
 // The tests above set `relayManaged` on `startPlaybackAttempt`'s `choice` by

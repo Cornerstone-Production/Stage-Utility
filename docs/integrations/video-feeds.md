@@ -331,6 +331,10 @@ Each screen writes its own `[video]` lines from the browser:
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.
+- A feed that needs HLS refused by a screen's own **Use HLS on this screen**
+  switch, once per outage, and a line once it can play again — the screen
+  allows HLS again, or the feed stops needing it. Nothing repeats while the
+  switch stays off.
 - A Video widget crashing, with the error. The rest of the layout keeps
   drawing.
 

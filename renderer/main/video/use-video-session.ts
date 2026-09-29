@@ -23,7 +23,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import type { VideoFeedView, VideoPlaybackReport } from "@main/types/video";
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
-import { browserCaps, choosePlayback } from "./choose-playback";
+import { browserCaps, choosePlayback, type PlaybackChoice } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
 import { createSampler, type PlaybackSampler, type SampleSource } from "./playback-stats";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
@@ -490,7 +490,10 @@ export type Verdict =
   | { kind: "waiting" }
   | { kind: "known-offline" }
   | { kind: "embed"; url: string }
-  | { kind: "cant-play" }
+  /** `reason` is `choosePlayback`'s own — carried here so a caller can tell
+   *  "no player exists in this browser" from "this screen's own switch
+   *  refused it" without recomputing the choice a second time. */
+  | { kind: "cant-play"; reason: Extract<PlaybackChoice, { method: "none" }>["reason"] }
   | { kind: "attempt"; choice: PlaybackAttemptChoice };
 
 function computeVerdict(
@@ -524,7 +527,7 @@ function computeVerdict(
 
   const choice = choosePlayback({ play: feed.play, status: feed.status, caps: browserCaps(), allowHls, webrtcFailed });
   if (choice.method === "embed") return { kind: "embed", url: choice.url };
-  if (choice.method === "none") return { kind: "cant-play" };
+  if (choice.method === "none") return { kind: "cant-play", reason: choice.reason };
   if (choice.method === "webrtc") return { kind: "attempt", choice: { method: "webrtc", url: choice.url, relayManaged: isRelay } };
   return { kind: "attempt", choice };
 }
@@ -691,6 +694,29 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     },
     [],
   );
+
+  // This screen's own switch refusing a feed that needs HLS is a pure
+  // computed verdict, never a timed attempt — nothing here retries, so there
+  // is no attempt effect to log it from the way a dropped WebRTC or HLS
+  // session is. Logged through the SAME per-feed OutageLog as that streak,
+  // under its own key, so a flap between "needs HLS" and "does not" (an
+  // encoder's B-frames setting changing mid-service) reads as one outage with
+  // one line rather than one per render — and only while on screen, since an
+  // operator is not watching a widget that is not.
+  useEffect(() => {
+    if (!active) return;
+    const needsHls = verdict.kind === "cant-play" && verdict.reason === "hls-off-here";
+    const name = feedRef.current?.name ?? "this feed";
+    const key = `${feedRef.current?.id ?? ""}:hls-off`;
+    if (needsHls) {
+      const d = streak().fail(key, "hls-off-here", Date.now());
+      if (d.log) onLogRef.current?.(`"${name}" can't play on this screen: it needs HLS, and HLS is off here${d.note}`);
+    } else {
+      const d = streak().ok(key, Date.now());
+      if (d.log) onLogRef.current?.(`"${name}" can play on this screen again${d.note}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, verdict.kind === "cant-play" ? verdict.reason : verdict.kind, feedRef, onLogRef]);
 
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
 
