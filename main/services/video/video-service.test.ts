@@ -733,6 +733,35 @@ test("a requested pull feed reads standby while the relay dials it, offline once
   }
 });
 
+// Driven on the real binary: a screen that connected eleven seconds before
+// the relay was killed found the pull feed offline after the respawn, and
+// waited out the rest of the old request's window before asking again.
+test("a request made to the previous relay process does not count against a respawned one", async (t) => {
+  const made = await videoService.addFeed({ name: "Respawn cam", source: { kind: "pull", url: "rtsp://192.0.2.54/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: id })] });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const stateOf = async () => (await videoService.state()).feeds.find((f) => f.id === id)?.status.state;
+  try {
+    videoService.markRequested(id);
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS + 1000);
+    await pollOnce();
+    assert.equal(await stateOf(), "offline", "sanity: the old process had its whole dial window");
+
+    supervisor.current = { state: "running", since: Date.now() };
+    supervisor.emit("status", supervisor.current); // killed and respawned
+    await pollOnce();
+    assert.equal(await stateOf(), "standby", "nothing has asked the new process for this feed yet");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 test("markRequested moves a not-ready pull feed off standby — its only observable effect", async (t) => {
   // Validation lives at the call site now (relayTarget(), which the proxy
   // calls before markRequested() — see video-proxy-routes.ts and its own

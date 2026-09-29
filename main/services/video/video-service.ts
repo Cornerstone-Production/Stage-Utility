@@ -290,7 +290,8 @@ class VideoService {
    *  same still-open session does not repeat the log line every time the
    *  relay logs another closed WebRTC attempt against it. */
   private readonly bframesAnnouncedAt = new Map<string, string | null>();
-  /** Epoch ms a WHEP/HLS request last named a feed — see markRequested(). */
+  /** Epoch ms a WHEP/HLS request last named a feed — see markRequested().
+   *  Cleared on every status change and detach: it is about one process. */
   private readonly requestedAt = new Map<string, number>();
   /** The last FeedState logged for each feed, so "is live"/"is delayed"/
    *  "went offline" fire on the transition only. */
@@ -652,6 +653,7 @@ class VideoService {
     this.polledSinceRunning = false;
     this.relayAnswered = false;
     this.reconciledFeedIds = new Set();
+    this.requestedAt.clear();
     this.versionAnnounced = false;
     // A reconcile or kick outage was about the relay just let go of; carried
     // into the next one it would swallow that relay's first failure as a
@@ -700,6 +702,9 @@ class VideoService {
     this.polledSinceRunning = false;
     this.relayAnswered = false;
     this.reconciledFeedIds = new Set();
+    // A request made to the previous process says nothing about whether
+    // this one could dial the source.
+    this.requestedAt.clear();
     if (status.state !== "running") this.lastPaths = new Map();
     void this.settleFeeds();
   }
