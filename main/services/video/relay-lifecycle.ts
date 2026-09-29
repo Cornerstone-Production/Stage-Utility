@@ -41,6 +41,7 @@ import { errorMessage } from "../errors.js";
 import { getLanIp } from "../lan-ip.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
+import { cleared } from "../timers.js";
 import type { ConnectionState } from "../../types/integrations.js";
 import type { RelayFailureKind, RelayStatus, VideoPorts } from "../../types/video.js";
 import { atomicWrite } from "../write-queue.js";
@@ -266,7 +267,7 @@ export class RelayLifecycle {
     if (decision.log) console.warn(`[video] ${scrub(reason)}${scrub(decision.note)}`);
     const delay = restartDelayMs(this.attempt);
     this.attempt++;
-    this.clearRetryTimer();
+    this.retryTimer = cleared(this.retryTimer);
     this.retryTimer = setTimeout(() => this.enqueue(() => this.reconcileWanted()), delay);
     this.retryTimer.unref?.();
   }
@@ -311,7 +312,7 @@ export class RelayLifecycle {
       if (this.isUp()) {
         await this.stopRelay();
       } else {
-        this.clearRetryTimer();
+        this.retryTimer = cleared(this.retryTimer);
         videoService.setPreAttachStatus(null);
       }
       this.attempt = 0;
@@ -347,16 +348,10 @@ export class RelayLifecycle {
     if (wasActive) console.log(`[video] relay stopped (${this.enabled ? "no relay feeds" : "video switched off"})`);
   }
 
-  private clearRetryTimer(): void {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
-  }
-
   private stopReadinessPoll(): void {
     this.readinessRun++;
     this.readinessPolling = false;
-    if (this.readinessTimer) clearTimeout(this.readinessTimer);
-    this.readinessTimer = null;
+    this.readinessTimer = cleared(this.readinessTimer);
   }
 
   /**
@@ -400,7 +395,7 @@ export class RelayLifecycle {
       placeArchiveAt,
       assetName,
     });
-    this.clearRetryTimer();
+    this.retryTimer = cleared(this.retryTimer);
     this.retryTimer = setTimeout(() => this.enqueue(() => this.reconcileWanted()), delay);
     this.retryTimer.unref?.();
   }
@@ -640,7 +635,7 @@ export class RelayLifecycle {
    *  always calls this, whether or not isUp() is true — see its comment). */
   private async stopRelay(): Promise<void> {
     this.stopReadinessPoll();
-    this.clearRetryTimer();
+    this.retryTimer = cleared(this.retryTimer);
     const supervisor = this.supervisor;
     this.supervisor = null;
     this.currentPorts = null;

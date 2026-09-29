@@ -22,6 +22,7 @@ import { promisify } from "node:util";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
+import { cleared } from "../timers.js";
 import { relayDir } from "./acquire.js";
 import { RelayLogWatcher } from "./relay-log.js";
 
@@ -309,7 +310,7 @@ export class RelaySupervisor extends EventEmitter {
   async stop(): Promise<void> {
     this.stopping = true;
     this.run++;
-    this.clearRestartTimer();
+    this.restartTimer = cleared(this.restartTimer);
     if (!this.child) {
       this.setStatus({ state: "off" });
       return;
@@ -464,21 +465,6 @@ export class RelaySupervisor extends EventEmitter {
     }, HEALTHY_AFTER_MS);
   }
 
-  private clearHealthyTimer(): void {
-    if (this.healthyTimer) clearTimeout(this.healthyTimer);
-    this.healthyTimer = null;
-  }
-
-  private clearRestartTimer(): void {
-    if (this.restartTimer) clearTimeout(this.restartTimer);
-    this.restartTimer = null;
-  }
-
-  private clearKillTimer(): void {
-    if (this.killTimer) clearTimeout(this.killTimer);
-    this.killTimer = null;
-  }
-
   /**
    * `setStatus()` assigns `this.current` before it emits "status", so any
    * listener reading `status()` from inside its own handler always sees the
@@ -489,8 +475,8 @@ export class RelaySupervisor extends EventEmitter {
    * was on its way out.
    */
   private onExit(code: number | null, spawnError?: string, signal: NodeJS.Signals | null = null): void {
-    this.clearHealthyTimer();
-    this.clearKillTimer();
+    this.healthyTimer = cleared(this.healthyTimer);
+    this.killTimer = cleared(this.killTimer);
     this.child = null;
     liveSupervisors.delete(this);
     this.deletePidFile();
