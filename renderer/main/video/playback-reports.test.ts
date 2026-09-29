@@ -1,12 +1,10 @@
 // renderer/main/video/playback-reports.test.ts — the registry the presence
 // heartbeat drains: registration, unregistration, anyPlaying(), and
-// drainReports() isolating one widget's failure from the rest.
-//
-// Not in the brief's own file list — playback-stats.test.ts is the only test
-// file it names — but registerPlayback/anyPlaying/drainReports are exact
-// registry behaviour with real edge cases (a stale unregister, a rejecting
-// sampler), and this repo's own guard-must-fail-red rule applies to a new
-// module whether or not a plan remembered to list its test file.
+// drainReports() isolating one widget's failure from the rest. Real registry
+// edge cases: a stale unregister from a fast remount, a rejecting sampler,
+// and onAnyPlayingChange notifying only on the boundary crossing (nothing
+// playing to something, or back), never on a second widget starting or
+// stopping beside one already registered.
 
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
