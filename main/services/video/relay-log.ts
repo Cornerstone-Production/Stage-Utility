@@ -77,6 +77,14 @@ export class RelayLogWatcher {
     return this.lastErrorText;
   }
 
+  /** A new relay process: its sessions and its last error start empty, so
+   *  an exit never reports an earlier process's error. The version stays,
+   *  the same binary's until the new one prints its own. */
+  newProcess(): void {
+    this.sessions.clear();
+    this.lastErrorText = null;
+  }
+
   version(): string | null {
     return this.versionString;
   }

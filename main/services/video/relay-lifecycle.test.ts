@@ -1223,7 +1223,7 @@ test("logs relay stopped, naming which of the two reasons", async () => {
   }
 });
 
-test("logs the relay started line once, with its version and ports, and never again for a mere crash-respawn", async (t: TestContext) => {
+test("logs the relay started line with its version and ports, once per process — a respawn is a new one", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const logs: string[] = [];
   t.mock.method(console, "log", (msg: string) => logs.push(msg));
@@ -1257,14 +1257,42 @@ test("logs the relay started line once, with its version and ports, and never ag
   assert.equal(started.length, 1, `expected exactly one "relay started" line, got: ${JSON.stringify(started)}`);
   assert.match(started[0]!, /relay started: MediaMTX v1\.21\.1, RTMP 1935, SRT 8890, video to screens UDP 8189/);
 
-  // A crash-and-respawn on the SAME started run must not repeat the line —
-  // only a fresh startRelay() (setEnabled/feedsChanged reaching a genuinely
-  // new attempt) resets loggedStartedThisRun.
+  // A respawn is a new process, and the log says it came up: after the
+  // exit line, a "relay started" for the process now running.
   logs.length = 0;
-  supervisors[0]!.setStatus({ state: "failing", reason: "exit code 1", retryAt: Date.now() + 1000, neverStarted: false });
+  supervisors[0]!.setStatus({ state: "failing", reason: "exited with code 1", retryAt: Date.now() + 1000, neverStarted: false });
+  supervisors[0]!.setStatus({ state: "running", since: Date.now() });
+  await waitUntil(() => logs.some((l) => l.includes("relay started")));
+  await settle();
+  assert.equal(logs.filter((l) => l.includes("relay started")).length, 1, "expected the respawned process announced once");
+});
+
+test("a respawned process that exits before its API ever answers is not announced as started", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  let apiOpen = true;
+  const { deps, supervisors } = makeDeps({
+    makeRelay: () =>
+      fakeRelay(async () => {
+        if (!apiOpen) throw new Error("fetch failed");
+      }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => logs.some((l) => l.includes("relay started")));
+  logs.length = 0;
+
+  apiOpen = false; // the respawned process dies before it opens its API
+  supervisors[0]!.ver = "v1.21.1";
+  supervisors[0]!.setStatus({ state: "failing", reason: "exited with code 1", retryAt: Date.now() + 1000, neverStarted: false });
   supervisors[0]!.setStatus({ state: "running", since: Date.now() });
   await settle();
-  assert.equal(logs.filter((l) => l.includes("relay started")).length, 0, "a crash-respawn re-announced the relay as freshly started");
+  await settle();
+  supervisors[0]!.setStatus({ state: "failing", reason: "exited with code 1", retryAt: Date.now() + 2000, neverStarted: false });
+  await settle();
+  assert.deepEqual(logs.filter((l) => l.includes("relay started")), [], "a process that never answered was announced as started");
 });
 
 test("the two 'starting' messages are one wording — the connection row and the status line agree", async () => {

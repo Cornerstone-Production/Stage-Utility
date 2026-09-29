@@ -156,6 +156,41 @@ describe("RelaySupervisor", () => {
     assert.deepEqual(sup.status(), { state: "running", since: START + 1000 } satisfies SupervisorStatus);
   });
 
+  it("a relay killed by a signal says which, and never \"code null\"", async (t) => {
+    enableClock(t);
+    const lines: string[] = [];
+    t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+    children[0]!.emit("exit", null, "SIGKILL");
+    assert.deepEqual(sup.status(), {
+      state: "failing",
+      reason: "killed by SIGKILL",
+      retryAt: START + 1000,
+      neverStarted: false,
+    } satisfies SupervisorStatus);
+    assert.deepEqual(lines, ["[video] relay killed by SIGKILL; restarting in 1 s"]);
+  });
+
+  it("an exit reports its own process's last error, never an earlier process's", async (t) => {
+    enableClock(t);
+    const lines: string[] = [];
+    t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+    children[0]!.stderr.write('2026/09/28 12:00:00 ERR json: unknown field "rtsps"\n');
+    await settle();
+    children[0]!.emit("exit", 1, null);
+    assert.equal((sup.status() as { reason: string }).reason, 'json: unknown field "rtsps"');
+
+    t.mock.timers.tick(1000); // the respawn prints no error of its own
+    children[1]!.emit("exit", 2, null);
+    assert.equal((sup.status() as { reason: string }).reason, "exited with code 2", "the second process never printed that error");
+    assert.equal(lines.at(-1)?.includes("rtsps"), false, `the second exit's line carried the first process's error: ${lines.at(-1)}`);
+  });
+
   // A respawn must not start from whatever config the last start wrote: a
   // push password rotated since is in the relay's memory, not in that file.
   it("rewrites the config before every respawn, and only then spawns", async (t) => {

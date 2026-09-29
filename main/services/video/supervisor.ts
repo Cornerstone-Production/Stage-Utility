@@ -371,6 +371,7 @@ export class RelaySupervisor extends EventEmitter {
   }
 
   private spawnChild(): void {
+    this.watcher.newProcess();
     const child = this.spawnImpl(this.binary, [this.configPath]);
     this.child = child;
     liveSupervisors.add(this);
@@ -402,7 +403,7 @@ export class RelaySupervisor extends EventEmitter {
       }
       console.warn(`[video] the relay's own process reported an error: ${scrub(errorMessage(err))}`);
     });
-    child.once("exit", (code: number | null) => {
+    child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       // A second, independent layer beyond start()'s re-entrancy guard: if
       // `this.child` has moved on to a newer child by the time THIS child
       // (closed over here, not read off `this` again) finally exits, that
@@ -410,7 +411,7 @@ export class RelaySupervisor extends EventEmitter {
       // file or status.
       if (this.child !== child) return;
       if (handledBySpawnError) return;
-      this.onExit(code);
+      this.onExit(code, undefined, signal ?? null);
     });
     this.armHealthyTimer();
   }
@@ -455,7 +456,7 @@ export class RelaySupervisor extends EventEmitter {
    * `status()` already reflects where this process landed, not whatever it
    * was on its way out.
    */
-  private onExit(code: number | null, spawnError?: string): void {
+  private onExit(code: number | null, spawnError?: string, signal: NodeJS.Signals | null = null): void {
     this.clearHealthyTimer();
     this.clearKillTimer();
     this.child = null;
@@ -472,7 +473,10 @@ export class RelaySupervisor extends EventEmitter {
       return;
     }
 
-    const reason = lastError ?? `exit code ${code}`;
+    // "killed by SIGKILL" or "exited with code 1": a signal kill has no
+    // code, and "code null" said nothing.
+    const how = signal ? `killed by ${signal}` : `exited with code ${code}`;
+    const reason = lastError ?? how;
     const delay = restartDelayMs(this.attempt);
     this.attempt += 1;
     this.setStatus({ state: "failing", reason, retryAt: Date.now() + delay, neverStarted: spawnError !== undefined });
@@ -480,10 +484,8 @@ export class RelaySupervisor extends EventEmitter {
 
     const result = this.outage.fail("relay", reason, Date.now());
     if (result.log) {
-      const line = spawnError
-        ? `[video] relay ${reason}; restarting in ${delay / 1000} s${result.note}`
-        : `[video] relay exited (code ${code}): ${reason}; restarting in ${delay / 1000} s${result.note}`;
-      console.warn(line);
+      const what = spawnError ? spawnError : lastError ? `${how}: ${lastError}` : how;
+      console.warn(`[video] relay ${what}; restarting in ${delay / 1000} s${result.note}`);
     }
     this.restartTimer = setTimeout(() => void this.respawn(), delay);
   }

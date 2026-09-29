@@ -168,12 +168,9 @@ export class RelayLifecycle {
   private readinessRun = 0;
   /** Whether a poll of the current run is armed or has a tick in flight. */
   private readinessPolling = false;
-  /** Set once the started-relay log line has fired for the CURRENT
-   *  startRelay() call — see startReadinessPoll()'s own comment. Reset only
-   *  by startRelay() itself, never by a mere crash-and-respawn: the
-   *  supervisor's own exit/restart lines already say that happened, and
-   *  announcing "relay started" again on every crash loop would be exactly
-   *  the noise CLAUDE.md's logging rule warns against. */
+  /** Set once the started-relay log line has fired for the current relay
+   *  process — reset by startRelay() and by every respawn's "running", so
+   *  the log follows each exit line with the process that replaced it. */
   private loggedStartedThisRun = false;
   /** One failure, one line, one recovery line — for everything that can go
    *  wrong before any supervisor exists (a busy port, a failed download, a
@@ -560,7 +557,11 @@ export class RelayLifecycle {
     // first poll itself, after the attach. Every later "running" is a
     // respawn whose empty relay needs its paths again.
     if (status.state === "running") {
-      if (this.supervisor) this.startReadinessPoll();
+      if (!this.supervisor) return;
+      // A respawn is a new process: the log says it came up, as it did the
+      // first one.
+      this.loggedStartedThisRun = false;
+      this.startReadinessPoll();
     } else {
       this.stopReadinessPoll();
     }
@@ -593,21 +594,11 @@ export class RelayLifecycle {
     const tick = async () => {
       this.readinessTimer = null;
       if (run !== this.readinessRun) return;
-      if (!this.loggedStartedThisRun) {
-        const version = this.supervisor?.version();
-        const ports = this.currentPorts;
-        if (version && ports) {
-          console.log(
-            `[video] relay started: MediaMTX ${version}, RTMP ${ports.rtmp}, SRT ${ports.srt}, ` +
-              `video to screens UDP ${ports.webrtcUdp}`,
-          );
-          this.loggedStartedThisRun = true;
-        }
-      }
       const applied = await videoService.reconcileRelay();
       if (run !== this.readinessRun) return; // stopped while this tick waited
       if (applied) {
         this.readinessPolling = false; // the API has answered — nothing left to retry
+        this.announceStarted();
         return;
       }
       attempt++;
@@ -615,6 +606,20 @@ export class RelayLifecycle {
       this.readinessTimer.unref?.();
     };
     void tick();
+  }
+
+  /** "relay started", once per process, once its API has answered: a
+   *  process that exits before it ever does (a crash loop) is the exit
+   *  line's to report, not this one's. */
+  private announceStarted(): void {
+    const ports = this.currentPorts;
+    if (this.loggedStartedThisRun || !ports) return;
+    this.loggedStartedThisRun = true;
+    const version = this.supervisor?.version();
+    console.log(
+      `[video] relay started: MediaMTX${version ? ` ${version}` : ""}, RTMP ${ports.rtmp}, SRT ${ports.srt}, ` +
+        `video to screens UDP ${ports.webrtcUdp}`,
+    );
   }
 
   /** supervisor.stop(), then await videoService.detachRelay() — in that
