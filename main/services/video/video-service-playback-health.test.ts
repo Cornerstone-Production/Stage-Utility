@@ -4,8 +4,9 @@
 // `[video]` log lines.
 //
 // Not covered here: the HTTP route itself (remote-server.ts's presence POST
-// handler) — see remote-server-presence.test.ts for the body-handling
-// function it calls into. The two checks below (an unknown outputId, and
+// handler) — see remote-server-presence-route.test.ts for the route, and
+// remote-server-presence.test.ts for the body-handling function it calls
+// into. The two checks below (an unknown outputId, and
 // parseVideoReports's whole-array refusal) are exercised directly against
 // the real videoService singleton, the same way every other
 // video-service.test.ts guard is.
