@@ -49,14 +49,23 @@ export function buildVersionPayload(
  * runs while something has already gone wrong, and it must not become a second
  * problem.
  */
-export function rawPortHolder(port: number): string {
+export function rawPortHolder(port: number, proto: "tcp" | "udp" = "tcp"): string {
+  // item 12 (findings-t15-r3.md): TCP only — the relay's own SRT and
+  // WebRTC-media ports are UDP, so a busy one always fell through to
+  // "could not determine which process holds it" no matter who actually
+  // held it.
   const probes: [string, string[]][] =
     process.platform === "win32"
-      ? [["netstat", ["-ano", "-p", "TCP"]]]
-      : [
-          ["lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]],
-          ["ss", ["-lptn", `sport = :${port}`]],
-        ];
+      ? [["netstat", ["-ano", "-p", proto.toUpperCase()]]]
+      : proto === "tcp"
+        ? [
+            ["lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]],
+            ["ss", ["-lptn", `sport = :${port}`]],
+          ]
+        : [
+            ["lsof", ["-nP", `-iUDP:${port}`]],
+            ["ss", ["-lpun", `sport = :${port}`]],
+          ];
   for (const [cmd, args] of probes) {
     try {
       const out = execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
@@ -114,9 +123,14 @@ function probeVersion(port: number): Promise<ProbedVersion | null> {
  * recognisable payload, name it — version, and pid/data directory when the
  * holder chose to include them (only a loopback caller gets those, see
  * `buildVersionPayload`). Otherwise fall back to the generic lsof/ss text.
+ *
+ * The version probe is HTTP-over-TCP — skipped entirely for a `proto:
+ * "udp"` port (item 12, findings-t15-r3.md): there is no HTTP request to
+ * make against a UDP-only port at all, so this goes straight to the UDP
+ * lsof/ss lookup.
  */
-export async function describePortHolder(port: number): Promise<string> {
-  const body = await probeVersion(port);
+export async function describePortHolder(port: number, proto: "tcp" | "udp" = "tcp"): Promise<string> {
+  const body = proto === "tcp" ? await probeVersion(port) : null;
   if (body && typeof body.version === "string") {
     const parts = [`version ${body.version}`];
     if (typeof body.pid === "number") parts.push(`pid ${body.pid}`);
@@ -127,7 +141,7 @@ export async function describePortHolder(port: number): Promise<string> {
       `systemctl list-unit-files --state=enabled (Linux) or launchctl list (macOS).`
     );
   }
-  return rawPortHolder(port);
+  return rawPortHolder(port, proto);
 }
 
 /**

@@ -127,15 +127,33 @@ describe("shortenHolder", () => {
     );
   });
 
-  it("leaves describePortHolder's own 'another Stage Utility' sentence untouched", () => {
+  // item 12 (findings-t15-r3.md): every caller of shortenHolder() embeds
+  // its result in "Port X is in use by <holder>." — describePortHolder()'s
+  // own FULL sentence there used to read "...is in use by another Stage
+  // Utility is already serving :51935 — version...", naming the port
+  // twice and running two sentences together. Reduced to a phrase.
+  it("reduces describePortHolder's own 'another Stage Utility' sentence to a phrase, not left whole", () => {
     const sentence =
       "another Stage Utility is already serving :51935 — version 1.24.0, pid 200, data directory /data. " +
       "If that is not the service you expect, find what started it: " +
       "systemctl list-unit-files --state=enabled (Linux) or launchctl list (macOS).";
-    assert.equal(shortenHolder(sentence), sentence);
+    assert.equal(shortenHolder(sentence), "another Stage Utility (version 1.24.0, pid 200, data directory /data)");
   });
 
   it("falls back to the holder text UNCHANGED when neither shape parses", () => {
     assert.equal(shortenHolder("could not determine which process holds it"), "could not determine which process holds it");
+  });
+
+  // item 5 (findings-t15-r3.md): an UNPRIVILEGED ss, asked about another
+  // user's socket, prints the state and every other column with no
+  // "users:(())" at all — nothing names the holder, and this exact shape
+  // still matched the lsof regex (a word, then a number) and read
+  // "LISTEN (pid 0)", inventing a holder ss never actually reported.
+  it("never reads an ss STATE token (LISTEN, UNCONN, ...) as a command", () => {
+    assert.equal(
+      shortenHolder("LISTEN 0 4096 0.0.0.0:1935 0.0.0.0:*"),
+      "LISTEN 0 4096 0.0.0.0:1935 0.0.0.0:*",
+      "an unparseable ss line must fall back unchanged, never invent a holder",
+    );
   });
 });

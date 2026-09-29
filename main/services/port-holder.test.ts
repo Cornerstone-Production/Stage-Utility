@@ -7,6 +7,7 @@
 // holder was ANOTHER STAGE UTILITY running from the wrong place.
 
 import assert from "node:assert/strict";
+import * as dgram from "node:dgram";
 import * as http from "node:http";
 import * as net from "node:net";
 import { test, describe } from "node:test";
@@ -96,6 +97,29 @@ describe("describePortHolder", () => {
       assert.ok(elapsedMs < 2000, `expected under 2s, took ${elapsedMs}ms`);
     } finally {
       server.close();
+    }
+  });
+
+  // item 12 (findings-t15-r3.md): rawPortHolder() looked up TCP only, so a
+  // busy UDP port (the relay's own SRT and WebRTC-media ports) always fell
+  // through to "could not determine which process holds it" no matter who
+  // actually held it.
+  test("finds the holder of a UDP port too, not just TCP", async () => {
+    const socket = dgram.createSocket("udp4");
+    await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
+    const port = (socket.address() as { port: number }).port;
+    try {
+      const description = await describePortHolder(port, "udp");
+      // No HTTP request is possible over a UDP-only port at all — the
+      // version probe must not even run for one.
+      assert.doesNotMatch(description, /another Stage Utility/);
+      assert.notEqual(
+        description,
+        "could not determine which process holds it",
+        "the UDP lookup found nothing — lsof/ss were never asked about UDP at all",
+      );
+    } finally {
+      socket.close();
     }
   });
 });
