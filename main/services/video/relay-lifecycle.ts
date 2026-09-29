@@ -544,18 +544,10 @@ export class RelayLifecycle {
         try {
           await supervisor.stop();
         } catch (stopErr) {
-          // item 7 (findings-t15-r3.md): a failed stop() here used to be
-          // swallowed entirely (`.catch(() => {})`) — an orphaned
-          // supervisor whose OWN stop() throws (killLeftover()'s own
-          // EPERM, say) left nothing telling an operator the stop itself
-          // failed too, only the attach failure that triggered it. Logged
-          // once per outage, same as every other pre-supervisor failure,
-          // and folded into the reason the status/connection row shows —
-          // "keep the failure visible in status", not just the log.
-          const stopReason = `could not stop the orphaned relay process: ${errorMessage(stopErr)}`;
-          const decision = this.prelaunchOutage.fail("relay-prelaunch-stop", stopReason, Date.now());
-          if (decision.log) console.warn(`[video] ${scrub(stopReason)}${scrub(decision.note)}`);
-          reason = `${reason}; ${stopReason}`;
+          // A supervisor whose own stop() also fails (a kill it may not
+          // make) is part of the same failure: folded into the reason the
+          // status, the connection row and the one log line below carry.
+          reason = `${reason}; could not stop the orphaned relay process: ${errorMessage(stopErr)}`;
         }
         this.failPreSupervisor(reason, "spawn", undefined, undefined);
       }

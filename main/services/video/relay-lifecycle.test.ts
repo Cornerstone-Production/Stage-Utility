@@ -805,11 +805,14 @@ test("item 7: a stop() failure on the orphaned supervisor logs once and is folde
     assert.match(relay.reason, /could not start the relay: makeRelay blew up/);
     assert.match(relay.reason, /could not stop the orphaned relay process: stop blew up/);
   }
-  // The console.warn line itself (the OutageLog-gated one, starting with
-  // it), not the (separate) combined failing-reason string that also
-  // mentions it — filtering on "includes" alone double-counted that one.
-  const stopFailureLines = warns.filter((w) => w.startsWith("[video] could not stop the orphaned relay process"));
-  assert.equal(stopFailureLines.length, 1, `expected exactly one stop-failure line, got: ${JSON.stringify(warns)}`);
+  // One line says it: the failing reason, which already carries the stop
+  // failure after the attach failure that caused it.
+  const stopFailureLines = warns.filter((w) => w.includes("could not stop the orphaned relay process"));
+  assert.deepEqual(
+    stopFailureLines,
+    ["[video] could not start the relay: makeRelay blew up; could not stop the orphaned relay process: stop blew up"],
+    "the stop failure must be logged once, in the failing reason",
+  );
 });
 
 // item 6 (findings-t15-r3.md, PROBE J): this.attempt used to reset to 0
