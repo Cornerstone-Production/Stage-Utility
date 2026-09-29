@@ -95,7 +95,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display — `201` |
-| PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `allowHls` (whether a Video widget here may play over HLS; `false` keeps it on WebRTC only), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400`. An id naming no display is also `400` with the reason, for `viewId`, `blackout`, `locked`, `hideTopBar`, `allowHls`, `slug` and `mode` |
+| PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `allowHls` (whether a Video widget here may play over HLS; `false` keeps it on WebRTC only), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400`. An id naming no display is also `400` with the reason, for every field |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |

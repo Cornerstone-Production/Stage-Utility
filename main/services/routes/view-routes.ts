@@ -643,7 +643,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       let state = stageController.getState();
-      if (hasName) state = await stageController.renameOutput(id, body.name as string);
+      // Same catch-and-400 shape as every other field below: an unknown id
+      // is a 400 with the reason, not a 500 stack trace.
+      if (hasName) {
+        try {
+          state = await stageController.renameOutput(id, body.name as string);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       // Mode BEFORE viewId, so a single request can turn a screen into a panel
       // and point it at a console. The other order refuses its own second half.
       if (hasMode) {
