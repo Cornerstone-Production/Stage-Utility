@@ -49,6 +49,7 @@ class FakeSupervisor extends EventEmitter implements RelaySupervisorLike {
 }
 
 const OUTPUT_ID = stageController.getOutputs()[0]!.id;
+const OUTPUT_NAME = stageController.getOutputs()[0]!.name;
 
 const frames: VideoState[] = [];
 addBroadcastListener((channel, payload) => {
@@ -167,6 +168,64 @@ test("a struggling pair's sticky flag clears at exactly CLEAR_AFTER_MS with no f
     assert.ok(health, "the pair must still be held — only CLEAR_AFTER_MS, not WINDOW_MS, has passed since its last report");
     assert.equal(health!.struggling, false, "the sticky flag must have cleared, driven by the timer alone");
     assert.ok(lines.some((l) => l.includes("Clears-quietly feed") && l.includes("smoothly again")), "the recovery must be logged, not only published silently");
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+// ── A flag the expiry timer clears starts the next episode fresh ───────────
+
+test("after the expiry timer clears a stall episode, the next struggle logs and publishes its own drops, not the old stalls", async (t: TestContext) => {
+  const id = await addRelayFeed("Fresh-episode feed");
+  const lines = captureConsole(t, "log");
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 300, dropped: 0, stalls: 5 })]);
+    await settle();
+    for (let i = 1; i <= 5; i++) {
+      t.mock.timers.tick(10_000);
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 400, dropped: 0, stalls: 0 })]);
+      await settle();
+    }
+    // 60 s after the stalls, with no heartbeat: the timer clears the flag.
+    t.mock.timers.tick(10_000);
+    await settle();
+    assert.ok(lines.some((l) => l.includes("Fresh-episode feed") && l.includes("smoothly again")), "sanity: the timer cleared the flag");
+
+    t.mock.timers.tick(500);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 300, dropped: 150, stalls: 0, width: 1920, height: 1080 })]);
+    await settle();
+
+    const struggling = lines.filter((l) => l.includes("Fresh-episode feed") && l.includes("is struggling"));
+    assert.deepEqual(struggling.slice(1), [
+      `[video] ${OUTPUT_NAME} is struggling with Fresh-episode feed: dropped 150 frames for 2300 decoded, 0 stalls in the last minute`,
+    ]);
+    const health = (await videoService.state()).screens.find((s) => s.feedId === id);
+    assert.deepEqual(health?.episode, { droppedInWindow: 150, decodedInWindow: 2300, stallsInWindow: 0, width: 1920, height: 1080 });
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a clean heartbeat after the expiry timer has already published the clear publishes nothing", async (t: TestContext) => {
+  const id = await addRelayFeed("Already-cleared feed");
+  captureConsole(t, "log"); // crosses into struggling on purpose; not asserting on the line
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 300, dropped: 0, stalls: 5 })]);
+    await settle();
+    t.mock.timers.tick(30_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 400, dropped: 0, stalls: 0 })]);
+    await settle();
+    t.mock.timers.tick(CLEAR_AFTER_MS - 30_000);
+    await settle();
+    assert.equal((await videoService.state()).screens.find((s) => s.feedId === id)?.struggling, false, "sanity: the timer published the clear");
+
+    const before = frames.length;
+    t.mock.timers.tick(10_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 400, dropped: 0, stalls: 0 })]);
+    await settle();
+    assert.equal(frames.length, before, "the clear is already published; a clean heartbeat after it has nothing new to say");
   } finally {
     await videoService.removeFeed(id);
   }

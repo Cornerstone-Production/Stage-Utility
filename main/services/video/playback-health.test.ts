@@ -88,7 +88,7 @@ test("samples older than 60 s leave the window's own totals, whether or not the 
   assert.equal(h.snapshot(t0)[0]?.decodedInWindow, 500);
 
   // A keep-alive heartbeat well inside the window, refreshing `reportedAt`
-  // so the PAIR ITSELF is not swept away by t0+WINDOW_MS — sweepStale()
+  // so the PAIR ITSELF is not swept away by t0+WINDOW_MS — sweep()
   // (run at the top of every record()) removes a pair whose own reportedAt
   // is WINDOW_MS old, and a record() call exactly then would otherwise
   // delete the whole pair and recreate it fresh with only the new sample,
@@ -262,6 +262,47 @@ test("episode: a pair that ages out entirely and reappears later starts a brand 
     { droppedInWindow: 60, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 },
     "a re-seeded pair's episode must start from ITS OWN first bad sample, not the long-gone one",
   );
+});
+
+// A stall-only episode, then clean heartbeats until the sticky flag clears by
+// time, then a heartbeat that drops frames at 1080p. The new episode must
+// describe those drops: carrying the cleared episode's stalls forward would
+// log a stall count that is gone and give network advice for a decode
+// problem.
+function clearedStallEpisode(h: InstanceType<typeof PlaybackHealth>, t0: number): void {
+  h.record("out1", [report({ decoded: 300, dropped: 0, stalls: 5 })], t0);
+  for (let i = 1; i <= 5; i++) h.record("out1", [report({ decoded: 400, dropped: 0, stalls: 0 })], t0 + i * 10_000);
+}
+const NEW_DROPS = { droppedInWindow: 150, decodedInWindow: 2300, stallsInWindow: 0, width: 1920, height: 1080 };
+
+test("episode: a new episode after the expiry timer clears the flag seeds from its own window, not the cleared one", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  clearedStallEpisode(h, t0);
+  const cleared = h.tick(t0 + CLEAR_AFTER_MS)[0]!;
+  assert.equal(cleared.struggling, false, "sanity: the flag cleared by time");
+
+  h.record("out1", [report({ decoded: 300, dropped: 150, stalls: 0 })], t0 + 60_500);
+  const entry = h.snapshot(t0 + 60_500)[0]!;
+  assert.equal(entry.struggling, true, "sanity: 150 of 2300 in the window is over 5%");
+  assert.deepEqual(entry.episode, NEW_DROPS, "the new episode must hold the new drops, not the cleared episode's 5 stalls");
+});
+
+test("episode: a new episode seeds fresh when the flag cleared by time with no expiry timer run in between", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  clearedStallEpisode(h, t0);
+
+  h.record("out1", [report({ decoded: 300, dropped: 150, stalls: 0 })], t0 + 60_500);
+  assert.deepEqual(h.snapshot(t0 + 60_500)[0]!.episode, NEW_DROPS, "the new episode must hold the new drops, not the cleared episode's 5 stalls");
+});
+
+test("record()'s changed flag: a heartbeat after the expiry timer already cleared the flag is not a flip", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  clearedStallEpisode(h, t0);
+  h.tick(t0 + CLEAR_AFTER_MS);
+  assert.equal(h.record("out1", [report({ decoded: 400, dropped: 0, stalls: 0 })], t0 + 70_000), false, "the timer already published the clear; a clean heartbeat after it changes nothing");
 });
 
 test("a burst of 1000 heartbeats holds a bounded number of samples, merging into the newest rather than dropping — the running totals still sum every one of them", () => {

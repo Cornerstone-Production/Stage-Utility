@@ -78,9 +78,9 @@ interface Pair {
    */
   lastBadAt: number | null;
   /**
-   * `isStrugglingAt(lastBadAt, at)` as record() last computed it — read back
-   * as THIS call's `wasStruggling`, never re-derived fresh against the new
-   * `now`. The sticky flag clears purely from elapsed wall-clock time, with
+   * `isStrugglingAt(lastBadAt, at)` as record() last computed it, or false
+   * once sweep() has seen it run out by time — read back as THIS call's
+   * `wasStruggling`, never re-derived fresh against the new `now`. The sticky flag clears purely from elapsed wall-clock time, with
    * no call landing at the exact moment it happens; the first call to
    * notice is whichever one happens next, however much later that is. If
    * that call compared a FRESH recompute of the old state (using the OLD
@@ -194,31 +194,42 @@ export class PlaybackHealth {
   }
 
   /**
-   * Ages out every pair (any output, not only the one reporting) whose last
-   * report is WINDOW_MS or older. Run at the start of every record() call —
-   * presence heartbeats arrive roughly every 10 s from any screen currently
-   * playing something (see VideoPlaybackReport's own comment), so in a
-   * building with more than one screen live this doubles as the sweep that
-   * notices ANOTHER screen going quiet, not only the one that just called
-   * in. A lone screen that stops reporting entirely is still caught the
-   * next time anything reads `snapshot()` — its own defensive age check
-   * does not depend on this sweep having run.
+   * Brings every pair (any output, not only the one reporting) up to `now`
+   * without a report of its own: removes a pair whose last report is
+   * WINDOW_MS or older, and clears the sticky flag and episode of a pair
+   * whose flag has run out by time alone. Run at the start of every record()
+   * call and by tick() — presence heartbeats arrive roughly every 10 s from
+   * any screen currently playing something (see VideoPlaybackReport's own
+   * comment), so in a building with more than one screen live this doubles
+   * as the sweep that notices ANOTHER screen going quiet, not only the one
+   * that just called in. A lone screen that stops reporting entirely is still
+   * caught the next time anything reads `snapshot()` — its own defensive age
+   * check does not depend on this sweep having run.
    *
-   * @returns whether anything was actually removed — folded into record()'s
-   *   own `changed` result as "a pair left".
+   * Clearing `struggling` and `episode` here, not only in record() for the
+   * pair reporting, is what makes the next bad report on a time-cleared pair
+   * a NEW episode: record() reads `wasStruggling` off the stored flag, and a
+   * stale `true` kept the cleared episode's numbers as the new one's peak.
+   *
+   * @returns whether `snapshot()` now reads differently — a pair left, or a
+   *   flag cleared — folded into record()'s own `changed` result.
    */
-  private sweepStale(now: number): boolean {
-    let removedAny = false;
+  private sweep(now: number): boolean {
+    let changed = false;
     for (const [outputId, byFeed] of this.pairs) {
       for (const [feedId, pair] of byFeed) {
         if (now - pair.reportedAt >= WINDOW_MS) {
           byFeed.delete(feedId);
-          removedAny = true;
+          changed = true;
+        } else if (pair.struggling && !isStrugglingAt(pair.lastBadAt, now)) {
+          pair.struggling = false;
+          pair.episode = null;
+          changed = true;
         }
       }
       if (byFeed.size === 0) this.pairs.delete(outputId);
     }
-    return removedAny;
+    return changed;
   }
 
   /**
@@ -228,8 +239,9 @@ export class PlaybackHealth {
    * markRequested() documents in video-service.ts for its own caller.
    *
    * @returns whether `snapshot()` would now read differently: a struggling
-   *   flag flipped, a pair appeared, a pair left (aged out, this call or a
-   *   previous one this call's sweep just noticed), or a currently-
+   *   flag flipped (here, or cleared by time in this call's sweep), a pair
+   *   appeared, a pair left (aged out, this call or a previous one this
+   *   call's sweep just noticed), or a currently-
    *   struggling pair's window totals moved — which is also every time its
    *   `episode` peak could have moved, since the peak is derived from those
    *   same totals; there is no separate check for "the peak moved" only.
@@ -237,7 +249,7 @@ export class PlaybackHealth {
    *   screen playing cleanly.
    */
   record(outputId: string, reports: readonly VideoPlaybackReport[], now: number): boolean {
-    let changed = this.sweepStale(now);
+    let changed = this.sweep(now);
     if (reports.length === 0) return changed;
 
     const byFeed = this.pairs.get(outputId) ?? new Map<string, Pair>();
@@ -349,7 +361,7 @@ export class PlaybackHealth {
    *  by outputId or feedId themselves. A pair whose last report is
    *  WINDOW_MS old or older is left out even if record() has not run since
    *  (and so never swept it out of the underlying map) — this is the
-   *  correctness backstop sweepStale() does not have to be relied on for. */
+   *  correctness backstop sweep() does not have to be relied on for. */
   snapshot(now: number): ScreenVideoHealth[] {
     const out: ScreenVideoHealth[] = [];
     for (const [outputId, byFeed] of this.pairs) {
@@ -420,18 +432,18 @@ export class PlaybackHealth {
   }
 
   /**
-   * Ages out stale pairs — actually removing them from the map, not merely
-   * excluding them from what is returned — and returns what `snapshot()`
-   * now says. This is the ONE caller with no heartbeat of its own behind it
-   * (video-service.ts's one-shot expiry timer): every other caller reaches
-   * `sweepStale()` through `record()`, which always has a fresh report to
-   * fold in. Without an actual sweep here, a pair nothing ever heartbeats
-   * again (a struggling screen that goes dark) would sit in memory forever —
-   * `snapshot()`'s own age check keeps it out of what any READER sees, but
-   * never frees it.
+   * Runs sweep() — actually removing stale pairs from the map, not merely
+   * excluding them from what is returned, and clearing a flag that has run
+   * out by time — and returns what `snapshot()` now says. This is the ONE
+   * caller with no heartbeat of its own behind it (video-service.ts's
+   * one-shot expiry timer): every other caller reaches `sweep()` through
+   * `record()`, which always has a fresh report to fold in. Without an
+   * actual sweep here, a pair nothing ever heartbeats again (a struggling
+   * screen that goes dark) would sit in memory forever — `snapshot()`'s own
+   * age check keeps it out of what any READER sees, but never frees it.
    */
   tick(now: number): ScreenVideoHealth[] {
-    this.sweepStale(now);
+    this.sweep(now);
     return this.snapshot(now);
   }
 }
