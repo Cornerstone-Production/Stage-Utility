@@ -31,7 +31,8 @@ class StubEventSource {
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
 
-const presencePosts: { body: Record<string, unknown> }[] = [];
+/** Every presence POST, with the fake clock's time when fetch received it. */
+const presencePosts: { at: number; body: Record<string, unknown> }[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
   const url = String(input);
@@ -39,7 +40,7 @@ const presencePosts: { body: Record<string, unknown> }[] = [];
     return { ok: true, status: 200, json: async () => stageState(), text: async () => "" };
   }
   if (url === "/api/displays/presence" && init?.method === "POST") {
-    presencePosts.push({ body: JSON.parse(String(init.body)) });
+    presencePosts.push({ at: Date.now(), body: JSON.parse(String(init.body)) });
     return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
   }
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
@@ -59,7 +60,7 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 
 /** Drains the real microtask queue without depending on the fake clock this
  *  file controls — `setImmediate` is a different API than `setTimeout`, left
- *  un-mocked by `mock.timers.enable({ apis: ["setTimeout"] })` below. */
+ *  un-mocked by `mock.timers.enable({ apis: ["setTimeout", "Date"] })` below. */
 async function flush(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setImmediate(resolve));
@@ -100,7 +101,7 @@ afterEach(async () => {
 });
 
 test("nothing playing: the heartbeat's slow (60s) cadence, and no video field", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
   try {
     window.history.replaceState({}, "", "/display-1");
     await act(async () => {
@@ -131,7 +132,7 @@ test("nothing playing: the heartbeat's slow (60s) cadence, and no video field", 
 });
 
 test("something playing: the heartbeat speeds up to VIDEO_HEARTBEAT_MS and carries a video field; unregistering slows it back down", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
   try {
     window.history.replaceState({}, "", "/display-1");
     await act(async () => {
@@ -162,29 +163,87 @@ test("something playing: the heartbeat speeds up to VIDEO_HEARTBEAT_MS and carri
     assert.equal(presencePosts.length, 2, "expected the sped-up ping at VIDEO_HEARTBEAT_MS, not 60s later");
     assert.deepEqual(presencePosts[1]!.body.video, [report]);
 
-    // Unregistering flips anyPlaying() back to false, rescheduling immediately
-    // onto the slow cadence again, timed from THIS moment.
+    // Unregistering flips anyPlaying() back to false. A slower cadence must
+    // not push out the ping already pending: it still fires VIDEO_HEARTBEAT_MS
+    // after the last one, and only the one after it waits the slow 60s.
     unregister();
 
     await act(async () => {
-      mock.timers.tick(59_999);
+      mock.timers.tick(VIDEO_HEARTBEAT_MS - 1);
       await flush();
     });
-    assert.equal(presencePosts.length, 2, "expected no ping this soon once nothing is playing again");
+    assert.equal(presencePosts.length, 2, "the pending ping must not fire early");
 
     await act(async () => {
       mock.timers.tick(1);
       await flush();
     });
-    assert.equal(presencePosts.length, 3, "expected the next ping exactly 60s after unregistering");
+    assert.equal(presencePosts.length, 3, "unregistering must keep the pending ping, not push it out to 60s");
     assert.equal("video" in presencePosts[2]!.body, false, "expected no video field once unregistered");
+
+    await act(async () => {
+      mock.timers.tick(59_999);
+      await flush();
+    });
+    assert.equal(presencePosts.length, 3, "after that ping, nothing playing is the slow cadence again");
+
+    await act(async () => {
+      mock.timers.tick(1);
+      await flush();
+    });
+    assert.equal(presencePosts.length, 4, "expected the next ping 60s after the last one");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("a picture flapping between playing and not still pings at least every 60s", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    window.history.replaceState({}, "", "/display-1");
+    await act(async () => {
+      render(
+        React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(TooltipProvider, null, React.createElement(StageView))),
+      );
+      await flush();
+    });
+    assert.equal(presencePosts.length, 1, "expected the initial ping on mount");
+
+    // A widget that plays for 9 s, then loses its picture for 30 s while its
+    // retry backs off, ten times over. Every flip changes the cadence, and
+    // each one used to restart the wait, so the 10 s cadence never came due
+    // and the 60 s one never had the chance: one ping in 390 s, well past
+    // the server's 90 s presence TTL.
+    const report = { feedId: "feed-1", via: "webrtc" as const, decoded: 270, dropped: 0, stalls: 0, width: 1280, height: 720 };
+    const advance = async (ms: number) => {
+      // One second at a time, so a POST's recorded time is within a second of
+      // when its timer fired rather than the end of a long tick.
+      for (let t = 0; t < ms; t += 1000) {
+        await act(async () => {
+          mock.timers.tick(1000);
+          await flush();
+        });
+      }
+    };
+    for (let cycle = 0; cycle < 10; cycle++) {
+      const unregister = registerPlayback("obj-1", async () => report);
+      await advance(9_000);
+      unregister();
+      await advance(30_000);
+    }
+
+    const times = presencePosts.map((p) => p.at);
+    const gaps = times.slice(1).map((at, i) => at - times[i]!);
+    gaps.push(Date.now() - times[times.length - 1]!);
+    const longest = Math.max(...gaps);
+    assert.ok(longest <= 60_000, `expected a ping at least every 60 s; the longest gap was ${longest} ms over ${presencePosts.length} pings`);
   } finally {
     mock.timers.reset();
   }
 });
 
 test("a preview never heartbeats, playing video or not", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
   try {
     window.history.replaceState({}, "", "/preview-v1");
     const unregister = registerPlayback("obj-1", async () => ({

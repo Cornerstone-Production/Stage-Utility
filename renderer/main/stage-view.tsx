@@ -474,15 +474,20 @@ export function StageView() {
   // deaths.
   //
   // A self-rescheduling setTimeout, not a fixed setInterval: anyPlaying() is read
-  // fresh every time schedule() runs, and onAnyPlayingChange reschedules the
-  // moment playback starts or stops — the same eager pattern the pco:live listener
-  // below already uses for `near` — so a widget starting to play does not have to
-  // wait out whatever was left of a slow, already-pending wait.
+  // fresh every time schedule() runs, and onAnyPlayingChange and the pco:live
+  // listener below both call schedule() the moment their half of the cadence
+  // changes, so a widget starting to play does not have to wait out whatever was
+  // left of a slow, already-pending wait. A change only ever brings the next ping
+  // forward: a picture flapping between playing and not would otherwise restart
+  // the wait on every flip, and never ping at all while it flaps faster than the
+  // cadence it keeps restarting.
   useEffect(() => {
     if (isPreviewSlug(displayId)) return;
     const url = "/api/displays/presence";
     let near = false;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // When the pending ping is due; null once it has fired.
+    let dueAt: number | null = null;
     const intervalMs = () => (anyPlaying() ? VIDEO_HEARTBEAT_MS : near ? 20_000 : 60_000);
     const ping = () => {
       void (async () => {
@@ -510,11 +515,16 @@ export function StageView() {
       })().catch(() => {});
     };
     const schedule = () => {
+      const now = Date.now();
+      const at = now + intervalMs();
+      if (dueAt !== null && dueAt <= at) return;
       clearTimeout(timer);
+      dueAt = at;
       timer = setTimeout(() => {
+        dueAt = null;
         ping();
         schedule();
-      }, intervalMs());
+      }, at - now);
     };
     ping();
     schedule();
