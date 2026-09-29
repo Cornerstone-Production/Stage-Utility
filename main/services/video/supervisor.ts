@@ -418,7 +418,10 @@ export class RelaySupervisor extends EventEmitter {
     // afterward (code null, signal null, per Node's docs); handledBySpawnError
     // skips it so the same failure is not reported, and restarted, twice.
     let handledBySpawnError = false;
-    child.once("error", (err: Error) => {
+    // `on`, not `once`: a kill can fail more than once (stop() escalating
+    // SIGTERM to SIGKILL), and an 'error' with no listener left throws,
+    // taking the server down with it.
+    child.on("error", (err: Error) => {
       if (this.child !== child) return;
       // item 9 (findings-t15-r3.md): 'error' is not ALWAYS a spawn
       // failure — a failed kill() (EPERM, say) fires it on an ALREADY-

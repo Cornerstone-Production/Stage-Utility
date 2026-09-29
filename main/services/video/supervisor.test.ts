@@ -332,6 +332,24 @@ describe("RelaySupervisor", () => {
     );
   });
 
+  // A kill that fails can fail again — stop() escalating SIGTERM to SIGKILL
+  // against a process it may not signal. An EventEmitter with no 'error'
+  // listener throws, which from a child process's event takes the whole
+  // server down.
+  it("a second 'error' on a running child is handled too, never thrown", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+    const warns: string[] = [];
+    t.mock.method(console, "warn", (m: string) => warns.push(m));
+    const eperm = () => Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    children[0]!.emit("error", eperm());
+    assert.doesNotThrow(() => children[0]!.emit("error", eperm()), "a second error on the same child went unheard and threw");
+    assert.equal(warns.filter((w) => w.includes("kill EPERM")).length, 2);
+    assert.equal(sup.status().state, "running");
+  });
+
   // R14j: a real v1.21.1 binary given a malformed pull source echoed the
   // WHOLE credentialed URL back in its own ERR line — this is what the
   // supervisor turns into both its exit reason (status.reason) and the
