@@ -229,4 +229,28 @@ describe("the HLS switch", () => {
     });
     assert.deepEqual(calls, [false], "checked (allowed) must flip to false on selection");
   });
+
+  for (const key of ["Enter", " "]) {
+    test(`focusing the item and pressing ${JSON.stringify(key)} sends the change`, async () => {
+      const calls: boolean[] = [];
+      render(
+        React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          React.createElement(TooltipProvider, null, cardFor("custom", {}, (v) => calls.push(v))),
+        ),
+      );
+      await openMenu();
+      const item = screen.getByRole("menuitemcheckbox", { name: "Use HLS on this screen" });
+      await act(async () => {
+        item.focus();
+        // Radix's own item only acts when the event's target IS the item
+        // (not a bubbled child event), which is what a real keypress on a
+        // focused element fires.
+        fireEvent.keyDown(item, { key });
+        await settle();
+      });
+      assert.deepEqual(calls, [false], `${JSON.stringify(key)} on a focused, checked item must flip it to false`);
+    });
+  }
 });
