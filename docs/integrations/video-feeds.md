@@ -156,7 +156,11 @@ browsers refuse to play one, so it is refused when the feed is saved.
 ### Pull from a device
 
 For an RTSP, SRT or HLS address on the LAN — a camera or encoder's own output.
-**Address**, then **Username and password** if the device needs them. The
+**Address**, then **Username and password** if the device needs them. SRT
+has no username, only a passphrase: leave Username empty and put the
+passphrase, 10 to 80 characters, in Password. A username, or a passphrase
+outside that length, is refused when the feed is saved, since the relay
+would refuse it on every attempt. The
 relay only dials the address while something is actually showing the feed
 (a Video widget on screen, or the editor's own preview); nothing else keeps
 it connected. Once a password is stored, the field says "A password is

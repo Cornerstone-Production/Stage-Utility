@@ -64,3 +64,28 @@ test("a name may be 60 characters after trimming, not 61", () => {
   assert.equal(r.ok, false);
   assert.equal((r as { error: string }).error, "Name must be 1–60 characters.");
 });
+
+// SRT authenticates a pull by passphrase alone, and MediaMTX refuses a
+// passphrase outside 10 to 80 bytes on every dial, for ever ("config:
+// Passphrase must be between 10 and 80 bytes long", from the real v1.21.1
+// binary). Both are refused at the door, with the reason.
+test("an SRT pull refuses a username, saying SRT uses only a passphrase", () => {
+  const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "srt://10.0.0.1:9000", username: "admin" }, password: "a-long-passphrase" }, ALL);
+  assert.equal(r.ok, false);
+  assert.equal((r as { error: string }).error, "SRT uses a passphrase only, no username: leave Username empty.");
+});
+
+test("an SRT passphrase must be 10 to 80 bytes, and an empty one still clears it", () => {
+  const srt = (password: string) => parseFeedInput({ name: "P", source: { kind: "pull", url: "srt://10.0.0.1:9000", username: "" }, password }, ALL);
+  for (const bad of ["a".repeat(9), "a".repeat(81), "é".repeat(41)]) {
+    const r = srt(bad);
+    assert.equal(r.ok, false, `${Buffer.byteLength(bad)} bytes`);
+    assert.equal((r as { error: string }).error, "An SRT passphrase must be 10 to 80 characters long.");
+  }
+  for (const good of ["a".repeat(10), "a".repeat(80), ""]) assert.equal(srt(good).ok, true, `${good.length} characters`);
+});
+
+test("the SRT rules are SRT's alone: an RTSP pull keeps its username and any password", () => {
+  const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "rtsp://10.0.0.1/s", username: "admin" }, password: "pw" }, ALL);
+  assert.equal(r.ok, true);
+});

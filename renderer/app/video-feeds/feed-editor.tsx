@@ -382,6 +382,11 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
                 Hidden the moment the operator starts typing a replacement,
                 since the message ("a password is saved") stops being true
                 the instant they are actively setting a new one. */}
+            {/^srt:/i.test(draft.pullUrl.trim()) && (
+              <span className="text-caption1 text-fg-subtle">
+                SRT takes a passphrase only, 10 to 80 characters: leave Username empty and put it in Password.
+              </span>
+            )}
             {!isNew && feed?.source.kind === "pull" && feed.hasPassword && !pullPasswordTouched && (
               <div className="flex items-center justify-between gap-2">
                 <span className="text-caption1 text-fg-subtle">A password is saved. Type to replace it, or clear it.</span>

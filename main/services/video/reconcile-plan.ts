@@ -50,9 +50,9 @@ function encodePercent(s: string): string {
  *  percent-encoded by the `URL` setters (`p@ss` becomes `p%40ss`) after a
  *  literal `%` is pre-escaped (see encodePercent); srt has no userinfo
  *  convention of its own, so its password goes in the query as
- *  `passphrase=<pw>` and its username is ignored — MediaMTX authenticates
- *  an SRT pull by passphrase alone. An empty username with no password
- *  leaves `url` untouched.
+ *  `passphrase=<pw>`; it has no username (feed-input.ts refuses one) —
+ *  MediaMTX authenticates an SRT pull by passphrase alone. An empty
+ *  username with no password leaves `url` untouched.
  */
 export function pullSource(url: string, username: string, password: string | undefined): string {
   const parsed = new URL(url);

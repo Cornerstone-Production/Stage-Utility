@@ -825,6 +825,23 @@ test("a pull feed's Address, Username and password fields render, the Magewell c
   }
 });
 
+test("an SRT address says a passphrase only, 10 to 80 characters, and no username; an RTSP one does not", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    const hint = () => screen.queryByText("SRT takes a passphrase only, 10 to 80 characters: leave Username empty and put it in Password.");
+    assert.equal(!!hint(), false, "an RTSP address has a username and password like any other");
+    const address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
+    fireEvent.change(address, { target: { value: "srt://192.0.2.30:9000?streamid=cam" } });
+    await settle();
+    assert.equal(!!hint(), true, "expected the SRT hint for an srt:// address");
+  } finally {
+    g.restore();
+  }
+});
+
 test("typing a pull password then clearing it back to empty still sends password: \"\" — the field is TOUCHED, not merely blank", async () => {
   const g = stubGlobals(
     { ...makeState([pullFeed()]), kinds: ALL_KINDS },

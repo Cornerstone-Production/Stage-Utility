@@ -105,6 +105,18 @@ export function parseFeedInput(
       return { ok: false, error: "Password must be at most 200 characters." };
     }
 
+    // SRT authenticates a pull by passphrase alone (reconcile-plan.ts's
+    // pullSource puts it in the query and has nowhere for a username), and
+    // MediaMTX refuses a passphrase outside 10 to 80 bytes on every dial,
+    // for as long as the feed exists.
+    if (url.protocol === "srt:") {
+      if (username !== "") return { ok: false, error: "SRT uses a passphrase only, no username: leave Username empty." };
+      const bytes = password ? Buffer.byteLength(password, "utf8") : 0;
+      if (password && (bytes < 10 || bytes > 80)) {
+        return { ok: false, error: "An SRT passphrase must be 10 to 80 characters long." };
+      }
+    }
+
     const result: { ok: true; name: string; source: VideoSource; password?: string } = {
       ok: true,
       name,
