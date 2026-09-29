@@ -47,12 +47,13 @@ after(() =>
  *
  * `idle()`, never a fixed delay. Every card on this page comes from the
  * `integrations:list` query, so until that resolves there are ZERO cards — and
- * this file's first assertion is that there are TOTAL. Waiting 30ms for one
- * fetch is enough on an idle machine and a coin toss on a loaded one, which is
- * how "all TOTAL cards are in the document on the first render" failed once inside
- * a full-suite run and passed in isolation and on every clean run after.
+ * this file's first assertion is that every one of them is there. Waiting
+ * 30ms for one fetch is enough on an idle machine and a coin toss on a
+ * loaded one, which is how "every card is in the document on the first
+ * render" failed once inside a full-suite run and passed in isolation and on
+ * every clean run after.
  *
- * Waiting for "TOTAL cards" instead would be waiting for the thing under test
+ * Waiting for the cards themselves instead would be waiting for the thing under test
  * and would prove nothing. `idle()` asks react-query whether it has finished,
  * which is independent of every assertion below — see the harness.
  */
