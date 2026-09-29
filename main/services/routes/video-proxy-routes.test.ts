@@ -24,6 +24,7 @@ import type { AddressInfo } from "node:net";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-proxy-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -61,19 +62,6 @@ const relay = fakeRelay();
  *  this is the seam that already exists for it. */
 const publish = () => (videoService as unknown as { publish(): Promise<void> }).publish();
 
-/** Swap a console method for the duration of `fn`, collecting every line —
- *  the same pattern video-service.test.ts's own outage-logging tests use. */
-async function captureConsole<T extends "log" | "warn">(method: T, fn: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const real = console[method];
-  console[method] = (...args: unknown[]) => lines.push(args.map(String).join(" "));
-  try {
-    await fn();
-  } finally {
-    console[method] = real;
-  }
-  return lines;
-}
 
 // ── The fake relay MediaMTX stands in for ─────────────────────────────────
 
@@ -430,13 +418,12 @@ describe("once the relay is attached and running", () => {
     assert.equal(received.length, receivedCountBefore, "a write against a read-only playlist must never reach the relay");
   });
 
-  test("a relay dying mid-segment (after headers) IS reported — unlike a viewer leaving, this is genuinely news about the relay", async () => {
+  test("a relay dying mid-segment (after headers) IS reported — unlike a viewer leaving, this is genuinely news about the relay", async (t) => {
     proxyOutage.forget();
-    const warns = await captureConsole("warn", async () => {
-      await assert.rejects(fetchSu(`/video/${camId}/dying.m3u8`).then((r) => r.text()));
-      // Give the server side time to notice the torn-down connection and log.
-      await new Promise((r) => setTimeout(r, 200));
-    });
+    const warns = captureConsole(t, "warn");
+    await assert.rejects(fetchSu(`/video/${camId}/dying.m3u8`).then((r) => r.text()));
+    // Give the server side time to notice the torn-down connection and log.
+    await new Promise((r) => setTimeout(r, 200));
     const relayFailureLines = warns.filter((l) => l.includes("proxy to relay failed"));
     assert.equal(relayFailureLines.length, 1, `expected exactly one relay-failure line for a relay that died mid-segment; got: ${JSON.stringify(warns)}`);
   });
@@ -609,23 +596,22 @@ describe("a viewer leaving mid-hold", () => {
     await videoService.detachRelay();
   });
 
-  test("aborting a held HLS request logs no relay-failure line — the viewer left, the relay did not fail", async () => {
+  test("aborting a held HLS request logs no relay-failure line — the viewer left, the relay did not fail", async (t) => {
     // AbortController, not a raw http.request destroy(): this is what an
     // actual browser navigating away mid-hold does. (A raw client would
     // work too, PROVIDED it calls .end() first — Node sends nothing on the
     // wire before .end()/.write(), so a request destroyed without one
     // never reaches the server at all; the first draft of this test forgot
     // that and chased a false lead. fetch() has no such trap.)
-    const warns = await captureConsole("warn", async () => {
-      const controller = new AbortController();
-      const fetchPromise = fetchSu(`/video/${camId}/index.m3u8`, { signal: controller.signal });
-      // The fixture holds for 2 s before answering; abort well inside that window.
-      setTimeout(() => controller.abort(), 200);
-      await assert.rejects(fetchPromise);
-      // Give the server side time to notice the close and run its own
-      // cleanup (clientGone, upstreamReq.destroy()) before asserting.
-      await new Promise((r) => setTimeout(r, 300));
-    });
+    const warns = captureConsole(t, "warn");
+    const controller = new AbortController();
+    const fetchPromise = fetchSu(`/video/${camId}/index.m3u8`, { signal: controller.signal });
+    // The fixture holds for 2 s before answering; abort well inside that window.
+    setTimeout(() => controller.abort(), 200);
+    await assert.rejects(fetchPromise);
+    // Give the server side time to notice the close and run its own
+    // cleanup (clientGone, upstreamReq.destroy()) before asserting.
+    await new Promise((r) => setTimeout(r, 300));
     const relayFailureLines = warns.filter((l) => l.includes("proxy to relay failed"));
     assert.deepEqual(relayFailureLines, [], `expected no relay-failure warning for a viewer that left; got: ${JSON.stringify(warns)}`);
   });
@@ -661,17 +647,16 @@ describe("an unreachable relay", () => {
     assert.match(body.error, /ECONNREFUSED|connect/i, `expected a connection-refused message, got: ${body.error}`);
   });
 
-  test("two consecutive failures against the same feed log exactly one relay-failure line — one per outage, not one per request", async () => {
+  test("two consecutive failures against the same feed log exactly one relay-failure line — one per outage, not one per request", async (t) => {
     proxyOutage.forget();
-    const warns = await captureConsole("warn", async () => {
-      await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
-      await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
-    });
+    const warns = captureConsole(t, "warn");
+    await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
+    await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
     const relayFailureLines = warns.filter((l) => l.includes("proxy to relay failed"));
     assert.equal(relayFailureLines.length, 1, `expected exactly one line for two failures of the same outage; got: ${JSON.stringify(relayFailureLines)}`);
   });
 
-  test("recovery logs once, after settling, once the relay answers again", async () => {
+  test("recovery logs once, after settling, once the relay answers again", async (t) => {
     proxyOutage.forget();
     proxyOutage.settleAfter(1); // the default is 2 minutes; this test cannot wait that long
     try {
@@ -682,9 +667,8 @@ describe("an unreachable relay", () => {
       await publish();
       await new Promise((r) => setTimeout(r, 20)); // past the 1 ms settle window
 
-      const logs = await captureConsole("log", async () => {
-        await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
-      });
+      const logs = captureConsole(t, "log");
+      await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
       const recoveryLines = logs.filter((l) => l.includes("is answering again"));
       assert.equal(recoveryLines.length, 1, `expected exactly one recovery line; got: ${JSON.stringify(logs)}`);
     } finally {

@@ -19,6 +19,7 @@ process.setMaxListeners(50);
 const { relayDir } = await import("./acquire.js");
 const { RelaySupervisor, restartDelayMs, isExpectedKillFailure } = await import("./supervisor.js");
 import type { PsLookup, SpawnImpl, SupervisorStatus } from "./supervisor.js";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 // No test here ever spawns the real MediaMTX binary: every RelaySupervisor
 // below is built with a fake spawnImpl (an EventEmitter standing in for a
@@ -158,8 +159,7 @@ describe("RelaySupervisor", () => {
 
   it("a relay killed by a signal says which, and never \"code null\"", async (t) => {
     enableClock(t);
-    const lines: string[] = [];
-    t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+    const lines = captureConsole(t, "warn");
     const { spawnImpl, children } = fakeSpawn();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
     await sup.start("mediamtx", "config.yml");
@@ -175,8 +175,7 @@ describe("RelaySupervisor", () => {
 
   it("an exit reports its own process's last error, never an earlier process's", async (t) => {
     enableClock(t);
-    const lines: string[] = [];
-    t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+    const lines = captureConsole(t, "warn");
     const { spawnImpl, children } = fakeSpawn();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
     await sup.start("mediamtx", "config.yml");
@@ -317,8 +316,7 @@ describe("RelaySupervisor", () => {
     await sup.start("mediamtx", "config.yml");
     assert.notEqual(children[0]!.pid, undefined, "precondition: this child DID spawn");
 
-    const warns: string[] = [];
-    t.mock.method(console, "warn", (m: string) => warns.push(m));
+    const warns = captureConsole(t, "warn");
     children[0]!.emit("error", Object.assign(new Error("kill EPERM"), { code: "EPERM" }));
 
     assert.deepEqual(
@@ -341,8 +339,7 @@ describe("RelaySupervisor", () => {
     const { spawnImpl, children } = fakeSpawn();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
     await sup.start("mediamtx", "config.yml");
-    const warns: string[] = [];
-    t.mock.method(console, "warn", (m: string) => warns.push(m));
+    const warns = captureConsole(t, "warn");
     const eperm = () => Object.assign(new Error("kill EPERM"), { code: "EPERM" });
     children[0]!.emit("error", eperm());
     assert.doesNotThrow(() => children[0]!.emit("error", eperm()), "a second error on the same child went unheard and threw");
@@ -360,30 +357,24 @@ describe("RelaySupervisor", () => {
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
     await sup.start("mediamtx", "config.yml");
 
-    const lines: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+    const lines = captureConsole(t, "warn");
 
-    try {
-      children[0].stderr.write(
-        "2026/09/28 12:00:00 ERR [API] 'rtsp://admin:s3c%!z(MISSING)ret@192.0.2.1/s' is not a valid URL\n",
-      );
-      await settle();
+    children[0].stderr.write(
+      "2026/09/28 12:00:00 ERR [API] 'rtsp://admin:s3c%!z(MISSING)ret@192.0.2.1/s' is not a valid URL\n",
+    );
+    await settle();
 
-      children[0].emit("exit", 1, null);
-      const status = sup.status();
-      assert.equal(status.state, "failing");
-      if (status.state !== "failing") throw new Error("unreachable");
-      assert.equal(status.reason.includes("admin"), false, "the username must not survive into status.reason");
-      assert.equal(status.reason.includes("s3c"), false, "no fragment of the password may survive into status.reason");
+    children[0].emit("exit", 1, null);
+    const status = sup.status();
+    assert.equal(status.state, "failing");
+    if (status.state !== "failing") throw new Error("unreachable");
+    assert.equal(status.reason.includes("admin"), false, "the username must not survive into status.reason");
+    assert.equal(status.reason.includes("s3c"), false, "no fragment of the password may survive into status.reason");
 
-      const exitLine = lines.find((l) => l.includes("relay exited"));
-      assert.ok(exitLine, "expected the \"relay exited\" log line");
-      assert.equal(exitLine!.includes("admin"), false, "the username must not survive into the log line either");
-      assert.equal(exitLine!.includes("s3c"), false, "no fragment of the password may survive into the log line either");
-    } finally {
-      console.warn = realWarn;
-    }
+    const exitLine = lines.find((l) => l.includes("relay exited"));
+    assert.ok(exitLine, "expected the \"relay exited\" log line");
+    assert.equal(exitLine!.includes("admin"), false, "the username must not survive into the log line either");
+    assert.equal(exitLine!.includes("s3c"), false, "no fragment of the password may survive into the log line either");
   });
 
   it("backs off 1, 2, 4 s on quick repeats, and after 20 exits still spawns again at the 60 s cap", async (t) => {

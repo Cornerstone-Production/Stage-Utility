@@ -14,6 +14,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test, type TestContext } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-relay-lifecycle-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -365,8 +366,7 @@ test("a leftover relay is stopped before the port check, so its ports read free"
 });
 
 test("a leftover that will not stop is the failing reason: its ports are still held", async (t: TestContext) => {
-  const logs: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "warn");
   const { deps, supervisors } = makeDeps({
     stopLeftover: async () => ({ kind: "would-not-stop", pid: 4242, error: "EPERM: operation not permitted" }),
   });
@@ -480,8 +480,7 @@ test("PROBE B: a busy port, then the last relay feed removed — same clearing",
 
 test("a repeated busy-port failure logs once, not once per retry", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const logs: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "warn");
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -496,8 +495,7 @@ test("a repeated busy-port failure logs once, not once per retry", async (t: Tes
 });
 
 test("a busy port's status names the program only; its pid goes to the server log only", async (t: TestContext) => {
-  const logs: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "warn");
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -513,8 +511,7 @@ test("a busy port's status names the program only; its pid goes to the server lo
 
 test("downloading MediaMTX logs once per download STREAK, not once per retry", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const logs: string[] = [];
-  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "log");
   let ensureBinaryCalls = 0;
   const { deps } = makeDeps({
     ensureBinary: async (opts) => {
@@ -541,8 +538,7 @@ test("recovering from a pre-supervisor outage logs once, at the attempt that pas
   // is no stream of successes to wait on for one to hold: the attempt that
   // passes ends the run, as it does for the relay's reconcile.
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const logs: string[] = [];
-  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "log");
   let attempts = 0;
   const { deps, supervisors } = makeDeps({
     busyPorts: async () => {
@@ -567,32 +563,26 @@ test("recovering from a pre-supervisor outage logs once, at the attempt that pas
 // ── 3. A ports change restarts an already-running relay on the new ports,
 //    and logs its own reason ────────────────────────────────────────────────
 
-test("a ports change restarts a running relay, logging its own reason (not the generic stop line)", async () => {
-  const logs: string[] = [];
-  const orig = console.log;
-  console.log = (msg: string) => logs.push(String(msg));
-  try {
-    const { deps, supervisors } = makeDeps();
-    const lifecycle = activate(new RelayLifecycle(deps));
-    await setRelayFeeds(1);
-    lifecycle.setEnabled(true);
-    await waitUntil(() => supervisors.length > 0);
+test("a ports change restarts a running relay, logging its own reason (not the generic stop line)", async (t) => {
+  const logs = captureConsole(t, "log");
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
 
-    const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
-    assert.ok(r.ok);
-    await waitUntil(() => supervisors.length > 1);
+  const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
+  assert.ok(r.ok);
+  await waitUntil(() => supervisors.length > 1);
 
-    assert.equal(supervisors[0]!.stopCalls, 1, "the ports change never stopped the old process");
-    assert.equal(supervisors[1]!.startCalls.length, 1);
-    assert.ok(logs.some((l) => l === "[video] relay restarting on new ports"), JSON.stringify(logs));
-    assert.equal(logs.some((l) => l.includes("relay stopped (")), false, "the ports-change restart must not ALSO log the generic stop line");
+  assert.equal(supervisors[0]!.stopCalls, 1, "the ports change never stopped the old process");
+  assert.equal(supervisors[1]!.startCalls.length, 1);
+  assert.ok(logs.some((l) => l === "[video] relay restarting on new ports"), JSON.stringify(logs));
+  assert.equal(logs.some((l) => l.includes("relay stopped (")), false, "the ports-change restart must not ALSO log the generic stop line");
 
-    const relay = (await videoService.state()).relay;
-    assert.equal(relay.state, "running");
-    assert.equal((relay as { ports: { rtmp: number } }).ports.rtmp, 21935, "the running relay's own ports never followed the change");
-  } finally {
-    console.log = orig;
-  }
+  const relay = (await videoService.state()).relay;
+  assert.equal(relay.state, "running");
+  assert.equal((relay as { ports: { rtmp: number } }).ports.rtmp, 21935, "the running relay's own ports never followed the change");
 });
 
 test("a ports change while the relay is off does not start it", async () => {
@@ -704,8 +694,7 @@ test("a retry whose own step rejects shows the new failure and a new next try, n
 // throws before calling setStatus).
 test("item 13: a rejected stop() still detaches videoService and clears preAttachStatus, logging the failure once", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const warns: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => warns.push(msg));
+  const warns = captureConsole(t, "warn");
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -771,8 +760,7 @@ test("item 7: a throw from attachRelay stops the orphaned supervisor and lets th
 // fact an operator needs, not silence.
 test("item 7: a stop() failure on the orphaned supervisor logs once and is folded into the failing reason, not swallowed", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const warns: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => warns.push(msg));
+  const warns = captureConsole(t, "warn");
   const supervisors: FakeSupervisor[] = [];
   const { deps } = makeDeps({
     makeSupervisor: () => {
@@ -866,8 +854,7 @@ test("item 6: a makeRelay that keeps throwing backs off between retries, not a f
 // inside its own `spokenAt` window) and stayed silent.
 test("PROBE H: a busy-port outage, switch off, switch back on into the SAME busy port — the second outage logs too", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const logs: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "warn");
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -974,9 +961,7 @@ test("a respawned relay is reconciled again: its paths went with the process tha
 
 test("a normal start logs no reconcile failure: the first attempt lands before the relay's API is open", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const lines: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => lines.push(msg));
-  t.mock.method(console, "log", (msg: string) => lines.push(msg));
+  const lines = captureConsole(t, "warn", "log");
   // The API is shut for the first attempt, to every call alike, as a real
   // relay's is for the moment after it spawns.
   let reconcileCalls = 0;
@@ -1127,8 +1112,7 @@ test("item 1: the connection row catches up to the version once the banner line 
 // ── 9: ensureBinary's discriminator reaches the wire unchanged ─────────────
 
 test("a download failure carries assetName and the hand-place folder to RelayStatus, relative to the data folder", async (t: TestContext) => {
-  const logs: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "warn");
   const downloads = path.join(TMP, "video-relay", "downloads");
   const { deps, order } = makeDeps({
     ensureBinary: async () => {
@@ -1212,37 +1196,30 @@ test("item 16: an unsupported platform never retries — no 'Next try at', and e
 
 // ── 5 (log wording): the two stop reasons, and the started line ───────────
 
-test("logs relay stopped, naming which of the two reasons", async () => {
-  const logs: string[] = [];
-  const orig = console.log;
-  console.log = (msg: string) => logs.push(String(msg));
-  try {
-    const { deps, supervisors } = makeDeps();
-    const lifecycle = activate(new RelayLifecycle(deps));
-    await setRelayFeeds(1);
-    lifecycle.setEnabled(true);
-    await waitUntil(() => supervisors.length > 0);
+test("logs relay stopped, naming which of the two reasons", async (t) => {
+  const logs = captureConsole(t, "log");
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
 
-    lifecycle.setEnabled(false);
-    await waitUntil(() => logs.some((l) => l.includes("relay stopped")));
-    assert.ok(logs.some((l) => l.includes("relay stopped (video switched off)")), JSON.stringify(logs));
+  lifecycle.setEnabled(false);
+  await waitUntil(() => logs.some((l) => l.includes("relay stopped")));
+  assert.ok(logs.some((l) => l.includes("relay stopped (video switched off)")), JSON.stringify(logs));
 
-    logs.length = 0;
-    lifecycle.setEnabled(true);
-    await waitUntil(() => supervisors.length > 1);
-    await setRelayFeeds(0);
-    lifecycle.feedsChanged();
-    await waitUntil(() => logs.some((l) => l.includes("relay stopped")));
-    assert.ok(logs.some((l) => l.includes("relay stopped (no relay feeds)")), JSON.stringify(logs));
-  } finally {
-    console.log = orig;
-  }
+  logs.length = 0;
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 1);
+  await setRelayFeeds(0);
+  lifecycle.feedsChanged();
+  await waitUntil(() => logs.some((l) => l.includes("relay stopped")));
+  assert.ok(logs.some((l) => l.includes("relay stopped (no relay feeds)")), JSON.stringify(logs));
 });
 
 test("logs the relay started line with its version and ports, once per process — a respawn is a new one", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const logs: string[] = [];
-  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "log");
   // The reconcile fake fails until the version is known — the same
   // ordering the real binary always gives (its startup banner, which sets
   // version(), is the very first line it ever prints, strictly before the
@@ -1285,8 +1262,7 @@ test("logs the relay started line with its version and ports, once per process �
 
 test("a respawned process that exits before its API ever answers is not announced as started", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const logs: string[] = [];
-  t.mock.method(console, "log", (msg: string) => logs.push(msg));
+  const logs = captureConsole(t, "log");
   let apiOpen = true;
   const { deps, supervisors } = makeDeps({
     makeRelay: () =>

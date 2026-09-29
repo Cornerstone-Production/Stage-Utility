@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 // Before any store is constructed: every import below builds its stores
 // against this directory, never the default data folder.
@@ -62,7 +63,6 @@ test("a config snapshot never carries a feed's password", async () => {
   assert.ok(serialized.includes(`"${id}"`), "the snapshot must carry the feed itself, or this proves nothing");
   assert.equal(serialized.includes(password), false, "a feed password reached a config snapshot");
 });
-
 
 test("parallel adds of one name get distinct ids", async () => {
   const body = { name: "Stage cam", source: { kind: "external", url: "http://192.0.2.20/cam/whep" } };
@@ -305,7 +305,7 @@ test("a poll broadcasts only when the relay's answer actually changes the snapsh
   }
 });
 
-test("logs a feed's live/offline transitions on the poll, once each — never on every poll", async () => {
+test("logs a feed's live/offline transitions on the poll, once each — never on every poll", async (t) => {
   const made = await videoService.addFeed({ name: "Narthex cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -316,9 +316,7 @@ test("logs a feed's live/offline transitions on the poll, once each — never on
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce();
@@ -332,7 +330,6 @@ test("logs a feed's live/offline transitions on the poll, once each — never on
       ["[video] Narthex cam is live (1920×1080 H264)", "[video] Narthex cam went offline"],
     );
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
@@ -341,7 +338,7 @@ test("logs a feed's live/offline transitions on the poll, once each — never on
 // "went offline" is news once per outage, and only for a feed that was
 // showing a picture: live or delayed, then offline.
 
-test("a relay restart logs a live feed going offline once, not again as the new relay comes up", async () => {
+test("a relay restart logs a live feed going offline once, not again as the new relay comes up", async (t) => {
   const made = await videoService.addFeed({ name: "Restart cam", source: { kind: "push", protocol: "rtmp" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -349,9 +346,7 @@ test("a relay restart logs a live feed going offline once, not again as the new 
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay({ status: async () => answer }), supervisor);
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
   const settleStatus = () => new Promise((r) => setTimeout(r, 20));
   try {
     await pollOnce(); // live
@@ -366,22 +361,19 @@ test("a relay restart logs a live feed going offline once, not again as the new 
     assert.equal((await videoService.state()).feeds.find((f) => f.id === id)?.status.state, "offline");
     assert.deepEqual(lines.filter((l) => l.includes("Restart cam went offline")), ["[video] Restart cam went offline"]);
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("a push feed that was never live logs nothing when the relay exits", async () => {
+test("a push feed that was never live logs nothing when the relay exits", async (t) => {
   const made = await videoService.addFeed({ name: "Never-live push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay({ status: async () => [notReadyPath({ name: id })] }), supervisor);
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
   try {
     await pollOnce(); // waiting
     supervisor.current = { state: "failing", reason: "exit code 1", retryAt: 1, neverStarted: false };
@@ -390,13 +382,12 @@ test("a push feed that was never live logs nothing when the relay exits", async 
     assert.equal((await videoService.state()).feeds.find((f) => f.id === id)?.status.state, "offline");
     assert.deepEqual(lines.filter((l) => l.includes("Never-live push")), [], "waiting to offline is not going offline");
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("logs a feed's entry into delayed too, and never prints an unknown picture", async () => {
+test("logs a feed's entry into delayed too, and never prints an unknown picture", async (t) => {
   // push, not pull: a not-ready pull feed nobody has requested reads
   // "standby" (a quieter, different fact — see feed-state.ts), and this test
   // is about the "went offline" / "is live" pair either side of "delayed".
@@ -411,9 +402,7 @@ test("logs a feed's entry into delayed too, and never prints an unknown picture"
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce();
@@ -436,13 +425,12 @@ test("logs a feed's entry into delayed too, and never prints an unknown picture"
       ["[video] Undercroft cam went offline", "[video] Undercroft cam is live"],
     );
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once per session", async () => {
+test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once per session", async (t) => {
   const made = await videoService.addFeed({ name: "Choir cam", source: { kind: "pull", url: "rtsp://192.0.2.51/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -452,9 +440,7 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce(); // populates lastPaths with a READY path — the immediate-bind branch
@@ -480,7 +466,6 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 1, "the line must not repeat for the same session");
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
@@ -519,7 +504,7 @@ test("binding an ALREADY-ready B-frames mark publishes immediately, not waiting 
   }
 });
 
-test("a B-frames close on an on-demand pull feed that is not yet ready binds on the next poll that sees it ready", async () => {
+test("a B-frames close on an on-demand pull feed that is not yet ready binds on the next poll that sees it ready", async (t) => {
   const made = await videoService.addFeed({ name: "Annex cam", source: { kind: "pull", url: "rtsp://192.0.2.61/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -531,9 +516,7 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce(); // sees the not-ready path first
@@ -575,13 +558,12 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 1);
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("a pending B-frames mark does not survive a detach — it cannot bind to a later, unrelated session", async () => {
+test("a pending B-frames mark does not survive a detach — it cannot bind to a later, unrelated session", async (t) => {
   const made = await videoService.addFeed({ name: "Pending cam", source: { kind: "pull", url: "rtsp://192.0.2.63/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -590,9 +572,7 @@ test("a pending B-frames mark does not survive a detach — it cannot bind to a 
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay({ status: async () => [notReadyPath({ name: id })] }), supervisor);
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce();
@@ -611,7 +591,6 @@ test("a pending B-frames mark does not survive a detach — it cannot bind to a 
     assert.notEqual(feed?.status.state, "delayed", "an old pending mark must never bind to a session it never saw");
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 0, "no announcement belongs to the new session either");
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
@@ -629,9 +608,7 @@ test("a pending B-frames mark expires after PENDING_MARK_TTL_MS without a ready 
 
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce();
@@ -649,13 +626,12 @@ test("a pending B-frames mark expires after PENDING_MARK_TTL_MS without a ready 
     assert.notEqual(feed?.status.state, "delayed", "an expired pending mark must not bind once the feed eventually becomes ready");
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 0);
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("a B-frames line for a path that is not a real feed is never logged, and never becomes a mark", async () => {
+test("a B-frames line for a path that is not a real feed is never logged, and never becomes a mark", async (t) => {
   // A relay path can outlive the feed it belonged to (reconcile() has not
   // yet dropped it), so "orphaned-path" is reported READY by the relay even
   // though no feed of that id exists in the store — the realistic shape of
@@ -665,9 +641,7 @@ test("a B-frames line for a path that is not a real feed is never logged, and ne
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce(); // lastPaths now reports 'orphaned-path' ready
@@ -682,7 +656,6 @@ test("a B-frames line for a path that is not a real feed is never logged, and ne
       "an id outside the feed list must never reach a log line, raw or scrubbed",
     );
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
   }
 });
@@ -701,11 +674,7 @@ test("a relay that stops answering warns once per outage; recovery logs once aft
   // so these failures read as the relay actually not answering.
   t.mock.timers.enable({ apis: ["Date"], now: RELAY_BOOT_GRACE_MS + 1000 });
 
-  const lines: string[] = [];
-  const realWarn = console.warn;
-  const realLog = console.log;
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "warn", "log");
 
   try {
     await pollOnce();
@@ -729,8 +698,6 @@ test("a relay that stops answering warns once per outage; recovery logs once aft
     await pollOnce();
     assert.equal(lines.filter((l) => l.includes("answering again")).length, 1, "a success held past the settle window is");
   } finally {
-    console.warn = realWarn;
-    console.log = realLog;
     await videoService.detachRelay();
   }
 });
@@ -1006,9 +973,7 @@ test("detachRelay settles feeds — flushes the seen store, not just a bare publ
 
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     await pollOnce(); // t=0 — the first-ever write always lands
@@ -1036,7 +1001,6 @@ test("detachRelay settles feeds — flushes the seen store, not just a bare publ
       "the flush must carry the LATEST in-memory value, not the throttled-away first write",
     );
   } finally {
-    console.log = realLog;
     await videoService.removeFeed(id);
   }
 });
@@ -1095,16 +1059,13 @@ test("a poll that fails within the supervisor's own boot grace window does not f
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   t.mock.timers.tick(RELAY_BOOT_GRACE_MS - 1000);
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await pollOnce();
     assert.equal(videoService.current().relay.state, "running", "still within the boot grace window");
     assert.equal(warns.length, 0, "nothing worth logging while the relay is still starting up");
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -1121,21 +1082,18 @@ test("a poll that fails after the supervisor's own boot grace window flips the r
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   t.mock.timers.tick(RELAY_BOOT_GRACE_MS + 1000); // 1 s past the grace
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await pollOnce();
     assert.deepEqual(videoService.current().relay, { state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null });
     assert.equal(warns.filter((l) => l.includes("not answering")).length, 1);
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
 
-test("the service does not poll while the supervisor is off, so a relay switched off produces no \"not answering\" line", async () => {
+test("the service does not poll while the supervisor is off, so a relay switched off produces no \"not answering\" line", async (t) => {
   let calls = 0;
   const relay = fakeRelay({ status: async () => {
     calls++;
@@ -1146,9 +1104,7 @@ test("the service does not poll while the supervisor is off, so a relay switched
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await pollOnce();
@@ -1156,12 +1112,11 @@ test("the service does not poll while the supervisor is off, so a relay switched
     assert.deepEqual(videoService.current().relay, { state: "off" });
     assert.equal(warns.filter((l) => l.includes("not answering")).length, 0, "an off relay must never log as not answering");
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
 
-test("a relay the supervisor already reports failing keeps its own reason, and logs no \"not answering\" line", async () => {
+test("a relay the supervisor already reports failing keeps its own reason, and logs no \"not answering\" line", async (t) => {
   const relay = fakeRelay({ status: async () => {
     throw new Error("ECONNREFUSED");
   } });
@@ -1170,9 +1125,7 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await pollOnce(); // also fails to answer — the supervisor's own diagnosis still wins
@@ -1183,7 +1136,6 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
       "the supervisor has already logged why it is failing; a poll must not add a second line",
     );
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -1302,7 +1254,7 @@ test("item 9: a spawn failure (neverStarted) reads kind 'spawn' and a feed as st
   }
 });
 
-test("R14i: between the supervisor reaching running and the first successful poll, a relay feed stays standby with no \"went offline\" line; the first successful poll with no path for it is what flips it to offline, with exactly one line", async () => {
+test("R14i: between the supervisor reaching running and the first successful poll, a relay feed stays standby with no \"went offline\" line; the first successful poll with no path for it is what flips it to offline, with exactly one line", async (t) => {
   const relay = fakeRelay({ status: async () => [] }); // no path ever matches this feed
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "off" };
@@ -1313,9 +1265,7 @@ test("R14i: between the supervisor reaching running and the first successful pol
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log");
 
   try {
     supervisor.current = { state: "starting" };
@@ -1344,13 +1294,12 @@ test("R14i: between the supervisor reaching running and the first successful pol
       "a feed that was never live did not go offline",
     );
   } finally {
-    console.log = realLog;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("the \"not answering\" override never applies while starting, even with a version left over from a previous run, and logs nothing", async () => {
+test("the \"not answering\" override never applies while starting, even with a version left over from a previous run, and logs nothing", async (t) => {
   const relay = fakeRelay({ status: async () => {
     throw new Error("ECONNREFUSED");
   } });
@@ -1360,9 +1309,7 @@ test("the \"not answering\" override never applies while starting, even with a v
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await pollOnce(); // fails to answer — there is no live child yet to BE "not answering"
@@ -1373,7 +1320,6 @@ test("the \"not answering\" override never applies while starting, even with a v
     );
     assert.deepEqual(warns.filter((l) => l.includes("not answering")), [], "a relay still starting has nothing to answer with yet");
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -1455,15 +1401,13 @@ test("an in-flight SUCCESS against a process the supervisor has since reported f
   }
 });
 
-test("an in-flight REJECTION against the old process, landing after a respawn, does not mark the new process not answering", async () => {
+test("an in-flight REJECTION against the old process, landing after a respawn, does not mark the new process not answering", async (t) => {
   const supervisor = new FakeSupervisor();
   rejectA = null;
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay({ status: () => new Promise<RelayPath[]>((_resolve, reject) => { rejectA = reject; }) }), supervisor);
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     const inFlight = pollOnce(); // against the old (hung) process
@@ -1485,7 +1429,6 @@ test("an in-flight REJECTION against the old process, landing after a respawn, d
     );
     assert.equal(warns.filter((l) => l.includes("not answering")).length, 0);
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -1648,7 +1591,7 @@ test("against a real supervisor: the not-answering flag does not carry over into
   }
 });
 
-test("against a real supervisor: a poll failing during its crash backoff logs no \"not answering\" line after the supervisor's own exit line", async () => {
+test("against a real supervisor: a poll failing during its crash backoff logs no \"not answering\" line after the supervisor's own exit line", async (t) => {
   const children: FakeChild[] = [];
   const sup = new RelaySupervisor({
     spawnImpl: () => {
@@ -1666,9 +1609,7 @@ test("against a real supervisor: a poll failing during its crash backoff logs no
     sup,
   );
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
@@ -1684,7 +1625,6 @@ test("against a real supervisor: a poll failing during its crash backoff logs no
       "a poll during the supervisor's own backoff must not repeat the crash as a second line",
     );
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
     await sup.stop();
   }
@@ -1778,7 +1718,7 @@ test("a stale in-flight SUCCESS from an already-detached relay is never applied,
   }
 });
 
-test("a stale in-flight REJECTION from an already-detached relay does not mark the new relay not answering", async () => {
+test("a stale in-flight REJECTION from an already-detached relay does not mark the new relay not answering", async (t) => {
   const made = await videoService.addFeed({ name: "Reject cam", source: { kind: "pull", url: "rtsp://192.0.2.71/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -1791,9 +1731,7 @@ test("a stale in-flight REJECTION from an already-detached relay does not mark t
   );
   const inFlight = pollOnce(); // A's status() is now pending, unawaited
 
-  const warns: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => warns.push(args.map(String).join(" "));
+  const warns = captureConsole(t, "warn");
 
   try {
     await videoService.detachRelay();
@@ -1810,7 +1748,6 @@ test("a stale in-flight REJECTION from an already-detached relay does not mark t
     assert.equal(snap.feeds.find((f) => f.id === id)?.status.state, "live", "a stale rejection must not wipe the NEW relay's paths");
     assert.equal(warns.filter((l) => l.includes("not answering")).length, 0);
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
@@ -1836,11 +1773,7 @@ test("a seen-store write that rejects still lets the poll publish its transition
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realWarn = console.warn;
-  const realLog = console.log;
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "warn", "log");
 
   try {
     await pollOnce();
@@ -1857,15 +1790,13 @@ test("a seen-store write that rejects still lets the poll publish its transition
     await pollOnce();
     assert.equal(lines.filter((l) => l.includes("saving the last-seen time is working again")).length, 1);
   } finally {
-    console.warn = realWarn;
-    console.log = realLog;
     store.update = realUpdate;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
 });
 
-test("a rejected forgetSeen write still lets removeFeed succeed and publish, and logs once through the seen-store outage", async () => {
+test("a rejected forgetSeen write still lets removeFeed succeed and publish, and logs once through the seen-store outage", async (t) => {
   const made = await videoService.addFeed({ name: "Culvert cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -1876,9 +1807,7 @@ test("a rejected forgetSeen write still lets removeFeed succeed and publish, and
     throw new Error("disk full");
   };
 
-  const lines: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "warn");
 
   try {
     const removed = await videoService.removeFeed(id);
@@ -1886,7 +1815,6 @@ test("a rejected forgetSeen write still lets removeFeed succeed and publish, and
     assert.equal((await videoService.state()).feeds.some((f) => f.id === id), false, "the feed must actually be gone");
     assert.equal(lines.filter((l) => l.includes("could not save the last-seen time")).length, 1, "the write failure must still reach the operator once");
   } finally {
-    console.warn = realWarn;
     store.update = realUpdate;
   }
 });
@@ -2066,9 +1994,7 @@ test("a reconcile failing before this relay's API has ever answered, inside the 
   supervisor.current = { state: "running", since: 50_000 - 1000 };
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
-  const lines: string[] = [];
-  t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
-  t.mock.method(console, "log", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+  const lines = captureConsole(t, "warn", "log");
   try {
     assert.equal(await videoService.reconcileRelay(), false);
     fail = false;
@@ -2094,9 +2020,7 @@ test("once the relay's API has answered, a reconcile failure is news, and the ne
   supervisor.current = { state: "running", since: 50_000 - 1000 };
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
-  const lines: string[] = [];
-  t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
-  t.mock.method(console, "log", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+  const lines = captureConsole(t, "warn", "log");
   const failures = () => lines.filter((l) => l.includes("could not reconcile")).length;
   const recoveries = () => lines.filter((l) => l.includes("reconciling the relay is working again")).length;
   try {
@@ -2116,7 +2040,7 @@ test("once the relay's API has answered, a reconcile failure is news, and the ne
   }
 });
 
-test("a reconcile failure is logged once per outage and never rejects addFeed/updateFeed — the feed store write is the source of truth", async () => {
+test("a reconcile failure is logged once per outage and never rejects addFeed/updateFeed — the feed store write is the source of truth", async (t) => {
   let fail = true;
   const relay = fakeRelay({
     reconcile: async () => {
@@ -2127,9 +2051,7 @@ test("a reconcile failure is logged once per outage and never rejects addFeed/up
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "warn");
 
   try {
     const made = await videoService.addFeed({ name: "Narthex box", source: { kind: "push", protocol: "rtmp" } });
@@ -2146,12 +2068,11 @@ test("a reconcile failure is logged once per outage and never rejects addFeed/up
     fail = false;
     await videoService.removeFeed(id);
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
 
-test("newPushPassword writes a fresh secret, reconciles, then kicks the current publisher — a kick failure is logged, not thrown, and the answer still carries the new password", async () => {
+test("newPushPassword writes a fresh secret, reconciles, then kicks the current publisher — a kick failure is logged, not thrown, and the answer still carries the new password", async (t) => {
   const kicked: string[] = [];
   const reconciled: RelayFeed[][] = [];
   const relay = recordingRelay(reconciled, {
@@ -2164,9 +2085,7 @@ test("newPushPassword writes a fresh secret, reconciles, then kicks the current 
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
 
-  const lines: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "warn");
 
   try {
     const made = await videoService.addFeed({ name: "ProPresenter output", source: { kind: "push", protocol: "srt" } });
@@ -2181,7 +2100,6 @@ test("newPushPassword writes a fresh secret, reconciles, then kicks the current 
     assert.equal(lines.filter((l) => l.includes("could not kick")).length, 1);
     assert.equal(result!.kicked, "failed", "a publisher WAS there and dropping it threw — kicked must read \"failed\", never \"none\"");
   } finally {
-    console.warn = realWarn;
     await videoService.detachRelay();
   }
 });
@@ -2392,7 +2310,7 @@ test("item 2: a rejecting reconcileOnce still clears reconcileRunning — a late
   }
 });
 
-test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async () => {
+test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async (t) => {
   const made = await videoService.addFeed({ name: "Snapshot restore", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2402,15 +2320,8 @@ test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secr
     await secretsStore.clearSecrets(SECRET_SLOT(id));
     assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
 
-    const lines: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
-    let address: Awaited<ReturnType<typeof videoService.pushAddress>>;
-    try {
-      address = await videoService.pushAddress(id);
-    } finally {
-      console.warn = realWarn;
-    }
+    const lines = captureConsole(t, "warn");
+    const address = await videoService.pushAddress(id);
 
     assert.ok(address);
     assert.ok(address!.password.length > 0, "expected pushAddress to mint a fresh password rather than publish with none");
@@ -2482,7 +2393,7 @@ test("R14c: a kind change's store write failing leaves the OLD secret in place �
   await videoService.removeFeed(id);
 });
 
-test("item 4: pushPassword mints single-flight — two concurrent callers on a wiped secret share ONE mint, not two racing ones", async () => {
+test("item 4: pushPassword mints single-flight — two concurrent callers on a wiped secret share ONE mint, not two racing ones", async (t) => {
   const made = await videoService.addFeed({ name: "Racing mint push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2511,9 +2422,7 @@ test("item 4: pushPassword mints single-flight — two concurrent callers on a w
     return result;
   };
 
-  const lines: string[] = [];
-  const realWarn = console.warn;
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "warn");
 
   try {
     const first = videoService.pushAddress(id);
@@ -2535,7 +2444,6 @@ test("item 4: pushPassword mints single-flight — two concurrent callers on a w
       "expected exactly one mint line, not one per racing caller",
     );
   } finally {
-    console.warn = realWarn;
     (secretsStore as unknown as { getSecrets: typeof secretsStore.getSecrets }).getSecrets = realGetSecrets;
     await videoService.removeFeed(id);
   }
@@ -2620,7 +2528,7 @@ test("R14d: kicked is \"dropped\" only once the relay actually drops a connected
   }
 });
 
-test("R14d: kickPublisher runs only while the supervisor is running, and its own outage run closes with ok() on a successful kick", async () => {
+test("R14d: kickPublisher runs only while the supervisor is running, and its own outage run closes with ok() on a successful kick", async (t) => {
   let kickCalls = 0;
   const relay = recordingRelay([], {
     kickPublisher: async () => {
@@ -2641,21 +2549,15 @@ test("R14d: kickPublisher runs only while the supervisor is running, and its own
     assert.equal(kickCalls, 0, "the kick must not even be attempted while the supervisor is not running");
 
     supervisor.current = { state: "running", since: 0 };
-    const lines: string[] = [];
-    const realLog = console.log;
-    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
-    try {
-      const result = await videoService.newPushPassword(id);
-      assert.ok(result);
-      assert.equal(kickCalls, 1, "expected the kick to be attempted now that the supervisor is running");
-      assert.equal(result!.kicked, "dropped");
-      assert.ok(
-        lines.some((l) => l.includes("kicking a publisher is working again")) === false,
-        "no PRIOR failure was open, so ok() must settle silently — nothing to announce recovering from",
-      );
-    } finally {
-      console.log = realLog;
-    }
+    const lines = captureConsole(t, "log");
+    const result = await videoService.newPushPassword(id);
+    assert.ok(result);
+    assert.equal(kickCalls, 1, "expected the kick to be attempted now that the supervisor is running");
+    assert.equal(result!.kicked, "dropped");
+    assert.ok(
+      lines.some((l) => l.includes("kicking a publisher is working again")) === false,
+      "no PRIOR failure was open, so ok() must settle silently — nothing to announce recovering from",
+    );
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
@@ -2685,11 +2587,7 @@ test("item 1: a kick failure opens the push-kick outage, and a kick succeeding p
   const id = (made as { feed: { id: string } }).feed.id;
 
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
-  const lines: string[] = [];
-  const realLog = console.log;
-  const realWarn = console.warn;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
-  console.warn = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+  const lines = captureConsole(t, "log", "warn");
 
   try {
     await videoService.newPushPassword(id); // the kick throws — opens the run
@@ -2708,8 +2606,6 @@ test("item 1: a kick failure opens the push-kick outage, and a kick succeeding p
       "a kick succeeding past the settle window must announce the recovery — deleting the ok() call leaves this at 0",
     );
   } finally {
-    console.log = realLog;
-    console.warn = realWarn;
     await videoService.detachRelay();
     await videoService.removeFeed(id);
   }
@@ -2746,10 +2642,8 @@ test("R14d/item 9: newPushPassword reconciles BEFORE it kicks — the new passwo
   }
 });
 
-test("R14d/item 10: newPushPassword logs one summary line per rotation, without the password, naming what happened to the current publisher", async () => {
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+test("R14d/item 10: newPushPassword logs one summary line per rotation, without the password, naming what happened to the current publisher", async (t) => {
+  const lines = captureConsole(t, "log");
 
   // No relay: "nothing was publishing".
   const made = await videoService.addFeed({ name: "Summary line push", source: { kind: "push", protocol: "srt" } });
@@ -2764,7 +2658,6 @@ test("R14d/item 10: newPushPassword logs one summary line per rotation, without 
     assert.equal(summary, "[video] Summary line push: new publish password; nothing was publishing");
     assert.equal(summary!.includes(before!), false, "the summary line must never carry the password");
   } finally {
-    console.log = realLog;
     await videoService.removeFeed(id);
   }
 });
