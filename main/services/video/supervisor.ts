@@ -124,6 +124,29 @@ export interface RelaySupervisorOptions {
  * backoff from 1 s to 60 s. It never gives up — `status()` says it is
  * failing and why, and the caller decides what an operator sees.
  */
+/**
+ * Every supervisor that currently has a live child, so the ONE process-level
+ * "exit" listener below (registered once, module scope) can kill each of
+ * them best-effort. Previously each RelaySupervisor registered its OWN
+ * `process.once("exit", …)` in its constructor — never removed, since a
+ * `once` listener only detaches once it FIRES, which for "exit" is once per
+ * process lifetime. A long-running server restarting the relay (a crash
+ * loop, a ports change) built one of these, and kept the whole discarded
+ * supervisor alive through the closure, on every single restart: about ten
+ * trip Node's own MaxListenersExceededWarning, and none of the earlier
+ * instances were ever eligible for garbage collection.
+ */
+const liveSupervisors = new Set<RelaySupervisor>();
+let exitHandlerRegistered = false;
+
+function ensureExitHandlerRegistered(): void {
+  if (exitHandlerRegistered) return;
+  exitHandlerRegistered = true;
+  process.once("exit", () => {
+    for (const supervisor of liveSupervisors) supervisor.killChildOnProcessExit();
+  });
+}
+
 export class RelaySupervisor extends EventEmitter {
   private readonly spawnImpl: SpawnImpl;
   private readonly psImpl: PsLookup;
@@ -171,9 +194,14 @@ export class RelaySupervisor extends EventEmitter {
     // So the server never leaves a relay running after IT exits — whatever
     // child is current at that moment gets one signal, best effort (the
     // process is on its way out; there is nobody left to hand a failure to).
-    process.once("exit", () => {
-      this.child?.kill();
-    });
+    // The listener itself is module-level and shared (see liveSupervisors'
+    // own comment); this constructor only ensures it exists.
+    ensureExitHandlerRegistered();
+  }
+
+  /** Called only from the shared module-level "exit" listener above. */
+  killChildOnProcessExit(): void {
+    this.child?.kill();
   }
 
   status(): SupervisorStatus {
@@ -329,6 +357,7 @@ export class RelaySupervisor extends EventEmitter {
   private spawnChild(): void {
     const child = this.spawnImpl(this.binary, [this.configPath]);
     this.child = child;
+    liveSupervisors.add(this);
     this.writePidFile(child.pid);
     this.setStatus({ state: "running", since: Date.now() });
     this.emit("spawned");
@@ -390,6 +419,7 @@ export class RelaySupervisor extends EventEmitter {
     this.clearHealthyTimer();
     this.clearKillTimer();
     this.child = null;
+    liveSupervisors.delete(this);
     this.deletePidFile();
     const lastError = this.watcher.lastError();
 

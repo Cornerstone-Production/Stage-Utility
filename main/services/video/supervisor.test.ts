@@ -9,11 +9,11 @@ import { afterEach, beforeEach, describe, it, type TestContext } from "node:test
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-supervisor-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-// Each RelaySupervisor registers one process "exit" listener for its own
-// lifetime (never removed, by design — see the constructor). This suite
-// builds well over 10 of them across its cases, which is only ever a
-// warning, not a leak: the default cap is a heuristic tuned for a long-lived
-// server process, not a test file that constructs many short-lived ones.
+// A generous cap for a file that builds many short-lived supervisors and
+// fake children across its cases — the default is a heuristic tuned for a
+// long-lived server process, not this. RelaySupervisor itself registers only
+// ONE shared process "exit" listener no matter how many instances this suite
+// builds (see supervisor.ts's own liveSupervisors comment).
 process.setMaxListeners(50);
 
 const { relayDir } = await import("./acquire.js");
@@ -588,6 +588,26 @@ describe("RelaySupervisor", () => {
       assert.ok(
         warned.some((line) => line.startsWith("[video] could not write relay.pid:")),
         `expected a could-not-write warning too, got: ${JSON.stringify(warned)}`,
+      );
+    });
+  });
+
+  describe("the process-level exit listener", () => {
+    it("stays at one no matter how many supervisors this process builds and stops", async (t) => {
+      enableClock(t);
+      const before = process.listenerCount("exit");
+      for (let i = 0; i < 12; i++) {
+        const { spawnImpl, children } = fakeSpawn();
+        const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+        await sup.start("mediamtx", "config.yml");
+        const stopped = sup.stop();
+        children[0]!.emit("exit", 0, null);
+        await stopped;
+      }
+      assert.equal(
+        process.listenerCount("exit"),
+        before,
+        "each RelaySupervisor must share ONE process-level exit listener, not register its own",
       );
     });
   });
