@@ -289,6 +289,12 @@ from the server:
 - A busy port, naming the program holding it and its process id.
 - `stopped a relay left over from the last run (pid N)`, or that it would
   not stop, which also stops this start.
+- The relay's own bookkeeping failing, each once per outage and once more
+  when it works again: `could not stop the relay` and `stopping the relay is
+  working again`; a start or stop step that could not run while the relay
+  was up (reading the feed list, say) and `the relay's start and stop steps
+  are working again`; `could not read`, `write` or `remove relay.pid` and
+  `relay.pid can be read`, `written` or `removed again`.
 - `the relay is not answering`: a running relay whose API has not answered a
   status read for 10 seconds, and `the relay is answering again`.
 - `could not reconcile the relay`: its paths or publish users could not be

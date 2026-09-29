@@ -673,6 +673,73 @@ test("a step that rejects on the chain reports failing and is tried again — th
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
+// A step or a stop that fails while the relay is up opens its own outage run.
+// Each says so once, stays quiet on the same failure again, and says it is
+// working again on its next success, so a later failure is news once more.
+test("a step that rejects while the relay is up logs once, stays quiet on a repeat, and logs its recovery", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const lines = captureConsole(t, "warn", "log");
+  let failReads = false;
+  const { deps, supervisors } = makeDeps({
+    loadFeedsFile: async () => {
+      if (failReads) throw new Error("EIO: i/o error, read");
+      return loadRealFeedsFile();
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  await waitUntil(() => videoService.current().relay.state === "running");
+  const stepLines = () => lines.filter((l) => l.includes("EIO") || l.includes("steps are working again"));
+
+  failReads = true;
+  lifecycle.feedsChanged();
+  await waitUntil(() => stepLines().length === 1);
+  lifecycle.feedsChanged(); // the same failure, inside the same run
+  await settle();
+  await settle();
+  assert.deepEqual(stepLines(), ["[video] could not start the relay: EIO: i/o error, read"]);
+
+  failReads = false;
+  t.mock.timers.tick(restartDelayMs(1)); // the retry, now able to read
+  await waitUntil(() => stepLines().length === 2);
+  assert.equal(stepLines()[1], "[video] the relay's start and stop steps are working again after 2 failed attempts (under a minute)");
+
+  failReads = true;
+  lifecycle.feedsChanged();
+  await waitUntil(() => stepLines().length === 3);
+  assert.equal(stepLines()[2], "[video] could not start the relay: EIO: i/o error, read", "a failure after the recovery is a new run");
+  assert.equal(supervisors.length, 1, "the relay stayed up throughout");
+});
+
+test("a stop that rejects logs once, stays quiet on a repeat, and logs its recovery at the next stop that works", async (t: TestContext) => {
+  const lines = captureConsole(t, "warn", "log");
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length === 1);
+  const stopLines = () => lines.filter((l) => l.includes("stop blew up") || l.includes("stopping the relay is working again"));
+
+  // A ports change stops the running relay and starts another, keeping the
+  // relay wanted throughout, so nothing forgets the run in between.
+  supervisors[0]!.stopRejectsOnce = true;
+  lifecycle.portsChanged();
+  await waitUntil(() => supervisors.length === 2);
+  supervisors[1]!.stopRejectsOnce = true;
+  lifecycle.portsChanged();
+  await waitUntil(() => supervisors.length === 3);
+  assert.deepEqual(stopLines(), ["[video] could not stop the relay: stop blew up"]);
+
+  lifecycle.portsChanged();
+  await waitUntil(() => supervisors.length === 4);
+  assert.deepEqual(stopLines(), [
+    "[video] could not stop the relay: stop blew up",
+    "[video] stopping the relay is working again after 2 failed attempts (under a minute)",
+  ]);
+});
+
 test("a retry whose own step rejects shows the new failure and a new next try, never the passed one", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
   let busyCalls = 0;

@@ -47,6 +47,9 @@ const STOP_KILL_AFTER_MS = 5_000;
 
 const PID_FILE_NAME = "relay.pid";
 
+type PidfileOp = "read" | "write" | "remove";
+const PIDFILE_DONE: Record<PidfileOp, string> = { read: "read", write: "written", remove: "removed" };
+
 /** How long a leftover relay has to exit after SIGTERM before SIGKILL, and
  *  how often it is looked for meanwhile. */
 const LEFTOVER_EXIT_WAIT_MS = 5_000;
@@ -181,6 +184,12 @@ export class RelaySupervisor extends EventEmitter {
   // a rapid crash loop reading its own next spawn as an instant recovery,
   // which armHealthyTimer's single deferred call already rules out.
   private readonly outage = new OutageLog(HEALTHY_AFTER_MS);
+  /** The leftover check and relay.pid's own read, write and removal: calls
+   *  made once per start, spawn or exit, not on a timer, so a success held
+   *  for HEALTHY_AFTER_MS is not something they ever show. Here a success
+   *  ends the run, with one recovery line; each operation is its own key, so
+   *  a remove finding nothing to remove never closes a write that fails. */
+  private readonly bookkeepingOutage = new OutageLog(0);
 
   private binary = "";
   private configPath = "";
@@ -285,13 +294,16 @@ export class RelaySupervisor extends EventEmitter {
     try {
       const leftover = await this.stopLeftover(binary);
       if (leftover.kind === "would-not-stop") {
-        const result = this.outage.fail("relay-leftover-kill", leftover.error, Date.now());
+        const result = this.bookkeepingOutage.fail("relay-leftover-kill", leftover.error, Date.now());
         if (result.log) {
           console.warn(
             `[video] a relay left over from the last run (pid ${leftover.pid}) would not stop: ` +
               `${leftover.error}${result.note} — it may still be holding the relay's ports`,
           );
         }
+      } else {
+        const result = this.bookkeepingOutage.ok("relay-leftover-kill", Date.now());
+        if (result.log) console.log(`[video] the relay left over from the last run is gone${result.note}`);
       }
       // A stop() that raced ahead of stopLeftover()'s await already cleared
       // stopWaiters and set state "off"; honor it rather than spawning anyway.
@@ -340,10 +352,14 @@ export class RelaySupervisor extends EventEmitter {
     try {
       text = await fsp.readFile(path.join(relayDir(), PID_FILE_NAME), "utf8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "none" }; // No pid file — nothing left over.
-      this.reportPidfileTrouble("could not read relay.pid", err);
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        this.pidfileWorks("read"); // No pid file — nothing left over.
+        return { kind: "none" };
+      }
+      this.reportPidfileTrouble("read", err);
       return { kind: "none" };
     }
+    this.pidfileWorks("read");
     const pid = Number(text.trim());
     if (!Number.isInteger(pid) || pid <= 0) return { kind: "none" };
     const running = async () => (await this.psImpl(pid))?.includes(binary) === true;
@@ -367,11 +383,16 @@ export class RelaySupervisor extends EventEmitter {
 
   /** `relay.pid` itself could not be written, read or removed — every case
    *  has some real cause (disk full, permissions) and none is expected, so
-   *  every one is worth a line, gated the same way a relay exit is rather
-   *  than once each. */
-  private reportPidfileTrouble(what: string, err: unknown): void {
-    const result = this.outage.fail("relay-pidfile", errorMessage(err), Date.now());
-    if (result.log) console.warn(`[video] ${what}: ${errorMessage(err)}${result.note}`);
+   *  every one is worth a line: once per outage of that operation, and once
+   *  more when it works again (pidfileWorks). */
+  private reportPidfileTrouble(op: PidfileOp, err: unknown): void {
+    const result = this.bookkeepingOutage.fail(`relay-pidfile-${op}`, errorMessage(err), Date.now());
+    if (result.log) console.warn(`[video] could not ${op} relay.pid: ${errorMessage(err)}${result.note}`);
+  }
+
+  private pidfileWorks(op: PidfileOp): void {
+    const result = this.bookkeepingOutage.ok(`relay-pidfile-${op}`, Date.now());
+    if (result.log) console.log(`[video] relay.pid can be ${PIDFILE_DONE[op]} again${result.note}`);
   }
 
   private writePidFile(pid: number | undefined): void {
@@ -383,8 +404,10 @@ export class RelaySupervisor extends EventEmitter {
       // Bookkeeping for the NEXT run's leftover check, not THIS run — a
       // failure here changes nothing about the child already spawned, so it
       // is reported rather than returned (nobody is waiting on this call).
-      this.reportPidfileTrouble("could not write relay.pid", err);
+      this.reportPidfileTrouble("write", err);
+      return;
     }
+    this.pidfileWorks("write");
   }
 
   private deletePidFile(): void {
@@ -392,11 +415,15 @@ export class RelaySupervisor extends EventEmitter {
       fs.unlinkSync(path.join(relayDir(), PID_FILE_NAME));
     } catch (err) {
       // ENOENT: already gone (we may have raced a manual cleanup, or never
-      // finished writing it) — quiet. Anything else leaves a stale pid file
-      // that will misfire stopLeftover()'s command check on the next run.
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-      this.reportPidfileTrouble("could not remove relay.pid", err);
+      // finished writing it) — nothing stale is left, so it counts as
+      // working. Anything else leaves a stale pid file that will misfire
+      // stopLeftover()'s command check on the next run.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.reportPidfileTrouble("remove", err);
+        return;
+      }
     }
+    this.pidfileWorks("remove");
   }
 
   private spawnChild(): void {

@@ -842,6 +842,79 @@ describe("RelaySupervisor", () => {
     });
   });
 
+  // A pidfile or leftover failure opens its own outage run: one line, quiet
+  // on the same failure again, and one line once the operation works again,
+  // so a later failure is news once more.
+  describe("a pidfile or leftover outage closes on its next success", () => {
+    it("a relay.pid that cannot be written logs once, stays quiet on a repeat, and logs when it can be written again", async (t) => {
+      enableClock(t);
+      // A DIRECTORY named relay.pid: every spawn's write fails with EISDIR.
+      await fs.mkdir(path.join(relayDir(), "relay.pid"), { recursive: true });
+      const lines = captureConsole(t, "warn", "log");
+      const { spawnImpl, children } = fakeSpawn();
+      const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+      const writeLines = () => lines.filter((l) => l.includes("write relay.pid") || l.includes("can be written again"));
+
+      await sup.start("mediamtx", "config.yml");
+      assert.equal(writeLines().length, 1, JSON.stringify(lines));
+      assert.match(writeLines()[0]!, /^\[video\] could not write relay\.pid: EISDIR/);
+
+      children[0]!.emit("exit", 1, null); // a crash; the respawn writes again
+      t.mock.timers.tick(1000);
+      assert.equal(children.length, 2);
+      assert.equal(writeLines().length, 1, "the same failure again, inside the same run, must stay quiet");
+
+      await fs.rm(path.join(relayDir(), "relay.pid"), { recursive: true, force: true });
+      children[1]!.emit("exit", 1, null);
+      t.mock.timers.tick(2000);
+      assert.equal(children.length, 3);
+      assert.deepEqual(writeLines().slice(1), ["[video] relay.pid can be written again after 2 failed attempts (under a minute)"]);
+    });
+
+    it("a leftover that would not stop logs once, stays quiet on a repeat, and logs once it is gone", async (t) => {
+      enableClock(t);
+      await fs.mkdir(relayDir(), { recursive: true });
+      const lines = captureConsole(t, "warn", "log");
+      const { spawnImpl, children } = fakeSpawn();
+      let leftoverRunning = true;
+      const sup = new RelaySupervisor({
+        spawnImpl,
+        psImpl: async (pid) => (pid === 4242 && leftoverRunning ? "/opt/mediamtx/mediamtx config.yml" : null),
+        killPid: () => {
+          const err = new Error("Operation not permitted") as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        },
+      });
+      const leftoverLines = () => lines.filter((l) => l.includes("left over from the last run"));
+      // The leftover's pid goes back into relay.pid before every start: each
+      // start's own child writes its own there, and removes it on exit.
+      const startWithLeftover = async () => {
+        await fs.writeFile(path.join(relayDir(), "relay.pid"), "4242", "utf8");
+        await sup.start("/opt/mediamtx/mediamtx", "config.yml");
+      };
+      const stop = async () => {
+        const stopped = sup.stop();
+        children.at(-1)!.emit("exit", 0, null);
+        await stopped;
+      };
+
+      await startWithLeftover();
+      await stop();
+      await startWithLeftover();
+      assert.equal(leftoverLines().length, 1, `the same failure again must stay quiet: ${JSON.stringify(leftoverLines())}`);
+      assert.match(leftoverLines()[0]!, /pid 4242\) would not stop: Operation not permitted/);
+
+      await stop();
+      leftoverRunning = false;
+      await startWithLeftover();
+      assert.deepEqual(leftoverLines().slice(1), [
+        "[video] the relay left over from the last run is gone after 2 failed attempts (under a minute)",
+      ]);
+      assert.equal(children.length, 3, "every start still spawned its own relay");
+    });
+  });
+
   describe("the process-level exit listener", () => {
     it("stays at one no matter how many supervisors this process builds and stops", async (t) => {
       enableClock(t);

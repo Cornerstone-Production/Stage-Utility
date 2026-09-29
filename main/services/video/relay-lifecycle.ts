@@ -182,9 +182,12 @@ export class RelayLifecycle {
   private loggedStartedThisRun = false;
   /** One failure, one line, one recovery line — for everything that can go
    *  wrong before any supervisor exists (a busy port, a failed download, a
-   *  config write that could not be written). Keyed by nothing but its own
-   *  single run: a fresh streak starts once startRelay() reaches the
-   *  supervisor successfully, or the desire to run goes away entirely. */
+   *  config write that could not be written), and for a step or a stop that
+   *  fails while one does. Three keys, each closed by its own next success:
+   *  "relay-prelaunch" once startRelay() reaches the supervisor,
+   *  "relay-step" by the next step that runs to the end (stepSucceeded),
+   *  "relay-stop" by the next supervisor.stop() that resolves. All three are
+   *  forgotten when the desire to run goes away entirely. */
   private readonly prelaunchOutage = new OutageLog(0);
   /** Serializes setEnabled()/feedsChanged()/portsChanged()/the retry timer
    *  through one chain, so two calls landing close together (a feed removed
@@ -252,10 +255,21 @@ export class RelayLifecycle {
    * `.then(fn).catch(onRejected)`, not `.then(fn, onRejected)`: the second
    * argument to one `.then()` catches the PREVIOUS link's rejection, never
    * fn's own, so fn's throw would reach the next enqueue() instead and skip
-   * that call's fn entirely.
+   * that call's fn entirely. The same holds for stepSucceeded, chained after
+   * fn and before the catch.
    */
   private enqueue(fn: () => Promise<void>): void {
-    this.chain = this.chain.then(fn).catch((err: unknown) => this.stepFailed(err));
+    this.chain = this.chain
+      .then(fn)
+      .then(() => this.stepSucceeded())
+      .catch((err: unknown) => this.stepFailed(err));
+  }
+
+  /** A step that ran to the end closes the run a step rejected while the
+   *  relay was up opened (stepFailed), with one recovery line. */
+  private stepSucceeded(): void {
+    const recovered = this.prelaunchOutage.ok("relay-step", Date.now());
+    if (recovered.log) console.log(`[video] the relay's start and stop steps are working again${recovered.note}`);
   }
 
   /** A rejected step (see enqueue): failing with why while the relay is not
@@ -644,7 +658,11 @@ export class RelayLifecycle {
     this.starting = false;
     this.attempt = 0;
     try {
-      if (supervisor) await supervisor.stop();
+      if (supervisor) {
+        await supervisor.stop();
+        const recovered = this.prelaunchOutage.ok("relay-stop", Date.now());
+        if (recovered.log) console.log(`[video] stopping the relay is working again${recovered.note}`);
+      }
     } catch (err) {
       // A rejected stop() used to skip the
       // detach/clear below entirely — this class had already forgotten
