@@ -136,8 +136,9 @@ external feed's picture — `{feedId, via: "webrtc"|"hls", decoded, dropped,
 stalls, width, height}`, `decoded`/`dropped`/`stalls` as deltas since that
 instance's last report, not running totals. A malformed array — not an
 array, over 32 entries, or any entry with a non-string/empty `feedId`, a
-`via` other than `webrtc`/`hls`, or a `decoded`/`dropped`/`stalls`/`width`/
-`height` that is not a finite non-negative integer — is refused whole and
+`via` other than `webrtc`/`hls`, a `decoded`/`dropped`/`stalls` that is not
+a whole number from 0 to 100000, or a `width`/`height` that is not a whole
+number from 0 to 16384 — is refused whole and
 read the same as no `video` field at all; the rest of the heartbeat (the
 Connected dot, the screen-size read) still lands. A report naming a feed id
 this build no longer holds is dropped on its own, without refusing the

@@ -8,6 +8,8 @@ import { test } from "node:test";
 import {
   CLEAR_AFTER_MS,
   DROPPED_FRACTION,
+  MAX_COUNT_PER_REPORT,
+  MAX_DIMENSION,
   MAX_REPORTS,
   MAX_SAMPLES_PER_PAIR,
   parseVideoReports,
@@ -440,6 +442,29 @@ test("parseVideoReports refuses a non-integer or non-finite count", () => {
   assert.equal(parseVideoReports([{ ...good, decoded: 1.5 }]), null);
   assert.equal(parseVideoReports([{ ...good, stalls: Infinity }]), null);
   assert.equal(parseVideoReports([{ ...good, width: NaN }]), null);
+});
+
+test("parseVideoReports accepts each count at its limit and refuses it one over", () => {
+  const good = { feedId: "f1", via: "webrtc" as const, decoded: 1, dropped: 0, stalls: 0, width: 1, height: 1 };
+  const limits: [field: keyof typeof good, max: number][] = [
+    ["decoded", MAX_COUNT_PER_REPORT],
+    ["dropped", MAX_COUNT_PER_REPORT],
+    ["stalls", MAX_COUNT_PER_REPORT],
+    ["width", MAX_DIMENSION],
+    ["height", MAX_DIMENSION],
+  ];
+  assert.equal(MAX_COUNT_PER_REPORT, 100_000);
+  assert.equal(MAX_DIMENSION, 16_384);
+  for (const [field, max] of limits) {
+    assert.equal(parseVideoReports([{ ...good, [field]: max }])?.length, 1, `${field} at ${max} must be accepted`);
+    assert.equal(parseVideoReports([good, { ...good, [field]: max + 1 }]), null, `${field} at ${max + 1} must refuse the whole array`);
+  }
+});
+
+test("parseVideoReports refuses a count too large to sum exactly", () => {
+  const good = { feedId: "f1", via: "webrtc" as const, decoded: 1, dropped: 0, stalls: 0, width: 1, height: 1 };
+  assert.equal(parseVideoReports([{ ...good, decoded: 1e308 }]), null, "1e308 is an integer to Number.isInteger, and two of them sum to Infinity");
+  assert.equal(parseVideoReports([{ ...good, dropped: Number.MAX_SAFE_INTEGER + 1 }]), null);
 });
 
 test("parseVideoReports refuses more than MAX_REPORTS entries, and accepts exactly MAX_REPORTS", () => {

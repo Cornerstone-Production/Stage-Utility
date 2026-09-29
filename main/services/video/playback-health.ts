@@ -38,6 +38,13 @@ export const CLEAR_AFTER_MS = 60_000;
  *  unbounded array. */
 export const MAX_REPORTS = 32;
 
+/** The most decoded, dropped or stalls one report may carry. A heartbeat every
+ *  10 s at 240 fps is 2400 frames, so this is far above anything real, and it
+ *  keeps a window's sums exact: two reports of 1e308 used to sum to Infinity. */
+export const MAX_COUNT_PER_REPORT = 100_000;
+/** The largest width or height one report may carry. */
+export const MAX_DIMENSION = 16_384;
+
 /** Samples held per pair, capped — see the merge branch in record(). A LAN
  *  client posting a valid outputId and feed id in a tight loop would
  *  otherwise grow one pair's own array for a full WINDOW_MS, and every
@@ -453,15 +460,18 @@ export class PlaybackHealth {
   }
 }
 
-function isNonNegativeInteger(n: unknown): n is number {
-  return typeof n === "number" && Number.isInteger(n) && n >= 0;
+function isCountUpTo(max: number): (n: unknown) => n is number {
+  return (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= max;
 }
+const isReportCount = isCountUpTo(MAX_COUNT_PER_REPORT);
+const isDimension = isCountUpTo(MAX_DIMENSION);
 
 /**
  * `body.video`'s refusal rules: a non-array, more than MAX_REPORTS entries,
  * or any single entry with a non-string/empty `feedId`, a `via` other than
- * "webrtc"/"hls", or any of decoded/dropped/stalls/width/height not a
- * finite non-negative integer refuses the WHOLE array — `null`, never a
+ * "webrtc"/"hls", a decoded/dropped/stalls that is not a whole number from 0
+ * to MAX_COUNT_PER_REPORT, or a width/height that is not a whole number from
+ * 0 to MAX_DIMENSION refuses the WHOLE array — `null`, never a
  * partial one. A malformed screen must not be able to poison one pair's
  * numbers while its others look normal, and the caller reads `null` the
  * same way it reads "no `video` field at all": nothing to record this
@@ -476,7 +486,8 @@ export function parseVideoReports(body: unknown): VideoPlaybackReport[] | null {
     const r = item as Record<string, unknown>;
     if (typeof r.feedId !== "string" || r.feedId.length === 0) return null;
     if (r.via !== "webrtc" && r.via !== "hls") return null;
-    if (![r.decoded, r.dropped, r.stalls, r.width, r.height].every(isNonNegativeInteger)) return null;
+    if (![r.decoded, r.dropped, r.stalls].every(isReportCount)) return null;
+    if (![r.width, r.height].every(isDimension)) return null;
     out.push({
       feedId: r.feedId,
       via: r.via,
