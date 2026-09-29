@@ -1,8 +1,7 @@
-// POST /api/displays/presence, driven through RemoteServer's real request
-// handler: the body the route reads reaches the video service's playback
-// record. remote-server-presence.test.ts covers handlePresenceHeartbeat() with
-// spies; this is the one line in the route that calls it, which a spy cannot
-// see.
+// POST /api/displays/presence, through RemoteServer's real request handler:
+// the body the route reads reaches the video service's playback record.
+// remote-server-presence.test.ts covers handlePresenceHeartbeat() with spies;
+// this is the one line in the route that calls it, which a spy cannot see.
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";

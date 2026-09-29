@@ -287,12 +287,10 @@ test("stop() drops the `waiting` listener: a stall after stop() is never counted
 
 // ── getStats() rejecting: skip the sample, and log once per outage ───────
 //
-// Not "swallow the failure" — the OLD shape of this catch did that, and the
-// review that found it named exactly this failure mode: a persistent
-// getStats() rejection degrading a widget's telemetry to permanent silence
-// with no diagnostic trail anywhere. Reuses repeat-log.ts's OutageLog, the
-// same class use-video-session.ts's own streak already wraps for dropped
-// playback — not a second, hand-rolled once-per-outage tracker.
+// Logged, not swallowed: a persistent getStats() rejection would otherwise
+// leave a widget reporting nothing, with no trail anywhere to say why. Uses
+// repeat-log.ts's OutageLog, the same class use-video-session.ts's streak
+// wraps for dropped playback, rather than a second once-per-outage tracker.
 
 function rejectingPc(message = "getStats failed") {
   return { getStats: async () => { throw new Error(message); } } as unknown as RTCPeerConnection;

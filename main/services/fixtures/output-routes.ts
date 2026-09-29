@@ -1,5 +1,5 @@
 // output-routes.ts — the setup the PATCH /api/outputs/:id route tests share:
-// a temp data dir, the real route module and controller, and one display
+// a temp data dir, the real route module and stageController, and one display
 // ("wall", showing view "v1") seeded fresh before every test.
 
 import * as fs from "node:fs/promises";
@@ -11,8 +11,8 @@ type Mutable = { state: { views: View[]; outputs: Output[]; [k: string]: unknown
 
 /**
  * Points STAGE_UTILITY_DATA and HOME at a fresh temp dir, THEN imports the
- * route module and controller — the order is the point, since both read the
- * data dir when they load. Call it at the top of the test file, before
+ * route module and stageController — the order is the point, since both read
+ * the data dir when they load. Call it at the top of the test file, before
  * anything else imports either. Registers the file's seeding beforeEach.
  */
 export async function outputRouteHarness(tmpPrefix: string) {
