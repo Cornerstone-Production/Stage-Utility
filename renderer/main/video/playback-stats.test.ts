@@ -93,6 +93,75 @@ test("webrtc: no inbound-rtp video report at all is also skipped, not reported a
   }
 });
 
+// ── createSampler: webrtc stalls — freezeCount, not `waiting` ────────────
+//
+// A `<video>` playing a MediaStream (every WebRTC session) never fires
+// `waiting` when the stream starves — three real 3 s SIGSTOPs of a 1080p
+// publisher, driven through a real browser, gave `waits: 0` for 46 actually
+// dropped frames. Chrome's `inbound-rtp` video report carries its own
+// receiver-side `freezeCount` instead; this reads that, falling back to
+// `waiting` only when a browser's report carries no such field at all.
+
+function fakePcFreeze(reports: { framesDecoded: number; framesDropped: number; frameWidth: number; frameHeight: number; freezeCount: number }[]) {
+  let call = 0;
+  return {
+    getStats: async () => {
+      const r = reports[Math.min(call, reports.length - 1)]!;
+      call += 1;
+      return new Map([["in", { type: "inbound-rtp", kind: "video", ...r }]]);
+    },
+  } as unknown as RTCPeerConnection;
+}
+
+test("webrtc: freezeCount is read as the stall delta, the same as decoded/dropped", async () => {
+  const pc = fakePcFreeze([
+    { framesDecoded: 300, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 1 },
+    { framesDecoded: 600, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 4 },
+  ]);
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
+  try {
+    const first = await sampler.sample();
+    assert.equal(first!.stalls, 1, "the first reading is a delta against a zero baseline, like every other counter here");
+    const second = await sampler.sample();
+    assert.equal(second!.stalls, 3, "expected the delta since the last sample, not the running total");
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("webrtc: a new session's freezeCount restarting at zero reads as a zero delta, not negative", async () => {
+  const pc = fakePcFreeze([
+    { framesDecoded: 500, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 5 },
+    { framesDecoded: 4, framesDropped: 0, frameWidth: 1920, frameHeight: 1080, freezeCount: 0 }, // a fresh attempt's own counters
+  ]);
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
+  try {
+    await sampler.sample();
+    const report = await sampler.sample();
+    assert.equal(report!.stalls, 0, "a lower freezeCount must not read as a negative stall delta");
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("webrtc: an absent freezeCount falls back to counting `waiting` events", async () => {
+  // fakePc's reports (unlike fakePcFreeze's) carry no freezeCount field at
+  // all — the shape a browser that does not implement it would answer with.
+  const pc = fakePc([{ framesDecoded: 300, framesDropped: 0, frameWidth: 1920, frameHeight: 1080 }]);
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
+  try {
+    video.dispatchEvent(new Event("waiting"));
+    video.dispatchEvent(new Event("waiting"));
+    const report = await sampler.sample();
+    assert.equal(report!.stalls, 2, "no freezeCount at all must fall back to the `waiting` count, the same source HLS uses");
+  } finally {
+    sampler.stop();
+  }
+});
+
 // ── createSampler: hls ───────────────────────────────────────────────────
 
 class FakeHlsVideoEl extends EventTarget {
