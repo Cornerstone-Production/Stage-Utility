@@ -46,6 +46,17 @@ const STOP_KILL_AFTER_MS = 5_000;
 
 const PID_FILE_NAME = "relay.pid";
 
+/** How long a leftover relay has to exit after SIGTERM before SIGKILL, and
+ *  how often it is looked for meanwhile. */
+const LEFTOVER_EXIT_WAIT_MS = 5_000;
+const LEFTOVER_POLL_MS = 100;
+
+/** What a check for a relay left over from the last run found. */
+export type LeftoverResult =
+  | { kind: "none" }
+  | { kind: "stopped"; pid: number }
+  | { kind: "would-not-stop"; pid: number; error: string };
+
 export type SupervisorStatus =
   | { state: "off" }
   | { state: "starting" }
@@ -121,7 +132,7 @@ export interface RelaySupervisorOptions {
   /** Test seam for the leftover-pid kill, so a test never signals a real
    *  host pid. Real default is `process.kill`, swallowing ESRCH (the
    *  process is already gone, which is what SIGTERM was going to achieve)
-   *  and rethrowing anything else — killLeftover() is the caller, and
+   *  and rethrowing anything else — stopLeftover() is the caller, and
    *  decides what an operator is told. */
   killPid?: (pid: number, signal: NodeJS.Signals) => void;
 }
@@ -199,7 +210,7 @@ export class RelaySupervisor extends EventEmitter {
           process.kill(pid, signal);
         } catch (err) {
           if (isExpectedKillFailure(err)) return;
-          // killLeftover() below is the only caller, and decides what to
+          // stopLeftover() below is the only caller, and decides what to
           // tell the operator.
           throw err;
         }
@@ -242,12 +253,12 @@ export class RelaySupervisor extends EventEmitter {
 
   /**
    * A no-op unless the relay is currently off. Without this guard, a second
-   * start() on an already-running relay would re-run killLeftover() — which
+   * start() on an already-running relay would re-run stopLeftover() — which
    * reads relay.pid, finds the CURRENT child's own pid (this run already
    * wrote it) matching this same binary, and SIGTERMs its own healthy
    * child as if it were left over from a previous run — then spawn a
    * second child on top of it. Confirmed by forcing exactly this sequence:
-   * `killed via killLeftover during 2nd start(): [[1000,'SIGTERM']], children
+   * `killed via stopLeftover during 2nd start(): [[1000,'SIGTERM']], children
    * spawned total: 2`. Call stop() first to restart with a clean state.
    *
    * The check and the "starting" state it sets both happen before the
@@ -272,8 +283,17 @@ export class RelaySupervisor extends EventEmitter {
     this.attempt = 0;
     this.setStatus({ state: "starting" });
     try {
-      await this.killLeftover();
-      // A stop() that raced ahead of killLeftover()'s await already cleared
+      const leftover = await this.stopLeftover(binary);
+      if (leftover.kind === "would-not-stop") {
+        const result = this.outage.fail("relay-leftover-kill", leftover.error, Date.now());
+        if (result.log) {
+          console.warn(
+            `[video] a relay left over from the last run (pid ${leftover.pid}) would not stop: ` +
+              `${leftover.error}${result.note} — it may still be holding the relay's ports`,
+          );
+        }
+      }
+      // A stop() that raced ahead of stopLeftover()'s await already cleared
       // stopWaiters and set state "off"; honor it rather than spawning anyway.
       if (this.stopping) return;
       this.spawnChild();
@@ -303,37 +323,46 @@ export class RelaySupervisor extends EventEmitter {
     await done;
   }
 
-  /** If `relay.pid` names a still-live process running this same binary,
-   *  SIGTERM it — the previous run of this server never got to clean up
-   *  after itself (a crash, a kill -9, a power loss). Skipped on Windows,
-   *  which has no `ps`. */
-  private async killLeftover(): Promise<void> {
-    if (process.platform === "win32") return;
+  /**
+   * If `relay.pid` names a still-live process running `binary`, stop it: the
+   * previous run of this server never cleaned up after itself (the server
+   * killed with SIGKILL, a crash, a power loss), and its relay still holds
+   * every relay port. SIGTERM, then SIGKILL if it is still there after
+   * LEFTOVER_EXIT_WAIT_MS; resolves once it has gone, so a port check made
+   * after this sees the ports free. Public so relay-lifecycle.ts can run it
+   * before its own port check; start() runs it too, for any other caller.
+   * The caller decides what to tell an operator about one that would not
+   * stop. Skipped on Windows, which has no `ps`.
+   */
+  async stopLeftover(binary: string): Promise<LeftoverResult> {
+    if (process.platform === "win32") return { kind: "none" };
     let text: string;
     try {
       text = await fsp.readFile(path.join(relayDir(), PID_FILE_NAME), "utf8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // No pid file — nothing left over.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "none" }; // No pid file — nothing left over.
       this.reportPidfileTrouble("could not read relay.pid", err);
-      return;
+      return { kind: "none" };
     }
     const pid = Number(text.trim());
-    if (!Number.isInteger(pid) || pid <= 0) return;
-    const cmd = await this.psImpl(pid);
-    if (!cmd || !cmd.includes(this.binary)) return;
-    try {
-      this.killPid(pid, "SIGTERM");
-    } catch (err) {
-      const result = this.outage.fail("relay-leftover-kill", errorMessage(err), Date.now());
-      if (result.log) {
-        console.warn(
-          `[video] a relay left over from the last run (pid ${pid}) would not stop: ` +
-            `${errorMessage(err)}${result.note} — it may still be holding the relay's ports`,
-        );
+    if (!Number.isInteger(pid) || pid <= 0) return { kind: "none" };
+    const running = async () => (await this.psImpl(pid))?.includes(binary) === true;
+    if (!(await running())) return { kind: "none" };
+    for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+      try {
+        this.killPid(pid, signal);
+      } catch (err) {
+        return { kind: "would-not-stop", pid, error: errorMessage(err) };
       }
-      return;
+      for (let waited = 0; waited < LEFTOVER_EXIT_WAIT_MS; waited += LEFTOVER_POLL_MS) {
+        if (!(await running())) {
+          console.log(`[video] stopped a relay left over from the last run (pid ${pid})`);
+          return { kind: "stopped", pid };
+        }
+        await new Promise((resolve) => setTimeout(resolve, LEFTOVER_POLL_MS));
+      }
     }
-    console.log(`[video] stopped a relay left over from the last run (pid ${pid})`);
+    return { kind: "would-not-stop", pid, error: "still running after SIGTERM and SIGKILL" };
   }
 
   /** `relay.pid` itself could not be written, read or removed — every case
@@ -364,7 +393,7 @@ export class RelaySupervisor extends EventEmitter {
     } catch (err) {
       // ENOENT: already gone (we may have raced a manual cleanup, or never
       // finished writing it) — quiet. Anything else leaves a stale pid file
-      // that will misfire killLeftover()'s command check on the next run.
+      // that will misfire stopLeftover()'s command check on the next run.
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       this.reportPidfileTrouble("could not remove relay.pid", err);
     }

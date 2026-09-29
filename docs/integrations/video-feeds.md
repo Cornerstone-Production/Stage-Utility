@@ -52,6 +52,13 @@ Once running, the relay is a child process of this server. If it exits for
 any reason it is restarted automatically, backing off from 1 second up to 60
 between attempts, and it never gives up.
 
+A relay can outlive a server that was killed outright (a crash, `kill -9`, a
+power cut) and keep holding its ports. The next start finds it by the
+`relay.pid` it left in `video-relay` and stops it before checking the ports;
+one that will not stop is reported as the reason the relay cannot start.
+Windows has no `ps` to confirm what that pid is, so there a leftover relay is
+not stopped: end `mediamtx.exe` in Task Manager.
+
 If it cannot start — a busy port, a failed download, a config write that
 failed, an unsupported platform — the line says why, and names where to
 place a downloaded archive by hand if the download itself is what failed.

@@ -519,7 +519,8 @@ describe("RelaySupervisor", () => {
     const killed: Array<[number, NodeJS.Signals]> = [];
     const sup = new RelaySupervisor({
       spawnImpl,
-      psImpl: async (pid) => (pid === 4242 ? "/opt/mediamtx/mediamtx /opt/mediamtx/mediamtx.yml" : null),
+      // Running until it is signalled, as a leftover that honours SIGTERM is.
+      psImpl: async (pid) => (pid === 4242 && killed.length === 0 ? "/opt/mediamtx/mediamtx /opt/mediamtx/mediamtx.yml" : null),
       killPid: (pid, signal) => killed.push([pid, signal]),
     });
 
@@ -527,6 +528,37 @@ describe("RelaySupervisor", () => {
 
     assert.deepEqual(killed, [[4242, "SIGTERM"]]);
     assert.equal(children.length, 1, "still spawns its own child after cleaning up the leftover");
+  });
+
+  // Its ports are free only once it has actually gone, so a port check made
+  // after this must not find the leftover still holding them.
+  it("stopLeftover resolves only once the leftover has exited, and SIGKILLs one that ignores SIGTERM", async (t) => {
+    enableClock(t);
+    await fs.mkdir(relayDir(), { recursive: true });
+    await fs.writeFile(path.join(relayDir(), "relay.pid"), "4242", "utf8");
+    const killed: NodeJS.Signals[] = [];
+    const sup = new RelaySupervisor({
+      spawnImpl: fakeSpawn().spawnImpl,
+      psImpl: async () => (killed.includes("SIGKILL") ? null : "/opt/mediamtx/mediamtx cfg.yml"),
+      killPid: (_pid, signal) => killed.push(signal),
+    });
+    let result: unknown = null;
+    void sup.stopLeftover("/opt/mediamtx/mediamtx").then((r) => (result = r));
+    for (let i = 0; i < 49; i++) {
+      await settle();
+      t.mock.timers.tick(100);
+    }
+    await settle();
+    assert.equal(result, null, "resolved while the leftover was still running");
+    assert.deepEqual(killed, ["SIGTERM"]);
+    for (let i = 0; i < 3; i++) {
+      await settle();
+      t.mock.timers.tick(100);
+    }
+    await settle();
+    await settle();
+    assert.deepEqual(killed, ["SIGTERM", "SIGKILL"]);
+    assert.deepEqual(result, { kind: "stopped", pid: 4242 });
   });
 
   it("does not SIGTERM a relay.pid pid whose command names a different binary", async (t) => {
@@ -723,9 +755,16 @@ describe("RelaySupervisor", () => {
 
       const { spawnImpl, children } = fakeSpawn();
       const warnSpy = t.mock.method(console, "warn");
+      let signalled = false;
       const sup = new RelaySupervisor({
         spawnImpl,
-        psImpl: async (pid) => (pid === goneP ? "/opt/mediamtx/mediamtx config.yml" : null),
+        // "Running" once, for the check that finds it; gone after the kill
+        // the real default made against a pid that no longer exists.
+        psImpl: async (pid) => {
+          if (pid !== goneP || signalled) return null;
+          signalled = true;
+          return "/opt/mediamtx/mediamtx config.yml";
+        },
         // No killPid override — this exercises the real default.
       });
 

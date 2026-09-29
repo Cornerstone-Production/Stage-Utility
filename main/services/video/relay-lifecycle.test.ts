@@ -27,6 +27,7 @@ const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 type RelayLifecycleDeps = import("./relay-lifecycle.js").RelayLifecycleDeps;
 type RelayLifecycleSupervisor = import("./relay-lifecycle.js").RelayLifecycleSupervisor;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
+type LeftoverResult = import("./supervisor.js").LeftoverResult;
 type VideoFeed = import("../../types/video.js").VideoFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
 type RelayFeed = import("./relay.js").RelayFeed;
@@ -110,6 +111,10 @@ function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
     busyPorts: async () => {
       order.push("busyPorts");
       return [];
+    },
+    stopLeftover: async (): Promise<LeftoverResult> => {
+      order.push("stopLeftover");
+      return { kind: "none" };
     },
     makeSupervisor: () => {
       const s = new FakeSupervisor();
@@ -285,7 +290,7 @@ test("ensureBinary, then busyPorts, then the config file (0o600, real publish us
   const stat = await fs.stat(configPath);
   assert.equal(stat.mode & 0o777, 0o600, "the config holds every push feed's live publish password in the clear");
 
-  assert.deepEqual(order, ["ensureBinary", "busyPorts", "reconcile"], "the start sequence ran out of order");
+  assert.deepEqual(order, ["ensureBinary", "stopLeftover", "busyPorts", "reconcile"], "the start sequence ran out of order");
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
@@ -346,6 +351,44 @@ test("the supervisor is handed a rewrite for every respawn: the feeds and push p
   assert.notEqual(pushPass(after), pushPass(before));
   assert.equal(apiPass(after), apiPass(before), "the API password stays the one the relay client was handed");
   assert.equal((await fs.stat(configPath)).mode & 0o777, 0o600);
+});
+
+// A relay left running when the server itself was killed holds every relay
+// port. The leftover is stopped BEFORE the port check, or the check finds
+// the relay's own ports taken — by the relay — and fails every retry, never
+// reaching the supervisor that would have stopped it.
+test("a leftover relay is stopped before the port check, so its ports read free", async () => {
+  let leftoverRunning = true;
+  const { deps, supervisors } = makeDeps({
+    busyPorts: async () => (leftoverRunning ? [{ port: 1935, proto: "tcp" as const, holder: { kind: "process" as const, program: "mediamtx", pid: 4242 } }] : []),
+    stopLeftover: async () => {
+      leftoverRunning = false;
+      return { kind: "stopped", pid: 4242 };
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0 && supervisors[0]!.startCalls.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running");
+});
+
+test("a leftover that will not stop is the failing reason: its ports are still held", async (t: TestContext) => {
+  const logs: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const { deps, supervisors } = makeDeps({
+    stopLeftover: async () => ({ kind: "would-not-stop", pid: 4242, error: "EPERM: operation not permitted" }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => videoService.current().relay.state === "failing");
+  const relay = (await videoService.state()).relay as { reason: string; kind: string; retryAt: number | null };
+  assert.equal(relay.kind, "port-conflict");
+  assert.equal(relay.reason, "A relay left over from the last run would not stop, and may still hold the relay's ports.");
+  assert.notEqual(relay.retryAt, null);
+  assert.equal(supervisors.length, 0, "no relay may be spawned onto ports a leftover still holds");
+  assert.ok(logs.some((l) => l.includes("(pid 4242) would not stop: EPERM")), JSON.stringify(logs));
 });
 
 // ── PROBE D / item 3: a throw anywhere in the pre-supervisor steps must

@@ -53,7 +53,7 @@ import { holderPhrase } from "../port-holder.js";
 import { busyPorts, type BusyPort } from "./port-check.js";
 import { relayUsers } from "./reconcile-plan.js";
 import type { VideoRelay } from "./relay.js";
-import { RelaySupervisor, restartDelayMs, type SupervisorStatus } from "./supervisor.js";
+import { RelaySupervisor, restartDelayMs, type LeftoverResult, type SupervisorStatus } from "./supervisor.js";
 import { videoService, type RelaySupervisorLike } from "./video-service.js";
 
 /** RelayStatus -> the integration manager's connection state, in exactly one
@@ -101,6 +101,9 @@ export interface RelayLifecycleSupervisor extends RelaySupervisorLike {
 
 export interface RelayLifecycleDeps {
   loadFeedsFile: typeof loadFeedsFile;
+  /** A relay left over from the last run of this server, stopped — see
+   *  supervisor.ts's stopLeftover. */
+  stopLeftover: (binary: string) => Promise<LeftoverResult>;
   ensureBinary: (opts?: EnsureBinaryOptions) => ReturnType<typeof ensureBinary>;
   busyPorts: (ports: VideoPorts) => Promise<BusyPort[]>;
   makeSupervisor: () => RelayLifecycleSupervisor;
@@ -109,6 +112,7 @@ export interface RelayLifecycleDeps {
 
 const REAL_DEPS: RelayLifecycleDeps = {
   loadFeedsFile,
+  stopLeftover: (binary) => new RelaySupervisor().stopLeftover(binary),
   ensureBinary,
   busyPorts,
   makeSupervisor: () => new RelaySupervisor(),
@@ -454,6 +458,22 @@ export class RelayLifecycle {
       if (!(this.enabled && (await this.hasRelayFeeds()))) {
         this.starting = false;
         videoService.setPreAttachStatus(null);
+        return;
+      }
+
+      // Before the port check: a relay left running when this server was
+      // killed holds every relay port, and the check would otherwise fail
+      // every retry on the relay's own ports, never reaching the
+      // supervisor that stops it.
+      const leftover = await this.deps.stopLeftover(ensured.path);
+      if (leftover.kind === "would-not-stop") {
+        this.failPreSupervisor(
+          "A relay left over from the last run would not stop, and may still hold the relay's ports.",
+          "port-conflict",
+          undefined,
+          undefined,
+          `A relay left over from the last run (pid ${leftover.pid}) would not stop: ${leftover.error}; it may still hold the relay's ports.`,
+        );
         return;
       }
 
