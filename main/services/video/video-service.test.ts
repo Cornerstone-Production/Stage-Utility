@@ -733,6 +733,35 @@ test("a requested pull feed reads standby while the relay dials it, offline once
   }
 });
 
+// Driven on the real binary: after a respawn the first poll finds no paths,
+// and a pull feed read offline (so a screen did not ask for it) until the
+// poll after the reconcile, up to STATUS_POLL_MS later.
+test("a successful reconcile is followed by a poll, so a feed it just set up reads from the relay at once", async () => {
+  const made = await videoService.addFeed({ name: "Reconcile cam", source: { kind: "pull", url: "rtsp://192.0.2.55/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let paths: RelayPath[] = [];
+  const relay = fakeRelay({
+    status: async () => paths,
+    reconcile: async (feeds) => {
+      paths = feeds.map((f) => notReadyPath({ name: f.id }));
+    },
+  });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  const stateOf = async () => (await videoService.state()).feeds.find((f) => f.id === id)?.status.state;
+  try {
+    await pollOnce();
+    assert.equal(await stateOf(), "offline", "sanity: a polled relay with no path for the feed");
+    assert.equal(await videoService.reconcileRelay(), true);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    assert.equal(await stateOf(), "standby");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 // Driven on the real binary: a screen that connected eleven seconds before
 // the relay was killed found the pull feed offline after the respawn, and
 // waited out the rest of the old request's window before asking again.

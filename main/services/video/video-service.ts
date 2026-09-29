@@ -1227,14 +1227,13 @@ class VideoService {
       }
       const decision = this.sparseOutage.ok("reconcile", Date.now());
       if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
-      // The readiness poll (relay-lifecycle.ts's startReadinessPoll)
-      // stops calling this the MOMENT it first succeeds — its own one
-      // chance to catch the connection row up if handleLine() somehow
-      // hasn't already. publish() itself is the guard against noise: it
-      // only broadcasts when something actually changed, so a reconcile
-      // that runs for an unrelated reason (a feed CRUD, a ports save) costs
-      // nothing extra here on every OTHER success.
-      void this.publish();
+      // Poll now rather than at the next tick: the paths this just set up
+      // are otherwise missing from lastPaths for up to STATUS_POLL_MS, and a
+      // pull feed with no path reads offline, so no screen asks for it. The
+      // poll ends in publish(), which only broadcasts a real change, and
+      // also catches the connection row up once the readiness poll
+      // (relay-lifecycle.ts) stops calling this on its first success.
+      void this.pollOnce();
       return true;
     } catch (err) {
       // Returned either way: the caller (the readiness poll) retries.
