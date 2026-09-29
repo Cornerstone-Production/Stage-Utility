@@ -10,6 +10,7 @@
 
 import { strict as assert } from "node:assert";
 import { QueryClient, QueryClientProvider, notifyManager } from "@tanstack/react-query";
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import type { ReactElement, ReactNode } from "react";
 import { act } from "@testing-library/react";
 import { TooltipProvider } from "../components/ui/tooltip-provider";
@@ -183,6 +184,27 @@ export function withQueryClient(children: ReactNode): ReactElement {
       <TooltipProvider>{children}</TooltipProvider>
     </QueryClientProvider>
   );
+}
+
+/**
+ * `withQueryClient`, further wrapped in a real TanStack router — the video
+ * card's own bespoke panel (integrations-panel.tsx) renders an `<AppLink>`,
+ * which THROWS with no `<RouterProvider>` ancestor at all (a bare
+ * `useRouter()` elsewhere only warns and returns a non-navigating
+ * fallback). NOT the default `withQueryClient` every other test file here
+ * uses: the router resolves its first match on a later tick, not
+ * synchronously, so a caller that reads the DOM right after `render()` with
+ * no `await` in between — most of them — would see nothing at all. Only for
+ * a test that actually opens the video dialog (integration-dialog.test.tsx)
+ * and already awaits a settle before reading the DOM.
+ */
+export function withQueryClientAndRouter(children: ReactNode): ReactElement {
+  const rootRoute = createRootRoute({ component: () => children as ReactElement });
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  return withQueryClient(<RouterProvider router={router} />);
 }
 
 /**

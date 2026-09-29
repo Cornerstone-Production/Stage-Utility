@@ -60,6 +60,7 @@ function makeState(feeds: VideoFeedView[]): VideoState {
     relay: { state: "running", version: "1.21.1", ports: TEST_PORTS },
     kinds: ["pull", "push", "embed", "external"],
     ports: TEST_PORTS,
+    binaryPresent: true,
     feeds,
   };
 }

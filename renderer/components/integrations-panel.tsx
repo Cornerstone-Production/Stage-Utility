@@ -1,7 +1,7 @@
 import { isMask } from "@main/services/mask";
 import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
-import { useRouter } from "@tanstack/react-router";
+import { AppLink } from "../app/app-link";
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
@@ -88,11 +88,12 @@ export function integrationFlashId(id: string): string {
  * The order integrations are laid out in, by purpose.
  *
  * The headings these categories used to draw are gone: eight of them over
- * sixteen integrations meant most held ONE card, and a heading above a single
- * card in a four-column grid wastes three quarters of the row and rebuilds the
- * tall thin column the grid exists to remove. The ORDER is kept, so Planning
- * Center and ProdCom still sit next to each other and the Ross pair is still
- * adjacent — which is all the pair card and the headings were really doing.
+ * every integration this build ships meant most held ONE card, and a heading
+ * above a single card in a four-column grid wastes three quarters of the row
+ * and rebuilds the tall thin column the grid exists to remove. The ORDER is
+ * kept, so Planning Center and ProdCom still sit next to each other and the
+ * Ross pair is still adjacent — which is all the pair card and the headings
+ * were really doing.
  */
 const CATEGORY_ORDER = [
   ["planning-center", "prodcom"], // Service & plan
@@ -179,7 +180,7 @@ function firstString(config: Record<string, unknown>, keys: string[]): string {
  * The card's second line: what this integration is pointed at, or what it is.
  *
  * A row could get away with a name and a badge because it was 1176px wide and
- * about to be opened anyway. A 252px card in a grid of sixteen has to answer
+ * about to be opened anyway. A 252px card in a grid this size has to answer
  * "which one is this" on its own, and for a configured integration the useful
  * answer is the address — that is what an operator is checking when something is
  * down. Derived from the descriptor rather than a per-id table, so adding an
@@ -214,7 +215,7 @@ function fmtSynced(iso: string | null | undefined): string {
  * twice: record where every card is, because this is what moves one between the
  * two grids.
  */
-async function toggleIntegration(
+export async function toggleIntegration(
   id: string,
   enabled: boolean,
   {
@@ -266,25 +267,13 @@ function bespokePanelFor(descriptor: IntegrationDescriptor): ReactNode | null {
   return null;
 }
 
-/** Typed as string, matching disconnected-popover.tsx's own INTEGRATIONS_ROUTE
- *  — the generated route union does not satisfy a bare literal. */
-const VIDEO_FEEDS_ROUTE: string = "/video-feeds";
-
-/** A button, not a Link — same reason disconnected-popover.tsx's own "go"
- *  uses `useRouter().navigate()` rather than `<Link>`: this dialog closes
- *  first, and a bare `<Link>` needs no closing of its own. */
 function VideoFeedsLinkPanel() {
-  const router = useRouter();
   return (
     <p className="px-1 py-2 text-callout text-fg-muted">
-      Feeds, ports and the relay's status all live on their own page.{" "}
-      <button
-        type="button"
-        className="text-accent hover:underline"
-        onClick={() => router.navigate({ to: VIDEO_FEEDS_ROUTE })}
-      >
+      Feeds and the relay's status live on their own page; its ports are in Advanced.{" "}
+      <AppLink to="/video-feeds" className="text-accent hover:underline">
         Open Video feeds
-      </button>
+      </AppLink>
     </p>
   );
 }
@@ -764,7 +753,7 @@ export function IntegrationDialog({
                   {descriptor.description}{" "}
                   {/* Where the setup steps went. The descriptions used to walk an
                       operator through the OTHER application's preferences, which
-                      made every card a paragraph and a grid of sixteen a wall. The
+                      made every card a paragraph and a grid this size a wall. The
                       steps are in docs/integrations/, and this is the only thing
                       in the app that points at them. */}
                   <a
@@ -1078,7 +1067,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
           Nothing is set up yet — open any card to connect it.
         </p>
       ) : (
-        // A denominator, because how many of the sixteen are up is the one fact
+        // A denominator, because how many of them are up is the one fact
         // no single card can tell you. The old "M to set up" is cut: those cards
         // are now on screen under a heading that names the state.
         <p className="text-caption1 text-fg-muted">

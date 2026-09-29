@@ -32,6 +32,7 @@ const { ConfirmHost } = await import("../../components/ui/index.js");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { COPIED_LABEL_MS } = await import("./feed-editor.js");
+const { createMemoryHistory, createRootRoute, createRouter, RouterProvider } = await import("@tanstack/react-router");
 
 // VideoState/VideoFeedView are NOT ambient globals (unlike LayoutObject and
 // LayoutObjectConfig) — see video-object.test.tsx's own note on this.
@@ -104,7 +105,7 @@ function pushFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
 const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
 
 function makeState(feeds: VideoFeedView[]): VideoState {
-  return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, feeds };
+  return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, binaryPresent: true, feeds };
 }
 
 interface Call {
@@ -228,10 +229,16 @@ function stubGlobals(state: VideoState, opts: FetchStubOptions = {}) {
   };
 }
 
+/** A real router, one root route rendering the page directly — the page's
+ *  own "Change ports in Advanced" link uses `useRouter().navigate()`, which
+ *  only WARNS with no provider (unlike `<Link>`, which throws), but a clean
+ *  test run has none of these warnings either. */
 function mount() {
-  return render(
-    React.createElement(React.Fragment, null, React.createElement(VideoFeedsRoute), React.createElement(ConfirmHost)),
-  );
+  const rootRoute = createRootRoute({
+    component: () => React.createElement(React.Fragment, null, React.createElement(VideoFeedsRoute), React.createElement(ConfirmHost)),
+  });
+  const router = createRouter({ routeTree: rootRoute, history: createMemoryHistory({ initialEntries: ["/"] }) });
+  return render(React.createElement(RouterProvider, { router } as never));
 }
 
 beforeEach(() => {

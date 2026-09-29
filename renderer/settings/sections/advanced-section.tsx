@@ -32,7 +32,7 @@ import {
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
-import { VideoRelayPortsPanel } from "./video-relay-ports";
+import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { BarConfigurator } from "../../app/bar-configurator";
 import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
@@ -1359,7 +1359,7 @@ export function AdvancedSection({
           <HistoryMilestonesPanel />
         </div>
 
-        <div className="su-card">
+        <div className="su-card" data-flash-id={VIDEO_PORTS_FLASH_ID}>
           <div className="border-b border-line px-4 py-3">
             <h3 className="text-callout font-semibold text-fg">Video relay</h3>
           </div>

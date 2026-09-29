@@ -1,8 +1,8 @@
-// Every one of the sixteen dialogs, opened.
+// Every one of the seventeen dialogs, opened.
 //
 // The page's whole shape now depends on the dialog: a card holds no form, so an
 // integration whose dialog throws or comes up empty has no settings at all. This
-// opens all sixteen against the real components and checks the things that
+// opens all seventeen against the real components and checks the things that
 // differ between them — the wide variant, the footer actions, and the inbound
 // case that gets neither a switch nor a Save.
 
@@ -18,7 +18,7 @@ const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, assertAbsent, integrationCard, settleFor, actIdle } = await import(
+const { installFakeServer, withQueryClientAndRouter, assertAbsent, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -45,7 +45,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 
 async function open(id: string) {
   server = installFakeServer();
-  const c = render(withQueryClient(<IntegrationsPanel />));
+  const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
   await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
   await settleFor(60);
@@ -57,7 +57,7 @@ async function open(id: string) {
 const labels = (root: HTMLElement) =>
   [...root.querySelectorAll("button")].map((b) => b.textContent?.trim()).filter(Boolean);
 
-describe("all sixteen dialogs", () => {
+describe("all seventeen dialogs", () => {
   for (const d of INTEGRATION_DESCRIPTOR_FIXTURE) {
     test(`${d.id} opens with its name and its settings`, async () => {
       const content = await open(d.id);
@@ -82,7 +82,7 @@ describe("all sixteen dialogs", () => {
 
   test("only the five repeater integrations render a panel that cannot wrap", async () => {
     // The direction integration-dialog-size.test.tsx cannot check on its own: it
-    // renders the five panels, this renders all sixteen BODIES. Between them,
+    // renders the five panels, this renders all seventeen BODIES. Between them,
     // neither a missing marker nor a stray one can pass.
     const marked: string[] = [];
     for (const d of INTEGRATION_DESCRIPTOR_FIXTURE) {

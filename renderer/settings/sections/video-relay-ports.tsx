@@ -17,6 +17,13 @@ import { invoke } from "../../lib/api";
 import { useVideoState } from "../../main/video/use-video-state";
 import { Button, ErrorNote, Field, FieldContent, FieldGroup, FieldLabel, NumberInput } from "../../components/ui";
 
+/** The card's own `data-flash-id`, named here (rather than in
+ *  advanced-section.tsx, which just renders it) so the Video feeds page's
+ *  "Change ports in Advanced" link — the only other place that needs it —
+ *  imports the identifier from the thing it identifies, not a duplicated
+ *  string literal. */
+export const VIDEO_PORTS_FLASH_ID = "video-relay-ports";
+
 const NETWORK_FIELDS: { key: keyof VideoPorts; label: string }[] = [
   { key: "rtmp", label: "RTMP" },
   { key: "srt", label: "SRT" },
