@@ -767,6 +767,9 @@ test("markRequested moves a not-ready pull feed off standby — its only observa
 
 // ── relayTarget() — what the playback proxy is allowed to reach ───────────
 
+const NOT_RUNNING = { refuse: 503, error: "The video relay is not running" };
+const NOT_GIVEN = { refuse: 503, error: "The video relay has not been given this feed yet" };
+
 test("relayTarget refuses a pattern-failing id, an unknown id, and a kind an embed/external feed cannot serve, all before ever asking whether the relay is up", async () => {
   // No relay attached at all — every one of these must read 404, not 503, so
   // an unknown feed can never be mistaken for "the relay is down".
@@ -826,8 +829,8 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
   try {
     // No relay attached — relayStatus() reads "off", which relayTarget must
     // treat as "not running" exactly like "starting" or "failing".
-    assert.deepEqual(videoService.relayTarget(id, "whep"), { refuse: 503 });
-    assert.deepEqual(videoService.relayTarget(id, "hls"), { refuse: 503 });
+    assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_RUNNING);
+    assert.deepEqual(videoService.relayTarget(id, "hls"), NOT_RUNNING);
 
     const relay = fakeRelay({ status: async () => [] });
     const supervisor = new FakeSupervisor();
@@ -838,14 +841,102 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
     // so the snapshot relayTarget reads picks up "starting" without waiting
     // on a poll. publish() is private; reached the same way pollOnce() above is.
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(id, "whep"), { refuse: 503 }, "starting is not running either");
+    assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_RUNNING, "starting is not running either");
 
     supervisor.current = { state: "running", since: Date.now() };
+    await videoService.reconcileRelay();
     await (videoService as unknown as { publish(): Promise<void> }).publish();
     assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, path: `/${id}` });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
+  }
+});
+
+// A relay process starts with no paths at all (mediamtx.yml carries
+// `paths: {}`); each feed's path arrives with the first reconcile. Until it
+// does, the real v1.21.1 binary answers a WHEP offer 400 "path '<id>' is not
+// configured", which a screen reads as the relay refusing the feed's encoder
+// and falls back to HLS for — so the proxy must not forward there yet.
+test("relayTarget answers 503 for a running relay until a reconcile has handed it this feed, and again after a respawn", async () => {
+  const made = await videoService.addFeed({ name: "Stage left", source: { kind: "pull", url: "rtsp://192.0.2.62/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(fakeRelay(), supervisor);
+  const publish = () => (videoService as unknown as { publish(): Promise<void> }).publish();
+  const whep = { host: "127.0.0.1", port: 8889, path: `/${id}/whep` };
+  try {
+    await publish();
+    assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_GIVEN, "running, but not reconciled yet");
+
+    assert.equal(await videoService.reconcileRelay(), true);
+    assert.deepEqual(videoService.relayTarget(id, "whep"), whep);
+
+    supervisor.current = { state: "running", since: 2 };
+    supervisor.emit("status", supervisor.current); // a respawned process: no paths again
+    await publish();
+    assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_GIVEN, "the new process has not been reconciled");
+
+    assert.equal(await videoService.reconcileRelay(), true);
+    assert.deepEqual(videoService.relayTarget(id, "whep"), whep);
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a reconcile that finishes after a respawn does not count for the new process", async () => {
+  const made = await videoService.addFeed({ name: "Stage right", source: { kind: "pull", url: "rtsp://192.0.2.65/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let release: () => void = () => {};
+  const relay = fakeRelay({ reconcile: () => new Promise<void>((resolve) => (release = resolve)) });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  try {
+    const pending = videoService.reconcileRelay();
+    await new Promise((r) => setImmediate(r)); // into relay.reconcile()
+    supervisor.current = { state: "running", since: 2 };
+    supervisor.emit("status", supervisor.current); // the process it was talking to is gone
+    release();
+    await pending;
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_GIVEN);
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("relayTarget keeps answering 503 for a feed the last reconcile failed to hand the relay", async () => {
+  let fail = false;
+  const relay = fakeRelay({
+    reconcile: async () => {
+      if (fail) throw new Error("MediaMTX answered 500");
+    },
+  });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  const first = await videoService.addFeed({ name: "Choir", source: { kind: "pull", url: "rtsp://192.0.2.63/s", username: "" } });
+  assert.ok(first.ok);
+  const firstId = (first as { feed: { id: string } }).feed.id;
+  fail = true;
+  const second = await videoService.addFeed({ name: "Balcony two", source: { kind: "pull", url: "rtsp://192.0.2.64/s", username: "" } });
+  assert.ok(second.ok);
+  const secondId = (second as { feed: { id: string } }).feed.id;
+  try {
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` });
+    assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN);
+  } finally {
+    fail = false;
+    await videoService.detachRelay();
+    await videoService.removeFeed(firstId);
+    await videoService.removeFeed(secondId);
   }
 });
 
@@ -867,6 +958,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor, OLD_PORTS);
   try {
+    await videoService.reconcileRelay();
     await (videoService as unknown as { publish(): Promise<void> }).publish();
     assert.deepEqual(
       videoService.relayTarget(id, "hls"),

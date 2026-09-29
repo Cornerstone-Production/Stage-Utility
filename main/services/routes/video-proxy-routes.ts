@@ -308,7 +308,7 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
 
   const target = videoService.relayTarget(parsed.feedId, parsed.kind);
   if ("refuse" in target) {
-    error(res, target.refuse === 503 ? "The video relay is not running" : "Not found", target.refuse);
+    error(res, target.refuse === 503 ? target.error : "Not found", target.refuse);
     return;
   }
 

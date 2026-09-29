@@ -310,9 +310,28 @@ describe("relay not running", () => {
   });
 });
 
+describe("a running relay not yet reconciled", () => {
+  before(async () => {
+    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    await publish();
+  });
+  after(async () => {
+    await videoService.detachRelay();
+  });
+
+  test("503 without reaching the relay, which would answer 400 for a path it has not been given", async () => {
+    const before = received.length;
+    const res = await callRoute(videoProxyRoutes, `/video/${camId}/whep`, { method: "POST", raw: "v=0" });
+    assert.equal(res.status, 503);
+    assert.deepEqual(res.json, { error: "The video relay has not been given this feed yet" });
+    assert.equal(received.length, before, "nothing may reach the relay");
+  });
+});
+
 describe("once the relay is attached and running", () => {
   before(async () => {
     videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    await videoService.reconcileRelay();
     await publish();
   });
   after(async () => {
@@ -586,6 +605,7 @@ describe("once the relay is attached and running", () => {
 describe("a viewer leaving mid-hold", () => {
   before(async () => {
     videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    await videoService.reconcileRelay();
     await publish();
     proxyOutage.forget();
   });
@@ -626,6 +646,7 @@ describe("an unreachable relay", () => {
     await new Promise<void>((r) => probe.close(() => r()));
 
     videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+    await videoService.reconcileRelay();
     await publish();
     proxyOutage.forget();
   });
@@ -661,6 +682,7 @@ describe("an unreachable relay", () => {
 
       // Point back at the real fake upstream — the relay "answering again".
       videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+      await videoService.reconcileRelay();
       await publish();
       await new Promise((r) => setTimeout(r, 20)); // past the 1 ms settle window
 
@@ -677,6 +699,7 @@ describe("an unreachable relay", () => {
 describe("a relay that never answers", () => {
   before(async () => {
     videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    await videoService.reconcileRelay();
     await publish();
   });
   after(async () => {

@@ -91,6 +91,9 @@ export const PENDING_MARK_TTL_MS = 30_000;
  *  well before MediaMTX has actually opened its API — so a poll landing in
  *  that window failing is normal, not news, and logs nothing. */
 export const RELAY_BOOT_GRACE_MS = 10_000;
+/** relayTarget()'s two 503 refusals, answered by the proxy as they are. */
+const RELAY_NOT_RUNNING = "The video relay is not running";
+const RELAY_NOT_GIVEN_FEED = "The video relay has not been given this feed yet";
 
 /**
  * The slice of RelaySupervisor the service needs: an EventEmitter for its
@@ -305,6 +308,14 @@ class VideoService {
   /** Whether this relay process's API has answered anything yet — a poll or
    *  a reconcile. Reset with polledSinceRunning, on every status change. */
   private relayAnswered = false;
+  /** The feed ids the current relay process has been handed by a
+   *  successful reconcile. A process starts with no paths (mediamtx.yml
+   *  carries `paths: {}`), and until its first reconcile the real binary
+   *  answers a WHEP offer 400 "path '<id>' is not configured" — which a
+   *  screen reads as the relay refusing the feed's encoder. relayTarget()
+   *  refuses 503 for any feed not in here, a status a screen retries.
+   *  Emptied on every status change and detach, with relayAnswered. */
+  private reconciledFeedIds = new Set<string>();
 
   private pollTimer: NodeJS.Timeout | null = null;
 
@@ -640,6 +651,7 @@ class VideoService {
     this.relayNotAnswering = false;
     this.polledSinceRunning = false;
     this.relayAnswered = false;
+    this.reconciledFeedIds = new Set();
     this.versionAnnounced = false;
     // A reconcile or kick outage was about the relay just let go of; carried
     // into the next one it would swallow that relay's first failure as a
@@ -687,6 +699,7 @@ class VideoService {
     // yet, whatever the previous one answered.
     this.polledSinceRunning = false;
     this.relayAnswered = false;
+    this.reconciledFeedIds = new Set();
     if (status.state !== "running") this.lastPaths = new Map();
     void this.settleFeeds();
   }
@@ -1023,17 +1036,19 @@ class VideoService {
    * that needs a push feed whose OWN protocol is whip — a pull feed, or a
    * push feed on SRT/RTMP, has nothing listening for a WHIP offer). 503 only
    * once a feed and kind both check out: an unknown feed is never "the relay
-   * is down" even while it genuinely is.
+   * is down" even while it genuinely is. 503 as well while the running
+   * process has not yet been reconciled with this feed (reconciledFeedIds).
    */
   relayTarget(
     feedId: string,
     kind: "whep" | "whip" | "hls",
-  ): { host: "127.0.0.1"; port: number; path: string } | { refuse: 404 | 503 } {
+  ): { host: "127.0.0.1"; port: number; path: string } | { refuse: 404 } | { refuse: 503; error: string } {
     if (!FEED_ID_PATTERN.test(feedId)) return { refuse: 404 };
     const feed = this.snapshot.feeds.find((f) => f.id === feedId);
     if (!feed || (feed.source.kind !== "pull" && feed.source.kind !== "push")) return { refuse: 404 };
     if (kind === "whip" && !(feed.source.kind === "push" && feed.source.protocol === "whip")) return { refuse: 404 };
-    if (this.snapshot.relay.state !== "running") return { refuse: 503 };
+    if (this.snapshot.relay.state !== "running") return { refuse: 503, error: RELAY_NOT_RUNNING };
+    if (!this.reconciledFeedIds.has(feedId)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
     const { ports } = this.snapshot.relay;
     return kind === "hls"
       ? { host: "127.0.0.1", port: ports.hls, path: `/${feedId}` }
@@ -1194,9 +1209,17 @@ class VideoService {
    *  own comment for the single-flight/dirty chain this runs inside. */
   private async reconcileOnce(): Promise<boolean> {
     if (!this.relay || this.supervisor?.status().state !== "running") return true;
+    const generation = this.relayGeneration;
     try {
-      await this.relay.reconcile(await this.relayFeeds());
-      this.relayAnswered = true;
+      const feeds = await this.relayFeeds();
+      await this.relay.reconcile(feeds);
+      // Both are facts about the process that was current when this
+      // started; a respawn in between gets its own reconcile from the
+      // readiness poll.
+      if (generation === this.relayGeneration) {
+        this.reconciledFeedIds = new Set(feeds.map((f) => f.id));
+        this.relayAnswered = true;
+      }
       const decision = this.sparseOutage.ok("reconcile", Date.now());
       if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
       // The readiness poll (relay-lifecycle.ts's startReadinessPoll)
