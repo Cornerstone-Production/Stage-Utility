@@ -4,7 +4,7 @@ import * as net from "node:net";
 import { describe, it } from "node:test";
 
 import type { VideoPorts } from "../../types/video.js";
-import { busyPorts } from "./port-check.js";
+import { busyPorts, shortenHolder } from "./port-check.js";
 
 interface Held<T> {
   handle: T;
@@ -102,5 +102,40 @@ describe("busyPorts", () => {
 
     const afterRelease = await busyPorts(ports);
     assert.deepEqual(afterRelease, [], "both released ports must read as free");
+  });
+});
+
+// item 13 (findings-t15-r2.md): the Video feeds page showed the raw lsof/ss
+// listing line wholesale — "node    43580 hstreuber   12u  IPv6
+// 0x8c0d35a89313ccc8      0t0  TCP *:51935 (LISTEN)" — rather than "who is
+// using this port", which is all an operator needs from that page. Pure and
+// deterministic, unlike busyPorts() itself above (which depends on the
+// test host's own lsof/ss), so every shape is exercised without needing a
+// real process holding a real port in one particular tool's format.
+describe("shortenHolder", () => {
+  it("reduces an lsof line to the command and pid", () => {
+    assert.equal(
+      shortenHolder("node    43580 hstreuber   12u  IPv6 0x8c0d35a89313ccc8      0t0  TCP *:51935 (LISTEN)"),
+      "node (pid 43580)",
+    );
+  });
+
+  it("reduces an ss line to the command and pid", () => {
+    assert.equal(
+      shortenHolder('LISTEN 0 128 *:51935 *:*  users:(("node",pid=43580,fd=12))'),
+      "node (pid 43580)",
+    );
+  });
+
+  it("leaves describePortHolder's own 'another Stage Utility' sentence untouched", () => {
+    const sentence =
+      "another Stage Utility is already serving :51935 — version 1.24.0, pid 200, data directory /data. " +
+      "If that is not the service you expect, find what started it: " +
+      "systemctl list-unit-files --state=enabled (Linux) or launchctl list (macOS).";
+    assert.equal(shortenHolder(sentence), sentence);
+  });
+
+  it("falls back to the holder text UNCHANGED when neither shape parses", () => {
+    assert.equal(shortenHolder("could not determine which process holds it"), "could not determine which process holds it");
   });
 });

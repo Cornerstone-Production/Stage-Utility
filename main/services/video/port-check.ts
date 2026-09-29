@@ -59,10 +59,36 @@ function udpBusy(port: number, host: string): Promise<boolean> {
 }
 
 /**
+ * `describePortHolder()`'s own "another Stage Utility" sentence is already
+ * the right shape for an operator to read as-is. Its OTHER shape — whatever
+ * `rawPortHolder()` fell back to, `lsof`'s or `ss`'s raw listing line — is
+ * a diagnostic dump, not a sentence: "node    43580 hstreuber   12u  IPv6
+ * 0x8c0d35a89313ccc8      0t0  TCP *:51935 (LISTEN)" on the Video feeds
+ * page, where the operator needs "what is using this port", not every
+ * column `lsof`/`ss` prints. Reduced to "node (pid 43580)" when either
+ * shape parses; left exactly as `describePortHolder()` returned it
+ * otherwise — never worse than the raw line, only sometimes shorter.
+ */
+export function shortenHolder(holder: string): string {
+  if (holder.startsWith("another Stage Utility")) return holder;
+  // ss -lptn: "...users:(("node",pid=43580,fd=12))" — checked BEFORE lsof's
+  // shape below, which would otherwise match ss's own leading
+  // "LISTEN 0 128 ..." columns first (a word, then a number) and report the
+  // socket's state as if it were the holding program's name.
+  const ss = holder.match(/users:\(\("([^"]+)",pid=(\d+)/);
+  if (ss) return `${ss[1]} (pid ${ss[2]})`;
+  // lsof -nP -iTCP:<port> -sTCP:LISTEN: "COMMAND   PID USER   FD ...".
+  const lsof = holder.match(/^(\S+)\s+(\d+)\s/);
+  if (lsof) return `${lsof[1]} (pid ${lsof[2]})`;
+  return holder;
+}
+
+/**
  * Every one of the relay's six ports that is already taken, each with who is
  * holding it (`describePortHolder`, the same lookup `/api/version` itself
- * uses). A port nobody is using is left out entirely — the caller only ever
- * wants the ones that are a problem.
+ * uses, shortened to a program and a pid — see `shortenHolder`). A port
+ * nobody is using is left out entirely — the caller only ever wants the ones
+ * that are a problem.
  */
 export async function busyPorts(ports: VideoPorts): Promise<BusyPort[]> {
   const specs = specsFor(ports);
@@ -70,7 +96,7 @@ export async function busyPorts(ports: VideoPorts): Promise<BusyPort[]> {
     specs.map(async (spec): Promise<BusyPort | null> => {
       const busy = spec.proto === "tcp" ? await tcpBusy(spec.port, spec.host) : await udpBusy(spec.port, spec.host);
       if (!busy) return null;
-      return { port: spec.port, proto: spec.proto, holder: await describePortHolder(spec.port) };
+      return { port: spec.port, proto: spec.proto, holder: shortenHolder(await describePortHolder(spec.port)) };
     }),
   );
   return results.filter((r): r is BusyPort => r !== null);
