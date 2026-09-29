@@ -21,6 +21,7 @@ import { test, type TestContext } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
 import { fakeRelay } from "../fixtures/fake-relay.js";
+import { addRelayFeed, report, settle, settleUntil } from "../fixtures/video-playback.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-screens-cache-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -31,7 +32,6 @@ const { addBroadcastListener } = await import("../broadcaster.js");
 const { WINDOW_MS, CLEAR_AFTER_MS } = await import("./playback-health.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 
-type VideoPlaybackReport = import("../../types/video.js").VideoPlaybackReport;
 type VideoState = import("../../types/video.js").VideoState;
 type RelayStatus = import("../../types/video.js").RelayStatus;
 type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
@@ -55,35 +55,6 @@ const frames: VideoState[] = [];
 addBroadcastListener((channel, payload) => {
   if (channel === "video:state") frames.push(payload as VideoState);
 });
-
-function report(overrides: Partial<VideoPlaybackReport> = {}): VideoPlaybackReport {
-  return { feedId: "feed-1", via: "webrtc", decoded: 1000, dropped: 0, stalls: 0, width: 1920, height: 1080, ...overrides };
-}
-
-async function addRelayFeed(name: string): Promise<string> {
-  const made = await videoService.addFeed({ name, source: { kind: "external", url: "https://relay.example/whep" } });
-  assert.ok(made.ok, "expected the fixture feed to be added");
-  return (made as { feed: { id: string } }).feed.id;
-}
-
-/** See video-service-playback-health.test.ts's own copy for why this is
- *  iteration-bounded rather than Date.now()-bounded. */
-async function settle(iterations = 20): Promise<void> {
-  for (let i = 0; i < iterations; i++) await new Promise((resolve) => setImmediate(resolve));
-}
-
-/**
- * Waits until `done()` holds, or fails after 5 s of wall-clock time. A
- * heartbeat's publish runs fire-and-forget behind real file reads (the relay
- * binary and archive checks in state()), so a fixed number of turns can end
- * before it lands under load, and a frame count read then is short by one.
- * performance.now(), not Date.now(): several tests here fake Date.
- */
-async function settleUntil(done: () => boolean, what: string): Promise<void> {
-  const deadline = performance.now() + 5_000;
-  while (!done() && performance.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(done(), `timed out waiting for ${what}`);
-}
 
 const pollOnce = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
 

@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
+import { addRelayFeed, report, settle, settleUntil } from "../fixtures/video-playback.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-playback-health-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -26,7 +27,6 @@ const { videoService } = await import("./video-service.js");
 const { stageController } = await import("../stage-controller.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 
-type VideoPlaybackReport = import("../../types/video.js").VideoPlaybackReport;
 type VideoState = import("../../types/video.js").VideoState;
 
 // The one output stageController starts with, before any load() — see its
@@ -40,42 +40,6 @@ const frames: VideoState[] = [];
 addBroadcastListener((channel, payload) => {
   if (channel === "video:state") frames.push(payload as VideoState);
 });
-
-function report(overrides: Partial<VideoPlaybackReport> = {}): VideoPlaybackReport {
-  return { feedId: "feed-1", via: "webrtc", decoded: 1000, dropped: 0, stalls: 0, width: 1920, height: 1080, ...overrides };
-}
-
-async function addRelayFeed(name: string): Promise<string> {
-  const made = await videoService.addFeed({ name, source: { kind: "external", url: "https://relay.example/whep" } });
-  assert.ok(made.ok, "expected the fixture feed to be added");
-  return (made as { feed: { id: string } }).feed.id;
-}
-
-/**
- * recordPlaybackReports() calls publish() fire-and-forget (see
- * setPreAttachStatus's own test above this one in video-service.test.ts for
- * the same shape) — real feed-store/relay-file reads sit inside it, so a
- * caller must let a real turn of the event loop happen before reading
- * `frames` or a captured log line. Iteration-bounded, not wall-clock-bounded:
- * several tests below mock Date itself to jump a full minute in zero real
- * time, and a `Date.now()`-based deadline would never advance under that.
- */
-async function settle(iterations = 20): Promise<void> {
-  for (let i = 0; i < iterations; i++) await new Promise((resolve) => setImmediate(resolve));
-}
-
-/**
- * Waits until `done()` holds, or fails after 5 s of wall-clock time. A
- * heartbeat's publish runs fire-and-forget behind real file reads (the relay
- * binary and archive checks in state()), so a fixed number of turns can end
- * before it lands under load, and a frame count read then is short by one.
- * performance.now(), not Date.now(): several tests here fake Date.
- */
-async function settleUntil(done: () => boolean, what: string): Promise<void> {
-  const deadline = performance.now() + 5_000;
-  while (!done() && performance.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(done(), `timed out waiting for ${what}`);
-}
 
 test("recordPlaybackReports drops a report for an unknown feed id on its own, without refusing the rest of the heartbeat", async () => {
   const id = await addRelayFeed("Known feed");

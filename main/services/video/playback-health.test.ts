@@ -18,13 +18,7 @@ import {
   STALLS_IN_WINDOW,
   WINDOW_MS,
 } from "./playback-health.js";
-import type { VideoPlaybackReport } from "../../types/video.js";
-
-/** A single report, everything defaulted to "nothing wrong" — every test
- *  overrides only what it is testing. */
-function report(overrides: Partial<VideoPlaybackReport> = {}): VideoPlaybackReport {
-  return { feedId: "feed-1", via: "webrtc", decoded: 100, dropped: 0, stalls: 0, width: 1920, height: 1080, ...overrides };
-}
+import { report } from "../fixtures/video-playback.js";
 
 test("the constants this window is built from", () => {
   assert.equal(WINDOW_MS, 60_000);
