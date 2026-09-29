@@ -854,12 +854,11 @@ test("item 6: a makeRelay that keeps throwing backs off between retries, not a f
   // Every supervisor created was also stopped — none left orphaned.
   for (const s of supervisors) assert.equal(s.stopCalls, 1);
 
-  // The backoff schedule this class uses is 1, 2, 4, 8, 16, 30 (capped at
-  // 60 s but restartDelayMs caps at 60 — 30 s of ticking only reaches the
-  // 16 s rung), so at most 5 attempts land inside 30 s: at 1, 3, 7, 15,
-  // and 31 s (the last just past this window). A flat 1 s floor would
-  // instead produce one new supervisor on very nearly every second —
-  // roughly 30 over the same window.
+  // The backoff between attempts is 1, 2, 4, 8, 16, 32 s, then 60 s
+  // (restartDelayMs), so at most 5 attempts land inside 30 s: at once, then
+  // at 1, 3, 7 and 15 s, the next not until 31 s. A flat 1 s floor would
+  // instead make a new supervisor very nearly every second — about 30 over
+  // the same window.
   assert.ok(
     supervisors.length <= 6,
     `expected at most ~5 attempts across 30 s of backoff, got ${supervisors.length} — the retry never backed off`,

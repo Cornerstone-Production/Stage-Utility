@@ -1,19 +1,13 @@
-// item 4 (findings-t15-r2.md): a failed enable/disable used to toast
-// "Failed to enable: Error: <message>" — String(err) on a real Error
-// carries its own "Error: " prefix, and the message named no integration at
-// all, so two failing cards read identically. Drives the REAL card grid
-// against a fake server that fails the one POST, and reads the actual
-// rendered toast text — never a unit test of toggleIntegration() in
-// isolation, since the bug was in what the operator's screen shows.
+// A failed enable or disable names the integration and the server's own
+// message — never String(err)'s "Error: " prefix, and never words two
+// failing cards would share. Drives the real card grid against a fake
+// server that fails the one POST, and reads the rendered toast text: the
+// bug was in what the operator's screen shows, not in a helper.
 //
-// The 50 "not wrapped in act" warnings this file used to print were my own
-// bug, not an unrelated jsdom quirk (item 4, findings-t15-r3.md, correcting
-// the paragraph that used to be here): integrationCard() polled the mount
-// for the card BEFORE actIdle() had let the initial `integrations:list`
-// query settle — every sibling file (integration-dialog.test.tsx,
-// integrations-visibility.test.tsx) calls actIdle() first, then
-// integrationCard(); this one had the two calls the wrong way round.
-// Swapped, and the file is clean.
+// actIdle() comes before integrationCard(), as in integration-dialog.test.tsx:
+// the card is looked for only once the initial integrations:list query has
+// settled. Looked for first, every update from that query landed outside
+// act() and warned.
 
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
