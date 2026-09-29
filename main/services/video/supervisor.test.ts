@@ -553,6 +553,10 @@ describe("RelaySupervisor", () => {
     });
     let result: unknown = null;
     void sup.stopLeftover("/opt/mediamtx/mediamtx").then((r) => (result = r));
+    // relay.pid is read from the real disk, which under load takes more than
+    // a turn or two; a tick before the first wait is armed would be lost.
+    for (let i = 0; i < 10_000 && killed.length === 0; i++) await settle();
+    assert.deepEqual(killed, ["SIGTERM"]);
     for (let i = 0; i < 49; i++) {
       await settle();
       t.mock.timers.tick(100);
