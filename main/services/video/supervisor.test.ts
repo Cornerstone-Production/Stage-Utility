@@ -595,7 +595,7 @@ describe("RelaySupervisor", () => {
     enableClock(t);
     const { spawnImpl, children } = fakeSpawn();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
-    const logSpy = t.mock.method(console, "log");
+    const logs = captureConsole(t, "log");
 
     await sup.start("mediamtx", "config.yml");
     children[0].stderr.write("ERR: boom\n");
@@ -604,9 +604,7 @@ describe("RelaySupervisor", () => {
     t.mock.timers.tick(1000); // respawn
     t.mock.timers.tick(60_000); // the healthy mark
 
-    const recovered = logSpy.mock.calls
-      .map((call) => call.arguments[0] as string)
-      .filter((line) => line.startsWith("[video] relay recovered"));
+    const recovered = logs.filter((line) => line.startsWith("[video] relay recovered"));
     assert.equal(recovered.length, 1, `expected one recovery line, got: ${JSON.stringify(recovered)}`);
     assert.match(recovered[0], /after 1 failed attempt/);
   });
@@ -767,7 +765,7 @@ describe("RelaySupervisor", () => {
       await fs.writeFile(path.join(relayDir(), "relay.pid"), String(goneP), "utf8");
 
       const { spawnImpl, children } = fakeSpawn();
-      const warnSpy = t.mock.method(console, "warn");
+      const warned = captureConsole(t, "warn");
       let signalled = false;
       const sup = new RelaySupervisor({
         spawnImpl,
@@ -784,7 +782,7 @@ describe("RelaySupervisor", () => {
       await sup.start("/opt/mediamtx/mediamtx", "config.yml");
 
       assert.equal(children.length, 1, "still starts its own relay");
-      assert.deepEqual(warnSpy.mock.calls, [], "ESRCH is the expected case and must stay quiet");
+      assert.deepEqual(warned, [], "ESRCH is the expected case and must stay quiet");
     });
 
     it("a non-ESRCH failure to kill a leftover is reported, not swallowed", async (t) => {
@@ -793,7 +791,7 @@ describe("RelaySupervisor", () => {
       await fs.writeFile(path.join(relayDir(), "relay.pid"), "4242", "utf8");
 
       const { spawnImpl, children } = fakeSpawn();
-      const warnSpy = t.mock.method(console, "warn");
+      const warned = captureConsole(t, "warn");
       const sup = new RelaySupervisor({
         spawnImpl,
         psImpl: async () => "/opt/mediamtx/mediamtx config.yml",
@@ -807,7 +805,6 @@ describe("RelaySupervisor", () => {
       await sup.start("/opt/mediamtx/mediamtx", "config.yml");
 
       assert.equal(children.length, 1, "still starts its own relay despite the leftover it could not stop");
-      const warned = warnSpy.mock.calls.map((c) => c.arguments[0] as string);
       assert.ok(
         warned.some((line) => line.includes("pid 4242") && line.includes("would not stop")),
         `expected a could-not-stop warning naming the leftover, got: ${JSON.stringify(warned)}`,
@@ -824,13 +821,12 @@ describe("RelaySupervisor", () => {
       await fs.mkdir(path.join(relayDir(), "relay.pid"), { recursive: true });
 
       const { spawnImpl, children } = fakeSpawn();
-      const warnSpy = t.mock.method(console, "warn");
+      const warned = captureConsole(t, "warn");
       const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
 
       await sup.start("mediamtx", "config.yml");
 
       assert.equal(children.length, 1, "still starts its own relay despite the pidfile trouble");
-      const warned = warnSpy.mock.calls.map((c) => c.arguments[0] as string);
       assert.ok(
         warned.some((line) => line.startsWith("[video] could not read relay.pid:")),
         `expected a could-not-read warning, got: ${JSON.stringify(warned)}`,

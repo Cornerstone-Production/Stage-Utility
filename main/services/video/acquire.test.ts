@@ -8,6 +8,7 @@ import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 
 import type { MediaMtxAsset } from "./mediamtx-pin.js";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -123,8 +124,7 @@ test("a checksum mismatch retried three times never logs from inside ensureBinar
   const bytes = await fs.readFile(archivePath);
   const wrongSha = "0".repeat(64);
   const assets = new Map([[KEY, asset("mediamtx-mismatch-repeat.tar.gz", wrongSha)]]);
-  const warns: string[] = [];
-  t.mock.method(console, "warn", (msg: string) => warns.push(msg));
+  const warns = captureConsole(t, "warn");
 
   for (let i = 0; i < 3; i++) {
     const result = await ensureBinary({

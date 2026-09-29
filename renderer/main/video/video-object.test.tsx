@@ -20,6 +20,7 @@ import { act } from "react";
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 import { installFakeHls } from "../../test-fixtures/fake-hls.js";
+import { captureConsole } from "../../../main/services/fixtures/capture-console.js";
 
 const teardown = installRenderDom();
 
@@ -326,13 +327,12 @@ test("an embed feed renders an iframe with mute=1 and no <video>; off screen rem
   }
 });
 
-test("a render error inside the player shows the can't-play state, and a sibling still renders", async () => {
+test("a render error inside the player shows the can't-play state, and a sibling still renders", async (t) => {
   // A deliberately malformed feed: `play` is null, so reading `feed.play.via`
   // during render throws — a REAL render-phase error, not a simulated one.
   const broken = { ...makeFeed(), play: null as unknown as VideoFeedView["play"] };
   const g = stubGlobals(makeState([broken]));
-  const consoleError = console.error;
-  console.error = () => {}; // React logs the caught error; expected noise, not a failure
+  captureConsole(t, "error"); // React logs the caught error; expected noise, not a failure
   try {
     render(
       React.createElement(
@@ -348,7 +348,6 @@ test("a render error inside the player shows the can't-play state, and a sibling
     assert.equal(!!screen.queryByText("sibling-marker"), true, "a sibling must keep rendering beside the failed widget");
     assert.equal(!!screen.queryByText("This screen can't play video"), true, "expected the can't-play fallback");
   } finally {
-    console.error = consoleError;
     g.restore();
   }
 });
