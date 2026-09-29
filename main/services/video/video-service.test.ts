@@ -1559,6 +1559,45 @@ test("a status event to a non-running state clears lastPaths immediately — a d
   }
 });
 
+// The moment the relay's process exits, every client is told it is failing:
+// the published state goes failing at the exit itself, not at the next poll
+// (which nothing may be running), and "running" again only once the
+// respawn after the backoff has actually happened. Measured on a real relay
+// killed with SIGKILL: failing at 0.01 s, running at 1.09 s.
+test("against a real supervisor: an exit publishes failing at once, and running only with the respawn", async () => {
+  const children: FakeChild[] = [];
+  const sup = new RelaySupervisor({
+    spawnImpl: () => {
+      const c = new FakeChild();
+      children.push(c);
+      return c;
+    },
+    psImpl: async () => null,
+  });
+  const { addBroadcastListener } = await import("../broadcaster.js");
+  const published: string[] = [];
+  let recording = false;
+  addBroadcastListener((channel, payload) => {
+    if (recording && channel === "video:state") published.push((payload as { relay: { state: string } }).relay.state);
+  });
+  videoPollDeps.inDemand = () => false;
+  attach(fakeRelay(async () => []), sup);
+  try {
+    await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
+    await new Promise((r) => setTimeout(r, 20));
+    recording = true;
+    children[0]!.emit("exit", null, "SIGKILL");
+    await new Promise((r) => setTimeout(r, 50)); // well inside the 1 s backoff
+    assert.deepEqual(published, ["failing"], "the exit must reach every client before anything else happens");
+    await new Promise((r) => setTimeout(r, 1100)); // the respawn
+    assert.deepEqual(published, ["failing", "running"]);
+  } finally {
+    recording = false;
+    await videoService.detachRelay();
+    await sup.stop();
+  }
+});
+
 test("against a real supervisor: the not-answering flag does not carry over into a freshly respawned process", async () => {
   const made = await videoService.addFeed({ name: "Respawn cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
