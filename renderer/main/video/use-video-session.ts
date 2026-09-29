@@ -18,13 +18,14 @@
 //    backoff counter across attempts, runs the probe while that verdict
 //    stands, and turns each attempt's outcome into render state.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
-import type { VideoFeedView } from "@main/types/video";
+import type { VideoFeedView, VideoPlaybackReport } from "@main/types/video";
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
 import { browserCaps, choosePlayback } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
+import { createSampler, type PlaybackSampler } from "./playback-stats";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
 
 /**
@@ -95,6 +96,15 @@ interface AttemptCallbacks {
    * path back.
    */
   onDropped: (reason: string) => void;
+  /**
+   * Fired once, the moment THIS attempt's own session exists — the WHEP
+   * answer applied, or the HLS session attached — never for probeWebrtc's
+   * separate, detached session below, which has no AttemptCallbacks at all
+   * and so can never reach this. Lets a caller build a playback-stats
+   * sampler against exactly the session whose picture is about to be on
+   * screen, with no notion of "probe" needed here to get it right.
+   */
+  onSession?: (active: { method: "webrtc"; pc: RTCPeerConnection } | { method: "hls" }) => void;
 }
 
 export interface PlaybackAttempt {
@@ -273,6 +283,7 @@ export function startPlaybackAttempt(
           return;
         }
         session = { kind: "webrtc", s: whep };
+        cb.onSession?.({ method: "webrtc", pc: whep.pc });
         clearTimeout(connectTimer);
         watchForFirstFrame();
         // A second, independent window: the handshake succeeded, so THIS
@@ -365,6 +376,7 @@ export function startPlaybackAttempt(
           return;
         }
         session = { kind: "hls", s: hls };
+        cb.onSession?.({ method: "hls" });
         watchForFirstFrame();
         firstFrameDeadline(HLS_FIRST_FRAME_TIMEOUT_MS);
         video.addEventListener(
@@ -551,6 +563,13 @@ export interface VideoSessionResult {
   /** Seconds behind live, while `phase === "delayed"`; null otherwise or
    *  until hls.js/native HLS has reported one. */
   latency: number | null;
+  /** The attempt actually on screen's current playback report, or null while
+   *  no attempt has a session yet (or none ever will — an embed feed's
+   *  verdict never reaches the attempt effect at all). A STABLE function
+   *  reference for the whole life of this hook instance, safe as a
+   *  `registerPlayback` callback with no dependency-array churn of its own —
+   *  it always reads whichever sampler the LATEST attempt installed. */
+  sample: () => Promise<VideoPlaybackReport | null>;
 }
 
 export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
@@ -579,6 +598,12 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // alongside `retryToken` would do. Reset only once playback has held for
   // RESET_AFTER_PLAYING_MS, never on a first frame.
   const attemptCountRef = useRef(0);
+  // The on-screen attempt's own stats sampler — set once its session exists,
+  // cleared and stopped when that attempt ends. Never set for `probeWebrtc`'s
+  // session (see AttemptCallbacks.onSession), so a probe can never be
+  // sampled without this file having to know what "probe" means.
+  const samplerRef = useRef<PlaybackSampler | null>(null);
+  const sample = useCallback((): Promise<VideoPlaybackReport | null> => samplerRef.current?.sample() ?? Promise.resolve(null), []);
   // The failing streak, for the log: its first failure, a reminder at most
   // every STREAK_REMIND_MS, and its recovery — never a line per retry, which
   // from one widget had /api/log/client answering 429 within seconds. The
@@ -727,6 +752,14 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           }
         },
         onLatency: setLatency,
+        onSession: (activeSession) => {
+          // A fresh sampler for THIS session, whatever the last one was —
+          // every counter restarts at zero rather than carrying a prior
+          // session's (or a prior method's) baseline across the swap.
+          samplerRef.current?.stop();
+          samplerRef.current =
+            activeSession.method === "webrtc" ? createSampler(key, "webrtc", video, activeSession.pc) : createSampler(key, "hls", video);
+        },
         onWebrtcUnusable: (reason) => {
           if (!webrtcOutageRef.current) onLogRef.current?.(`WebRTC unusable for "${name}" on this screen: ${reason}`);
           webrtcOutageRef.current = true;
@@ -752,8 +785,10 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       clearTimeout(retryTimer);
       clearTimeout(heldTimer);
       attemptHandle.stop();
+      samplerRef.current?.stop();
+      samplerRef.current = null;
     };
   }, [active, video, retryToken, attemptChoice, feedRef, onLogRef]);
 
-  return { phase, embedUrl, latency };
+  return { phase, embedUrl, latency, sample };
 }

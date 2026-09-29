@@ -1419,3 +1419,124 @@ test("an HLS attempt stopped while hls.js is still loading destroys the instance
     undoHls();
   }
 });
+
+// ── sample(): the hook's own stats report ─────────────────────────────────
+//
+// Whichever session the WIDGET is showing, never a probe's — a probe plays
+// into an element nobody mounts and never fires AttemptCallbacks.onSession at
+// all, so it never installs a sampler in the first place. Proven below by
+// driving the same probe/adopt sequence the tests above use and checking
+// `sample()`'s `via` through it, not by asserting anything about probeWebrtc
+// directly.
+
+test("sample() resolves null before any session exists yet", async () => {
+  const g = stubGlobals("hang");
+  const video = new FakeVideo();
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
+    );
+    assert.equal(await result.current.sample(), null, "the handshake has not even been sent yet");
+  } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+test("sample() reports a live webrtc session's stats: feedId, via, deltas and current frame size", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    const pc = FakePeerConnection.instances.at(-1)!;
+    act(() => {
+      pc.setConnectionState("connected");
+      video.fireFrame();
+    });
+    assert.equal(result.current.phase, "live");
+
+    pc.framesDecoded = 30;
+    pc.framesDropped = 1;
+    pc.frameWidth = 1280;
+    pc.frameHeight = 720;
+    const first = await result.current.sample();
+    assert.deepEqual(first, { feedId: "cam", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720 });
+
+    pc.framesDecoded = 90;
+    pc.framesDropped = 2;
+    const second = await result.current.sample();
+    assert.deepEqual(
+      second,
+      { feedId: "cam", via: "webrtc", decoded: 60, dropped: 1, stalls: 0, width: 1280, height: 720 },
+      "expected the delta since the FIRST sample, not the running total",
+    );
+  } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+test("a probe beside a live HLS picture is never sampled: sample() stays via 'hls' through the whole probing window, and flips to 'webrtc' with fresh counters only once adopted", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed")); // the first POST refuses (falls back to HLS); the probe's own POST must succeed to be adoptable
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const probeStream = { id: "probe-stream" };
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { result } = renderRelaySession(video, logs);
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame()); // HLS live: "delayed"
+    assert.equal(result.current.phase, "delayed");
+
+    // HLS's own sampler is installed; give it something to report so a
+    // regression that stops sampling HLS entirely would also show here.
+    video.decodedFrames = 12;
+    const beforeProbe = await result.current.sample();
+    assert.equal(beforeProbe?.via, "hls");
+    assert.equal(beforeProbe?.decoded, 12);
+
+    FakePeerConnection.trackStream = probeStream;
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS); // starts the probe
+      await flush();
+    });
+    const probe = FakePeerConnection.instances.at(-1)!;
+    // The probe's own peer connection reports frames a webrtc sampler would
+    // read as huge counts — proof, if `sample()` ever reads THIS pc while it
+    // is still only a probe, that the guard failed.
+    probe.framesDecoded = 9999;
+    probe.framesDropped = 500;
+    assert.equal((await result.current.sample())?.via, "hls", "a running probe must not be sampled");
+    assert.equal((await result.current.sample())?.decoded, 0, "the probe's huge counters must not leak into the HLS report");
+
+    // The probe's frames arrive: it is adopted, and the picture moves to it.
+    probe.framesReceived = 4;
+    await act(async () => {
+      mock.timers.tick(PROBE_POLL_MS);
+      await flush();
+      await flush();
+    });
+    assert.equal(video.srcObject, probeStream, "expected the picture moved onto the probe's stream");
+
+    // The adopted session is a NEW attempt: a fresh sampler, counters at
+    // zero — not the huge numbers the probe was already carrying.
+    const afterAdopt = await result.current.sample();
+    assert.equal(afterAdopt?.via, "webrtc", "expected the swap to webrtc reflected in the report");
+    assert.equal(afterAdopt?.decoded, 9999, "the first read of a NEW sampler is its own baseline, not a delta against nothing");
+    const nextSample = await result.current.sample();
+    assert.equal(nextSample?.decoded, 0, "expected the SECOND read to be a delta since the first, not the running total again");
+  } finally {
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
