@@ -52,7 +52,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
 class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
   current: SupervisorStatus = { state: "off" };
   ver: string | null = null;
-  startCalls: { binary: string; configPath: string }[] = [];
+  startCalls: { binary: string; configPath: string; beforeRespawn?: () => Promise<void> }[] = [];
   stopCalls = 0;
   /** item 6/7: one real supervisor.stop() (or, for item 7, makeRelay/
    *  attachRelay) throwing is not a hypothetical — a leftover-kill EPERM,
@@ -69,8 +69,8 @@ class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
     this.current = s;
     this.emit("status", s);
   }
-  async start(binary: string, configPath: string): Promise<void> {
-    this.startCalls.push({ binary, configPath });
+  async start(binary: string, configPath: string, beforeRespawn?: () => Promise<void>): Promise<void> {
+    this.startCalls.push({ binary, configPath, beforeRespawn });
     this.setStatus({ state: "running", since: Date.now() });
   }
   async stop(): Promise<void> {
@@ -321,6 +321,30 @@ test("every start makes a fresh API password: in the config's API user, and hand
   const second = await apiUserIn(supervisors[1]!.startCalls[0]!.configPath);
   assert.equal(second, handed[1]);
   assert.notEqual(second, first, "a new relay start must not reuse the last start's API password");
+});
+
+test("the supervisor is handed a rewrite for every respawn: the feeds and push passwords as they are by then, the same API password", async () => {
+  const { deps, supervisors } = makeDeps();
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1); // push feed f0
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  const { configPath, beforeRespawn } = supervisors[0]!.startCalls[0]!;
+  assert.ok(beforeRespawn, "start() must be handed a way to rewrite the config before a respawn");
+  type Config = { authInternalUsers: { user: string; pass: string; permissions: { action: string; path: string }[] }[] };
+  const read = async () => JSON.parse(await fs.readFile(configPath, "utf8")) as Config;
+  const pushPass = (c: Config) => c.authInternalUsers.find((u) => u.permissions.some((p) => p.action === "publish" && p.path === "f0"))?.pass;
+  const apiPass = (c: Config) => c.authInternalUsers.find((u) => u.permissions.some((p) => p.action === "api"))?.pass;
+  const before = await read();
+
+  const rotated = await videoService.newPushPassword("f0");
+  assert.ok(rotated);
+  await beforeRespawn();
+  const after = await read();
+  assert.equal(pushPass(after), rotated.password, "a respawn must start from the password rotated since the last start");
+  assert.notEqual(pushPass(after), pushPass(before));
+  assert.equal(apiPass(after), apiPass(before), "the API password stays the one the relay client was handed");
+  assert.equal((await fs.stat(configPath)).mode & 0o777, 0o600);
 });
 
 // ── PROBE D / item 3: a throw anywhere in the pre-supervisor steps must

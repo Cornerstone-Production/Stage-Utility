@@ -156,6 +156,76 @@ describe("RelaySupervisor", () => {
     assert.deepEqual(sup.status(), { state: "running", since: START + 1000 } satisfies SupervisorStatus);
   });
 
+  // A respawn must not start from whatever config the last start wrote: a
+  // push password rotated since is in the relay's memory, not in that file.
+  it("rewrites the config before every respawn, and only then spawns", async (t) => {
+    enableClock(t);
+    const order: string[] = [];
+    const { spawnImpl: inner, children } = fakeSpawn();
+    const spawnImpl: SpawnImpl = (binary, args) => {
+      order.push("spawn");
+      return inner(binary, args);
+    };
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml", async () => {
+      order.push("rewrite");
+    });
+    assert.deepEqual(order, ["spawn"], "the first spawn uses the config start() was handed");
+
+    children[0]!.emit("exit", 1, null);
+    t.mock.timers.tick(1000);
+    await settle();
+    assert.deepEqual(order, ["spawn", "rewrite", "spawn"]);
+    assert.equal(sup.status().state, "running");
+  });
+
+  it("a config that cannot be rewritten is a failed attempt: failing with why, no child, and retried", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    let rewrites = 0;
+    await sup.start("mediamtx", "config.yml", async () => {
+      rewrites++;
+      if (rewrites === 1) throw new Error("EACCES: permission denied");
+    });
+    children[0]!.emit("exit", 1, null);
+    t.mock.timers.tick(1000);
+    await settle();
+    assert.equal(children.length, 1, "no child may spawn from a config that was not rewritten");
+    assert.deepEqual(sup.status(), {
+      state: "failing",
+      reason: "could not rewrite its config: EACCES: permission denied",
+      retryAt: START + 1000 + 2000,
+      neverStarted: true,
+    } satisfies SupervisorStatus);
+
+    t.mock.timers.tick(2000);
+    await settle();
+    assert.equal(children.length, 2, "the next attempt rewrites and spawns");
+  });
+
+  it("stop() while a respawn's rewrite is in flight spawns nothing", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let rewrites = 0;
+    await sup.start("mediamtx", "config.yml", async () => {
+      rewrites++;
+      await held;
+    });
+    children[0]!.emit("exit", 1, null);
+    t.mock.timers.tick(1000);
+    await settle();
+    assert.equal(rewrites, 1);
+    await sup.stop();
+    release();
+    await settle();
+    assert.equal(children.length, 1, "a stopped supervisor spawned a child anyway");
+    assert.equal(sup.status().state, "off");
+  });
+
   // item 15 (findings-t15-r2.md): a bad binary path (ENOENT — the pinned
   // release moved or was never extracted) never reaches 'exit' at all —
   // node's own spawn() failed, and reports it ONLY through 'error'. An

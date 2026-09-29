@@ -173,6 +173,12 @@ export class RelaySupervisor extends EventEmitter {
 
   private binary = "";
   private configPath = "";
+  /** Rewrites the config before every respawn — see start(). */
+  private beforeRespawn: (() => Promise<void>) | null = null;
+  /** Bumped by every start() and stop(), so a respawn whose rewrite was
+   *  still in flight when either happened never spawns for a run that is
+   *  over. */
+  private run = 0;
   private child: SupervisedChild | null = null;
   private attempt = 0;
   private stopping = false;
@@ -256,10 +262,12 @@ export class RelaySupervisor extends EventEmitter {
    * swallowed: the caller asked this relay to start and gets to know it
    * didn't.
    */
-  async start(binary: string, configPath: string): Promise<void> {
+  async start(binary: string, configPath: string, beforeRespawn?: () => Promise<void>): Promise<void> {
     if (this.current.state !== "off") return;
     this.binary = binary;
     this.configPath = configPath;
+    this.beforeRespawn = beforeRespawn ?? null;
+    this.run++;
     this.stopping = false;
     this.attempt = 0;
     this.setStatus({ state: "starting" });
@@ -280,6 +288,7 @@ export class RelaySupervisor extends EventEmitter {
    *  mid-backoff wait with no live child, this resolves immediately. */
   async stop(): Promise<void> {
     this.stopping = true;
+    this.run++;
     this.clearRestartTimer();
     if (!this.child) {
       this.setStatus({ state: "off" });
@@ -476,6 +485,30 @@ export class RelaySupervisor extends EventEmitter {
         : `[video] relay exited (code ${code}): ${reason}; restarting in ${delay / 1000} s${result.note}`;
       console.warn(line);
     }
-    this.restartTimer = setTimeout(() => this.spawnChild(), delay);
+    this.restartTimer = setTimeout(() => void this.respawn(), delay);
+  }
+
+  /**
+   * The next attempt after an exit. The config is rewritten first when
+   * start() was handed a way to: the file on disk is whatever the last start
+   * wrote, and a push feed's password rotated since then lives only in the
+   * relay's memory, which the exit just lost. A rewrite that fails is a
+   * failed attempt like a spawn that fails: failing with why, and retried.
+   */
+  private async respawn(): Promise<void> {
+    this.restartTimer = null;
+    const rewrite = this.beforeRespawn;
+    if (!rewrite) {
+      this.spawnChild();
+      return;
+    }
+    const run = this.run;
+    try {
+      await rewrite();
+    } catch (err) {
+      if (run === this.run) this.onExit(null, `could not rewrite its config: ${errorMessage(err)}`);
+      return;
+    }
+    if (run === this.run) this.spawnChild();
   }
 }

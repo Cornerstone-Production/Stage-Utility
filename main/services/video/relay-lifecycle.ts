@@ -93,7 +93,9 @@ const DOWNLOAD_PROGRESS_THROTTLE_MS = 500;
  * real RelaySupervisor satisfies this structurally, same as RelaySupervisorLike.
  */
 export interface RelayLifecycleSupervisor extends RelaySupervisorLike {
-  start(binary: string, configPath: string): Promise<void>;
+  /** `beforeRespawn` rewrites the config before every respawn after an
+   *  exit — see supervisor.ts's respawn(). */
+  start(binary: string, configPath: string, beforeRespawn?: () => Promise<void>): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -121,6 +123,16 @@ function busyPortReason(busy: BusyPort[]): { reason: string; logReason: string }
     reason: `Port ${first.port} is in use by ${holderPhrase(first.holder, "lan")}.`,
     logReason: `Port ${first.port} is in use by ${holderPhrase(first.holder, "log")}.`,
   };
+}
+
+/** mediamtx.yml, from the feeds and push passwords as they stand now. 0o600,
+ *  as secrets.ts's own atomicWrite() calls write: it holds every push feed's
+ *  live publish password and the API password in the clear. */
+async function writeRelayConfig(configPath: string, ports: VideoPorts, apiPassword: string): Promise<void> {
+  const feeds = await videoService.relayFeeds();
+  const config = relayConfig({ ports, lanIp: getLanIp(), users: relayUsers(feeds, apiPassword) });
+  await fsp.mkdir(path.dirname(configPath), { recursive: true });
+  await atomicWrite(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 export class RelayLifecycle {
@@ -441,13 +453,9 @@ export class RelayLifecycle {
       // own client and nothing else (mediamtx-config.ts's apiUser).
       const apiPassword = randomBytes(24).toString("base64url");
       const configPath = path.join(relayDir(), "mediamtx.yml");
+      const writeConfig = () => writeRelayConfig(configPath, ports, apiPassword);
       try {
-        const feeds = await videoService.relayFeeds();
-        const config = relayConfig({ ports, lanIp: getLanIp(), users: relayUsers(feeds, apiPassword) });
-        await fsp.mkdir(relayDir(), { recursive: true });
-        // 0o600, as secrets.ts's own atomicWrite() calls write: the config
-        // holds every push feed's live publish password in the clear.
-        await atomicWrite(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+        await writeConfig();
       } catch (err) {
         this.failPreSupervisor(`could not write the relay's config: ${errorMessage(err)}`, "config-write", undefined, undefined);
         return;
@@ -457,7 +465,9 @@ export class RelayLifecycle {
       this.statusListener = (status) => this.onSupervisorStatus(status);
       supervisor.on("status", this.statusListener);
       try {
-        await supervisor.start(ensured.path, configPath);
+        // The same write before every respawn: this start's ports and API
+        // password, and the feeds and push passwords as they are by then.
+        await supervisor.start(ensured.path, configPath, writeConfig);
       } catch (err) {
         supervisor.off("status", this.statusListener);
         this.statusListener = null;
