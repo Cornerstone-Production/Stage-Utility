@@ -258,3 +258,34 @@ test("a rejection after stop() (the session closing on purpose) logs nothing", a
   assert.equal(await pending, null);
   assert.deepEqual(logs, [], "a rejection that lands after stop() must not be reported as an outage");
 });
+
+test("a successful read that lands after stop() logs no recovery for the ended attempt", async () => {
+  mock.timers.enable({ apis: ["Date"] });
+  const video = new FakeVideoEl() as unknown as HTMLVideoElement;
+  const logs: string[] = [];
+  let failing = true;
+  let settle!: () => void;
+  const pc = {
+    getStats: () => {
+      if (failing) return Promise.reject(new Error("connection error"));
+      return new Promise((resolve) => {
+        settle = () => resolve(new Map([["in", { type: "inbound-rtp", kind: "video", framesDecoded: 1, framesDropped: 0, frameWidth: 0, frameHeight: 0 }]]));
+      });
+    },
+  } as unknown as RTCPeerConnection;
+  const sampler = createSampler("feed-1", "Program (IMAG)", { via: "webrtc", pc }, video, (r) => logs.push(r));
+  try {
+    await sampler.sample();
+    assert.equal(logs.length, 1, "expected the one failure line");
+    failing = false;
+    mock.timers.tick(DEFAULT_SETTLE_MS);
+    const pending = sampler.sample();
+    sampler.stop(); // the attempt ends while the successful read is in flight
+    settle();
+    await pending;
+    assert.equal(logs.length, 1, "a recovery landing after stop() must not be logged");
+  } finally {
+    sampler.stop();
+    mock.timers.reset();
+  }
+});

@@ -146,8 +146,12 @@ export function createSampler(
         }
         return null;
       }
-      const d = statsOutage.ok("", Date.now());
-      if (d.log) onLog(`${name}: playback stats readable again${d.note}`);
+      // A read that lands after stop() belongs to an attempt that has ended:
+      // its recovery is not this widget's news either.
+      if (!stopped) {
+        const d = statsOutage.ok("", Date.now());
+        if (d.log) onLog(`${name}: playback stats readable again${d.note}`);
+      }
       if (!raw) return null;
       return {
         feedId,
