@@ -6,11 +6,11 @@
 // real video:state, never by reading source text or asserting on the copy
 // function in isolation.
 //
-// NOT covered here: the layout mockup shows the box sitting visually under
-// the live preview with the app's own spacing and warn-tint colour. jsdom
-// loads no stylesheet and reports every offsetHeight/getBoundingClientRect as
-// zero, so neither is observable here — driven in a browser instead, see
-// task-18-report.md.
+// NOT covered here, and not yet verified anywhere else either: the approved
+// mockup shows the box sitting visually under the live preview with the
+// app's own spacing and warn-tint colour. jsdom loads no stylesheet and
+// reports every offsetHeight/getBoundingClientRect as zero, so neither is
+// observable in this environment — a real browser has to confirm both.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND — node:assert inspects
 // `actual` to build its failure message, and inspecting a live jsdom element
@@ -203,6 +203,33 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
   await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
   assert.ok(screen.getByText(/This screen dropped 300 frames in the last minute\./), "the box must carry THIS pair's own numbers, not a placeholder");
   assert.equal(screen.queryByText(/Struggling with Stage PTZ/) === null, true, "a feed reporting clean on the same screen must get no box");
+});
+
+test("OutputsSection routes each screen's own struggles to its own card — a second, healthy screen shows no box for the first screen's struggle", async () => {
+  const OTHER: Output = { id: "display-2", name: "Right Mic Display", viewId: null };
+  stubVideoState(
+    videoState([
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now() },
+      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now() },
+    ]),
+  );
+  render(
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS })),
+  );
+
+  await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
+  // Exactly one box, not one per card — the same feed struggling on ONE
+  // screen must not paint a warning on a screen playing it cleanly.
+  assert.equal(screen.getAllByText(/Struggling with Program \(IMAG\)\./).length, 1, "only the struggling screen's own card gets a box");
+
+  // The name is an editable field's VALUE (an <input>), not a text node —
+  // getByDisplayValue is what matches that, not getByText. OutputRow's own
+  // root div carries this exact class, unique to a screen card's outer
+  // container (matched by a fixed classname substring rather than a guessed
+  // number of parentElement hops, which would break the moment the markup
+  // between the name field and the card root changes shape).
+  const rightCard = screen.getByDisplayValue("Right Mic Display").closest('[class*="rounded-xl"]')!;
+  assert.equal(within(rightCard).queryByText(/Struggling with/), null, "the healthy second screen's own card must carry no box at all");
 });
 
 test("OutputsSection shows no struggle box for any screen before video:state has hydrated struggling data", async () => {
