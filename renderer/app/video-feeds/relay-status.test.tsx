@@ -17,9 +17,14 @@ import { after, afterEach, describe, test } from "node:test";
 import { installDom } from "../../test-dom.js";
 
 const teardown = installDom();
+// item 8 (findings-t15-r3.md): sibling files set this so React act-wraps a
+// render and WARNS the moment an update escapes one — without it a file
+// reads as clean while updates land outside act, silently.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
 const { RelayPill, RelaySwitch, RelayDetailRow } = await import("./relay-status.js");
+const { assertAbsent } = await import("../../test-fixtures/integrations-harness.js");
 
 type RelayStatus = import("@main/types/video").RelayStatus;
 
@@ -96,7 +101,12 @@ describe("the off-state detail — item 6: enabled and binaryPresent both change
     // item 5: RelayDetailRow used to render its bordered/padded wrapper div
     // unconditionally, so this exact case (off, binary present) produced a
     // strip with nothing in it — a border and padding around empty space.
-    assert.equal(container.querySelector(".border-b"), null, "an empty strip is still rendering");
+    // A boolean, never the raw node: item 8 (findings-t15-r3.md) — passing
+    // a DOM Element straight to assert.equal() makes a FAILURE hang for
+    // ~23 s with no message at all, node's assert trying to diff/serialize
+    // a circular object (the element's own React fiber, attached as an
+    // expando property) rather than reporting anything useful.
+    assert.equal(container.querySelector(".border-b") !== null, false, "an empty strip is still rendering");
   });
 
   test("switched on with no relay feed yet: says the relay is waiting for one, never the download line", () => {
@@ -146,13 +156,17 @@ describe("the detail line, per other state", () => {
       { state: "failing", reason: "exit code 1", kind: "crash-loop", retryAt: null },
       { state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null },
     ] as RelayStatus[]) {
-      const { container, unmount } = renderRow(relay);
-      assert.equal(
-        container.querySelector("button")?.textContent?.includes("Change ports"),
-        false,
-        (relay as { kind: string }).kind,
+      renderRow(relay);
+      // NOT container.querySelector("button") — renderRow() puts the Radix
+      // switch's own <button role="switch"> first in the DOM, which never
+      // has "Change ports" text, so that check passed no matter what the
+      // rest of the row showed. queryByRole with the link's own name finds
+      // it specifically, wherever it sits.
+      assertAbsent(
+        screen.queryByRole("button", { name: "Change ports in Advanced" }),
+        `Change ports in Advanced showed for ${(relay as { kind: string }).kind}`,
       );
-      unmount();
+      cleanup();
     }
   });
 
@@ -162,9 +176,12 @@ describe("the detail line, per other state", () => {
       { state: "starting", version: null },
       { state: "downloading", receivedBytes: 1, totalBytes: 2 },
     ] as RelayStatus[]) {
-      const { container, unmount } = renderRow(relay);
-      assert.equal(container.querySelector("button")?.textContent?.includes("Change ports"), false, relay.state);
-      unmount();
+      renderRow(relay);
+      assertAbsent(
+        screen.queryByRole("button", { name: "Change ports in Advanced" }),
+        `Change ports in Advanced showed for ${relay.state}`,
+      );
+      cleanup();
     }
   });
 
