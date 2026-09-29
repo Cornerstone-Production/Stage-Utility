@@ -13,6 +13,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import { ErrorBoundary } from "../../components/ui/error-boundary-view";
 import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
+import type { RelayStatus } from "@main/types/video";
 import { isPreviewSlug } from "../preview-url";
 import { useOnScreen } from "./use-on-screen";
 import { useVideoSession } from "./use-video-session";
@@ -174,7 +175,7 @@ function VideoObjectBody({
               content. */}
           {!isEmbed && !showingPicture && !(phase === "offline" && config.whenOffline === "nothing") && (
             <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
-              {phase === "waiting" && <StateText big="Waiting for the source" small="Nothing is sending to this feed yet" />}
+              {phase === "waiting" && <StateText {...waitingText(state?.relay.state)} />}
               {phase === "connecting" && <ConnectingBody name={name} />}
               {phase === "offline" && (
                 <OfflineBody
@@ -205,6 +206,20 @@ function VideoObjectBody({
       )}
     </div>
   );
+}
+
+/**
+ * The Waiting cover's two lines. A relay feed waits either because the
+ * running relay has had nothing from a push feed's device yet, or because
+ * the relay itself is not running — and then nothing can send to any feed,
+ * so the cover says why instead: video switched off (the relay reads "off"
+ * whenever a relay feed exists and the switch is off), or the relay still
+ * coming up (starting, downloading, failing and retrying).
+ */
+function waitingText(relay: RelayStatus["state"] | undefined): { big: string; small: string } {
+  if (relay === "running") return { big: "Waiting for the source", small: "Nothing is sending to this feed yet" };
+  if (relay === "off") return { big: "Video is off", small: "Turn it on on the Video feeds page" };
+  return { big: "Waiting for the video relay", small: "It is starting up" };
 }
 
 function StateText({ big, small }: { big: string; small: string }) {

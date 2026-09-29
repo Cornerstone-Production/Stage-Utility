@@ -528,7 +528,19 @@ test("a feed id the loaded list does not name shows removed copy, not the come-b
 // on-demand source only once a reader connects, so for a pull feed standby is
 // the reason to connect, not a reason to wait. Only a push feed's "waiting"
 // means there is nothing to connect to — and nothing answers while the relay
-// itself is not running.
+// itself is not running, which the cover names instead of the source.
+
+/** The Waiting cover's two lines, or null when neither is on screen. */
+function waitingCover(): string | null {
+  for (const [big, small] of [
+    ["Waiting for the source", "Nothing is sending to this feed yet"],
+    ["Video is off", "Turn it on on the Video feeds page"],
+    ["Waiting for the video relay", "It is starting up"],
+  ] as const) {
+    if (screen.queryByText(big)) return screen.queryByText(small) ? `${big} / ${small}` : `${big} / (no second line)`;
+  }
+  return null;
+}
 
 const PULL_STANDBY = makeFeed({ status: { state: "standby" } });
 
@@ -546,22 +558,44 @@ test("a standby pull feed connects once on screen: the request is what starts th
   }
 });
 
-test("a standby pull feed while the relay is not running waits and asks for nothing", async () => {
+test("a standby pull feed with video switched off says video is off, and asks for nothing", async () => {
   const { g } = await renderOnScreen(PULL_STANDBY, {}, { state: "off" });
   try {
     assert.deepEqual(feedCalls(g.calls), [], "nothing answers a playback request while the relay is off");
-    assert.equal(!!screen.queryByText("Waiting for the source"), true, "expected the Waiting state");
+    assert.equal(waitingCover(), "Video is off / Turn it on on the Video feeds page");
   } finally {
     g.restore();
   }
 });
 
-test("a push feed waiting for its device shows Waiting and asks for nothing", async () => {
-  const push = makeFeed({ kind: "push", source: { kind: "push", protocol: "rtmp" }, status: { state: "waiting" } });
+const PUSH = { kind: "push", source: { kind: "push", protocol: "rtmp" } } as const;
+
+test("a relay feed while the relay is starting, downloading or failing waits for the relay, not the source", async () => {
+  const notRunning: VideoState["relay"][] = [
+    { state: "starting", version: null },
+    { state: "downloading", receivedBytes: 1, totalBytes: 2 },
+    { state: "failing", reason: "Port 1935 is in use by OBS Studio.", kind: "port-conflict", retryAt: null },
+  ];
+  for (const relay of notRunning) {
+    for (const feed of [PULL_STANDBY, makeFeed({ ...PUSH, status: { state: "standby" } })]) {
+      const { g, unmount } = await renderOnScreen(feed, {}, relay);
+      try {
+        assert.deepEqual(feedCalls(g.calls), [], `${relay.state}, ${feed.kind}: nothing answers while the relay is not running`);
+        assert.equal(waitingCover(), "Waiting for the video relay / It is starting up", `${relay.state}, ${feed.kind}`);
+      } finally {
+        unmount();
+        g.restore();
+      }
+    }
+  }
+});
+
+test("a push feed waiting for its device, with the relay running, shows Waiting for the source and asks for nothing", async () => {
+  const push = makeFeed({ ...PUSH, status: { state: "waiting" } });
   const { g } = await renderOnScreen(push);
   try {
     assert.deepEqual(feedCalls(g.calls), [], "a push feed's waiting means there is nothing to connect to yet");
-    assert.equal(!!screen.queryByText("Waiting for the source"), true, "expected the Waiting state");
+    assert.equal(waitingCover(), "Waiting for the source / Nothing is sending to this feed yet");
   } finally {
     g.restore();
   }
