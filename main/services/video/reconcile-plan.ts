@@ -80,13 +80,17 @@ export function pullSource(url: string, username: string, password: string | und
   return parsed.toString();
 }
 
+/** How long the relay dials an on-demand pull source before giving up on
+ *  that request. */
+export const PULL_START_TIMEOUT_MS = 10_000;
+
 /** The config MediaMTX needs for one feed's path. */
 export function pathConf(feed: RelayFeed): PathConf {
   if (feed.kind === "pull") {
     return {
       source: feed.source,
       sourceOnDemand: true,
-      sourceOnDemandStartTimeout: "10s",
+      sourceOnDemandStartTimeout: `${PULL_START_TIMEOUT_MS / 1000}s`,
       sourceOnDemandCloseAfter: "10s",
     };
   }

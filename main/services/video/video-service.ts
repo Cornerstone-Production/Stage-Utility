@@ -22,7 +22,7 @@ import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput } from "./feed-input.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { parsePorts } from "./ports.js";
-import { pullSource } from "./reconcile-plan.js";
+import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { RelayLogWatcher } from "./relay-log.js";
 import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
@@ -70,10 +70,13 @@ function generatePushPassword(): string {
 
 /** How often relay.status() is polled while something watches `video:state`. */
 export const STATUS_POLL_MS = 3000;
-/** How long a WHEP/HLS request against a pull feed keeps its status reading
- *  "offline" (rather than "standby") once the relay reports it not ready —
- *  see feed-state.ts's `recentlyRequested`. */
-export const RECENT_REQUEST_MS = 15_000;
+/** How long after a WHEP/HLS request a pull feed the relay still reports
+ *  not ready reads "offline" rather than "standby" — see feed-state.ts's
+ *  `recentlyRequested`. Counted from PULL_START_TIMEOUT_MS: until the relay's
+ *  own dial window has run out, a not-ready pull feed is still being dialled,
+ *  and reading it offline then tore down the very session whose request had
+ *  started the dial. */
+export const RECENT_REQUEST_MS = PULL_START_TIMEOUT_MS + 15_000;
 /** How long a PENDING B-frames mark (one whose feed was not yet ready when
  *  the close was logged) waits for a ready poll before it is forgotten.
  *  Without an expiry, a mark that never resolves would bind to whatever
@@ -378,14 +381,19 @@ class VideoService {
       relayUp,
       path: this.lastPaths.get(feedId),
       bframesMark: this.bframesMarks.get(feedId),
-      recentlyRequested: this.isRecentlyRequested(feedId),
+      recentlyRequested: this.dialRanOut(feedId),
       lastSeenAt: lastSeenAt(feedId),
     });
   }
 
-  private isRecentlyRequested(feedId: string): boolean {
+  /** Whether a request for this pull feed is old enough that the relay has
+   *  had its whole dial window, and recent enough to still count — see
+   *  RECENT_REQUEST_MS. */
+  private dialRanOut(feedId: string): boolean {
     const at = this.requestedAt.get(feedId);
-    return at !== undefined && Date.now() - at < RECENT_REQUEST_MS;
+    if (at === undefined) return false;
+    const age = Date.now() - at;
+    return age >= PULL_START_TIMEOUT_MS && age < RECENT_REQUEST_MS;
   }
 
   private play(feed: VideoFeed): FeedPlay {

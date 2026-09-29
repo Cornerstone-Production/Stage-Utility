@@ -10,9 +10,9 @@ import * as path from "node:path";
 // against this directory, never the default data folder.
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-service-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { videoService, SECRET_SLOT, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BOOT_GRACE_MS, videoPollDeps } = await import(
-  "./video-service.js"
-);
+const { videoService, SECRET_SLOT, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BOOT_GRACE_MS, RECENT_REQUEST_MS, videoPollDeps } =
+  await import("./video-service.js");
+const { PULL_START_TIMEOUT_MS } = await import("./reconcile-plan.js");
 const { secretsStore } = await import("../secrets.js");
 const { configSnapshot } = await import("../config-snapshot.js");
 const { videoSeenStore, SEEN_WRITE_INTERVAL_MS } = await import("./seen-store.js");
@@ -680,7 +680,38 @@ test("a relay that stops answering warns once per outage; recovery logs once aft
   }
 });
 
-test("markRequested moves a not-ready pull feed off standby — its only observable effect", async () => {
+test("a requested pull feed reads standby while the relay dials it, offline once the dial has run out, standby again later", async (t) => {
+  // The request is what starts the dial, and the first poll after it
+  // routinely still finds the path not ready. Reading that as offline told
+  // the widget whose request it was to give up on the session it had just
+  // opened.
+  const made = await videoService.addFeed({ name: "Dial cam", source: { kind: "pull", url: "rtsp://192.0.2.53/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const relay = fakeRelay(async () => [notReadyPath({ name: id })]);
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const stateOf = async () => (await videoService.state()).feeds.find((f) => f.id === id)?.status.state;
+  try {
+    videoService.markRequested(id);
+    await pollOnce();
+    assert.equal(await stateOf(), "standby", "a pull feed still inside the relay's dial window is being dialled, not offline");
+
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS);
+    await pollOnce();
+    assert.equal(await stateOf(), "offline", "not ready once the dial window has run out is offline");
+
+    t.mock.timers.tick(RECENT_REQUEST_MS - PULL_START_TIMEOUT_MS);
+    await pollOnce();
+    assert.equal(await stateOf(), "standby", "a request this old no longer counts");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("markRequested moves a not-ready pull feed off standby — its only observable effect", async (t) => {
   // Validation lives at the call site now (relayTarget(), which the proxy
   // calls before markRequested() — see video-proxy-routes.ts and its own
   // relayTarget-refusal tests): markRequested() itself is a trusted,
@@ -700,7 +731,9 @@ test("markRequested moves a not-ready pull feed off standby — its only observa
     let feed = (await videoService.state()).feeds.find((f) => f.id === id);
     assert.equal(feed?.status.state, "standby", "nothing has asked for this feed yet");
 
+    t.mock.timers.enable({ apis: ["Date"], now: 2_000_000 });
     videoService.markRequested(id);
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS);
     await pollOnce();
     feed = (await videoService.state()).feeds.find((f) => f.id === id);
     assert.equal(feed?.status.state, "offline", "a real request must move a not-ready pull feed off standby");
