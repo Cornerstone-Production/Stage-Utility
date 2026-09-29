@@ -187,15 +187,18 @@ class FakeHlsVideoEl extends EventTarget {
   }
 }
 
-test("hls: totalVideoFrames/droppedVideoFrames are deltas; videoWidth/Height are the current size", async () => {
+test("hls: decoded is totalVideoFrames less droppedVideoFrames, both as deltas; videoWidth/Height are the current size", async () => {
+  // totalVideoFrames counts dropped frames too; WebRTC's framesDecoded does
+  // not. Reported as-is, 5 dropped of 100 total would read 5% on HLS where
+  // the same picture over WebRTC reads 5 of 95.
   const video = new FakeHlsVideoEl(1280, 720, 50, 2);
   const sampler = createSampler("feed-2", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
   try {
     const first = await sampler.sample();
-    assert.deepEqual(first, { feedId: "feed-2", via: "hls", decoded: 50, dropped: 2, stalls: 0, width: 1280, height: 720 });
+    assert.deepEqual(first, { feedId: "feed-2", via: "hls", decoded: 48, dropped: 2, stalls: 0, width: 1280, height: 720 });
     video.set(140, 5, 1920, 1080);
     const second = await sampler.sample();
-    assert.deepEqual(second, { feedId: "feed-2", via: "hls", decoded: 90, dropped: 3, stalls: 0, width: 1920, height: 1080 });
+    assert.deepEqual(second, { feedId: "feed-2", via: "hls", decoded: 87, dropped: 3, stalls: 0, width: 1920, height: 1080 });
   } finally {
     sampler.stop();
   }

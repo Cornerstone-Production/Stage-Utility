@@ -72,12 +72,18 @@ async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null
   return found;
 }
 
+/** `decoded` is `totalVideoFrames` less `droppedVideoFrames`: the total counts
+ *  every frame the element received, dropped ones included, where WebRTC's
+ *  `framesDecoded` does not. Subtracting here makes `dropped / decoded` mean
+ *  the same on both, which the server's 5% line assumes. */
 function readHlsCounts(video: HTMLVideoElement): RawCounts {
   const v = video as HTMLVideoElement & {
     getVideoPlaybackQuality?: () => { totalVideoFrames: number; droppedVideoFrames: number };
   };
   const q = v.getVideoPlaybackQuality?.();
-  return { decoded: q?.totalVideoFrames ?? 0, dropped: q?.droppedVideoFrames ?? 0, width: video.videoWidth, height: video.videoHeight };
+  const total = q?.totalVideoFrames ?? 0;
+  const dropped = q?.droppedVideoFrames ?? 0;
+  return { decoded: total - dropped, dropped, width: video.videoWidth, height: video.videoHeight };
 }
 
 /** What a sampler reads from — `pc` only exists on the `webrtc` arm, so the
