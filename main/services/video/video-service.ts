@@ -294,6 +294,15 @@ class VideoService {
    *  answering a poll, "seen-store" for the seen store failing to write —
    *  different facts, each its own outage rather than one per poll. */
   private readonly pollOutage = new OutageLog();
+  /** "reconcile" and "push-kick": calls made on a feed change or a password
+   *  rotation, not on a timer, so a success is the next call, maybe hours
+   *  away. The default settle window waits for a success to hold, which
+   *  sparse calls never show, so a run never closed and the next outage's
+   *  first line was swallowed as a repeat. Here a success ends the run. */
+  private readonly sparseOutage = new OutageLog(0);
+  /** Whether this relay process's API has answered anything yet — a poll or
+   *  a reconcile. Reset with polledSinceRunning, on every status change. */
+  private relayAnswered = false;
 
   private pollTimer: NodeJS.Timeout | null = null;
 
@@ -628,7 +637,12 @@ class VideoService {
     this.statusListener = null;
     this.relayNotAnswering = false;
     this.polledSinceRunning = false;
+    this.relayAnswered = false;
     this.versionAnnounced = false;
+    // A reconcile or kick outage was about the relay just let go of; carried
+    // into the next one it would swallow that relay's first failure as a
+    // repeat, and close with a recovery line counting the old one's attempts.
+    this.sparseOutage.forget();
     this.stopPolling();
     // "No path" is exactly how feedState() reads a relay it cannot ask.
     this.lastPaths = new Map();
@@ -666,10 +680,11 @@ class VideoService {
   private handleStatusChange(status: SupervisorStatus): void {
     this.relayGeneration++;
     this.relayNotAnswering = false;
-    // R14i: a status change is always a DIFFERENT process's moment (even a
-    // crash-and-respawn on the same object) — nothing has polled THIS one
+    // A status change is always a different process's moment (even a
+    // crash-and-respawn on the same object) — nothing has polled this one
     // yet, whatever the previous one answered.
     this.polledSinceRunning = false;
+    this.relayAnswered = false;
     if (status.state !== "running") this.lastPaths = new Map();
     void this.settleFeeds();
   }
@@ -736,6 +751,7 @@ class VideoService {
       }
       if (this.relayGeneration !== generation) return; // see the comment in the catch branch above
       this.reportPollSuccess();
+      this.relayAnswered = true;
       // R14i: THIS generation has now genuinely heard from the relay once —
       // relayFeedStatus() may read a missing path as offline from here on,
       // for as long as this same generation lasts.
@@ -797,6 +813,14 @@ class VideoService {
   private pollFailureIsNews(): boolean {
     const status = this.supervisor?.status();
     return status?.state === "running" && Date.now() - status.since >= RELAY_BOOT_GRACE_MS;
+  }
+
+  /** A failed reconcile is news once this process's API has answered at
+   *  least once, or RELAY_BOOT_GRACE_MS have passed with it still shut —
+   *  never for the first attempts of a start, which land before MediaMTX has
+   *  opened its API. */
+  private reconcileFailureIsNews(): boolean {
+    return this.relayAnswered || this.pollFailureIsNews();
   }
 
   private reportPollFailure(err: unknown): void {
@@ -1167,7 +1191,8 @@ class VideoService {
     if (!this.relay || this.supervisor?.status().state !== "running") return true;
     try {
       await this.relay.reconcile(await this.relayFeeds());
-      const decision = this.pollOutage.ok("reconcile", Date.now());
+      this.relayAnswered = true;
+      const decision = this.sparseOutage.ok("reconcile", Date.now());
       if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
       // item 1: the readiness poll (relay-lifecycle.ts's startReadinessPoll)
       // stops calling this the MOMENT it first succeeds — its own one
@@ -1179,8 +1204,10 @@ class VideoService {
       void this.publish();
       return true;
     } catch (err) {
+      // Returned either way: the caller (the readiness poll) retries.
+      if (!this.reconcileFailureIsNews()) return false;
       const message = errorMessage(err);
-      const decision = this.pollOutage.fail("reconcile", message, Date.now());
+      const decision = this.sparseOutage.fail("reconcile", message, Date.now());
       if (decision.log) console.warn(`[video] could not reconcile the relay: ${scrub(message)}${scrub(decision.note)}`);
       return false;
     }
@@ -1279,12 +1306,12 @@ class VideoService {
     if (this.relay && this.supervisor?.status().state === "running") {
       try {
         kicked = (await this.relay.kickPublisher(id)) ? "dropped" : "none";
-        const decision = this.pollOutage.ok("push-kick", Date.now());
+        const decision = this.sparseOutage.ok("push-kick", Date.now());
         if (decision.log) console.log(`[video] kicking a publisher is working again${scrub(decision.note)}`);
       } catch (err) {
         kicked = "failed";
         const message = errorMessage(err);
-        const decision = this.pollOutage.fail("push-kick", message, Date.now());
+        const decision = this.sparseOutage.fail("push-kick", message, Date.now());
         if (decision.log) console.warn(`[video] could not kick the previous publisher: ${scrub(message)}${scrub(decision.note)}`);
       }
     }

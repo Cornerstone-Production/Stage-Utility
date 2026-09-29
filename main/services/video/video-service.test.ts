@@ -43,7 +43,11 @@ const attach = (relay: VideoRelay, supervisor: RelaySupervisorLike, ports: Video
 // Every test here shares the one videoService, and so its OutageLog: an outage
 // one test leaves open would swallow, as a repeat of the same failure, the
 // line a later test expects to see first. Each test starts with none open.
-beforeEach(() => (videoService as unknown as { pollOutage: { forget(): void } }).pollOutage.forget());
+beforeEach(() => {
+  const outages = videoService as unknown as { pollOutage: { forget(): void }; sparseOutage: { forget(): void } };
+  outages.pollOutage.forget();
+  outages.sparseOutage.forget();
+});
 
 test("a config snapshot never carries a feed's password", async () => {
   const password = "correct-horse-battery-staple";
@@ -1958,6 +1962,70 @@ test("reconcile is skipped while the relay is attached but the supervisor is not
     supervisor.current = { state: "running", since: 0 };
     await videoService.updateFeed(id, { name: "Choir loft" });
     assert.equal(reconciled.length, 1, "expected a reconcile once the supervisor reports running");
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+// The relay's API opens a moment after its process starts, so the first
+// reconcile of every start routinely fails. Not news — until the API has
+// answered once, or the boot grace has passed with it still shut.
+test("a reconcile failing before this relay's API has ever answered, inside the boot grace, logs nothing", async (t) => {
+  let fail = true;
+  const relay = fakeRelay(async () => []);
+  relay.reconcile = async () => {
+    if (fail) throw new Error("fetch failed");
+  };
+  const supervisor = new FakeSupervisor();
+  t.mock.timers.enable({ apis: ["Date"], now: 50_000 });
+  supervisor.current = { state: "running", since: 50_000 - 1000 };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  const lines: string[] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+  t.mock.method(console, "log", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+  try {
+    assert.equal(await videoService.reconcileRelay(), false);
+    fail = false;
+    assert.equal(await videoService.reconcileRelay(), true);
+    assert.deepEqual(
+      lines.filter((l) => l.includes("reconcil")),
+      [],
+      "a relay still opening its API is not news, and nothing was reported to recover from",
+    );
+  } finally {
+    await videoService.detachRelay();
+  }
+});
+
+test("once the relay's API has answered, a reconcile failure is news, and the next success closes the run", async (t) => {
+  let fail = false;
+  const relay = fakeRelay(async () => []);
+  relay.reconcile = async () => {
+    if (fail) throw new Error("relay unreachable");
+  };
+  const supervisor = new FakeSupervisor();
+  t.mock.timers.enable({ apis: ["Date"], now: 50_000 });
+  supervisor.current = { state: "running", since: 50_000 - 1000 };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  const lines: string[] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+  t.mock.method(console, "log", (...args: unknown[]) => lines.push(args.map(String).join(" ")));
+  const failures = () => lines.filter((l) => l.includes("could not reconcile")).length;
+  const recoveries = () => lines.filter((l) => l.includes("reconciling the relay is working again")).length;
+  try {
+    assert.equal(await videoService.reconcileRelay(), true); // the API has answered
+    fail = true;
+    await videoService.reconcileRelay();
+    assert.equal(failures(), 1, "a failure after the API has answered is news");
+    fail = false;
+    t.mock.timers.tick(1000);
+    await videoService.reconcileRelay();
+    assert.equal(recoveries(), 1, "the next success must close the run — reconciles are too sparse to wait for one to hold");
+    fail = true;
+    await videoService.reconcileRelay();
+    assert.equal(failures(), 2, "a failure after the run closed is a new outage, and news again");
   } finally {
     await videoService.detachRelay();
   }

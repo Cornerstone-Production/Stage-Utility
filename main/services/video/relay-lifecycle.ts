@@ -172,7 +172,7 @@ export class RelayLifecycle {
    *  config write that could not be written). Keyed by nothing but its own
    *  single run: a fresh streak starts once startRelay() reaches the
    *  supervisor successfully, or the desire to run goes away entirely. */
-  private readonly prelaunchOutage = new OutageLog();
+  private readonly prelaunchOutage = new OutageLog(0);
   /** Serializes setEnabled()/feedsChanged()/portsChanged()/the retry timer
    *  through one chain, so two calls landing close together (a feed removed
    *  right as the switch is flicked, say) are never interleaved mid-async —

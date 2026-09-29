@@ -471,7 +471,8 @@ test("a busy port's status names the program only; its pid goes to the server lo
 
   const state = await videoService.state();
   assert.equal((state.relay as { reason: string }).reason, "Port 1935 is in use by OBS Studio.");
-  assert.equal(JSON.stringify(state).includes("812"), false, "a host pid reached the state every LAN client reads");
+  // "pid", not the number: a retry timestamp can carry any digits.
+  assert.equal(JSON.stringify(state).includes("pid"), false, "a host pid reached the state every LAN client reads");
   assert.ok(logs.some((l) => l.includes("Port 1935 is in use by OBS Studio (pid 812).")), JSON.stringify(logs));
 });
 
@@ -500,11 +501,10 @@ test("downloading MediaMTX logs once per download STREAK, not once per retry", a
   assert.equal(downloadLines.length, 1, `expected one "downloading" line across three attempts, got: ${JSON.stringify(downloadLines)}`);
 });
 
-test("recovering from a pre-supervisor outage logs once — but only once the recovery has genuinely HELD, per OutageLog's own settle window", async (t: TestContext) => {
-  // OutageLog.ok() answers quiet for a success inside its settle window (2
-  // minutes by default) — a fast retry succeeding a second later is a gap in
-  // one flapping outage, not its end, and the "Date" clock has to move past
-  // that window for a recovery line to ever have a CHANCE to print.
+test("recovering from a pre-supervisor outage logs once, at the attempt that passes", async (t: TestContext) => {
+  // The pre-launch checks succeed once per start, not on a timer, so there
+  // is no stream of successes to wait on for one to hold: the attempt that
+  // passes ends the run, as it does for the relay's reconcile.
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const logs: string[] = [];
   t.mock.method(console, "log", (msg: string) => logs.push(msg));
@@ -521,7 +521,7 @@ test("recovering from a pre-supervisor outage logs once — but only once the re
   await settle();
   assert.equal(supervisors.length, 0, "the first attempt must have failed on the busy port");
 
-  t.mock.timers.tick(3 * 60 * 1000); // past the failure AND past the 2-minute settle window
+  t.mock.timers.tick(restartDelayMs(0));
   await waitUntil(() => supervisors.length > 0);
   assert.ok(
     logs.some((l) => l.includes("pre-launch checks are passing again")),
@@ -858,6 +858,38 @@ test("the readiness poll backs off with restartDelayMs between retries while the
   assert.equal(reconcileCalls, 2, "the THIRD attempt must wait restartDelayMs(2), not fire on the same delay as the first retry");
   t.mock.timers.tick(1);
   await waitUntil(() => reconcileCalls === 3);
+});
+
+test("a normal start logs no reconcile failure: the first attempt lands before the relay's API is open", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const lines: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => lines.push(msg));
+  t.mock.method(console, "log", (msg: string) => lines.push(msg));
+  // The API is shut for the first attempt, to every call alike, as a real
+  // relay's is for the moment after it spawns.
+  let reconcileCalls = 0;
+  let apiOpen = false;
+  const { deps } = makeDeps({
+    makeRelay: () => ({
+      ...fakeRelay(async () => {
+        reconcileCalls++;
+        if (!apiOpen) throw new Error("fetch failed");
+      }),
+      status: async () => {
+        if (!apiOpen) throw new Error("fetch failed");
+        return [];
+      },
+    }),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => reconcileCalls === 1);
+  apiOpen = true;
+  t.mock.timers.tick(restartDelayMs(1));
+  await waitUntil(() => reconcileCalls === 2);
+  await settle();
+  assert.deepEqual(lines.filter((l) => l.includes("reconcil")), [], "the relay opening its API a moment late is not news");
 });
 
 test("the readiness poll stops on a successful reconcile ALONE, even before the version is known", async (t: TestContext) => {
