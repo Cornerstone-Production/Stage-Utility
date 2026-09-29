@@ -18,6 +18,11 @@ function hasUserinfo(u: URL): boolean {
   return u.username !== "" || u.password !== "";
 }
 
+/** Printable ASCII, space to tilde — what an encoder's own settings page
+ *  takes for an SRT passphrase, and what makes the length rule's
+ *  "characters" the same count as MediaMTX's bytes. */
+const PLAIN_ASCII = /^[\x20-\x7E]*$/;
+
 export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
@@ -108,11 +113,14 @@ export function parseFeedInput(
     // SRT authenticates a pull by passphrase alone (reconcile-plan.ts's
     // pullSource puts it in the query and has nowhere for a username), and
     // MediaMTX refuses a passphrase outside 10 to 80 bytes on every dial,
-    // for as long as the feed exists.
+    // for as long as the feed exists. Plain ASCII only, so a character is a
+    // byte and the length sentence is exact.
     if (url.protocol === "srt:") {
       if (username !== "") return { ok: false, error: "SRT uses a passphrase only, no username: leave Username empty." };
-      const bytes = password ? Buffer.byteLength(password, "utf8") : 0;
-      if (password && (bytes < 10 || bytes > 80)) {
+      if (password && !PLAIN_ASCII.test(password)) {
+        return { ok: false, error: "An SRT passphrase can use only plain letters, digits, spaces and punctuation." };
+      }
+      if (password && (password.length < 10 || password.length > 80)) {
         return { ok: false, error: "An SRT passphrase must be 10 to 80 characters long." };
       }
     }

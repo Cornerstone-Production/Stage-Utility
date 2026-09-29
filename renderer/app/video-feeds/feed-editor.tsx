@@ -373,7 +373,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
             </div>
             {/^srt:/i.test(draft.pullUrl.trim()) && (
               <span className="text-caption1 text-fg-subtle">
-                SRT takes a passphrase only, 10 to 80 characters: leave Username empty and put it in Password.
+                SRT takes a passphrase only: 10 to 80 plain letters, digits, spaces and punctuation. Leave Username empty and put it in Password.
               </span>
             )}
             {/* The field itself never shows a stored password — only THAT

@@ -840,13 +840,13 @@ test("a pull feed's Address, Username and password fields render, the Magewell c
   }
 });
 
-test("an SRT address says a passphrase only, 10 to 80 characters, and no username; an RTSP one does not", async () => {
+test("an SRT address says a passphrase only, 10 to 80 plain ASCII characters, and no username; an RTSP one does not", async () => {
   const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
     await settle();
     await settle();
-    const hint = () => screen.queryByText("SRT takes a passphrase only, 10 to 80 characters: leave Username empty and put it in Password.");
+    const hint = () => screen.queryByText("SRT takes a passphrase only: 10 to 80 plain letters, digits, spaces and punctuation. Leave Username empty and put it in Password.");
     assert.equal(!!hint(), false, "an RTSP address has a username and password like any other");
     const address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
     fireEvent.change(address, { target: { value: "srt://192.0.2.30:9000?streamid=cam" } });
