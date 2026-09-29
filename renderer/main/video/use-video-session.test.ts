@@ -984,6 +984,61 @@ test("a screen with HLS allowed logs nothing about the switch for the same feed"
   }
 });
 
+test("through the hook: a feed already playing over WebRTC shows can't-play once it turns to B-frames on an HLS-off screen, with no HLS session opened", async () => {
+  // installFakeHls (MediaSource) makes this environment otherwise ABLE to
+  // play the HLS this feed would need — proof that FakeHls is never even
+  // constructed is proof nothing here fell back to it, not an artifact of
+  // jsdom having no HLS player of its own.
+  const undoHls = installFakeHls();
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const playingFirst: VideoFeedView = { ...B_FRAMES_FEED, status: { state: "live" } };
+  try {
+    const { result, rerender } = renderHook(
+      ({ feed }: { feed: VideoFeedView }) =>
+        useVideoSession({
+          active: true,
+          feed,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls: false,
+          relayRunning: true,
+        }),
+      { initialProps: { feed: playingFirst } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    const pc = FakePeerConnection.instances.at(-1)!;
+    act(() => {
+      pc.setConnectionState("connected");
+      video.fireFrame();
+    });
+    assert.equal(result.current.phase, "live", "expected WebRTC genuinely playing first");
+
+    // The relay now reports B-frames mid-play — a real path: an encoder's
+    // profile can change while it is already sending.
+    rerender({ feed: B_FRAMES_FEED });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(
+      result.current.phase,
+      "cant-play",
+      "expected the can't-play cover once a feed already playing needs HLS this screen refuses",
+    );
+    assert.deepEqual(
+      FakeHls.instances.flatMap((h) => h.calls),
+      [],
+      "expected no HLS session — and so no index.m3u8 request — opened for a feed an HLS-off screen refuses",
+    );
+  } finally {
+    undoHls();
+    cleanup();
+    g.restore();
+  }
+});
+
 // ── routing a real feed view to the right verdict on a WHEP refusal ────────
 //
 // The tests above set `relayManaged` on `startPlaybackAttempt`'s `choice` by
