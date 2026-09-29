@@ -70,20 +70,12 @@ describe("PATCH /api/outputs/:id — allowHls", () => {
     );
   });
 
-  it("refuses an id that names no output — same as hideTopBar, locked and blackout do", async () => {
-    // setOutputAllowHls throws on a missing id, exactly like setOutputHideTopBar,
-    // setOutputLocked and setOutputBlackout — none of the four are wrapped in a
-    // try/catch here the way setOutputView/setOutputMode/setOutputSlug are, so
-    // this route module does not itself turn the throw into a 400. callRoute
-    // drives the module directly and has no outer catch either, so the throw
-    // surfaces here; remote-server.ts's request handler is what turns it into a
-    // 500 in production (handlerErrorStatus's generic-Error branch). Pre-existing
-    // for the other three, and out of scope for this change — this only proves
-    // allowHls did not silently swallow the id check.
-    await assert.rejects(
-      () => callRoute(viewRoutes, "/api/outputs/nowhere", { method: "PATCH", body: { allowHls: false } }),
-      /not found/i,
-    );
+  it("refuses an id that names no output with a clean 400 — same as hideTopBar, locked and blackout", async () => {
+    // See output-patch-unknown-id.test.ts for all four fields together; this
+    // just confirms allowHls's own request goes through the same caught shape.
+    const r = await callRoute(viewRoutes, "/api/outputs/nowhere", { method: "PATCH", body: { allowHls: false } });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error?: string })?.error ?? "", /not found/i);
   });
 
   it("combines with the other output flags in one request, same as hideTopBar does", async () => {

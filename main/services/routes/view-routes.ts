@@ -664,10 +664,42 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
           return;
         }
       }
-      if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
-      if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
-      if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
-      if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+      // Each of the four below refuses only on an id that names no output, so
+      // the same catch-and-400 shape as setOutputView/setOutputMode/setOutputSlug
+      // above applies to all: an unknown id is a 400 with the reason, not a 500
+      // an operator would read as the server itself being broken.
+      if (hasBlackout) {
+        try {
+          state = await stageController.setOutputBlackout(id, body.blackout as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      if (hasLocked) {
+        try {
+          state = await stageController.setOutputLocked(id, body.locked as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      if (hasHideTopBar) {
+        try {
+          state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      if (hasAllowHls) {
+        try {
+          state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       // A rejected slug is a 400 with the reason, not a silent no-op — the operator
       // has to see WHY "/history" cannot be used.
       if (hasSlug) {
