@@ -2991,6 +2991,47 @@ test("setRelayStatusListener fires on every publish that actually changes the re
   }
 });
 
+// Seen in a full test run: a publish still reading the disk when attachRelay
+// published "running" finished afterwards, and its older "off" became the
+// snapshot and the connection row's last word, with the relay running.
+test("a publish that started before a newer one never lands after it", async (t) => {
+  const seen: RelayStatus[] = [];
+  videoService.setRelayStatusListener((relay) => seen.push(relay));
+  const real = videoService.state.bind(videoService);
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let calls = 0;
+  let read: () => void = () => {};
+  const olderRead = new Promise<void>((resolve) => (read = resolve));
+  t.mock.method(videoService, "state", async () => {
+    const first = ++calls === 1; // the older publish, slow on its reads
+    const s = await real();
+    if (first) {
+      read();
+      await held;
+    }
+    return s;
+  });
+  try {
+    const older = (videoService as unknown as { publish(): Promise<void> }).publish();
+    await olderRead; // it has read "off"
+    const supervisor = new FakeSupervisor();
+    supervisor.ver = "v1.21.1";
+    attach(fakeRelay({ status: async () => [] }), supervisor); // publishes "running"
+    // Give the newer publish its chance to land first.
+    const until = performance.now() + 500;
+    while (seen.length === 0 && performance.now() < until) await new Promise((r) => setImmediate(r));
+    release();
+    await older;
+    assert.equal(videoService.current().relay.state, "running", "the snapshot every screen hydrates from");
+    assert.equal(seen.at(-1)?.state, "running", `the row was told, in order: ${JSON.stringify(seen)}`);
+  } finally {
+    release();
+    videoService.setRelayStatusListener(null);
+    await videoService.detachRelay();
+  }
+});
+
 test("attachRelay itself publishes the settled state — a caller must not need a SEPARATE trigger to have the row learn the relay just came up", async () => {
   const seen: RelayStatus[] = [];
   videoService.setRelayStatusListener((relay) => seen.push(relay));

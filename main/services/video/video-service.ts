@@ -549,14 +549,45 @@ class VideoService {
     return { ok: true, ports: parsed.ports };
   }
 
+  /** The publish in progress, and whether a call arrived during it. */
+  private publishing: Promise<void> | null = null;
+  private publishAgain = false;
+
   /**
    * Publishes only when the computed snapshot actually differs from the last
    * one published (everything but `rev`) — otherwise a poll every
    * STATUS_POLL_MS would be an SSE frame every STATUS_POLL_MS. `current()` is
    * kept fresh either way, so a hello burst between changes still hydrates
    * with the truth rather than a stale snapshot.
+   *
+   * One at a time: state() reads the disk after it reads the relay, so two
+   * publishes in flight could finish in either order, and an older one
+   * finishing last made its stale relay status the snapshot and the
+   * connection row's last word. A call arriving during a publish waits for
+   * it and then one more, which reads everything afresh; the promise
+   * resolves once a publish that started after the call has landed.
    */
-  protected async publish(): Promise<void> {
+  protected publish(): Promise<void> {
+    if (this.publishing) {
+      this.publishAgain = true;
+      return this.publishing;
+    }
+    this.publishing = this.publishLoop();
+    return this.publishing;
+  }
+
+  private async publishLoop(): Promise<void> {
+    try {
+      do {
+        this.publishAgain = false;
+        await this.publishOnce();
+      } while (this.publishAgain);
+    } finally {
+      this.publishing = null;
+    }
+  }
+
+  private async publishOnce(): Promise<void> {
     const candidate = await this.state();
     const changed = this.body(candidate) !== this.body(this.snapshot);
     if (changed) this.rev++;
