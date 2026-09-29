@@ -1,4 +1,4 @@
-// All sixteen integrations are on the page, always.
+// Every integration is on the page, always.
 //
 // They used to be split: the ones in use in category groups, the rest behind a
 // collapsed "Not set up (11)" disclosure. The disclosure is gone at the
@@ -47,12 +47,12 @@ after(() =>
  *
  * `idle()`, never a fixed delay. Every card on this page comes from the
  * `integrations:list` query, so until that resolves there are ZERO cards — and
- * this file's first assertion is that there are sixteen. Waiting 30ms for one
+ * this file's first assertion is that there are TOTAL. Waiting 30ms for one
  * fetch is enough on an idle machine and a coin toss on a loaded one, which is
- * how "all 16 cards are in the document on the first render" failed once inside
+ * how "all TOTAL cards are in the document on the first render" failed once inside
  * a full-suite run and passed in isolation and on every clean run after.
  *
- * Waiting for "sixteen cards" instead would be waiting for the thing under test
+ * Waiting for "TOTAL cards" instead would be waiting for the thing under test
  * and would prove nothing. `idle()` asks react-query whether it has finished,
  * which is independent of every assertion below — see the harness.
  */
@@ -154,12 +154,12 @@ describe("every integration is visible, with nothing collapsed", () => {
     );
   });
 
-  test("with nothing set up, the summary is the sentence and not '0 of 16 connected'", async () => {
+  test("with nothing set up, the summary is the sentence and not '0 of N connected'", async () => {
     const c = await panel();
     assert.match(c.container.textContent ?? "", /Nothing is set up yet — open any card to connect it\./);
     assert.doesNotMatch(c.container.textContent ?? "", /connected/);
     // The heading and every card are still there — a fresh install is a page of
-    // sixteen quiet cards, not an empty state with the list hidden behind it.
+    // quiet cards, not an empty state with the list hidden behind it.
     assert.equal(tiles(c).length, TOTAL);
     assert.match(c.container.textContent ?? "", /Not set up/);
   });

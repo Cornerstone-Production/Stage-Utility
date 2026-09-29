@@ -5,7 +5,7 @@
 // files then read the DOM for a card immediately. React commits the render that
 // draws the cards AFTER the queries settle, so the two are not the same moment.
 // On an unloaded machine the gap is invisible; on a loaded CI runner one of the
-// sixteen dialog tests lost the race and reported
+// the dialog tests lost the race and reported
 //
 //   Unable to fire a "click" event - please provide a DOM element
 //

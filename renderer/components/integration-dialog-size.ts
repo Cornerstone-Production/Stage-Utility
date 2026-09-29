@@ -7,7 +7,7 @@ import { cn } from "../lib/cn";
  *
  * It is what makes the width rule checkable against the running page instead of
  * against a second hand-written list: integration-dialog-size.test.tsx renders
- * all sixteen dialog bodies for real and asserts that the ids carrying this
+ * every dialog body for real and asserts that the ids carrying this
  * marker are exactly WIDE_DIALOG_IDS. Adding a repeater panel to a new
  * integration and forgetting the width therefore fails, which two lists compared
  * to each other could never do.
