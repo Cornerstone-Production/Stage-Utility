@@ -128,7 +128,7 @@ test("a screen with nothing struggling shows no warning box at all", () => {
 });
 
 test("a struggling screen shows the lead sentence and the dropped-frames sentence, bold lead first", () => {
-  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, stallsInWindow: 0, width: 1920, height: 1080 }]);
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 }]);
   const box = screen.getByText(/Struggling with Program \(IMAG\)\./);
   assert.equal(box.tagName, "SPAN", "the lead sentence must be its own element (bold), not plain text run into the body");
   assert.equal(box.className.includes("font-semibold"), true, "the lead sentence must read bold");
@@ -137,14 +137,14 @@ test("a struggling screen shows the lead sentence and the dropped-frames sentenc
 });
 
 test("the 720p-encoder sentence appears only when the feed is taller than 720p", () => {
-  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, stallsInWindow: 0, width: 1920, height: 1080 }]);
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 }]);
   assert.ok(
     screen.getByText(/The feed is 1920 × 1080; a Pi 4 plays 1280 × 720 smoothly\. Lower the encoder's output to 720p\./),
     "a 1080p feed must carry the resolution sentence",
   );
 
   cleanup();
-  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, stallsInWindow: 0, width: 1280, height: 720 }]);
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 0, width: 1280, height: 720 }]);
   assert.equal(
     screen.queryByText(/a Pi 4 plays/) === null,
     true,
@@ -153,21 +153,41 @@ test("the 720p-encoder sentence appears only when the feed is taller than 720p",
 });
 
 test("the stall sentence appears only once stalls crossed STALLS_IN_WINDOW, using the exact count", () => {
-  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, stallsInWindow: 2, width: 1280, height: 720 }]);
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 2, width: 1280, height: 720 }]);
   assert.equal(screen.queryByText(/stalled/) === null, true, "2 stalls (under STALLS_IN_WINDOW) must not carry the stall sentence");
 
   cleanup();
-  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, stallsInWindow: 3, width: 1280, height: 720 }]);
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 3, width: 1280, height: 720 }]);
   assert.ok(
     screen.getByText(/It stalled 3 times; check this screen's network\./),
     "3 stalls (at STALLS_IN_WINDOW) must carry the stall sentence with the exact count",
   );
 });
 
+test("the mockup's own drops-at-1080 example reads exactly as before, sourced from the episode", () => {
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 }]);
+  const box = screen.getByText(/Struggling with Program \(IMAG\)\./).parentElement!;
+  assert.equal(
+    box.textContent,
+    "Struggling with Program (IMAG). This screen dropped 240 frames in the last minute. " +
+      "The feed is 1920 × 1080; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.",
+  );
+});
+
+test("an episode that crossed stalls alone leads with the stall sentence and shows no dropped or 720 sentence, even above 720p", () => {
+  renderRow([{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 0, decodedInWindow: 900, stallsInWindow: 5, width: 1920, height: 1080 }]);
+  const box = screen.getByText(/Struggling with Program \(IMAG\)\./).parentElement!;
+  assert.equal(
+    box.textContent,
+    "Struggling with Program (IMAG). This screen stalled 5 times in the last minute; check its network.",
+    "stalls alone must lead the box, and skip the dropped-frames and resolution sentences entirely",
+  );
+});
+
 test("two struggling feeds on one screen render two separate boxes, each naming its own feed", () => {
   renderRow([
-    { feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 100, stallsInWindow: 0, width: 1280, height: 720 },
-    { feedId: "ptz", feedName: "Stage PTZ", droppedInWindow: 50, stallsInWindow: 0, width: 1280, height: 720 },
+    { feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 100, decodedInWindow: 1000, stallsInWindow: 0, width: 1280, height: 720 },
+    { feedId: "ptz", feedName: "Stage PTZ", droppedInWindow: 50, decodedInWindow: 200, stallsInWindow: 0, width: 1280, height: 720 },
   ]);
   assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./));
   assert.ok(screen.getByText(/Struggling with Stage PTZ\./));
@@ -193,8 +213,8 @@ function stageStateWith(outputs: Output[]) {
 test("OutputsSection shows the struggling feed's box, correctly naming it from video:state.feeds — and nothing for a feed reporting clean", async () => {
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now() },
-      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now() },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 } },
+      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null },
     ]),
   );
   render(
@@ -202,7 +222,7 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
   );
 
   await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
-  assert.ok(screen.getByText(/This screen dropped 300 frames in the last minute\./), "the box must carry THIS pair's own numbers, not a placeholder");
+  assert.ok(screen.getByText(/This screen dropped 300 frames in the last minute\./), "the box must carry THIS pair's own EPISODE numbers, not a placeholder");
   assert.equal(screen.queryByText(/Struggling with Stage PTZ/) === null, true, "a feed reporting clean on the same screen must get no box");
 });
 
@@ -210,8 +230,8 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
   const OTHER: Output = { id: "display-2", name: "Right Mic Display", viewId: null };
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now() },
-      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now() },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 } },
+      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
     ]),
   );
   render(

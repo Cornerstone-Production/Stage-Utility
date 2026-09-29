@@ -149,6 +149,121 @@ test("the sticky clock re-arms only on a sample that is ITSELF bad — a droppin
   assert.equal(h.snapshot(lastDroppingAt + CLEAR_AFTER_MS)[0]?.struggling, false, "60 s after the LAST dropping sample, with nothing bad since, clears it");
 });
 
+// ── episode: the worst window since the flag turned on ─────────────────────
+
+test("episode: seeded the moment struggling turns true, from that flip's own window", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 51, stalls: 0 })], t0);
+  const entry = h.snapshot(t0)[0]!;
+  assert.equal(entry.struggling, true, "sanity: the flip itself");
+  assert.deepEqual(entry.episode, { droppedInWindow: 51, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 });
+});
+
+test("episode: a later window that is WORSE than the current peak replaces it — the peak moves", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 200, stalls: 0 })], t0); // 20%, flips
+  assert.deepEqual(h.snapshot(t0)[0]!.episode, { droppedInWindow: 200, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 });
+
+  // The cumulative window (both samples still inside it) climbs to 30% —
+  // strictly worse than the 20% the peak was seeded with.
+  h.record("out1", [report({ decoded: 1000, dropped: 400, stalls: 0 })], t0 + 1000);
+  const entry = h.snapshot(t0 + 1000)[0]!;
+  assert.equal(entry.droppedInWindow, 600, "sanity: the live window's own cumulative total");
+  assert.deepEqual(entry.episode, { droppedInWindow: 600, decodedInWindow: 2000, stallsInWindow: 0, width: 1920, height: 1080 }, "the worse cumulative window becomes the new peak");
+});
+
+test("episode: a later window that is MILDER than the current peak leaves it unchanged", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 200, stalls: 0 })], t0); // 20%, flips; peak = 200/1000
+  assert.deepEqual(h.snapshot(t0)[0]!.episode, { droppedInWindow: 200, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 });
+
+  // A clean keep-alive dilutes the cumulative window to 200 of 2000 (10%) —
+  // still struggling (over 5%), but milder than the peak's own 20%.
+  h.record("out1", [report({ decoded: 1000, dropped: 0, stalls: 0 })], t0 + 1000);
+  const entry = h.snapshot(t0 + 1000)[0]!;
+  assert.equal(entry.struggling, true, "sanity: still struggling, just diluted");
+  assert.deepEqual(entry.episode, { droppedInWindow: 200, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 }, "the milder cumulative window must not replace the worse peak already held");
+});
+
+test("episode: a struggling pair's peak survives its original bad sample aging out of the live window, holding the worst cumulative window seen while the sticky flag has stayed armed", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 0, stalls: 4 })], t0);
+  assert.deepEqual(h.snapshot(t0)[0]!.episode, { droppedInWindow: 0, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 });
+
+  // A second stall 30 s later re-arms the sticky clock (the cumulative
+  // window, both samples still inside it, reads 5 stalls) and is itself a
+  // WORSE window than the first sample alone — the peak moves to it.
+  h.record("out1", [report({ decoded: 1000, dropped: 0, stalls: 1 })], t0 + 30_000);
+  assert.deepEqual(
+    h.snapshot(t0 + 30_000)[0]!.episode,
+    { droppedInWindow: 0, decodedInWindow: 2000, stallsInWindow: 5, width: 1920, height: 1080 },
+    "sanity: the worse cumulative window becomes the new peak",
+  );
+
+  // By t0+60_000 the FIRST sample has aged out of the live window's own sum
+  // (only the +30 s sample's own stall remains, diluted under
+  // STALLS_IN_WINDOW), but the sticky flag — armed at t0+30_000 — is still
+  // well inside CLEAR_AFTER_MS of ITS OWN arming time.
+  h.record("out1", [report({ decoded: 1000, dropped: 0, stalls: 0 })], t0 + 60_000);
+  const entry = h.snapshot(t0 + 60_000)[0]!;
+  assert.equal(entry.stallsInWindow, 1, "sanity: the live window's own stall count has diluted");
+  assert.equal(entry.struggling, true, "sanity: still inside CLEAR_AFTER_MS of the +30 s re-arm");
+  assert.deepEqual(
+    entry.episode,
+    { droppedInWindow: 0, decodedInWindow: 2000, stallsInWindow: 5, width: 1920, height: 1080 },
+    "the episode still remembers the worst window this struggle has had, not the diluted live count",
+  );
+});
+
+test("episode: clears the instant the sticky flag itself clears, with no further record() call touching this pair needed", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 51 })], t0);
+  assert.notEqual(h.snapshot(t0)[0]!.episode, null, "sanity: episode is seeded");
+
+  // A keep-alive well inside CLEAR_AFTER_MS, refreshing reportedAt so the
+  // PAIR ITSELF is not swept out of snapshot() at the same boundary as the
+  // sticky flag's own clear — isolating "the flag cleared" from "the pair
+  // aged out entirely", the same way the sticky-clock tests above do.
+  h.record("out1", [report({ decoded: 100, dropped: 0 })], t0 + 30_000);
+  assert.equal(h.snapshot(t0 + 30_000)[0]!.struggling, true, "sanity: still struggling");
+
+  // No further record() call at all past this point — CLEAR_AFTER_MS since
+  // the ORIGINAL bad sample (t0), a bare snapshot() must already read both
+  // struggling and episode as cleared, purely off elapsed time.
+  const cleared = h.snapshot(t0 + CLEAR_AFTER_MS)[0]!;
+  assert.equal(cleared.struggling, false);
+  assert.equal(cleared.episode, null);
+});
+
+test("episode: a pair that ages out entirely and reappears later starts a brand fresh episode, never the old peak", () => {
+  const h = new PlaybackHealth();
+  const t0 = 1_000_000;
+  h.record("out1", [report({ decoded: 1000, dropped: 200 })], t0); // struggling, episode seeded
+  assert.notEqual(h.snapshot(t0)[0]!.episode, null);
+
+  // Nothing reports at all for a full WINDOW_MS — the pair itself is gone,
+  // not merely cleared (see "a pair that stops reporting drops out of
+  // snapshot after WINDOW_MS" above).
+  assert.equal(h.snapshot(t0 + WINDOW_MS).length, 0, "sanity: the pair is gone entirely");
+
+  // A brand new bad sample for the SAME outputId/feedId, well after the old
+  // one aged out — this is a NEW Pair object (the Map entry was deleted), so
+  // its own episode must be seeded fresh from THIS sample alone, never
+  // carrying the old (200-dropped) peak forward.
+  h.record("out1", [report({ decoded: 1000, dropped: 60 })], t0 + WINDOW_MS + 10_000);
+  const fresh = h.snapshot(t0 + WINDOW_MS + 10_000)[0]!;
+  assert.deepEqual(
+    fresh.episode,
+    { droppedInWindow: 60, decodedInWindow: 1000, stallsInWindow: 0, width: 1920, height: 1080 },
+    "a re-seeded pair's episode must start from ITS OWN first bad sample, not the long-gone one",
+  );
+});
+
 test("a burst of 1000 heartbeats holds a bounded number of samples, merging into the newest rather than dropping — the running totals still sum every one of them", () => {
   const h = new PlaybackHealth();
   const t0 = 1_000_000;

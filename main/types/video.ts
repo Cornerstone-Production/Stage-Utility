@@ -161,6 +161,28 @@ export interface ScreenVideoHealth {
    *  `now - reportedAt >= WINDOW_MS`: nothing has reported it in a minute,
    *  so it is not read as "clean" — it is gone. */
   reportedAt: number;
+  /**
+   * The worst window this pair has had since `struggling` turned true —
+   * same shape as the live `droppedInWindow`/`decodedInWindow`/
+   * `stallsInWindow`/`width`/`height` fields above, but frozen at whichever
+   * report made the window worst, not the live one. The live window's own
+   * totals dilute as an old bad sample ages out from under a sticky flag
+   * that is still holding it struggling — a card or log line built off the
+   * live fields alone can end up describing a cause (stalls, say) that has
+   * already aged out of what it is currently showing. `episode` is what a
+   * screen's own card and the `[video]` struggling line read from instead.
+   *
+   * Null while not struggling, and cleared the instant the sticky flag
+   * clears — see playback-health.ts's own comment on Pair.episode for how
+   * "worst" is judged.
+   */
+  episode: {
+    droppedInWindow: number;
+    decodedInWindow: number;
+    stallsInWindow: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 /**

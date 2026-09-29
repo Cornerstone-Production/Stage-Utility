@@ -283,10 +283,13 @@ while at least one widget on that screen is actually showing a relay or
 external feed's picture, faster than the heartbeat's normal 20-second (near a
 service) or 60-second cadence otherwise. Each report is that widget
 instance's own numbers since its last report: frames decoded, frames dropped
-and stalls (the picture going into `waiting`) as deltas, and the frame's
-current width, height and whether it is playing over WebRTC or HLS. An
-embed's platform player, and a probe merely testing whether WebRTC works,
-report nothing — only a widget actually showing a picture does.
+and stalls as deltas, and the frame's current width, height and whether it is
+playing over WebRTC or HLS. A stall is the picture going into `waiting` on
+HLS; on WebRTC, where a `<video>` playing a live stream never fires
+`waiting` when the stream starves, it is instead Chrome's own receiver-side
+freeze counter, falling back to `waiting` on a browser that does not report
+one. An embed's platform player, and a probe merely testing whether WebRTC
+works, report nothing — only a widget actually showing a picture does.
 
 The server keeps a rolling one-minute window per screen and feed — two
 widgets on one screen playing the same feed are one pair — and marks the pair
@@ -296,13 +299,23 @@ that way for 60 seconds after the last sample that kept it bad, even through
 cleaner reports arriving in between, so one bad spike cannot flap the warning
 on and off as the window's own totals dilute it.
 
-A struggling screen's card on the Screens page shows a warning under its
-preview: **Struggling with \<feed\>.** followed by how many frames it dropped
-in the last minute. Above 720p it adds the feed's resolution and the fix — a
-Pi 4 decodes WebRTC in software and cannot keep up much past that: **The feed
-is W × H; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to
-720p.** At 3 or more stalls it adds **It stalled N times; check this screen's
-network.**
+While a pair holds struggling, the server also holds its **episode**: the
+worst window since it started struggling, not the live one — the live
+window's own totals dilute as an old bad sample ages out from under a sticky
+flag that is still holding, so a card built off the live numbers alone could
+end up describing a cause (a stall count, say) that has already faded out of
+what it is currently showing. A struggling screen's card on the Screens page
+reads from the episode instead: **Struggling with \<feed\>.** followed by how
+many frames it dropped in that worst minute. Above 720p it adds the feed's
+resolution and the fix — a Pi 4 decodes WebRTC in software and cannot keep up
+much past that: **The feed is W × H; a Pi 4 plays 1280 × 720 smoothly. Lower
+the encoder's output to 720p.** At 3 or more stalls it adds **It stalled N
+times; check this screen's network.** — unless stalls alone crossed the
+threshold (the dropped fraction never did), in which case the card leads with
+**This screen stalled N times in the last minute; check its network.** and
+leaves out the dropped-frames and resolution sentences, since those are
+decode advice and a stall-only episode says nothing about decode load. The
+`[video]` struggling log line below reads from the same episode.
 
 The Video feeds list's own meta line reads **On N screens** for any feed
 currently playing anywhere, struggling or not — every distinct screen a

@@ -93,12 +93,50 @@ interface Pair {
    * makes the transition visible to whichever call finally notices it.
    */
   struggling: boolean;
+  /**
+   * The worst window since `struggling` last turned true — null whenever it
+   * is false. "Worst" is judged by severity() below, comparing THIS call's
+   * fresh `totals` against the stored peak; a later window that is not
+   * worse leaves the peak exactly as it was, which is what lets it survive
+   * a live window diluting back toward clean while the sticky flag still
+   * holds. Reset to a fresh reading (never merged with the old one) the
+   * moment `struggling` turns true from false — a NEW episode's peak must
+   * never start from a previous, already-cleared episode's numbers.
+   * width/height are captured alongside dropped/decoded/stalls because the
+   * card's own resolution sentence has to describe the frame size AT THE
+   * PEAK, which can differ from the pair's current width/height if the
+   * encoder changed output mid-episode.
+   */
+  episode: { dropped: number; decoded: number; stalls: number; width: number; height: number } | null;
 }
 
 interface Totals {
   decoded: number;
   dropped: number;
   stalls: number;
+}
+
+/**
+ * A single comparable measure of how bad ONE window's totals are, used only
+ * to decide whether a later window inside the same episode becomes the new
+ * peak (see Pair.episode's own comment) — never to decide struggling itself,
+ * which stays isBadWindow()'s own `>`/`>=` rules.
+ *
+ * Both axes are normalized against their OWN threshold (1.0 is exactly the
+ * line isBadWindow() itself would still call struggling on that axis alone),
+ * so a window that is mildly over on both counts can still lose to one that
+ * is badly over on just one, and a stall-only episode's peak is judged
+ * purely on stalls without a zero dropped-fraction pulling it down.
+ */
+function severity(totals: Totals): number {
+  const droppedRatio =
+    totals.decoded === 0
+      ? totals.dropped > 0
+        ? Number.POSITIVE_INFINITY
+        : 0
+      : totals.dropped / totals.decoded / DROPPED_FRACTION;
+  const stallRatio = totals.stalls / STALLS_IN_WINDOW;
+  return Math.max(droppedRatio, stallRatio);
 }
 
 function sumSamples(samples: readonly Sample[]): Totals {
@@ -192,8 +230,11 @@ export class PlaybackHealth {
    * @returns whether `snapshot()` would now read differently: a struggling
    *   flag flipped, a pair appeared, a pair left (aged out, this call or a
    *   previous one this call's sweep just noticed), or a currently-
-   *   struggling pair's window totals moved. video-service.ts publishes
-   *   only then — never on every heartbeat from a screen playing cleanly.
+   *   struggling pair's window totals moved — which is also every time its
+   *   `episode` peak could have moved, since the peak is derived from those
+   *   same totals; there is no separate check for "the peak moved" only.
+   *   video-service.ts publishes only then — never on every heartbeat from a
+   *   screen playing cleanly.
    */
   record(outputId: string, reports: readonly VideoPlaybackReport[], now: number): boolean {
     let changed = this.sweepStale(now);
@@ -257,7 +298,19 @@ export class PlaybackHealth {
       const lastBadAt = sampleIsBad && isBadWindow(totals) ? now : (existing?.lastBadAt ?? null);
       const isStruggling = isStrugglingAt(lastBadAt, now);
 
-      byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, lastBadAt, struggling: isStruggling });
+      // A fresh episode (never merged with a previous, already-cleared one)
+      // the moment the flag turns true from false; otherwise the peak only
+      // moves when THIS call's window is strictly worse than what is
+      // already held — see severity()'s own comment. Not struggling clears
+      // it outright, the same fact isStrugglingAt() itself is judged on.
+      let episode = existing?.episode ?? null;
+      if (!isStruggling) {
+        episode = null;
+      } else if (!wasStruggling || episode === null || severity(totals) > severity(episode)) {
+        episode = { dropped: totals.dropped, decoded: totals.decoded, stalls: totals.stalls, width: r.width, height: r.height };
+      }
+
+      byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, lastBadAt, struggling: isStruggling, episode });
 
       if (!existing) {
         changed = true; // a pair appeared
@@ -303,6 +356,10 @@ export class PlaybackHealth {
       for (const [feedId, pair] of byFeed) {
         if (now - pair.reportedAt >= WINDOW_MS) continue;
         const totals = sumSamples(this.pruneSamples(pair.samples, now));
+        // Recomputed fresh, the same way `struggling` itself always is —
+        // never a bare read of `pair.episode`, which would still show a
+        // stale peak for however long it takes the NEXT record() call to
+        // notice the sticky flag has actually cleared by elapsed time alone.
         const struggling = isStrugglingAt(pair.lastBadAt, now);
         out.push({
           outputId,
@@ -315,6 +372,15 @@ export class PlaybackHealth {
           width: pair.width,
           height: pair.height,
           reportedAt: pair.reportedAt,
+          episode: struggling && pair.episode
+            ? {
+                droppedInWindow: pair.episode.dropped,
+                decodedInWindow: pair.episode.decoded,
+                stallsInWindow: pair.episode.stalls,
+                width: pair.episode.width,
+                height: pair.episode.height,
+              }
+            : null,
         });
       }
     }

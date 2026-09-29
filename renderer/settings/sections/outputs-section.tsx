@@ -29,7 +29,7 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
-import { STALLS_IN_WINDOW } from "@main/services/video/playback-health";
+import { DROPPED_FRACTION, STALLS_IN_WINDOW } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -41,14 +41,20 @@ const UNROUTED = "__none__";
 // A sentinel, never a stored value: picking it opens the new-view dialog.
 const NEW_VIEW = "__new__";
 
-/** ScreenVideoHealth reduced to what the card's warning box needs to say —
- *  computed once in OutputsSection from video:state's `screens` and `feeds`,
- *  never read off VideoState directly in OutputRow, so a test can hand the
- *  row a plain object with no server behind it at all. */
+/** ScreenVideoHealth.episode reduced to what the card's warning box needs to
+ *  say — computed once in OutputsSection from video:state's `screens` and
+ *  `feeds`, never read off VideoState directly in OutputRow, so a test can
+ *  hand the row a plain object with no server behind it at all. Sourced
+ *  from the pair's EPISODE (the worst window since it started struggling),
+ *  never the live window fields on ScreenVideoHealth itself — the live
+ *  ones dilute as an old bad sample ages out from under a sticky flag that
+ *  is still holding the pair struggling, which used to leave the box
+ *  describing a cause (stalls, say) already gone from what it showed. */
 interface ScreenStruggle {
   feedId: string;
   feedName: string;
   droppedInWindow: number;
+  decodedInWindow: number;
   stallsInWindow: number;
   width: number;
   height: number;
@@ -60,22 +66,41 @@ interface ScreenStruggle {
  * (feed-editor.tsx), so the two surfaces read as one design rather than two
  * shades of amber.
  *
- * Always the dropped-frames sentence; the resolution sentence only once the
- * feed is taller than 720p (a Pi 4's own ceiling — see the mockup's "a Pi 4
- * plays 1280 × 720 smoothly"); the stall sentence only when stalls
- * themselves crossed STALLS_IN_WINDOW — the same threshold
- * playback-health.ts struggles the pair on, so this never blames the
- * network for a stall count that was not actually why the pair is here.
+ * Which sentences show turns on which threshold the EPISODE itself crossed
+ * — the same two playback-health.ts struggles a pair on, recomputed here
+ * from its frozen numbers rather than trusted as a given, since an episode
+ * this box is handed can be a mixed one (both crossed):
+ *
+ * - Dropped fraction crossed: the dropped-frames sentence, plus the
+ *   resolution sentence once the feed is taller than 720p (a Pi 4's own
+ *   ceiling — see the mockup's "a Pi 4 plays 1280 × 720 smoothly").
+ * - Stalls alone crossed (dropped fraction did not): a different lead
+ *   sentence naming the stall count and pointing at the network, with
+ *   NEITHER the dropped-frames nor the resolution sentence — those are
+ *   decode advice, and stalls alone say nothing about decode load.
+ * - Both crossed: the dropped/resolution sentences as above, with a
+ *   trailing stall sentence appended.
  */
 function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
-  const sentences: string[] = [`This screen dropped ${struggle.droppedInWindow} frames in the last minute.`];
-  if (struggle.height > 720) {
-    sentences.push(
-      `The feed is ${struggle.width} × ${struggle.height}; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.`,
-    );
-  }
-  if (struggle.stallsInWindow >= STALLS_IN_WINDOW) {
-    sentences.push(`It stalled ${struggle.stallsInWindow} times; check this screen's network.`);
+  const droppedBad =
+    struggle.decodedInWindow === 0
+      ? struggle.droppedInWindow > 0
+      : struggle.droppedInWindow / struggle.decodedInWindow > DROPPED_FRACTION;
+  const stallsBad = struggle.stallsInWindow >= STALLS_IN_WINDOW;
+
+  const sentences: string[] = [];
+  if (!droppedBad && stallsBad) {
+    sentences.push(`This screen stalled ${struggle.stallsInWindow} times in the last minute; check its network.`);
+  } else {
+    sentences.push(`This screen dropped ${struggle.droppedInWindow} frames in the last minute.`);
+    if (struggle.height > 720) {
+      sentences.push(
+        `The feed is ${struggle.width} × ${struggle.height}; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.`,
+      );
+    }
+    if (stallsBad) {
+      sentences.push(`It stalled ${struggle.stallsInWindow} times; check this screen's network.`);
+    }
   }
   return (
     <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
@@ -775,21 +800,24 @@ export function OutputsSection({
   // Every screen's own struggling feeds, keyed by outputId — the same
   // change-driven video:state channel the Video feeds page and every Video
   // widget already subscribe to (use-video-state.ts), never a second fetch
-  // path. Only the STRUGGLING entries: a screen playing every feed cleanly
-  // gets no box at all.
+  // path. Only the STRUGGLING entries with an episode to show: a screen
+  // playing every feed cleanly gets no box at all, and `episode` is null
+  // exactly then (see ScreenVideoHealth's own comment) — never read off the
+  // live window fields, which dilute out from under a still-struggling pair.
   const video = useVideoState();
   const strugglesByOutput = new Map<string, ScreenStruggle[]>();
   for (const health of video?.screens ?? []) {
-    if (!health.struggling) continue;
+    if (!health.struggling || !health.episode) continue;
     const feed = video?.feeds.find((f) => f.id === health.feedId);
     const list = strugglesByOutput.get(health.outputId) ?? [];
     list.push({
       feedId: health.feedId,
       feedName: feed?.name ?? health.feedId,
-      droppedInWindow: health.droppedInWindow,
-      stallsInWindow: health.stallsInWindow,
-      width: health.width,
-      height: health.height,
+      droppedInWindow: health.episode.droppedInWindow,
+      decodedInWindow: health.episode.decodedInWindow,
+      stallsInWindow: health.episode.stallsInWindow,
+      width: health.episode.width,
+      height: health.episode.height,
     });
     strugglesByOutput.set(health.outputId, list);
   }

@@ -1763,12 +1763,15 @@ class VideoService {
    * `[video] <screen> is struggling with <feed>: dropped <n> frames for <m>
    * decoded, <s> stalls in the last minute` the moment a pair's sticky flag
    * turns true, `[video] <screen> is playing <feed> smoothly again` the
-   * moment it turns back false. `<n>`/`<m>` are the SAME ratio the sticky
-   * flag itself is judged on (dropped over decoded, not dropped over
-   * decoded+dropped) — the two must never read as different percentages.
-   * A struggling pair that simply stops reporting (ages out of the window,
-   * or is swept by the expiry timer) is neither — nothing said it
-   * recovered — so it logs nothing.
+   * moment it turns back false. `<n>`/`<m>`/`<s>` are the pair's own
+   * `episode` — the worst window since it started struggling, the same
+   * numbers the Screens page's own warning reads (outputs-section.tsx) — not
+   * the live window fields, which is exactly right at the flip moment (the
+   * episode is freshly seeded from that same window) and stays right for
+   * every later publish this same episode causes, since the two are never
+   * shown out of sync. A struggling pair that simply stops reporting (ages
+   * out of the window, or is swept by the expiry timer) is neither — nothing
+   * said it recovered — so it logs nothing.
    *
    * `lastLoggedStruggling` is pruned here for any key `after` no longer
    * carries: without this, a pair that left while struggling and comes back
@@ -1795,9 +1798,14 @@ class VideoService {
       const key = pairKey(health.outputId, health.feedId);
       const wasStruggling = this.lastLoggedStruggling.get(key) ?? false;
       if (health.struggling && !wasStruggling) {
+        // health.episode is non-null here in every real case: `struggling`
+        // freshly true means playback-health.ts just seeded or is holding a
+        // peak for this very episode (see its own comment). The live-window
+        // fallback is defensive only — never expected to run.
+        const peak = health.episode ?? { droppedInWindow: health.droppedInWindow, decodedInWindow: health.decodedInWindow, stallsInWindow: health.stallsInWindow };
         console.log(
           `[video] ${scrub(screenName(health.outputId))} is struggling with ${scrub(feedName(health.feedId))}: ` +
-            `dropped ${scrub(health.droppedInWindow)} frames for ${scrub(health.decodedInWindow)} decoded, ${scrub(health.stallsInWindow)} stalls in the last minute`,
+            `dropped ${scrub(peak.droppedInWindow)} frames for ${scrub(peak.decodedInWindow)} decoded, ${scrub(peak.stallsInWindow)} stalls in the last minute`,
         );
       } else if (!health.struggling && wasStruggling) {
         console.log(`[video] ${scrub(screenName(health.outputId))} is playing ${scrub(feedName(health.feedId))} smoothly again`);
