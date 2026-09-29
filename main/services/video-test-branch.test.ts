@@ -78,8 +78,33 @@ test("video test: running answers ok with the version", async () => {
 });
 
 test("video test: failing answers the relay's own reason, not ok", async () => {
-  videoService.setPreAttachStatus({ state: "failing", reason: "Port 1935 is in use by OBS Studio.", retryAt: null });
+  videoService.setPreAttachStatus({
+    state: "failing",
+    reason: "Port 1935 is in use by OBS Studio.",
+    kind: "port-conflict",
+    retryAt: null,
+  });
   const r = await integrationManager.test("video");
   assert.equal(r.ok, false);
   assert.equal(r.message, "Port 1935 is in use by OBS Studio.");
+});
+
+// item 9 (findings-t15-r2.md): the test button used to answer every
+// non-running, non-failing state with the same generic "not running" line
+// — reusing relay-lifecycle.ts's own relayConnectionState() (the ONE place
+// a RelayStatus becomes a message) means "starting" and "downloading"
+// answer with EXACTLY the words the connection row and the page's own
+// status line already show, not a second, independently-worded mapping.
+test("video test: starting answers with the SAME wording as the connection row, not ok", async () => {
+  videoService.setPreAttachStatus({ state: "starting", version: null });
+  const r = await integrationManager.test("video");
+  assert.equal(r.ok, false);
+  assert.equal(r.message, "Starting the relay");
+});
+
+test("video test: downloading answers with the SAME wording as the connection row, not ok", async () => {
+  videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 5_000_000, totalBytes: 27_000_000 });
+  const r = await integrationManager.test("video");
+  assert.equal(r.ok, false);
+  assert.equal(r.message, "Downloading MediaMTX v1.21.1 (19%)");
 });

@@ -35,7 +35,7 @@ import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
-import { relayLifecycle } from "./video/relay-lifecycle.js";
+import { relayConnectionState, relayLifecycle } from "./video/relay-lifecycle.js";
 import { videoService } from "./video/video-service.js";
 import { wirelessManager } from "./wireless-manager.js";
 // One definition of "this is the mask, not a value" and "is there anything in
@@ -2021,10 +2021,18 @@ class IntegrationManager {
       }
 
       if (id === "video") {
+        // item 9 (findings-t15-r2.md): this used to be a SECOND mapping
+        // from RelayStatus to a message, alongside relay-lifecycle.ts's own
+        // relayConnectionState() — the one place that mapping is supposed
+        // to live. Reusing it here means "starting"/"downloading" answer
+        // with exactly the same wording the connection row and the Video
+        // feeds page's own status line already show, rather than a
+        // separate hardcoded "not running" that collapsed every non-
+        // running, non-failing state into one generic line.
         const relay = (await videoService.state()).relay;
-        if (relay.state === "running") return { ok: true, message: `MediaMTX ${relay.version}` };
-        if (relay.state === "failing") return { ok: false, message: relay.reason };
-        return { ok: false, message: "The video relay is not running." };
+        const { state, message } = relayConnectionState(relay);
+        if (state === "connected") return { ok: true, message: message ?? "MediaMTX" };
+        return { ok: false, message: message ?? "The video relay is not running." };
       }
 
       return { ok: false, message: `No test available for integration: ${id}` };
