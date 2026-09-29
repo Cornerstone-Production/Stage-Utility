@@ -33,6 +33,9 @@ type RelayFeed = import("./relay.js").RelayFeed;
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+/** A busy port's holder, as port-holder.ts reports one. */
+const OBS_STUDIO = { kind: "process" as const, program: "OBS Studio", pid: 812 };
+
 /** Real wall-clock polling, never affected by a test's own mocked
  *  setTimeout: the start sequence's first-ever secretsStore call generates
  *  an encryption key (real crypto), and a single settle() is not always
@@ -337,7 +340,7 @@ test("a throw from busyPorts (not from ensureBinary) is caught the same way, by 
 test("PROBE A: a busy port, then switched off — the failing status clears and the retry stops", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const seen: { state: string; message: string | null }[] = [];
-  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));
   await setRelayFeeds(1);
@@ -366,7 +369,7 @@ test("PROBE A: a busy port, then switched off — the failing status clears and 
 
 test("PROBE B: a busy port, then the last relay feed removed — same clearing", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
@@ -385,7 +388,7 @@ test("a repeated busy-port failure logs once, not once per retry", async (t: Tes
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const logs: string[] = [];
   t.mock.method(console, "warn", (msg: string) => logs.push(msg));
-  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
@@ -396,6 +399,21 @@ test("a repeated busy-port failure logs once, not once per retry", async (t: Tes
   await settle();
   const busyLines = logs.filter((l) => l.includes("Port 1935 is in use by OBS Studio"));
   assert.equal(busyLines.length, 1, `expected exactly one busy-port line across three failures, got: ${JSON.stringify(busyLines)}`);
+});
+
+test("a busy port's status names the program only; its pid goes to the server log only", async (t: TestContext) => {
+  const logs: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => videoService.current().relay.state === "failing");
+
+  const state = await videoService.state();
+  assert.equal((state.relay as { reason: string }).reason, "Port 1935 is in use by OBS Studio.");
+  assert.equal(JSON.stringify(state).includes("812"), false, "a host pid reached the state every LAN client reads");
+  assert.ok(logs.some((l) => l.includes("Port 1935 is in use by OBS Studio (pid 812).")), JSON.stringify(logs));
 });
 
 test("downloading MediaMTX logs once per download STREAK, not once per retry", async (t: TestContext) => {
@@ -435,7 +453,7 @@ test("recovering from a pre-supervisor outage logs once — but only once the re
   const { deps, supervisors } = makeDeps({
     busyPorts: async () => {
       attempts++;
-      return attempts === 1 ? [{ port: 1935, proto: "tcp" as const, holder: "OBS Studio" }] : [];
+      return attempts === 1 ? [{ port: 1935, proto: "tcp" as const, holder: OBS_STUDIO }] : [];
     },
   });
   const lifecycle = activate(new RelayLifecycle(deps));
@@ -500,7 +518,7 @@ test("a ports change while the relay is off does not start it", async () => {
 test("PROBE F: a busy port, then a ports change that fixes it — retries immediately, not on the pending backoff", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { deps, supervisors } = makeDeps({
-    busyPorts: async (ports) => (ports.rtmp === DEFAULT_VIDEO_PORTS.rtmp ? [{ port: 1935, proto: "tcp" as const, holder: "OBS Studio" }] : []),
+    busyPorts: async (ports) => (ports.rtmp === DEFAULT_VIDEO_PORTS.rtmp ? [{ port: 1935, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
@@ -737,7 +755,7 @@ test("PROBE H: a busy-port outage, switch off, switch back on into the SAME busy
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const logs: string[] = [];
   t.mock.method(console, "warn", (msg: string) => logs.push(msg));
-  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }] });
+  const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
@@ -858,7 +876,7 @@ test("relayConnectionState maps every RelayStatus to the integration row, never 
 test("the connection listener is told every transition, ending in error for a failing relay", async () => {
   const seen: { state: string; message: string | null }[] = [];
   const { deps, supervisors } = makeDeps({
-    busyPorts: async () => [{ port: 1935, proto: "tcp", holder: "OBS Studio" }],
+    busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }],
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   lifecycle.setConnectionListener((state, message) => seen.push({ state, message }));

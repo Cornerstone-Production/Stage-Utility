@@ -15,7 +15,11 @@ import { test, describe } from "node:test";
 import {
   buildVersionPayload,
   describePortHolder,
+  holderPhrase,
   isLoopbackAddress,
+  parseHolderLine,
+  pickHolderLine,
+  portHolder,
   wrongDataDirWarning,
 } from "./port-holder.js";
 
@@ -120,6 +124,134 @@ describe("describePortHolder", () => {
       );
     } finally {
       socket.close();
+    }
+  });
+});
+
+// Who holds a port, as parts — the caller phrases them for its audience: a
+// log line may name a pid and a data directory, anything a LAN client reads
+// names the program only.
+describe("parseHolderLine", () => {
+  test("an lsof line: the command and pid", () => {
+    assert.deepEqual(parseHolderLine("node    43580 hstreuber   12u  IPv6 0x8c0d35a89313ccc8      0t0  TCP *:51935 (LISTEN)"), {
+      kind: "process",
+      program: "node",
+      pid: 43580,
+    });
+  });
+
+  test("an lsof command with a space in it", () => {
+    assert.deepEqual(parseHolderLine("OBS\\x20Studio 812 op 40u IPv4 0x1 0t0 TCP *:1935 (LISTEN)"), {
+      kind: "process",
+      program: "OBS Studio",
+      pid: 812,
+    });
+  });
+
+  test("an ss line with users: the command and pid", () => {
+    assert.deepEqual(parseHolderLine('LISTEN 0 128 *:51935 *:*  users:(("node",pid=43580,fd=12))'), {
+      kind: "process",
+      program: "node",
+      pid: 43580,
+    });
+  });
+
+  // An unprivileged ss asked about another user's socket prints no
+  // "users:(())" at all; its state column must never read as a program.
+  test("an ss line with no users names nobody", () => {
+    assert.deepEqual(parseHolderLine("LISTEN 0 4096 0.0.0.0:1935 0.0.0.0:*"), { kind: "unknown" });
+    assert.deepEqual(parseHolderLine("UNCONN 0 0 0.0.0.0:8890 0.0.0.0:*"), { kind: "unknown" });
+  });
+
+  test("a Windows netstat line: the pid, no program", () => {
+    assert.deepEqual(parseHolderLine("  TCP    0.0.0.0:1935           0.0.0.0:0              LISTENING       4321"), {
+      kind: "process",
+      program: null,
+      pid: 4321,
+    });
+    assert.deepEqual(parseHolderLine("  UDP    0.0.0.0:8890           *:*                                    4321"), {
+      kind: "process",
+      program: null,
+      pid: 4321,
+    });
+  });
+});
+
+describe("pickHolderLine", () => {
+  // `lsof -iUDP:<port>` also lists every socket CONNECTED to that port — a
+  // client sending to it names itself as holding it otherwise.
+  test("skips a socket connected to the port, and a longer port that merely starts with it", () => {
+    const out = [
+      "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME",
+      "ffmpeg   9001 op    7u  IPv4 0x2      0t0  UDP 127.0.0.1:61234->127.0.0.1:8890",
+      "other    9002 op    8u  IPv4 0x3      0t0  UDP *:18890",
+      "mediamtx 9003 op    9u  IPv4 0x4      0t0  UDP *:8890",
+    ].join("\n");
+    assert.equal(pickHolderLine(out, 8890), "mediamtx 9003 op    9u  IPv4 0x4      0t0  UDP *:8890");
+  });
+
+  test("nothing when only a connected client names the port", () => {
+    assert.equal(pickHolderLine("ffmpeg 9001 op 7u IPv4 0x2 0t0 UDP 127.0.0.1:61234->127.0.0.1:8890", 8890), null);
+  });
+});
+
+describe("holderPhrase", () => {
+  const su = { kind: "stage-utility" as const, version: "1.24.0", pid: 200, dataDir: "/var/lib/stage-utility" };
+  test("the log gets the pid and data directory", () => {
+    assert.equal(holderPhrase(su, "log"), "another Stage Utility (version 1.24.0, pid 200, data directory /var/lib/stage-utility)");
+    assert.equal(holderPhrase({ kind: "process", program: "node", pid: 43580 }, "log"), "node (pid 43580)");
+    assert.equal(holderPhrase({ kind: "process", program: null, pid: 4321 }, "log"), "a program with pid 4321");
+  });
+
+  test("the LAN gets the program only — no pid, no path", () => {
+    assert.equal(holderPhrase(su, "lan"), "another Stage Utility");
+    assert.equal(holderPhrase({ kind: "process", program: "node", pid: 43580 }, "lan"), "node");
+    assert.equal(holderPhrase({ kind: "process", program: null, pid: 4321 }, "lan"), "another program");
+  });
+
+  test("nobody identified reads as one phrase, never a raw listing or a fallback sentence", () => {
+    for (const audience of ["log", "lan"] as const) {
+      assert.equal(holderPhrase({ kind: "unknown" }, audience), "a program that could not be identified");
+    }
+  });
+});
+
+describe("portHolder", () => {
+  test("names this process as holding a TCP and a UDP port, through the real lookup", async () => {
+    const server = net.createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const socket = dgram.createSocket("udp4");
+    await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
+    try {
+      for (const [port, proto] of [
+        [(server.address() as net.AddressInfo).port, "tcp"],
+        [(socket.address() as { port: number }).port, "udp"],
+      ] as const) {
+        const holder = await portHolder(port, proto);
+        assert.equal(holder.kind, "process", `${proto}: expected a process, got ${JSON.stringify(holder)}`);
+        assert.equal(holder.kind === "process" && holder.pid, process.pid, `${proto}: expected this process's own pid`);
+      }
+    } finally {
+      server.close();
+      socket.close();
+    }
+  });
+
+  test("names another Stage Utility from its /api/version answer", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ version: "abc1234", pid: 4242, dataDir: "/tmp/x" }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      assert.deepEqual(await portHolder((server.address() as net.AddressInfo).port, "tcp"), {
+        kind: "stage-utility",
+        version: "abc1234",
+        pid: 4242,
+        dataDir: "/tmp/x",
+      });
+    } finally {
+      server.close();
     }
   });
 });

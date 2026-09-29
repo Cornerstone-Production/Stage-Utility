@@ -283,7 +283,7 @@ const NOT_SCANNED = new Map<string, string>([
       "supervisor.ts below) and its bound ports, which ARE saved through PATCH " +
       "/api/video/ports — but ports.ts's own parsePorts() accepts only an integer 1024-" +
       "65535 for each, so nothing that reaches the log line can carry a newline. The one " +
-      "free-text value, a busy port's holder, is describePortHolder()'s own OS process " +
+      "free-text value, a busy port's holder, is port-holder.ts's own OS process " +
       "lookup — the DEVICE threat model below, not an HTTP body. Audited, not just excused.",
   ],
   [

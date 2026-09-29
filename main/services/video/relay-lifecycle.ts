@@ -48,6 +48,7 @@ import { loadFeedsFile } from "./feed-store.js";
 import { relayConfig } from "./mediamtx-config.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
 import { MEDIAMTX_VERSION } from "./mediamtx-pin.js";
+import { holderPhrase } from "../port-holder.js";
 import { busyPorts, type BusyPort } from "./port-check.js";
 import { publishUsers } from "./reconcile-plan.js";
 import type { VideoRelay } from "./relay.js";
@@ -109,12 +110,16 @@ const REAL_DEPS: RelayLifecycleDeps = {
   makeRelay: (apiPort) => new MediaMtxRelay(apiPort),
 };
 
-/** The one busy port named in a failing reason — see port-check.ts's own
- *  comment for why every one of the six is worth checking even though only
- *  the first is ever shown; an operator fixes one collision at a time. */
-function busyPortReason(busy: BusyPort[]): string {
+/** The one busy port named in a failing reason — every one of the six is
+ *  checked, but an operator fixes one collision at a time. Two wordings: the
+ *  status, which any LAN client reads, names the program only; the server
+ *  log also names its pid (port-holder.ts's holderPhrase). */
+function busyPortReason(busy: BusyPort[]): { reason: string; logReason: string } {
   const first = busy[0]!;
-  return `Port ${first.port} is in use by ${first.holder}.`;
+  return {
+    reason: `Port ${first.port} is in use by ${holderPhrase(first.holder, "lan")}.`,
+    logReason: `Port ${first.port} is in use by ${holderPhrase(first.holder, "log")}.`,
+  };
 }
 
 export class RelayLifecycle {
@@ -339,10 +344,11 @@ export class RelayLifecycle {
     kind: RelayFailureKind,
     placeArchiveAt: string | undefined,
     assetName: string | undefined,
+    logReason: string = reason,
   ): void {
     this.starting = false;
     const decision = this.prelaunchOutage.fail("relay-prelaunch", reason, Date.now());
-    if (decision.log) console.warn(`[video] ${scrub(reason)}${scrub(decision.note)}`);
+    if (decision.log) console.warn(`[video] ${scrub(logReason)}${scrub(decision.note)}`);
     if (kind === "unsupported") {
       videoService.setPreAttachStatus({ state: "failing", reason, kind, retryAt: null, placeArchiveAt, assetName });
       return;
@@ -421,7 +427,8 @@ export class RelayLifecycle {
       const { ports } = await loadFeedsFile();
       const busy = await this.deps.busyPorts(ports);
       if (busy.length > 0) {
-        this.failPreSupervisor(busyPortReason(busy), "port-conflict", undefined, undefined);
+        const { reason, logReason } = busyPortReason(busy);
+        this.failPreSupervisor(reason, "port-conflict", undefined, undefined, logReason);
         return;
       }
 
