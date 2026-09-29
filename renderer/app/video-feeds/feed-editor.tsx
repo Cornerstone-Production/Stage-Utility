@@ -591,10 +591,10 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
         // trip needed.
         setData({ protocol: r.protocol, address: r.address, password: r.password });
       } else {
-        // The control is previewing a DIFFERENT, unsaved protocol. Showing r's own (saved-protocol) address here
-        // would show an address for a protocol the control does not even
-        // have selected, so the control and the address field would stop
-        // matching. Re-preview the protocol the control shows, now with the
+        // The control is previewing a DIFFERENT, unsaved protocol. Showing
+        // r's own (saved-protocol) address here would show an address for a
+        // protocol the control does not even have selected, so the control
+        // and the address field would stop matching. Re-preview the protocol the control shows, now with the
         // fresh password. Safe to land out of order: the request counter
         // above drops it if a newer request has since started.
         void load();

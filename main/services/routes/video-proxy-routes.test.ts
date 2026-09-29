@@ -109,8 +109,9 @@ before(async () => {
       return;
     }
     // Proves this proxy actually STREAMS rather than buffering the whole
-    // upstream answer before relaying it: the fixture above proves only that a HELD response eventually arrives,
-    // not that bytes already sent are not held back for the rest.
+    // upstream answer before relaying it: the fixture above proves only that
+    // a HELD response eventually arrives, not that bytes already sent are not
+    // held back for the rest.
     if (req.method === "GET" && req.url === "/cam/chunked.m3u8") {
       res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
       res.write("#EXTM3U\n");

@@ -193,13 +193,6 @@ function probeVersion(port: number): Promise<ProbedVersion | null> {
   });
 }
 
-/**
- * The main port's holder as one log sentence (remote-server.ts): another
- * Stage Utility if it answers `/api/version` over loopback — version, and
- * pid/data directory when the holder included them (only a loopback caller
- * gets those, see `buildVersionPayload`) — else the raw lsof/ss text. No
- * version probe for a UDP port: there is no HTTP to ask over it.
- */
 /** Who holds `port`, as parts: another Stage Utility if it answers
  *  /api/version on it (TCP only — there is no HTTP to ask over UDP), else
  *  whatever lsof, ss or netstat names. */
@@ -217,6 +210,13 @@ export async function portHolder(port: number, proto: "tcp" | "udp"): Promise<Po
   return line ? parseHolderLine(line) : { kind: "unknown" };
 }
 
+/**
+ * The main port's holder as one log sentence (remote-server.ts): another
+ * Stage Utility if it answers `/api/version` over loopback — version, and
+ * pid/data directory when the holder included them (only a loopback caller
+ * gets those, see `buildVersionPayload`) — else the raw lsof/ss text. No
+ * version probe for a UDP port: there is no HTTP to ask over it.
+ */
 export async function describePortHolder(port: number, proto: "tcp" | "udp" = "tcp"): Promise<string> {
   const body = proto === "tcp" ? await probeVersion(port) : null;
   if (body && typeof body.version === "string") {

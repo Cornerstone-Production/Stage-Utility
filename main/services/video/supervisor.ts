@@ -141,11 +141,6 @@ export interface RelaySupervisorOptions {
 }
 
 /**
- * Runs MediaMTX as a child of this process and restarts it forever, with
- * backoff from 1 s to 60 s. It never gives up — `status()` says it is
- * failing and why, and the caller decides what an operator sees.
- */
-/**
  * Every supervisor that currently has a live child, so the ONE process-level
  * "exit" listener below (registered once, module scope) can kill each of
  * them best-effort. Previously each RelaySupervisor registered its OWN
@@ -168,6 +163,11 @@ function ensureExitHandlerRegistered(): void {
   });
 }
 
+/**
+ * Runs MediaMTX as a child of this process and restarts it forever, with
+ * backoff from 1 s to 60 s. It never gives up — `status()` says it is
+ * failing and why, and the caller decides what an operator sees.
+ */
 export class RelaySupervisor extends EventEmitter {
   private readonly spawnImpl: SpawnImpl;
   private readonly psImpl: PsLookup;

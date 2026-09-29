@@ -622,10 +622,10 @@ class VideoService {
    *  process was actually started with. Required, not defaulted: a caller
    *  that does not know what it started the relay on has no business
    *  attaching one — a silent default here is the wrong-port bug
-   *  attachedPorts's own comment describes, one call site earlier. A ports change (`PATCH /api/video/ports`) takes
-   *  effect only once the relay restarts on the new ones; whatever restarts
-   *  it must attachRelay() again with THOSE ports, not reuse the old
-   *  attachment.
+   *  attachedPorts's own comment describes, one call site earlier. A ports
+   *  change (`PATCH /api/video/ports`) takes effect only once the relay
+   *  restarts on the new ones; whatever restarts it must attachRelay() again
+   *  with THOSE ports, not reuse the old attachment.
    *  Safe to call again with no detachRelay() first — the previous relay's
    *  listeners are removed here, never left to leak, and NO intermediate
    *  "off" is published for that half: a caller replacing one relay with
@@ -1349,8 +1349,8 @@ class VideoService {
    * kicks whoever is currently publishing — a new password does not by
    * itself drop an already-connected device, so without
    * the kick the OLD stream would keep going under the password just
-   * replaced. The kick is attempted only while the supervisor is running
-   *, best-effort and logged the same way reconcileRelay() is; its own
+   * replaced. The kick is attempted only while the supervisor is running,
+   * best-effort and logged the same way reconcileRelay() is; its own
    * outage run closes with ok() on a successful call, kicking someone or
    * not.
    *
