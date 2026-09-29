@@ -138,7 +138,10 @@ export type RelayStatus =
    *  anything. */
   | { state: "starting"; version: string | null }
   | { state: "running"; version: string; ports: VideoPorts }
-  /** `assetName` is set only once a real pinned asset exists to place —
+  /** `placeArchiveAt` is the downloads folder relative to the data folder
+   *  ("video-relay/downloads"), never the full path: any LAN client reads
+   *  this, and the server log has the full one.
+   *  `assetName` is set only once a real pinned asset exists to place —
    *  never for "no asset for this platform/arch at all" (acquire.ts's
    *  `ensureBinary` says which case it is directly, rather than a caller
    *  guessing from whether `placeArchiveAt` looks like a bare directory or a

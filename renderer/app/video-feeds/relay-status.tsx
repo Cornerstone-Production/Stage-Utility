@@ -182,7 +182,7 @@ function RelayDetail({
           {relay.retryAt !== null && <span className="inline-flex items-baseline gap-1.5">Next try at {formatClock(relay.retryAt, { seconds: true })}</span>}
           {relay.assetName && relay.placeArchiveAt && (
             <span className="inline-flex items-baseline gap-1.5">
-              Or place {relay.assetName} in {relay.placeArchiveAt} by hand.
+              Or place {relay.assetName} in {relay.placeArchiveAt} in Stage Utility's data folder by hand.
             </span>
           )}
         </>

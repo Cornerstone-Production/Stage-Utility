@@ -192,17 +192,18 @@ describe("the detail line, per other state", () => {
       reason: "checksum mismatch for mediamtx_v1.21.1_linux_amd64.tar.gz: expected a, got b",
       kind: "download",
       retryAt,
-      // A bare DIRECTORY, never a full file path repeating the asset's own
-      // name a second time — item 3 (findings-t15-r2.md): acquire.ts now
-      // sends the two as separate fields for every failure, not just the
-      // unsupported-platform one.
-      placeArchiveAt: "/data/video-relay/downloads",
+      // A folder relative to the data folder, as the server sends it: the
+      // full path never reaches a LAN client.
+      placeArchiveAt: "video-relay/downloads",
       assetName: "mediamtx_v1.21.1_linux_amd64.tar.gz",
     });
     const text = document.body.textContent ?? "";
     assert.match(text, /checksum mismatch for mediamtx_v1\.21\.1_linux_amd64\.tar\.gz: expected a, got b/);
     assert.match(text, /Next try at/);
-    assert.match(text, /Or place mediamtx_v1\.21\.1_linux_amd64\.tar\.gz in \/data\/video-relay\/downloads by hand\./);
+    assert.match(
+      text,
+      /Or place mediamtx_v1\.21\.1_linux_amd64\.tar\.gz in video-relay\/downloads in Stage Utility's data folder by hand\./,
+    );
     // Not run together on one sentence — "… Or place …" immediately after
     // the retry time, with no separating punctuation, reads as one run-on.
     assert.equal(/Next try at [\d:]+ Or place/.test(text), false, "the retry time and the hand-place line ran together");
@@ -219,7 +220,7 @@ describe("the detail line, per other state", () => {
       reason: "Video relay is not available for win32 arm64.",
       kind: "unsupported",
       retryAt: null,
-      placeArchiveAt: "/data/video-relay/downloads",
+      placeArchiveAt: "video-relay/downloads",
     });
     const text = document.body.textContent ?? "";
     assert.match(text, /Video relay is not available for win32 arm64\./);

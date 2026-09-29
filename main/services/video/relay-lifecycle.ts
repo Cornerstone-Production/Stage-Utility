@@ -348,7 +348,11 @@ export class RelayLifecycle {
   ): void {
     this.starting = false;
     const decision = this.prelaunchOutage.fail("relay-prelaunch", reason, Date.now());
-    if (decision.log) console.warn(`[video] ${scrub(logReason)}${scrub(decision.note)}`);
+    // The full hand-place path goes here, to the server log; the status
+    // every LAN client reads names it relative to the data folder
+    // (video-service.ts's relayStatus()).
+    const byHand = placeArchiveAt && assetName ? ` (to place it by hand: ${assetName} in ${placeArchiveAt})` : "";
+    if (decision.log) console.warn(`[video] ${scrub(logReason)}${scrub(byHand)}${scrub(decision.note)}`);
     if (kind === "unsupported") {
       videoService.setPreAttachStatus({ state: "failing", reason, kind, retryAt: null, placeArchiveAt, assetName });
       return;

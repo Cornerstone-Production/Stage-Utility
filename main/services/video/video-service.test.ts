@@ -1133,6 +1133,47 @@ test("a relay the supervisor already reports failing keeps its own reason, and l
   }
 });
 
+// The relay status reaches every LAN client (video:state, the integration
+// row), so this server's data-folder path never does: a path inside it reads
+// relative to it, and the full path stays in the server log.
+test("a failing relay's reason and hand-place folder never carry the data-folder path", async () => {
+  const relay = fakeRelay(async () => []);
+  const supervisor = new FakeSupervisor();
+  supervisor.current = {
+    state: "failing",
+    reason: `open ${path.join(TMP, "video-relay", "mediamtx.yml")}: permission denied`,
+    retryAt: 55555,
+    neverStarted: false,
+  };
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  try {
+    await pollOnce();
+    const status = (await videoService.state()).relay;
+    assert.equal(JSON.stringify(status).includes(TMP), false, `the data-folder path reached the relay status: ${JSON.stringify(status)}`);
+    assert.equal((status as { reason: string }).reason, `open ${path.join("video-relay", "mediamtx.yml")}: permission denied`);
+  } finally {
+    await videoService.detachRelay();
+  }
+
+  videoService.setPreAttachStatus({
+    state: "failing",
+    reason: `hand-placed archive at ${path.join(TMP, "video-relay", "downloads", "m.tar.gz")} does not match`,
+    kind: "download",
+    retryAt: 55555,
+    placeArchiveAt: path.join(TMP, "video-relay", "downloads"),
+    assetName: "m.tar.gz",
+  });
+  try {
+    const status = (await videoService.state()).relay as { reason: string; placeArchiveAt?: string };
+    assert.equal(JSON.stringify(status).includes(TMP), false, `the data-folder path reached the relay status: ${JSON.stringify(status)}`);
+    assert.equal(status.placeArchiveAt, path.join("video-relay", "downloads"));
+    assert.equal(status.reason, `hand-placed archive at ${path.join("video-relay", "downloads", "m.tar.gz")} does not match`);
+  } finally {
+    videoService.setPreAttachStatus(null);
+  }
+});
+
 test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed with no path as offline, not standby — it is up enough to have an opinion", async () => {
   const relay = fakeRelay(async () => []);
   const supervisor = new FakeSupervisor();

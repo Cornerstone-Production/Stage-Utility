@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 
+import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { getLanIp } from "../lan-ip.js";
@@ -316,6 +317,17 @@ class VideoService {
    * pollFailureIsNews() says so.
    */
   private relayStatus(): RelayStatus {
+    const status = this.relayStatusWithPaths();
+    if (status.state !== "failing") return status;
+    // Every LAN client reads this (video:state, the integration row): no
+    // data-folder path, whatever the failure's own text named. The server
+    // log keeps the full one.
+    const lan: RelayStatus = { ...status, reason: withoutDataDir(status.reason) };
+    if (status.placeArchiveAt !== undefined) lan.placeArchiveAt = withoutDataDir(status.placeArchiveAt);
+    return lan;
+  }
+
+  private relayStatusWithPaths(): RelayStatus {
     if (!this.supervisor) return this.preAttachStatus ?? { state: "off" };
     const status = this.supervisor.status();
     switch (status.state) {

@@ -31,9 +31,22 @@ named for the version. None of this is backed up; it is runtime data, rebuilt
 the same way on a fresh machine. Once extracted it is reused on every later
 start, with no re-download and no re-check. A machine with no internet access
 can skip the download entirely: place the exact archive the failing status
-line names in that same `downloads` folder by hand, and it is checked against
-the same checksum before it is ever run — a wrong or corrupted file is
-refused, not extracted.
+line names in `video-relay/downloads` in the data folder by hand, and it is
+checked against the same checksum before it is ever run — a wrong or
+corrupted file is refused, not extracted.
+
+| Install | Data folder |
+|---|---|
+| Linux (one-line installer) | `/var/lib/stage-utility` |
+| macOS (one-line installer) | `/usr/local/var/stage-utility` |
+| Windows | `%ProgramData%\stage-utility` |
+| Homebrew | `$(brew --prefix)/var/stage-utility` |
+| Checkout, or no installer | `~/.stage-utility` |
+
+The status line, like everything else a browser on the network can read,
+names folders relative to the data folder and a busy port's holder by
+program name only. The server log has the full path and the holder's
+process id.
 
 Once running, the relay is a child process of this server. If it exits for
 any reason it is restarted automatically, backing off from 1 second up to 60

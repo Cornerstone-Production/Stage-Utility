@@ -923,23 +923,30 @@ test("item 1: the connection row catches up to the version once the banner line 
 
 // ── 9: ensureBinary's discriminator reaches the wire unchanged ─────────────
 
-test("a download failure carries assetName and placeArchiveAt straight through to RelayStatus", async () => {
+test("a download failure carries assetName and the hand-place folder to RelayStatus, relative to the data folder", async (t: TestContext) => {
+  const logs: string[] = [];
+  t.mock.method(console, "warn", (msg: string) => logs.push(msg));
+  const downloads = path.join(TMP, "video-relay", "downloads");
   const { deps, order } = makeDeps({
     ensureBinary: async () => {
       order.push("ensureBinary");
-      return { ok: false, reason: "checksum mismatch", placeArchiveAt: "/data/video-relay/downloads/mediamtx.tar.gz", assetName: "mediamtx.tar.gz" };
+      return { ok: false, reason: "checksum mismatch", placeArchiveAt: downloads, assetName: "mediamtx.tar.gz" };
     },
   });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  await waitUntil(() => videoService.current().relay.state === "failing");
 
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "failing");
   assert.equal((relay as { reason: string }).reason, "checksum mismatch");
-  assert.equal((relay as { placeArchiveAt?: string }).placeArchiveAt, "/data/video-relay/downloads/mediamtx.tar.gz");
+  assert.equal((relay as { placeArchiveAt?: string }).placeArchiveAt, path.join("video-relay", "downloads"));
   assert.equal((relay as { assetName?: string }).assetName, "mediamtx.tar.gz");
+  assert.ok(
+    logs.some((l) => l.includes(`to place it by hand: mediamtx.tar.gz in ${downloads}`)),
+    `the server log must keep the full path: ${JSON.stringify(logs)}`,
+  );
 });
 
 test("an unsupported platform (assetName: null) never invents a hand-place path", async () => {
