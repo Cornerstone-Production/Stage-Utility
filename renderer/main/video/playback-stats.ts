@@ -63,11 +63,6 @@ type StatsEntry = {
   freezeCount?: number;
 };
 
-/** `pc.getStats()`'s one inbound-rtp video report, or null when the call
- *  succeeded but carries no such report yet — legitimately nothing to
- *  report, never logged (see `createSampler`). Rethrows a `getStats()`
- *  failure itself: the caller, not this function, knows whether that is
- *  teardown noise or a real outage worth telling the operator about. */
 /** `read`, or a rejection once STATS_READ_TIMEOUT_MS passes without it. A
  *  result landing after that is dropped: the next read's deltas count what
  *  this one missed. */
@@ -83,6 +78,11 @@ async function inTime<T>(read: Promise<T>): Promise<T> {
   }
 }
 
+/** `pc.getStats()`'s one inbound-rtp video report, or null when the call
+ *  succeeded but carries no such report yet — legitimately nothing to
+ *  report, never logged (see `createSampler`). Rethrows a `getStats()`
+ *  failure itself: the caller, not this function, knows whether that is
+ *  teardown noise or a real outage worth telling the operator about. */
 async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null> {
   const report = await pc.getStats();
   let found: RawCounts | null = null;
