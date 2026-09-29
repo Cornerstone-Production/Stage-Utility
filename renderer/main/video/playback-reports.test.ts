@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { __resetPlaybackRegistryForTests, anyPlaying, drainReports, registerPlayback } from "./playback-reports.js";
+import { __resetPlaybackRegistryForTests, anyPlaying, drainReports, onAnyPlayingChange, registerPlayback } from "./playback-reports.js";
 
 // The registry is module-level state, shared across every test in the file —
 // each test cleans up its own registrations, but a leaked one from a FAILED
@@ -103,5 +103,56 @@ test("re-registering the same key replaces it; the OLD registration's unregister
     assert.deepEqual(await drainReports(), [report("second")]);
   } finally {
     second();
+  }
+});
+
+// ── onAnyPlayingChange: notified only on the boundary crossing ───────────
+//
+// stage-view.tsx's presence heartbeat subscribes to this to reschedule its
+// pending timer the instant playback starts or stops, rather than riding
+// out whatever cadence it already committed to. It must fire on the FIRST
+// registration and the LAST unregistration — never on every register/
+// unregister in between, which would reschedule (and so re-POST sooner than
+// intended) every time a second or third widget starts or stops beside one
+// still playing.
+
+test("onAnyPlayingChange fires on the first registration, not on a second one alongside it", async () => {
+  const flips: boolean[] = [];
+  const unsubscribe = onAnyPlayingChange(() => flips.push(anyPlaying()));
+  const u1 = registerPlayback("obj-1", async () => report("feed-1"));
+  const u2 = registerPlayback("obj-2", async () => report("feed-2"));
+  try {
+    assert.deepEqual(flips, [true], "expected exactly one notification, from the FIRST registration");
+  } finally {
+    u1();
+    u2();
+    unsubscribe();
+  }
+});
+
+test("onAnyPlayingChange fires on the last unregistration, not on one that still leaves another registered", async () => {
+  const u1 = registerPlayback("obj-1", async () => report("feed-1"));
+  const u2 = registerPlayback("obj-2", async () => report("feed-2"));
+  const flips: boolean[] = [];
+  const unsubscribe = onAnyPlayingChange(() => flips.push(anyPlaying()));
+  try {
+    u1();
+    assert.deepEqual(flips, [], "one of two unregistering must not notify — something is still playing");
+    u2();
+    assert.deepEqual(flips, [false], "expected exactly one notification, from the LAST unregistration");
+  } finally {
+    unsubscribe();
+  }
+});
+
+test("unsubscribe stops further notifications", async () => {
+  const flips: boolean[] = [];
+  const unsubscribe = onAnyPlayingChange(() => flips.push(anyPlaying()));
+  unsubscribe();
+  const unregister = registerPlayback("obj-1", async () => report("feed-1"));
+  try {
+    assert.deepEqual(flips, [], "an unsubscribed listener must not be called");
+  } finally {
+    unregister();
   }
 });

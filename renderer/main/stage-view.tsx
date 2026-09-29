@@ -20,6 +20,7 @@ import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { anyPlaying, drainReports, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -466,44 +467,66 @@ export function StageView() {
 
   // Presence heartbeat: tell the server this screen is alive so the Screens page
   // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
-  // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
-  // flips the dot offline at once, and the server TTL catches ungraceful deaths.
+  // otherwise (no point pinging every 20s during a dead week) — faster still,
+  // VIDEO_HEARTBEAT_MS, whenever a Video widget on this screen is actually playing
+  // something, whichever of the other two cadences that beats. A sendBeacon on
+  // unload flips the dot offline at once, and the server TTL catches ungraceful
+  // deaths.
+  //
+  // A self-rescheduling setTimeout, not a fixed setInterval: anyPlaying() is read
+  // fresh every time schedule() runs, and onAnyPlayingChange reschedules the
+  // moment playback starts or stops — the same eager pattern the pco:live listener
+  // below already uses for `near` — so a widget starting to play does not have to
+  // wait out whatever was left of a slow, already-pending wait.
   useEffect(() => {
     if (isPreviewSlug(displayId)) return;
     const url = "/api/displays/presence";
     let near = false;
-    let timer: ReturnType<typeof setInterval>;
+    let timer: ReturnType<typeof setTimeout>;
+    const intervalMs = () => (anyPlaying() ? VIDEO_HEARTBEAT_MS : near ? 20_000 : 60_000);
     const ping = () => {
-      void fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The size this screen is actually running at, so Screens can show it
-        // without anybody walking to the wall with a laptop. CSS pixels plus the
-        // ratio: that is what a layout is measured in, so it is the number that
-        // answers "will my view fit".
-        //
-        // `device` comes from the /enroll redirect and is only present on a
-        // kiosk device. A browser opened by hand has none, so its size is
-        // reported by nobody and cannot overwrite the screen's.
-        body: JSON.stringify({
+      void (async () => {
+        const reports = await drainReports();
+        const body: Record<string, unknown> = {
           outputId: displayId,
           deviceId: new URLSearchParams(window.location.search).get("device") ?? undefined,
+          // The size this screen is actually running at, so Screens can show it
+          // without anybody walking to the wall with a laptop. CSS pixels plus the
+          // ratio: that is what a layout is measured in, so it is the number that
+          // answers "will my view fit".
+          //
+          // `device` comes from the /enroll redirect and is only present on a
+          // kiosk device. A browser opened by hand has none, so its size is
+          // reported by nobody and cannot overwrite the screen's.
           screen: { w: window.screen.width, h: window.screen.height, dpr: window.devicePixelRatio },
-        }),
-        keepalive: true,
-      }).catch(() => {});
+        };
+        if (reports.length > 0) body.video = reports;
+        await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          keepalive: true,
+        });
+      })().catch(() => {});
     };
     const schedule = () => {
-      clearInterval(timer);
-      timer = setInterval(ping, near ? 20_000 : 60_000);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        ping();
+        schedule();
+      }, intervalMs());
     };
     ping();
     schedule();
     const offLive = onNotification("pco:live", (p: unknown) => {
       const mode = (p as { mode?: string } | null)?.mode;
       const n = mode === "item" || mode === "preservice";
-      if (n !== near) { near = n; schedule(); }
+      if (n !== near) {
+        near = n;
+        schedule();
+      }
     });
+    const offPlaying = onAnyPlayingChange(schedule);
     const leave = () => {
       try {
         navigator.sendBeacon?.(
@@ -514,8 +537,9 @@ export function StageView() {
     };
     window.addEventListener("pagehide", leave);
     return () => {
-      clearInterval(timer);
+      clearTimeout(timer);
       offLive();
+      offPlaying();
       window.removeEventListener("pagehide", leave);
       leave();
     };

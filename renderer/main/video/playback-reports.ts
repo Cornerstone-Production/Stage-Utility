@@ -20,23 +20,45 @@ type Sample = () => Promise<VideoPlaybackReport | null>;
 
 const registry = new Map<string, Sample>();
 
+/** Notified whenever `anyPlaying()` FLIPS — nothing playing to something, or
+ *  back — never on every register/unregister, so a widget cycling through
+ *  several attempts while at least one other stays registered notifies
+ *  nobody. stage-view.tsx's presence heartbeat uses this to reschedule the
+ *  moment playback starts or stops, the same way it already reschedules the
+ *  moment PCO goes live, rather than riding out whatever cadence its
+ *  currently pending timer already committed to. */
+const listeners = new Set<() => void>();
+
+function notifyIfFlipped(wasPlaying: boolean): void {
+  if (wasPlaying !== anyPlaying()) for (const cb of listeners) cb();
+}
+
 /** Registers `sample` under `key`. Returns the unregister function — call it
  *  on unmount or the moment playback stops. Re-registering the same key (a
  *  fast remount) replaces the entry; the OLDER registration's own unregister
  *  is then a no-op, so it can never evict the newer one that has already
  *  taken its place. */
 export function registerPlayback(key: string, sample: Sample): () => void {
+  const wasPlaying = anyPlaying();
   registry.set(key, sample);
+  notifyIfFlipped(wasPlaying);
   return () => {
-    if (registry.get(key) === sample) registry.delete(key);
+    if (registry.get(key) !== sample) return;
+    const was = anyPlaying();
+    registry.delete(key);
+    notifyIfFlipped(was);
   };
 }
 
-/** Whether any widget is currently registered — checked fresh on every
- *  heartbeat tick, so starting or stopping playback speeds up or slows down
- *  the NEXT tick rather than waiting for the interval to be rebuilt. */
+/** Whether any widget is currently registered. */
 export function anyPlaying(): boolean {
   return registry.size > 0;
+}
+
+/** Subscribes to `anyPlaying()` flipping. Returns the unsubscribe function. */
+export function onAnyPlayingChange(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
 }
 
 /** Every registered widget's current report. A sampler's promise rejecting
@@ -49,8 +71,10 @@ export async function drainReports(): Promise<VideoPlaybackReport[]> {
   return settled.flatMap((r) => (r.status === "fulfilled" && r.value !== null ? [r.value] : []));
 }
 
-/** Test-only: clears every registration, so one test's leaked entry (from a
- *  failure that skipped its own unregister) cannot bleed into the next. */
+/** Test-only: clears every registration and subscriber, so one test's leaked
+ *  entry (from a failure that skipped its own unregister/unsubscribe) cannot
+ *  bleed into the next. */
 export function __resetPlaybackRegistryForTests(): void {
   registry.clear();
+  listeners.clear();
 }
