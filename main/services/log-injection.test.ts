@@ -271,8 +271,7 @@ const NOT_SCANNED = new Map<string, string>([
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
-  // video/acquire.ts is NOT here: item 2 (findings-t15-r2.md, this PR)
-  // removed its own two console.warn calls entirely — the caller
+  // video/acquire.ts is NOT here: it logs nothing — the caller
   // (relay-lifecycle.ts, already in this map below) owns all logging for a
   // checksum mismatch now, so acquire.ts itself no longer logs anything at
   // all, and an exclusion for a file that has stopped logging is exactly

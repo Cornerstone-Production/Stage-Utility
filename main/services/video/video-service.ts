@@ -209,12 +209,12 @@ class VideoService {
    * The ports the CURRENT relay process was actually started with — pinned
    * at attachRelay(), never re-read from the store while the same process
    * keeps running. relayStatus()'s "running" ports come from here, not from
-   * loadFeedsFile(): a `PATCH /api/video/ports` change (PR 2) writes the
+   * loadFeedsFile(): a `PATCH /api/video/ports` change writes the
    * store immediately but the relay itself keeps listening on its OLD ports
    * until it restarts, so a poll landing between that write and the restart
-   * must still answer the ports the relay is actually reachable on — R13a's
-   * finding was relayTarget() pointing the proxy at a store's brand-new
-   * port nothing was listening on yet.
+   * must still answer the ports the relay is actually reachable on, or
+   * relayTarget() points the proxy at a brand-new port nothing is
+   * listening on yet.
    */
   private attachedPorts: VideoPorts | null = null;
   /** Whether the connection row has already been told THIS attachment's
@@ -258,7 +258,7 @@ class VideoService {
    *  the same fact as a relay actually answering: a hung process is running
    *  and not answering both. */
   private relayNotAnswering = false;
-  /** R14i: whether a poll has SUCCEEDED since the supervisor's status last
+  /** Whether a poll has SUCCEEDED since the supervisor's status last
    *  became "running" — reset false on every status change (same moment as
    *  relayNotAnswering, in handleStatusChange()/detachInternal()) and set
    *  true only by pollOnce()'s own success path, once its generation still
@@ -345,7 +345,7 @@ class VideoService {
       case "off":
         return { state: "off" };
       case "failing":
-        // item 9 (findings-t15-r3.md): status.neverStarted is true ONLY
+        // status.neverStarted is true ONLY
         // for a genuine spawn failure (node's own spawn() never created a
         // process at all) — that is a PRE-process kind, same as every
         // failPreSupervisor() kind, matching the standby ruling: nothing
@@ -367,9 +367,9 @@ class VideoService {
         // attachRelay() requires ports and sets attachedPorts in the same
         // call that sets supervisor, so a "running" supervisor GUARANTEES
         // this is non-null — asserted, not defaulted: a silent fallback
-        // here is the exact bug class R13a fixed, and attachRelay()'s own
-        // required parameter is what makes this assertion true rather than
-        // hopeful.
+        // here would point the proxy at a port nothing listens on, and
+        // attachRelay()'s own required parameter is what makes this
+        // assertion true rather than hopeful.
         return { state: "running", version: this.supervisor.version() ?? "", ports: this.attachedPorts! };
     }
   }
@@ -382,7 +382,7 @@ class VideoService {
   }
 
   private relayFeedStatus(feedId: string, kind: "pull" | "push"): FeedStatus {
-    // R14a/R14i, and item 14 (findings-t15-r2.md): "up" is running WITH at
+    // "up" is running WITH at
     // least one poll answered since it last reached running (never true
     // fresh out of "starting", where the relay may not have opened its API
     // yet — see RELAY_BOOT_GRACE_MS's own reasoning), or failing IN A WAY
@@ -440,7 +440,7 @@ class VideoService {
     return `${SOURCE_LINE_KIND[s.kind]} · ${detail}`;
   }
 
-  /** R14c/item 12: `hasPassword` only for a pull feed — whether a password
+  /** `hasPassword` only for a pull feed — whether a password
    *  is currently stored, NEVER the value. Lets the editor say "a password
    *  is saved" without a blank field silently implying there is none. A
    *  push feed's password is never on this view at all; it has its own
@@ -565,9 +565,8 @@ class VideoService {
   /** Give the service a relay and its supervisor, and the ports THIS
    *  process was actually started with. Required, not defaulted: a caller
    *  that does not know what it started the relay on has no business
-   *  attaching one — a silent default here is exactly the wrong-port bug
-   *  class R13a fixed (see attachedPorts's own comment), just moved one
-   *  call site earlier. A ports change (`PATCH /api/video/ports`) takes
+   *  attaching one — a silent default here is the wrong-port bug
+   *  attachedPorts's own comment describes, one call site earlier. A ports change (`PATCH /api/video/ports`) takes
    *  effect only once the relay restarts on the new ones; whatever restarts
    *  it must attachRelay() again with THOSE ports, not reuse the old
    *  attachment.
@@ -755,7 +754,7 @@ class VideoService {
       if (this.relayGeneration !== generation) return; // see the comment in the catch branch above
       this.reportPollSuccess();
       this.relayAnswered = true;
-      // R14i: THIS generation has now genuinely heard from the relay once —
+      // THIS generation has now genuinely heard from the relay once —
       // relayFeedStatus() may read a missing path as offline from here on,
       // for as long as this same generation lasts.
       this.polledSinceRunning = true;
@@ -934,7 +933,7 @@ class VideoService {
   private handleLine(text: string): void {
     const event = this.logWatcher.line(text);
     if (event?.kind === "b-frames") void this.markBFrames(event.path);
-    // item 1 (findings-t15-r2.md): the supervisor's own version() is
+    // The supervisor's own version() is
     // updated (supervisor.ts's attachReader()) BEFORE this listener ever
     // runs, so the moment the relay's startup banner is the line just read,
     // version() already reflects it. Without this, the connection row —
@@ -1045,7 +1044,7 @@ class VideoService {
 
   /**
    * A push feed's password, minting and storing a fresh one first if none is
-   * currently stored — R14c. `secrets.password ?? ""` used to hand the relay
+   * currently stored. `secrets.password ?? ""` used to hand the relay
    * an EMPTY password for a push feed with no secret (a restored snapshot, a
    * wiped secrets file, or a kind change that landed between two writes),
    * and an empty `pass` is exactly READER_USER's OWN convention for "no
@@ -1055,7 +1054,7 @@ class VideoService {
    * caller (reconcileRelay's own catch, or pushAddress's route) without
    * ever claiming success.
    *
-   * Single-flight per feed id (R14 round 2 item 4) — this is called from
+   * Single-flight per feed id — this is called from
    * BOTH reconcileOnce() (relayFeeds(), every reconcile) and pushAddress()
    * (a single feed, on every GET), so a feed with no stored secret yet can
    * have both land at once; without mintingPassword each reads "no
@@ -1131,7 +1130,7 @@ class VideoService {
    * relay-lifecycle.ts's own readiness retry can call it directly once the
    * relay it just started has an API worth asking.
    *
-   * R14e: single-flight. Two feed changes calling this while a reconcile is
+   * Single-flight. Two feed changes calling this while a reconcile is
    * already talking to the relay used to fire two overlapping
    * relay.reconcile() calls — each reading its own snapshot of the feed
    * store and racing the OTHER's writes to the relay, so the loser's own
@@ -1200,7 +1199,7 @@ class VideoService {
       this.relayAnswered = true;
       const decision = this.sparseOutage.ok("reconcile", Date.now());
       if (decision.log) console.log(`[video] reconciling the relay is working again${scrub(decision.note)}`);
-      // item 1: the readiness poll (relay-lifecycle.ts's startReadinessPoll)
+      // The readiness poll (relay-lifecycle.ts's startReadinessPoll)
       // stops calling this the MOMENT it first succeeds — its own one
       // chance to catch the connection row up if handleLine() somehow
       // hasn't already. publish() itself is the guard against noise: it
@@ -1243,11 +1242,11 @@ class VideoService {
    *  listener. `password` is `<pw>` for SRT/RTMP, and `video:<pw>` for WHIP
    *  because that whole string is what OBS's Bearer Token field takes.
    *  Ports come from the feed store, not `attachedPorts`: a paste-ready
-   *  address is exactly as good with the relay off as running (Task 15
-   *  starts it once a push/pull feed exists), and the store is what the
+   *  address is exactly as good with the relay off as running (it starts
+   *  once a push or pull feed exists), and the store is what the
    *  relay WILL be listening on once it does.
    *
-   *  `protocolOverride` (R14g): the editor's protocol segmented control
+   *  `protocolOverride`: the editor's protocol segmented control
    *  previews the OTHER protocols' addresses before Save — same feed, same
    *  password, a different protocol's address shape — without writing
    *  anything. Defaults to the feed's own saved protocol. */
@@ -1274,19 +1273,19 @@ class VideoService {
   /**
    * Writes a fresh password, reconciles the relay so it takes effect, then
    * kicks whoever is currently publishing — a new password does not by
-   * itself drop an already-connected device (relay-facts.md), so without
+   * itself drop an already-connected device, so without
    * the kick the OLD stream would keep going under the password just
    * replaced. The kick is attempted only while the supervisor is running
-   * (R14d), best-effort and logged the same way reconcileRelay() is; its own
+   *, best-effort and logged the same way reconcileRelay() is; its own
    * outage run closes with ok() on a successful call, kicking someone or
    * not.
    *
-   * `applied`/`kicked` (R14d) let the editor say when a rotation has not
+   * `applied`/`kicked` let the editor say when a rotation has not
    * actually taken hold yet, rather than showing a new password nothing is
    * enforcing: `applied` is false only when a relay IS running and the
    * reconcile itself failed (true, vacuously, with no relay to apply to —
    * there is nothing wrong to report). `kicked` is three-way, not a
-   * boolean (controller ruling on R14d's own flagged wording gap): "none"
+   * boolean: "none"
    * covers BOTH "nobody was publishing" and "no relay is running to ask" —
    * two different facts a boolean could not tell apart, which is exactly
    * what let the editor's old two-state note say a device was sending when
@@ -1388,7 +1387,7 @@ class VideoService {
     // key (see main/types/video.ts). Only feedIdFor(), at creation, mints one.
     const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
 
-    // The feed store write happens FIRST, updateFeedSecret() second — R14c.
+    // The feed store write happens FIRST, updateFeedSecret() second.
     // The reverse order (this used to run the secret change BEFORE the
     // store write) meant a store write that failed left a feed whose file
     // still named the OLD kind sitting behind a secret already changed to

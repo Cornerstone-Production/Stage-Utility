@@ -16,8 +16,7 @@ export const PUSH_PROTOCOL_LABEL: Record<PushProtocol, string> = {
 /** What newPushPassword()'s kick attempt did, three ways rather than a
  *  boolean — "none" and "failed" are both "nothing got dropped," but only
  *  one of them means a device really was pushing and stayed connected
- *  under the old password (controller ruling on R14d's own flagged wording
- *  gap): "dropped" a publisher was actually dropped; "none" nobody was
+ *  under the old password: "dropped" a publisher was actually dropped; "none" nobody was
  *  publishing, or no relay is running to ask; "failed" a publisher WAS
  *  there and the attempt to drop it failed. */
 export type KickResult = "dropped" | "none" | "failed";

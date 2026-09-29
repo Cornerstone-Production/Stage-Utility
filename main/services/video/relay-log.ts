@@ -28,7 +28,7 @@ export class RelayLogWatcher {
 
     const errorMatch = text.match(ERROR);
     if (errorMatch) {
-      // R14j: the relay's own error lines can echo a credentialed URL back
+      // The relay's own error lines can echo a credentialed URL back
       // verbatim (a real v1.21.1 binary given a malformed pull source did
       // exactly this) — lastError() is what the supervisor turns into its
       // exit reason (status.reason, and the "relay exited" log line), so

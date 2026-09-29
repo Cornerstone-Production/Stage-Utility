@@ -135,7 +135,7 @@ describe("pullSource", () => {
     assert.equal(pullSource("rtsp://h/s", "user", "a@b:c/d"), "rtsp://user:a%40b%3Ac%2Fd@h/s");
   });
 
-  // R14b (fix round 1): the WHATWG URL setters leave a literal `%` alone —
+  // The WHATWG URL setters leave a literal `%` alone —
   // confirmed against a real MediaMTX v1.21.1 binary, which then choked
   // parsing the result and echoed the whole credentialed URL, garbled by its
   // own Go fmt formatting, into an API error text a relay failure would log

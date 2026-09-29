@@ -4,7 +4,7 @@
 //
 // The relay's status line and on/off switch belong in this card's header too,
 // and arrive with the relay; there is nothing to report on without one. Per
-// the approved design (mockup-v2.html:363-374), the pill and the switch sit
+// the approved design, the pill and the switch sit
 // on the SAME row as the page's own h1 and sub-title, not a separate one —
 // see relay-status.tsx's own header comment.
 // useVideoState()'s `kinds` already limits the Source dropdown to what this

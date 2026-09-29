@@ -11,9 +11,8 @@
 // Every traversal case below is driven through a REAL socket to the real SU
 // server, never through `fetch()` alone: undici normalizes a `..` segment
 // client-side before the request is ever sent, so a test that only fetches
-// proves the CLIENT LIBRARY normalizes, not that this server does (fix
-// round 1's finding — the first version of this file got exactly this
-// wrong). `rawGet()` below uses `http.request`'s own `path` option, which
+// proves the CLIENT LIBRARY normalizes, not that this server does.
+// `rawGet()` below uses `http.request`'s own `path` option, which
 // Node sends verbatim with no normalization of its own.
 
 import { strict as assert } from "node:assert";
@@ -103,15 +102,14 @@ before(async () => {
     }
     if (req.method === "GET" && (req.url ?? "").startsWith("/cam/index.m3u8")) {
       // Models LL-HLS's blocking playlist reload: the fixture holds the
-      // request open until the next part exists (task-13-brief.md).
+      // request open until the next part exists.
       await new Promise((r) => setTimeout(r, 2000));
       res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
       res.end("#EXTM3U\n#EXT-X-VERSION:9\n");
       return;
     }
     // Proves this proxy actually STREAMS rather than buffering the whole
-    // upstream answer before relaying it — fix round 1's finding: the
-    // fixture above proves only that a HELD response eventually arrives,
+    // upstream answer before relaying it: the fixture above proves only that a HELD response eventually arrives,
     // not that bytes already sent are not held back for the rest.
     if (req.method === "GET" && req.url === "/cam/chunked.m3u8") {
       res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
@@ -136,9 +134,9 @@ before(async () => {
     }
     // MediaMTX's real HLS server does exactly this cookie-check dance on a
     // first request — headers and behaviour confirmed against the real
-    // v1.21.1 binary (task-13-report.md's fix-round-1 addendum): a plain
+    // v1.21.1 binary: a plain
     // GET answers 302 to `?cookieCheck=1` with a Secure, SameSite=None,
-    // Partitioned cookie; on plain HTTP (prod — see prod-remote-diagnosis)
+    // Partitioned cookie; on plain HTTP (how the app is usually served)
     // a browser refuses a Secure cookie outright, so the relay ALSO
     // answers 200 straight from `?cookieCheck=1` with no cookie at all,
     // embedding a `?session=<uuid>` query on every nested URL instead —
@@ -182,7 +180,7 @@ before(async () => {
       return;
     }
     // Answers 200 for anything else under /cam/ — deliberately, not 404.
-    // Fix round 1's finding: a traversal or malformed-segment request that
+    // A traversal or malformed-segment request that
     // this module should refuse BEFORE ever building an upstream target
     // must be OBSERVABLY wrong if it leaks through — against an upstream
     // that 404s everything, a forwarding bug and a correct refusal are
@@ -270,8 +268,8 @@ function rawGet(rawPath: string): Promise<{ status: number; body: string }> {
 // refuse to forward). Every feed's ports point at the ONE fake upstream
 // above: real MediaMTX runs webrtcHttp and hls as two separate listeners,
 // but nothing here cares which port a request lands on, only that
-// relayTarget() computed the right one — R13a's own test, in
-// video-service.test.ts, is what covers the port itself being right.
+// relayTarget() computed the right one — video-service.test.ts covers the
+// port itself being the running relay's.
 
 let camId = "";
 let lobbyId = "";
@@ -441,8 +439,7 @@ describe("once the relay is attached and running", () => {
     );
     const setCookie = redirected.headers.get("set-cookie");
     assert.ok(setCookie?.includes("cookieCheck=1"), `expected the relay's own Set-Cookie to be forwarded, got: ${setCookie}`);
-    // The real binary's exact attributes (task-13-report.md's fix-round-1
-    // addendum) — Secure means a plain-HTTP prod browser refuses to store
+    // The real binary's exact attributes — Secure means a plain-HTTP prod browser refuses to store
     // it at all, which is exactly why the query-string fallback below
     // matters more than the cookie does in production.
     assert.match(setCookie ?? "", /Secure/);
@@ -455,8 +452,8 @@ describe("once the relay is attached and running", () => {
   });
 
   test("on plain HTTP, where a browser refuses the Secure cookie, the relay's own query-string session survives this proxy unchanged", async () => {
-    // No Cookie header at all — models a browser over plain HTTP (prod;
-    // see prod-remote-diagnosis) that never stored the Secure cookie from
+    // No Cookie header at all — models a browser over plain HTTP, how the
+    // app is usually served, that never stored the Secure cookie from
     // the redirect above. The real binary answers 200 straight from
     // `?cookieCheck=1` in that case, embedding `?session=<uuid>` in the
     // playlist body instead of relying on the cookie.

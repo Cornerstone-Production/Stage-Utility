@@ -104,7 +104,7 @@ describe("describePortHolder", () => {
     }
   });
 
-  // item 12 (findings-t15-r3.md): rawPortHolder() looked up TCP only, so a
+  // rawPortHolder() looked up TCP only, so a
   // busy UDP port (the relay's own SRT and WebRTC-media ports) always fell
   // through to "could not determine which process holds it" no matter who
   // actually held it.

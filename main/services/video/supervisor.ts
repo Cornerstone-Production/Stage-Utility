@@ -65,7 +65,7 @@ export type SupervisorStatus =
   /** `neverStarted`: true only for a genuine spawn failure (node's own
    *  spawn() never created a process at all — ENOENT, EACCES) — the ONE
    *  case nothing could have received a source, matching the standby
-   *  ruling (item 9, findings-t15-r3.md); false for a real child that ran
+   *  ruling; false for a real child that ran
    *  and exited, which video-service.ts's own kind mapping reads as
    *  "offline" instead. */
   | { state: "failing"; reason: string; retryAt: number; neverStarted: boolean };
@@ -410,7 +410,7 @@ export class RelaySupervisor extends EventEmitter {
     this.emit("spawned");
     this.attachReader(child.stdout);
     this.attachReader(child.stderr);
-    // item 15 (findings-t15-r2.md): a bad binary path (ENOENT — the pinned
+    // A bad binary path (ENOENT — the pinned
     // release moved or was never extracted) or one that is not executable
     // (EACCES) never reaches 'exit' at all — node_spawn() itself failed,
     // and reports it ONLY through 'error'. An EventEmitter with no 'error'
@@ -424,7 +424,7 @@ export class RelaySupervisor extends EventEmitter {
     // taking the server down with it.
     child.on("error", (err: Error) => {
       if (this.child !== child) return;
-      // item 9 (findings-t15-r3.md): 'error' is not ALWAYS a spawn
+      // 'error' is not ALWAYS a spawn
       // failure — a failed kill() (EPERM, say) fires it on an ALREADY-
       // RUNNING child too. `child.pid` is undefined ONLY when node's own
       // spawn() never actually created a process; that is the one case

@@ -45,7 +45,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 interface FakeChild extends EventEmitter {
   // number | undefined, matching the real SupervisedChild interface: node's
   // own child_process leaves pid undefined when spawn() never actually
-  // created a process at all — the one shape item 9 (findings-t15-r3.md)
+  // created a process at all — the one shape the supervisor
   // reads as a genuine spawn failure, distinct from an 'error' on a child
   // that DID spawn (a failed kill(), say).
   pid: number | undefined;
@@ -260,7 +260,7 @@ describe("RelaySupervisor", () => {
     assert.equal(sup.status().state, "off");
   });
 
-  // item 15 (findings-t15-r2.md): a bad binary path (ENOENT — the pinned
+  // A bad binary path (ENOENT — the pinned
   // release moved or was never extracted) never reaches 'exit' at all —
   // node's own spawn() failed, and reports it ONLY through 'error'. An
   // EventEmitter with no 'error' listener THROWS on that event, which would
@@ -305,7 +305,7 @@ describe("RelaySupervisor", () => {
     assert.equal(children.length, 2, `expected exactly one restart, got ${children.length - 1}`);
   });
 
-  // item 9 (findings-t15-r3.md): 'error' fires for reasons OTHER than a
+  // 'error' fires for reasons OTHER than a
   // spawn failure too — a failed kill() (EPERM, say) on a child that DID
   // spawn (a real pid). That must not be relabeled "could not start" —
   // the process is (or was) genuinely running.
@@ -347,11 +347,11 @@ describe("RelaySupervisor", () => {
     assert.equal(sup.status().state, "running");
   });
 
-  // R14j: a real v1.21.1 binary given a malformed pull source echoed the
+  // A real v1.21.1 binary given a malformed pull source echoed the
   // WHOLE credentialed URL back in its own ERR line — this is what the
   // supervisor turns into both its exit reason (status.reason) and the
   // "relay exited" log line, so neither may carry it through.
-  it("R14j: a credentialed ERR line never reaches the exit reason or the \"relay exited\" log line", async (t) => {
+  it("a credentialed ERR line never reaches the exit reason or the \"relay exited\" log line", async (t) => {
     enableClock(t);
     const { spawnImpl, children } = fakeSpawn();
     const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });

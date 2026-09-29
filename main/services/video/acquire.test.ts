@@ -111,13 +111,13 @@ test("a downloaded archive whose hash does not match is refused, deleted, and ne
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-mismatch.tar.gz.part")));
 });
 
-// item 2 (findings-t15-r2.md, PROBE I): a checksum mismatch used to
+// A checksum mismatch used to
 // console.warn from INSIDE ensureBinary on every single call — 3 retries, 3
 // (or, with the hand-placed check ALSO firing its own line, 4) lines for
 // one ongoing failure. The caller (relay-lifecycle.ts) already owns "once
 // per outage" logging from the returned `reason`; acquire.ts logging its
 // own copy is a duplicate on every retry, not a second fact.
-test("PROBE I: a checksum mismatch retried three times never logs from inside ensureBinary itself", async (t: TestContext) => {
+test("a checksum mismatch retried three times never logs from inside ensureBinary itself", async (t: TestContext) => {
   await resetRelayDir();
   const { archivePath } = await buildArchive(path.join(TMP, "src-mismatch-repeat"), "mediamtx-mismatch-repeat.tar.gz");
   const bytes = await fs.readFile(archivePath);

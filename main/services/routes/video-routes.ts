@@ -43,7 +43,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
 
   const push = pathname.match(/^\/api\/video\/feeds\/([^/]+)\/push$/);
   if (method === "GET" && push) {
-    // R14f: this route answers a live secret (the feed's own publish
+    // This route answers a live secret (the feed's own publish
     // password), unlike every other GET here — a browser cross-site request
     // must be refused the same way a mutating one already is
     // (remote-server.ts's own gate only covers POST/PATCH/PUT/DELETE; reads
@@ -52,7 +52,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
       error(res, "cross-origin request rejected", 403);
       return;
     }
-    // R14g: the editor's protocol segmented control previews another
+    // The editor's protocol segmented control previews another
     // protocol's address (same feed, same password) before Save — an
     // invalid or absent value just falls back to the feed's own saved one.
     const protocolParam = url.searchParams.get("protocol");

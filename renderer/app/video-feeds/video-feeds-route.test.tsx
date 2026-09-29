@@ -132,10 +132,10 @@ interface FetchStubOptions {
   /** What video:feedUsage reports. Default: two layouts. "fail" rejects. */
   usage?: { viewId: string; name: string }[] | "fail";
   /** Answers a video:pushAddress GET, keyed by feed id and the `?protocol=`
-   *  query param the client sends (R14g-a's preview) — undefined when the
+   *  query param the client sends (the protocol preview) — undefined when the
    *  request carried none. Default: a plain SRT address carrying "testpw".
-   *  May return a Promise instead — R14 round 2 item 6's stale-response
-   *  tests hold one call open on purpose, to prove a LATER request's answer
+   *  May return a Promise instead — the stale-response tests hold one
+   *  call open on purpose, to prove a LATER request's answer
    *  landing first is not clobbered once the held one finally resolves. */
   onPushAddress?: (id: string, protocol: string | undefined) => FeedResponse | Promise<FeedResponse>;
   /** Answers a video:newPushPassword POST, keyed by feed id. Default: the
@@ -198,7 +198,7 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
       const r = opts.onAddFeed?.(body) ?? { status: 201, body: { feed: {} } };
       return { ok: r.status < 400, status: r.status, json: async () => r.body, text: async () => "" } as unknown as Response;
     }
-    // `(?:\?.*)?` — R14g-a's client now appends `?protocol=<draft protocol>`
+    // `(?:\?.*)?` — the client appends `?protocol=<draft protocol>`
     // to every push-address GET, previewing another protocol before Save.
     const push = url.match(/\/api\/video\/feeds\/([^/?]+)\/push(?:\?.*)?$/);
     if (method === "GET" && push) {
@@ -276,7 +276,7 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-// item 3 (findings-t15-r2.md): a route-level test that the page's switch
+// A route-level test that the page's switch
 // sends integrations:setEnabled with { id: "video", enabled } THROUGH THE
 // PAGE — driven against the real route component, a real fetch stub and a
 // real click, never toggleVideo()/toggleIntegration() called directly as a
@@ -729,7 +729,7 @@ test("each row says how its feed plays", async () => {
   }
 });
 
-test("R14 round 3 item 4: a delayed relay row's meta line says \"a few seconds behind\", never a figure nothing computes; a live row still says \"under 1 s behind\"", async () => {
+test("a delayed relay row's meta line says \"a few seconds behind\", never a figure nothing computes; a live row still says \"under 1 s behind\"", async () => {
   const g = stubGlobals({
     ...makeState([
       pushFeed({ id: "feed-live", name: "Live push", status: { state: "live", width: 1920, height: 1080 } }),
@@ -982,11 +982,11 @@ test("Copy falls back to selecting the address and prompting Ctrl+C/Cmd+C — js
   }
 });
 
-// R14k: the shared B-frames sentence (b-frames-copy.ts), verbatim.
+// The shared B-frames sentence (b-frames-copy.ts), verbatim.
 const WHIP_HINT = "OBS is sending B-frames, so screens get this feed a few seconds late. Turn them off for under-a-second playback.";
 const DEVICE_HINT = "The device is sending B-frames, so screens get this feed a few seconds late. Turn them off on the device for under-a-second playback.";
 
-test("R14k: a push feed set to WHIP shows the OBS-specific callout and list hint; a pull feed (never necessarily OBS) shows the generic device wording instead, in the SAME two places; a live feed shows neither", async () => {
+test("a push feed set to WHIP shows the OBS-specific callout and list hint; a pull feed (never necessarily OBS) shows the generic device wording instead, in the SAME two places; a live feed shows neither", async () => {
   const g = stubGlobals({
     ...makeState([pushFeed({ id: "feed-whip-delayed", name: "OBS delayed", source: { kind: "push", protocol: "whip" }, status: { state: "delayed", delayedBecause: "b-frames" } })]),
     kinds: ALL_KINDS,
@@ -1052,7 +1052,7 @@ test("R14k: a push feed set to WHIP shows the OBS-specific callout and list hint
   }
 });
 
-test("item 12: a pull feed with a stored password shows \"A password is saved\" with a Clear button, which sends password: \"\" immediately", async () => {
+test("a pull feed with a stored password shows \"A password is saved\" with a Clear button, which sends password: \"\" immediately", async () => {
   const g = stubGlobals(
     { ...makeState([pullFeed({ hasPassword: true })]), kinds: ALL_KINDS },
     { onUpdateFeed: (id, body) => ({ status: 200, body: echoUpdate(id, body) }) },
@@ -1076,7 +1076,7 @@ test("item 12: a pull feed with a stored password shows \"A password is saved\" 
   }
 });
 
-test("item 12: typing into the pull Password field hides the \"password is saved\" message and the Clear button", async () => {
+test("typing into the pull Password field hides the \"password is saved\" message and the Clear button", async () => {
   const g = stubGlobals({ ...makeState([pullFeed({ hasPassword: true })]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
@@ -1095,7 +1095,7 @@ test("item 12: typing into the pull Password field hides the \"password is saved
   }
 });
 
-test("item 12: a pull feed with no stored password shows neither the message nor Clear", async () => {
+test("a pull feed with no stored password shows neither the message nor Clear", async () => {
   const g = stubGlobals({ ...makeState([pullFeed({ hasPassword: false })]), kinds: ALL_KINDS });
   try {
     mount();
@@ -1108,7 +1108,7 @@ test("item 12: a pull feed with no stored password shows neither the message nor
   }
 });
 
-test("item 11: a failed rotation keeps the address and password fields visible, shows the error, and New password stays pressable", async () => {
+test("a failed rotation keeps the address and password fields visible, shows the error, and New password stays pressable", async () => {
   let attempt = 0;
   const g = stubGlobals(
     { ...makeState([pushFeed()]), kinds: ALL_KINDS },
@@ -1150,7 +1150,7 @@ test("item 11: a failed rotation keeps the address and password fields visible, 
   }
 });
 
-test("R14g-a: flipping the segmented control before Save re-fetches the OTHER protocol's address, without saving", async () => {
+test("flipping the segmented control before Save re-fetches the OTHER protocol's address, without saving", async () => {
   const requested: (string | undefined)[] = [];
   const g = stubGlobals(
     { ...makeState([pushFeed()]), kinds: ALL_KINDS },
@@ -1192,7 +1192,7 @@ test("R14g-a: flipping the segmented control before Save re-fetches the OTHER pr
   }
 });
 
-test("R14 round 2 item 6: a stale preview response landing late must not clobber a newer one — a request counter drops it", async () => {
+test("a stale preview response landing late must not clobber a newer one — a request counter drops it", async () => {
   let heldRelease: ((r: { status: number; body: unknown }) => void) | null = null;
   const g = stubGlobals(
     { ...makeState([pushFeed()]), kinds: ALL_KINDS },
@@ -1292,7 +1292,7 @@ test("a slow rotation that succeeds after a newer preview failed leaves the prev
   }
 });
 
-test("R14 round 2 item 6: New password during an unsaved preview re-fetches the address for the protocol the control shows, rather than flipping to the saved one", async () => {
+test("New password during an unsaved preview re-fetches the address for the protocol the control shows, rather than flipping to the saved one", async () => {
   let rotated = false;
   const g = stubGlobals(
     { ...makeState([pushFeed()]), kinds: ALL_KINDS },
@@ -1345,7 +1345,7 @@ test("R14 round 2 item 6: New password during an unsaved preview re-fetches the 
   }
 });
 
-test("R14 round 3 item 1: switching protocol while a rotation is in flight still shows the rotation's own note once it resolves", async () => {
+test("switching protocol while a rotation is in flight still shows the rotation's own note once it resolves", async () => {
   let releaseRotation: ((r: { status: number; body: unknown }) => void) | null = null;
   const g = stubGlobals(
     { ...makeState([pushFeed()]), kinds: ALL_KINDS, relay: RUNNING_RELAY },
@@ -1418,7 +1418,7 @@ test("the Copy button reads \"Copy\" before any click, never stale \"Copied\" fr
   }
 });
 
-test("R14k item 2: the secure-clipboard Copy path flips the button to \"Copied\" and reverts after COPIED_LABEL_MS — stubbing navigator.clipboard and isSecureContext, which jsdom does not provide on its own", async () => {
+test("the secure-clipboard Copy path flips the button to \"Copied\" and reverts after COPIED_LABEL_MS — stubbing navigator.clipboard and isSecureContext, which jsdom does not provide on its own", async () => {
   Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
   Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
@@ -1444,7 +1444,7 @@ test("R14k item 2: the secure-clipboard Copy path flips the button to \"Copied\"
   }
 });
 
-test("R14k item 2: blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" hint", async () => {
+test("blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" hint", async () => {
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
@@ -1481,7 +1481,7 @@ const RUNNING_RELAY = {
 
 /** Mounts, rotates once, and returns whether the "could not be dropped" /
  *  "did not take the new password" notes are on screen — shared by the
- *  four R14d scenarios below, which differ only in `relay` and the
+ *  four rotation-note scenarios below, which differ only in `relay` and the
  *  rotation response's own `applied`/`kicked`. */
 async function rotateAndCheckNotes(relay: VideoState["relay"], applied: boolean, kicked: "dropped" | "none" | "failed") {
   const g = stubGlobals(
@@ -1512,31 +1512,31 @@ async function rotateAndCheckNotes(relay: VideoState["relay"], applied: boolean,
   }
 }
 
-test("R14d: applied:false shows its own note while the relay is running", async () => {
+test("applied:false shows its own note while the relay is running", async () => {
   const notes = await rotateAndCheckNotes(RUNNING_RELAY, false, "none");
   assert.equal(notes.appliedNote, true);
   assert.equal(notes.kickedNote, false);
 });
 
-test("R14d: kicked:\"failed\" shows its own note while the relay is running — a publisher really was connected and dropping it did not work", async () => {
+test("kicked:\"failed\" shows its own note while the relay is running — a publisher really was connected and dropping it did not work", async () => {
   const notes = await rotateAndCheckNotes(RUNNING_RELAY, true, "failed");
   assert.equal(notes.kickedNote, true);
   assert.equal(notes.appliedNote, false);
 });
 
-test("R14d: kicked:\"none\" shows NO note while the relay is running — nobody was publishing is not a failure worth flagging", async () => {
+test("kicked:\"none\" shows NO note while the relay is running — nobody was publishing is not a failure worth flagging", async () => {
   const notes = await rotateAndCheckNotes(RUNNING_RELAY, true, "none");
   assert.equal(notes.kickedNote, false, "\"none\" must never be read as \"could not be dropped\"");
   assert.equal(notes.appliedNote, false);
 });
 
-test("R14d: kicked:\"dropped\" shows no note either — a successful kick is not a failure", async () => {
+test("kicked:\"dropped\" shows no note either — a successful kick is not a failure", async () => {
   const notes = await rotateAndCheckNotes(RUNNING_RELAY, true, "dropped");
   assert.equal(notes.kickedNote, false);
   assert.equal(notes.appliedNote, false);
 });
 
-test("R14d: with no relay running, neither note fires even for applied:false and kicked:\"failed\"", async () => {
+test("with no relay running, neither note fires even for applied:false and kicked:\"failed\"", async () => {
   const notes = await rotateAndCheckNotes({ state: "off" }, false, "failed");
   assert.equal(notes.appliedNote, false, "no relay running — the note must not fire even though applied is false");
   assert.equal(notes.kickedNote, false, "no relay running — the note must not fire even though kicked is \"failed\"");

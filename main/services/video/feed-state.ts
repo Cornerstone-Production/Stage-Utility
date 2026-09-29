@@ -23,7 +23,7 @@ export interface BFramesMark {
 
 export interface FeedStateInput {
   kind: "pull" | "push";
-  /** Whether the relay is currently "running" or "failing" — R14a. Off,
+  /** Whether the relay is currently "running" or "failing". Off,
    *  starting, or never attached at all (video switched off) all read the
    *  same way here: nothing yet can tell a genuinely-down source from one
    *  nobody has been able to ask about, so a missing path means "standby"
@@ -52,7 +52,7 @@ export interface FeedStateInput {
 export function feedState(i: FeedStateInput): FeedStatus {
   const { kind, relayUp, path, bframesMark, recentlyRequested, lastSeenAt } = i;
 
-  // R14a: video switched off, the relay still starting, or never attached
+  // Video switched off, the relay still starting, or never attached
   // at all — standby, not a red "offline", whatever `path` says. A stale
   // path should never survive this (the service clears lastPaths on every
   // non-running status change), but the relay's own state is what decides

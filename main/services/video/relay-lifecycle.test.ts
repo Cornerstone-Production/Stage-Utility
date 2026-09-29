@@ -4,9 +4,6 @@
 // only real I/O anywhere in this file is a config file written under a
 // throwaway STAGE_UTILITY_DATA — the same tmp dir every other video test
 // under this directory writes to.
-//
-// Includes the reviewer's own probes (A-F, scratchpad/t15probe), turned into
-// real assertions rather than console.log observations.
 
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
@@ -55,10 +52,9 @@ class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
   ver: string | null = null;
   startCalls: { binary: string; configPath: string; beforeRespawn?: () => Promise<void> }[] = [];
   stopCalls = 0;
-  /** item 6/7: one real supervisor.stop() (or, for item 7, makeRelay/
-   *  attachRelay) throwing is not a hypothetical — a leftover-kill EPERM,
-   *  say — and every caller's OWN reaction to it is what these two items
-   *  guard. */
+  /** One real supervisor.stop() (or makeRelay/attachRelay) throwing is
+   *  not a hypothetical — a leftover-kill EPERM, say — and every caller's
+   *  own reaction to it is what the tests using this guard. */
   stopRejectsOnce = false;
   status(): SupervisorStatus {
     return this.current;
@@ -85,8 +81,8 @@ class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
 }
 
 
-/** Every fake, with an ORDER log shared across all of them — the one thing
- *  carry item 2 (the start sequence) needs proof of. */
+/** Every fake, with an ORDER log shared across all of them — what the
+ *  start-sequence test needs proof of. */
 function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
   deps: RelayLifecycleDeps;
   order: string[];
@@ -382,10 +378,10 @@ test("a leftover that will not stop is the failing reason: its ports are still h
   assert.ok(logs.some((l) => l.includes("(pid 4242) would not stop: EPERM")), JSON.stringify(logs));
 });
 
-// ── PROBE D / item 3: a throw anywhere in the pre-supervisor steps must
+// ── A throw anywhere in the pre-supervisor steps must
 //    never wedge starting=true forever ─────────────────────────────────────
 
-test("PROBE D: a throwing ensureBinary (not an ok:false return) does not wedge the lifecycle — the next attempt still starts it", async (t: TestContext) => {
+test("a throwing ensureBinary (not an ok:false return) does not wedge the lifecycle — the next attempt still starts it", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
   const { deps, supervisors } = makeDeps({
@@ -428,10 +424,10 @@ test("a throw from busyPorts (not from ensureBinary) is caught the same way, by 
   await waitUntil(() => supervisors.length > 0);
 });
 
-// ── PROBES A & B / item 2: a pre-supervisor failure must clear when the
+// ── A pre-supervisor failure must clear when the
 //    desire to run goes away, not linger with its retry timer still running ──
 
-test("PROBE A: a busy port, then switched off — the failing status clears and the retry stops", async (t: TestContext) => {
+test("a busy port, then switched off — the failing status clears and the retry stops", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const seen: { state: string; message: string | null }[] = [];
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
@@ -461,7 +457,7 @@ test("PROBE A: a busy port, then switched off — the failing status clears and 
   assert.equal(seen.length, before, "a cancelled retry timer fired anyway");
 });
 
-test("PROBE B: a busy port, then the last relay feed removed — same clearing", async (t: TestContext) => {
+test("a busy port, then the last relay feed removed — same clearing", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
@@ -596,10 +592,10 @@ test("a ports change while the relay is off does not start it", async () => {
   assert.equal(supervisors.length, 0);
 });
 
-// ── PROBE F / item 7: a ports change that fixes a busy port retries AT ONCE,
+// ── A ports change that fixes a busy port retries AT ONCE,
 //    not on whatever backoff was already scheduled ─────────────────────────
 
-test("PROBE F: a busy port, then a ports change that fixes it — retries immediately, not on the pending backoff", async (t: TestContext) => {
+test("a busy port, then a ports change that fixes it — retries immediately, not on the pending backoff", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { deps, supervisors } = makeDeps({
     busyPorts: async (ports) => (ports.rtmp === DEFAULT_VIDEO_PORTS.rtmp ? [{ port: 1935, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
@@ -619,7 +615,7 @@ test("PROBE F: a busy port, then a ports change that fixes it — retries immedi
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
-// item 6 (findings-t15-r2.md): `this.chain.then(fn, onRejected)` catches a
+// `this.chain.then(fn, onRejected)` catches a
 // rejection of the PREVIOUS link, never of `fn` itself — so when a queued
 // call's own fn rejects, the rejection propagates unhandled and poisons the
 // very NEXT enqueue() call: that one's onRejected fires (catching what it
@@ -685,14 +681,14 @@ test("a retry whose own step rejects shows the new failure and a new next try, n
   await waitUntil(() => supervisors.length > 0);
 });
 
-// item 13 (findings-t15-r3.md): a rejected supervisor.stop() inside
+// A rejected supervisor.stop() inside
 // stopRelay() used to skip detachRelay()/setPreAttachStatus(null)
 // entirely — this class had already forgotten the supervisor (its own
 // isUp() reads false), but videoService had NOT: it stayed attached to
 // the same, now half-stopped supervisor object, still reporting
 // "running" (the fake's own status never reaches "off" when stop()
 // throws before calling setStatus).
-test("item 13: a rejected stop() still detaches videoService and clears preAttachStatus, logging the failure once", async (t: TestContext) => {
+test("a rejected stop() still detaches videoService and clears preAttachStatus, logging the failure once", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const warns = captureConsole(t, "warn");
   const { deps, supervisors } = makeDeps();
@@ -714,12 +710,12 @@ test("item 13: a rejected stop() still detaches videoService and clears preAttac
   assert.equal(stopFailureLines.length, 1, `expected exactly one stop-failure line, got: ${JSON.stringify(warns)}`);
 });
 
-// item 7 (findings-t15-r2.md): this.supervisor used to be assigned before
+// this.supervisor used to be assigned before
 // makeRelay()/attachRelay() ran, so a throw from either left this.supervisor
 // pointing at a supervisor with a real, running, UNATTACHED child — isUp()
 // true forever, and every later setEnabled()/feedsChanged() believed the
 // relay was already up and never tried again.
-test("item 7: a throw from attachRelay stops the orphaned supervisor and lets the NEXT attempt actually retry", async (t: TestContext) => {
+test("a throw from attachRelay stops the orphaned supervisor and lets the NEXT attempt actually retry", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let throwOnce = true;
   const { deps, supervisors } = makeDeps({
@@ -753,12 +749,12 @@ test("item 7: a throw from attachRelay stops the orphaned supervisor and lets th
   assert.equal((await videoService.state()).relay.state, "running");
 });
 
-// item 7 (findings-t15-r3.md): the orphaned supervisor's own stop() —
-// called from the SAME catch item 7 above added — used to be
+// The orphaned supervisor's own stop() —
+// called from the same catch as the test above — used to be
 // `.catch(() => {})`, swallowing a failure there completely. A supervisor
 // that will not stop (killLeftover()'s own EPERM, say) is a second real
 // fact an operator needs, not silence.
-test("item 7: a stop() failure on the orphaned supervisor logs once and is folded into the failing reason, not swallowed", async (t: TestContext) => {
+test("a stop() failure on the orphaned supervisor logs once and is folded into the failing reason, not swallowed", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const warns = captureConsole(t, "warn");
   const supervisors: FakeSupervisor[] = [];
@@ -794,14 +790,13 @@ test("item 7: a stop() failure on the orphaned supervisor logs once and is folde
   );
 });
 
-// item 6 (findings-t15-r3.md, PROBE J): this.attempt used to reset to 0
+// this.attempt used to reset to 0
 // the moment supervisor.start() itself succeeded, BEFORE the attach try —
 // so a makeRelay/attachRelay that keeps throwing always computed its
 // backoff from attempt 0 (a flat 1 s floor forever), never accumulating
-// like every other repeated pre-supervisor failure. Confirmed empirically
-// against the reviewer's own probe before fixing anything: 31 supervisors
-// created (and orphaned) in 30 s of mocked time.
-test("item 6: a makeRelay that keeps throwing backs off between retries, not a flat 1 s floor forever", async (t: TestContext) => {
+// like every other repeated pre-supervisor failure: 31 supervisors created
+// (and orphaned) in 30 s of mocked time.
+test("a makeRelay that keeps throwing backs off between retries, not a flat 1 s floor forever", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { deps, supervisors } = makeDeps({
     makeRelay: () => {
@@ -822,7 +817,7 @@ test("item 6: a makeRelay that keeps throwing backs off between retries, not a f
   // triggered by that tick to finish, which made an earlier version of
   // this test pass whether or not the bug it was meant to catch was
   // present. Sampling supervisors.length every 1 s of mocked time for 30 s
-  // (mirroring the re-reviewer's own PROBE J) sidesteps needing to know
+  // sidesteps needing to know
   // exactly how many turns is "enough" — by second 30, every real
   // continuation the mocked clock could have triggered by then has had
   // ample real time to run.
@@ -848,18 +843,18 @@ test("item 6: a makeRelay that keeps throwing backs off between retries, not a f
   // asserting its shape made this test flake without saying anything more.
 });
 
-// item 12 (findings-t15-r2.md, PROBE H): prelaunchOutage was never reset
+// prelaunchOutage was never reset
 // when the relay was no longer wanted, so a SECOND busy-port outage after
 // switching off and back on read as a continuation of the FIRST (still
 // inside its own `spokenAt` window) and stayed silent.
-test("PROBE H: a busy-port outage, switch off, switch back on into the SAME busy port — the second outage logs too", async (t: TestContext) => {
+test("a busy-port outage, switch off, switch back on into the SAME busy port — the second outage logs too", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const logs = captureConsole(t, "warn");
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  // waitUntil(), not a bare settle() — see PROBE A's own comment on why:
+  // waitUntil(), not a bare settle() — see the switched-off test's comment:
   // this exact assertion flaked in a full-suite run and passed every time
   // run alone.
   await waitUntil(() => videoService.current().relay.state === "failing");
@@ -1003,7 +998,7 @@ test("the readiness poll stops on a successful reconcile ALONE, even before the 
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "running");
 
-  // item 11 (findings-t15-r2.md): relay.state === "running" alone stays
+  // relay.state === "running" alone stays
   // green even if the poll were re-gated on loggedStartedThisRun instead of
   // the reconcile itself — the supervisor's OWN status is already
   // "running" regardless of whether the poll noticed and stopped. Counting
@@ -1045,7 +1040,7 @@ test("relayConnectionState maps every RelayStatus to the integration row, never 
     relayConnectionState({ state: "running", version: "v1.21.1", ports: DEFAULT_VIDEO_PORTS }),
     { state: "connected", message: "MediaMTX v1.21.1" },
   );
-  // PROBE C: a supervisor mid-spawn, version not yet known — must never
+  // A supervisor mid-spawn, version not yet known — must never
   // read "connected: MediaMTX " with nothing after it.
   assert.deepEqual(
     relayConnectionState({ state: "running", version: "", ports: DEFAULT_VIDEO_PORTS }),
@@ -1080,13 +1075,13 @@ test("the connection listener is told every transition, ending in error for a fa
   );
 });
 
-// item 1 (findings-t15-r2.md): the connection row never reached "connected /
+// The connection row never reached "connected /
 // MediaMTX <version>" when the banner arrived AFTER attach — nothing
 // published when the version became known, so the row stuck on "connected"
 // with a blank version until some UNRELATED change happened to publish
-// again. PROBE C's own real sequence: attach while version() is still
-// null, THEN the banner line arrives.
-test("item 1: the connection row catches up to the version once the banner line arrives, with no other change forcing it", async () => {
+// again. The real sequence: attach while version() is still null, THEN
+// the banner line arrives.
+test("the connection row catches up to the version once the banner line arrives, with no other change forcing it", async () => {
   const seen: { state: string; message: string | null }[] = [];
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
@@ -1148,8 +1143,8 @@ test("an unsupported platform (assetName: null) never invents a hand-place path"
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  // waitUntil(), not a bare settle() — item 10 (findings-t15-r3.md): the
-  // same chain PROBE A and PROBE H were hardened against (a single
+  // waitUntil(), not a bare settle() — the
+  // same chain the busy-port tests were hardened against (a single
   // macrotask tick is not always enough for ensureBinary -> ... ->
   // failPreSupervisor to have actually run under real CPU contention).
   await waitUntil(() => videoService.current().relay.state === "failing");
@@ -1159,11 +1154,11 @@ test("an unsupported platform (assetName: null) never invents a hand-place path"
   assert.equal((relay as { assetName?: string }).assetName, undefined);
 });
 
-// item 16 (findings-t15-r2.md, Ruling): an unsupported platform never
+// An unsupported platform never
 // retries — no pinned asset exists for this platform/arch, ever, so a
 // backoff timer here would retry forever against a fact that cannot
 // change, and the page must show no "Next try at" either.
-test("item 16: an unsupported platform never retries — no 'Next try at', and ensureBinary is never called again", async (t: TestContext) => {
+test("an unsupported platform never retries — no 'Next try at', and ensureBinary is never called again", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let ensureBinaryCalls = 0;
   const { deps } = makeDeps({
@@ -1223,7 +1218,7 @@ test("logs the relay started line with its version and ports, once per process �
   // The reconcile fake fails until the version is known — the same
   // ordering the real binary always gives (its startup banner, which sets
   // version(), is the very first line it ever prints, strictly before the
-  // API opens — relay-facts.md). Without this, a reconcile that succeeds on
+  // API opens). Without this, a reconcile that succeeds on
   // its very first (version-less) attempt stops the poll before it ever
   // gets a later tick to notice the version arriving, which is a fair thing
   // for a FAKE to do but not for the real relay.

@@ -1,7 +1,7 @@
 // relay-status.test.tsx — the Video feeds page's own switch and relay status
 // line: the pill, the per-state detail text, and "Change ports in Advanced"
-// showing while the relay is running OR failing (item 17: it is most useful
-// exactly where a busy port shows up).
+// showing while the relay is running OR failing on a busy port, where it
+// is most useful.
 //
 // NOT tested here: the switch's real visual state (CSS), and the progress
 // bar's width as a rendered pixel value — jsdom loads no stylesheet, so
@@ -9,7 +9,7 @@
 // rather than anything a browser would paint. The style attribute itself
 // (the string used to compute `width`) is asserted instead. Also not tested:
 // the merged header row's real layout (gaps, wrapping) against the design —
-// driven in a real browser instead, screenshotted against mockup-v2.html.
+// driven in a real browser instead, screenshotted against the approved design.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
@@ -17,7 +17,7 @@ import { after, afterEach, describe, test } from "node:test";
 import { installDom } from "../../test-dom.js";
 
 const teardown = installDom();
-// item 8 (findings-t15-r3.md): sibling files set this so React act-wraps a
+// Sibling files set this so React act-wraps a
 // render and WARNS the moment an update escapes one — without it a file
 // reads as clean while updates land outside act, silently.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -88,7 +88,7 @@ describe("the header pill and switch", () => {
   }
 });
 
-describe("the off-state detail — item 6: enabled and binaryPresent both change it", () => {
+describe("the off-state detail — enabled and binaryPresent both change it", () => {
   test("switched off, never downloaded: names the download size", () => {
     renderRow({ state: "off" }, { enabled: false, binaryPresent: false });
     const text = document.body.textContent ?? "";
@@ -109,10 +109,10 @@ describe("the off-state detail — item 6: enabled and binaryPresent both change
   test("switched off, binary already present: says nothing at all, and renders no empty strip", () => {
     const { container } = renderRow({ state: "off" }, { enabled: false, binaryPresent: true });
     assert.equal((container.textContent ?? "").trim(), "Relay off", "only the pill should render — no stray sentence");
-    // item 5: RelayDetailRow used to render its bordered/padded wrapper div
+    // RelayDetailRow used to render its bordered/padded wrapper div
     // unconditionally, so this exact case (off, binary present) produced a
     // strip with nothing in it — a border and padding around empty space.
-    // A boolean, never the raw node: item 8 (findings-t15-r3.md) — passing
+    // A boolean, never the raw node — passing
     // a DOM Element straight to assert.equal() makes a FAILURE hang for
     // ~23 s with no message at all, node's assert trying to diff/serialize
     // a circular object (the element's own React fiber, attached as an
@@ -153,12 +153,12 @@ describe("the detail line, per other state", () => {
     assert.ok(screen.getByRole("button", { name: "Change ports in Advanced" }));
   });
 
-  test("failing on a port conflict shows Change ports in Advanced — item 17: most useful exactly there", () => {
+  test("failing on a port conflict shows Change ports in Advanced — most useful exactly there", () => {
     renderRow({ state: "failing", reason: "Port 1935 is in use by OBS Studio.", kind: "port-conflict", retryAt: null });
     assert.ok(screen.getByRole("button", { name: "Change ports in Advanced" }));
   });
 
-  test("item 8: failing for any OTHER reason does not show Change ports in Advanced — nothing there would fix it", () => {
+  test("failing for any OTHER reason does not show Change ports in Advanced — nothing there would fix it", () => {
     for (const relay of [
       { state: "failing", reason: "checksum mismatch", kind: "download", retryAt: null },
       { state: "failing", reason: "could not write the relay's config: EACCES", kind: "config-write", retryAt: null },
@@ -220,7 +220,7 @@ describe("the detail line, per other state", () => {
     assert.equal(/Next try at [\d:]+ Or place/.test(text), false, "the retry time and the hand-place line ran together");
   });
 
-  test("no pinned asset for this platform: names it directly, never invents a hand-place sentence by splitting a bare directory, and never retries — item 16", () => {
+  test("no pinned asset for this platform: names it directly, never invents a hand-place sentence by splitting a bare directory, and never retries", () => {
     // The real shape acquire.ts returns for an unsupported platform/arch:
     // `assetName: undefined`, `placeArchiveAt` a bare DOWNLOADS DIRECTORY
     // with no file name in it at all — splitting that on "/" (the bug this
@@ -237,7 +237,7 @@ describe("the detail line, per other state", () => {
     assert.match(text, /Video relay is not available for win32 arm64\./);
     assert.equal(text.includes("Or place"), false);
     assert.equal(text.includes("downloads"), false, "a bare directory must never be shown as though it were the asset");
-    // item 16: nothing will ever fix this by waiting, so no "Next try at".
+    // Nothing will ever fix this by waiting, so no "Next try at".
     assert.equal(text.includes("Next try at"), false);
   });
 });

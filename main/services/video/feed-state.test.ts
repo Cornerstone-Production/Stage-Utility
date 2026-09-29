@@ -115,7 +115,7 @@ test("relay up, but no path at all for this feed -> offline, lastSeenAt", () => 
   );
 });
 
-// ── R14a: the relay itself not being up (off, starting, or never attached — "video switched off") ──
+// ── The relay itself not being up (off, starting, or never attached — "video switched off") ──
 
 test("relay not up -> standby, whatever path/kind/lastSeenAt say — never a red offline for something nobody has asked about yet", () => {
   assert.deepEqual(feedState({ ...base, relayUp: false, kind: "pull", path: undefined }), { state: "standby" });

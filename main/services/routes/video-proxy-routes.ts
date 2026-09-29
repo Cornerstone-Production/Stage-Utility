@@ -36,7 +36,7 @@ export const proxyTimeouts = {
    *  open indefinitely. */
   whepWhip: 10_000,
   /** LL-HLS's blocking playlist reload holds the request open until the
-   *  next part is ready — the relay-facts fixture models 2 s of that. 30 s
+   *  next part is ready — the tests' fixture holds for 2 s. 30 s
    *  covers a real stall without the client waiting forever on a relay
    *  that has hung. */
   hls: 30_000,
@@ -54,8 +54,7 @@ const MAX_PROXY_BODY_BYTES = 64 * 1024;
  *  carrying a session outside this is dropped rather than forwarded
  *  verbatim onto a browser — see rewriteLocation. */
 const SESSION_PATTERN = /^[A-Za-z0-9-]+$/;
-/** The three extensions MediaMTX's HLS server answers — see decisions.md's
- *  proxy-routes row. No `/` in the class, so a percent-encoded traversal
+/** The three extensions MediaMTX's HLS server answers. No `/` in the class, so a percent-encoded traversal
  *  attempt (`..%2Fsecret.m3u8`) fails this outright: the `%` is not in it. */
 const HLS_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.(m3u8|mp4|m4s)$/;
 
@@ -126,12 +125,11 @@ function upstreamPath(target: { path: string }, parsed: Parsed, search: string):
 
 /**
  * A `Location` MediaMTX itself sends is relative to ITS OWN root — WHEP/WHIP
- * creation answers `Location: /<path>/whep/<uuid>` (relay-facts.md), and the
+ * creation answers `Location: /<path>/whep/<uuid>`, and the
  * HLS listener answers its OWN redirect the same way: a plain
  * `GET /<path>/index.m3u8` comes back `302` to `/<path>/index.m3u8?cookieCheck=1`
  * with a `Set-Cookie` — undocumented anywhere until this proxy's own drive
- * against the real v1.21.1 binary hit it (task-13-report.md); the WHEP
- * answer's Location was the only one relay-facts.md had actually probed.
+ * against the real v1.21.1 binary hit it.
  * Either shape must read back on Stage Utility's own origin: the WHEP
  * player resolves its DELETE against whatever URL it POSTed to, and a
  * browser resolves a redirect against the CURRENT origin, which is Stage
@@ -249,7 +247,7 @@ function forwardToUpstream(
         const rewritten = typeof location === "string" ? rewriteLocation(location, feedId, kind) : null;
         if (rewritten) outHeaders.location = rewritten;
         // A playlist or segment must never be cached: LL-HLS advances the
-        // same file names across a stream's lifetime (relay-facts.md).
+        // same file names across a stream's lifetime.
         if (kind === "hls") outHeaders["cache-control"] = "no-store";
         res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
         upstreamRes.pipe(res);
@@ -326,7 +324,7 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
   }
 
   // Buffered, not piped: the only way to guarantee an over-cap body "never
-  // reaches upstream" (task-13-brief.md) is to finish reading it before the
+  // reaches upstream" is to finish reading it before the
   // upstream connection even opens. Safe to buffer at this size — an SDP
   // offer/answer is a few KB — unlike the HLS response path below, which
   // streams because a held blocking-reload response can run to seconds.

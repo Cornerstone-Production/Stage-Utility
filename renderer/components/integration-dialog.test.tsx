@@ -96,7 +96,7 @@ describe("every dialog", () => {
 });
 
 describe("the dialog footer", () => {
-  // item 3 (findings-t15-r2.md): the video card's bespoke panel replaces the
+  // The video card's bespoke panel replaces the
   // form with "Open Video feeds" — this is the one place the finding's own
   // "renders and navigates to /video-feeds" is checkable: an <a href> IS
   // the navigation mechanism, so asserting the real, resolved href (not a

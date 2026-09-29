@@ -71,7 +71,7 @@ function FeedPill({ feed }: { feed: VideoFeedView }) {
  * A relay (pull/push) feed shows how it plays plus its resolution once the
  * relay reports it: "WebRTC · under 1 s behind" while live (the design's own
  * text), or "HLS · a few seconds behind" once B-frames or an unsupported
- * codec pushes it onto HLS — R14 round 3 item 4: no build in this pipeline
+ * codec pushes it onto HLS — no build in this pipeline
  * computes an actual figure (feed-state.ts, relay.ts's RelayPath carry no
  * such number; the server's own comment for a B-frames close gives a 2-to-6 s
  * RANGE, not a single one), and a delayed row's own hint right below this
@@ -103,7 +103,7 @@ export function feedMeta(feed: VideoFeedView): string[] {
 }
 
 /**
- * R14k: the design's per-row B-frames hint (mockup-v2.html's `.hint` span,
+ * The design's per-row B-frames hint (its `.hint` span,
  * distinct from the muted meta line above it) — null for anything else,
  * including a codec-delayed feed (no per-row hint text is specified for
  * that case). The exact sentence the editor's own callout shares

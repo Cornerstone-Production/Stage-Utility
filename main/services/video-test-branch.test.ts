@@ -81,7 +81,7 @@ test("video test: failing answers the relay's own reason, not ok", async () => {
   assert.equal(r.message, "Port 1935 is in use by OBS Studio.");
 });
 
-// item 9 (findings-t15-r2.md): the test button used to answer every
+// The test button used to answer every
 // non-running, non-failing state with the same generic "not running" line
 // — reusing relay-lifecycle.ts's own relayConnectionState() (the ONE place
 // a RelayStatus becomes a message) means "starting" and "downloading"
@@ -101,7 +101,7 @@ test("video test: downloading answers with the SAME wording as the connection ro
   assert.equal(r.message, "Downloading MediaMTX v1.21.1 (19%)");
 });
 
-// item 1 (findings-t15-r3.md): outOfBandSetup()'s own
+// outOfBandSetup()'s own
 // `.filter((f) => f.kind === "pull" || f.kind === "push")` had no test at
 // all — every integration-manager test seeded a synthetic setup object
 // (empty-schema-configured.test.ts) rather than exercising the real

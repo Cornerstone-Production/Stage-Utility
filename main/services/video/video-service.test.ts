@@ -32,7 +32,7 @@ type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
 
 /**
  * attachRelay() with ports defaulted to DEFAULT_VIDEO_PORTS. Ports are
- * REQUIRED in production (R13a: a caller that does not know what it
+ * REQUIRED in production (a caller that does not know what it
  * started the relay on has no business attaching one — see
  * video-service.ts's own attachedPorts comment); almost every test below
  * does not care what the number is, only that some ports are pinned, so
@@ -107,7 +107,7 @@ test("removeFeed refuses an id outside FEED_ID_PATTERN, even for a feed stored u
   assert.ok(names.includes(badId), "the malformed feed must still be there — refused, not silently dropped");
 });
 
-test("R14a: a pull or push feed reads standby, not offline, while no relay is attached at all (video switched off)", async () => {
+test("a pull or push feed reads standby, not offline, while no relay is attached at all (video switched off)", async () => {
   const pull = await videoService.addFeed({ name: "Off-cam pull", source: { kind: "pull", url: "rtsp://192.0.2.95/s", username: "" } });
   const push = await videoService.addFeed({ name: "Off-cam push", source: { kind: "push", protocol: "srt" } });
   assert.ok(pull.ok && push.ok);
@@ -529,7 +529,7 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
     assert.notEqual(feed?.status.state, "delayed", "there is nothing to bind the mark to yet");
     // Scoped to THIS feed, not a bare `lines.length === 0`: this file shares
     // one videoFeedsStore across every test (several deliberately leave
-    // their own feed behind), and R14a means one of THOSE can now log its
+    // their own feed behind), and one of THOSE can log its
     // own standby<->offline flap as other tests attach and detach relays
     // around it — a fact about test isolation in a shared store, not about
     // whether Annex cam's own mark was announced early.
@@ -849,9 +849,9 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
   }
 });
 
-// R13a (fix round 1): relayTarget must forward to the ports the RUNNING
+// relayTarget() must forward to the ports the RUNNING
 // relay was actually STARTED with, never the store's current ports — a
-// ports change (PR 2's PATCH /api/video/ports) writes the store at once,
+// ports change (PATCH /api/video/ports) writes the store at once,
 // but the relay process itself keeps listening on its old ports until it
 // restarts, and a poll landing in that gap must not point the proxy at a
 // port nothing is listening on yet.
@@ -880,8 +880,8 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
       ...current,
       ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 },
     }));
-    // A poll/publish after the store write — the moment R13a's bug pointed
-    // the proxy at a port the relay was not actually listening on.
+    // A poll/publish after the store write — the moment a proxy reading the
+    // store would point at a port the relay is not listening on yet.
     await (videoService as unknown as { publish(): Promise<void> }).publish();
 
     assert.deepEqual(
@@ -950,10 +950,9 @@ test("detachRelay reports the relay off and forgets its last known paths — a s
     const state = await videoService.state();
     assert.deepEqual(state.relay, { state: "off" });
     feed = state.feeds.find((f) => f.id === id);
-    // R14a: a detached relay is "off", not merely "no path yet" — standby
-    // (neutral), not a red "offline". This used to read "offline", the same
-    // as a relay that had simply never reconciled this feed; the controller
-    // ruling that distinguishes them is what this test now proves.
+    // A detached relay is "off", not merely "no path yet" — standby
+    // (neutral), not a red "offline" — not the same as a relay that has
+    // simply never reconciled this feed, which is what this test proves.
     assert.equal(feed?.status.state, "standby");
   } finally {
     await videoService.detachRelay();
@@ -961,7 +960,7 @@ test("detachRelay reports the relay off and forgets its last known paths — a s
   }
 });
 
-test("detachRelay settles feeds — flushes the seen store, not just a bare publish; R14a means the transition itself is to standby, not offline, so no \"went offline\" line fires", async (t) => {
+test("detachRelay settles feeds — flushes the seen store, not just a bare publish; the transition itself is to standby, not offline, so no \"went offline\" line fires", async (t) => {
   const made = await videoService.addFeed({ name: "Sanctum cam", source: { kind: "push", protocol: "rtmp" }, password: "pw" });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -983,7 +982,7 @@ test("detachRelay settles feeds — flushes the seen store, not just a bare publ
 
     await videoService.detachRelay(); // t=59_000 — must settle, not just publish
 
-    // R14a: detaching the relay is a transition to "standby" (video
+    // Detaching the relay is a transition to "standby" (video
     // switched off), not "offline" — logTransition() has no "went to
     // standby" line, so nothing here claims the SOURCE dropped when it was
     // Stage Utility that stopped asking. The seen-store flush below is the
@@ -1181,7 +1180,7 @@ test("a failing relay's reason and hand-place folder never carry the data-folder
   }
 });
 
-test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed with no path as offline, not standby — it is up enough to have an opinion", async () => {
+test("a relay reporting \"failing\" (was running, crashed) reads a feed with no path as offline, not standby — it is up enough to have an opinion", async () => {
   const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "failing", reason: "Port 1935 is in use by OBS.", retryAt: 55555, neverStarted: false };
@@ -1192,20 +1191,20 @@ test("R14a: a relay reporting \"failing\" (was running, crashed) reads a feed wi
   assert.ok(made.ok);
   try {
     const feed = (await videoService.state()).feeds.find((f) => f.id === (made as { feed: { id: string } }).feed.id);
-    assert.equal(feed?.status.state, "offline", "failing counts as \"up\" for R14a — the relay has an opinion, even a bad one");
+    assert.equal(feed?.status.state, "offline", "failing counts as \"up\" — the relay has an opinion, even a bad one");
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed((made as { feed: { id: string } }).feed.id);
   }
 });
 
-// item 14 (findings-t15-r2.md, Ruling): the OPPOSITE case from the test
+// The OPPOSITE case from the test
 // above — "failing" reported through setPreAttachStatus() (a busy port, a
 // failed download — relay-lifecycle.ts's own pre-supervisor sequence, which
 // never got as far as a child process existing at all) must NOT count as
-// "up" for R14a: nothing could ever have received a source, so a feed reads
+// "up": nothing could ever have received a source, so a feed reads
 // standby, never a red "offline" implying its device stopped sending.
-test("item 14: a PRE-supervisor failure (a busy port, no process has ever run) reads a feed as standby, never offline", async () => {
+test("a PRE-supervisor failure (a busy port, no process has ever run) reads a feed as standby, never offline", async () => {
   videoService.setPreAttachStatus({
     state: "failing",
     reason: "Port 1935 is in use by OBS Studio.",
@@ -1227,13 +1226,13 @@ test("item 14: a PRE-supervisor failure (a busy port, no process has ever run) r
   }
 });
 
-// item 9 (findings-t15-r3.md): a spawn failure (the supervisor's own
+// A spawn failure (the supervisor's own
 // child 'error' with no pid) used to surface as "failing" with kind
 // "crash-loop" — the SAME kind as a process that genuinely ran and
 // exited — so a feed read "offline" even though nothing could ever have
 // reached a source. neverStarted distinguishes the two; this is the
 // spawn-failure half, reading standby like every other pre-process kind.
-test("item 9: a spawn failure (neverStarted) reads kind 'spawn' and a feed as standby, not crash-loop/offline", async () => {
+test("a spawn failure (neverStarted) reads kind 'spawn' and a feed as standby, not crash-loop/offline", async () => {
   const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "failing", reason: "could not start: spawn mediamtx ENOENT", retryAt: 55555, neverStarted: true };
@@ -1254,7 +1253,7 @@ test("item 9: a spawn failure (neverStarted) reads kind 'spawn' and a feed as st
   }
 });
 
-test("R14i: between the supervisor reaching running and the first successful poll, a relay feed stays standby with no \"went offline\" line; the first successful poll with no path for it is what flips it to offline, with exactly one line", async (t) => {
+test("between the supervisor reaching running and the first successful poll, a relay feed stays standby with no \"went offline\" line; the first successful poll with no path for it is what flips it to offline, with exactly one line", async (t) => {
   const relay = fakeRelay({ status: async () => [] }); // no path ever matches this feed
   const supervisor = new FakeSupervisor();
   supervisor.current = { state: "off" };
@@ -2152,9 +2151,9 @@ test("pushAddress's SRT and RTMP forms embed the password in the address; WHIP's
   }
 });
 
-// ── Fix round 1 — R14b through R14h ────────────────────────────────────────
+// ── Reconciles, secrets and push passwords ────────────────────────────────
 
-test("R14e: reconciles are single-flight — a change arriving mid-reconcile is folded into ONE more pass with the LATEST store contents, never a second overlapping relay.reconcile() call", async () => {
+test("reconciles are single-flight — a change arriving mid-reconcile is folded into ONE more pass with the LATEST store contents, never a second overlapping relay.reconcile() call", async () => {
   const reconciled: RelayFeed[][] = [];
   // A mutable container, not a bare `let`: TS's reachability analysis reads
   // `while (!releaseFirst.fn)` as possibly-infinite when the only
@@ -2217,7 +2216,7 @@ test("R14e: reconciles are single-flight — a change arriving mid-reconcile is 
   }
 });
 
-test("item 5: a change landing between the loop's own last dirty check and reconcileRunning actually clearing is not silently dropped", async () => {
+test("a change landing between the loop's own last dirty check and reconcileRunning actually clearing is not silently dropped", async () => {
   const reconciled: RelayFeed[][] = [];
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -2268,7 +2267,7 @@ test("item 5: a change landing between the loop's own last dirty check and recon
   }
 });
 
-test("item 2: a rejecting reconcileOnce still clears reconcileRunning — a later reconcileRelay() call still runs a pass, not wedged behind a stuck flag", async () => {
+test("a rejecting reconcileOnce still clears reconcileRunning — a later reconcileRelay() call still runs a pass, not wedged behind a stuck flag", async () => {
   const reconciled: RelayFeed[][] = [];
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -2310,7 +2309,7 @@ test("item 2: a rejecting reconcileOnce still clears reconcileRunning — a late
   }
 });
 
-test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async (t) => {
+test("a push feed with no stored secret (a restored snapshot, a wiped secrets file) mints and stores a fresh password before the relay or the address ever sees it — never an empty publish password", async (t) => {
   const made = await videoService.addFeed({ name: "Snapshot restore", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2339,7 +2338,7 @@ test("R14c: a push feed with no stored secret (a restored snapshot, a wiped secr
   }
 });
 
-test("R14c: relayFeeds() mints a password for a push feed with no stored secret too, so the relay is never handed an empty one", async () => {
+test("relayFeeds() mints a password for a push feed with no stored secret too, so the relay is never handed an empty one", async () => {
   const reconciled: RelayFeed[][] = [];
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -2363,7 +2362,7 @@ test("R14c: relayFeeds() mints a password for a push feed with no stored secret 
   }
 });
 
-test("R14c: a kind change's store write failing leaves the OLD secret in place — the secret only changes after the store write succeeds", async () => {
+test("a kind change's store write failing leaves the OLD secret in place — the secret only changes after the store write succeeds", async () => {
   const made = await videoService.addFeed({ name: "Reorder push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2393,7 +2392,7 @@ test("R14c: a kind change's store write failing leaves the OLD secret in place �
   await videoService.removeFeed(id);
 });
 
-test("item 4: pushPassword mints single-flight — two concurrent callers on a wiped secret share ONE mint, not two racing ones", async (t) => {
+test("pushPassword mints single-flight — two concurrent callers on a wiped secret share ONE mint, not two racing ones", async (t) => {
   const made = await videoService.addFeed({ name: "Racing mint push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2449,7 +2448,7 @@ test("item 4: pushPassword mints single-flight — two concurrent callers on a w
   }
 });
 
-test("R14d: newPushPassword's applied shape — true with nothing to apply to, false only when a running relay's reconcile fails", async () => {
+test("newPushPassword's applied shape — true with nothing to apply to, false only when a running relay's reconcile fails", async () => {
   // No relay attached at all: nothing to apply to — vacuously true.
   const madeNoRelay = await videoService.addFeed({ name: "No relay push", source: { kind: "push", protocol: "srt" } });
   assert.ok(madeNoRelay.ok);
@@ -2481,11 +2480,11 @@ test("R14d: newPushPassword's applied shape — true with nothing to apply to, f
   }
 });
 
-// Controller ruling on R14d's own flagged wording gap: `kicked` is
+// `kicked` is
 // three-way, not a boolean — "none" and "failed" are both "nothing got
 // dropped," but only "failed" means a device really was connected and
 // stayed connected under the old password. One test per value.
-test("R14d: kicked is \"none\" with no relay attached at all — nothing to ask, not a failure", async () => {
+test("kicked is \"none\" with no relay attached at all — nothing to ask, not a failure", async () => {
   const made = await videoService.addFeed({ name: "No relay kick", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2495,7 +2494,7 @@ test("R14d: kicked is \"none\" with no relay attached at all — nothing to ask,
   await videoService.removeFeed(id);
 });
 
-test("R14d: kicked is \"none\" with a running relay but nobody publishing", async () => {
+test("kicked is \"none\" with a running relay but nobody publishing", async () => {
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(recordingRelay([], { kickPublisher: async () => false }), supervisor);
@@ -2512,7 +2511,7 @@ test("R14d: kicked is \"none\" with a running relay but nobody publishing", asyn
   }
 });
 
-test("R14d: kicked is \"dropped\" only once the relay actually drops a connected publisher", async () => {
+test("kicked is \"dropped\" only once the relay actually drops a connected publisher", async () => {
   const supervisor = new FakeSupervisor();
   attach(recordingRelay([], { kickPublisher: async () => true }), supervisor);
   const made = await videoService.addFeed({ name: "Kicked push", source: { kind: "push", protocol: "srt" } });
@@ -2528,7 +2527,7 @@ test("R14d: kicked is \"dropped\" only once the relay actually drops a connected
   }
 });
 
-test("R14d: kickPublisher runs only while the supervisor is running, and its own outage run closes with ok() on a successful kick", async (t) => {
+test("kickPublisher runs only while the supervisor is running, and its own outage run closes with ok() on a successful kick", async (t) => {
   let kickCalls = 0;
   const relay = recordingRelay([], {
     kickPublisher: async () => {
@@ -2564,13 +2563,13 @@ test("R14d: kickPublisher runs only while the supervisor is running, and its own
   }
 });
 
-// R14 round 2 item 1: the PRIOR version of this test only proved ok()
-// settles SILENTLY when no failure was ever open — true whether or not the
-// ok("push-kick", ...) call exists at all, since nothing was ever failing.
+// The test above only proves ok() settles SILENTLY when no failure was ever
+// open — true whether or not the ok("push-kick", ...) call exists at all,
+// since nothing was ever failing.
 // This proves the actual recovery line fires: a kick failure opens the
 // outage, and a kick succeeding once the settle window has passed closes it
 // with the announcement.
-test("item 1: a kick failure opens the push-kick outage, and a kick succeeding past the settle window announces the recovery", async (t) => {
+test("a kick failure opens the push-kick outage, and a kick succeeding past the settle window announces the recovery", async (t) => {
   let fail = true;
   const relay = recordingRelay([], {
     kickPublisher: async () => {
@@ -2611,7 +2610,7 @@ test("item 1: a kick failure opens the push-kick outage, and a kick succeeding p
   }
 });
 
-test("R14d/item 9: newPushPassword reconciles BEFORE it kicks — the new password must already be live at the relay before the old connection is dropped", async () => {
+test("newPushPassword reconciles BEFORE it kicks — the new password must already be live at the relay before the old connection is dropped", async () => {
   const order: string[] = [];
   const relay = fakeRelay({
     reconcile: async () => {
@@ -2642,7 +2641,7 @@ test("R14d/item 9: newPushPassword reconciles BEFORE it kicks — the new passwo
   }
 });
 
-test("R14d/item 10: newPushPassword logs one summary line per rotation, without the password, naming what happened to the current publisher", async (t) => {
+test("newPushPassword logs one summary line per rotation, without the password, naming what happened to the current publisher", async (t) => {
   const lines = captureConsole(t, "log");
 
   // No relay: "nothing was publishing".
@@ -2662,7 +2661,7 @@ test("R14d/item 10: newPushPassword logs one summary line per rotation, without 
   }
 });
 
-test("item 8 (carry 4 gaps): pull -> external/embed clears the slot; pull -> push overwrites the pull password with a fresh push one", async () => {
+test("pull -> external/embed clears the slot; pull -> push overwrites the pull password with a fresh push one", async () => {
   const madePull = await videoService.addFeed({
     name: "Gap pull",
     source: { kind: "pull", url: "rtsp://192.0.2.99:8554/s", username: "" },
@@ -2701,7 +2700,7 @@ test("item 8 (carry 4 gaps): pull -> external/embed clears the slot; pull -> pus
   await videoService.removeFeed(pullId3);
 });
 
-test("R14g-a: pushAddress's protocolOverride previews another protocol's address with the SAME stored password, without saving anything", async () => {
+test("pushAddress's protocolOverride previews another protocol's address with the SAME stored password, without saving anything", async () => {
   const made = await videoService.addFeed({ name: "Preview push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2724,7 +2723,7 @@ test("R14g-a: pushAddress's protocolOverride previews another protocol's address
   }
 });
 
-test("item 12: view() reports hasPassword for a pull feed (never the value), true once a password is stored and false once cleared", async () => {
+test("view() reports hasPassword for a pull feed (never the value), true once a password is stored and false once cleared", async () => {
   const made = await videoService.addFeed({ name: "HasPassword pull", source: { kind: "pull", url: "rtsp://192.0.2.103:8554/s", username: "" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
@@ -2784,7 +2783,7 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
   }
 });
 
-test("PROBE E: saving the SAME ports never fires the hook — an unchanged save must not restart a running relay and drop every publisher", async () => {
+test("saving the SAME ports never fires the hook — an unchanged save must not restart a running relay and drop every publisher", async () => {
   const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
   const calls: string[] = [];
   try {
@@ -2808,7 +2807,7 @@ test("PROBE E: saving the SAME ports never fires the hook — an unchanged save 
 
 /** setPreAttachStatus()/attachRelay() both call publish() fire-and-forget —
  *  intentionally, so relay-lifecycle.ts's own callers are never made to wait
- *  on it (item 1's own fix). A test therefore cannot rely on either call
+ *  on it. A test therefore cannot rely on either call
  *  having settled synchronously, or even after a single microtask: publish()
  *  itself awaits a real feed-store read. Real wall-clock polling, bounded,
  *  rather than a guessed number of ticks. */

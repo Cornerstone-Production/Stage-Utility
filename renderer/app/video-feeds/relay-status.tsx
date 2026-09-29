@@ -1,9 +1,8 @@
 // relay-status.tsx — the Video feeds page's own switch and relay status
-// line, laid out per the approved design (mockup-v2.html): the pill and the
+// line, laid out per the approved design: the pill and the
 // switch sit on the page's OWN header row (its h1 and sub-title), and the
 // relay's own detail — version, ports, or why it isn't running — is a
-// single strip below it, matching mockup-v2.html:363-374 and its CSS at
-// 161-195. video-feeds-route.tsx renders RelayPill and RelaySwitch directly
+// single strip below it. video-feeds-route.tsx renders RelayPill and RelaySwitch directly
 // into its own header row; RelayDetailRow is the strip beneath it.
 
 import type { ReactNode } from "react";
@@ -104,7 +103,7 @@ export function RelayDetailRow({
   archivePresent: boolean;
   onChangePorts: () => void;
 }) {
-  // item 8: only a port conflict is something "Change ports in Advanced"
+  // Only a port conflict is something "Change ports in Advanced"
   // can fix — an unsupported platform, a failed download, a config write
   // that failed or a plain crash loop all send the operator to a page with
   // nothing on it that helps.
@@ -117,7 +116,7 @@ export function RelayDetailRow({
   // calling it directly is exactly as safe as JSX would be, and actually
   // reads its return value.
   const detail = RelayDetail({ relay, enabled, binaryPresent, archivePresent });
-  // item 5: this row used to render its bordered/padded strip
+  // This row used to render its bordered/padded strip
   // unconditionally, so "off, switched off, binary already downloaded" (the
   // one case with nothing to say — RelayDetail returns null and
   // showChangePorts is false) rendered a strip with nothing in it, just a

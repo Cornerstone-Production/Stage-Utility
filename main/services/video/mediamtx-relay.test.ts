@@ -46,7 +46,7 @@ let runtimePaths: Record<string, unknown>[];
  *  throws rather than being swallowed. */
 let failPathsList = false;
 /** When set, `failPathsList`'s 500 carries this `error` text instead of the
- *  fixed "relay is not ready" — for R14b's credential-stripping test, which
+ *  fixed "relay is not ready" — for the credential-stripping tests, which
  *  needs to control exactly what the relay's own error text says. */
 let failPathsListWith: string | null = null;
 /** When set, `GET /v3/config/paths/list` answers 500 with this raw text,
@@ -320,7 +320,7 @@ describe("MediaMtxRelay.reconcile", () => {
     );
   });
 
-  // R14b, defence in depth: reconcile-plan.ts's own fix (percent-encoding a
+  // Defence in depth: reconcile-plan.ts's own fix (percent-encoding a
   // literal `%`) is the primary defence against a credentialed URL ever
   // reaching the relay malformed in the first place — this is what happens
   // if a credential reaches an Error message anyway, from any cause, not

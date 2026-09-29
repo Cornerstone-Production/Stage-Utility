@@ -172,10 +172,8 @@ export interface EnsureBinaryOptions {
  * by hand.
  *
  * `placeArchiveAt` is ALWAYS the bare downloads DIRECTORY, never a file path
- * — item 3 (findings-t15-r2.md): it used to be the full archive path for
- * every failure except the unsupported-platform one, so the renderer's
- * "place X at Y" read "place mediamtx.tar.gz at .../mediamtx.tar.gz",
- * naming the same file twice. `assetName` and `placeArchiveAt` are sent as
+ * — a full path made the renderer's "place X at Y" name the same file
+ * twice. `assetName` and `placeArchiveAt` are sent as
  * the two separate fields they are — "place <assetName> in
  * <placeArchiveAt>" — never one path a caller has to split apart.
  */

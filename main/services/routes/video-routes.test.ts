@@ -114,7 +114,7 @@ test("a PATCH's password reaches the feed's secrets slot", async () => {
 /** Adds a push feed and returns its id and secretsStore password — shared
  *  setup for the leak-proving tests below, each of which then checks
  *  exactly ONE surface so a failure there is the only failing assertion in
- *  its test (item 7). */
+ *  its test. */
 async function addPushFeedWithSecret(name: string): Promise<{ id: string; secret: string }> {
   const { secretsStore } = await import("../secrets.js");
   const made = await callRoute(videoRoutes, "/api/video/feeds", { method: "POST", body: { name, source: { kind: "push", protocol: "srt" } } });
@@ -193,7 +193,7 @@ test("the push address and new-password routes carry the password, and delete cl
   assert.deepEqual(await secretsStore.getSecrets(`video:${id}`), {}, "delete must clear the push feed's secret slot");
 });
 
-test("R14g-a: GET /push?protocol=whip previews another protocol's address with the SAME password, without saving anything", async () => {
+test("GET /push?protocol=whip previews another protocol's address with the SAME password, without saving anything", async () => {
   const { id, secret } = await addPushFeedWithSecret("Preview box");
   try {
     const preview = await callRoute(videoRoutes, `/api/video/feeds/${id}/push?protocol=whip`);
@@ -211,7 +211,7 @@ test("R14g-a: GET /push?protocol=whip previews another protocol's address with t
   }
 });
 
-test("R14f: GET /push refuses a cross-origin browser request with 403; same-origin and no Origin header both answer 200", async () => {
+test("GET /push refuses a cross-origin browser request with 403; same-origin and no Origin header both answer 200", async () => {
   const { id } = await addPushFeedWithSecret("Origin box");
   try {
     const crossOrigin = await callRoute(videoRoutes, `/api/video/feeds/${id}/push`, {

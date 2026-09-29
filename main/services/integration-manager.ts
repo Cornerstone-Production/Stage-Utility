@@ -2021,7 +2021,7 @@ class IntegrationManager {
       }
 
       if (id === "video") {
-        // item 9 (findings-t15-r2.md): this used to be a SECOND mapping
+        // This used to be a SECOND mapping
         // from RelayStatus to a message, alongside relay-lifecycle.ts's own
         // relayConnectionState() — the one place that mapping is supposed
         // to live. Reusing it here means "starting"/"downloading" answer

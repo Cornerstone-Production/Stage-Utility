@@ -224,7 +224,7 @@ export async function toggleIntegration(
     setBusy,
     onStateChange,
   }: {
-    /** The integration's own display name — item 4 (findings-t15-r2.md): a
+    /** The integration's own display name — a
      *  failed toggle used to read "Failed to enable: <error>", with no
      *  saying WHICH integration; every caller has this on hand already
      *  (the descriptor its own card or dialog is already showing). */
@@ -247,7 +247,7 @@ export async function toggleIntegration(
     // reason rather than what it is. Three more call sites in this same
     // file had the identical bug (Failed to save, Refresh failed, the Test
     // connection result) — grepped for every `String(err)` here and fixed
-    // all four together, not just the one item 4 named.
+    // all four together, not just the toggle's.
     toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${errorMessage(err)}`);
   } finally {
     setBusy(false);

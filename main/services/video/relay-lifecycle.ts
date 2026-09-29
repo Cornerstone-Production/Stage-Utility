@@ -88,8 +88,8 @@ const DOWNLOAD_PROGRESS_THROTTLE_MS = 500;
 /**
  * RelaySupervisorLike (video-service.ts) plus the two lifecycle methods
  * video-service.ts never calls itself — it only ever receives an
- * ALREADY-STARTED supervisor through attachRelay(), and the plan's own start/
- * stop sequence ("supervisor.start(...)", "supervisor.stop(), then await
+ * ALREADY-STARTED supervisor through attachRelay(), and the start/stop
+ * sequence ("supervisor.start(...)", "supervisor.stop(), then await
  * videoService.detachRelay()") makes THIS class the one caller of both. A
  * real RelaySupervisor satisfies this structurally, same as RelaySupervisorLike.
  */
@@ -441,7 +441,7 @@ export class RelayLifecycle {
       if (!ensured.ok) {
         // ensureBinary's own assetName is null for exactly one case — no
         // pinned asset exists for this platform/arch at all — and that is
-        // also the one kind that never retries (item 16).
+        // also the one kind that never retries.
         const kind: RelayFailureKind = ensured.assetName === null ? "unsupported" : "download";
         this.failPreSupervisor(ensured.reason, kind, ensured.placeArchiveAt, ensured.assetName ?? undefined);
         return;
@@ -511,7 +511,7 @@ export class RelayLifecycle {
       const recovered = this.prelaunchOutage.ok("relay-prelaunch", Date.now());
       if (recovered.log) console.log(`[video] the relay's pre-launch checks are passing again${recovered.note}`);
       try {
-        // item 7: this.supervisor is set ONLY once attachRelay() has
+        // this.supervisor is set ONLY once attachRelay() has
         // actually taken it — not the moment supervisor.start() itself
         // succeeds. Setting it earlier (before this try) made isUp() true
         // the instant this line ran, so a throw from makeRelay()/
@@ -522,7 +522,7 @@ export class RelayLifecycle {
         this.supervisor = supervisor;
         videoService.attachRelay(this.deps.makeRelay(ports.api, apiPassword), supervisor, ports);
         this.startReadinessPoll();
-        // item 6 (findings-t15-r3.md): reset ONLY here, once attach has
+        // Reset ONLY here, once attach has
         // genuinely succeeded — resetting it before this try (as it used
         // to) made a makeRelay/attachRelay that keeps throwing retry on
         // the SAME 1 s floor forever (restartDelayMs(0) every time,
@@ -589,7 +589,7 @@ export class RelayLifecycle {
    * line below, which is a separate concern that piggybacks on the same
    * tick. In practice the two are never in tension: MediaMTX's own startup
    * banner (which sets the supervisor's version()) is the FIRST line it
-   * ever prints, always before "[API] started with listener" (relay-facts.md),
+   * ever prints, always before "[API] started with listener",
    * so the version is already known by the time reconcile can possibly
    * succeed.
    */
@@ -630,7 +630,7 @@ export class RelayLifecycle {
   }
 
   /** supervisor.stop(), then await videoService.detachRelay() — in that
-   *  order, per the plan's own start/stop sequence. Idempotent: safe to call
+   *  order. Idempotent: safe to call
    *  with nothing running (reconcileWanted()'s own !wantRunning branch
    *  always calls this, whether or not isUp() is true — see its comment). */
   private async stopRelay(): Promise<void> {
@@ -646,7 +646,7 @@ export class RelayLifecycle {
     try {
       if (supervisor) await supervisor.stop();
     } catch (err) {
-      // item 13 (findings-t15-r3.md): a rejected stop() used to skip the
+      // A rejected stop() used to skip the
       // detach/clear below entirely — this class had already forgotten
       // the supervisor (this.supervisor is null, above), but videoService
       // had NOT: it stayed attached to the same, now half-stopped

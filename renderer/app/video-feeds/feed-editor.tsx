@@ -60,10 +60,10 @@ const PUSH_DESCRIPTION: Record<PushProtocol, string> = {
  * WebRTC — null for anything else, including "delayed" via an embed/
  * external source, which this build never reports.
  *
- * R14k: `<b>Delayed a few seconds.</b>` then the shared B-frames sentence
+ * `<b>Delayed a few seconds.</b>` then the shared B-frames sentence
  * (b-frames-copy.ts, also used by the list row's own hint), then — WHIP
  * only — the OBS-specific fix. A pull camera, or a push feed on SRT/RTMP,
- * gets no third sentence at all: R14k's own copy for that case is exactly
+ * gets no third sentence at all: the design's copy for that case is exactly
  * the shared sentence, nothing more, since neither is necessarily OBS (a
  * Magewell, ProPresenter's own output, anything else that can push or be
  * pulled from).
@@ -181,10 +181,9 @@ export interface FeedEditorProps {
    * whatever was selected before "Add feed" — see video-feeds-route.tsx.
    */
   onCancelNew: () => void;
-  /** `video:state`'s `relay.state === "running"` — R14d gates the push
-   *  editor's "did not take effect" notes on this, so they never fire
-   *  merely because no relay is attached yet (the common case until Task
-   *  15 wires one into the server). */
+  /** `video:state`'s `relay.state === "running"` — the push editor's "did
+   *  not take effect" notes are gated on it, so they never fire merely
+   *  because no relay is running (video switched off, say). */
   relayRunning: boolean;
 }
 
@@ -411,7 +410,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           </StackedField>
 
           {!isNew && feed && feed.source.kind === "push" ? (
-            // R14g-a: `protocol` is the DRAFT's current segmented-control
+            // `protocol` is the DRAFT's current segmented-control
             // choice, not necessarily the feed's saved one — the address
             // and description now preview whatever protocol is selected,
             // via the server's own protocolOverride (pushAddress()), never
@@ -501,7 +500,7 @@ interface PushAddress {
   password: string;
 }
 
-/** What newPushPassword() reports about the rotation that just ran — R14d.
+/** What newPushPassword() reports about the rotation that just ran.
  *  Kept separate from `PushAddress`: it is only ever set by an ACTUAL
  *  rotation this session, never by a plain load, so its presence alone is
  *  "a rotation happened," not "the feed has ever been rotated." */
@@ -510,13 +509,13 @@ interface RotationResult {
   kicked: KickResult;
 }
 
-/** How long the Copy button's label reads "Copied" before reverting — R14g. */
+/** How long the Copy button's label reads "Copied" before reverting. */
 export const COPIED_LABEL_MS = 1400;
 
 /**
  * A push feed's paste-ready address and password: "Paste this into the
  * device" with Copy, then Password with New password. Re-fetched whenever
- * `feedId` OR `protocol` changes — R14g-a: `protocol` is the editor's own
+ * `feedId` OR `protocol` changes — `protocol` is the editor's own
  * DRAFT choice (the segmented control above), so flipping it previews that
  * protocol's address with the SAME stored password, via the server's own
  * `protocolOverride`, without saving anything.
@@ -540,7 +539,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   const [copyHint, setCopyHint] = useState<string | null>(null);
   const [justCopied, setJustCopied] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
-  /** R14 round 2 item 6: every request this component makes — a preview
+  /** Every request this component makes — a preview
    *  load() or a rotation — takes a ticket, and a response is applied only
    *  if its own ticket is still the newest one issued. Without this, two
    *  requests in flight together apply in WHATEVER ORDER THEY RESOLVE, not
@@ -580,8 +579,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
       // publishing — describes THIS call, never "whatever the control
       // currently shows," so it must never be dropped just because the
       // control was flipped to a different protocol while the request was
-      // in flight (R14 round 3 item 1: the staleness check used to return
-      // before either of these ran at all). Only the DATA a later request
+      // in flight. Only the DATA a later request
       // could already have replaced is gated by the counter below.
       setRotation({ applied: r.applied, kicked: r.kicked });
       setRotationError(null);
@@ -593,8 +591,7 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
         // trip needed.
         setData({ protocol: r.protocol, address: r.address, password: r.password });
       } else {
-        // The control is previewing a DIFFERENT, unsaved protocol — R14
-        // round 2 item 6. Showing r's own (saved-protocol) address here
+        // The control is previewing a DIFFERENT, unsaved protocol. Showing r's own (saved-protocol) address here
         // would show an address for a protocol the control does not even
         // have selected, so the control and the address field would stop
         // matching. Re-preview the protocol the control shows, now with the
