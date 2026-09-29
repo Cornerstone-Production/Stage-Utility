@@ -20,7 +20,7 @@ import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
-import { anyPlaying, drainReports, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
+import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -491,7 +491,9 @@ export function StageView() {
     const intervalMs = () => (anyPlaying() ? VIDEO_HEARTBEAT_MS : near ? 20_000 : 60_000);
     const ping = () => {
       void (async () => {
-        const reports = await drainReports();
+        // Bounded: a sampler that never answers sends this beat without video,
+        // rather than holding the Connected dot hostage.
+        const reports = await drainReportsInTime();
         const body: Record<string, unknown> = {
           outputId: displayId,
           deviceId: new URLSearchParams(window.location.search).get("device") ?? undefined,

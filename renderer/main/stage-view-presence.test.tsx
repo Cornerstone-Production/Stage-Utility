@@ -242,6 +242,47 @@ test("a picture flapping between playing and not still pings at least every 60s"
   }
 });
 
+test("a playback sampler that never answers delays the heartbeat by at most 2 s, and the beat goes without video", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const unregister = registerPlayback("obj-1", () => new Promise(() => {}));
+  try {
+    window.history.replaceState({}, "", "/display-1");
+    await act(async () => {
+      render(
+        React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(TooltipProvider, null, React.createElement(StageView))),
+      );
+      await flush();
+    });
+    assert.equal(presencePosts.length, 0, "sanity: the mount ping is waiting on the sampler");
+
+    await act(async () => {
+      mock.timers.tick(2_000);
+      await flush();
+    });
+    assert.equal(presencePosts.length, 1, "the mount ping must go out 2 s later, not wait on the sampler forever");
+    assert.equal("video" in presencePosts[0]!.body, false, "a beat that gave up on the samplers carries no video field");
+
+    // To the next ping's due time, then past its 2 s wait, as two ticks: a
+    // mock tick runs every callback at the tick's END time, so a timer set
+    // inside one long tick would land late.
+    await act(async () => {
+      mock.timers.tick(VIDEO_HEARTBEAT_MS - 2_000);
+      await flush();
+    });
+    assert.equal(presencePosts.length, 1, "sanity: the next ping is waiting on the sampler");
+    await act(async () => {
+      mock.timers.tick(2_000);
+      await flush();
+    });
+    assert.equal(presencePosts.length, 2, "the next ping must go out within the interval plus 2 s");
+    assert.equal(presencePosts[1]!.at, VIDEO_HEARTBEAT_MS + 2_000);
+    assert.equal("video" in presencePosts[1]!.body, false);
+  } finally {
+    unregister();
+    mock.timers.reset();
+  }
+});
+
 test("a preview never heartbeats, playing video or not", async () => {
   mock.timers.enable({ apis: ["setTimeout", "Date"] });
   try {

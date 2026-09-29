@@ -73,6 +73,27 @@ export async function drainReports(): Promise<VideoPlaybackReport[]> {
   return settled.flatMap((r) => (r.status === "fulfilled" && r.value !== null ? [r.value] : []));
 }
 
+/** How long the presence heartbeat waits on drainReports() before sending
+ *  without video: the heartbeat is what keeps the screen's Connected dot on,
+ *  and a sampler that never answers must not hold it. */
+export const DRAIN_TIMEOUT_MS = 2_000;
+
+/** drainReports(), or no reports at all if it has not settled within
+ *  DRAIN_TIMEOUT_MS. A late result is dropped, never carried into the next
+ *  heartbeat: each report is a delta since its sampler's last read, so the
+ *  next drain already counts what this one missed. */
+export async function drainReportsInTime(): Promise<VideoPlaybackReport[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<VideoPlaybackReport[]>((resolve) => {
+    timer = setTimeout(() => resolve([]), DRAIN_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([drainReports(), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Test-only: clears every registration and subscriber, so one test's leaked
  *  entry (from a failure that skipped its own unregister/unsubscribe) cannot
  *  bleed into the next. */

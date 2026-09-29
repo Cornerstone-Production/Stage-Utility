@@ -285,7 +285,9 @@ service) or 60-second cadence otherwise. Each report is that widget
 instance's own numbers since its last report: frames decoded (never counting
 the dropped ones, over either method), frames dropped and stalls as deltas,
 and the frame's current width, height and whether it is playing over WebRTC
-or HLS. A stall is the picture going into `waiting` on
+or HLS. If the screen's widgets have not all answered within 2 seconds, that
+heartbeat goes without any reports rather than wait, so the Connected dot
+never waits on a stats read. A stall is the picture going into `waiting` on
 HLS; on WebRTC, where a `<video>` playing a live stream never fires
 `waiting` when the stream starves, it is instead Chrome's own receiver-side
 freeze counter, falling back to `waiting` on a browser that does not report
