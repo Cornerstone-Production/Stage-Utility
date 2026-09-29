@@ -79,9 +79,12 @@ export async function drainReports(): Promise<VideoPlaybackReport[]> {
 export const DRAIN_TIMEOUT_MS = 2_000;
 
 /** drainReports(), or no reports at all if it has not settled within
- *  DRAIN_TIMEOUT_MS. A late result is dropped, never carried into the next
- *  heartbeat: each report is a delta since its sampler's last read, so the
- *  next drain already counts what this one missed. */
+ *  DRAIN_TIMEOUT_MS. A sampler bounded below 2 s, as createSampler's own
+ *  STATS_READ_TIMEOUT_MS-capped read is, never reaches this cut. One that
+ *  answers later loses that interval's counts rather than folding them into
+ *  the next report: `sample()` moves its delta baselines the moment its read
+ *  lands, so the frames a dropped report would have carried are already gone
+ *  from the next drain's delta by the time it runs. */
 export async function drainReportsInTime(): Promise<VideoPlaybackReport[]> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<VideoPlaybackReport[]>((resolve) => {
