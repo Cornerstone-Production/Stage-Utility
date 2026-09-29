@@ -115,6 +115,20 @@ interface Pair {
    * encoder changed output mid-episode.
    */
   episode: { dropped: number; decoded: number; stalls: number; width: number; height: number } | null;
+  /**
+   * This episode's identity — bumped only the moment `struggling` turns true
+   * from false, null whenever `episode` is. UNLIKE `episode`'s own object
+   * identity, this does NOT change when the peak merely moves within an
+   * ONGOING struggle (severity() rising keeps the same id): `episode` mints a
+   * fresh object on BOTH a genuinely new struggle and a worsening peak inside
+   * one that never cleared, so video-service.ts's logPlaybackFlips uses this,
+   * not `episode`'s reference, to tell the two apart — a struggling flag that
+   * reads true both before and after one record() call (sweep() clearing it
+   * in its own pass, then the same call's report re-arming it, both inside
+   * the same call — see record()'s own comment) needs a fresh id here even
+   * though nothing outside this call ever saw the flag flip.
+   */
+  episodeId: number | null;
 }
 
 export interface Totals {
@@ -206,6 +220,11 @@ export class PlaybackHealth {
    *  is exactly the request-keyed-property-injection shape this repo fixes
    *  with Maps. */
   private readonly pairs = new Map<string, Map<string, Pair>>();
+  /** The next `Pair.episodeId` to mint — see its own field comment. A plain
+   *  incrementing counter, never a timestamp: two episodes starting from
+   *  record() calls at the exact same `now` (the sweep-then-reflag scenario
+   *  this exists for is precisely that) must still mint DIFFERENT ids. */
+  private nextEpisodeId = 1;
 
   private pruneSamples(samples: readonly Sample[], now: number): Sample[] {
     return samples.filter((s) => now - s.at < WINDOW_MS);
@@ -242,6 +261,7 @@ export class PlaybackHealth {
         } else if (pair.struggling && !isStrugglingAt(pair.lastBadAt, now)) {
           pair.struggling = false;
           pair.episode = null;
+          pair.episodeId = null;
           changed = true;
         }
       }
@@ -334,13 +354,21 @@ export class PlaybackHealth {
       // already held — see severity()'s own comment. Not struggling clears
       // it outright, the same fact isStrugglingAt() itself is judged on.
       let episode = existing?.episode ?? null;
+      let episodeId = existing?.episodeId ?? null;
       if (!isStruggling) {
         episode = null;
+        episodeId = null;
       } else if (!wasStruggling || episode === null || severity(totals) > severity(episode)) {
         episode = { dropped: totals.dropped, decoded: totals.decoded, stalls: totals.stalls, width: r.width, height: r.height };
+        // A new id ONLY on the genuine transition into struggling — not on a
+        // peak merely worsening inside a struggle that never cleared, which
+        // also lands in this branch (severity(totals) > severity(episode))
+        // and must keep the SAME id. See Pair.episodeId's own comment for
+        // why the two need to read differently to video-service.ts.
+        if (!wasStruggling || episodeId === null) episodeId = this.nextEpisodeId++;
       }
 
-      byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, lastBadAt, struggling: isStruggling, episode });
+      byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, lastBadAt, struggling: isStruggling, episode, episodeId });
 
       if (!existing) {
         changed = true; // a pair appeared
@@ -377,6 +405,16 @@ export class PlaybackHealth {
   /** Exposed for tests: how many samples one pair currently holds. */
   samplesHeld(outputId: string, feedId: string): number {
     return this.pairs.get(outputId)?.get(feedId)?.samples.length ?? 0;
+  }
+
+  /** A pair's current episode identity, or null when not struggling —
+   *  video-service.ts's logPlaybackFlips reads this, never `snapshot()`'s own
+   *  `episode` (a fresh object every call, so never comparable by reference
+   *  across calls, and equal-by-value even for two genuinely different
+   *  episodes that happen to share the same numbers). See Pair.episodeId's
+   *  own comment. */
+  episodeIdFor(outputId: string, feedId: string): number | null {
+    return this.pairs.get(outputId)?.get(feedId)?.episodeId ?? null;
   }
 
   /** Every currently-live pair's health, freshest first play order not

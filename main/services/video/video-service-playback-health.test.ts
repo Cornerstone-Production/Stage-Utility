@@ -26,6 +26,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 const { videoService } = await import("./video-service.js");
 const { stageController } = await import("../stage-controller.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
+const { CLEAR_AFTER_MS, WINDOW_MS } = await import("./playback-health.js");
 
 type VideoState = import("../../types/video.js").VideoState;
 
@@ -194,6 +195,70 @@ test("logs the struggling and smoothly-again flips, and only the flips — never
     ]);
   } finally {
     await videoService.removeFeed(id);
+  }
+});
+
+test("a heartbeat whose own record() call clears the sticky flag in its sweep and then re-flags it from the same bad sample logs the clear and the new episode's struggling line, in that order", async (t: TestContext) => {
+  const id = await addRelayFeed("Chapel screen");
+  try {
+    // The pair's first-ever struggle, at t=0 — its own "is struggling" line
+    // is setup for this test, not part of the sequence under test, so
+    // console capture starts only once it has already logged and settled.
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 51, stalls: 0 })], 0);
+    await settle();
+
+    const lines = captureConsole(t, "log");
+    // A second heartbeat landing exactly CLEAR_AFTER_MS after the first bad
+    // sample, a few ms ahead of where the expiry timer would otherwise have
+    // swept it on its own — record()'s own sweep(), which runs before this
+    // heartbeat's reports are folded in, reads that as no longer struggling
+    // (isStrugglingAt is strictly `<`) and clears the sticky flag AND the
+    // episode. This same heartbeat's own sample is bad too, so the
+    // merged-report loop right after immediately re-arms it as a fresh
+    // episode — all inside this one record() call, with no heartbeat or
+    // timer landing in between to have logged the clear on its own.
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 51, stalls: 0 })], CLEAR_AFTER_MS);
+    await settle();
+
+    assert.deepEqual(lines, [
+      `[video] ${OUTPUT_NAME} is playing Chapel screen smoothly again`,
+      `[video] ${OUTPUT_NAME} is struggling with Chapel screen: dropped 51 frames for 1000 decoded, 0 stalls in the last minute`,
+    ]);
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("removeFeed and a departed pair's own cleanup both forget the episode-id bookkeeping, not only lastLoggedStruggling", async (t: TestContext) => {
+  const removed = await addRelayFeed("Removed screen");
+  const departed = await addRelayFeed("Departed screen");
+  captureConsole(t, "log"); // both feeds cross into struggling on purpose; not asserting on the lines
+  const episodeIds = (videoService as unknown as { lastLoggedEpisodeId: Map<string, number | null> }).lastLoggedEpisodeId;
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: removed, decoded: 1000, dropped: 51, stalls: 0 })], 0);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: departed, decoded: 1000, dropped: 51, stalls: 0 })], 0);
+    await settle();
+    assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${removed}`), true, "sanity: removeFeed's own pair logged a struggling line first");
+    assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${departed}`), true, "sanity: the departed pair's own logged a struggling line first");
+
+    await videoService.removeFeed(removed);
+    assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${removed}`), false, "removeFeed must forget the removed feed's episode id, not only lastLoggedStruggling");
+
+    // The departed pair ages out of playbackHealth entirely with no
+    // removeFeed of its own — a heartbeat for a THIRD, unrelated feed at
+    // WINDOW_MS later runs a sweep() over every held pair, which drops it,
+    // and logPlaybackFlips() then prunes anything `after` no longer names.
+    const other = await addRelayFeed("Unrelated screen");
+    try {
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: other, decoded: 1000, dropped: 0, stalls: 0 })], WINDOW_MS);
+      await settle();
+      assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${departed}`), false, "a pair that ages out of playbackHealth on its own must also forget its episode id");
+    } finally {
+      await videoService.removeFeed(other);
+    }
+  } finally {
+    await videoService.removeFeed(removed);
+    await videoService.removeFeed(departed);
   }
 });
 

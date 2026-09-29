@@ -238,6 +238,20 @@ class VideoService {
    * `lastLoggedState` below already applies to a feed's own
    * live/delayed/offline transitions. */
   private readonly lastLoggedStruggling = new Map<string, boolean>();
+  /**
+   * The episode identity (playbackHealth.episodeIdFor()) the pair's last
+   * LOGGED struggling line described — beside `lastLoggedStruggling` above,
+   * pruned and written in exactly the same places, for exactly the same
+   * reason. `lastLoggedStruggling` alone cannot tell "still the same
+   * struggle" from "a heartbeat's own record() call cleared the sticky flag
+   * in its sweep and then re-flagged it from that same heartbeat's own bad
+   * sample" — both read struggling=true before and after logPlaybackFlips()
+   * ever gets a look, so the ordinary flip check never fires either log
+   * line. episodeIdFor() only changes on a genuine transition into
+   * struggling (see its own comment), so a differing id here — while
+   * `lastLoggedStruggling` still says true — is what tells logPlaybackFlips()
+   * a clear it never announced happened in between. */
+  private readonly lastLoggedEpisodeId = new Map<string, number | null>();
 
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
@@ -1630,6 +1644,9 @@ class VideoService {
     for (const key of this.lastLoggedStruggling.keys()) {
       if (key.endsWith(`\u0000${id}`)) this.lastLoggedStruggling.delete(key);
     }
+    for (const key of this.lastLoggedEpisodeId.keys()) {
+      if (key.endsWith(`\u0000${id}`)) this.lastLoggedEpisodeId.delete(key);
+    }
     // forgetFeed() just changed what playbackHealth itself would say, but
     // `cachedScreens` — what state() actually reports — only refreshes on a
     // heartbeat's own change or the expiry timer; neither has any reason to
@@ -1798,21 +1815,35 @@ class VideoService {
    * out of the window, or is swept by the expiry timer) is neither — nothing
    * said it recovered — so it logs nothing.
    *
-   * `lastLoggedStruggling` is pruned here for any key `after` no longer
-   * carries: without this, a pair that left while struggling and comes back
-   * later (the same outputId/feedId pair reporting again, whether or not
-   * it is a different physical feed under a reused id) would either log
-   * nothing on its first genuine struggle (a stale `true` reads as "already
-   * announced") or log a spurious "smoothly again" for a struggle nothing
-   * ever announced. removeFeed() prunes proactively too, for the same
-   * reason, the moment a feed id is known gone rather than waiting for the
-   * next flip pass to notice.
+   * `lastLoggedStruggling` (and `lastLoggedEpisodeId` beside it) are pruned
+   * here for any key `after` no longer carries: without this, a pair that
+   * left while struggling and comes back later (the same outputId/feedId
+   * pair reporting again, whether or not it is a different physical feed
+   * under a reused id) would either log nothing on its first genuine
+   * struggle (a stale `true` reads as "already announced") or log a
+   * spurious "smoothly again" for a struggle nothing ever announced.
+   * removeFeed() prunes proactively too, for the same reason, the moment a
+   * feed id is known gone rather than waiting for the next flip pass to
+   * notice.
+   *
+   * A pair can read struggling=true both before AND after this runs even
+   * though it genuinely cleared and re-flagged in between: one record() call
+   * can have its own sweep() clear the sticky flag by elapsed time and then
+   * the SAME heartbeat's own bad sample re-arm it, all before logPlaybackFlips
+   * ever gets a look (playback-health.ts's own comment on this). The ordinary
+   * flip check below cannot see that — it only compares before and after this
+   * one call — so a differing `episodeIdFor()` while `lastLoggedStruggling`
+   * still reads true is the second signal: the clear this call never
+   * announced, followed immediately by the new episode's own line.
    */
   private logPlaybackFlips(now: number): void {
     const after = this.playbackHealth.snapshot(now);
     const afterKeys = new Set(after.map((h) => pairKey(h.outputId, h.feedId)));
     for (const key of this.lastLoggedStruggling.keys()) {
       if (!afterKeys.has(key)) this.lastLoggedStruggling.delete(key);
+    }
+    for (const key of this.lastLoggedEpisodeId.keys()) {
+      if (!afterKeys.has(key)) this.lastLoggedEpisodeId.delete(key);
     }
 
     const outputs = stageController.getOutputs();
@@ -1822,7 +1853,10 @@ class VideoService {
     for (const health of after) {
       const key = pairKey(health.outputId, health.feedId);
       const wasStruggling = this.lastLoggedStruggling.get(key) ?? false;
-      if (health.struggling && !wasStruggling) {
+      const lastEpisodeId = this.lastLoggedEpisodeId.get(key) ?? null;
+      const currentEpisodeId = this.playbackHealth.episodeIdFor(health.outputId, health.feedId);
+
+      const logStruggling = () => {
         // health.episode is non-null here in every real case: `struggling`
         // freshly true means playback-health.ts just seeded or is holding a
         // peak for this very episode (see its own comment). The live-window
@@ -1832,10 +1866,22 @@ class VideoService {
           `[video] ${scrub(screenName(health.outputId))} is struggling with ${scrub(feedName(health.feedId))}: ` +
             `dropped ${scrub(peak.droppedInWindow)} frames for ${scrub(peak.decodedInWindow)} decoded, ${scrub(peak.stallsInWindow)} stalls in the last minute`,
         );
+      };
+      const logClear = () => console.log(`[video] ${scrub(screenName(health.outputId))} is playing ${scrub(feedName(health.feedId))} smoothly again`);
+
+      if (health.struggling && wasStruggling && currentEpisodeId !== null && currentEpisodeId !== lastEpisodeId) {
+        // Struggling reads true on both sides of this call, so the ordinary
+        // flip check below never fires — the clear and the new episode's
+        // own struggling line, in that order, are what this call missed.
+        logClear();
+        logStruggling();
+      } else if (health.struggling && !wasStruggling) {
+        logStruggling();
       } else if (!health.struggling && wasStruggling) {
-        console.log(`[video] ${scrub(screenName(health.outputId))} is playing ${scrub(feedName(health.feedId))} smoothly again`);
+        logClear();
       }
       this.lastLoggedStruggling.set(key, health.struggling);
+      this.lastLoggedEpisodeId.set(key, currentEpisodeId);
     }
   }
 }
