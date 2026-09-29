@@ -275,6 +275,42 @@ reference: see [Video](../reference/widgets.md#video).
 A Raspberry Pi decodes WebRTC in software. Plan on one 720p feed per Pi 4
 screen; a Pi 5 or a computer handles 1080p.
 
+## Health from the screens
+
+Every Video widget reports its own playback on the same presence heartbeat
+that keeps its screen's Connected/Offline dot current — every 10 seconds
+while at least one widget on that screen is actually showing a relay or
+external feed's picture, faster than the heartbeat's normal 20-second (near a
+service) or 60-second cadence otherwise. Each report is that widget
+instance's own numbers since its last report: frames decoded, frames dropped
+and stalls (the picture going into `waiting`) as deltas, and the frame's
+current width, height and whether it is playing over WebRTC or HLS. An
+embed's platform player, and a probe merely testing whether WebRTC works,
+report nothing — only a widget actually showing a picture does.
+
+The server keeps a rolling one-minute window per screen and feed — two
+widgets on one screen playing the same feed are one pair — and marks the pair
+**struggling** the moment its window crosses either threshold: more than 5%
+of decoded frames dropped, or 3 or more stalls. Once struggling, it stays
+that way for 60 seconds after the last sample that kept it bad, even through
+cleaner reports arriving in between, so one bad spike cannot flap the warning
+on and off as the window's own totals dilute it.
+
+A struggling screen's card on the Screens page shows a warning under its
+preview: **Struggling with \<feed\>.** followed by how many frames it dropped
+in the last minute. Above 720p it adds the feed's resolution and the fix — a
+Pi 4 decodes WebRTC in software and cannot keep up much past that: **The feed
+is W × H; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to
+720p.** At 3 or more stalls it adds **It stalled N times; check this screen's
+network.**
+
+The Video feeds list's own meta line reads **On N screens** for any feed
+currently playing anywhere, struggling or not — every distinct screen a
+heartbeat has reported that feed's playback for in the last minute.
+
+Each transition into or out of struggling is a `[video]` line on the
+server's own log; see Logging below.
+
 ## Logging
 
 The relay itself writes `[video]` lines to [`/log`](../ops/updates-and-logs.md)
@@ -315,6 +351,12 @@ from the server:
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
   feed that had lost its password, which its device then needs.
+- A screen struggling with a feed — dropped frames and stalls, in the last
+  minute — the moment its window crosses the threshold above, and playing it
+  smoothly again the moment it clears; each once, not repeated while it stays
+  true. `could not record <screen>'s playback report` on every heartbeat
+  whose numbers could not be saved — a report lost is a report lost, so this
+  has no recovery line of its own.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password
@@ -335,6 +377,8 @@ Each screen writes its own `[video]` lines from the browser:
   switch, once per outage, and a line once it can play again — the screen
   allows HLS again, or the feed stops needing it. Nothing repeats while the
   switch stays off.
+- A playing widget's own stats failing to read (for the health report
+  above), once per outage, and a line once they read again.
 - A Video widget crashing, with the error. The rest of the layout keeps
   drawing.
 
