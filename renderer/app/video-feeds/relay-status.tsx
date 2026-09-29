@@ -95,10 +95,28 @@ export function RelayDetailRow({
   binaryPresent: boolean;
   onChangePorts: () => void;
 }) {
-  const showChangePorts = relay.state === "running" || relay.state === "failing";
+  // item 8: only a port conflict is something "Change ports in Advanced"
+  // can fix — an unsupported platform, a failed download, a config write
+  // that failed or a plain crash loop all send the operator to a page with
+  // nothing on it that helps.
+  const showChangePorts = relay.state === "running" || (relay.state === "failing" && relay.kind === "port-conflict");
+  // Called as a plain function, NOT `<RelayDetail .../>` — that JSX form
+  // always produces a truthy element object (a description of "call this
+  // component"), never the null RelayDetail itself sometimes returns, so
+  // checking ITS result for null always saw an object and never skipped
+  // anything. RelayDetail takes no ref, no children and uses no hooks, so
+  // calling it directly is exactly as safe as JSX would be, and actually
+  // reads its return value.
+  const detail = RelayDetail({ relay, enabled, binaryPresent });
+  // item 5: this row used to render its bordered/padded strip
+  // unconditionally, so "off, switched off, binary already downloaded" (the
+  // one case with nothing to say — RelayDetail returns null and
+  // showChangePorts is false) rendered a strip with nothing in it, just a
+  // border and padding around empty space.
+  if (detail === null && !showChangePorts) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line px-4 py-3 text-caption1 text-fg-muted">
-      <RelayDetail relay={relay} enabled={enabled} binaryPresent={binaryPresent} />
+      {detail}
       {showChangePorts && <ChangePortsLink onChangePorts={onChangePorts} />}
     </div>
   );
@@ -164,7 +182,7 @@ function RelayDetail({
           {relay.retryAt !== null && <span className="inline-flex items-baseline gap-1.5">Next try at {formatClock(relay.retryAt, { seconds: true })}</span>}
           {relay.assetName && relay.placeArchiveAt && (
             <span className="inline-flex items-baseline gap-1.5">
-              Or place {relay.assetName} at {relay.placeArchiveAt} by hand.
+              Or place {relay.assetName} in {relay.placeArchiveAt} by hand.
             </span>
           )}
         </>

@@ -72,7 +72,7 @@ describe("the header pill and switch", () => {
     [{ state: "off" }, "Relay off"],
     [{ state: "starting", version: null }, "Relay starting"],
     [{ state: "downloading", receivedBytes: 0, totalBytes: 100 }, "Downloading the relay"],
-    [{ state: "failing", reason: "x", retryAt: null }, "Relay error"],
+    [{ state: "failing", reason: "x", kind: "port-conflict", retryAt: null }, "Relay error"],
   ] as [RelayStatus, string][]) {
     test(`${relay.state} shows the "${label}" pill`, () => {
       renderRow(relay);
@@ -90,9 +90,13 @@ describe("the off-state detail — item 6: enabled and binaryPresent both change
     assert.match(text, /55 MB on disk/);
   });
 
-  test("switched off, binary already present: says nothing at all", () => {
+  test("switched off, binary already present: says nothing at all, and renders no empty strip", () => {
     const { container } = renderRow({ state: "off" }, { enabled: false, binaryPresent: true });
     assert.equal((container.textContent ?? "").trim(), "Relay off", "only the pill should render — no stray sentence");
+    // item 5: RelayDetailRow used to render its bordered/padded wrapper div
+    // unconditionally, so this exact case (off, binary present) produced a
+    // strip with nothing in it — a border and padding around empty space.
+    assert.equal(container.querySelector(".border-b"), null, "an empty strip is still rendering");
   });
 
   test("switched on with no relay feed yet: says the relay is waiting for one, never the download line", () => {
@@ -128,9 +132,28 @@ describe("the detail line, per other state", () => {
     assert.ok(screen.getByRole("button", { name: "Change ports in Advanced" }));
   });
 
-  test("failing ALSO shows Change ports in Advanced — item 17: most useful exactly on a busy port", () => {
-    renderRow({ state: "failing", reason: "Port 1935 is in use by OBS Studio.", retryAt: null });
+  test("failing on a port conflict shows Change ports in Advanced — item 17: most useful exactly there", () => {
+    renderRow({ state: "failing", reason: "Port 1935 is in use by OBS Studio.", kind: "port-conflict", retryAt: null });
     assert.ok(screen.getByRole("button", { name: "Change ports in Advanced" }));
+  });
+
+  test("item 8: failing for any OTHER reason does not show Change ports in Advanced — nothing there would fix it", () => {
+    for (const relay of [
+      { state: "failing", reason: "checksum mismatch", kind: "download", retryAt: null },
+      { state: "failing", reason: "could not write the relay's config: EACCES", kind: "config-write", retryAt: null },
+      { state: "failing", reason: "could not start the relay: ENOENT", kind: "spawn", retryAt: null },
+      { state: "failing", reason: "Video relay is not available for win32 arm64.", kind: "unsupported", retryAt: null },
+      { state: "failing", reason: "exit code 1", kind: "crash-loop", retryAt: null },
+      { state: "failing", reason: "The relay is not answering", kind: "not-answering", retryAt: null },
+    ] as RelayStatus[]) {
+      const { container, unmount } = renderRow(relay);
+      assert.equal(
+        container.querySelector("button")?.textContent?.includes("Change ports"),
+        false,
+        (relay as { kind: string }).kind,
+      );
+      unmount();
+    }
   });
 
   test("Change ports in Advanced is absent for off, starting and downloading", () => {
@@ -150,20 +173,25 @@ describe("the detail line, per other state", () => {
     renderRow({
       state: "failing",
       reason: "checksum mismatch for mediamtx_v1.21.1_linux_amd64.tar.gz: expected a, got b",
+      kind: "download",
       retryAt,
-      placeArchiveAt: "/data/video-relay/downloads/mediamtx_v1.21.1_linux_amd64.tar.gz",
+      // A bare DIRECTORY, never a full file path repeating the asset's own
+      // name a second time — item 3 (findings-t15-r2.md): acquire.ts now
+      // sends the two as separate fields for every failure, not just the
+      // unsupported-platform one.
+      placeArchiveAt: "/data/video-relay/downloads",
       assetName: "mediamtx_v1.21.1_linux_amd64.tar.gz",
     });
     const text = document.body.textContent ?? "";
     assert.match(text, /checksum mismatch for mediamtx_v1\.21\.1_linux_amd64\.tar\.gz: expected a, got b/);
     assert.match(text, /Next try at/);
-    assert.match(text, /Or place mediamtx_v1\.21\.1_linux_amd64\.tar\.gz at \/data\/video-relay\/downloads\/mediamtx_v1\.21\.1_linux_amd64\.tar\.gz by hand\./);
+    assert.match(text, /Or place mediamtx_v1\.21\.1_linux_amd64\.tar\.gz in \/data\/video-relay\/downloads by hand\./);
     // Not run together on one sentence — "… Or place …" immediately after
     // the retry time, with no separating punctuation, reads as one run-on.
     assert.equal(/Next try at [\d:]+ Or place/.test(text), false, "the retry time and the hand-place line ran together");
   });
 
-  test("no pinned asset for this platform: names it directly, never invents a hand-place sentence by splitting a bare directory", () => {
+  test("no pinned asset for this platform: names it directly, never invents a hand-place sentence by splitting a bare directory, and never retries — item 16", () => {
     // The real shape acquire.ts returns for an unsupported platform/arch:
     // `assetName: undefined`, `placeArchiveAt` a bare DOWNLOADS DIRECTORY
     // with no file name in it at all — splitting that on "/" (the bug this
@@ -172,6 +200,7 @@ describe("the detail line, per other state", () => {
     renderRow({
       state: "failing",
       reason: "Video relay is not available for win32 arm64.",
+      kind: "unsupported",
       retryAt: null,
       placeArchiveAt: "/data/video-relay/downloads",
     });
@@ -179,5 +208,7 @@ describe("the detail line, per other state", () => {
     assert.match(text, /Video relay is not available for win32 arm64\./);
     assert.equal(text.includes("Or place"), false);
     assert.equal(text.includes("downloads"), false, "a bare directory must never be shown as though it were the asset");
+    // item 16: nothing will ever fix this by waiting, so no "Next try at".
+    assert.equal(text.includes("Next try at"), false);
   });
 });
