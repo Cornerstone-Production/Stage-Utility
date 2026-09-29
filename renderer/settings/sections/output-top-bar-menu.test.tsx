@@ -68,10 +68,10 @@ const noop = () => {};
 const asyncNoop = async () => {};
 
 /** The card for one display routed to a View of `kind` (null = unrouted). */
-function cardFor(kind: ViewKind | null) {
+function cardFor(kind: ViewKind | null, overrides: Partial<OutputRowProps["output"]> = {}, onSetAllowHls: OutputRowProps["onSetAllowHls"] = noop) {
   const views: View[] = kind ? [{ id: "v1", name: "The view", kind, createdAt: "2026-01-01T00:00:00.000Z" }] : [];
   const props: OutputRowProps = {
-    output: { id: "display-1", name: "Stage left", viewId: kind ? "v1" : null },
+    output: { id: "display-1", name: "Stage left", viewId: kind ? "v1" : null, ...overrides },
     views,
     baseUrl: "http://display.invalid",
     online: false,
@@ -84,12 +84,25 @@ function cardFor(kind: ViewKind | null) {
     onRenameView: noop,
     onSetLocked: noop,
     onSetHideTopBar: noop,
+    onSetAllowHls,
     onSetMode: asyncNoop,
     onRefresh: noop,
     onRemove: noop,
     onRequestNewView: noop,
   };
   return React.createElement(OutputRow, props);
+}
+
+/** Open the card's hamburger for an already-rendered card and return the
+ *  words in the menu. */
+async function openMenu(): Promise<string> {
+  const trigger = screen.getByLabelText(/more|menu|options/i);
+  await act(async () => {
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    await settle();
+  });
+  return document.body.textContent ?? "";
 }
 
 /** Open this card's hamburger and return the words in the menu. */
@@ -103,13 +116,7 @@ async function menuText(kind: ViewKind | null): Promise<string> {
       React.createElement(TooltipProvider, null, cardFor(kind)),
     ),
   );
-  const trigger = screen.getByLabelText(/more|menu|options/i);
-  await act(async () => {
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-    fireEvent.click(trigger);
-    await settle();
-  });
-  return document.body.textContent ?? "";
+  return openMenu();
 }
 
 describe("the top-bar menu items follow the bar", () => {
@@ -133,6 +140,14 @@ describe("the top-bar menu items follow the bar", () => {
           ? `${kind} draws a bar but cannot hide it`
           : `${kind} draws no bar and still offers "Hide top bar"`,
       );
+      // Unlike the two above, the HLS switch is about the OUTPUT, not the
+      // routed view's own top bar — a Video widget can land on any custom
+      // layout this screen is routed to next, so it stays offered whatever
+      // kind is routed today.
+      assert.ok(
+        text.includes("Use HLS on this screen"),
+        `${kind}: the HLS switch must be offered regardless of the routed view's kind`,
+      );
     });
   }
 
@@ -143,5 +158,65 @@ describe("the top-bar menu items follow the bar", () => {
     const text = await menuText(null);
     assert.ok(text.includes("Lock display"), "an unrouted display lost its lock");
     assert.ok(text.includes("Hide top bar"), "an unrouted display lost its top-bar toggle");
+    assert.ok(text.includes("Use HLS on this screen"), "an unrouted display lost its HLS switch");
+  });
+});
+
+describe("the HLS switch", () => {
+  test("checked by default (allowHls absent), with no hint caption", async () => {
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(TooltipProvider, null, cardFor("custom")),
+      ),
+    );
+    await openMenu();
+    const item = screen.getByRole("menuitemcheckbox", { name: "Use HLS on this screen" });
+    assert.equal(item.getAttribute("aria-checked"), "true", "absent must read as allowed");
+    assert.equal(
+      document.body.textContent?.includes("this screen plays only WebRTC"),
+      false,
+      "the off-hint must not show while HLS is allowed",
+    );
+  });
+
+  test("unchecked with allowHls: false, and shows the hint", async () => {
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(TooltipProvider, null, cardFor("custom", { allowHls: false })),
+      ),
+    );
+    await openMenu();
+    const item = screen.getByRole("menuitemcheckbox", { name: "Use HLS on this screen" });
+    assert.equal(item.getAttribute("aria-checked"), "false");
+    assert.ok(
+      document.body.textContent?.includes(
+        "Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here.",
+      ),
+      "expected the exact hint copy under the switch once it is off",
+    );
+  });
+
+  test("selecting it calls the handler with the flipped value", async () => {
+    const calls: boolean[] = [];
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(TooltipProvider, null, cardFor("custom", {}, (v) => calls.push(v))),
+      ),
+    );
+    await openMenu();
+    const item = screen.getByRole("menuitemcheckbox", { name: "Use HLS on this screen" });
+    await act(async () => {
+      fireEvent.pointerDown(item, { button: 0, ctrlKey: false });
+      fireEvent.pointerUp(item, { button: 0, ctrlKey: false });
+      fireEvent.click(item);
+      await settle();
+    });
+    assert.deepEqual(calls, [false], "checked (allowed) must flip to false on selection");
   });
 });

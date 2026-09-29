@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon, CheckIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -114,6 +114,9 @@ export interface OutputRowProps {
   onSetLocked: (locked: boolean) => void;
   /** Show or hide THIS display's kiosk top bar (brand, plan context, QR). */
   onSetHideTopBar: (hideTopBar: boolean) => void;
+  /** Allow or refuse HLS playback for a Video widget on THIS screen. Off keeps
+   *  a struggling Pi on WebRTC only. */
+  onSetAllowHls: (allowHls: boolean) => void;
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
@@ -164,7 +167,7 @@ export function resolveIconEntry(
   return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   // Both bar items below are about a strip that only some kinds draw. Offering
@@ -394,6 +397,26 @@ export function OutputRow({ output, views, baseUrl, online, struggles, canRemove
                     : <PanelTopIcon className="size-3.5 text-fg-subtle" />}
                   {output.hideTopBar ? "Show top bar" : "Hide top bar"}
                 </DropdownMenu.Item>
+              )}
+              {/* Per display, not per view kind: a Video widget can land on
+                  any custom layout this screen might be routed to next, so the
+                  switch stays offered whatever it currently shows. */}
+              <DropdownMenu.CheckboxItem
+                checked={output.allowHls !== false}
+                onCheckedChange={onSetAllowHls}
+                className={MENU_ITEM}
+              >
+                <span className="flex size-3.5 shrink-0 items-center justify-center">
+                  <DropdownMenu.ItemIndicator>
+                    <CheckIcon className="size-3.5 text-accent" />
+                  </DropdownMenu.ItemIndicator>
+                </span>
+                Use HLS on this screen
+              </DropdownMenu.CheckboxItem>
+              {output.allowHls === false && (
+                <p className="px-2 pb-1.5 text-caption1 text-fg-subtle">
+                  Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here.
+                </p>
               )}
               <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
@@ -812,6 +835,7 @@ export function OutputsSection({
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
+                onSetAllowHls={(allowHls) => handlers.handleSetOutputAllowHls(output.id, allowHls)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}

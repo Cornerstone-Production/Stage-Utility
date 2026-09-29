@@ -63,11 +63,14 @@ export function VideoObject({
   config,
   appLogo,
   appLogoMonochrome,
+  allowHls,
 }: {
   o: LayoutObject;
   config: VideoObjectConfig;
   appLogo: string | null;
   appLogoMonochrome: boolean;
+  /** This screen's own "Use HLS on this screen" switch. */
+  allowHls: boolean;
 }) {
   return (
     // Keyed on the feed id: a different feed (or one disappearing) is a clean
@@ -76,7 +79,7 @@ export function VideoObject({
     // and a verdict about the PREVIOUS feed's WebRTC support, or a pending
     // backoff timer, can never carry onto the next feed either.
     <VideoErrorBoundary key={config.feedId ?? "none"} fallback={<CantPlayBody name="This feed" />}>
-      <VideoObjectBody objectId={o.id} config={config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />
+      <VideoObjectBody objectId={o.id} config={config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls={allowHls} />
     </VideoErrorBoundary>
   );
 }
@@ -86,11 +89,13 @@ function VideoObjectBody({
   config,
   appLogo,
   appLogoMonochrome,
+  allowHls,
 }: {
   objectId: string;
   config: VideoObjectConfig;
   appLogo: string | null;
   appLogoMonochrome: boolean;
+  allowHls: boolean;
 }) {
   const state = useVideoState();
   const feed = useMemo(
@@ -119,7 +124,7 @@ function VideoObjectBody({
     feed,
     feedDeleted,
     video: videoEl,
-    allowHls: true, // Always on until a screen has its own "Use HLS on this screen" switch.
+    allowHls,
     relayRunning: state?.relay.state === "running",
     onLog,
   });

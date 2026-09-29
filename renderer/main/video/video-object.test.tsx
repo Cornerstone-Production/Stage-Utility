@@ -192,7 +192,7 @@ test("preview route: paused, and nothing is requested until Play is pressed", as
   history.pushState({}, "", "/preview-abc");
   const g = stubGlobals(makeState([makeFeed()]));
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settle();
     await settle();
 
@@ -224,7 +224,7 @@ test("off screen: no request; on screen: one POST; off again past the teardown: 
   const g = stubGlobals(makeState([makeFeed()]));
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settleFake();
     await settleFake();
 
@@ -258,7 +258,7 @@ test("a hidden document behaves like off screen", async () => {
   const g = stubGlobals(makeState([makeFeed()]));
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settleFake();
     await settleFake();
 
@@ -301,7 +301,7 @@ test("an embed feed renders an iframe with mute=1 and no <video>; off screen rem
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
     const { container } = render(
-      React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }),
+      React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }),
     );
     await settleFake();
     await settleFake();
@@ -348,7 +348,7 @@ test("a render error inside the player shows the can't-play state, and a sibling
         "div",
         null,
         React.createElement("span", null, "sibling-marker"),
-        React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }),
+        React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }),
       ),
     );
     await settle();
@@ -370,6 +370,7 @@ test("whenOffline: logo with no app logo configured shows the message state", as
         ...makeObject({ whenOffline: "logo" }),
         appLogo: null,
         appLogoMonochrome: false,
+        allowHls: true,
       }),
     );
     await settle();
@@ -421,13 +422,22 @@ const EMBED = makeFeed({
   status: { state: "embed" },
 });
 
+/** A relay feed WebRTC cannot carry at all — the encoder has B-frames, so the
+ *  only way to play it is HLS. */
+const B_FRAMES_FEED = makeFeed({ status: { state: "delayed", delayedBecause: "b-frames" } });
+
 /** The corner name tag: a span whose whole text is the feed's name (the
  *  Connecting line carries the name too, inside a longer sentence). */
 const nameTag = (name: string) => screen.queryAllByText(name, { exact: true }).length > 0;
 
-async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}, relay?: VideoState["relay"]) {
+async function renderOnScreen(
+  feed: VideoFeedView,
+  config: Partial<VideoConfig> = {},
+  relay?: VideoState["relay"],
+  allowHls = true,
+) {
   const g = stubGlobals(makeState([feed], relay));
-  const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false }));
+  const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false, allowHls }));
   await settle();
   await settle();
   act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
@@ -515,6 +525,45 @@ test("a WebRTC picture carries no badge", async () => {
     await settle();
     assert.equal(!!screen.queryByText(/s behind$/), false, "a WebRTC picture is not behind");
   } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+// ── the per-screen "Use HLS on this screen" switch ─────────────────────────
+
+test("a B-frame feed on an HLS-off screen shows the can't-play state and requests nothing", async () => {
+  // installFakeHls defines MediaSource, which is what makes this environment
+  // otherwise ABLE to play HLS — without it, jsdom has no HLS player of its
+  // own either way, and the assertions below would pass whether or not
+  // `allowHls` did anything at all.
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(B_FRAMES_FEED, {}, undefined, false);
+  try {
+    assert.equal(!!screen.queryByText("This screen can't play video"), true, "expected the can't-play cover");
+    assert.deepEqual(feedCalls(g.calls), [], "a screen with HLS off must never attempt this feed's playback endpoint at all");
+    assert.equal(
+      g.calls.some((c) => c.url.includes("index.m3u8")),
+      false,
+      "expected no index.m3u8 request from an HLS-off screen",
+    );
+  } finally {
+    undoHls();
+    g.restore();
+  }
+});
+
+test("the same B-frame feed plays over HLS once the screen allows it", async () => {
+  const frames = captureFrames();
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(B_FRAMES_FEED, {}, undefined, true);
+  try {
+    assert.equal(!!screen.queryByText("This screen can't play video"), false, "expected an attempt, not the can't-play cover");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText(/s behind$/), true, "expected the HLS picture's delayed badge once allowed");
+  } finally {
+    undoHls();
     frames.restore();
     g.restore();
   }
@@ -617,7 +666,7 @@ test("a live relay picture registers with the presence heartbeat; going off scre
   const g = stubGlobals(makeState([makeFeed()]));
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settleFake();
     await settleFake();
     assert.equal(anyPlaying(), false, "expected nothing registered before the widget is even on screen");
@@ -672,8 +721,8 @@ test("two widget instances playing the same feed register under two separate key
       React.createElement(
         "div",
         null,
-        React.createElement(VideoObject, { ...objA, appLogo: null, appLogoMonochrome: false }),
-        React.createElement(VideoObject, { ...objB, appLogo: null, appLogoMonochrome: false }),
+        React.createElement(VideoObject, { ...objA, appLogo: null, appLogoMonochrome: false, allowHls: true }),
+        React.createElement(VideoObject, { ...objB, appLogo: null, appLogoMonochrome: false, allowHls: true }),
       ),
     );
     await settle();

@@ -564,7 +564,9 @@ request is what brings it up.
 **Offline** is what shows when a widget's feed has been deleted from the Video
 feeds page while a layout still points at it, and while a feed that dropped
 waits for its next attempt. **Can't play here** is this screen's browser
-lacking WebRTC or HLS support for the feed's address.
+lacking WebRTC or HLS support for the feed's address, or this screen's own
+**Use HLS on this screen** switch (Screens page) turned off for a feed that
+needs HLS to play at all.
 
 ---
 

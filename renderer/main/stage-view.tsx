@@ -606,7 +606,7 @@ function renderView(
   previewViewId: string | null,
   previewDraftSlots: Slot[] | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, isPreview, outputMode } = screen;
+  const { kind, view: activeView, displayId, isPreview, outputMode, allowHls } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -637,6 +637,7 @@ function renderView(
               ndiSource={activeView?.ndiSource ?? null}
               interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
               surface={viewSurface(activeView)}
+              allowHls={allowHls}
             />
           </div>
         </div>

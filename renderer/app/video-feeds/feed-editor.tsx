@@ -310,7 +310,10 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       <h2 className="text-subheadline font-semibold text-fg">{isNew ? "New feed" : feed?.name}</h2>
 
       <div className="aspect-video w-full overflow-hidden rounded-[10px] bg-black">
-        <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />
+        {/* This preview is the feed editor, never a real kiosk display, so it
+            must never refuse a B-frame feed over some wall's own "Use HLS on
+            this screen" switch. */}
+        <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls />
       </div>
 
       {warning && (

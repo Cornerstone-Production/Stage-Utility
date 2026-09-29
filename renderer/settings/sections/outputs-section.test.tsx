@@ -112,6 +112,7 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"]) {
         onSetView: () => {},
         onSetLocked: () => {},
         onSetHideTopBar: () => {},
+        onSetAllowHls: () => {},
         onSetMode: NOOP_ASYNC,
         onRefresh: () => {},
         onRemove: () => {},

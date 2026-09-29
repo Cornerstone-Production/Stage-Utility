@@ -20,6 +20,7 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     blackout: false,
     locked: false,
     hideTopBar: false,
+    allowHls: true,
     ...over,
   };
 }
@@ -445,6 +446,7 @@ describe("the view kind", () => {
       hideTopBar: false,
       isPreview: false,
       outputMode: undefined,
+      allowHls: true,
     });
   });
 
@@ -502,6 +504,29 @@ describe("the view kind", () => {
       }),
     }));
     assert.equal(preview.k === "view" && preview.outputMode, undefined);
+  });
+
+  test("carries the output's own allowHls, but a preview always reads allowed", () => {
+    // A settings-page card is not the real screen it stands in for: showing a
+    // B-frame feed as "can't play here" on the CARD would be wrong even while
+    // the real wall it previews has its own HLS switch off.
+    const off = resolveScreen(input({
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ allowHls: false }) } }),
+    }));
+    assert.equal(off.k === "view" && off.allowHls, false);
+
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({
+        outputs: [{ id: "preview-v1", name: "Not a screen", viewId: "v1" }] as unknown as Output[],
+        // Even a resolved descriptor that itself says HLS is off, keyed under
+        // the preview's own id, must not reach the preview: a preview has no
+        // `resolved` at all (see resolveScreen), so this must be ignored.
+        resolvedByOutput: { "preview-v1": resolvedOutput({ allowHls: false }) },
+      }),
+    }));
+    assert.equal(preview.k === "view" && preview.allowHls, true, "a preview must always read HLS as allowed");
   });
 
   test("a preview of a View that no longer exists says so, instead of drawing slots", () => {

@@ -198,6 +198,10 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     onlineOutputIds: d.onlineOutputIds,
     now: d.now,
     ndiSource: null,
+    // Home is a page of tiles, not a real kiosk display — a card's Video widget
+    // must never refuse to play a B-frame feed because of a WALL's own "Use HLS
+    // on this screen" switch.
+    allowHls: true,
     H: NOMINAL_H,
     // Home is the operator's own screen: controls fire and drill-downs work.
     interactive: true,

@@ -108,6 +108,11 @@ export interface LayoutRenderCtx {
    *  answer from its own. See renderer/lib/server-clock.ts. */
   now: number;
   ndiSource: string | null;
+  /** Whether a Video widget here may attempt HLS — the real display's own "Use
+   *  HLS on this screen" switch. Only a live kiosk route can be gated off; Home,
+   *  a Screens-card preview and the layout editor's own canvas are never the
+   *  real screen a B-frame feed would be refused on, so each sets this true. */
+  allowHls: boolean;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
@@ -1153,7 +1158,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         </div>
       );
     case "video":
-      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} />;
+      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} />;
     case "slots-grid": {
       // Resolved BY OBJECT wherever the server could do it -- inline grids, and
       // grids embedding a view. Both are free-dragged boxes on a custom layout,
@@ -3108,12 +3113,17 @@ export function LayoutRenderer({
   layout,
   ndiSource,
   interactive = false,
+  allowHls = true,
   surface,
   viewId,
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
   interactive?: boolean;
+  /** The real display's own "Use HLS on this screen" switch. Absent behaves as
+   *  allowed — the safe default, and what every caller but a real kiosk route
+   *  wants. */
+  allowHls?: boolean;
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -3204,7 +3214,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, ndiSource, allowHls, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
