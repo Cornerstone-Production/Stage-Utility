@@ -108,3 +108,35 @@ describe("busyPorts", () => {
     assert.deepEqual(afterRelease, [], "both released ports must read as free");
   });
 });
+
+describe("busyPorts, checked again and again", () => {
+  // The relay's pre-launch retry calls busyPorts on every attempt, for as
+  // long as a port stays taken. A probe socket whose bind failed was never
+  // closed: one leaked UDP socket, and its file descriptor, per attempt.
+  it("closes its probe socket when a held UDP port refuses the bind", async () => {
+    const held = await openUdp("0.0.0.0");
+    const spares = await Promise.all([openTcp("0.0.0.0"), openUdp("0.0.0.0"), openTcp("127.0.0.1"), openTcp("127.0.0.1"), openTcp("127.0.0.1")]);
+    await Promise.all(spares.map((s) => s.close()));
+    const [rtmp, webrtcUdp, webrtcHttp, hls, api] = spares.map((s) => s.port) as [number, number, number, number, number];
+    const ports: VideoPorts = { rtmp, srt: held.port, webrtcUdp, webrtcHttp, hls, api };
+    const udpHandles = () => process.getActiveResourcesInfo().filter((r) => r === "UDPWrap").length;
+    // A closed socket's handle is released a little after its close
+    // callback, so a count is read once it has stopped falling.
+    const settled = async (atMost: number | null) => {
+      for (let i = 0; i < 100; i++) {
+        const n = udpHandles();
+        if (atMost !== null && n <= atMost) return n;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        if (atMost === null && udpHandles() === n) return n;
+      }
+      return udpHandles();
+    };
+    try {
+      const before = await settled(null);
+      for (let i = 0; i < 5; i++) await busyPorts(ports);
+      assert.equal(await settled(before), before, "every failed UDP probe left its socket open");
+    } finally {
+      await held.close();
+    }
+  });
+});

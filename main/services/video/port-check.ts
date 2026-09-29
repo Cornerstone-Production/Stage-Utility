@@ -54,7 +54,9 @@ function tcpBusy(port: number, host: string): Promise<boolean> {
 function udpBusy(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = dgram.createSocket("udp4");
-    socket.once("error", () => resolve(true));
+    // A failed bind still leaves the socket open; closed here, or every
+    // retry against a taken port leaks one socket and its descriptor.
+    socket.once("error", () => socket.close(() => resolve(true)));
     socket.once("listening", () => socket.close(() => resolve(false)));
     socket.bind(port, host);
   });
