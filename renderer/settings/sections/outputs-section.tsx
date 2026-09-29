@@ -84,7 +84,7 @@ function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
   );
 }
 
-interface OutputRowProps {
+export interface OutputRowProps {
   output: Output;
   views: View[];
   /** Base origin for this display's URL — the configured public URL or the current origin. */

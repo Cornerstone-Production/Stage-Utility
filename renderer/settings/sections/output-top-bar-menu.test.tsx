@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../../test-dom.js";
-import { KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
+import { KIND_DRAWS_TOP_BAR, type View, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
 
@@ -52,6 +52,7 @@ class StubEventSource {
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { OutputRow } = await import("./outputs-section.js");
+type OutputRowProps = import("./outputs-section.js").OutputRowProps;
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 // retry:false — a bound-device query that fails must fail once, not keep the
@@ -68,8 +69,8 @@ const asyncNoop = async () => {};
 
 /** The card for one display routed to a View of `kind` (null = unrouted). */
 function cardFor(kind: ViewKind | null) {
-  const views = kind ? [{ id: "v1", name: "The view", kind }] : [];
-  return React.createElement(OutputRow, {
+  const views: View[] = kind ? [{ id: "v1", name: "The view", kind, createdAt: "2026-01-01T00:00:00.000Z" }] : [];
+  const props: OutputRowProps = {
     output: { id: "display-1", name: "Stage left", viewId: kind ? "v1" : null },
     views,
     baseUrl: "http://display.invalid",
@@ -87,7 +88,8 @@ function cardFor(kind: ViewKind | null) {
     onRefresh: noop,
     onRemove: noop,
     onRequestNewView: noop,
-  } as never);
+  };
+  return React.createElement(OutputRow, props);
 }
 
 /** Open this card's hamburger and return the words in the menu. */
