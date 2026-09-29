@@ -1089,12 +1089,11 @@ class VideoService {
   }
 
   /** Every pull/push feed as the relay needs it, credentials folded in —
-   *  never logged, never returned from here: the callers are reconcileOnce()
-   *  (handed straight to relay.reconcile()), pushAddress() (which returns
-   *  exactly one feed's own password to the route that asked for it), and
-   *  relay-lifecycle.ts's start sequence, which needs the same list to build
-   *  the initial config's publish users before any relay exists to reconcile
-   *  against. PUBLIC for that last caller alone. */
+   *  never logged, never returned from here. The callers are reconcileOnce()
+   *  (handed straight to relay.reconcile()) and relay-lifecycle.ts's config
+   *  write, which needs the same list for the publish users of every start
+   *  and respawn before a reconcile can reach the relay. PUBLIC for that
+   *  second caller alone. */
   async relayFeeds(): Promise<RelayFeed[]> {
     const { feeds } = await loadFeedsFile();
     const out: RelayFeed[] = [];

@@ -645,10 +645,9 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   if (error && !data) return <ErrorNote>{error}</ErrorNote>;
   if (!data) return null;
 
-  // R14d, refined per controller ruling: a note only for a RUNNING relay —
-  // with none attached (the common case until Task 15 wires one into the
-  // server), `applied` is vacuously true and `kicked` is "none", and would
-  // otherwise show a false alarm on every single rotation. `kicked` is
+  // A note only for a RUNNING relay — with none running (video switched off,
+  // or no relay started yet), `applied` is vacuously true and `kicked` is
+  // "none", and would otherwise show a false alarm on every rotation. `kicked` is
   // three-way, not a boolean: "none" means EITHER nobody was publishing OR
   // no relay was there to ask — both unremarkable — so the note fires only
   // for "failed", where a device really was connected and dropping it did

@@ -128,9 +128,11 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
       if (type === "screen-embed") push("output", str(c.outputId), o.id);
       // Same reasoning as screen-embed, one line up: a Video widget's feedId
       // is set up on the Video feeds page, per install (see
-      // docs/moving-a-view.md), and a bundle carries no feeds either — a
-      // same-named feed on the destination resolves it, and there is no feed
-      // name to borrow for the label, so the object id is the label.
+      // docs/moving-a-view.md), and a bundle carries no feeds either — a feed
+      // on the destination with the same id resolves it (the id is the
+      // slug of the name the feed was first given, and a rename keeps it),
+      // and there is no feed name to borrow for the label, so the object id
+      // is the label.
       if (type === "video") push("video-feed", str(c.feedId), o.id);
     });
   }
