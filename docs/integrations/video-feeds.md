@@ -23,6 +23,22 @@ needs it. The status line at the top of this page reflects exactly that:
 | On | None yet | — | Says the relay starts once a feed pulls from a device or a device pushes to it |
 | On | At least one | — | Downloading: a progress bar. Starting: says so. Running: the version and its ports (RTMP and SRT inbound, UDP for video to screens) |
 
+The first time it is needed, the switch downloads that pinned MediaMTX
+release, checks it against a fixed SHA-256 checksum, and extracts it with the
+system's own `tar` into the data folder's `video-relay` directory — the
+archive under its `downloads` subfolder, the extracted binary under a folder
+named for the version. None of this is backed up; it is runtime data, rebuilt
+the same way on a fresh machine. Once extracted it is reused on every later
+start, with no re-download and no re-check. A machine with no internet access
+can skip the download entirely: place the exact archive the failing status
+line names in that same `downloads` folder by hand, and it is checked against
+the same checksum before it is ever run — a wrong or corrupted file is
+refused, not extracted.
+
+Once running, the relay is a child process of this server. If it exits for
+any reason it is restarted automatically, backing off from 1 second up to 60
+between attempts, and it never gives up.
+
 If it cannot start — a busy port, a failed download, a config write that
 failed, an unsupported platform — the line says why, and names where to
 place a downloaded archive by hand if the download itself is what failed.
@@ -33,6 +49,32 @@ this line's "Change ports in Advanced" while running, or failing on a busy
 port specifically — the one failure that page can actually fix — saving
 them restarts the relay if it is running, unless the six values did not
 actually change.
+
+## Ports and the firewall
+
+The relay listens on six ports, all editable on that same card in
+**Advanced**:
+
+| Port | Default | Protocol | Reaches | Carries |
+|---|---|---|---|---|
+| RTMP | 1935 | TCP | The LAN | A push feed set to RTMP |
+| SRT | 8890 | UDP | The LAN | A push feed set to SRT |
+| Video to screens | 8189 | UDP | The LAN | WebRTC media for every relay feed a screen plays, however it was ingested |
+| WebRTC signalling | 8889 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
+| HLS | 8888 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
+| Relay API | 9997 | TCP | 127.0.0.1 only | Only this server ever calls it |
+
+If the server sits behind a firewall, or the gear it talks to is on another
+VLAN, two directions matter — the loopback-only three never need a rule,
+since nothing outside this machine ever reaches them:
+
+- **UDP 8189 must reach the server from the screens' network.** Every screen
+  playing a relay feed over WebRTC opens a direct UDP connection here for the
+  video itself — the one leg that cannot go through Stage Utility's own HTTP
+  server. Block it and a feed sits on Connecting until the player gives up
+  and falls back to HLS.
+- **UDP 8890 and TCP 1935 must reach the server from the encoders' network.**
+  A push feed's device connects to these directly to send SRT or RTMP.
 
 ## What a feed is
 
@@ -108,13 +150,14 @@ server as its second output.
 
 ### The device pushes to Stage Utility
 
-For a device that connects outward — OBS, a hardware encoder, ProPresenter's
-own output. Choose **How it connects**: SRT, RTMP, or WHIP (OBS) — switching
-it before saving previews that protocol's own address below, with the same
-password, so there is no need to save just to see what each one looks like.
-Saving the feed mints a random password, shown once the feed exists under
-**Paste this into the device** — the exact address to paste, with **Copy**
-(its label reads "Copied" for a moment after) — and **Password**.
+For a device that connects outward — OBS, a hardware encoder, or an NDI
+source through a converter box. Choose **How it connects**: SRT, RTMP, or
+WHIP (OBS) — switching it before saving previews that protocol's own address
+below, with the same password, so there is no need to save just to see what
+each one looks like. Saving the feed mints a random password, shown once the
+feed exists under **Paste this into the device** — the exact address to
+paste, with **Copy** (its label reads "Copied" for a moment after) — and
+**Password**.
 
 The password is part of the SRT and RTMP addresses already (a device pushing
 without it is refused); for WHIP it is OBS's Bearer Token, entered separately
@@ -124,12 +167,41 @@ immediately rather than at the device's next reconnect. If the relay cannot
 be reached to apply it, or cannot drop the current connection, the editor
 says so rather than claiming it worked.
 
-If the device sends B-frames, WebRTC cannot carry the picture and Stage
-Utility falls back to HLS — a few seconds behind instead of under one. The
-editor says so. For a feed set to WHIP this names OBS specifically, with its
-own fix (Settings, Output, Streaming: Profile baseline, or Keyframe interval
-1 s with B-frames 0); a pull camera or an SRT/RTMP push feed is not
-necessarily OBS, so the same message names "the device" instead.
+A Panasonic AW-UE160 pushes SRT or RTMP itself, straight to the addresses
+above; the older AW-UE150 pushes RTMP only. ProPresenter and ProVideoPlayer
+output only NDI, which has no SRT, RTMP or WHIP of its own — a small
+converter box on the network (a Kiloview N60, or a Magewell Ultra Encode)
+turns an NDI source into one, and its output sets up as an ordinary push feed
+the same way.
+
+A B-frame is a picture the encoder built by referencing both an earlier AND a
+later frame, which needs frames held back and sent out of order — cheaper to
+encode, but not something any browser's WebRTC decoder accepts for H.264. If
+the source sends them, WebRTC cannot carry the picture and Stage Utility
+falls back to HLS for that feed — a few seconds behind instead of under
+one — whether it pulls from a device or a device pushes to it. The editor
+says so, and so does the feed's own row on this page. For a feed set to WHIP
+this names OBS specifically, with its own fix (Settings, Output, Streaming:
+Profile baseline, or Keyframe interval 1 s with B-frames 0); a pulled camera
+or an SRT/RTMP push feed is not necessarily OBS, so the same message names
+"the device" instead.
+
+## Feed states
+
+A pull or push feed's status pill reflects what the relay currently knows:
+
+| Pill | Meaning |
+|---|---|
+| Live | Playing over WebRTC, under a second behind |
+| Live, delayed | Playing, but only over HLS — a few seconds behind, from B-frames (above) or an unsupported codec |
+| Standby | Nothing to report yet: video is off, the relay is still starting, or — once it is up — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks |
+| Waiting for source | A push feed nothing has ever sent to |
+| Offline | Was live and is not any more — shows how long ago |
+
+An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
+platform it plays through; Stage Utility cannot see whether that platform's
+own stream is actually live. An external feed shows no pill at all — Stage
+Utility cannot see its health either way.
 
 ## The Video feeds page
 
@@ -155,10 +227,27 @@ holding a connection nobody is watching.
 Settings, states and the "N s behind" badge are covered in the widget
 reference: see [Video](../reference/widgets.md#video).
 
+A Raspberry Pi decodes WebRTC in software. Plan on one 720p feed per Pi 4
+screen; a Pi 5 or a computer handles 1080p.
+
 ## Logging
 
-Each screen writes `[video]` lines to [`/log`](../ops/updates-and-logs.md) from
-the browser:
+The relay itself writes `[video]` lines to [`/log`](../ops/updates-and-logs.md)
+from the server:
+
+- Starting (with its version and its RTMP/SRT/UDP ports), exiting, and
+  restarting with backoff — a failing streak's start and its recovery, each
+  logged once, not on every retry.
+- Downloading the pinned MediaMTX release, and a checksum that does not
+  match — from a fresh download or a hand-placed archive — refused rather
+  than run.
+- A busy port, naming who is holding it.
+- Each feed going live, delayed or offline, on the transition only.
+- B-frames detected on a feed, with which setting to change.
+- A push feed's password rotating, and whether it dropped the device that
+  was connected.
+
+Each screen writes its own `[video]` lines from the browser:
 
 - A feed failing on a screen, once per failing streak: its first failure and
   the reason, a reminder at most every 5 minutes while it goes on failing
