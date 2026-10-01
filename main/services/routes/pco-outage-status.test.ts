@@ -27,6 +27,7 @@ const { historyRoutes } = await import("./history-routes.js");
 const { stateRoutes } = await import("./state-routes.js");
 const { scriptviewRoutes } = await import("./scriptview-routes.js");
 const { calendarRoutes } = await import("./calendar-routes.js");
+const { statusRoutes } = await import("./status-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
 
@@ -39,6 +40,7 @@ const OUTAGE = "Planning Center returned 503";
 /** Every GET route whose failure can only be PCO, and the method it goes through. */
 const PCO_READS: { path: string; route: Parameters<typeof callRoute>[0]; method: string }[] = [
   { path: "/api/pco/attachments", route: historyRoutes, method: "listPlanAttachments" },
+  { path: "/api/pco/live", route: statusRoutes, method: "fetchLive" },
   { path: "/api/pco/plan-items", route: historyRoutes, method: "listCurrentPlanItems" },
   { path: "/api/pco/checklist", route: historyRoutes, method: "listPlanChecklist" },
   { path: "/api/pco/checklist-sources", route: historyRoutes, method: "listChecklistSources" },
@@ -71,6 +73,7 @@ describe("a PCO read that fails answers 502, not 500", () => {
       "/api/pco/calendar?viewId=view-1",
       "/api/pco/checklist",
       "/api/pco/checklist-sources",
+      "/api/pco/live",
       "/api/pco/plan-items",
       "/api/plans?serviceTypeId=st-1",
       "/api/scriptview/note-categories?serviceTypeId=st-1",
@@ -96,6 +99,11 @@ describe("a PCO read that fails answers 502, not 500", () => {
       const original = controller[method];
       assert.equal(typeof original, "function", `stageController.${method} is not a method any more`);
       controller[method] = () => Promise.reject(new Error(OUTAGE));
+      // The operator's only evidence: pco-service logs a retry, never the read
+      // that finally failed, so the route has to say it or nothing does.
+      const warned: string[] = [];
+      const warn = console.warn;
+      console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
       try {
         const out = await callRoute(route, routePath);
         assert.equal(
@@ -104,7 +112,13 @@ describe("a PCO read that fails answers 502, not 500", () => {
           `${routePath} answered ${out.status} for an upstream outage — a 500 blames this app`,
         );
         assert.deepEqual(out.json, { error: OUTAGE }, "the upstream's reason did not reach the caller");
+        assert.deepEqual(
+          warned.filter((l) => l.startsWith("[pco] ")).map((l) => l.replace(/^\[pco\] .+ read failed: /, "")),
+          [OUTAGE],
+          `${routePath} failed without one [pco] line saying so — got ${JSON.stringify(warned)}`,
+        );
       } finally {
+        console.warn = warn;
         controller[method] = original;
       }
     });

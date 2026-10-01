@@ -1,17 +1,20 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
-import { useStatusChannel } from "./use-status-channel";
+import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 /**
- * Live REAPER transport state, pushed on the "reaper:status" channel. Hydrates
- * once on mount (the channel only broadcasts on change) then stays live. Shared
- * by the custom-layout "REAPER status" object and its editor inspector.
+ * Live REAPER transport state, pushed on the "reaper:status" channel, plus
+ * whether it has answered yet. Hydrates once on mount (the channel only
+ * broadcasts on change) then stays live. Shared by the custom-layout REAPER and
+ * recorder widgets, their editor inspector and Home's recording card — every
+ * one judges "connected" from `value`, and must not say "not connected" before
+ * `known` is true. See useStatusChannel's own header.
  *
  * Ordering between the hydrate and the first push is useStatusChannel's job —
  * see the note there for the staleness this used to have.
  */
-export function useReaperState(enabled = true): ReaperStatusDTO | null {
+export function useReaperStatus(enabled = true): StatusChannelResult<ReaperStatusDTO> {
   const read = useCallback(() => invoke<ReaperStatusDTO>("reaper:getStatus"), []);
   return useStatusChannel<ReaperStatusDTO>(read, "reaper:status", enabled);
 }

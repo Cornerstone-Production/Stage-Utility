@@ -18,7 +18,7 @@ import { useStatusChannel } from "./use-status-channel";
  */
 export function usePvpState(enabled = true): PvpStatusDTO | null {
   const read = useCallback(() => invoke<PvpStatusDTO>("pvp:getStatus"), []);
-  const status = useStatusChannel<PvpStatusDTO>(read, "pvp:status", enabled);
+  const { value: status } = useStatusChannel<PvpStatusDTO>(read, "pvp:status", enabled);
   // PVP's frames feed the page's clock like every other server-stamped
   // timestamp. `sampledAt` is stamped as the poll returns, so a landing frame is
   // a fair reading of the offset — and it means nothing about ProVideoPlayer

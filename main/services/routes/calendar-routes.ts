@@ -10,7 +10,7 @@
 import { errorMessage } from "../errors.js";
 import { monthOffsetOf } from "../calendar-grid.js";
 import { stageController } from "../stage-controller.js";
-import { type RouteCtx, json, error } from "./context.js";
+import { type RouteCtx, json, error, pcoReadFailed } from "./context.js";
 
 export async function calendarRoutes(c: RouteCtx): Promise<void> {
   const { res, pathname, url, method } = c;
@@ -38,7 +38,7 @@ export async function calendarRoutes(c: RouteCtx): Promise<void> {
       // would blame the caller for the upstream being down. Rethrowing instead
       // would leave the response unsent, which the dispatcher reads as unhandled
       // — see the ONE RULE in context.ts.
-      error(res, errorMessage(err), 502);
+      pcoReadFailed(res, "calendar", err);
     }
     return;
   }
@@ -49,7 +49,7 @@ export async function calendarRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, await stageController.listCalendarSources());
     } catch (err) {
-      error(res, errorMessage(err), 502);
+      pcoReadFailed(res, "calendar sources", err);
     }
     return;
   }

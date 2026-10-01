@@ -90,7 +90,7 @@ after(async () => { await settle(); teardown(); });
 beforeEach(() => cleanup());
 afterEach(async () => { cleanup(); await settle(); });
 
-/** The card, with the status hydrated — `useScoresState` fetches on mount. */
+/** The card, with the status hydrated — `useScoresStatus` fetches on mount. */
 async function leadTeam(config: Record<string, unknown>): Promise<string | null> {
   let container!: HTMLElement;
   await act(async () => {

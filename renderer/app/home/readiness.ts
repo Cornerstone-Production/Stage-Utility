@@ -47,12 +47,18 @@ export function splitByPresence(
 /**
  * @param state  Current stage state.
  * @param onlineOutputIds  Output ids with a live heartbeat, from the
- *   `displays:presence` channel by way of `useDisplayPresence`. Empty is a
- *   legitimate answer (nothing is on), not an error.
+ *   `displays:presence` channel by way of `useDisplayPresenceStatus`. Empty is
+ *   a legitimate answer (nothing is on), not an error — as long as `onlineKnown`.
+ * @param onlineKnown  Whether presence has answered yet. Unknown is its own
+ *   state: with nothing settled, the "online" check reads as passing rather
+ *   than as a screen genuinely found offline, so a page that has not heard
+ *   back yet does not tell the operator to go fix something that may not be
+ *   broken.
  */
 export function readinessChecks(
   state: StageState,
   onlineOutputIds: readonly string[],
+  onlineKnown = true,
 ): ReadinessCheck[] {
   const outputs = state.outputs ?? [];
   // Home excluded: it is seeded on every install, so counting it would tick "a
@@ -116,12 +122,18 @@ export function readinessChecks(
       id: "online",
       label: "Screens online",
       detail:
-        outputs.length === 0
-          ? "no screens set up yet"
-          : offline.length === 0
-            ? `all ${outputs.length} connected`
-            : `${offline.map((o) => o.name).join(", ")} not connected`,
-      ok: outputs.length > 0 && offline.length === 0,
+        !onlineKnown
+          ? "checking…"
+          : outputs.length === 0
+            ? "no screens set up yet"
+            : offline.length === 0
+              ? `all ${outputs.length} connected`
+              : `${offline.map((o) => o.name).join(", ")} not connected`,
+      // Passing while unknown, not failing: an operator opening the list before
+      // presence has answered must not be told to go fix a screen that may be
+      // fine — `offline` is empty either way, so without this the two cases
+      // were indistinguishable and "checking…" would have read as "outstanding".
+      ok: !onlineKnown || (outputs.length > 0 && offline.length === 0),
       route: "/screens",
     },
   ];

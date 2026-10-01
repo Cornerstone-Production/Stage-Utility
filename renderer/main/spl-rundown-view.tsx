@@ -4,7 +4,7 @@ import { useServerClock } from "@renderer/lib/server-clock";
 
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
-import { usePlanItems } from "./use-plan-items";
+import { usePlanItemsStatus } from "./use-plan-items";
 import { resolveSplValue, useSplHistory, useSplState } from "./use-spl-state";
 
 interface SplRundownViewProps {
@@ -46,7 +46,7 @@ function splColor(db: number | null): string {
  */
 export function SplRundownView({ displayId }: SplRundownViewProps) {
   const { state, isLoading, error, pcoLive } = useDashboardState();
-  const plan = usePlanItems();
+  const { value: plan, known: planKnown, failed: planFailed } = usePlanItemsStatus();
   const history = useSplHistory();
   const spl = useSplState();
 
@@ -111,7 +111,11 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
       <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-white/5">
         {items.length === 0 ? (
           <div className="flex items-center justify-center h-full text-fg-faint text-body">
-            {plan ? "No items in this plan" : "Planning Center not configured"}
+            {/* `plan` is never null for an unconfigured Planning Center — the
+                server answers that with an empty rundown — so null is "not
+                read yet" or "the read failed", and neither is "not
+                configured". The stage state is what knows that. */}
+            {!planKnown ? "—" : planFailed ? "Couldn't load the plan" : !state.pcoConfigured ? "Planning Center not configured" : "No items in this plan"}
           </div>
         ) : (
           items.map((it) => {
