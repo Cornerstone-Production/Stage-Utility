@@ -560,6 +560,11 @@ export type IpcChannel =
   | "update:setAuto"
   | "update:setTrack"
   | "update:status"
+  | "video:addFeed"
+  | "video:feedUsage"
+  | "video:removeFeed"
+  | "video:state"
+  | "video:updateFeed"
   | "views:add"
   | "views:copySlots"
   | "views:duplicate"
@@ -1049,6 +1054,24 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       const id = p.id as string;
       // Pass explicit `slots` (inline mic-slots) when present, else overwrite from a view.
       return patch<T>(`/api/presets/${encodeURIComponent(id)}`, p.slots ? { slots: p.slots } : { overwriteFromDisplayId: p.displayId });
+    }
+
+    // ── Video feeds ────────────────────────────────────────────────────
+    case "video:state":
+      return apiFetch<T>("/api/video/state");
+    case "video:addFeed":
+      return post<T>("/api/video/feeds", p);
+    case "video:updateFeed": {
+      const id = p.id as string;
+      return patch<T>(`/api/video/feeds/${encodeURIComponent(id)}`, p.patch);
+    }
+    case "video:removeFeed": {
+      const id = p.id as string;
+      return del<T>(`/api/video/feeds/${encodeURIComponent(id)}`);
+    }
+    case "video:feedUsage": {
+      const id = p.id as string;
+      return apiFetch<T>(`/api/video/feeds/${encodeURIComponent(id)}/usage`);
     }
 
     // ── Views (content) ──────────────────────────────────────────────────

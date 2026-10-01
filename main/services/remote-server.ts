@@ -53,6 +53,7 @@ import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { overlaidTimeline } from "./history-item-times.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
+import { videoService } from "./video/video-service.js";
 import { stageController } from "./stage-controller.js";
 import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
@@ -82,6 +83,7 @@ import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
+import { videoRoutes } from "./routes/video-routes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
@@ -115,6 +117,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   brandingRoutes,
   presetRoutes,
   calendarRoutes,
+  videoRoutes,
 ] as const;
 
 /**
@@ -404,6 +407,12 @@ export function writeHelloBurst(res: EventSink): void {
   // rather than silently leaving this burst writing to a dead channel.
   sseWrite(res, "calendar:grid" satisfies typeof CALENDAR_CHANNEL, calendarBroadcaster.getLatest());
   sseWrite(res, "displays:presence", presenceSnapshot());
+  // Feeds rarely change mid-service, so a display or the Video feeds page
+  // opened after the burst would otherwise show nothing until an operator
+  // happened to edit a feed. videoService.current() is SYNCHRONOUS — this
+  // function cannot await — and returns the last snapshot init() or publish()
+  // computed (see video-service.ts).
+  sseWrite(res, "video:state", videoService.current());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

@@ -13,7 +13,7 @@ import type { RossTalkTargetConfig } from "./rosstalk.js";
 /** A binding that names something — hardware, or a screen — the destination will
  *  not have. */
 export interface UnresolvableRef {
-  kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter" | "output";
+  kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter" | "output" | "video-feed";
   /** The view whose layout holds it — without this the rebind list cannot link
    *  anywhere, since an object id alone does not say which editor to open. */
   viewId: string;

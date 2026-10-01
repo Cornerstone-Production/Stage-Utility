@@ -121,7 +121,8 @@ describe("every registered route resolves a title", () => {
     // these went untitled with the suite green, and a bare count cannot tell
     // an added route plus a removed one from no change at all — a sorted list
     // also merges cleanly when two branches each add a different route.
-    // 21 since /scriptview split into the tablet's page and /scriptview/manage.
+    // 22 since /scriptview split into the tablet's page and /scriptview/manage,
+    // plus /video-feeds, the Screens-adjacent page for camera and program feeds.
     assert.deepEqual(
       [...REGISTERED].sort(),
       [
@@ -145,13 +146,14 @@ describe("every registered route resolves a title", () => {
         "/settings/advanced",
         "/settings/branding",
         "/settings/integrations",
+        "/video-feeds",
         "/views",
       ],
       "a route was added or removed; update this list deliberately",
     );
   });
 
-  test("eighteen of the twenty-one registered routes are titled", () => {
+  test("nineteen of the twenty-two registered routes are titled", () => {
     // The three untitled: /settings (redirects), /displays and /views (also
     // redirects). Everything else must resolve a label.
     const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
@@ -176,6 +178,7 @@ describe("every registered route resolves a title", () => {
         "/settings/advanced",
         "/settings/branding",
         "/settings/integrations",
+        "/video-feeds",
       ],
       "a route's title status changed; update this list deliberately",
     );

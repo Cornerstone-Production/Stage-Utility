@@ -122,6 +122,7 @@ const EXPECTED_CONFIG = [
   "scriptview-roles.json",
   "settings.json",
   "slots.json",
+  "video-feeds.json",
   "views.json",
   "wireless-connections.json",
 ];

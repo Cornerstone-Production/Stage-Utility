@@ -42,6 +42,7 @@ import "./signal-store.js";
 import "./update-notices-store.js";
 import "./slots-store.js";
 import "./spl-history-store.js";
+import "./video/feed-store.js";
 import "./views-store.js";
 import "./wireless-store.js";
 

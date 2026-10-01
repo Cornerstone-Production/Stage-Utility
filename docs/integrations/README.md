@@ -26,6 +26,7 @@ countdown, so the app needs it.
 | [RossTalk (Carbonite / Ultrix)](rosstalk.md) | Commands to Ross gear — custom controls, switching, routing, salvos |
 | [Ross Ultritouch](ultritouch.md) | A console on a Ross touch panel, through DashBoard's Browser component |
 | [Live scores](scores.md) | Followed teams' live scores (ESPN public scoreboard) |
+| [Video feeds](video-feeds.md) | Live camera and program video in layouts and on Home |
 
 ## Closing a settings dialog with unsaved edits
 

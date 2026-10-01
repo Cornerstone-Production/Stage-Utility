@@ -124,6 +124,11 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
       // tells two rows on a producer wall apart; the literal "Screen" told
       // them apart from nothing.
       if (type === "screen-embed") push("output", str(c.outputId), o.id);
+      // Same reasoning as screen-embed, one line up: a Video widget's feedId
+      // is set up on the Video feeds page, per install (see
+      // docs/moving-a-view.md), and a bundle carries no feeds — so there is no
+      // feed name to borrow either, and the object id is the label.
+      if (type === "video") push("video-feed", str(c.feedId), o.id);
     });
   }
 

@@ -97,15 +97,23 @@ wireless rack, so bringing the source building's connection definitions would
 point the new rig at receivers that are not in the room. That is worse than an
 unbound object, because it looks configured.
 
-The target of an **Embedded screen** object stays behind for the same kind of
-reason: it watches an output id, and an output is a screen configured on this
-install. The file carries no outputs at all, so every screen tile in an
-imported wall arrives unbound, whatever it was pointed at on the source.
+The target of an **Embedded screen** object does not travel either, for the
+same kind of reason: it watches an output id, and an output is a screen
+configured on this install. The file carries no outputs at all. A screen tile
+keeps the id it had, so on the destination it shows whichever screen there has
+that id, if one does — which need not be the same screen — and nothing
+otherwise.
 
-Objects bound to absent gear or a missing screen **keep their bindings** and
-render as unconfigured. Nothing is silently cleared. The import report lists
-them by name, grouped by what they need, and each entry opens the editor for
-the view holding it.
+A **Video** widget's feed is set up the same way: on the Video feeds page, per
+install, and the file carries no feeds either. The widget keeps its feed id. A
+feed's id comes from the name it was first given, so a feed on the destination
+created under the same name plays in its place; with no such feed the widget
+shows its offline state until one is chosen.
+
+Objects bound to absent gear, a missing screen or a missing feed **keep their
+bindings** and render as unconfigured (a Video widget as offline). Nothing is
+silently cleared. The import report lists them by name, grouped by what they
+need, and each entry opens the editor for the view holding it.
 
 ### What resolves anyway
 

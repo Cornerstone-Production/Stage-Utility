@@ -468,6 +468,16 @@ and team names, not ids. Either may be omitted and is then left as it stands; a
 present one must be a `string[]`, and `[]` clears that list. A body naming
 neither is a 400.
 
+**Video feeds** — see [Video feeds](../integrations/video-feeds.md)
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/video/state` | `{rev, relay, kinds, feeds}` — the same snapshot `video:state` pushes |
+| GET | `/api/video/feeds` | `{feeds}` |
+| POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |
+| PATCH | `/api/video/feeds/:id` | Update a feed. Any field omitted from the body keeps its current value; a field present is validated as on POST |
+| DELETE | `/api/video/feeds/:id` | Remove a feed. A layout still pointed at it keeps the binding and renders it as offline |
+| GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
+
 **Branding & events**
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -561,7 +571,7 @@ something to change:
 `service-timeline:history` · `baptism:state` · `obs:status` · `reaper:status` ·
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
-`wireless:channels` · `calendar:grid` · `displays:presence`
+`wireless:channels` · `calendar:grid` · `displays:presence` · `video:state`
 
 **Pushed only when something happens:**
 
