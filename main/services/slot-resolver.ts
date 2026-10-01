@@ -1,6 +1,7 @@
 // Pure function: merges saved slots + PCO team members + device status.
 // No I/O — takes data already fetched and returns resolved Slot[].
 
+import { setAvatarGeometry } from "./avatar-geometry.js";
 import { clamp } from "./clamp.js";
 import type { Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
@@ -324,10 +325,7 @@ export function fitAvatarToColumn(
   // fit-inside image (see 3edc79c, which fixed the decode bug that had been
   // stripping it by accident).
   if (fit === "whole") {
-    const geometry = `${AVATAR_MAX_PX}x${AVATAR_MAX_PX}`;
-    return /[?&]g=\d+x\d+(%23|#)?/.test(url)
-      ? url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${geometry}`)
-      : url + (url.includes("?") ? "&" : "?") + `g=${geometry}`;
+    return setAvatarGeometry(url, `${AVATAR_MAX_PX}x${AVATAR_MAX_PX}`);
   }
   // Not simply height/depth: the info card under the photo is sized by the card's
   // WIDTH, so it costs the same pixels in a half-height slot as a full one. A slot
@@ -346,10 +344,7 @@ export function fitAvatarToColumn(
       Math.ceil((AVATAR_MAX_PX * COLUMN_ASPECT_BUDGET) / columns),
     ),
   );
-  const geometry = `${width}x${height}%23`;
-  return /[?&]g=\d+x\d+(%23|#)?/.test(url)
-    ? url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${geometry}`)
-    : url + (url.includes("?") ? "&" : "?") + `g=${geometry}`;
+  return setAvatarGeometry(url, `${width}x${height}%23`);
 }
 
 export function resolveSlots(

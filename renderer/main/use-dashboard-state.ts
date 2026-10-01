@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "./use-stage-state";
-import { useStatusChannel } from "./use-status-channel";
+import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 interface UseDashboardStateResult {
   state: StageState | null;
@@ -76,9 +76,9 @@ export function useDashboardState(): UseDashboardStateResult {
  *   nor subscribes, which is what lets the server's fallback poll drop to its
  *   idle cadence (propresenter-service.ts, IDLE_INTERVAL_MS).
  */
-export function useProPresenterStatus(enabled = true): ProPresenterStatusDTO | null {
+export function useProPresenterStatus(enabled = true): StatusChannelResult<ProPresenterStatusDTO> {
   const read = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
-  return useStatusChannel<ProPresenterStatusDTO>(read, "propresenter:status", enabled).value;
+  return useStatusChannel<ProPresenterStatusDTO>(read, "propresenter:status", enabled);
 }
 
 /**

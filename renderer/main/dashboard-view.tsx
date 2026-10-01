@@ -36,8 +36,8 @@ interface DashboardViewProps {
  * header says why: it is an office display read from a desk, at absolute sizes.
  */
 export function DashboardView({ displayId }: DashboardViewProps) {
-  const { state, isLoading, error, pcoLive } = useDashboardState();
-  const propresenter = useProPresenterStatus();
+  const { state, isLoading, error, pcoLive, pcoLiveKnown } = useDashboardState();
+  const { value: propresenter, known: propresenterKnown } = useProPresenterStatus();
   const transcript = useTranscript();
   const spl = useSplState();
 
@@ -183,7 +183,8 @@ export function DashboardView({ displayId }: DashboardViewProps) {
               </span>
             </div>
           ) : (
-            <span className="text-body text-fg-faint">No live service</span>
+            // A dash until PCO has answered — see the ProPresenter tile below.
+            <span className="text-body text-fg-faint">{pcoLiveKnown ? "No live service" : "—"}</span>
           )}
         </Tile>
 
@@ -212,7 +213,10 @@ export function DashboardView({ displayId }: DashboardViewProps) {
               ) : null}
             </div>
           ) : (
-            <span className="text-body text-fg-faint">ProPresenter offline</span>
+            // Not until ProPresenter has answered: a `null` status is also what
+            // the hook holds before its first read lands, and a dashboard that
+            // has just loaded does not know yet. The dash "Up next" already uses.
+            <span className="text-body text-fg-faint">{propresenterKnown ? "ProPresenter offline" : "—"}</span>
           )}
         </Tile>
 

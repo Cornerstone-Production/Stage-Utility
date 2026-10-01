@@ -78,8 +78,8 @@ function SectionChip({ section, size = "md" }: { section: ProSection | null; siz
  * header says why: it is an office display read from a desk, at absolute sizes.
  */
 export function StageDisplayView({ displayId }: StageDisplayViewProps) {
-  const { state, isLoading, error, pcoLive } = useDashboardState();
-  const propresenter = useProPresenterStatus();
+  const { state, isLoading, error, pcoLive, pcoLiveKnown } = useDashboardState();
+  const { value: propresenter, known: propresenterKnown } = useProPresenterStatus();
   const transcript = useTranscript();
   const spl = useSplState();
 
@@ -207,7 +207,9 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
                 )}
               </div>
             ) : (
-              <span className="text-fg-faint text-[clamp(0.8rem,2.4vmin,1.1rem)]">No live service</span>
+              // A dash until PCO has answered: `null` is also what it says
+              // before it has said anything, and this faces the stage.
+              <span className="text-fg-faint text-[clamp(0.8rem,2.4vmin,1.1rem)]">{pcoLiveKnown ? "No live service" : "—"}</span>
             )}
           </Cell>
           {splVal && (
@@ -231,7 +233,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
             <div className="flex flex-1 items-center min-h-0">
               <span className="text-[clamp(1.3rem,5vmin,3rem)] font-medium leading-tight line-clamp-4">
-                {connected ? (pro?.currentSlideText ?? "—") : "ProPresenter offline"}
+                {connected ? (pro?.currentSlideText ?? "—") : propresenterKnown ? "ProPresenter offline" : "—"}
               </span>
             </div>
           </div>

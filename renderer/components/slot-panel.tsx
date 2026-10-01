@@ -5,6 +5,7 @@ import { StatusStrip, OfflinePill } from "./status-strip";
 import { slotStripMode } from "./slot-strip-mode";
 import { BrandLogo } from "./brand-logo";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { usePhotoSize } from "@renderer/lib/use-photo-size";
 
 interface SlotPanelProps {
   slot: Slot;
@@ -42,9 +43,13 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
     setImgFailed(false);
   });
 
+  // How big the photo box is drawn, so the proxy sends that size rather than the
+  // full-size original. Undefined until measured: see usePhotoSize.
+  const { size: photoSize, ref: photoBoxRef, onLoad: onPhotoLoad } = usePhotoSize(hasPhoto);
+
   const photoSrc =
-    hasPhoto && !imgFailed
-      ? `/photos?u=${encodeURIComponent(slot.photoUrl!)}${imgAttempt > 0 ? `&r=${imgAttempt}` : ""}`
+    hasPhoto && !imgFailed && photoSize !== undefined
+      ? `/photos?u=${encodeURIComponent(slot.photoUrl!)}${photoSize ? `&s=${photoSize}` : ""}${imgAttempt > 0 ? `&r=${imgAttempt}` : ""}`
       : null;
 
   function handleImgError() {
@@ -124,7 +129,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             QUERY reads it -- that rule is gone (see styles.css). It stays because
             the avatar bubble below sizes itself in cqi, which has to resolve
             against this box rather than the whole card. */}
-        <div className="slot-photo relative flex-1 min-h-0 overflow-hidden">
+        <div ref={photoBoxRef} className="slot-photo relative flex-1 min-h-0 overflow-hidden">
           {photoSrc ? (
             <img
               src={photoSrc}
@@ -134,6 +139,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               // inline on an element the reasoning cannot fit next to.
               className="absolute inset-0 w-full h-full"
               draggable={false}
+              onLoad={onPhotoLoad}
               onError={handleImgError}
             />
           ) : (

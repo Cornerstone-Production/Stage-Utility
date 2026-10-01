@@ -17,6 +17,16 @@ A widget whose integration is not set up draws a dash rather than disappearing, 
 a screen does not silently lose a tile when a device goes offline. The palette can
 hide those: **Hide widgets whose integration is not set up**.
 
+A status readout also draws that dash on a screen that has just loaded, until its
+source answers for the first time. Offline, No recorder, No teams followed,
+ProPresenter offline, No live service, No service plan, a cue button's Unbound, a
+baptism count of 0 and a screen tile's dark dot are each a claim, and none is
+drawn before the answer that makes it true. A plan that could not be read says
+**Couldn't load the plan** rather than that there is none.
+A widget watching more than one source — **Record status** on any recorder,
+**Streaming status** on every platform — waits for all of them, unless one is
+already recording or live.
+
 See also [Layout editor](layout-editor.md) for placement, sizing and styling, and
 [Integrations](../integrations/README.md) for setting up the sources below.
 

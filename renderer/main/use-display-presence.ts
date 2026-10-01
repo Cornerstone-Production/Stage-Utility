@@ -12,7 +12,7 @@
 //
 // `enabled` is how a wall display avoids subscribing to something it does not
 // draw, which was the objection that kept the fake in place. Same shape as every
-// other gated channel in useLayoutData: `useObsState(want([...]))`.
+// other gated channel in useLayoutData: `useObsStatus(want([...]))`.
 //
 // THE REV-ORDERING RULE IS NOT WRITTEN HERE. It was — the appliedRev ref, the
 // fresh-window reset, the drop-strictly-older guard and push-always-wins, a
@@ -50,7 +50,7 @@ export interface DisplayPresenceResult {
 /**
  * Output ids with a live heartbeat, plus whether presence has answered yet.
  *
- * Hydrated as well as subscribed, exactly like useObsState. The SSE hello burst
+ * Hydrated as well as subscribed, exactly like useObsStatus. The SSE hello burst
  * does carry a presence snapshot and api.ts caches it for a late subscriber —
  * but only the CONNECT-time value. Between the burst and this hook mounting, the
  * server filters "displays:presence" out for a client with nothing subscribed to
@@ -77,14 +77,4 @@ export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult 
     onlineOutputIds: enabled ? (presence?.connected ?? EMPTY) : EMPTY,
     known: enabled ? known : false,
   };
-}
-
-/**
- * The ids alone, for a caller that does not judge "none online" against "we do
- * not know" — the custom-layout screen tile, which already draws a screen with
- * no heartbeat as offline whether that is settled or merely not yet known, the
- * same way it would before the very first read of any kind ever lands.
- */
-export function useDisplayPresence(enabled = true): readonly string[] {
-  return useDisplayPresenceStatus(enabled).onlineOutputIds;
 }
