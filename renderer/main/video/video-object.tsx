@@ -7,7 +7,7 @@
 // Always muted, no controls: video only, never audio, and nothing on a stage
 // display for anyone to scrub or pause.
 
-import { useCallback, useMemo, useRef, useState, type ErrorInfo } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ErrorInfo } from "react";
 
 import { BrandLogo } from "../../components/brand-logo";
 import { ErrorBoundary } from "../../components/ui/error-boundary-view";
@@ -15,6 +15,7 @@ import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
 import type { RelayStatus } from "@main/types/video";
 import { isPreviewSlug } from "../preview-url";
+import { registerPlayback } from "./playback-reports";
 import { useOnScreen } from "./use-on-screen";
 import { useVideoSession } from "./use-video-session";
 import { useVideoState } from "./use-video-state";
@@ -62,11 +63,14 @@ export function VideoObject({
   config,
   appLogo,
   appLogoMonochrome,
+  allowHls,
 }: {
   o: LayoutObject;
   config: VideoObjectConfig;
   appLogo: string | null;
   appLogoMonochrome: boolean;
+  /** This screen's own "Use HLS on this screen" switch. */
+  allowHls: boolean;
 }) {
   return (
     // Keyed on the feed id: a different feed (or one disappearing) is a clean
@@ -75,7 +79,7 @@ export function VideoObject({
     // and a verdict about the PREVIOUS feed's WebRTC support, or a pending
     // backoff timer, can never carry onto the next feed either.
     <VideoErrorBoundary key={config.feedId ?? "none"} fallback={<CantPlayBody name="This feed" />}>
-      <VideoObjectBody objectId={o.id} config={config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />
+      <VideoObjectBody objectId={o.id} config={config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls={allowHls} />
     </VideoErrorBoundary>
   );
 }
@@ -85,11 +89,13 @@ function VideoObjectBody({
   config,
   appLogo,
   appLogoMonochrome,
+  allowHls,
 }: {
   objectId: string;
   config: VideoObjectConfig;
   appLogo: string | null;
   appLogoMonochrome: boolean;
+  allowHls: boolean;
 }) {
   const state = useVideoState();
   const feed = useMemo(
@@ -111,13 +117,14 @@ function VideoObjectBody({
 
   const [previewPaused, setPreviewPaused] = useState(isPreviewRoute);
   const onLog = useCallback((reason: string) => logToServer("video", reason), []);
+  const active = onScreen && !previewPaused;
 
-  const { phase, embedUrl, latency } = useVideoSession({
-    active: onScreen && !previewPaused,
+  const { phase, embedUrl, latency, sample } = useVideoSession({
+    active,
     feed,
     feedDeleted,
     video: videoEl,
-    allowHls: true, // Always on until a screen has its own "Use HLS on this screen" switch.
+    allowHls,
     relayRunning: state?.relay.state === "running",
     onLog,
   });
@@ -127,6 +134,25 @@ function VideoObjectBody({
   const showingPicture = phase === "live" || phase === "delayed";
   const showLabel = config.showLabel !== false;
   const showTag = showLabel && !previewPaused && (isEmbed || showingPicture);
+
+  // Registered only while this instance is actually showing a relay or
+  // external feed's picture — never an embed, whose playback Stage Utility
+  // cannot measure at all, and not merely while attempting to connect: a
+  // widget stuck retrying is not "playing" for the presence heartbeat's
+  // purposes. `active` (not just `showingPicture`) is needed too: going off
+  // screen tears the attempt down (its sampler stops with it) but leaves
+  // `phase` sitting on its last value rather than resetting it, since
+  // nothing needs that reset for what's ON screen — the video element itself
+  // is what shows the stale cover getting torn down, and this widget has no
+  // picture to report once inactive regardless of what `phase` still reads.
+  // Keyed on the widget instance — neither the feed nor the layout object id
+  // — so two widgets playing the same feed report separately, and so do an
+  // embed tile and its expanded copy, which draw one object id twice.
+  const instanceKey = useId();
+  useEffect(() => {
+    if (!active || isEmbed || !showingPicture) return undefined;
+    return registerPlayback(instanceKey, sample);
+  }, [instanceKey, active, isEmbed, showingPicture, sample]);
 
   if (!config.feedId) {
     return (
@@ -218,7 +244,7 @@ function VideoObjectBody({
  */
 function waitingText(relay: RelayStatus["state"] | undefined): { big: string; small: string } {
   if (relay === "running") return { big: "Waiting for the source", small: "Nothing is sending to this feed yet" };
-  if (relay === "off") return { big: "Video is off", small: "Turn it on on the Video feeds page" };
+  if (relay === "off") return { big: "Video is off", small: "Turn video on to play this feed" };
   return { big: "Waiting for the video relay", small: "It is starting up" };
 }
 

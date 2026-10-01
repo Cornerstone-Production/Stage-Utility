@@ -1165,6 +1165,12 @@ export interface Output {
    *  Only a "panel" may be bound to a console View, enforced server-side in
    *  stage-controller's setOutputView. */
   mode?: OutputMode;
+  /** When false, a Video widget on this screen never plays over HLS — only
+   *  WebRTC. A B-frame feed that needs HLS to play at all says it cannot play
+   *  here instead. Absent means allowed, which is what every screen did before
+   *  this existed: a Pi 4 can freeze decoding HLS, and this is the per-screen
+   *  escape hatch rather than turning HLS off everywhere. */
+  allowHls?: boolean;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -1179,6 +1185,10 @@ export interface ResolvedOutput {
    *  because this descriptor is what the kiosk reads — leaving it off would make
    *  every display do the outputs lookup this type exists to prevent. */
   hideTopBar: boolean;
+  /** Resolved {@link Output.allowHls}, true when absent. Rides here for the same
+   *  reason `hideTopBar` does: the kiosk reads this descriptor, never the Output
+   *  list, to decide what a Video widget on it may attempt. */
+  allowHls: boolean;
 }
 
 /**

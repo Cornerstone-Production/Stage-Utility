@@ -51,8 +51,14 @@ export class FakePeerConnection extends EventTarget {
   remoteDescription: unknown = null;
   ontrack: ((e: { streams: unknown[]; track: unknown }) => void) | null = null;
   closed = false;
-  /** What getStats() reports for the one inbound video stream. */
+  /** What getStats() reports for the one inbound video stream — framesReceived
+   *  is what probeWebrtc reads; the other three are what playback-stats.ts's
+   *  webrtc sampler reads once a session is actually on screen. */
   framesReceived = 0;
+  framesDecoded = 0;
+  framesDropped = 0;
+  frameWidth = 0;
+  frameHeight = 0;
 
   constructor() {
     super();
@@ -76,8 +82,23 @@ export class FakePeerConnection extends EventTarget {
   }
 
   /** The inbound-rtp video report, the one entry a player reads. */
-  async getStats(): Promise<Map<string, { type: string; kind: string; framesReceived: number; framesDecoded: number }>> {
-    return new Map([["in", { type: "inbound-rtp", kind: "video", framesReceived: this.framesReceived, framesDecoded: 0 }]]);
+  async getStats(): Promise<
+    Map<string, { type: string; kind: string; framesReceived: number; framesDecoded: number; framesDropped: number; frameWidth: number; frameHeight: number }>
+  > {
+    return new Map([
+      [
+        "in",
+        {
+          type: "inbound-rtp",
+          kind: "video",
+          framesReceived: this.framesReceived,
+          framesDecoded: this.framesDecoded,
+          framesDropped: this.framesDropped,
+          frameWidth: this.frameWidth,
+          frameHeight: this.frameHeight,
+        },
+      ],
+    ]);
   }
 
   close(): void {

@@ -108,6 +108,7 @@ const VIDEO_STATE: import("@main/types/video").VideoState = {
   binaryPresent: false,
   archivePresent: false,
   feeds: [],
+  screens: [],
 };
 globalThis.fetch = (async (input: RequestInfo | URL) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);

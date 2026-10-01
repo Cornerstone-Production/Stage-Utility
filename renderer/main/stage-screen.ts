@@ -65,6 +65,12 @@ export type StageScreen =
        *  does, and a preview has to null it, which is a rule that must live in
        *  exactly one place. */
       outputMode: Output["mode"];
+      /** Whether a Video widget here may attempt HLS — this screen's own "Use
+       *  HLS on this screen" switch, `resolved`'s so it is never a picture of
+       *  another screen the way `standingIn`'s chrome fields are. Always true
+       *  on a preview: a settings-page card is not the real screen and must
+       *  not refuse to play a feed the wall it stands in for cannot. */
+      allowHls: boolean;
     } & ScreenChrome);
 
 export interface ScreenInput {
@@ -193,6 +199,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     displayId,
     isPreview: !!previewViewId,
     outputMode: currentDisplay?.mode,
+    allowHls: resolved?.allowHls ?? true,
     ...chrome,
   });
 

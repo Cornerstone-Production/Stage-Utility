@@ -2038,7 +2038,18 @@ class IntegrationManager {
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
       const msg = errorMessage(err);
-      this.setConnectionState(id, "error", msg);
+      // The video row is driven ONLY by video-service's own relay-status
+      // publish (relayStatusListener, wired to relayLifecycle.handleRelayStatus
+      // in relay-lifecycle.ts) — the branch above never writes it even on a
+      // real "not running"/"failing" answer, relying entirely on that publish
+      // to keep the row true. A throw here (videoService.state() failing to
+      // read the feed store, say) is not necessarily a relay problem, and
+      // writing "error" would break that invariant: the dedup in
+      // publishOnce() (video-service.ts) only re-fires the listener when the
+      // relay status itself changes, so a row wrongly set here could stay
+      // wrong for hours. Test still answers the caller with the failure; it
+      // just never touches the row for id === "video".
+      if (id !== "video") this.setConnectionState(id, "error", msg);
       this.broadcastStates();
       return { ok: false, message: msg };
     }

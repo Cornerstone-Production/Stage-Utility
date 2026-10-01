@@ -95,7 +95,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display — `201` |
-| PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400` |
+| PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `allowHls` (whether a Video widget here may play over HLS; `false` keeps it on WebRTC only), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400`. An id naming no display is also `400` with the reason, for every field |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |
@@ -129,6 +129,20 @@ screens (`{id?}`; omit it for all of them). `GET /api/displays/presence` returns
 display page reports by heartbeat to `POST /api/displays/presence`. The same set
 rides the `displays:presence` SSE channel; `rev` is what lets a client tell a
 stale read from a fresh one.
+
+The heartbeat body may also carry `video`: an array of up to 32 reports, one
+per Video widget instance on that screen currently showing a relay or
+external feed's picture — `{feedId, via: "webrtc"|"hls", decoded, dropped,
+stalls, width, height}`, `decoded`/`dropped`/`stalls` as deltas since that
+instance's last report, not running totals. A malformed array — not an
+array, over 32 entries, or any entry with a non-string/empty `feedId`, a
+`via` other than `webrtc`/`hls`, a `decoded`/`dropped`/`stalls` that is not
+a whole number from 0 to 100000, or a `width`/`height` that is not a whole
+number from 0 to 16384 — is refused whole and
+read the same as no `video` field at all; the rest of the heartbeat (the
+Connected dot, the screen-size read) still lands. A report naming a feed id
+this build no longer holds is dropped on its own, without refusing the
+others. See [Health from the screens](../integrations/video-feeds.md#health-from-the-screens).
 
 **Presets** — `GET /api/presets`, `POST /api/presets` (snapshot the current
 slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
@@ -471,7 +485,7 @@ neither is a 400.
 **Video feeds** — see [Video feeds](../integrations/video-feeds.md)
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/video/state` | `{rev, relay, kinds, ports, binaryPresent, archivePresent, feeds}` — the same snapshot `video:state` pushes. `relay` is the switch/relay status the page's own line reads: `{state: "off"}`, `{state: "downloading", receivedBytes, totalBytes}`, `{state: "starting", version}`, `{state: "running", version, ports}`, or `{state: "failing", reason, kind, retryAt, placeArchiveAt?, assetName?}` — see [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). `kinds` is the source kinds this build offers, matching the editor's **Source** dropdown. `ports` is the SAVED set (what the next start uses); a running relay's own ports are under `relay.ports` and can differ for the moment between a ports save and the restart it triggers. `binaryPresent` is whether the pinned MediaMTX binary is already extracted on this machine and runnable, checked fresh on every read — it is what tells the Video feeds page's "off" status line apart: the download-size sentence only ever shows before the FIRST download, never again once it has one. `archivePresent` is whether the pinned archive is already in `video-relay/downloads` (placed by hand, say), extracted or not; with it, the "off" line says the relay sets up from it instead of naming a download. `feeds` is each feed's wire view — id, name, kind, source, how it plays, and its live status — never a password; see [Feed states](../integrations/video-feeds.md#feed-states) |
+| GET | `/api/video/state` | `{rev, relay, kinds, ports, binaryPresent, archivePresent, feeds, screens}` — the same snapshot `video:state` pushes. `relay` is the switch/relay status the page's own line reads: `{state: "off"}`, `{state: "downloading", receivedBytes, totalBytes}`, `{state: "starting", version}`, `{state: "running", version, ports}`, or `{state: "failing", reason, kind, retryAt, placeArchiveAt?, assetName?}` — see [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). `kinds` is the source kinds this build offers, matching the editor's **Source** dropdown. `ports` is the SAVED set (what the next start uses); a running relay's own ports are under `relay.ports` and can differ for the moment between a ports save and the restart it triggers. `binaryPresent` is whether the pinned MediaMTX binary is already extracted on this machine and runnable, checked fresh on every read — it is what tells the Video feeds page's "off" status line apart: the download-size sentence only ever shows before the FIRST download, never again once it has one. `archivePresent` is whether the pinned archive is already in `video-relay/downloads` (placed by hand, say), extracted or not; with it, the "off" line says the relay sets up from it instead of naming a download. `feeds` is each feed's wire view — id, name, kind, source, how it plays, and its live status — never a password; see [Feed states](../integrations/video-feeds.md#feed-states). `screens` is every (screen, feed) pair a presence heartbeat has reported playback for in the last rolling minute — `{outputId, feedId, via, struggling, droppedInWindow, decodedInWindow, stallsInWindow, width, height, reportedAt, episode}`, struggling or not. It is change-driven, the same as every other field this route and `video:state` share: `screens` is re-read only when a pair appears, leaves or flips `struggling`, a struggling pair's `episode` moves, or a feed is removed. Between those, every other field of a pair — `via`, `width`, `height`, `droppedInWindow`, `decodedInWindow`, `stallsInWindow` and `reportedAt` — is as of the last re-read, not a live meter, struggling or not: a screen playing cleanly for minutes can read a `reportedAt` several minutes old though it still heartbeats every 10 seconds, and a WebRTC-to-HLS fallback with no struggle publishes nothing, so `via` can still read `webrtc` on a screen now playing HLS. `episode` is the worst window since `struggling` last turned true — `{droppedInWindow, decodedInWindow, stallsInWindow, width, height}`, frozen at whichever report made the window worst, not the live one; `null` while not struggling. See [Health from the screens](../integrations/video-feeds.md#health-from-the-screens) |
 | GET | `/api/video/feeds` | `{feeds}` |
 | PATCH | `/api/video/ports` | Saves the relay's six ports and restarts it if it is running. Body: `{rtmp, srt, webrtcUdp, webrtcHttp, hls, api}`, every value a whole number from 1024 to 65535 and all six different — `400` naming the rule otherwise. `200` with `{ports}` |
 | POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |

@@ -845,6 +845,200 @@ test("a failing streak logs once, reminds at most every 5 minutes, and logs its 
   }
 });
 
+// ── the HLS-off switch's own outage line ────────────────────────────────
+//
+// A B-frame feed's verdict here is CANT-PLAY, never an attempt — nothing
+// retries, so there are no timers to drive; only a rerender (a fresh feed
+// object off a repeated status push) can make this fire twice.
+
+const B_FRAMES_FEED: VideoFeedView = {
+  id: "p",
+  name: "Program",
+  kind: "pull",
+  sourceLine: "",
+  source: { kind: "pull", url: "rtsp://x", username: "" },
+  play: { via: "relay", whep: "/video/p/whep", hls: "/video/p/index.m3u8" },
+  status: { state: "delayed", delayedBecause: "b-frames" },
+};
+
+test("an HLS-off screen logs the can't-play line once, not once per rerender", async () => {
+  // installFakeHls defines MediaSource, so this environment could otherwise
+  // play the HLS this feed needs — without it every rerender would read as
+  // can't-play for the environment's own sake, proving nothing about the
+  // switch.
+  const undoHls = installFakeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { rerender } = renderHook(
+      ({ feed }: { feed: VideoFeedView }) =>
+        useVideoSession({
+          active: true,
+          feed,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls: false,
+          relayRunning: true,
+          onLog: (l) => logs.push(l),
+        }),
+      { initialProps: { feed: B_FRAMES_FEED } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.deepEqual(logs, [`Program can't play on this screen: it needs HLS, and HLS is off here`]);
+
+    // Three more renders off a fresh object each time (what a repeated
+    // video:state push looks like) — same status, so the same outage.
+    for (let i = 0; i < 3; i++) {
+      rerender({ feed: { ...B_FRAMES_FEED, status: { state: "delayed", delayedBecause: "b-frames" } } });
+      await act(async () => {
+        await flush();
+      });
+    }
+    assert.equal(logs.length, 1, "a rerender carrying the same verdict is not news");
+  } finally {
+    undoHls();
+    cleanup();
+  }
+});
+
+test("recovers once the screen allows HLS again, with exactly one recovery line", async () => {
+  const undoHls = installFakeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { rerender } = renderHook(
+      ({ allowHls }: { allowHls: boolean }) =>
+        useVideoSession({
+          active: true,
+          feed: B_FRAMES_FEED,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls,
+          relayRunning: true,
+          onLog: (l) => logs.push(l),
+        }),
+      { initialProps: { allowHls: false } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 1, "expected the outage's first line");
+
+    rerender({ allowHls: true });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 2, "expected exactly one recovery line");
+    assert.match(logs[1]!, /^Program can play on this screen again after \d+ failed attempts?/);
+
+    // Turning it off and on again a second time is a SECOND outage with its
+    // own first line and its own recovery — not silence, and not a stale
+    // note carried over from the first.
+    rerender({ allowHls: false });
+    await act(async () => {
+      await flush();
+    });
+    rerender({ allowHls: true });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(logs.length, 4, "expected a second outage to log its own start and its own recovery");
+    assert.equal(logs[2], `Program can't play on this screen: it needs HLS, and HLS is off here`);
+  } finally {
+    undoHls();
+    cleanup();
+  }
+});
+
+test("a screen with HLS allowed logs nothing about the switch for the same feed", async () => {
+  const undoHls = installFakeHls();
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed: B_FRAMES_FEED,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        relayRunning: true,
+        onLog: (l) => logs.push(l),
+      }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(
+      logs.some((l) => l.includes("HLS is off here")),
+      false,
+      "an HLS-allowed screen must never log the HLS-off line",
+    );
+  } finally {
+    undoHls();
+    cleanup();
+    g.restore();
+  }
+});
+
+test("through the hook: a feed already playing over WebRTC shows can't-play once it turns to B-frames on an HLS-off screen, with no HLS session opened", async () => {
+  // installFakeHls (MediaSource) makes this environment otherwise ABLE to
+  // play the HLS this feed would need — proof that FakeHls is never even
+  // constructed is proof nothing here fell back to it, not an artifact of
+  // jsdom having no HLS player of its own.
+  const undoHls = installFakeHls();
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const playingFirst: VideoFeedView = { ...B_FRAMES_FEED, status: { state: "live" } };
+  try {
+    const { result, rerender } = renderHook(
+      ({ feed }: { feed: VideoFeedView }) =>
+        useVideoSession({
+          active: true,
+          feed,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls: false,
+          relayRunning: true,
+        }),
+      { initialProps: { feed: playingFirst } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    const pc = FakePeerConnection.instances.at(-1)!;
+    act(() => {
+      pc.setConnectionState("connected");
+      video.fireFrame();
+    });
+    assert.equal(result.current.phase, "live", "expected WebRTC genuinely playing first");
+
+    // The relay now reports B-frames mid-play — a real path: an encoder's
+    // profile can change while it is already sending.
+    rerender({ feed: B_FRAMES_FEED });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(
+      result.current.phase,
+      "cant-play",
+      "expected the can't-play cover once a feed already playing needs HLS this screen refuses",
+    );
+    assert.deepEqual(
+      FakeHls.instances.flatMap((h) => h.calls),
+      [],
+      "expected no HLS session — and so no index.m3u8 request — opened for a feed an HLS-off screen refuses",
+    );
+  } finally {
+    undoHls();
+    cleanup();
+    g.restore();
+  }
+});
+
 // ── routing a real feed view to the right verdict on a WHEP refusal ────────
 //
 // The tests above set `relayManaged` on `startPlaybackAttempt`'s `choice` by
@@ -1417,5 +1611,131 @@ test("an HLS attempt stopped while hls.js is still loading destroys the instance
     assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), []);
   } finally {
     undoHls();
+  }
+});
+
+// ── sample(): the hook's own stats report ─────────────────────────────────
+//
+// Whichever session the WIDGET is showing, never a probe's — a probe plays
+// into an element nobody mounts and never fires AttemptCallbacks.onSession at
+// all, so it never installs a sampler in the first place. Proven below by
+// driving the same probe/adopt sequence the tests above use and checking
+// `sample()`'s `via` through it, not by asserting anything about probeWebrtc
+// directly.
+
+test("sample() resolves null before any session exists yet", async () => {
+  const g = stubGlobals("hang");
+  const video = new FakeVideo();
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
+    );
+    assert.equal(await result.current.sample(), null, "the handshake has not even been sent yet");
+  } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+test("sample() reports a live webrtc session's stats: feedId, via, deltas and current frame size", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    const pc = FakePeerConnection.instances.at(-1)!;
+    act(() => {
+      pc.setConnectionState("connected");
+      video.fireFrame();
+    });
+    assert.equal(result.current.phase, "live");
+
+    pc.framesDecoded = 30;
+    pc.framesDropped = 1;
+    pc.frameWidth = 1280;
+    pc.frameHeight = 720;
+    const first = await result.current.sample();
+    assert.deepEqual(first, { feedId: "cam", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720 });
+
+    pc.framesDecoded = 90;
+    pc.framesDropped = 2;
+    const second = await result.current.sample();
+    assert.deepEqual(
+      second,
+      { feedId: "cam", via: "webrtc", decoded: 60, dropped: 1, stalls: 0, width: 1280, height: 720 },
+      "expected the delta since the FIRST sample, not the running total",
+    );
+  } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+test("a probe beside a live HLS picture is never sampled: sample() stays via 'hls' through the whole probing window, and flips to 'webrtc' with fresh counters only once adopted", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed")); // the first POST refuses (falls back to HLS); the probe's own POST must succeed to be adoptable
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const probeStream = { id: "probe-stream" };
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { result } = renderRelaySession(video, logs);
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame()); // HLS live: "delayed"
+    assert.equal(result.current.phase, "delayed");
+
+    // HLS's own sampler is installed; give it something to report so a
+    // regression that stops sampling HLS entirely would also show here.
+    video.decodedFrames = 12;
+    const beforeProbe = await result.current.sample();
+    assert.equal(beforeProbe?.via, "hls");
+    assert.equal(beforeProbe?.decoded, 12);
+
+    FakePeerConnection.trackStream = probeStream;
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS); // starts the probe
+      await flush();
+    });
+    const probe = FakePeerConnection.instances.at(-1)!;
+    // The probe's own peer connection reports frames a webrtc sampler would
+    // read as huge counts — proof, if `sample()` ever reads THIS pc while it
+    // is still only a probe, that the guard failed.
+    probe.framesDecoded = 9999;
+    probe.framesDropped = 500;
+    assert.equal((await result.current.sample())?.via, "hls", "a running probe must not be sampled");
+    assert.equal((await result.current.sample())?.decoded, 0, "the probe's huge counters must not leak into the HLS report");
+
+    // The probe's frames arrive: it is adopted, and the picture moves to it.
+    probe.framesReceived = 4;
+    await act(async () => {
+      mock.timers.tick(PROBE_POLL_MS);
+      await flush();
+      await flush();
+    });
+    assert.equal(video.srcObject, probeStream, "expected the picture moved onto the probe's stream");
+
+    // The adopted session is a NEW attempt: a fresh sampler, counters at
+    // zero — not the huge numbers the probe was already carrying. `9999` is
+    // an exaggerated stand-in to make the mechanism obvious here; in
+    // production the real backlog at adoption is bounded by the probe's own
+    // poll (PROBE_POLL_MS = 500ms — it adopts the instant that poll sees any
+    // frame at all), so it is on the order of half a second of frames, not
+    // this test's magnitude.
+    const afterAdopt = await result.current.sample();
+    assert.equal(afterAdopt?.via, "webrtc", "expected the swap to webrtc reflected in the report");
+    assert.equal(afterAdopt?.decoded, 9999, "the first read of a NEW sampler is its own baseline, not a delta against nothing");
+    const nextSample = await result.current.sample();
+    assert.equal(nextSample?.decoded, 0, "expected the SECOND read to be a delta since the first, not the running total again");
+  } finally {
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
   }
 });

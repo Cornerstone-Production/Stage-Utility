@@ -24,6 +24,7 @@ import { EventPollHub, serializePollResponse, type PollFrame } from "./event-pol
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
+import type { VideoPlaybackReport } from "../types/video.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { serverPort } from "./server-port.js";
 import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
@@ -54,6 +55,7 @@ import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { overlaidTimeline } from "./history-item-times.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { videoService } from "./video/video-service.js";
+import { parseVideoReports } from "./video/playback-health.js";
 import { stageController } from "./stage-controller.js";
 import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
@@ -222,6 +224,42 @@ export function handlerErrorCode(err: unknown, status: number): string | undefin
   if (status === 500) return undefined;
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : undefined;
+}
+
+/**
+ * `POST /api/displays/presence`'s own heartbeat body — extracted so its
+ * shape is provable without a live server: the display heartbeat itself
+ * lands FIRST and unconditionally, a screen-size read that fails is logged
+ * and discarded (nothing downstream reads it to decide anything), and a
+ * `video` field refused whole by parseVideoReports (or simply absent) never
+ * blocks either of those — it reads exactly like an empty one.
+ *
+ * `deps` defaults to the real side effects; a test hands in spies to prove
+ * each of the three happens, and that a malformed `video` still counts the
+ * heartbeat rather than skipping the whole call.
+ */
+export function handlePresenceHeartbeat(
+  outputId: string,
+  body: Record<string, unknown>,
+  deps: {
+    heartbeat: (outputId: string) => void;
+    recordScreen: (outputId: string, deviceId: unknown, screen: unknown) => Promise<Error | null>;
+    recordVideo: (outputId: string, reports: VideoPlaybackReport[]) => void;
+  } = {
+    heartbeat: displayHeartbeat,
+    recordScreen: recordDisplayScreen,
+    recordVideo: (id, reports) => videoService.recordPlaybackReports(id, reports),
+  },
+): void {
+  deps.heartbeat(outputId);
+  // Deliberately discarded, with a log: the heartbeat itself succeeded and a
+  // display that could not record its size is still a display showing the
+  // right thing. Nothing reads the size to decide anything.
+  void deps.recordScreen(outputId, body.deviceId, body.screen).then((failed) => {
+    if (failed) console.warn("[displays] could not record screen size:", failed);
+  });
+  const reports = parseVideoReports(body.video);
+  if (reports && reports.length > 0) deps.recordVideo(outputId, reports);
 }
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
@@ -1056,15 +1094,7 @@ export class RemoteServer {
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);
-        else {
-          displayHeartbeat(outputId);
-          // Deliberately discarded, with a log: the heartbeat itself succeeded
-          // and a display that could not record its size is still a display
-          // showing the right thing. Nothing reads the size to decide anything.
-          void recordDisplayScreen(outputId, body.deviceId, body.screen).then((failed) => {
-            if (failed) console.warn("[displays] could not record screen size:", failed);
-          });
-        }
+        else handlePresenceHeartbeat(outputId, body);
       }
       json(res, { ok: outputId != null });
       return;

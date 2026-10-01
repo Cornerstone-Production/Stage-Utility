@@ -107,6 +107,85 @@ export interface VideoFeedView {
 }
 
 /**
+ * One Video widget instance's playback health, carried in the presence
+ * heartbeat's `video` field alongside every other instance currently showing
+ * a picture — never one per feed: two widgets playing the same feed each
+ * report their own numbers.
+ *
+ * `decoded`, `dropped` and `stalls` are deltas since the LAST report, not the
+ * session's running total, so two heartbeats can be summed or charted without
+ * re-deriving a rate from two cumulative reads — a counter that goes
+ * backwards (a fresh session replacing the one being sampled) contributes a
+ * zero delta rather than a negative one. `width`/`height` are the frame's
+ * current size, never a delta.
+ */
+export interface VideoPlaybackReport {
+  feedId: string;
+  via: "webrtc" | "hls";
+  decoded: number;
+  dropped: number;
+  stalls: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One (output, feed) pair's playback health over the last rolling minute —
+ * computed server-side (main/services/video/playback-health.ts) from every
+ * VideoPlaybackReport that pair has sent, and carried in VideoState.screens
+ * so the Screens page can warn about a screen without asking the relay
+ * itself anything: presence heartbeats already carry the numbers.
+ *
+ * One entry per (outputId, feedId), never per widget instance — two widgets
+ * on one screen playing the same feed are folded into a single pair, the
+ * same way `VideoPlaybackReport`'s own comment describes them arriving.
+ */
+export interface ScreenVideoHealth {
+  outputId: string;
+  feedId: string;
+  via: "webrtc" | "hls";
+  /** Sticky: set the moment the rolling window crosses a threshold, held for
+   *  CLEAR_AFTER_MS after the last sample that kept it true — never a bare
+   *  re-read of the instantaneous window fraction, which a later CLEAN
+   *  sample's own decoded count would otherwise dilute back under threshold
+   *  while the bad sample that caused it is still sitting in the window. */
+  struggling: boolean;
+  droppedInWindow: number;
+  decodedInWindow: number;
+  stallsInWindow: number;
+  /** The frame's current size, as of the pair's last report — never a delta,
+   *  same as VideoPlaybackReport's own width/height. */
+  width: number;
+  height: number;
+  /** Epoch ms of this pair's last report. snapshot() drops a pair once
+   *  `now - reportedAt >= WINDOW_MS`: nothing has reported it in a minute,
+   *  so it is not read as "clean" — it is gone. */
+  reportedAt: number;
+  /**
+   * The worst window this pair has had since `struggling` turned true —
+   * same shape as the live `droppedInWindow`/`decodedInWindow`/
+   * `stallsInWindow`/`width`/`height` fields above, but frozen at whichever
+   * report made the window worst, not the live one. The live window's own
+   * totals dilute as an old bad sample ages out from under a sticky flag
+   * that is still holding it struggling — a card or log line built off the
+   * live fields alone can end up describing a cause (stalls, say) that has
+   * already aged out of what it is currently showing. `episode` is what a
+   * screen's own card and the `[video]` struggling line read from instead.
+   *
+   * Null while not struggling, and cleared the instant the sticky flag
+   * clears — see playback-health.ts's own comment on Pair.episode for how
+   * "worst" is judged.
+   */
+  episode: {
+    droppedInWindow: number;
+    decodedInWindow: number;
+    stallsInWindow: number;
+    width: number;
+    height: number;
+  } | null;
+}
+
+/**
  * Which failing case this is — separate from `reason` (free text an operator
  * reads) because two different UI/logic decisions turn on knowing the CASE,
  * not the words:
@@ -186,4 +265,9 @@ export interface VideoState {
    *  up from it rather than naming a download that will not happen. */
   archivePresent: boolean;
   feeds: VideoFeedView[];
+  /** Every (output, feed) pair a presence heartbeat has reported playback
+   *  for in the last rolling minute — struggling or not, so the feed list's
+   *  "On N screens" can count every screen actually showing a feed, not only
+   *  the struggling ones. See ScreenVideoHealth's own comment. */
+  screens: ScreenVideoHealth[];
 }

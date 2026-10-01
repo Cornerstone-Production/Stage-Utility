@@ -125,6 +125,8 @@ export function ConsoleRoute() {
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"
+            // The operator's console page, not a screen with its own HLS switch.
+            allowHls
           />
         ) : (
           <EmptyState

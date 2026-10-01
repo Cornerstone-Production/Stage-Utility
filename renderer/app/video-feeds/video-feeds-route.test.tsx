@@ -104,8 +104,8 @@ function pushFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
 
 const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
 
-function makeState(feeds: VideoFeedView[]): VideoState {
-  return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, binaryPresent: true, archivePresent: true, feeds };
+function makeState(feeds: VideoFeedView[], screens: VideoState["screens"] = []): VideoState {
+  return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, binaryPresent: true, archivePresent: true, feeds, screens };
 }
 
 interface Call {
@@ -348,6 +348,52 @@ test("both feeds render, the embed row's pill names its player, the external row
       screen.getByText("WebRTC (WHEP) or HLS address"),
       "expected the external field to appear once Source is switched to it",
     );
+  } finally {
+    g.restore();
+  }
+});
+
+test("\"On N screens\" counts DISTINCT outputIds reporting a feed, never raw screens entries, and only for that feed", async () => {
+  const program = pullFeed({ id: "feed-pull", name: "Program (IMAG)", status: { state: "live" } });
+  const ptz = pushFeed({ id: "feed-push", name: "Stage PTZ", status: { state: "waiting" } });
+  const g = stubGlobals(
+    makeState([program, ptz], [
+      { outputId: "display-1", feedId: "feed-pull", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
+      { outputId: "display-2", feedId: "feed-pull", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
+      // A third entry for feed-pull naming the SAME outputId as the first —
+      // never a shape the real server produces (PlaybackHealth holds one
+      // entry per outputId+feedId pair), but exactly what tells "count
+      // distinct outputIds" apart from "count entries": a raw-length count
+      // would read 3, not 2.
+      { outputId: "display-1", feedId: "feed-pull", via: "hls", struggling: false, droppedInWindow: 0, decodedInWindow: 50, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
+      { outputId: "display-3", feedId: "feed-push", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
+    ]),
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    assert.ok(screen.getByText("On 2 screens"), "feed-pull is reported by two distinct outputIds");
+    assert.ok(screen.getByText("On 1 screen"), "feed-push is reported by one — singular, not \"1 screens\"");
+  } finally {
+    g.restore();
+  }
+});
+
+test("\"On N screens\" shows for an external feed too — a screen's own playback is a real measure whatever the source", async () => {
+  const relay = externalFeed({ id: "feed-external", name: "Lobby relay" });
+  const g = stubGlobals(
+    makeState([relay], [
+      { outputId: "display-1", feedId: "feed-external", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null },
+    ]),
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    assert.ok(screen.getByText("On 1 screen"), "an external feed's own screens count must show just like a relay feed's");
   } finally {
     g.restore();
   }
@@ -722,7 +768,7 @@ test("each row says how its feed plays", async () => {
     assert.equal(!!screen.queryByText("Plays in YouTube's own player · 5 to 15 s behind"), true);
     assert.equal(!!screen.queryByText("Plays in Resi's own player"), true);
     assert.equal(!!screen.queryByText("WebRTC, played as given"), true);
-    assert.equal(!!screen.queryByText("Stage Utility cannot see its health"), true);
+    assert.equal(!!screen.queryByText("Stage Utility cannot see whether its source is live"), true);
     assert.equal(!!screen.queryByText("Other address · https://relay.example.org/feed.whep"), true, "the source line is shown as the server built it");
   } finally {
     g.restore();

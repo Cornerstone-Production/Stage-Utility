@@ -15,6 +15,8 @@ import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { secretsStore } from "../secrets.js";
 import { serverPort } from "../server-port.js";
+import { stageController } from "../stage-controller.js";
+import { cleared } from "../timers.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
 import { embedSrc } from "./embed.js";
@@ -22,6 +24,7 @@ import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput } from "./feed-input.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
+import { pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { RelayLogWatcher } from "./relay-log.js";
@@ -37,9 +40,11 @@ import {
   type KickResult,
   type PushProtocol,
   type RelayStatus,
+  type ScreenVideoHealth,
   type VideoFeed,
   type VideoFeedsFile,
   type VideoFeedView,
+  type VideoPlaybackReport,
   type VideoPorts,
   type VideoSourceKind,
   type VideoState,
@@ -181,7 +186,72 @@ class VideoService {
     binaryPresent: false,
     archivePresent: false,
     feeds: [],
+    screens: [],
   };
+
+  /** Every screen's rolling playback window — see playback-health.ts. */
+  private readonly playbackHealth = new PlaybackHealth();
+  /**
+   * What `state()` reports as `screens` — written ONLY by
+   * recordPlaybackReportsAsync() (when playbackHealth.record() says
+   * something changed) and by the one-shot expiry timer below, never by a
+   * fresh `playbackHealth.snapshot(Date.now())` call inside `state()`
+   * itself. `snapshot()`'s own numbers (reportedAt, the window totals) move
+   * on almost every heartbeat and as samples simply age out — reading it
+   * fresh on every `state()` call made the relay's OWN status poll
+   * (STATUS_POLL_MS, running whenever `video:state` is watched) into a
+   * `video:state` broadcast on almost every tick, since publishOnce()'s
+   * whole-body diff saw a real difference every time, dragging
+   * integrations:state-changed along with it (setRelayStatusListener) for
+   * nothing having actually changed. Measured live: a healthy screen
+   * heartbeating every 9 s produced 15 broadcasts over 90 s of polling with
+   * NOTHING struggling, where the rule this file's own STATUS_POLL_MS
+   * comment states is "a poll must not become an SSE frame every
+   * STATUS_POLL_MS". */
+  private cachedScreens: ScreenVideoHealth[] = [];
+  /**
+   * The one timer for "something would change even with no further
+   * heartbeat" — see playbackHealth.nextExpiryAt()'s own comment for what it
+   * computes. A SINGLE timer over every held pair, re-armed to the new
+   * earliest moment after every record() and after this timer itself fires,
+   * rather than one timer per pair: pairs come and go with every heartbeat,
+   * and a struggling screen going dark (the scenario this exists for) is
+   * rare enough that re-deriving "what's next" from scratch each time is
+   * cheap, while a naive per-pair timer set would need its own bookkeeping
+   * to cancel and reschedule on every single sample. Cleared and left unset
+   * with nothing held — see armScreenExpiry()'s own null check. */
+  private screenExpiryTimer: NodeJS.Timeout | null = null;
+  /**
+   * Which (outputId, feedId) pairs the "struggling"/"smoothly again" lines
+   * last announced as struggling — keyed by playback-health.ts's own
+   * pairKey(). Never diffed against `this.cachedScreens` itself: both
+   * recordPlaybackReportsAsync() and the expiry timer below UPDATE
+   * `cachedScreens` and then want to log against what it held a moment
+   * before that update — a "before" that must be captured ahead of the
+   * overwrite and carried correctly to the log call is one more ordering
+   * rule for every future writer of `cachedScreens` to get right forever.
+   * Writing and reading this map only inside logPlaybackFlips() itself, in
+   * one place, removes that ordering question entirely: whatever it held is
+   * always exactly "what the log last said", regardless of how many
+   * different callers end up updating the cache over time. Pruned there
+   * too, for any key no longer in `after` — the same reasoning
+   * `lastLoggedState` below already applies to a feed's own
+   * live/delayed/offline transitions. */
+  private readonly lastLoggedStruggling = new Map<string, boolean>();
+  /**
+   * The episode identity (playbackHealth.episodeIdFor()) the pair's last
+   * LOGGED struggling line described — beside `lastLoggedStruggling` above,
+   * pruned and written in exactly the same places, for exactly the same
+   * reason. `lastLoggedStruggling` alone cannot tell "still the same
+   * struggle" from "a heartbeat's own record() call cleared the sticky flag
+   * in its sweep and then re-flagged it from that same heartbeat's own bad
+   * sample" — both read struggling=true before and after logPlaybackFlips()
+   * ever gets a look, so the ordinary flip check never fires either log
+   * line. episodeIdFor() only changes on a genuine transition into
+   * struggling (see its own comment), so a differing id here — while
+   * `lastLoggedStruggling` still says true — is what tells logPlaybackFlips()
+   * a clear it never announced happened in between. */
+  private readonly lastLoggedEpisodeId = new Map<string, number | null>();
 
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
@@ -202,12 +272,18 @@ class VideoService {
   private feedsChangedListener: (() => void) | null = null;
   private portsChangedListener: (() => void) | null = null;
   /** relay-lifecycle.ts's own connection-row mapping, fired with the fresh
-   *  RelayStatus on every publish() that actually changes — the ONE place
+   *  RelayStatus on every publish() whose relay status changed — the ONE place
    *  the integration manager's row is driven from, so a transition
    *  video-service discovers on its OWN poll (going "not answering", and
    *  recovering from it) reaches the row exactly the same way a supervisor
    *  event does, rather than only the page that happens to be open. */
   private relayStatusListener: ((relay: RelayStatus) => void) | null = null;
+  /** The RelayStatus last handed to relayStatusListener, as JSON — null
+   *  before the first, and again whenever the listener is replaced. A
+   *  publish that changes only `screens` or a feed must not tell the
+   *  connection row anything, since every call broadcasts
+   *  integrations:state-changed. */
+  private lastRelaySent: string | null = null;
   /** relay-lifecycle.ts's readiness poll, told of every status change of the
    *  attached supervisor AFTER handleStatusChange() has forgotten the previous
    *  process. The service is the supervisor's only "status" listener: a
@@ -313,6 +389,10 @@ class VideoService {
    *  sparse calls never show, so a run never closed and the next outage's
    *  first line was swallowed as a repeat. Here a success ends the run. */
   private readonly sparseOutage = new OutageLog(0);
+  /** A screen's playback report failing to record, keyed by outputId: once
+   *  per outage per screen, and once when it records again. The default
+   *  settle window suits a heartbeat every 10 s. */
+  private readonly playbackRecordOutage = new OutageLog();
   /** Whether this relay process's API has answered anything yet — a poll or
    *  a reconcile. Reset with polledSinceRunning, on every status change. */
   private relayAnswered = false;
@@ -492,6 +572,9 @@ class VideoService {
       binaryPresent: await relayBinaryPresent(),
       archivePresent: await relayArchivePresent(),
       feeds: await Promise.all(feeds.map((f) => this.view(f))),
+      // The CACHED value — see its own field comment for why this is never
+      // a fresh playbackHealth.snapshot(Date.now()) call.
+      screens: this.cachedScreens,
     };
   }
 
@@ -540,6 +623,7 @@ class VideoService {
    *  comment. `null` clears it (a caller replacing the singleton in tests). */
   setRelayStatusListener(cb: ((relay: RelayStatus) => void) | null): void {
     this.relayStatusListener = cb;
+    this.lastRelaySent = null;
   }
 
   /** relay-lifecycle.ts's hook for the attached supervisor's status — see the
@@ -607,7 +691,11 @@ class VideoService {
     this.snapshot = { ...candidate, rev: this.rev };
     if (changed) {
       broadcast("video:state", this.snapshot);
-      this.relayStatusListener?.(this.snapshot.relay);
+      const relay = JSON.stringify(this.snapshot.relay);
+      if (this.relayStatusListener && relay !== this.lastRelaySent) {
+        this.lastRelaySent = relay;
+        this.relayStatusListener(this.snapshot.relay);
+      }
     }
   }
 
@@ -1546,6 +1634,31 @@ class VideoService {
     this.pendingBFramesAt.delete(id);
     this.requestedAt.delete(id);
     this.lastLoggedState.delete(id);
+    // Same reasoning, every output: a re-added feed under the same name
+    // must not read struggling for up to a minute on a build that has never
+    // actually measured the new feed's playback.
+    this.playbackHealth.forgetFeed(id);
+    // And its own log bookkeeping — otherwise a re-added feed's first
+    // GENUINE struggling episode reads as "already announced" against a
+    // stale `true` from before the delete, and logs nothing.
+    for (const key of this.lastLoggedStruggling.keys()) {
+      if (key.endsWith(`\u0000${id}`)) this.lastLoggedStruggling.delete(key);
+    }
+    for (const key of this.lastLoggedEpisodeId.keys()) {
+      if (key.endsWith(`\u0000${id}`)) this.lastLoggedEpisodeId.delete(key);
+    }
+    // forgetFeed() just changed what playbackHealth itself would say, but
+    // `cachedScreens` — what state() actually reports — only refreshes on a
+    // heartbeat's own change or the expiry timer; neither has any reason to
+    // run here. Without this, a feed removed mid-struggle keeps reading
+    // struggling in `screens` until one of those happens to fire next,
+    // which may be minutes away or never if nothing plays again at all.
+    // The removed feed's own pairs may also have been the soonest-expiring
+    // ones (or the only ones) — re-derive the timer from what is left too,
+    // rather than leave it armed for a pair forgetFeed() just removed.
+    const forgottenAt = Date.now();
+    this.cachedScreens = this.playbackHealth.snapshot(forgottenAt);
+    this.armScreenExpiry(forgottenAt);
     // Without this, a re-added feed under the same name (a new feed,
     // minting the same deterministic id) reads "offline, last seen <old>"
     // instead of "waiting" — the old feed's history, not its own.
@@ -1569,6 +1682,207 @@ class VideoService {
       if (uses) out.push({ viewId: v.id, name: v.name });
     }
     return out;
+  }
+
+  // ── Screen health, fed by the presence heartbeat ─────────────────────────
+
+  /**
+   * A presence heartbeat's `video` field — already refusal-checked WHOLE
+   * (parseVideoReports) by the caller (remote-server.ts's presence route);
+   * `reports` here is never itself malformed, only possibly stale. Two
+   * checks specific to this build's CURRENT state happen here rather than
+   * there, so they stay covered by the same test that exercises everything
+   * else this service knows:
+   *
+   *  - `outputId` must name a real output in stageController's own list —
+   *    an unclaimed browser tab, or a screen since removed, polling this
+   *    route with an id nothing recognises must not seed a screen entry
+   *    nothing could ever clear.
+   *  - a report naming a feed id this build no longer holds (a just-deleted
+   *    feed's widget catching up with one more heartbeat) is dropped one
+   *    report at a time — unlike parseVideoReports's own whole-array
+   *    refusal, this is never a reason to throw away the rest of the
+   *    screen's reports.
+   *
+   * Fire-and-forget on purpose, like every other caller of `void
+   * this.publish()` in this file: the presence route does not await it, and
+   * a report that cannot be recorded must not fail the heartbeat that
+   * carried it. A failure is logged once per outage per screen, naming the
+   * screen, and its recovery once — never a line per heartbeat.
+   */
+  recordPlaybackReports(outputId: string, reports: VideoPlaybackReport[], now = Date.now()): void {
+    const output = stageController.getOutputs().find((o) => o.id === outputId);
+    if (!output) return;
+    void this.recordPlaybackReportsAsync(outputId, reports, now).then(
+      () => {
+        const d = this.playbackRecordOutage.ok(outputId, now);
+        if (d.log) console.log(`[video] recording ${scrub(output.name)}'s playback reports is working again${scrub(d.note)}`);
+      },
+      (err: unknown) => {
+        const message = errorMessage(err);
+        const d = this.playbackRecordOutage.fail(outputId, message, now);
+        if (d.log) console.warn(`[video] could not record ${scrub(output.name)}'s playback report: ${scrub(message)}${scrub(d.note)}`);
+      },
+    );
+  }
+
+  /**
+   * recordPlaybackReports()'s own body, split out because it needs an
+   * `await` the public method's synchronous signature cannot carry.
+   *
+   * The known-feed-ids filter reads the feed STORE's current list
+   * (loadFeedsFile(), which resolves from DataStore's own in-memory cache
+   * once anything has loaded it — no disk read most of the time), never
+   * `this.snapshot.feeds`: that field is stale until the next publish()
+   * lands, and removeFeed() calls playbackHealth.forgetFeed() well before
+   * its own publish() at the end — `this.snapshot.feeds` still names the
+   * just-deleted feed for the whole gap in between. A heartbeat landing in
+   * that gap, filtered against the stale snapshot, would re-seed the very
+   * pair forgetFeed() just removed.
+   *
+   * Logs the flip only — "struggling" the moment a pair's sticky flag turns
+   * true, "playing smoothly again" the moment it turns back false — and
+   * publishes exactly when playbackHealth.record() says the snapshot
+   * actually changed, never on every heartbeat from a screen playing
+   * cleanly. Re-arms the expiry timer on every call, changed or not: even
+   * an all-clean heartbeat moves `reportedAt` forward, which moves when
+   * this pair would otherwise age out with no further heartbeat.
+   */
+  private async recordPlaybackReportsAsync(outputId: string, reports: VideoPlaybackReport[], now: number): Promise<void> {
+    const { feeds } = await loadFeedsFile();
+    const knownFeedIds = new Set(feeds.map((f) => f.id));
+    const filtered = reports.filter((r) => knownFeedIds.has(r.feedId));
+    const changed = this.playbackHealth.record(outputId, filtered, now);
+    if (changed) {
+      this.cachedScreens = this.playbackHealth.snapshot(now);
+      this.logPlaybackFlips(now);
+      void this.publish();
+    }
+    this.armScreenExpiry(now);
+  }
+
+  /**
+   * (Re-)arms the one expiry timer to playbackHealth.nextExpiryAt() — see
+   * its own comment, and screenExpiryTimer's own field comment for why this
+   * is one timer, not one per pair. Always clears whatever was armed
+   * before: a caller re-arming after a change (a heartbeat, a feed removed)
+   * must never leave an OLDER, now-wrong deadline still pending alongside
+   * the new one. Unref'd — an expiry timer must never be what keeps the
+   * process alive, the same rule videoPollDeps.setInterval already applies
+   * to the relay status poll.
+   */
+  private armScreenExpiry(now: number): void {
+    this.screenExpiryTimer = cleared(this.screenExpiryTimer);
+    const nextAt = this.playbackHealth.nextExpiryAt(now);
+    if (nextAt === null) return; // nothing held — no timer, per its own contract
+    const timer = setTimeout(() => this.onScreenExpiry(), Math.max(0, nextAt - now));
+    timer.unref();
+    this.screenExpiryTimer = timer;
+  }
+
+  /** The expiry timer's own handler: a pair aged out, or a sticky flag
+   *  cleared, with no heartbeat around to have noticed either on its own.
+   *  playbackHealth.tick() both sweeps (actually frees a pair nothing will
+   *  ever heartbeat again — see its own comment) and returns the fresh
+   *  read; logPlaybackFlips() and publish() run unconditionally, since
+   *  tick() only fires when something WOULD show differently, and both are
+   *  cheap enough on their own idle-no-op paths (publish()'s whole-body
+   *  diff, logPlaybackFlips()'s per-pair map lookups) that gating this on a
+   *  second, separately-computed "did it really change" is not worth the
+   *  duplicated logic. */
+  private onScreenExpiry(): void {
+    this.screenExpiryTimer = null;
+    const now = Date.now();
+    this.cachedScreens = this.playbackHealth.tick(now);
+    this.logPlaybackFlips(now);
+    void this.publish();
+    this.armScreenExpiry(now);
+  }
+
+  /**
+   * recordPlaybackReportsAsync()'s and onScreenExpiry()'s shared log-flip
+   * driver: logged on the flip only, from either side —
+   * `[video] <screen> is struggling with <feed>: dropped <n> frames for <m>
+   * decoded, <s> stalls in the last minute` the moment a pair's sticky flag
+   * turns true, `[video] <screen> is playing <feed> smoothly again` the
+   * moment it turns back false. `<n>`/`<m>`/`<s>` are the pair's own
+   * `episode` — the worst window since it started struggling, the same
+   * numbers the Screens page's own warning reads (outputs-section.tsx) — not
+   * the live window fields, which is exactly right at the flip moment (the
+   * episode is freshly seeded from that same window) and stays right for
+   * every later publish this same episode causes, since the two are never
+   * shown out of sync. A struggling pair that simply stops reporting (ages
+   * out of the window, or is swept by the expiry timer) is neither — nothing
+   * said it recovered — so it logs nothing.
+   *
+   * `lastLoggedStruggling` (and `lastLoggedEpisodeId` beside it) are pruned
+   * here for any key `after` no longer carries: without this, a pair that
+   * left while struggling and comes back later (the same outputId/feedId
+   * pair reporting again, whether or not it is a different physical feed
+   * under a reused id) would either log nothing on its first genuine
+   * struggle (a stale `true` reads as "already announced") or log a
+   * spurious "smoothly again" for a struggle nothing ever announced.
+   * removeFeed() prunes proactively too, for the same reason, the moment a
+   * feed id is known gone rather than waiting for the next flip pass to
+   * notice.
+   *
+   * A pair can read struggling=true both before AND after this runs even
+   * though it genuinely cleared and re-flagged in between: one record() call
+   * can have its own sweep() clear the sticky flag by elapsed time and then
+   * the SAME heartbeat's own bad sample re-arm it, all before logPlaybackFlips
+   * ever gets a look (playback-health.ts's own comment on this). The ordinary
+   * flip check below cannot see that — it only compares before and after this
+   * one call — so a differing `episodeIdFor()` while `lastLoggedStruggling`
+   * still reads true is the second signal: the clear this call never
+   * announced, followed immediately by the new episode's own line.
+   */
+  private logPlaybackFlips(now: number): void {
+    const after = this.playbackHealth.snapshot(now);
+    const afterKeys = new Set(after.map((h) => pairKey(h.outputId, h.feedId)));
+    for (const key of this.lastLoggedStruggling.keys()) {
+      if (!afterKeys.has(key)) this.lastLoggedStruggling.delete(key);
+    }
+    for (const key of this.lastLoggedEpisodeId.keys()) {
+      if (!afterKeys.has(key)) this.lastLoggedEpisodeId.delete(key);
+    }
+
+    const outputs = stageController.getOutputs();
+    const screenName = (id: string) => outputs.find((o) => o.id === id)?.name ?? id;
+    const feedName = (id: string) => this.snapshot.feeds.find((f) => f.id === id)?.name ?? id;
+
+    for (const health of after) {
+      const key = pairKey(health.outputId, health.feedId);
+      const wasStruggling = this.lastLoggedStruggling.get(key) ?? false;
+      const lastEpisodeId = this.lastLoggedEpisodeId.get(key) ?? null;
+      const currentEpisodeId = this.playbackHealth.episodeIdFor(health.outputId, health.feedId);
+
+      const logStruggling = () => {
+        // health.episode is non-null here in every real case: `struggling`
+        // freshly true means playback-health.ts just seeded or is holding a
+        // peak for this very episode (see its own comment). The live-window
+        // fallback is defensive only — never expected to run.
+        const peak = health.episode ?? { droppedInWindow: health.droppedInWindow, decodedInWindow: health.decodedInWindow, stallsInWindow: health.stallsInWindow };
+        console.log(
+          `[video] ${scrub(screenName(health.outputId))} is struggling with ${scrub(feedName(health.feedId))}: ` +
+            `dropped ${scrub(peak.droppedInWindow)} frames for ${scrub(peak.decodedInWindow)} decoded, ${scrub(peak.stallsInWindow)} stalls in the last minute`,
+        );
+      };
+      const logClear = () => console.log(`[video] ${scrub(screenName(health.outputId))} is playing ${scrub(feedName(health.feedId))} smoothly again`);
+
+      if (health.struggling && wasStruggling && currentEpisodeId !== null && currentEpisodeId !== lastEpisodeId) {
+        // Struggling reads true on both sides of this call, so the ordinary
+        // flip check below never fires — the clear and the new episode's
+        // own struggling line, in that order, are what this call missed.
+        logClear();
+        logStruggling();
+      } else if (health.struggling && !wasStruggling) {
+        logStruggling();
+      } else if (!health.struggling && wasStruggling) {
+        logClear();
+      }
+      this.lastLoggedStruggling.set(key, health.struggling);
+      this.lastLoggedEpisodeId.set(key, currentEpisodeId);
+    }
   }
 }
 

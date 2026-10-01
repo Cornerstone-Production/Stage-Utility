@@ -104,6 +104,7 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
     wireless: [],
     now: 0,
     ndiSource: null,
+    allowHls: true,
     H: 1080,
     interactive: false,
     placed: undefined,

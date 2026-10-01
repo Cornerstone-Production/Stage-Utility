@@ -621,7 +621,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
     // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
-    // (boolean = draw no kiosk top bar), and/or { slug? } (string; "" clears the
+    // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
+    // widget here may play over HLS), and/or { slug? } (string; "" clears the
     // friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
@@ -633,15 +634,25 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
       const hasHideTopBar = typeof body.hideTopBar === "boolean";
+      const hasAllowHls = typeof body.allowHls === "boolean";
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
-      if (hasName) state = await stageController.renameOutput(id, body.name as string);
+      // Same catch-and-400 shape as every other field below: an unknown id
+      // is a 400 with the reason, not a 500 stack trace.
+      if (hasName) {
+        try {
+          state = await stageController.renameOutput(id, body.name as string);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       // Mode BEFORE viewId, so a single request can turn a screen into a panel
       // and point it at a console. The other order refuses its own second half.
       if (hasMode) {
@@ -662,9 +673,42 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
           return;
         }
       }
-      if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
-      if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
-      if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
+      // Each of the four below refuses only on an id that names no output, so
+      // the same catch-and-400 shape as setOutputView/setOutputMode/setOutputSlug
+      // above applies to all: an unknown id is a 400 with the reason, not a 500
+      // an operator would read as the server itself being broken.
+      if (hasBlackout) {
+        try {
+          state = await stageController.setOutputBlackout(id, body.blackout as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      if (hasLocked) {
+        try {
+          state = await stageController.setOutputLocked(id, body.locked as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      if (hasHideTopBar) {
+        try {
+          state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      if (hasAllowHls) {
+        try {
+          state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       // A rejected slug is a 400 with the reason, not a silent no-op — the operator
       // has to see WHY "/history" cannot be used.
       if (hasSlug) {

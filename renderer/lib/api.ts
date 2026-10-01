@@ -453,6 +453,7 @@ export type IpcChannel =
   | "outputs:remove"
   | "outputs:rename"
   | "outputs:reorder"
+  | "outputs:setAllowHls"
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
   | "outputs:setMode"
@@ -1309,6 +1310,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "outputs:setHideTopBar": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { hideTopBar: p.hideTopBar });
+    }
+
+    case "outputs:setAllowHls": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { allowHls: p.allowHls });
     }
 
     case "history:editWindow":

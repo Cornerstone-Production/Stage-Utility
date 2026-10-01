@@ -769,6 +769,17 @@ export function useStageSettings(pinnedViewId?: string) {
     );
   }
 
+  /** Allow or refuse HLS on one display's Video widgets. Optimistic like the
+   *  lock and the top bar: the server only refuses an id that does not exist. */
+  async function handleSetOutputAllowHls(id: string, allowHls: boolean) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { allowHls }) }),
+      () => ipc<StageState>("outputs:setAllowHls", { id, allowHls }),
+      "Failed to update the display's HLS setting",
+    );
+  }
+
   /**
    * Make a screen a read-only display or an interactive control surface.
    *
@@ -912,6 +923,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetOutputView,
     handleSetOutputLocked,
     handleSetOutputHideTopBar,
+    handleSetOutputAllowHls,
     handleSetOutputMode,
     handleSetViewSurface,
     handleRemoveOutput,

@@ -28,6 +28,7 @@ const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { VideoObject } = await import("./video-object.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
+const { __resetPlaybackRegistryForTests, anyPlaying, drainReports } = await import("./playback-reports.js");
 
 // VideoState/VideoFeedView are NOT ambient globals (unlike LayoutObject and
 // LayoutObjectConfig, aliased in renderer/types.d.ts from main/types/stage —
@@ -64,6 +65,7 @@ function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state:
     binaryPresent: true,
     archivePresent: true,
     feeds,
+    screens: [],
   };
 }
 
@@ -105,10 +107,15 @@ function stubFetch(state: VideoState) {
  *  body is skipped and nothing here would ever go on screen. */
 class StubObserver {
   static last: StubObserver | null = null;
+  /** Every instance since the last reset — for a test rendering more than one
+   *  widget, where `.last` alone can only ever address the most recently
+   *  mounted one. */
+  static instances: StubObserver[] = [];
   readonly cb: (entries: { isIntersecting: boolean }[]) => void;
   constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
     this.cb = cb;
     StubObserver.last = this;
+    StubObserver.instances.push(this);
   }
   observe(): void {}
   disconnect(): void {}
@@ -171,7 +178,9 @@ async function settleFake(): Promise<void> {
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
+  __resetPlaybackRegistryForTests();
   StubObserver.last = null;
+  StubObserver.instances = [];
   FakePeerConnection.reset();
 });
 afterEach(() => cleanup());
@@ -183,7 +192,7 @@ test("preview route: paused, and nothing is requested until Play is pressed", as
   history.pushState({}, "", "/preview-abc");
   const g = stubGlobals(makeState([makeFeed()]));
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settle();
     await settle();
 
@@ -215,7 +224,7 @@ test("off screen: no request; on screen: one POST; off again past the teardown: 
   const g = stubGlobals(makeState([makeFeed()]));
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settleFake();
     await settleFake();
 
@@ -249,7 +258,7 @@ test("a hidden document behaves like off screen", async () => {
   const g = stubGlobals(makeState([makeFeed()]));
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }));
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
     await settleFake();
     await settleFake();
 
@@ -292,7 +301,7 @@ test("an embed feed renders an iframe with mute=1 and no <video>; off screen rem
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
     const { container } = render(
-      React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }),
+      React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }),
     );
     await settleFake();
     await settleFake();
@@ -339,7 +348,7 @@ test("a render error inside the player shows the can't-play state, and a sibling
         "div",
         null,
         React.createElement("span", null, "sibling-marker"),
-        React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false }),
+        React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }),
       ),
     );
     await settle();
@@ -361,6 +370,7 @@ test("whenOffline: logo with no app logo configured shows the message state", as
         ...makeObject({ whenOffline: "logo" }),
         appLogo: null,
         appLogoMonochrome: false,
+        allowHls: true,
       }),
     );
     await settle();
@@ -412,13 +422,22 @@ const EMBED = makeFeed({
   status: { state: "embed" },
 });
 
+/** A relay feed WebRTC cannot carry at all — the encoder has B-frames, so the
+ *  only way to play it is HLS. */
+const B_FRAMES_FEED = makeFeed({ status: { state: "delayed", delayedBecause: "b-frames" } });
+
 /** The corner name tag: a span whose whole text is the feed's name (the
  *  Connecting line carries the name too, inside a longer sentence). */
 const nameTag = (name: string) => screen.queryAllByText(name, { exact: true }).length > 0;
 
-async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}, relay?: VideoState["relay"]) {
+async function renderOnScreen(
+  feed: VideoFeedView,
+  config: Partial<VideoConfig> = {},
+  relay?: VideoState["relay"],
+  allowHls = true,
+) {
   const g = stubGlobals(makeState([feed], relay));
-  const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false }));
+  const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false, allowHls }));
   await settle();
   await settle();
   act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
@@ -511,6 +530,45 @@ test("a WebRTC picture carries no badge", async () => {
   }
 });
 
+// ── the per-screen "Use HLS on this screen" switch ─────────────────────────
+
+test("a B-frame feed on an HLS-off screen shows the can't-play state and requests nothing", async () => {
+  // installFakeHls defines MediaSource, which is what makes this environment
+  // otherwise ABLE to play HLS — without it, jsdom has no HLS player of its
+  // own either way, and the assertions below would pass whether or not
+  // `allowHls` did anything at all.
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(B_FRAMES_FEED, {}, undefined, false);
+  try {
+    assert.equal(!!screen.queryByText("This screen can't play video"), true, "expected the can't-play cover");
+    assert.deepEqual(feedCalls(g.calls), [], "a screen with HLS off must never attempt this feed's playback endpoint at all");
+    assert.equal(
+      g.calls.some((c) => c.url.includes("index.m3u8")),
+      false,
+      "expected no index.m3u8 request from an HLS-off screen",
+    );
+  } finally {
+    undoHls();
+    g.restore();
+  }
+});
+
+test("the same B-frame feed plays over HLS once the screen allows it", async () => {
+  const frames = captureFrames();
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(B_FRAMES_FEED, {}, undefined, true);
+  try {
+    assert.equal(!!screen.queryByText("This screen can't play video"), false, "expected an attempt, not the can't-play cover");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText(/s behind$/), true, "expected the HLS picture's delayed badge once allowed");
+  } finally {
+    undoHls();
+    frames.restore();
+    g.restore();
+  }
+});
+
 test("a feed id the loaded list does not name shows removed copy, not the come-back promise", async () => {
   const { g } = await renderOnScreen(makeFeed({ id: "some-other-feed" }));
   try {
@@ -534,7 +592,7 @@ test("a feed id the loaded list does not name shows removed copy, not the come-b
 function waitingCover(): string | null {
   for (const [big, small] of [
     ["Waiting for the source", "Nothing is sending to this feed yet"],
-    ["Video is off", "Turn it on on the Video feeds page"],
+    ["Video is off", "Turn video on to play this feed"],
     ["Waiting for the video relay", "It is starting up"],
   ] as const) {
     if (screen.queryByText(big)) return screen.queryByText(small) ? `${big} / ${small}` : `${big} / (no second line)`;
@@ -562,7 +620,7 @@ test("a standby pull feed with video switched off says video is off, and asks fo
   const { g } = await renderOnScreen(PULL_STANDBY, {}, { state: "off" });
   try {
     assert.deepEqual(feedCalls(g.calls), [], "nothing answers a playback request while the relay is off");
-    assert.equal(waitingCover(), "Video is off / Turn it on on the Video feeds page");
+    assert.equal(waitingCover(), "Video is off / Turn video on to play this feed");
   } finally {
     g.restore();
   }
@@ -597,6 +655,127 @@ test("a push feed waiting for its device, with the relay running, shows Waiting 
     assert.deepEqual(feedCalls(g.calls), [], "a push feed's waiting means there is nothing to connect to yet");
     assert.equal(waitingCover(), "Waiting for the source / Nothing is sending to this feed yet");
   } finally {
+    g.restore();
+  }
+});
+
+// ── registerPlayback: what actually reaches the presence heartbeat ─────────
+
+test("a live relay picture registers with the presence heartbeat; going off screen unregisters it", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected nothing registered before the widget is even on screen");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected nothing registered while still Connecting — not yet actually playing");
+
+    act(() => frames.fire());
+    await settleFake();
+    assert.equal(anyPlaying(), true, "expected the live picture registered");
+    const reports = await drainReports();
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.feedId, "feed-1");
+    assert.equal(reports[0]!.via, "webrtc");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected the widget unregistered once it went off screen");
+  } finally {
+    mock.timers.reset();
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("an embed feed's picture never registers — Stage Utility cannot measure an iframe's playback", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(EMBED);
+  try {
+    assert.ok(nameTag(EMBED.name), "expected the embed actually showing, for this to be a real test of the gate");
+    assert.equal(anyPlaying(), false, "an embed must never occupy a registry slot the heartbeat treats as 'playing'");
+    assert.deepEqual(await drainReports(), []);
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("two instances of one layout object each report, and unmounting one leaves the other reporting", async () => {
+  // An embed tile and its expanded copy draw the same layout object twice,
+  // under the same object id.
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    const obj = makeObject();
+    const copy = (key: string) => React.createElement(VideoObject, { key, ...obj, appLogo: null, appLogoMonochrome: false, allowHls: true });
+    const { rerender } = render(React.createElement("div", null, copy("tile"), copy("expanded")));
+    await settle();
+    await settle();
+    act(() => {
+      for (const o of StubObserver.instances) o.cb([{ isIntersecting: true }]);
+    });
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+    assert.equal((await drainReports()).length, 2, "each rendered instance must report, not one per object id");
+
+    rerender(React.createElement("div", null, copy("tile")));
+    await settle();
+    await settle();
+    assert.equal(anyPlaying(), true, "the instance still on screen must still be registered");
+    assert.equal((await drainReports()).length, 1, "the instance still on screen must still report");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("two widget instances playing the same feed register under two separate keys, each reported", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    const objA = makeObject();
+    const objB = { o: { ...objA.o, id: "obj-2" }, config: objA.config };
+    render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement(VideoObject, { ...objA, appLogo: null, appLogoMonochrome: false, allowHls: true }),
+        React.createElement(VideoObject, { ...objB, appLogo: null, appLogoMonochrome: false, allowHls: true }),
+      ),
+    );
+    await settle();
+    await settle();
+    assert.equal(StubObserver.instances.length, 2, "expected one IntersectionObserver per widget instance");
+
+    act(() => {
+      for (const o of StubObserver.instances) o.cb([{ isIntersecting: true }]);
+    });
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+
+    const reports = await drainReports();
+    assert.equal(reports.length, 2, "expected one report PER WIDGET INSTANCE, not one per feed");
+    assert.deepEqual(
+      reports.map((r) => r.feedId),
+      ["feed-1", "feed-1"],
+    );
+  } finally {
+    frames.restore();
     g.restore();
   }
 });

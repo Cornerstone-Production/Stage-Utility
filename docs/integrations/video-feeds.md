@@ -225,6 +225,12 @@ Profile baseline, or Keyframe interval 1 s with B-frames 0); a pulled camera
 or an SRT/RTMP push feed is not necessarily OBS, so the same message names
 "the device" instead.
 
+That fallback needs a screen willing to play HLS. A screen's own **Use HLS on
+this screen** switch (its overflow menu on the Screens page) can turn it off —
+a Pi 4 can freeze decoding HLS, so this keeps a struggling screen on WebRTC
+only. With it off, a feed that needs HLS shows **This screen can't play
+video** there instead, while it keeps playing normally on every other screen.
+
 ## Feed states
 
 A pull or push feed's status pill reflects what the relay currently knows:
@@ -240,7 +246,7 @@ A pull or push feed's status pill reflects what the relay currently knows:
 An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
 platform it plays through; Stage Utility cannot see whether that platform's
 own stream is actually live. An external feed shows no pill at all — Stage
-Utility cannot see its health either way.
+Utility cannot see whether its source is live.
 
 ## The Video feeds page
 
@@ -268,6 +274,63 @@ reference: see [Video](../reference/widgets.md#video).
 
 A Raspberry Pi decodes WebRTC in software. Plan on one 720p feed per Pi 4
 screen; a Pi 5 or a computer handles 1080p.
+
+## Health from the screens
+
+Every Video widget reports its own playback on the same presence heartbeat
+that keeps its screen's Connected/Offline dot current — every 10 seconds
+while at least one widget on that screen is actually showing a relay or
+external feed's picture, faster than the heartbeat's normal 20-second (near a
+service) or 60-second cadence otherwise. Each report is that widget
+instance's own numbers since its last report: frames decoded (never counting
+the dropped ones, over either method), frames dropped and stalls as deltas,
+and the frame's current width, height and whether it is playing over WebRTC
+or HLS. A stall is the picture going into `waiting` on HLS; on WebRTC, where
+a `<video>` playing a live stream never fires `waiting` when the stream
+starves, it is instead Chrome's own receiver-side freeze counter, falling
+back to `waiting` on a browser that does not report one. On WebRTC a stall is
+therefore a receiver-side freeze, a gap between frames of roughly 180 ms or
+more at 30 fps; on HLS it is the buffer running dry. An embed's platform
+player, and a probe merely testing whether WebRTC works, report nothing —
+only a widget actually showing a picture does.
+
+A widget whose stats take longer than 1.5 seconds to read is left out of that
+heartbeat and counts as a failed read (see Logging below). If the widgets
+have not all answered within 2 seconds, the heartbeat goes without any
+reports rather than wait, so the Connected dot never waits on a stats read.
+
+The server keeps a rolling one-minute window per screen and feed — two
+widgets on one screen playing the same feed are one pair — and marks the pair
+**struggling** the moment its window crosses either threshold: more than 5%
+of decoded frames dropped, or 3 or more stalls. Once struggling, it stays
+that way for 60 seconds after the last sample that kept it bad, even through
+cleaner reports arriving in between, so one bad spike cannot flap the warning
+on and off as the window's own totals dilute it.
+
+While a pair holds struggling, the server also holds its **episode**: the
+worst window since it started struggling, not the live one — the live
+window's own totals dilute as an old bad sample ages out from under a sticky
+flag that is still holding, so a card built off the live numbers alone could
+end up describing a cause (a stall count, say) that has already faded out of
+what it is currently showing. A struggling screen's card on the Screens page
+reads from the episode instead: **Struggling with \<feed\>.** followed by how
+many frames it dropped in that worst minute. Above 720p it adds the feed's
+resolution and the fix — a Pi 4 decodes WebRTC in software and cannot keep up
+much past that: **The feed is W × H; a Pi 4 plays 1280 × 720 smoothly. Lower
+the encoder's output to 720p.** At 3 or more stalls it adds **It stalled N
+times; check this screen's network.** — unless stalls alone crossed the
+threshold (the dropped fraction never did), in which case the card leads with
+**This screen stalled N times in the last minute; check its network.** and
+leaves out the dropped-frames and resolution sentences, since those are
+decode advice and a stall-only episode says nothing about decode load. The
+`[video]` struggling log line below reads from the same episode.
+
+The Video feeds list's own meta line reads **On N screens** for any feed
+currently playing anywhere, struggling or not — every distinct screen a
+heartbeat has reported that feed's playback for in the last minute.
+
+Each transition into or out of struggling is a `[video]` line on the
+server's own log; see Logging below.
 
 ## Logging
 
@@ -309,6 +372,13 @@ from the server:
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
   feed that had lost its password, which its device then needs.
+- A screen struggling with a feed — dropped frames and stalls, in the last
+  minute — the moment its window crosses the threshold above, and playing it
+  smoothly again the moment it clears; each once, not repeated while it stays
+  true. `could not record <screen>'s playback report` when a screen's
+  numbers cannot be saved, once per outage for each screen, and `recording
+  <screen>'s playback reports is working again` once they have saved again
+  for two minutes. The heartbeat itself still counts either way.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password
@@ -325,6 +395,13 @@ Each screen writes its own `[video]` lines from the browser:
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.
+- A feed that needs HLS refused by a screen's own **Use HLS on this screen**
+  switch, once per outage, and a line once it can play again — the screen
+  allows HLS again, or the feed stops needing it. Nothing repeats while the
+  switch stays off.
+- A playing widget's own stats failing to read (for the health report
+  above), or taking longer than 1.5 seconds, once per outage, and a line once
+  they read again.
 - A Video widget crashing, with the error. The rest of the layout keeps
   drawing.
 

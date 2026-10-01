@@ -545,22 +545,23 @@ nothing at all.
 
 A YouTube or Resi feed plays in the platform's own player. A feed pointed at
 another WebRTC or HLS address plays over HLS when the address ends in `.m3u8`,
-or over WebRTC otherwise. Stage Utility cannot see either kind's health, so a
-failed attempt retries the same method rather than switching to the other,
-after a delay that starts at 1 second and doubles to 30; playback that holds
-for 10 seconds starts the delay over. It never gives up on such a feed.
+or over WebRTC otherwise. Stage Utility cannot see whether either kind's
+source is live, so a failed attempt retries the same method rather than
+switching to the other, after a delay that starts at 1 second and doubles to
+30; playback that holds for 10 seconds starts the delay over. It never gives
+up on such a feed.
 
 | State | Shown as |
 |---|---|
 | No feed chosen | "Choose a feed" |
 | Connecting | A pulsing dot and "Connecting to \<feed name\>" |
 | Waiting | "Waiting for the source" and "Nothing is sending to this feed yet" — a push feed nothing has sent to yet, with the relay running |
-| Video off | "Video is off" and "Turn it on on the Video feeds page" — a pull or push feed while video is switched off |
+| Video off | "Video is off" and "Turn video on to play this feed" — a pull or push feed while video is switched off |
 | Waiting for the relay | "Waiting for the video relay" and "It is starting up" — a pull or push feed while the relay is starting, downloading, or failing and retrying |
 | Live | The picture |
 | Live, over HLS | The picture, with a badge counting how many seconds behind live it is |
 | Offline | Your **When the feed is offline** setting |
-| Can't play here | "This screen can't play video" |
+| Can't play here | "This screen can't play video" and "\<feed name\> plays on the other screens" |
 
 A relay feed that falls back to HLS because WebRTC failed on this screen
 tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
@@ -574,7 +575,9 @@ request is what brings it up.
 **Offline** is what shows when a widget's feed has been deleted from the Video
 feeds page while a layout still points at it, and while a feed that dropped
 waits for its next attempt. **Can't play here** is this screen's browser
-lacking WebRTC or HLS support for the feed's address.
+lacking WebRTC or HLS support for the feed's address, or this screen's own
+**Use HLS on this screen** switch (Screens page) turned off for a feed that
+needs HLS to play at all.
 
 ---
 

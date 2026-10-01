@@ -3446,6 +3446,20 @@ export class StageController {
     );
   }
 
+  /** Allow or refuse HLS playback on this output's Video widgets. Off keeps a
+   *  struggling Pi on WebRTC only, at the cost of any feed that needs HLS
+   *  (B-frames) refusing to play here at all. */
+  async setOutputAllowHls(id: string, allowHls: boolean): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setAllowHls — output ${id} not found`);
+    }
+    return this.commitOutputPatch(
+      id,
+      { allowHls },
+      `[stage-controller] setOutputAllowHls output=${scrub(id)} → ${scrub(allowHls ? "allowed" : "WebRTC only")}`,
+    );
+  }
+
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
     await this.outputWrites.enqueue(async () => {
@@ -4057,6 +4071,7 @@ export class StageController {
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
         hideTopBar: output.hideTopBar ?? false,
+        allowHls: output.allowHls ?? true,
       };
     }
     this.state = {

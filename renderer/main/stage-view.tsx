@@ -20,6 +20,7 @@ import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -466,44 +467,85 @@ export function StageView() {
 
   // Presence heartbeat: tell the server this screen is alive so the Screens page
   // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
-  // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
-  // flips the dot offline at once, and the server TTL catches ungraceful deaths.
+  // otherwise (no point pinging every 20s during a dead week) — faster still,
+  // VIDEO_HEARTBEAT_MS, whenever a Video widget on this screen is actually playing
+  // something, whichever of the other two cadences that beats. A sendBeacon on
+  // unload flips the dot offline at once, and the server TTL catches ungraceful
+  // deaths.
+  //
+  // A self-rescheduling setTimeout, not a fixed setInterval: anyPlaying() is read
+  // fresh every time schedule() runs, and onAnyPlayingChange and the pco:live
+  // listener below both call schedule() the moment their half of the cadence
+  // changes, so a widget starting to play does not have to wait out whatever was
+  // left of a slow, already-pending wait. A change only ever brings the next ping
+  // forward: a picture flapping between playing and not would otherwise restart
+  // the wait on every flip, and never ping at all while it flaps faster than the
+  // cadence it keeps restarting.
   useEffect(() => {
     if (isPreviewSlug(displayId)) return;
     const url = "/api/displays/presence";
     let near = false;
-    let timer: ReturnType<typeof setInterval>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // When the pending ping is due; null once it has fired.
+    let dueAt: number | null = null;
+    const intervalMs = () => (anyPlaying() ? VIDEO_HEARTBEAT_MS : near ? 20_000 : 60_000);
     const ping = () => {
-      void fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The size this screen is actually running at, so Screens can show it
-        // without anybody walking to the wall with a laptop. CSS pixels plus the
-        // ratio: that is what a layout is measured in, so it is the number that
-        // answers "will my view fit".
-        //
-        // `device` comes from the /enroll redirect and is only present on a
-        // kiosk device. A browser opened by hand has none, so its size is
-        // reported by nobody and cannot overwrite the screen's.
-        body: JSON.stringify({
+      void (async () => {
+        // Bounded: a sampler that never answers sends this beat without video,
+        // rather than holding the Connected dot hostage.
+        const reports = await drainReportsInTime();
+        const body: Record<string, unknown> = {
           outputId: displayId,
           deviceId: new URLSearchParams(window.location.search).get("device") ?? undefined,
+          // The size this screen is actually running at, so Screens can show it
+          // without anybody walking to the wall with a laptop. CSS pixels plus the
+          // ratio: that is what a layout is measured in, so it is the number that
+          // answers "will my view fit".
+          //
+          // `device` comes from the /enroll redirect and is only present on a
+          // kiosk device. A browser opened by hand has none, so its size is
+          // reported by nobody and cannot overwrite the screen's.
           screen: { w: window.screen.width, h: window.screen.height, dpr: window.devicePixelRatio },
-        }),
-        keepalive: true,
-      }).catch(() => {});
+        };
+        if (reports.length > 0) body.video = reports;
+        await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          keepalive: true,
+        });
+      })().catch(() => {});
     };
     const schedule = () => {
-      clearInterval(timer);
-      timer = setInterval(ping, near ? 20_000 : 60_000);
+      // performance.now(), not Date.now(): the deadline math below compares
+      // this call's candidate against a PREVIOUS call's `dueAt`, and only a
+      // monotonic clock keeps that comparison meaningful across a wall-clock
+      // step (NTP catching up on a Pi with no clock battery). Date.now()
+      // jumping mid-session reads a stale `dueAt` as already past whatever
+      // the new candidate is, so a faster cadence (a widget starting to
+      // play) never gets to bring the pending ping forward.
+      const now = performance.now();
+      const at = now + intervalMs();
+      if (dueAt !== null && dueAt <= at) return;
+      clearTimeout(timer);
+      dueAt = at;
+      timer = setTimeout(() => {
+        dueAt = null;
+        ping();
+        schedule();
+      }, at - now);
     };
     ping();
     schedule();
     const offLive = onNotification("pco:live", (p: unknown) => {
       const mode = (p as { mode?: string } | null)?.mode;
       const n = mode === "item" || mode === "preservice";
-      if (n !== near) { near = n; schedule(); }
+      if (n !== near) {
+        near = n;
+        schedule();
+      }
     });
+    const offPlaying = onAnyPlayingChange(schedule);
     const leave = () => {
       try {
         navigator.sendBeacon?.(
@@ -514,8 +556,9 @@ export function StageView() {
     };
     window.addEventListener("pagehide", leave);
     return () => {
-      clearInterval(timer);
+      clearTimeout(timer);
       offLive();
+      offPlaying();
       window.removeEventListener("pagehide", leave);
       leave();
     };
@@ -582,7 +625,7 @@ function renderView(
   previewViewId: string | null,
   previewDraftSlots: Slot[] | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, isPreview, outputMode } = screen;
+  const { kind, view: activeView, displayId, isPreview, outputMode, allowHls } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -613,6 +656,7 @@ function renderView(
               ndiSource={activeView?.ndiSource ?? null}
               interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
               surface={viewSurface(activeView)}
+              allowHls={allowHls}
             />
           </div>
         </div>
