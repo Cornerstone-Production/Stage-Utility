@@ -24,10 +24,13 @@ import { useStatusChannel } from "./use-status-channel";
  * stale replayed frame (a display reconnecting after both services ran) gets
  * corrected. A push for the SAME service still updates normally; so does any
  * push once this hook's own record has itself ended.
+ *
+ * @param enabled false where nothing on screen draws it — a layout with no
+ *   pacing widget or people graph. Off, it neither reads nor subscribes.
  */
-export function useServiceTimeline(): ServiceTimeline | null {
+export function useServiceTimeline(enabled = true): ServiceTimeline | null {
   const read = useCallback(() => invoke<ServiceTimeline | null>("serviceTimeline:getCurrent"), []);
-  const { value: pushed } = useStatusChannel<ServiceTimeline>(read, "service-timeline:history");
+  const { value: pushed } = useStatusChannel<ServiceTimeline>(read, "service-timeline:history", enabled);
 
   // The last value THIS hook actually accepted, and the last `pushed` it has
   // already reacted to — React's own "adjusting state when a prop changes"

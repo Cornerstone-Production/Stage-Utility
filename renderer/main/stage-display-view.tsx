@@ -2,7 +2,7 @@ import { Tooltip } from "../components/ui/tooltip";
 import { parseColor } from "../components/ui/color-math";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
-import { useDashboardState } from "./use-dashboard-state";
+import { useDashboardState, useProPresenterStatus } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useTranscript } from "./use-transcript";
 import { channelLabel, lineColor } from "./channel-color";
@@ -78,7 +78,8 @@ function SectionChip({ section, size = "md" }: { section: ProSection | null; siz
  * header says why: it is an office display read from a desk, at absolute sizes.
  */
 export function StageDisplayView({ displayId }: StageDisplayViewProps) {
-  const { state, isLoading, error, pcoLive, pcoLiveKnown, propresenter, propresenterKnown } = useDashboardState();
+  const { state, isLoading, error, pcoLive, pcoLiveKnown } = useDashboardState();
+  const { value: propresenter, known: propresenterKnown } = useProPresenterStatus();
   const transcript = useTranscript();
   const spl = useSplState();
 

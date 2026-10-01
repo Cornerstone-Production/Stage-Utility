@@ -170,7 +170,7 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
   return {
     ...statusCtx(d),
     state: d.state,
-    propresenter: d.propresenter,
+    propresenter: d.propresenterStatus.value,
     propInstances: d.propInstances,
     pcoLive: d.pcoLive,
     transcript: d.transcript,

@@ -123,7 +123,17 @@ const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
  * say it through here.
  */
 export function markSoundUnavailable<F extends StatFigure & { sub?: string }>(figures: F[]): F[] {
-  return figures.map((f) => (f.key === "level" ? { ...f, sub: "sound unavailable" } : f));
+  return markLevel(figures, "sound unavailable");
+}
+
+/** Figures for a service whose sound record is still being READ — for the same
+ *  reason, never "no sound recorded" before anyone has looked. */
+function markSoundLoading<F extends StatFigure & { sub?: string }>(figures: F[]): F[] {
+  return markLevel(figures, "loading");
+}
+
+function markLevel<F extends StatFigure & { sub?: string }>(figures: F[], sub: string): F[] {
+  return figures.map((f) => (f.key === "level" ? { ...f, sub } : f));
 }
 
 /**
@@ -472,11 +482,15 @@ export function useHeaderInset(ref: React.RefObject<HTMLElement | null>): number
 
 export interface ServiceHeaderProps {
   timeline: ServiceTimeline;
-  attendance: ServiceAttendance | null;
+  /** A summary is enough: the header quotes the peaks, never the samples, so
+   *  the list's own summary can stand in while the full record is read. */
+  attendance: ServiceAttendanceSummary | null;
   spl: ServiceSplHistory | null;
   /** The sound record could not be read. Its absence then means nothing about
    *  the service, so the level figure must not say "no sound recorded". */
   soundUnavailable?: boolean;
+  /** The sound record has not been read yet — the same reason, not a fault. */
+  soundLoading?: boolean;
   /** Ticks every second while the record is open, so Actual counts up. */
   now?: number;
   readOnly?: boolean;
@@ -498,11 +512,22 @@ export interface ServiceHeaderProps {
   sections?: readonly { id: string; label: string }[];
 }
 
+/** The way back from a service to the list — this header's, and every page
+ *  History draws for a service without one. */
+export function AllServicesLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="self-start text-caption1 text-accent hover:underline" onClick={onClick}>
+      ← All services
+    </button>
+  );
+}
+
 export function ServiceHeader({
   timeline,
   attendance,
   spl,
   soundUnavailable = false,
+  soundLoading = false,
   now,
   readOnly = false,
   meta,
@@ -528,9 +553,12 @@ export function ServiceHeader({
       // linter: the value is never used, the CHANGE is the whole point.
       void metricsVersion;
       const figures = serviceKpis(timeline, attendance, spl, live ? now : undefined);
-      return soundUnavailable && !spl ? markSoundUnavailable(figures) : figures;
+      if (spl) return figures;
+      if (soundUnavailable) return markSoundUnavailable(figures);
+      if (soundLoading) return markSoundLoading(figures);
+      return figures;
     },
-    [timeline, attendance, spl, soundUnavailable, live, now, metricsVersion],
+    [timeline, attendance, spl, soundUnavailable, soundLoading, live, now, metricsVersion],
   );
 
   // Geometry: see useHeaderInset's own doc comment — 184px tall at 1280 and
@@ -559,9 +587,7 @@ export function ServiceHeader({
         "before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-bg before:content-['']",
       )}
     >
-      <button className="self-start text-caption1 text-accent hover:underline" onClick={onBack}>
-        ← All services
-      </button>
+      <AllServicesLink onClick={onBack} />
 
       {/* Title beside the actions once the HEADER has room for both, not the
           viewport: beside the rail at 640px the actions would not shrink and

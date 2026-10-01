@@ -14,16 +14,19 @@ import { useStatusChannel, type StatusChannelResult } from "./use-status-channel
  * Ordering between the hydrate and the first push is useStatusChannel's job — see
  * the note there. A running timer whose read landed after the start frame reads
  * as stopped on the wall until the next button press.
+ *
+ * @param enabled false where nothing on screen draws it — a layout with no
+ *   baptism timer. Off, it neither reads nor subscribes.
  */
-export function useBaptismStatus(): StatusChannelResult<BaptismState> {
+export function useBaptismStatus(enabled = true): StatusChannelResult<BaptismState> {
   const read = useCallback(() => invoke<BaptismState>("baptism:get"), []);
-  return useStatusChannel<BaptismState>(read, "baptism:state");
+  return useStatusChannel<BaptismState>(read, "baptism:state", enabled);
 }
 
 /** The value alone, for the operator panel, which draws its own loading state
  *  rather than reading a `null` as idle. */
-export function useBaptismState(): BaptismState | null {
-  return useBaptismStatus().value;
+export function useBaptismState(enabled = true): BaptismState | null {
+  return useBaptismStatus(enabled).value;
 }
 
 /**

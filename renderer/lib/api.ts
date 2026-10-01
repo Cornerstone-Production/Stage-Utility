@@ -6,6 +6,7 @@
 // The renderer is always served from the same origin as the HTTP server
 // (port 8788), so all paths here are relative.
 
+import { errorMessage } from "@main/services/errors";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 
@@ -23,7 +24,247 @@ export interface ApiError extends Error {
   code?: string;
 }
 
+/** A non-2xx answer's body, or null when it is not JSON — never fatal. */
+async function errorBody(res: Response): Promise<{ error?: string; code?: string } | null> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** The Error a read that ran past REQUEST_TIMEOUT_MS becomes. */
+function timeoutError(path: string, cause: unknown): Error {
+  return new Error(`Request to ${path} timed out`, { cause });
+}
+
+/** The Error a non-2xx answer becomes, from its status and parsed body. */
+function httpError(status: number, statusText: string, body: { error?: string; code?: string } | null): ApiError {
+  const err = new Error(typeof body?.error === "string" ? body.error : statusText) as ApiError;
+  err.status = status;
+  if (typeof body?.code === "string") err.code = body.code;
+  return err;
+}
+
+// ── Shared reads ──────────────────────────────────────────────────────────────
+//
+// A first read of a live snapshot joins an identical one already on its way
+// instead of sending a second. Every page asked for the same snapshot more than
+// once at the same moment: the context bar's stage-state store and the settings
+// query each read /api/state (60 KB) at mount, 5 ms apart, and every status
+// hook instance read its own copy. The Screens page was the worst of it — each
+// preview is an iframe running the whole kiosk app, so it read every snapshot
+// again, per preview: 82 reads for 28 distinct answers on one visit, /api/state
+// nine times. On a slow link those queued behind the browser's six connections
+// until some hit REQUEST_TIMEOUT_MS and failed.
+//
+// ONLY the paths in SHARED_READ_PATHS, and only a plain GET. Each is the
+// snapshot a live channel also carries, read once to hydrate: nobody reads one
+// of them again to catch a change, because the push carries the change, and
+// every consumer already orders its read against pushes that overtake it (a
+// rev, or "a push arrived first, drop the read"). A read that re-asks BECAUSE
+// something changed must never join one sent before the change, which is why
+// sharing is a list and not the default, and why any write clears every read
+// on its way (asWrite) — the refetch after a save always goes out fresh.
+//
+// Only a read still ON ITS WAY is joined, and only one sent within
+// JOIN_WINDOW_MS. A finished answer is never reused.
+//
+// A joined read was sent BEFORE the caller asked, and that is only safe where
+// the caller can tell it from something newer. For a snapshot carrying a server
+// `rev` it can: every consumer of one orders read against push by rev, through
+// useStatusChannel. For one without, a consumer trusts a read because it sent it
+// AFTER subscribing — so a later mount joining an earlier mount's read could
+// apply an answer older than the frame it had just been replayed, and keep it
+// until the next push, which on a quiet channel is hours. So for those a joined
+// answer is used only if nothing newer on its channel has reached this frame
+// since that read was sent; otherwise the caller sends its own, exactly as it
+// would have without sharing. "Newer" is when the content arrived: a live
+// frame's arrival, or for a replay the time the cache took it.
+//
+// A same-origin preview frame reads through its parent's copy of this, so one
+// answer serves the page and every preview in it. What crosses between frames
+// is the parsed body, and each caller takes its own structuredClone of it in its
+// own realm: no object is shared between callers or crosses as a live reference.
+// The staleness check reads the CALLER's frame's content times, which holds
+// because every reader of these paths subscribes to the paired channel in its
+// own frame (the hydrate-then-subscribe shape); a reader that did not would see
+// no newer content, and trust a joined answer it should have re-asked.
+
+/**
+ * The reads that may be shared: the hydrate read behind each live snapshot, the
+ * channel that carries the same snapshot, and whether the answer carries a
+ * server `rev` its consumers order by. Checked against prod, 27 Sep 2026.
+ * Sorted by path, one per line. shared-reads-table.test.ts pins the list and
+ * asks the server code itself whether each `rev: true` answer carries one.
+ */
+export const SHARED_READ_PATHS: ReadonlyMap<string, { channel: string; rev: boolean }> = new Map([
+  ["/api/attendance/history/current", { channel: "attendance:history", rev: false }],
+  ["/api/baptism", { channel: "baptism:state", rev: false }],
+  ["/api/displays/presence", { channel: "displays:presence", rev: true }],
+  ["/api/integrations", { channel: "integrations:state-changed", rev: false }],
+  ["/api/integrations/wireless/channels", { channel: "wireless:channels", rev: false }],
+  ["/api/obs/status", { channel: "obs:status", rev: true }],
+  ["/api/pco/live", { channel: "pco:live", rev: false }],
+  ["/api/people/count", { channel: "people:count", rev: true }],
+  ["/api/propresenter/instances", { channel: "propresenter:instances", rev: false }],
+  ["/api/propresenter/status", { channel: "propresenter:status", rev: true }],
+  ["/api/pvp/status", { channel: "pvp:status", rev: true }],
+  ["/api/reaper/status", { channel: "reaper:status", rev: true }],
+  ["/api/resi/status", { channel: "resi:status", rev: true }],
+  ["/api/scores/status", { channel: "scores:status", rev: true }],
+  ["/api/service-timeline/current", { channel: "service-timeline:history", rev: false }],
+  ["/api/spl/metrics", { channel: "spl:metrics", rev: true }],
+  ["/api/state", { channel: "stage:state-changed", rev: false }],
+  ["/api/update/status", { channel: "update:status", rev: false }],
+  ["/api/youtube/status", { channel: "youtube:status", rev: true }],
+]);
+
+/**
+ * When the newest content on each channel reached THIS frame: a live frame's
+ * arrival, or for a replay the time its cache took it. Only ever moves forward.
+ */
+const contentAt = new Map<string, number>();
+
+function noteContent(channel: string, at: number): void {
+  if (at > (contentAt.get(channel) ?? 0)) contentAt.set(channel, at);
+}
+
+/** What one shared read came back as — clone-safe data only, so it can serve a
+ *  caller in another frame. */
+type SharedRead =
+  | { kind: "ok"; body: unknown }
+  | { kind: "http"; status: number; statusText: string; body: { error?: string; code?: string } | null }
+  | { kind: "timeout" }
+  | { kind: "failed"; name: string; message: string; cause: string | null };
+
+/** A shared read's answer, and when that read was sent. */
+interface SharedAnswer {
+  sentAt: number;
+  result: SharedRead;
+}
+
+/** A frame's reader, published for the frames inside it. */
+interface SharedReader {
+  read: (path: string) => Promise<SharedAnswer>;
+  /** A write went out: nothing already on its way may be joined. */
+  invalidate: () => void;
+}
+
+/** How long after it was sent a read on its way may still be joined. */
+const JOIN_WINDOW_MS = 2000;
+/** Where a frame publishes its reader. Versioned: a preview built from a newer
+ *  bundle than its page must not call a reader with a different contract. */
+const SHARED_READER_KEY = "__stageUtilitySharedReader_v1";
+
+/** Reads on their way, by path. `fetchFn` is the fetch that sent it: a read
+ *  made through a different fetch (a test's stub, replaced per case) is a
+ *  different network and is never joined. */
+const readsInFlight = new Map<string, { at: number; fetchFn: typeof fetch; read: Promise<SharedAnswer> }>();
+
+function sendRead(path: string): Promise<SharedAnswer> {
+  const now = Date.now();
+  const fetchFn = globalThis.fetch;
+  const hit = readsInFlight.get(path);
+  if (hit && hit.fetchFn === fetchFn && now - hit.at <= JOIN_WINDOW_MS) return hit.read;
+  const result = (async (): Promise<SharedRead> => {
+    try {
+      const res = await fetchFn(path, {
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!res.ok) return { kind: "http", status: res.status, statusText: res.statusText, body: await errorBody(res) };
+      return { kind: "ok", body: await res.json() };
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") return { kind: "timeout" };
+      return {
+        kind: "failed",
+        name: err instanceof Error ? err.name : "Error",
+        message: errorMessage(err),
+        // Node says "fetch failed" and puts the real reason one level down.
+        cause: err instanceof Error && err.cause !== undefined ? errorMessage(err.cause) : null,
+      };
+    }
+  })();
+  const read = result.then((r): SharedAnswer => ({ sentAt: now, result: r }));
+  const entry = { at: now, fetchFn, read };
+  readsInFlight.set(path, entry);
+  void read.then(() => {
+    if (readsInFlight.get(path) === entry) readsInFlight.delete(path);
+  });
+  return read;
+}
+
+/** The reader this frame uses: its same-origin parent's when there is one (a
+ *  Screens preview inside the operator app), its own otherwise. */
+const sharedReader: SharedReader = (() => {
+  try {
+    if (typeof window !== "undefined" && window.parent !== window) {
+      const theirs = (window.parent as unknown as Record<string, unknown>)[SHARED_READER_KEY] as SharedReader | undefined;
+      if (typeof theirs?.read === "function" && typeof theirs.invalidate === "function") return theirs;
+    }
+  } catch {
+    /* a parent on another origin: reading its properties throws */
+  }
+  return { read: sendRead, invalidate: () => readsInFlight.clear() };
+})();
+if (typeof window !== "undefined") (window as unknown as Record<string, unknown>)[SHARED_READER_KEY] = sharedReader;
+
+async function sharedGet<T>(path: string, share: { channel: string; rev: boolean }): Promise<T> {
+  const askedAt = Date.now();
+  const { sentAt, result: r } = await sharedReader.read(path);
+  // Joined a read sent before this caller asked, for a snapshot its consumer
+  // cannot order, and something newer has reached this frame since: the answer
+  // may be older than what the consumer already holds. Ask again.
+  if (!share.rev && sentAt < askedAt && (contentAt.get(share.channel) ?? 0) > sentAt) {
+    return sendAsAsked<T>(path);
+  }
+  switch (r.kind) {
+    case "ok":
+      return structuredClone(r.body) as T;
+    case "http":
+      throw httpError(r.status, r.statusText, r.body);
+    case "timeout":
+      throw timeoutError(path, new DOMException("signal timed out", "TimeoutError"));
+    case "failed": {
+      // Rebuilt in this frame's realm, so `instanceof TypeError` holds here.
+      const options = r.cause === null ? undefined : { cause: new Error(r.cause) };
+      let err: Error;
+      if (r.name === "TypeError") err = new TypeError(r.message, options);
+      else if (r.name === "SyntaxError") err = new SyntaxError(r.message, options);
+      else err = new Error(r.message, options);
+      if (err.name !== r.name) err.name = r.name;
+      throw err;
+    }
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // A plain read of a live snapshot is shared (see "Shared reads" above).
+  // Anything carrying its own options goes out as asked, and a write first
+  // stops every read on its way from being joined, before AND after it lands.
+  const share = init === undefined ? SHARED_READ_PATHS.get(path) : undefined;
+  if (share) return sharedGet<T>(path, share);
+  if (init?.method !== undefined && init.method !== "GET") return asWrite(() => sendAsAsked<T>(path, init));
+  return sendAsAsked<T>(path, init);
+}
+
+/**
+ * Send a write so that no read already on its way can be joined across it —
+ * before it goes out, and again once it has landed, so the refetch after a
+ * save is always sent after the save. EVERY write goes through here, including
+ * the one that cannot use apiFetch (cues:call).
+ */
+async function asWrite<T>(send: () => Promise<T>): Promise<T> {
+  sharedReader.invalidate();
+  try {
+    return await send();
+  } finally {
+    sharedReader.invalidate();
+  }
+}
+
+async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -32,26 +273,13 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new Error(`Request to ${path} timed out`, { cause: err });
-    }
+    if (err instanceof DOMException && err.name === "TimeoutError") throw timeoutError(path, err);
     throw err;
   }
-  if (!res.ok) {
-    let msg = res.statusText;
-    let body: { error?: string; code?: string } | null = null;
-    try {
-      body = await res.json();
-      if (typeof body?.error === "string") msg = body.error;
-    } catch { /* ignore */ }
-    // Carry the status and any machine-readable `code` on the Error. Callers that
-    // only interpolate the message are unaffected, but one that has to tell a
-    // conflict from a failure (a 409 is a choice, not an error) now can.
-    const err = new Error(msg) as ApiError;
-    err.status = res.status;
-    if (typeof body?.code === "string") err.code = body.code;
-    throw err;
-  }
+  // Carry the status and any machine-readable `code` on the Error. Callers that
+  // only interpolate the message are unaffected, but one that has to tell a
+  // conflict from a failure (a 409 is a choice, not an error) now can.
+  if (!res.ok) throw httpError(res.status, res.statusText, await errorBody(res));
   return res.json() as Promise<T>;
 }
 
@@ -1203,16 +1431,17 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // confirmation the panel cannot give, 409 refused with a reason. The button
     // reads all three; throwing on a 409 would turn "not allowed during a
     // service" into a generic failure toast. So not post(), which throws.
-    case "cues:call": {
-      const res = await fetch(`/api/cues/${encodeURIComponent(String(p.name))}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    case "cues:call":
+      return asWrite(async () => {
+        const res = await fetch(`/api/cues/${encodeURIComponent(String(p.name))}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        return { ...body, status: res.status } as T;
       });
-      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      return { ...body, status: res.status } as T;
-    }
     case "cues:mintToken": return post("/api/cues/tokens", params);
     case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
     // YAML, not JSON — the one text response in this file, so it cannot go
@@ -1378,7 +1607,15 @@ type SseCallback = (payload: unknown, replayed: boolean) => void;
  * replayed snapshot on top of it. A handler's throw is contained so one broken
  * subscriber cannot cost the others their frame.
  */
-function fanOut(channel: string, payload: unknown, replayed: boolean, callbacks: Iterable<SseCallback> | undefined): void {
+function fanOut(
+  channel: string,
+  payload: unknown,
+  replayed: boolean,
+  callbacks: Iterable<SseCallback> | undefined,
+  /** For a replay, when its cache took it. Unknown is treated as now. */
+  cachedAt?: number,
+): void {
+  noteContent(channel, replayed && cachedAt !== undefined ? cachedAt : Date.now());
   if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
   if (!callbacks) return;
   for (const cb of [...callbacks]) {
@@ -1418,9 +1655,14 @@ const channelListeners = new Map<string, SseListener>();
  * one's first subscriber. That is right in a browser and wrong in a suite: a
  * case whose premise is "the server was down at page load" would be handed a
  * state frame from the case above it, and pass or fail on test ORDER.
+ *
+ * Reads still in flight go with it, for the same reason: a case that holds a
+ * read open must not hand it to the next case's first read of that path.
  */
 export function __resetReplayCacheForTests(): void {
   lastPayload.clear();
+  readsInFlight.clear();
+  contentAt.clear();
 }
 
 // Stable per-context client id, sent on the SSE URL so the server can scope this
@@ -1548,8 +1790,8 @@ function ensureWorker(): boolean {
       // `replay` is the worker's word for "this is the cached snapshot, not
       // something the server just sent" — the same distinction the direct path
       // draws, so a subscriber cannot tell which transport it is on.
-      const { channel, data, replay } = msg as { channel: string; data: unknown; replay?: boolean };
-      fanOut(channel, data, replay === true, workerHandlers.get(channel));
+      const { channel, data, replay, at } = msg as { channel: string; data: unknown; replay?: boolean; at?: number };
+      fanOut(channel, data, replay === true, workerHandlers.get(channel), typeof at === "number" ? at : undefined);
     };
     sseWorker.port.start();
     startWorkerHeartbeat();
@@ -1719,6 +1961,7 @@ function ensureEventSource(): EventSource {
     eventSource.addEventListener(channel, (e: MessageEvent) => {
       try {
         lastPayload.set(channel, JSON.parse(e.data));
+        noteContent(channel, Date.now());
       } catch {
         /* a malformed frame is the dispatcher's problem, not the cache's */
       }

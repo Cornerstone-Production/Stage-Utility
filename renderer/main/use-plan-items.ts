@@ -32,13 +32,21 @@ const UNKNOWN: PlanItemsStatus = { value: null, known: false, failed: false };
  * script-view-plan-switch.test.tsx holds ScriptView to, where showing the wrong
  * plan was worse than showing nothing. Only the latest read may land, so a slow
  * answer for the plan just left cannot overwrite the one for the plan now live.
+ *
+ * @param enabled false where nothing on screen draws it — a layout with no
+ *   service-order or pacing widget. Off, it reads nothing. Gated in the fetch
+ *   rather than around the listener, because the read is all this costs: the
+ *   stage state channel is held open by every surface that renders a layout,
+ *   and keeping the listener tracks the plan while off, so switching back on
+ *   reads once rather than again for a plan it has already seen.
  */
-export function usePlanItemsStatus(): PlanItemsStatus {
+export function usePlanItemsStatus(enabled = true): PlanItemsStatus {
   const [answer, setAnswer] = useState<{ value: PlanItemsDTO | null; failed: boolean } | null>(null);
   const planRef = useRef<string | null | undefined>(undefined);
   const latest = useRef(0);
 
   const fetchItems = useCallback(() => {
+    if (!enabled) return;
     const mine = ++latest.current;
     invoke<PlanItemsDTO>("pco:getPlanItems")
       .then((d) => {
@@ -47,22 +55,29 @@ export function usePlanItemsStatus(): PlanItemsStatus {
       .catch(() => {
         if (mine === latest.current) setAnswer((prev) => ({ value: prev?.value ?? null, failed: true }));
       });
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
 
   useEffect(() => {
-    return onNotification("stage:state-changed", (p) => {
+    // `stage:state-changed` is a hydrated channel (sse-channels.ts), so every
+    // mount into an already-open SSE stream replays its cached frame — on top
+    // of the `fetchItems()` mount effect above, that was a second, redundant
+    // `pco:getPlanItems` on every open. A replay is at best as new as this
+    // mount, which the effect above already covers, so it only seeds
+    // `planRef` here; a plan change is worth a refetch only when it arrives
+    // LIVE.
+    return onNotification("stage:state-changed", (p, replayed) => {
       const pid = (p as StageState | null)?.planId ?? null;
-      if (pid !== planRef.current) {
-        planRef.current = pid;
-        // Kept only when it already IS this plan's: the mount read racing the
-        // first push answers for the plan that push names.
-        setAnswer((prev) => (prev && !prev.failed && prev.value?.planId === pid ? prev : null));
-        fetchItems();
-      }
+      if (pid === planRef.current) return;
+      planRef.current = pid;
+      if (replayed) return;
+      // Kept only when it already IS this plan's: the mount read racing the
+      // first push answers for the plan that push names.
+      setAnswer((prev) => (prev && !prev.failed && prev.value?.planId === pid ? prev : null));
+      fetchItems();
     });
   }, [fetchItems]);
 
@@ -72,6 +87,6 @@ export function usePlanItemsStatus(): PlanItemsStatus {
 /** The rundown alone, for callers that draw nothing from a missing one — the
  *  baptism triggers panel hides, and the inspector says what appears once a
  *  plan is loaded. */
-export function usePlanItems(): PlanItemsDTO | null {
-  return usePlanItemsStatus().value;
+export function usePlanItems(enabled = true): PlanItemsDTO | null {
+  return usePlanItemsStatus(enabled).value;
 }

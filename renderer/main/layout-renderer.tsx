@@ -15,7 +15,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
-import { useDashboardState, usePropInstances } from "./use-dashboard-state";
+import { useDashboardState, useProPresenterStatus, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useDisplayPresenceStatus } from "./use-display-presence";
 import { useObsStatus } from "./use-obs-state";
@@ -3097,7 +3097,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // The state comes FIRST, before the gates that used to be computed above it:
   // an embedded view's objects live in `state.views`, and a gate that cannot see
   // them leaves every widget inside a tile without a channel.
-  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const { state, isLoading, error, pcoLive } = useDashboardState();
   const views = state?.views;
   const outputs = state?.outputs;
   // `views`/`outputs` are fresh array identities on every state broadcast, so
@@ -3167,17 +3167,42 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // layouts, so that tile reports "screen-embed" on its own and the stand-in is
   // gone — a view-embed of a clock no longer opens the presence channel.
   const onlinePresence = useDisplayPresenceStatus(want(["screen-embed", "home-screens", "home-readiness"]));
-  const propInstances = usePropInstances();
-  const baptismStatus = useBaptismStatus();
-  const planItemsStatus = usePlanItemsStatus();
-  const serviceTimeline = useServiceTimeline();
-  const integrationsSnap = useIntegrations();
+  // Every object that reads ProPresenter, through its own instance or the
+  // default one — the types layout-objects.ts marks `propInstance: true`. A
+  // literal rather than derived from that flag, because gate-render-parity
+  // reads gates as literals; layout-data-reads holds this list to the flag.
+  // The status channel is the costly one: while anything subscribes to it the
+  // server holds its ProPresenter fallback poll at full rate, so a Home of
+  // status cards must not. The two service-item objects are here although they
+  // follow PCO first — they fall back to ProPresenter's playlist when PCO has no
+  // current item.
+  const proWanted = want([
+    "current-service-item",
+    "current-slide-notes",
+    "current-slide-text",
+    "next-service-item",
+    "next-slide-text",
+    "pp-timer",
+    "section-chip",
+    "slide-progress",
+    "slide-thumbnail",
+  ]);
+  const propresenterStatus = useProPresenterStatus(proWanted);
+  const propInstances = usePropInstances(proWanted);
+  const baptismStatus = useBaptismStatus(want(["baptism-timer"]));
+  // service-pacing reads the rundown only for its projected-end mode, and is
+  // named whatever its config says: a gate that followed config would open the
+  // read one render after the operator flipped the switch, and the projection
+  // would sit on a dash until it landed.
+  const planItemsStatus = usePlanItemsStatus(want(["service-order", "service-pacing"]));
+  const serviceTimeline = useServiceTimeline(want(["service-pacing", "people-graph"]));
+  const integrationsSnap = useIntegrations(want(["integration-status"]));
 
   // One clock for the whole canvas, and it is the SERVER's — a wall Pi's own is
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3252,7 +3277,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3325,7 +3350,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

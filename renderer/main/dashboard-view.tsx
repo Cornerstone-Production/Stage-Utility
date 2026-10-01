@@ -1,7 +1,7 @@
 import { Tooltip } from "../components/ui/tooltip";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
-import { useDashboardState } from "./use-dashboard-state";
+import { useDashboardState, useProPresenterStatus } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useTranscript } from "./use-transcript";
 import { channelLabel, lineColor } from "./channel-color";
@@ -36,7 +36,8 @@ interface DashboardViewProps {
  * header says why: it is an office display read from a desk, at absolute sizes.
  */
 export function DashboardView({ displayId }: DashboardViewProps) {
-  const { state, isLoading, error, pcoLive, pcoLiveKnown, propresenter, propresenterKnown } = useDashboardState();
+  const { state, isLoading, error, pcoLive, pcoLiveKnown } = useDashboardState();
+  const { value: propresenter, known: propresenterKnown } = useProPresenterStatus();
   const transcript = useTranscript();
   const spl = useSplState();
 
