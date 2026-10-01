@@ -34,6 +34,7 @@ const { videoProxyRoutes, proxyTimeouts, proxyOutage } = await import("./video-p
 const { callRoute } = await import("./route-harness.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
+const { PULL_START_TIMEOUT_MS } = await import("../video/reconcile-plan.js");
 const { fakeRelay } = await import("../fixtures/fake-relay.js");
 type SupervisorStatus = import("../video/supervisor.js").SupervisorStatus;
 
@@ -705,6 +706,17 @@ describe("a relay that never answers", () => {
   });
   after(async () => {
     await videoService.detachRelay();
+  });
+
+  test("a WHEP offer outlasts the relay's own dial window, so the relay's reason reaches the screen", () => {
+    // Seen on a dev server, 1 Oct 2026: a pull feed pointed at the wrong
+    // device. The relay answered 400 "source of path 'box' has timed out" at
+    // 10.0 s; the proxy, on the same 10 s, answered 502 "the video relay did
+    // not answer in time" instead.
+    assert.ok(
+      proxyTimeouts.whepWhip > PULL_START_TIMEOUT_MS,
+      `whepWhip ${proxyTimeouts.whepWhip} ms must be longer than the relay's ${PULL_START_TIMEOUT_MS} ms dial`,
+    );
   });
 
   test("a WHEP/WHIP request against a relay that never answers is a 502 once proxyTimeouts.whepWhip elapses", async () => {

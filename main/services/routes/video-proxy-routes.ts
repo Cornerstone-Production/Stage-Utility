@@ -19,6 +19,7 @@ import * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
+import { PULL_START_TIMEOUT_MS } from "../video/reconcile-plan.js";
 import { videoService } from "../video/video-service.js";
 import { type RouteCtx, error, readRawBody } from "./context.js";
 
@@ -31,10 +32,14 @@ import { type RouteCtx, error, readRawBody } from "./context.js";
  */
 export const proxyTimeouts = {
   /** WHEP/WHIP signalling is a handful of round trips over an SDP
-   *  offer/answer — long enough to survive a slow network, short enough
-   *  that a hung relay is reported rather than left to hold the request
-   *  open indefinitely. */
-  whepWhip: 10_000,
+   *  offer/answer, but a WHEP offer for an on-demand pull feed is also held
+   *  while the relay dials the device, up to PULL_START_TIMEOUT_MS. The
+   *  margin past that window is what lets the relay's own answer through —
+   *  "source of path 'box' has timed out" names the device; cut off at the
+   *  same instant it read as "the video relay did not answer in time", and
+   *  sent the operator to the wrong box. Still short enough that a hung
+   *  relay is reported rather than left to hold the request open. */
+  whepWhip: PULL_START_TIMEOUT_MS + 5_000,
   /** LL-HLS's blocking playlist reload holds the request open until the
    *  next part is ready — the tests' fixture holds for 2 s. 30 s
    *  covers a real stall without the client waiting forever on a relay

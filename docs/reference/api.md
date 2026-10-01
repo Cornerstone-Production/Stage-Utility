@@ -504,8 +504,9 @@ the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
 kind the feed's own source cannot serve (embed/external have no relay path;
 WHIP needs a push feed whose own protocol is WHIP), or a file name outside
 the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `502` if the relay
-refuses the connection or the exchange times out (10 s for WHEP/WHIP, 30 s
-for HLS — an LL-HLS blocking playlist reload can legitimately hold that
+refuses the connection or the exchange times out (15 s for WHEP/WHIP, past the
+relay's own 10-second dial of a pull feed's device so its reason comes
+through, 30 s for HLS — an LL-HLS blocking playlist reload can legitimately hold that
 long); `503` while the relay is not running, or in the moment after it
 starts, before it has been given the feed.
 
