@@ -27,6 +27,7 @@ import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
+import { withoutCredentials } from "./redact-url.js";
 import { RelayLogWatcher } from "./relay-log.js";
 import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
@@ -390,6 +391,10 @@ class VideoService {
    *  answering a poll, "seen-store" for the seen store failing to write —
    *  different facts, each its own outage rather than one per poll. */
   private readonly pollOutage = new OutageLog();
+  /** One run per pull feed whose device did not answer the relay's dial —
+   *  keyed by feed id, so a screen retrying through the run writes one line,
+   *  not one per attempt. */
+  private readonly dialOutage = new OutageLog();
   /** "reconcile" and "push-kick": calls made on a feed change or a password
    *  rotation, not on a timer, so a success is the next call, maybe hours
    *  away. The default settle window waits for a success to hold, which
@@ -961,6 +966,7 @@ class VideoService {
         this.unansweredSince.delete(feed.id);
         await this.recordSeen(feed.id, now);
       }
+      if (feed.source.kind === "pull") this.reportDial(feed, feed.source.url, path?.ready === true, now);
 
       const leftReady = this.logTransition(feed, status);
       // noteSeen()'s own write is throttled to once a minute, so the TRUE
@@ -1059,6 +1065,27 @@ class VideoService {
   private pictureText(status: FeedStatus): string {
     const dims = status.width && status.height ? `${status.width}×${status.height}` : null;
     return [dims, status.codec].filter((part): part is string => Boolean(part)).join(" ");
+  }
+
+  /** The only server-side word on a pull feed whose device never answers:
+   *  the screen's own line names the relay's reason, but a feed nothing on
+   *  the server reports looks, at 9am on a Sunday, like a relay that is
+   *  fine. Names the address, because a wrong one is the usual cause — and
+   *  some encoders answer an unknown path with silence rather than an error,
+   *  which looks exactly like a slow device. */
+  private reportDial(feed: VideoFeed, url: string, ready: boolean, now: number): void {
+    if (this.dialRanOut(feed.id)) {
+      const decision = this.dialOutage.fail(feed.id, "dial", now);
+      if (decision.log) {
+        console.warn(
+          `[video] ${scrub(feed.name)}: nothing from ${scrub(withoutCredentials(url))} within ` +
+            `${scrub(PULL_START_TIMEOUT_MS / 1000)} s of the relay asking — check the device is on and the address and path are right${scrub(decision.note)}`,
+        );
+      }
+    } else if (ready) {
+      const decision = this.dialOutage.ok(feed.id, now);
+      if (decision.log) console.log(`[video] ${scrub(feed.name)}: the device is answering again${scrub(decision.note)}`);
+    }
   }
 
   /**

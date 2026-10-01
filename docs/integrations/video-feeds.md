@@ -368,6 +368,12 @@ from the server:
   did not answer, once per outage per feed, and `is answering again`.
 - Each feed going live or delayed, and `went offline` once per outage, only
   for a feed that was showing a picture.
+- `<feed>: nothing from <address> within 10 s of the relay asking`: a pull
+  feed's device did not answer the relay's dial, once per outage however often
+  screens retry, and `the device is answering again` once it has. The usual
+  cause is a wrong address or path — some encoders answer a path they do not
+  have with silence rather than an error, which looks the same as a device
+  that is off.
 - B-frames detected on a feed, with which setting to change.
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
