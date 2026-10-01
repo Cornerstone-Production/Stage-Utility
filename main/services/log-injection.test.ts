@@ -133,6 +133,10 @@ const REQUEST_FACING = [
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
+  // Its one outage line names the feed id off the proxied URL (validated
+  // against the feed list first, so it is never an attacker's raw string)
+  // and whatever the relay's own error said back.
+  "routes/video-proxy-routes.ts",
   // Logs nothing today — every routes/ file is walked, so a new one forces this
   // decision rather than being found the day it first logs a feed name or a URL
   // typed into a POST /api/video/feeds body.
@@ -145,6 +149,9 @@ const REQUEST_FACING = [
   "service-timeline-recorder.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
+  // file's own "is live"/"went offline"/B-frames log lines on a transition.
+  "video/video-service.ts",
   "view-import.ts",
   // The channel title on a successful Connect comes back from Google, not the
   // operator, but it is still external data reaching a log line.
@@ -264,6 +271,28 @@ const NOT_SCANNED = new Map<string, string>([
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
+  // video/acquire.ts is NOT here: it logs nothing — the caller
+  // (relay-lifecycle.ts, already in this map below) owns all logging for a
+  // checksum mismatch now, so acquire.ts itself no longer logs anything at
+  // all, and an exclusion for a file that has stopped logging is exactly
+  // the stale entry this guard's own second half catches.
+  [
+    "video/relay-lifecycle.ts",
+    "logs the relay's own version (MediaMTX's startup banner, the same not-HTTP-data as " +
+      "supervisor.ts below) and its bound ports, which ARE saved through PATCH " +
+      "/api/video/ports — but ports.ts's own parsePorts() accepts only an integer 1024-" +
+      "65535 for each, so nothing that reaches the log line can carry a newline. The one " +
+      "free-text value, a busy port's holder, is port-holder.ts's own OS process " +
+      "lookup — the DEVICE threat model below, not an HTTP body. Audited, not just excused.",
+  ],
+  [
+    "video/supervisor.ts",
+    "logs the leftover-relay pid it cleans up (its own bookkeeping file, never HTTP data) and " +
+      "the relay CHILD PROCESS's own exit reason — MediaMTX's stdout/stderr, parsed by " +
+      "RelayLogWatcher and never from an HTTP request the module itself handles (it owns no " +
+      "route). The same shape as a device or provider talking back, since a LAN publisher's " +
+      "stream key could in principle reach MediaMTX's own log — not audited line by line.",
+  ],
   ["wireless-manager.ts", DEVICE],
   ["youtube-service.ts", DEVICE],
 ]);
@@ -364,6 +393,9 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "service-timeline-recorder.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
+    // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
+    // file's own "is live"/"went offline"/B-frames log lines on a transition.
+    path.join(HERE, "video/video-service.ts"),
     // Every value on its three log lines comes out of an UPLOADED FILE — the
     // service type name and id, a patch sheet's name, a variant's name. It
     // logged nothing at all before the plan import, which is when it acquired

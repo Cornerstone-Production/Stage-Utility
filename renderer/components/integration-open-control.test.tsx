@@ -90,13 +90,13 @@ describe("the panel opens whatever it is told to", () => {
   test("an id nobody owns opens nothing and does not throw", async () => {
     const c = await controlled("not-a-thing");
     assertAbsent(dialog(), "an unknown id opened a dialog");
-    assert.equal(c.container.querySelectorAll("[data-integration-card]").length, 16);
+    assert.equal(c.container.querySelectorAll("[data-integration-card]").length, 17);
   });
 
   test("null opens nothing", async () => {
     const c = await controlled(null);
     assertAbsent(dialog(), "a null open value opened a dialog");
-    assert.equal(c.container.querySelectorAll("[data-integration-card]").length, 16);
+    assert.equal(c.container.querySelectorAll("[data-integration-card]").length, 17);
   });
 
   test("clicking a card reports the id up rather than opening on its own", async () => {

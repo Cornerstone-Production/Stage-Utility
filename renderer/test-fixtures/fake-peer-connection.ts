@@ -34,10 +34,15 @@ export class FakePeerConnection extends EventTarget {
    *  test's own stubs push beside it (a fetch's method, say). */
   static log: string[] = [];
 
+  /** When set, every answer applied fires `track` carrying this as its
+   *  stream, as a browser does once the relay's video track is negotiated. */
+  static trackStream: unknown = null;
+
   static reset(): void {
     FakePeerConnection.instances.length = 0;
     FakePeerConnection.onSetRemoteDescription = null;
     FakePeerConnection.log.length = 0;
+    FakePeerConnection.trackStream = null;
   }
 
   iceGatheringState: RTCIceGatheringState = "complete";
@@ -46,6 +51,8 @@ export class FakePeerConnection extends EventTarget {
   remoteDescription: unknown = null;
   ontrack: ((e: { streams: unknown[]; track: unknown }) => void) | null = null;
   closed = false;
+  /** What getStats() reports for the one inbound video stream. */
+  framesReceived = 0;
 
   constructor() {
     super();
@@ -65,6 +72,12 @@ export class FakePeerConnection extends EventTarget {
   async setRemoteDescription(desc: unknown): Promise<void> {
     this.remoteDescription = desc;
     FakePeerConnection.onSetRemoteDescription?.(this);
+    if (FakePeerConnection.trackStream) this.ontrack?.({ streams: [FakePeerConnection.trackStream], track: {} });
+  }
+
+  /** The inbound-rtp video report, the one entry a player reads. */
+  async getStats(): Promise<Map<string, { type: string; kind: string; framesReceived: number; framesDecoded: number }>> {
+    return new Map([["in", { type: "inbound-rtp", kind: "video", framesReceived: this.framesReceived, framesDecoded: 0 }]]);
   }
 
   close(): void {

@@ -96,11 +96,22 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 // There is no server here, and an unanswered request settles after the DOM is
 // torn down and throws "window is not defined" from a React update with nowhere
 // to land. So every request is answered: the state document for the state route,
-// an empty LIST for everything else, because a card handed the state object
-// where it expected an array throws on `.filter` and takes the tree with it.
+// the video state for the Video widget (handed a list it read `relay` off
+// nothing and crashed into its error boundary), and an empty LIST for
+// everything else, because a card handed the state object where it expected
+// an array throws on `.filter` and takes the tree with it.
+const VIDEO_STATE: import("@main/types/video").VideoState = {
+  rev: 0,
+  relay: { state: "off" },
+  kinds: [],
+  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  binaryPresent: false,
+  archivePresent: false,
+  feeds: [],
+};
 globalThis.fetch = (async (input: RequestInfo | URL) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-  const body = url.startsWith("/api/state") ? DEFAULT_STAGE_STATE : [];
+  const body = url.startsWith("/api/state") ? DEFAULT_STAGE_STATE : url.startsWith("/api/video/state") ? VIDEO_STATE : [];
   return new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },

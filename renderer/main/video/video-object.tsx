@@ -13,6 +13,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import { ErrorBoundary } from "../../components/ui/error-boundary-view";
 import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
+import type { RelayStatus } from "@main/types/video";
 import { isPreviewSlug } from "../preview-url";
 import { useOnScreen } from "./use-on-screen";
 import { useVideoSession } from "./use-video-session";
@@ -117,6 +118,7 @@ function VideoObjectBody({
     feedDeleted,
     video: videoEl,
     allowHls: true, // Always on until a screen has its own "Use HLS on this screen" switch.
+    relayRunning: state?.relay.state === "running",
     onLog,
   });
 
@@ -168,13 +170,22 @@ function VideoObjectBody({
               invisible-but-still-"visible" video may never fire
               requestVideoFrameCallback in every browser, which would time
               every attempt out before a frame had a chance to arrive. Omitted
-              entirely for "nothing": the mockup's offline-nothing state is
-              transparent over the box, not a covered one with empty content. */}
+              entirely for "nothing": the approved design's offline-nothing
+              state is transparent over the box, not a covered one with empty
+              content. */}
           {!isEmbed && !showingPicture && !(phase === "offline" && config.whenOffline === "nothing") && (
             <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
-              {phase === "waiting" && <StateText big="Waiting for the source" small="Nothing is sending to this feed yet" />}
+              {phase === "waiting" && <StateText {...waitingText(state?.relay.state)} />}
               {phase === "connecting" && <ConnectingBody name={name} />}
-              {phase === "offline" && <OfflineBody mode={config.whenOffline ?? "message"} name={name} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />}
+              {phase === "offline" && (
+                <OfflineBody
+                  mode={config.whenOffline ?? "message"}
+                  name={name}
+                  deleted={feedDeleted}
+                  appLogo={appLogo}
+                  appLogoMonochrome={appLogoMonochrome}
+                />
+              )}
               {phase === "cant-play" && <CantPlayBody name={name} />}
             </div>
           )}
@@ -195,6 +206,20 @@ function VideoObjectBody({
       )}
     </div>
   );
+}
+
+/**
+ * The Waiting cover's two lines. A relay feed waits either because the
+ * running relay has had nothing from a push feed's device yet, or because
+ * the relay itself is not running — and then nothing can send to any feed,
+ * so the cover says why instead: video switched off (the relay reads "off"
+ * whenever a relay feed exists and the switch is off), or the relay still
+ * coming up (starting, downloading, failing and retrying).
+ */
+function waitingText(relay: RelayStatus["state"] | undefined): { big: string; small: string } {
+  if (relay === "running") return { big: "Waiting for the source", small: "Nothing is sending to this feed yet" };
+  if (relay === "off") return { big: "Video is off", small: "Turn it on on the Video feeds page" };
+  return { big: "Waiting for the video relay", small: "It is starting up" };
 }
 
 function StateText({ big, small }: { big: string; small: string }) {
@@ -224,11 +249,18 @@ function ConnectingBody({ name }: { name: string }) {
 function OfflineBody({
   mode,
   name,
+  deleted,
   appLogo,
   appLogoMonochrome,
 }: {
   mode: "message" | "logo" | "nothing";
   name: string;
+  /** True when this feed id names nothing in the loaded feed list — a live
+   *  feed that is merely down never sets this. The two read as the same
+   *  `phase === "offline"` to everything else here, but they are not the
+   *  same fact: "will appear when the source comes back" is a promise a
+   *  deleted feed can never keep. */
+  deleted: boolean;
   appLogo: string | null;
   appLogoMonochrome: boolean;
 }) {
@@ -243,6 +275,7 @@ function OfflineBody({
       </div>
     );
   }
+  if (deleted) return <StateText big="This feed was removed" small="Choose another feed for this widget" />;
   return <StateText big={`${name} is offline`} small="It will appear here when the source comes back" />;
 }
 

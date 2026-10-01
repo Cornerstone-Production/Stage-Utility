@@ -23,6 +23,9 @@ import {
   CONNECT_TIMEOUT_MS,
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
+  FRAME_POLL_MS,
+  PROBE_POLL_MS,
+  PROBE_TIMEOUT_MS,
   RESET_AFTER_PLAYING_MS,
   RETRY_MAX_MS,
   RETRY_MIN_MS,
@@ -64,8 +67,10 @@ class FakeVideo extends EventTarget {
   cancelVideoFrameCallback(): void {
     this.frameCb = undefined;
   }
+  /** What getVideoPlaybackQuality() reports as decoded so far. */
+  decodedFrames = 0;
   getVideoPlaybackQuality(): { totalVideoFrames: number } {
-    return { totalVideoFrames: 0 };
+    return { totalVideoFrames: this.decodedFrames };
   }
   /** Simulates the browser delivering a decoded frame. */
   fireFrame(): void {
@@ -402,6 +407,68 @@ test("a frame with no connectionstatechange ever dispatched still goes live, and
   }
 });
 
+// requestVideoFrameCallback runs only in a rendering step. A page in a
+// covered, minimized or napping window gets few rendering steps or none,
+// while the element goes on decoding and this attempt's own deadlines go on
+// running, so the decoded-frame count is watched as well.
+
+test("a picture that decodes while the page is not being rendered still lifts the cover", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    // Frames decode; no rendering step ever runs the frame callback.
+    for (let i = 0; i < 5; i++) {
+      video.decodedFrames += 6;
+      mock.timers.tick(FRAME_POLL_MS);
+    }
+    mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+
+    assert.deepEqual(
+      calls.filter((c) => c.fn === "onPhase").map((c) => c.arg),
+      ["connecting", "live"],
+      "a picture that is decoding must lift the cover whether or not the page renders",
+    );
+    assert.deepEqual(
+      calls.filter((c) => c.fn === "onWebrtcUnusable" || c.fn === "onDropped").map((c) => c.fn),
+      [],
+      "a decoding picture must never be read as no frame ever arriving",
+    );
+    attempt.stop();
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a decoded-frame count left from an earlier source is not a first frame", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  video.decodedFrames = 500; // the element's last picture, not this attempt's
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(
+      calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn),
+      ["onWebrtcUnusable"],
+      "a count that does not move is no frame, whatever its value",
+    );
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
 test("through the hook: a frame with no 'connected' event puts the widget's phase at live", async () => {
   const g = stubGlobals("succeed");
   const video = new FakeVideo();
@@ -416,7 +483,7 @@ test("through the hook: a frame with no 'connected' event puts the widget's phas
   };
   try {
     const { result } = renderHook(() =>
-      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -425,6 +492,7 @@ test("through the hook: a frame with no 'connected' event puts the widget's phas
     act(() => video.fireFrame());
     assert.equal(result.current.phase, "live");
   } finally {
+    cleanup();
     g.restore();
   }
 });
@@ -619,7 +687,7 @@ test("the retry delay grows 1, 2, 4, 8, 16 s and caps at 30 s across consecutive
   const video = new FakeVideo();
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -633,6 +701,7 @@ test("the retry delay grows 1, 2, 4, 8, 16 s and caps at 30 s across consecutive
       expected: EXPECTED_DELAYS,
     });
   } finally {
+    cleanup();
     mock.timers.reset();
     g.restore();
   }
@@ -648,7 +717,7 @@ test("a failure right after a single frame still grows the delay — one frame i
   const video = new FakeVideo();
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_HLS, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_HLS, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -663,6 +732,7 @@ test("a failure right after a single frame still grows the delay — one frame i
       expected: [1000, 2000, 4000, 8000],
     });
   } finally {
+    cleanup();
     mock.timers.reset();
     restoreHls();
     g.restore();
@@ -675,7 +745,7 @@ test("playback that holds for RESET_AFTER_PLAYING_MS restarts the backoff at RET
   const video = new FakeVideo();
   try {
     renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -695,6 +765,7 @@ test("playback that holds for RESET_AFTER_PLAYING_MS restarts the backoff at RET
     // A play that holds: the next failure starts over.
     await measureDelays({ rounds: 1, attempts: posts, fail: dropAfterPlaying(RESET_AFTER_PLAYING_MS), expected: [1000] });
   } finally {
+    cleanup();
     mock.timers.reset();
     g.restore();
   }
@@ -716,6 +787,7 @@ test("a failing streak logs once, reminds at most every 5 minutes, and logs its 
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
+        relayRunning: true,
         onLog: (l) => logs.push(l),
       }),
     );
@@ -767,6 +839,7 @@ test("a failing streak logs once, reminds at most every 5 minutes, and logs its 
     assert.equal(logs.length, 3, "expected one recovery line");
     assert.match(logs[2]!, /"Cam" is playing again on this screen after \d+ failed attempts/);
   } finally {
+    cleanup();
     mock.timers.reset();
     g.restore();
   }
@@ -801,6 +874,7 @@ test("a real relay feed view whose WHEP answer refuses the offer (415) is treate
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
+        relayRunning: true,
         onLog: (r) => logs.push(r),
       }),
     );
@@ -813,6 +887,7 @@ test("a real relay feed view whose WHEP answer refuses the offer (415) is treate
       "expected a relay's outright refusal to be treated as a verdict about the stream, not the network",
     );
   } finally {
+    cleanup();
     g.restore();
   }
 });
@@ -838,6 +913,7 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
         feedDeleted: false,
         video: video as unknown as HTMLVideoElement,
         allowHls: true,
+        relayRunning: true,
         onLog: (r) => logs.push(r),
       }),
     );
@@ -855,6 +931,55 @@ test("a real external WHEP feed view whose answer refuses the offer (415) retrie
       "an external feed's health cannot be reported, so a refusal there must not be treated as a stream verdict",
     );
   } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+test("a pull feed going from standby to live keeps the session its request opened", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const standby: VideoFeedView = {
+    id: "f",
+    name: "F",
+    kind: "pull",
+    sourceLine: "",
+    source: { kind: "pull", url: "rtsp://x", username: "" },
+    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
+    status: { state: "standby" },
+  };
+  const posts = () => g.calls.filter((c) => c.method === "POST").length;
+  const deletes = () => g.calls.filter((c) => c.method === "DELETE").length;
+  try {
+    const { rerender } = renderHook(
+      ({ feed }: { feed: VideoFeedView }) =>
+        useVideoSession({
+          active: true,
+          feed,
+          feedDeleted: false,
+          video: video as unknown as HTMLVideoElement,
+          allowHls: true,
+          relayRunning: true,
+        }),
+      { initialProps: { feed: standby } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(posts(), 1, "expected the standby pull feed's own WHEP POST");
+
+    // The request is what started the pull, so the relay now reports the
+    // feed live. Same method, same URL: the session already open is the one
+    // that made it live, and tearing it down for a fresh one drops the
+    // picture for nothing.
+    rerender({ feed: { ...standby, status: { state: "live", codec: "H264" } } });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(posts(), 1, "a status change that leaves the method and URL alone must not open a second session");
+    assert.equal(deletes(), 0, "the session that made the feed live must not be torn down");
+  } finally {
+    cleanup();
     g.restore();
   }
 });
@@ -933,7 +1058,7 @@ test("through the hook: an external WHEP feed that never connects shows Offline 
   const video = new FakeVideo();
   try {
     const { result } = renderHook(() =>
-      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
+      useVideoSession({ active: true, feed: EXTERNAL_WHEP, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true }),
     );
     await act(async () => {
       await flush();
@@ -951,53 +1076,251 @@ test("through the hook: an external WHEP feed that never connects shows Offline 
     assert.equal(posts.length, 2, "expected a second WHEP attempt after the backoff");
     assert.equal(result.current.phase, "connecting");
   } finally {
+    cleanup();
     mock.timers.reset();
     g.restore();
   }
 });
 
-test("a relay feed on HLS after a WebRTC refusal tries WebRTC again after WEBRTC_RETRY_AFTER_MS", async () => {
-  const g = stubGlobals({ status: 415 });
-  mock.timers.enable({ apis: ["setTimeout"] });
-  const video = new FakeVideo();
-  const feed: VideoFeedView = {
-    id: "f",
-    name: "F",
-    kind: "pull",
-    sourceLine: "",
-    source: { kind: "pull", url: "rtsp://x", username: "" },
-    play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
-    status: { state: "live" },
-  };
-  const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
-  // browserCaps() asks a jsdom <video>, which plays no HLS, and Node has no
-  // MediaSource: without this the fallback is "can't play", not HLS.
+// ── after a fallback, WebRTC is probed beside the HLS picture ──────────────
+//
+// A relay feed on HLS because WebRTC failed on this screen tries WebRTC again
+// every WEBRTC_RETRY_AFTER_MS — with a second session that plays into no
+// element, so the HLS picture stays up while it is tried. A probe whose
+// frames arrive is adopted as it stands: the picture moves to it with no
+// second connection. One that does not is closed, quietly, and tried again.
+
+const RELAY_LIVE: VideoFeedView = {
+  id: "f",
+  name: "F",
+  kind: "pull",
+  sourceLine: "",
+  source: { kind: "pull", url: "rtsp://x", username: "" },
+  play: { via: "relay", whep: "/video/f/whep", hls: "/video/f/index.m3u8" },
+  status: { state: "live" },
+};
+
+/** browserCaps() asks a jsdom <video>, which plays no HLS, and Node has no
+ *  MediaSource: without this the fallback is "can't play", not HLS. */
+function allowNativeHls(): () => void {
   const proto = Object.getPrototypeOf(document.createElement("video")) as { canPlayType: (t: string) => string };
-  const realCanPlayType = proto.canPlayType;
+  const real = proto.canPlayType;
   proto.canPlayType = () => "maybe";
+  return () => {
+    proto.canPlayType = real;
+  };
+}
+
+/** The WHEP POST answers: 415 for the first (the refusal that falls back to
+ *  HLS), then whatever `later` says. */
+function refuseFirstThen(later: FetchBehavior): () => FetchBehavior {
+  let posts = 0;
+  return () => (++posts === 1 ? { status: 415 } : later);
+}
+
+function renderRelaySession(video: FakeVideo, logs: string[]) {
+  return renderHook(() =>
+    useVideoSession({
+      active: true,
+      feed: RELAY_LIVE,
+      feedDeleted: false,
+      video: video as unknown as HTMLVideoElement,
+      allowHls: true,
+      relayRunning: true,
+      onLog: (r) => logs.push(r),
+    }),
+  );
+}
+
+test("a relay feed on HLS probes WebRTC every WEBRTC_RETRY_AFTER_MS without taking the HLS picture down, and logs the fallback once", async () => {
+  const g = stubGlobals({ status: 415 });
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
+  const unusableLines = () => logs.filter((l) => l.includes("unusable")).length;
   try {
-    renderHook(() =>
-      useVideoSession({ active: true, feed, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true }),
-    );
+    const { result } = renderRelaySession(video, logs);
     await act(async () => {
       await flush();
     });
+    act(() => video.fireFrame());
     assert.equal(whepPosts(), 1);
     assert.equal(video.src, "/video/f/index.m3u8", "expected the refusal to fall back to HLS");
+    assert.equal(result.current.phase, "delayed");
+    assert.equal(unusableLines(), 1);
 
     await act(async () => {
       mock.timers.tick(WEBRTC_RETRY_AFTER_MS - 1);
       await flush();
     });
-    assert.equal(whepPosts(), 1, "WebRTC must not be retried before WEBRTC_RETRY_AFTER_MS");
+    assert.equal(whepPosts(), 1, "WebRTC must not be tried again before WEBRTC_RETRY_AFTER_MS");
 
+    for (const round of [2, 3]) {
+      await act(async () => {
+        mock.timers.tick(round === 2 ? 1 : WEBRTC_RETRY_AFTER_MS);
+        await flush();
+      });
+      assert.equal(whepPosts(), round, `expected WebRTC probed again, round ${round}`);
+      assert.equal(video.src, "/video/f/index.m3u8", "the HLS picture must stay up while WebRTC is probed");
+      assert.equal(video.srcSets, 1, "HLS must not be restarted by a probe");
+      assert.equal(result.current.phase, "delayed", "the widget keeps showing the HLS picture");
+      assert.equal(unusableLines(), 1, "a probe that fails again is not news — the fallback was logged once");
+    }
+  } finally {
+    // Unmounted while the stubs are still in: the teardown's DELETE and its
+    // cap timer must land on the stubbed fetch and the fake clock, not leak
+    // a real timer into the next test.
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a probe whose frames arrive is adopted: the picture moves to that session with no second connection", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed"));
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const probeStream = { id: "probe-stream" };
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
+  try {
+    const { result } = renderRelaySession(video, logs);
     await act(async () => {
-      mock.timers.tick(1);
       await flush();
     });
-    assert.equal(whepPosts(), 2, "expected WebRTC tried again once WEBRTC_RETRY_AFTER_MS had passed on HLS");
+    act(() => video.fireFrame());
+    assert.equal(result.current.phase, "delayed");
+
+    FakePeerConnection.trackStream = probeStream;
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS);
+      await flush();
+    });
+    assert.equal(whepPosts(), 2, "expected the probe's own POST");
+    const probe = FakePeerConnection.instances.at(-1)!;
+    assert.equal(video.src, "/video/f/index.m3u8", "no frame through the probe yet: HLS stays up");
+    assert.equal(result.current.phase, "delayed");
+
+    probe.framesReceived = 4;
+    await act(async () => {
+      mock.timers.tick(PROBE_POLL_MS);
+      await flush();
+      await flush();
+    });
+    assert.equal(video.srcObject, probeStream, "expected the picture moved onto the probe's own stream");
+    assert.equal(video.src, "", "expected HLS stopped once WebRTC carries the picture");
+    assert.notEqual(
+      result.current.phase,
+      "connecting",
+      "an adopted session is already carrying frames: no Connecting cover while the element picks it up",
+    );
+    assert.equal(whepPosts(), 2, "the probe's session is the one kept — no second connection");
+    assert.equal(g.calls.filter((c) => c.method === "DELETE").length, 0, "the adopted session must not be torn down");
+    assert.equal(probe.closed, false);
+
+    act(() => video.fireFrame());
+    assert.equal(result.current.phase, "live");
   } finally {
-    proto.canPlayType = realCanPlayType;
+    // Unmounted while the stubs are still in: the teardown's DELETE and its
+    // cap timer must land on the stubbed fetch and the fake clock, not leak
+    // a real timer into the next test.
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("an adopted session that then shows no frame goes back to HLS without logging the fallback a second time", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed"));
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { result } = renderRelaySession(video, logs);
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame());
+    FakePeerConnection.trackStream = { id: "probe-stream" };
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS);
+      await flush();
+    });
+    const probe = FakePeerConnection.instances.at(-1)!;
+    probe.connectionState = "connected";
+    probe.framesReceived = 4;
+    await act(async () => {
+      mock.timers.tick(PROBE_POLL_MS);
+      await flush();
+      await flush();
+    });
+    assert.equal(video.src, "", "expected the picture moved onto the adopted session");
+
+    // The adopted session's frames never reach this element.
+    await act(async () => {
+      mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+      await flush();
+    });
+    assert.equal(video.src, "/video/f/index.m3u8", "expected HLS back once the adopted session showed nothing");
+    assert.equal(result.current.phase, "connecting");
+    assert.equal(
+      logs.filter((l) => l.includes("unusable")).length,
+      1,
+      "the same outage is not logged twice: WebRTC never held in between",
+    );
+  } finally {
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a probe that never sees a frame closes its session within PROBE_TIMEOUT_MS, and HLS plays on", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed"));
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
+  try {
+    const { result } = renderRelaySession(video, logs);
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame());
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS);
+      await flush();
+    });
+    assert.equal(whepPosts(), 2);
+    await act(async () => {
+      mock.timers.tick(PROBE_TIMEOUT_MS);
+      await flush();
+    });
+    assert.equal(g.calls.filter((c) => c.method === "DELETE").length, 1, "expected the failed probe's session DELETEd");
+    assert.equal(video.src, "/video/f/index.m3u8");
+    assert.equal(video.srcSets, 1, "HLS must not be restarted by a failed probe");
+    assert.equal(result.current.phase, "delayed");
+    assert.equal(logs.filter((l) => l.includes("unusable")).length, 1);
+
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS);
+      await flush();
+    });
+    assert.equal(whepPosts(), 3, "expected the next probe a full WEBRTC_RETRY_AFTER_MS later");
+  } finally {
+    // Unmounted while the stubs are still in: the teardown's DELETE and its
+    // cap timer must land on the stubbed fetch and the fake clock, not leak
+    // a real timer into the next test.
+    cleanup();
+    undoHls();
     mock.timers.reset();
     g.restore();
   }

@@ -1,5 +1,5 @@
 // The Video widget's inspector section: Feed, Fit, Show feed name and When
-// offline — the four settings the mockup's Layout editor tab shows.
+// offline — the four settings the approved design's Layout editor tab shows.
 //
 // Driven through the real VideoConfig component with a stubbed fetch, not
 // reasoned about: a control that renders is not a control that patches the
@@ -38,6 +38,9 @@ const FEEDS_STATE = {
   rev: 1,
   relay: { state: "off" as const },
   kinds: ["pull", "push", "embed", "external"],
+  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  binaryPresent: true,
+  archivePresent: true,
   feeds: [
     { id: "program", name: "Program (IMAG)", kind: "pull", sourceLine: "rtsp://192.0.2.21:8554/stream2", source: { kind: "pull", url: "rtsp://192.0.2.21:8554/stream2", username: "" }, play: { via: "relay", whep: "/whep/program", hls: "/hls/program" }, status: { state: "live" } },
     { id: "lobby", name: "Lobby cam", kind: "pull", sourceLine: "rtsp://192.0.2.22:8554/stream1", source: { kind: "pull", url: "rtsp://192.0.2.22:8554/stream1", username: "" }, play: { via: "relay", whep: "/whep/lobby", hls: "/hls/lobby" }, status: { state: "offline" } },
@@ -227,7 +230,7 @@ describe("VideoConfig — When the feed is offline", () => {
 });
 
 describe("VideoConfig — the callout", () => {
-  test("always says muted, no controls, and where a struggling screen reports", async () => {
+  test("always says the widget is muted, with no controls", async () => {
     const f = stubVideoState();
     try {
       const { getByText } = await mount(DEFAULT_CONFIG, () => {});

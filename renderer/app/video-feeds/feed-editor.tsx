@@ -7,10 +7,19 @@
 // A kind with no field group here yet is refused at Save rather than guessed
 // at.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
-import { EMBED_PLAYERS, type EmbedPlayer, type VideoFeedView, type VideoSourceKind } from "@main/types/video";
+import {
+  EMBED_PLAYERS,
+  PUSH_PROTOCOL_LABEL,
+  PUSH_PROTOCOLS,
+  type EmbedPlayer,
+  type KickResult,
+  type PushProtocol,
+  type VideoFeedView,
+  type VideoSourceKind,
+} from "@main/types/video";
 
 import {
   Button,
@@ -24,9 +33,11 @@ import {
   SelectValue,
   StackedField,
 } from "../../components/ui";
+import { Segmented } from "../../editor/inspector-rows";
 import { invoke } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
 import { VideoObject } from "../../main/video/video-object";
+import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
   pull: "Pull from a device (RTSP, SRT, HLS)",
@@ -34,6 +45,42 @@ const KIND_LABEL: Record<VideoSourceKind, string> = {
   embed: "YouTube or Resi player",
   external: "Another WebRTC or HLS address",
 };
+
+/** The description under "Paste this into the device" — OBS needs the
+ *  Bearer Token pointer; SRT and RTMP carry the password in the address
+ *  itself, so the same sentence covers both. */
+const PUSH_DESCRIPTION: Record<PushProtocol, string> = {
+  srt: "The password is part of the address. Anything that pushes without it is refused.",
+  rtmp: "The password is part of the address. Anything that pushes without it is refused.",
+  whip: "In OBS: Settings, Stream, Service WHIP. Use the password below as the Bearer Token.",
+};
+
+/**
+ * The design's warning callout for a relay feed playing over HLS instead of
+ * WebRTC — null for anything else, including "delayed" via an embed/
+ * external source, which this build never reports.
+ *
+ * `<b>Delayed a few seconds.</b>` then the shared B-frames sentence
+ * (b-frames-copy.ts, also used by the list row's own hint), then — WHIP
+ * only — the OBS-specific fix. A pull camera, or a push feed on SRT/RTMP,
+ * gets no third sentence at all: the design's copy for that case is exactly
+ * the shared sentence, nothing more, since neither is necessarily OBS (a
+ * Magewell, ProPresenter's own output, anything else that can push or be
+ * pulled from).
+ */
+export function delayWarning(feed: VideoFeedView): { headline: string; body: string } | null {
+  const status = feed.status;
+  if (status.state !== "delayed") return null;
+  const isObsWhip = isObsWhipFeed(feed);
+  if (status.delayedBecause === "b-frames") {
+    const fix = isObsWhip ? " In OBS: Settings, Output, Streaming, set Profile to baseline, or Keyframe interval 1 s with B-frames 0." : "";
+    return { headline: "Delayed a few seconds.", body: `${bFramesSentence(isObsWhip)}${fix}` };
+  }
+  return {
+    headline: "Delayed a few seconds.",
+    body: `${status.codec ?? "This"} video is not supported over WebRTC, so screens see it over HLS instead.`,
+  };
+}
 
 const EMBED_PLAYER_LABEL: Record<EmbedPlayer, string> = {
   "youtube-channel": "YouTube, the channel's current live stream",
@@ -52,7 +99,7 @@ const EMBED_CALLOUT: Record<EmbedPlayer, string> = {
   resi: "Plays in Resi's own player. Good for a lobby, not for the stage.",
 };
 
-/** The field label under the Player select follows the player, per the mockup. */
+/** The field label under the Player select follows the player, per the approved design. */
 const EMBED_FIELD_LABEL: Record<EmbedPlayer, string> = {
   "youtube-channel": "Channel",
   "youtube-video": "Video",
@@ -62,6 +109,14 @@ const EMBED_FIELD_LABEL: Record<EmbedPlayer, string> = {
 interface Draft {
   name: string;
   kind: VideoSourceKind;
+  pullUrl: string;
+  pullUsername: string;
+  /** Never seeded from the feed: a stored password is never sent to the
+   *  client (see main/types/video.ts's VideoSource comment), so this always
+   *  starts blank. Whether it is SENT on Save is a separate question — see
+   *  pullPasswordTouched below. */
+  pullPassword: string;
+  pushProtocol: PushProtocol;
   embedPlayer: EmbedPlayer;
   embedRef: string;
   externalUrl: string;
@@ -71,6 +126,10 @@ function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]
   return {
     name: feed?.name ?? "New feed",
     kind: feed?.source.kind ?? kinds[0] ?? "embed",
+    pullUrl: feed?.source.kind === "pull" ? feed.source.url : "rtsp://",
+    pullUsername: feed?.source.kind === "pull" ? feed.source.username : "",
+    pullPassword: "",
+    pushProtocol: feed?.source.kind === "push" ? feed.source.protocol : "srt",
     embedPlayer: feed?.source.kind === "embed" ? feed.source.player : "youtube-channel",
     embedRef: feed?.source.kind === "embed" ? feed.source.ref : "",
     externalUrl: feed?.source.kind === "external" ? feed.source.url : "https://",
@@ -122,22 +181,40 @@ export interface FeedEditorProps {
    * whatever was selected before "Add feed" — see video-feeds-route.tsx.
    */
   onCancelNew: () => void;
+  /** `video:state`'s `relay.state === "running"` — the push editor's "did
+   *  not take effect" notes are gated on it, so they never fire merely
+   *  because no relay is running (video switched off, say). */
+  relayRunning: boolean;
 }
 
-export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew }: FeedEditorProps) {
+export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew, relayRunning }: FeedEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(feed, kinds));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** True once the operator has typed into the pull Password field this
+   *  session. The field always starts blank (a stored password is never
+   *  sent to the client), so a blank Save must LEAVE an existing password
+   *  alone rather than clear it — only an edit, even one that ends back at
+   *  "", counts as the operator's own choice to change or clear it. */
+  const [pullPasswordTouched, setPullPasswordTouched] = useState(false);
 
   function handleCancel() {
     onCancelNew();
     setDraft(draftFrom(feed, kinds));
+    setPullPasswordTouched(false);
     setError(null);
   }
 
   /** null for a kind with no field group here yet (see the file header). */
-  function sourcePayload(): { kind: "embed"; player: EmbedPlayer; ref: string } | { kind: "external"; url: string } | null {
+  function sourcePayload():
+    | { kind: "pull"; url: string; username: string }
+    | { kind: "push"; protocol: PushProtocol }
+    | { kind: "embed"; player: EmbedPlayer; ref: string }
+    | { kind: "external"; url: string }
+    | null {
+    if (draft.kind === "pull") return { kind: "pull", url: draft.pullUrl, username: draft.pullUsername };
+    if (draft.kind === "push") return { kind: "push", protocol: draft.pushProtocol };
     if (draft.kind === "embed") return { kind: "embed", player: draft.embedPlayer, ref: draft.embedRef };
     if (draft.kind === "external") return { kind: "external", url: draft.externalUrl };
     return null;
@@ -152,7 +229,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
     setSaving(true);
     setError(null);
     try {
-      const body = { name: draft.name.trim(), source };
+      const body: Record<string, unknown> = { name: draft.name.trim(), source };
+      // Only sent when the operator actually touched the field — see
+      // pullPasswordTouched's own comment. "" is how updateFeed clears a
+      // stored password; leaving the key out entirely is how it is told to
+      // leave the existing one alone.
+      if (draft.kind === "pull" && pullPasswordTouched) body.password = draft.pullPassword;
       // Nothing reads as saved until this resolves: onSaved only fires with
       // the server's own view of the feed, never the local draft.
       const result =
@@ -160,10 +242,30 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           ? await invoke<{ feed: VideoFeedView }>("video:addFeed", body)
           : await invoke<{ feed: VideoFeedView }>("video:updateFeed", { id: feed.id, patch: body });
       onSaved(result.feed);
+      setDraft((d) => ({ ...d, pullPassword: "" }));
+      setPullPasswordTouched(false);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** Clears a pull feed's stored password immediately — sends
+   *  `password: ""` on its own, rather than waiting for the operator to
+   *  also press Save. Only shown while a password IS stored and the
+   *  operator has not started typing a replacement (see the field's own
+   *  render below). */
+  async function handleClearPullPassword() {
+    if (!feed) return;
+    setError(null);
+    try {
+      const result = await invoke<{ feed: VideoFeedView }>("video:updateFeed", { id: feed.id, patch: { password: "" } });
+      onSaved(result.feed);
+      setDraft((d) => ({ ...d, pullPassword: "" }));
+      setPullPasswordTouched(false);
+    } catch (err) {
+      setError(errorMessage(err));
     }
   }
 
@@ -181,8 +283,9 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         title: `Delete "${feed.name}"?`,
         message,
         // "Delete", not "Delete feed": the row's own trigger already reads
-        // "Delete feed" (the mockup's action copy), and this is the confirm
-        // dialog's OWN action button, a distinct control from that trigger.
+        // "Delete feed" (the approved design's action copy), and this is the
+        // confirm dialog's OWN action button, a distinct control from that
+        // trigger.
         confirmLabel: "Delete",
         destructive: true,
       });
@@ -197,6 +300,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
   }
 
   const picture = pictureFor(feed?.id ?? null);
+  const warning = !isNew && feed ? delayWarning(feed) : null;
 
   return (
     <aside
@@ -208,6 +312,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       <div className="aspect-video w-full overflow-hidden rounded-[10px] bg-black">
         <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} />
       </div>
+
+      {warning && (
+        <p className="rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+          <b>{warning.headline}</b> {warning.body}
+        </p>
+      )}
 
       <StackedField label="Name" description="What layouts and Home show. Renaming keeps every layout using it.">
         <Input aria-label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
@@ -227,6 +337,92 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           </SelectContent>
         </Select>
       </StackedField>
+
+      {draft.kind === "pull" && (
+        <>
+          <StackedField
+            label="Address"
+            description="An RTSP, SRT or HLS address the relay fetches. It only fetches while something is showing this feed."
+          >
+            <Input
+              aria-label="Address"
+              className="font-mono text-caption1"
+              value={draft.pullUrl}
+              onChange={(e) => setDraft({ ...draft, pullUrl: e.target.value })}
+            />
+          </StackedField>
+
+          <StackedField label="Username and password">
+            <div className="flex gap-2">
+              <Input
+                aria-label="Username"
+                placeholder="If the device asks for one"
+                value={draft.pullUsername}
+                onChange={(e) => setDraft({ ...draft, pullUsername: e.target.value })}
+              />
+              <Input
+                aria-label="Password"
+                type="password"
+                placeholder="Password"
+                value={draft.pullPassword}
+                onChange={(e) => {
+                  setDraft({ ...draft, pullPassword: e.target.value });
+                  setPullPasswordTouched(true);
+                }}
+              />
+            </div>
+            {/^srt:/i.test(draft.pullUrl.trim()) && (
+              <span className="text-caption1 text-fg-subtle">
+                SRT takes a passphrase only: 10 to 80 plain letters, digits, spaces and punctuation. Leave Username empty and put it in Password.
+              </span>
+            )}
+            {/* The field itself never shows a stored password — only THAT
+                one is stored, via hasPassword, never the value. Hidden the
+                moment the operator starts typing a replacement, since the
+                message ("a password is saved") stops being true the instant
+                they are actively setting a new one. */}
+            {!isNew && feed?.source.kind === "pull" && feed.hasPassword && !pullPasswordTouched && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-caption1 text-fg-subtle">A password is saved. Type to replace it, or clear it.</span>
+                <Button type="button" variant="transparent" size="small" onClick={() => void handleClearPullPassword()}>
+                  Clear
+                </Button>
+              </div>
+            )}
+          </StackedField>
+
+          <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">
+            <b>Magewell Ultra Stream:</b> turn on its RTSP server as the second output. It keeps streaming to Resi on the
+            first.
+          </p>
+        </>
+      )}
+
+      {draft.kind === "push" && (
+        <>
+          <StackedField label="How it connects">
+            <Segmented
+              label="How it connects"
+              value={draft.pushProtocol}
+              options={PUSH_PROTOCOLS.map((p) => ({ value: p, label: PUSH_PROTOCOL_LABEL[p] }))}
+              onChange={(v) => setDraft({ ...draft, pushProtocol: v })}
+            />
+          </StackedField>
+
+          {!isNew && feed && feed.source.kind === "push" ? (
+            // `protocol` is the DRAFT's current segmented-control
+            // choice, not necessarily the feed's saved one — the address
+            // and description now preview whatever protocol is selected,
+            // via the server's own protocolOverride (pushAddress()), never
+            // saving anything until Save is pressed.
+            <PushAddressFields feedId={feed.id} protocol={draft.pushProtocol} relayRunning={relayRunning} />
+          ) : (
+            <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">
+              Save this feed to get its address and password.
+            </p>
+          )}
+        </>
+      )}
 
       {draft.kind === "embed" && (
         <>
@@ -295,6 +491,210 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
 
       {!isNew && feed && <UsedByLine feedId={feed.id} />}
     </aside>
+  );
+}
+
+interface PushAddress {
+  protocol: PushProtocol;
+  address: string;
+  password: string;
+}
+
+/** What newPushPassword() reports about the rotation that just ran.
+ *  Kept separate from `PushAddress`: it is only ever set by an ACTUAL
+ *  rotation this session, never by a plain load, so its presence alone is
+ *  "a rotation happened," not "the feed has ever been rotated." */
+interface RotationResult {
+  applied: boolean;
+  kicked: KickResult;
+}
+
+/** How long the Copy button's label reads "Copied" before reverting. */
+export const COPIED_LABEL_MS = 1400;
+
+/**
+ * A push feed's paste-ready address and password: "Paste this into the
+ * device" with Copy, then Password with New password. Re-fetched whenever
+ * `feedId` OR `protocol` changes — `protocol` is the editor's own
+ * DRAFT choice (the segmented control above), so flipping it previews that
+ * protocol's address with the SAME stored password, via the server's own
+ * `protocolOverride`, without saving anything.
+ *
+ * Copy never throws: `navigator.clipboard` is undefined outside a secure
+ * context, which is how Stage Utility is normally served on a LAN (plain
+ * HTTP) — the fallback selects the address so Ctrl+C/Cmd+C still works,
+ * rather than reaching for the same silent execCommand trick
+ * renderer/lib/clipboard.ts uses elsewhere; the design calls for the
+ * operator to see and confirm the selection, not a copy that happened
+ * invisibly.
+ */
+function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string; protocol: PushProtocol; relayRunning: boolean }) {
+  const [data, setData] = useState<PushAddress | null>(null);
+  // One slot each: a rotation landing after a newer preview failed must
+  // not clear that preview's error, nor a preview a rotation's.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [rotationError, setRotationError] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotation, setRotation] = useState<RotationResult | null>(null);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [justCopied, setJustCopied] = useState(false);
+  const addressRef = useRef<HTMLInputElement>(null);
+  /** Every request this component makes — a preview
+   *  load() or a rotation — takes a ticket, and a response is applied only
+   *  if its own ticket is still the newest one issued. Without this, two
+   *  requests in flight together apply in WHATEVER ORDER THEY RESOLVE, not
+   *  the order they were ISSUED in: flipping the segmented control to
+   *  preview a protocol, then clicking New password before that preview's
+   *  own GET has returned, could have the (fast) rotation land first and
+   *  then the (slower) STALE preview overwrite it right back — showing an
+   *  address the rotation had already replaced. */
+  const requestSeq = useRef(0);
+
+  const load = useCallback(() => {
+    const seq = ++requestSeq.current;
+    return invoke<PushAddress>("video:pushAddress", { id: feedId, protocol }).then(
+      (r) => {
+        if (seq !== requestSeq.current) return; // superseded by a newer request — drop it
+        setData(r);
+        setLoadError(null);
+      },
+      (err: unknown) => {
+        if (seq !== requestSeq.current) return;
+        logReadFailure("video", "the push address", err);
+        setLoadError("Couldn't read the push address.");
+      },
+    );
+  }, [feedId, protocol]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function handleNewPassword() {
+    setRotating(true);
+    const seq = ++requestSeq.current;
+    try {
+      const r = await invoke<PushAddress & RotationResult>("video:newPushPassword", { id: feedId });
+      // The rotation's own report — what happened to whoever was
+      // publishing — describes THIS call, never "whatever the control
+      // currently shows," so it must never be dropped just because the
+      // control was flipped to a different protocol while the request was
+      // in flight. Only the DATA a later request
+      // could already have replaced is gated by the counter below.
+      setRotation({ applied: r.applied, kicked: r.kicked });
+      setRotationError(null);
+      setCopyHint(null);
+      if (seq !== requestSeq.current) return; // a newer request already owns the data shown now
+      if (protocol === r.protocol) {
+        // The control is showing the feed's own saved protocol — r's own
+        // answer already IS that protocol's fresh address; no second round
+        // trip needed.
+        setData({ protocol: r.protocol, address: r.address, password: r.password });
+      } else {
+        // The control is previewing a DIFFERENT, unsaved protocol. Showing
+        // r's own (saved-protocol) address here would show an address for a
+        // protocol the control does not even have selected, so the control
+        // and the address field would stop matching. Re-preview the protocol the control shows, now with the
+        // fresh password. Safe to land out of order: the request counter
+        // above drops it if a newer request has since started.
+        void load();
+      }
+    } catch (err) {
+      // Same reasoning as above: a rotation failure IS the report worth
+      // showing, regardless of what is being previewed by the time it
+      // arrives.
+      setRotationError(errorMessage(err));
+    } finally {
+      setRotating(false);
+    }
+  }
+
+  function handleCopy() {
+    if (!data) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(data.address).then(
+          () => {
+            setCopyHint(null);
+            setJustCopied(true);
+            setTimeout(() => setJustCopied(false), COPIED_LABEL_MS);
+          },
+          () => {
+            addressRef.current?.select();
+            setCopyHint("Press Ctrl+C / Cmd+C to copy");
+          },
+        );
+        return;
+      }
+    } catch {
+      /* fall through to the select-and-prompt fallback below */
+    }
+    addressRef.current?.select();
+    setCopyHint("Press Ctrl+C / Cmd+C to copy");
+  }
+
+  // An error from a ROTATION (data already loaded) keeps the
+  // fields on screen, with the error under Password and New password still
+  // pressable — only a failed INITIAL load (nothing to show at all) falls
+  // back to a bare ErrorNote.
+  if (loadError && !data) return <ErrorNote>{loadError}</ErrorNote>;
+  if (!data) return null;
+
+  // A note only for a RUNNING relay — with none running (video switched off,
+  // or no relay started yet), `applied` is vacuously true and `kicked` is
+  // "none", and would otherwise show a false alarm on every rotation. `kicked` is
+  // three-way, not a boolean: "none" means EITHER nobody was publishing OR
+  // no relay was there to ask — both unremarkable — so the note fires only
+  // for "failed", where a device really was connected and dropping it did
+  // not work. `applied` false wins when both are true: the new password is
+  // not live at the relay yet, so whether the kick itself also failed is
+  // moot until it is.
+  const rotationNote =
+    relayRunning && rotation && (!rotation.applied || rotation.kicked === "failed")
+      ? !rotation.applied
+        ? "The relay did not take the new password yet; it will on its next start"
+        : "The device already sending could not be dropped; it keeps sending until it reconnects"
+      : null;
+
+  return (
+    <>
+      <StackedField label="Paste this into the device" description={PUSH_DESCRIPTION[data.protocol]}>
+        <div className="flex gap-2">
+          <Input
+            ref={addressRef}
+            aria-label="Paste this into the device"
+            readOnly
+            className="min-w-0 flex-1 font-mono text-caption1"
+            value={data.address}
+            onBlur={() => setCopyHint(null)}
+          />
+          <Button type="button" variant="filled" size="small" className="shrink-0" onClick={handleCopy}>
+            {justCopied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+        {copyHint && <span className="text-caption1 text-fg-subtle">{copyHint}</span>}
+      </StackedField>
+
+      <StackedField label="Password">
+        <div className="flex gap-2">
+          <Input aria-label="Password" readOnly className="min-w-0 flex-1 font-mono text-caption1" value={data.password} />
+          <Button
+            type="button"
+            variant="filled"
+            size="small"
+            className="shrink-0 whitespace-nowrap"
+            onClick={() => void handleNewPassword()}
+            disabled={rotating}
+          >
+            {rotating ? "…" : "New password"}
+          </Button>
+        </div>
+      </StackedField>
+
+      {rotationNote && <p className="text-caption1 text-warn-11">{rotationNote}</p>}
+      {loadError && <ErrorNote>{loadError}</ErrorNote>}
+      {rotationError && <ErrorNote>{rotationError}</ErrorNote>}
+    </>
   );
 }
 

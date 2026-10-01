@@ -6,6 +6,21 @@
 export const PUSH_PROTOCOLS = ["srt", "rtmp", "whip"] as const;
 export type PushProtocol = (typeof PUSH_PROTOCOLS)[number];
 
+/** How each push protocol is named on the page and in a feed's source line. */
+export const PUSH_PROTOCOL_LABEL: Record<PushProtocol, string> = {
+  srt: "SRT",
+  rtmp: "RTMP",
+  whip: "WHIP (OBS)",
+};
+
+/** What newPushPassword()'s kick attempt did, three ways rather than a
+ *  boolean — "none" and "failed" are both "nothing got dropped," but only
+ *  one of them means a device really was pushing and stayed connected
+ *  under the old password: "dropped" a publisher was actually dropped; "none" nobody was
+ *  publishing, or no relay is running to ask; "failed" a publisher WAS
+ *  there and the attempt to drop it failed. */
+export type KickResult = "dropped" | "none" | "failed";
+
 export const EMBED_PLAYERS = ["youtube-channel", "youtube-video", "resi"] as const;
 export type EmbedPlayer = (typeof EMBED_PLAYERS)[number];
 
@@ -85,19 +100,90 @@ export interface VideoFeedView {
   source: VideoSource;
   play: FeedPlay;
   status: FeedStatus;
+  /** Set only for a pull feed: whether a password is CURRENTLY stored for
+   *  it — never the value. The editor uses this to say "a password is
+   *  saved" without a blank field implying there is none. */
+  hasPassword?: boolean;
 }
+
+/**
+ * Which failing case this is — separate from `reason` (free text an operator
+ * reads) because two different UI/logic decisions turn on knowing the CASE,
+ * not the words:
+ *
+ * - "Change ports in Advanced" only helps a `port-conflict`; showing it for
+ *   an unsupported platform or a download failure sends the operator to a
+ *   page with nothing to fix.
+ * - A pull/push feed reads "offline" rather than "standby" only once a relay
+ *   PROCESS has actually run in this outage — true for `crash-loop` (a child
+ *   ran and exited) and `not-answering` (one is running; its API just is
+ *   not), never for the other five, all raised before any child exists at
+ *   all (relay-lifecycle.ts's own pre-supervisor sequence never gets far
+ *   enough to have spawned anything a source could have reached).
+ *
+ * `unsupported` is the one kind that never retries (no pinned asset exists
+ * for this platform/arch, ever) — `retryAt` is always null for it.
+ */
+export type RelayFailureKind =
+  | "port-conflict"
+  | "download"
+  | "config-write"
+  | "spawn"
+  | "unsupported"
+  | "crash-loop"
+  | "not-answering";
 
 export type RelayStatus =
   | { state: "off" }
   | { state: "downloading"; receivedBytes: number; totalBytes: number }
-  | { state: "starting"; version: string }
+  /** `version` is null only if no process has EVER printed a startup banner
+   *  — once one has, it never resets, surviving every later restart. A
+   *  "starting" supervisor has no live child at all yet (one is not spawned
+   *  until AFTER "starting"), so a non-null version here describes a
+   *  PREVIOUS run, never proof that the current attempt has printed
+   *  anything. */
+  | { state: "starting"; version: string | null }
   | { state: "running"; version: string; ports: VideoPorts }
-  | { state: "failing"; reason: string; retryAt: number | null; placeArchiveAt?: string };
+  /** `placeArchiveAt` is the downloads folder relative to the data folder
+   *  ("video-relay/downloads"), never the full path: any LAN client reads
+   *  this, and the server log has the full one.
+   *  `assetName` is set only once a real pinned asset exists to place —
+   *  never for "no asset for this platform/arch at all" (acquire.ts's
+   *  `ensureBinary` says which case it is directly, rather than a caller
+   *  guessing from whether `placeArchiveAt` looks like a bare directory or a
+   *  full file path). The renderer never derives it by splitting
+   *  `placeArchiveAt` on "/" — that breaks on Windows. */
+  | {
+      state: "failing";
+      reason: string;
+      kind: RelayFailureKind;
+      retryAt: number | null;
+      placeArchiveAt?: string;
+      assetName?: string;
+    };
 
 export interface VideoState {
   rev: number;
   relay: RelayStatus;
   /** The Source kinds this build offers; the page's dropdown lists exactly these. */
   kinds: VideoSourceKind[];
+  /** The STORED ports — what the next start (or restart) will use, and what
+   *  the Advanced page's ports card edits. Independent of `relay`: a running
+   *  relay's OWN ports (relay.state === "running" ? relay.ports : never) can
+   *  differ from this for the moment between a ports save and the restart it
+   *  triggers, which is exactly why the two are separate fields rather than
+   *  one "ports" the running state alone carries. */
+  ports: VideoPorts;
+  /** Whether the pinned MediaMTX binary is already extracted on this
+   *  machine — from relayDir's own versioned binary existing, checked fresh
+   *  on every read. Lets the "off" status line tell "never downloaded" (show
+   *  the download-size sentence) from "downloaded once, just switched off
+   *  since" (say nothing) apart — `relay.state` alone cannot: both read
+   *  "off". */
+  binaryPresent: boolean;
+  /** Whether the pinned archive is already in video-relay/downloads (placed
+   *  by hand, say), extracted or not — so the "off" line says the relay sets
+   *  up from it rather than naming a download that will not happen. */
+  archivePresent: boolean;
   feeds: VideoFeedView[];
 }

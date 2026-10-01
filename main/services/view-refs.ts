@@ -114,10 +114,12 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
       const pp = str(c.propresenterInstanceId);
       if (pp && pp !== "default") push("propresenter", pp, "ProPresenter");
       // The screen a `screen-embed` watches. Output ids are per-install and a
-      // bundle carries no outputs, so every screen tile in an imported wall
-      // points at nothing until somebody repoints it. Named here so the import
-      // report says which objects, rather than the operator finding out from a
-      // wall of "That screen no longer exists" on a Sunday.
+      // bundle carries no outputs, so an imported screen tile keeps the id it
+      // had: it resolves on the destination if an output there shares that id
+      // (see docs/moving-a-view.md), and renders unconfigured, not silently
+      // cleared, if none does. Named here so the import report says which
+      // objects to check, rather than the operator finding out from a wall of
+      // "That screen no longer exists" on a Sunday.
       //
       // No output name to borrow — a bundle carries no outputs, so there is
       // nothing here to read one from (see above). The object id at least
@@ -126,8 +128,11 @@ export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]
       if (type === "screen-embed") push("output", str(c.outputId), o.id);
       // Same reasoning as screen-embed, one line up: a Video widget's feedId
       // is set up on the Video feeds page, per install (see
-      // docs/moving-a-view.md), and a bundle carries no feeds — so there is no
-      // feed name to borrow either, and the object id is the label.
+      // docs/moving-a-view.md), and a bundle carries no feeds either — a feed
+      // on the destination with the same id resolves it (the id is the
+      // slug of the name the feed was first given, and a rename keeps it),
+      // and there is no feed name to borrow for the label, so the object id
+      // is the label.
       if (type === "video") push("video-feed", str(c.feedId), o.id);
     });
   }

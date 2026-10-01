@@ -471,12 +471,29 @@ neither is a 400.
 **Video feeds** — see [Video feeds](../integrations/video-feeds.md)
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/video/state` | `{rev, relay, kinds, feeds}` — the same snapshot `video:state` pushes |
+| GET | `/api/video/state` | `{rev, relay, kinds, ports, binaryPresent, archivePresent, feeds}` — the same snapshot `video:state` pushes. `relay` is the switch/relay status the page's own line reads: `{state: "off"}`, `{state: "downloading", receivedBytes, totalBytes}`, `{state: "starting", version}`, `{state: "running", version, ports}`, or `{state: "failing", reason, kind, retryAt, placeArchiveAt?, assetName?}` — see [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). `kinds` is the source kinds this build offers, matching the editor's **Source** dropdown. `ports` is the SAVED set (what the next start uses); a running relay's own ports are under `relay.ports` and can differ for the moment between a ports save and the restart it triggers. `binaryPresent` is whether the pinned MediaMTX binary is already extracted on this machine and runnable, checked fresh on every read — it is what tells the Video feeds page's "off" status line apart: the download-size sentence only ever shows before the FIRST download, never again once it has one. `archivePresent` is whether the pinned archive is already in `video-relay/downloads` (placed by hand, say), extracted or not; with it, the "off" line says the relay sets up from it instead of naming a download. `feeds` is each feed's wire view — id, name, kind, source, how it plays, and its live status — never a password; see [Feed states](../integrations/video-feeds.md#feed-states) |
 | GET | `/api/video/feeds` | `{feeds}` |
+| PATCH | `/api/video/ports` | Saves the relay's six ports and restarts it if it is running. Body: `{rtmp, srt, webrtcUdp, webrtcHttp, hls, api}`, every value a whole number from 1024 to 65535 and all six different — `400` naming the rule otherwise. `200` with `{ports}` |
 | POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |
 | PATCH | `/api/video/feeds/:id` | Update a feed. Any field omitted from the body keeps its current value; a field present is validated as on POST |
 | DELETE | `/api/video/feeds/:id` | Remove a feed. A layout still pointed at it keeps the binding and renders it as offline |
 | GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
+| GET | `/api/video/feeds/:id/push?protocol=srt\|rtmp\|whip` | A push feed's paste-ready address: `{protocol, address, password}`. `?protocol` previews another protocol with the SAME stored password, without saving anything; omitted or invalid falls back to the feed's own saved protocol. `404` for an unknown id or a feed that is not `push`; `403` for a cross-origin browser request (unlike every other GET here, this one answers a live secret) |
+| POST | `/api/video/feeds/:id/push/new-password` | Replaces the feed's publish password, reconciles the relay, and kicks whoever is currently publishing so the old password stops working at once. `{protocol, address, password, applied, kicked}` — `applied` is false only if a running relay's reconcile itself failed; `kicked` is `"dropped"` once a connected publisher actually was, `"none"` if nobody was publishing or no relay was running to ask, and `"failed"` only if a publisher was there and dropping it did not work |
+
+Playback is proxied on Stage Utility's own origin, not under `/api`, because
+the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
+`PATCH`/`DELETE /video/<feedId>/whep/<session>`, `POST /video/<feedId>/whip`
+(OBS's Authorization Bearer token forwarded through),
+`PATCH`/`DELETE /video/<feedId>/whip/<session>`, and
+`GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. `404` for an unknown feed id, a
+kind the feed's own source cannot serve (embed/external have no relay path;
+WHIP needs a push feed whose own protocol is WHIP), or a file name outside
+the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `502` if the relay
+refuses the connection or the exchange times out (10 s for WHEP/WHIP, 30 s
+for HLS — an LL-HLS blocking playlist reload can legitimately hold that
+long); `503` while the relay is not running, or in the moment after it
+starts, before it has been given the feed.
 
 **Branding & events**
 | Method | Path | Purpose |

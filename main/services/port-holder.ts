@@ -42,31 +42,116 @@ export function buildVersionPayload(
 }
 
 /**
- * Best-effort "who is holding this port", for the log only.
- *
- * Fixed argument vectors, no shell, no interpolation of anything a request can
- * reach — the port is a number this process chose. Any failure is silent: this
- * runs while something has already gone wrong, and it must not become a second
- * problem.
+ * Who holds a port, as parts, for each caller to phrase for its own audience
+ * (holderPhrase below): a log line may name a pid and a data directory,
+ * anything a LAN client reads names the program only — the same line
+ * buildVersionPayload draws for /api/version.
  */
-export function rawPortHolder(port: number): string {
+export type PortHolder =
+  | { kind: "stage-utility"; version: string; pid: number | null; dataDir: string | null }
+  | { kind: "process"; program: string | null; pid: number | null }
+  | { kind: "unknown" };
+
+/** ss's own connection-state column, never a program name: an unprivileged
+ *  `ss` asked about another user's socket prints the state and the other
+ *  columns with no "users:(())" at all. */
+const SS_STATE_TOKENS = new Set([
+  "LISTEN",
+  "ESTAB",
+  "SYN-SENT",
+  "SYN-RECV",
+  "FIN-WAIT-1",
+  "FIN-WAIT-2",
+  "TIME-WAIT",
+  "CLOSE",
+  "CLOSE-WAIT",
+  "LAST-ACK",
+  "CLOSING",
+  "UNCONN",
+]);
+
+/** One lsof, ss or netstat listing line, as parts. */
+export function parseHolderLine(line: string): PortHolder {
+  // ss -lptn / -lpun: `...users:(("node",pid=43580,fd=12))`. Checked first:
+  // its leading "LISTEN 0 128" columns would otherwise read as lsof's shape.
+  const ss = line.match(/users:\(\("([^"]+)",pid=(\d+)/);
+  if (ss) return { kind: "process", program: ss[1]!, pid: Number(ss[2]) };
+  // netstat -ano: `TCP  0.0.0.0:1935  0.0.0.0:0  LISTENING  4321`, or UDP
+  // with no state column — a pid, and no program.
+  const netstat = line.match(/^\s*(?:TCP|UDP)\s+\S+\s+\S+\s+(?:[A-Z_]+\s+)?(\d+)\s*$/i);
+  if (netstat) return { kind: "process", program: null, pid: Number(netstat[1]) };
+  // lsof -nP: `COMMAND  PID  USER ...`, a space in the command escaped \x20.
+  const lsof = line.match(/^(\S+)\s+(\d+)\s/);
+  if (lsof && !SS_STATE_TOKENS.has(lsof[1]!)) return { kind: "process", program: lsof[1]!.replace(/\\x20/g, " "), pid: Number(lsof[2]) };
+  return { kind: "unknown" };
+}
+
+/** The line of a listing that names `port` as its own — never one only
+ *  connected to it (`lsof -iUDP:<port>` lists a client sending to the port
+ *  as `<local>-><remote>:<port>`), and never a longer port that merely starts
+ *  with the same digits. */
+export function pickHolderLine(output: string, port: number): string | null {
+  const own = new RegExp(`[:.]${port}(?!\\d)`);
+  const line = output.split("\n").find((l) => !l.includes("->") && own.test(l));
+  return line?.trim() || null;
+}
+
+/** "another Stage Utility (version …, pid …, data directory …)", "node (pid
+ *  43580)" for a log line; "another Stage Utility", "node" for anything a
+ *  LAN client reads. */
+export function holderPhrase(holder: PortHolder, audience: "log" | "lan"): string {
+  switch (holder.kind) {
+    case "stage-utility": {
+      if (audience === "lan") return "another Stage Utility";
+      const parts = [`version ${holder.version}`];
+      if (holder.pid !== null) parts.push(`pid ${holder.pid}`);
+      if (holder.dataDir !== null) parts.push(`data directory ${holder.dataDir}`);
+      return `another Stage Utility (${parts.join(", ")})`;
+    }
+    case "process":
+      if (audience === "lan") return holder.program ?? "another program";
+      if (holder.program !== null && holder.pid !== null) return `${holder.program} (pid ${holder.pid})`;
+      if (holder.program !== null) return holder.program;
+      return holder.pid !== null ? `a program with pid ${holder.pid}` : "another program";
+    case "unknown":
+      return "a program that could not be identified";
+  }
+}
+
+/** The listing line for whoever holds `port`, or null. Fixed argument
+ *  vectors, no shell, no interpolation of anything a request can reach — the
+ *  port is a number this process chose. Any failure is silent: this runs
+ *  while something has already gone wrong, and it must not become a second
+ *  problem. */
+function holderLine(port: number, proto: "tcp" | "udp"): string | null {
   const probes: [string, string[]][] =
     process.platform === "win32"
-      ? [["netstat", ["-ano", "-p", "TCP"]]]
-      : [
-          ["lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]],
-          ["ss", ["-lptn", `sport = :${port}`]],
-        ];
+      ? [["netstat", ["-ano", "-p", proto.toUpperCase()]]]
+      : proto === "tcp"
+        ? [
+            ["lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]],
+            ["ss", ["-lptn", `sport = :${port}`]],
+          ]
+        : [
+            ["lsof", ["-nP", `-iUDP:${port}`]],
+            ["ss", ["-lpun", `sport = :${port}`]],
+          ];
   for (const [cmd, args] of probes) {
     try {
       const out = execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
-      const line = out.split("\n").find((l: string) => l.includes(String(port)));
-      if (line?.trim()) return line.trim();
+      const line = pickHolderLine(out, port);
+      if (line) return line;
     } catch {
       // Tool missing or nothing listening — try the next one.
     }
   }
-  return "could not determine which process holds it";
+  return null;
+}
+
+/** Best-effort "who is holding this port", for the log only: the raw
+ *  listing line. */
+export function rawPortHolder(port: number, proto: "tcp" | "udp" = "tcp"): string {
+  return holderLine(port, proto) ?? "could not determine which process holds it";
 }
 
 const PROBE_TIMEOUT_MS = 1500;
@@ -108,15 +193,32 @@ function probeVersion(port: number): Promise<ProbedVersion | null> {
   });
 }
 
+/** Who holds `port`, as parts: another Stage Utility if it answers
+ *  /api/version on it (TCP only — there is no HTTP to ask over UDP), else
+ *  whatever lsof, ss or netstat names. */
+export async function portHolder(port: number, proto: "tcp" | "udp"): Promise<PortHolder> {
+  const body = proto === "tcp" ? await probeVersion(port) : null;
+  if (body && typeof body.version === "string") {
+    return {
+      kind: "stage-utility",
+      version: body.version,
+      pid: typeof body.pid === "number" ? body.pid : null,
+      dataDir: typeof body.dataDir === "string" ? body.dataDir : null,
+    };
+  }
+  const line = holderLine(port, proto);
+  return line ? parseHolderLine(line) : { kind: "unknown" };
+}
+
 /**
- * Ask whatever is listening on `port` if it is another Stage Utility, by
- * GETting its own `/api/version` over loopback. If it answers with a
- * recognisable payload, name it — version, and pid/data directory when the
- * holder chose to include them (only a loopback caller gets those, see
- * `buildVersionPayload`). Otherwise fall back to the generic lsof/ss text.
+ * The main port's holder as one log sentence (remote-server.ts): another
+ * Stage Utility if it answers `/api/version` over loopback — version, and
+ * pid/data directory when the holder included them (only a loopback caller
+ * gets those, see `buildVersionPayload`) — else the raw lsof/ss text. No
+ * version probe for a UDP port: there is no HTTP to ask over it.
  */
-export async function describePortHolder(port: number): Promise<string> {
-  const body = await probeVersion(port);
+export async function describePortHolder(port: number, proto: "tcp" | "udp" = "tcp"): Promise<string> {
+  const body = proto === "tcp" ? await probeVersion(port) : null;
   if (body && typeof body.version === "string") {
     const parts = [`version ${body.version}`];
     if (typeof body.pid === "number") parts.push(`pid ${body.pid}`);
@@ -127,7 +229,7 @@ export async function describePortHolder(port: number): Promise<string> {
       `systemctl list-unit-files --state=enabled (Linux) or launchctl list (macOS).`
     );
   }
-  return rawPortHolder(port);
+  return rawPortHolder(port, proto);
 }
 
 /**

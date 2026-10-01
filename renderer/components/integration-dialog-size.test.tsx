@@ -10,7 +10,7 @@
 // the DOM, rather than comparing WIDE_DIALOG_IDS to a second hand-written list
 // in this file — two lists agree with each other happily while both are wrong.
 // The other direction (no integration outside these five renders a marked panel)
-// is covered by integration-dialog.test.tsx, which mounts all sixteen bodies.
+// is covered by integration-dialog.test.tsx, which mounts every body.
 
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";

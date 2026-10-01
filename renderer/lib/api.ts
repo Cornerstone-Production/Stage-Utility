@@ -562,7 +562,10 @@ export type IpcChannel =
   | "update:status"
   | "video:addFeed"
   | "video:feedUsage"
+  | "video:newPushPassword"
+  | "video:pushAddress"
   | "video:removeFeed"
+  | "video:setPorts"
   | "video:state"
   | "video:updateFeed"
   | "views:add"
@@ -1073,6 +1076,19 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       const id = p.id as string;
       return apiFetch<T>(`/api/video/feeds/${encodeURIComponent(id)}/usage`);
     }
+    case "video:pushAddress": {
+      const id = p.id as string;
+      // `protocol`, when given, previews another protocol's address
+      // with the feed's SAME stored password, without saving anything.
+      const query = p.protocol ? `?protocol=${encodeURIComponent(p.protocol as string)}` : "";
+      return apiFetch<T>(`/api/video/feeds/${encodeURIComponent(id)}/push${query}`);
+    }
+    case "video:newPushPassword": {
+      const id = p.id as string;
+      return post<T>(`/api/video/feeds/${encodeURIComponent(id)}/push/new-password`);
+    }
+    case "video:setPorts":
+      return patch<T>("/api/video/ports", p);
 
     // ── Views (content) ──────────────────────────────────────────────────
     case "views:add":

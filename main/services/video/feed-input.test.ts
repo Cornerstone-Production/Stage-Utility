@@ -64,3 +64,44 @@ test("a name may be 60 characters after trimming, not 61", () => {
   assert.equal(r.ok, false);
   assert.equal((r as { error: string }).error, "Name must be 1–60 characters.");
 });
+
+// SRT authenticates a pull by passphrase alone, and MediaMTX refuses a
+// passphrase outside 10 to 80 bytes on every dial, for ever ("config:
+// Passphrase must be between 10 and 80 bytes long", from the real v1.21.1
+// binary). A passphrase is plain printable ASCII, so its characters are its
+// bytes. Each rule is refused at the door, with its own reason.
+test("an SRT pull refuses a username, saying SRT uses only a passphrase", () => {
+  const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "srt://10.0.0.1:9000", username: "admin" }, password: "a-long-passphrase" }, ALL);
+  assert.equal(r.ok, false);
+  assert.equal((r as { error: string }).error, "SRT uses a passphrase only, no username: leave Username empty.");
+});
+
+const srtPull = (password: string) =>
+  parseFeedInput({ name: "P", source: { kind: "pull", url: "srt://10.0.0.1:9000", username: "" }, password }, ALL);
+
+test("an SRT passphrase must be 10 to 80 characters, and an empty one still clears it", () => {
+  for (const bad of ["a".repeat(9), "a".repeat(81)]) {
+    const r = srtPull(bad);
+    assert.equal(r.ok, false, `${bad.length} characters`);
+    assert.equal((r as { error: string }).error, "An SRT passphrase must be 10 to 80 characters long.");
+  }
+  // Space and tilde are the two ends of printable ASCII.
+  for (const good of ["a".repeat(10), "a".repeat(80), " ~".repeat(5), ""]) {
+    assert.equal(srtPull(good).ok, true, `${JSON.stringify(good)}, ${good.length} characters`);
+  }
+});
+
+test("an SRT passphrase that is not plain ASCII is refused with its own reason, whatever its length", () => {
+  // 41 characters, 82 bytes: the length rule in characters holds, so only
+  // the ASCII rule can refuse it.
+  for (const bad of ["é".repeat(41), "passphrase\u00a0nbsp", "tab\tpassphrase"]) {
+    const r = srtPull(bad);
+    assert.equal(r.ok, false, JSON.stringify(bad));
+    assert.equal((r as { error: string }).error, "An SRT passphrase can use only plain letters, digits, spaces and punctuation.");
+  }
+});
+
+test("the SRT rules are SRT's alone: an RTSP pull keeps its username and any password", () => {
+  const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "rtsp://10.0.0.1/s", username: "admin" }, password: "pw" }, ALL);
+  assert.equal(r.ok, true);
+});

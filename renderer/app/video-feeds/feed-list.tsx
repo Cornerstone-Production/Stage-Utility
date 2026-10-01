@@ -8,6 +8,7 @@ import type { FeedState, VideoFeedView } from "@main/types/video";
 
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 
 /**
  * The row's pill: its text, its tint and its dot, or null for a feed this
@@ -65,8 +66,22 @@ function FeedPill({ feed }: { feed: VideoFeedView }) {
 /**
  * How the feed plays, in the row's muted meta line. Only what this build can
  * know: an embed is the platform's own player, and an external address is
- * played exactly as given with no health to report. A relay feed's live
- * figures (path, delay, resolution, screens) come with the relay.
+ * played exactly as given with no health to report.
+ *
+ * A relay (pull/push) feed shows how it plays plus its resolution once the
+ * relay reports it: "WebRTC · under 1 s behind" while live (the design's own
+ * text), or "HLS · a few seconds behind" once B-frames or an unsupported
+ * codec pushes it onto HLS — no build in this pipeline
+ * computes an actual figure (feed-state.ts, relay.ts's RelayPath carry no
+ * such number; the server's own comment for a B-frames close gives a 2-to-6 s
+ * RANGE, not a single one), and a delayed row's own hint right below this
+ * line already says "a few seconds late" (b-frames-copy.ts) — a specific
+ * "about 4 s" here directly above it was never a real measurement and
+ * disagreed with its own neighbor. No frame rate either: neither FeedStatus
+ * nor the relay's own runtime API reports one anywhere in this pipeline —
+ * the approved mockup's sample "30 fps" is sample copy with no real data
+ * behind it, so it is left out here rather than invented. A feed that is
+ * standby, waiting or offline has nothing to say yet.
  */
 export function feedMeta(feed: VideoFeedView): string[] {
   const s = feed.source;
@@ -76,7 +91,29 @@ export function feedMeta(feed: VideoFeedView): string[] {
   if (feed.play.via === "external") {
     return [`${feed.play.protocol === "hls" ? "HLS" : "WebRTC"}, played as given`, "Stage Utility cannot see its health"];
   }
+  if (feed.play.via === "relay") {
+    const status = feed.status;
+    if (status.state === "live" || status.state === "delayed") {
+      const meta = [status.state === "live" ? "WebRTC · under 1 s behind" : "HLS · a few seconds behind"];
+      if (status.width && status.height) meta.push(`${status.width} × ${status.height}`);
+      return meta;
+    }
+  }
   return [];
+}
+
+/**
+ * The design's per-row B-frames hint (its `.hint` span,
+ * distinct from the muted meta line above it) — null for anything else,
+ * including a codec-delayed feed (no per-row hint text is specified for
+ * that case). The exact sentence the editor's own callout shares
+ * (b-frames-copy.ts) — "OBS" only for a push feed set to WHIP, "The
+ * device" otherwise, since neither a pull camera nor a push feed on
+ * SRT/RTMP is necessarily OBS.
+ */
+export function bFramesHint(feed: VideoFeedView): string | null {
+  if (feed.status.state !== "delayed" || feed.status.delayedBecause !== "b-frames") return null;
+  return bFramesSentence(isObsWhipFeed(feed));
 }
 
 export function FeedList({
@@ -95,6 +132,7 @@ export function FeedList({
       {feeds.length === 0 && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
       {feeds.map((feed) => {
         const meta = feedMeta(feed);
+        const hint = bFramesHint(feed);
         return (
           <button
             key={feed.id}
@@ -116,6 +154,7 @@ export function FeedList({
                 ))}
               </span>
             )}
+            {hint && <span className="col-span-2 text-caption1 text-warn-11">{hint}</span>}
           </button>
         );
       })}

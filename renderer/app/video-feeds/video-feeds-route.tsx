@@ -3,7 +3,10 @@
 // as the approved design lays it out.
 //
 // The relay's status line and on/off switch belong in this card's header too,
-// and arrive with the relay; there is nothing to report on without one.
+// and arrive with the relay; there is nothing to report on without one. Per
+// the approved design, the pill and the switch sit
+// on the SAME row as the page's own h1 and sub-title, not a separate one —
+// see relay-status.tsx's own header comment.
 // useVideoState()'s `kinds` already limits the Source dropdown to what this
 // build offers, so nothing here changes when that list widens.
 //
@@ -18,16 +21,31 @@
 
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
+import { useRouter } from "@tanstack/react-router";
 
+import type { IntegrationState } from "@main/types/integrations";
 import type { VideoFeedView } from "@main/types/video";
 
 import { FieldSet } from "../../components/ui";
+import { toggleIntegration } from "../../components/integrations-panel";
+import { useIntegrations } from "../../main/use-integration-states";
 import { useVideoState } from "../../main/video/use-video-state";
+import { flashTarget } from "../flash";
+import { VIDEO_PORTS_FLASH_ID } from "../../settings/sections/video-relay-ports";
 import { FeedEditor } from "./feed-editor";
 import { FeedList } from "./feed-list";
+import { RelayDetailRow, RelayPill, RelaySwitch } from "./relay-status";
+
+/** Typed as string — the generated route union does not satisfy a bare
+ *  literal (see integrations-panel.tsx's own VIDEO_FEEDS_ROUTE for the same
+ *  reason, the other direction). */
+const ADVANCED_ROUTE: string = "/settings/advanced";
 
 export function VideoFeedsRoute() {
   const state = useVideoState();
+  const { states } = useIntegrations();
+  const router = useRouter();
+  const [toggling, setToggling] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
   /**
@@ -57,13 +75,36 @@ export function VideoFeedsRoute() {
   // select yet" (an empty list) — either way the editor's isNew form is what
   // belongs on screen.
   const selected = creatingNew ? null : (justSaved ?? fromList ?? feeds[0] ?? null);
+  const videoEnabled = states.find((s) => s.id === "video")?.enabled === true;
+
+  function toggleVideo(enabled: boolean): void {
+    void toggleIntegration(
+      "video",
+      enabled,
+      { label: "Video feeds", setBusy: setToggling, onStateChange: (_next: IntegrationState) => {} },
+    );
+  }
+
+  function changePorts(): void {
+    router.navigate({ to: ADVANCED_ROUTE });
+    flashTarget(VIDEO_PORTS_FLASH_ID);
+  }
 
   return (
     <FieldSet>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-line px-4 py-3.5">
-        <h1 className="text-subheadline font-semibold text-fg">Video feeds</h1>
+        <h2 className="text-subheadline font-semibold text-fg">Video feeds</h2>
+        <RelayPill relay={state.relay} />
         <span className="text-caption1 text-fg-muted">Shows camera and program feeds in layouts and on Home</span>
+        <RelaySwitch enabled={videoEnabled} toggling={toggling} onToggle={toggleVideo} />
       </div>
+      <RelayDetailRow
+        relay={state.relay}
+        enabled={videoEnabled}
+        binaryPresent={state.binaryPresent}
+        archivePresent={state.archivePresent}
+        onChangePorts={changePorts}
+      />
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_360px]">
         <FeedList
           feeds={feeds}
@@ -92,6 +133,7 @@ export function VideoFeedsRoute() {
           kinds={state.kinds}
           appLogo={null}
           appLogoMonochrome={false}
+          relayRunning={state.relay.state === "running"}
           onSaved={(feed) => {
             setCreatingNew(false);
             setSelectedId(feed.id);

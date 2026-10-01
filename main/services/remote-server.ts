@@ -8,7 +8,6 @@ import * as fs from "fs/promises";
 import { scrub } from "./scrub.js";
 import * as http from "http";
 import * as net from "net";
-import * as os from "os";
 import * as path from "path";
 import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
@@ -29,6 +28,7 @@ import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./hist
 import { serverPort } from "./server-port.js";
 import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
 import { getUserDataPath } from "./app-paths.js";
+import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { logRoutes } from "./routes/log-routes.js";
@@ -84,6 +84,7 @@ import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
 import { videoRoutes } from "./routes/video-routes.js";
+import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
@@ -132,8 +133,12 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * is: dispatch.test.ts walks routes/ and requires every module it finds to be in
  * one of these two lists, and a module dispatched by a bespoke line would have to
  * be excused by name — which is how a coverage scan stops covering anything.
+ *
+ * videoProxyRoutes belongs here for the same reason logRoutes does: none of
+ * `/video/<feedId>/whep|whip|<file>` starts with /api/, so the static-build
+ * arm below would serve the SPA shell for every one of them.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes, videoProxyRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -155,19 +160,6 @@ const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function getLanIp(): string {
-  const interfaces = os.networkInterfaces();
-  for (const ifaces of Object.values(interfaces)) {
-    if (!ifaces) continue;
-    for (const iface of ifaces) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return "127.0.0.1";
-}
 
 function cors(res: http.ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");

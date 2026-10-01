@@ -1,8 +1,11 @@
 # Network traffic
 
 During a service with every integration running and six screens connected, Stage
-Utility uses about **1.4 Mbit/s across the whole LAN** — roughly 0.25 Mbit/s per
-screen. Between services it is close to zero.
+Utility uses about **1.4 Mbit/s across the whole LAN** for its own state and
+control traffic — roughly 0.25 Mbit/s per screen. Video is separate and far
+larger (see below): a feed playing on one screen costs about 6 Mbit/s for that
+screen alone, on top of the figure above. Between services it is close to
+zero.
 
 Figures are calculated from measured payloads and the cadences in the code, not
 captured from a packet trace.
@@ -68,7 +71,30 @@ Integrations back off toward a dormant ceiling (see [reliability](reliability.md
 and the Planning Center poll stretches from 4 seconds to 5 minutes. With nothing
 changing, nothing is pushed. A screen left on overnight costs a keepalive.
 
+## Video
+
+A pull or push feed's own picture never travels over the event stream above:
+each screen pulls its own copy straight from the relay, at about **6 Mbit/s
+per screen per feed** (typical 1080p30 H.264, over WebRTC or HLS). Two screens
+playing the same feed cost two copies of that traffic, not one shared between
+them.
+
+- **A pull feed's source is fetched only while something is watching it** — a
+  Video widget on screen, or the editor's own preview. With nobody watching,
+  there is no connection to the source at all, whatever the switch says.
+- **The relay's own status poll runs only while something watches**
+  `video:state` — the Video feeds page open, or a Video widget on screen
+  anywhere. With nobody watching, the server asks the relay nothing.
+
 ## Leaving your network
 
-Only Planning Center. Every other integration is LAN-only, and video never passes
-through the app — NDI is discovered and received peer-to-peer by the client.
+Planning Center, and whatever an embed or external feed points at — a YouTube
+or Resi player reaches its own platform, and an external feed reaches whatever
+address it names. Once, the first time video is switched on with a pull or
+push feed, the server downloads the pinned MediaMTX release from GitHub
+(about 27 MB), unless the archive was placed by hand; see
+[Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). Every other integration is LAN-only, and so is a pull or
+push feed: its picture passes through Stage Utility's own relay, but never any
+further than the network the encoders and screens are already on. NDI is the
+one path that skips the app entirely — discovered and received peer-to-peer by
+the client.

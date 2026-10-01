@@ -20,6 +20,7 @@ import { act } from "react";
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 import { installFakeHls } from "../../test-fixtures/fake-hls.js";
+import { captureConsole } from "../../../main/services/fixtures/capture-console.js";
 
 const teardown = installRenderDom();
 
@@ -52,11 +53,16 @@ function makeFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
   };
 }
 
-function makeState(feeds: VideoFeedView[]): VideoState {
+const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+
+function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state: "running", version: "1.21.1", ports: TEST_PORTS }): VideoState {
   return {
     rev: 1,
-    relay: { state: "running", version: "1.21.1", ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 } },
+    relay,
     kinds: ["pull", "push", "embed", "external"],
+    ports: TEST_PORTS,
+    binaryPresent: true,
+    archivePresent: true,
     feeds,
   };
 }
@@ -321,13 +327,12 @@ test("an embed feed renders an iframe with mute=1 and no <video>; off screen rem
   }
 });
 
-test("a render error inside the player shows the can't-play state, and a sibling still renders", async () => {
+test("a render error inside the player shows the can't-play state, and a sibling still renders", async (t) => {
   // A deliberately malformed feed: `play` is null, so reading `feed.play.via`
   // during render throws — a REAL render-phase error, not a simulated one.
   const broken = { ...makeFeed(), play: null as unknown as VideoFeedView["play"] };
   const g = stubGlobals(makeState([broken]));
-  const consoleError = console.error;
-  console.error = () => {}; // React logs the caught error; expected noise, not a failure
+  captureConsole(t, "error"); // React logs the caught error; expected noise, not a failure
   try {
     render(
       React.createElement(
@@ -343,7 +348,6 @@ test("a render error inside the player shows the can't-play state, and a sibling
     assert.equal(!!screen.queryByText("sibling-marker"), true, "a sibling must keep rendering beside the failed widget");
     assert.equal(!!screen.queryByText("This screen can't play video"), true, "expected the can't-play fallback");
   } finally {
-    console.error = consoleError;
     g.restore();
   }
 });
@@ -412,8 +416,8 @@ const EMBED = makeFeed({
  *  Connecting line carries the name too, inside a longer sentence). */
 const nameTag = (name: string) => screen.queryAllByText(name, { exact: true }).length > 0;
 
-async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}) {
-  const g = stubGlobals(makeState([feed]));
+async function renderOnScreen(feed: VideoFeedView, config: Partial<VideoConfig> = {}, relay?: VideoState["relay"]) {
+  const g = stubGlobals(makeState([feed], relay));
   const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false }));
   await settle();
   await settle();
@@ -507,10 +511,91 @@ test("a WebRTC picture carries no badge", async () => {
   }
 });
 
-test("a feed id the loaded list does not name shows the offline message without a name", async () => {
+test("a feed id the loaded list does not name shows removed copy, not the come-back promise", async () => {
   const { g } = await renderOnScreen(makeFeed({ id: "some-other-feed" }));
   try {
-    assert.equal(!!screen.queryByText("This feed is offline"), true, "a deleted feed reads as offline");
+    assert.equal(!!screen.queryByText("This feed was removed"), true, "a deleted feed must say it was removed");
+    assert.equal(!!screen.queryByText("Choose another feed for this widget"), true, "expected the corrected second line");
+    assert.equal(!!screen.queryByText("It will appear here when the source comes back"), false, "a deleted feed never comes back on its own");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── a feed nothing is sending to yet ─────────────────────────────────────
+//
+// A pull feed reads "standby" until something asks for it: the relay dials an
+// on-demand source only once a reader connects, so for a pull feed standby is
+// the reason to connect, not a reason to wait. Only a push feed's "waiting"
+// means there is nothing to connect to — and nothing answers while the relay
+// itself is not running, which the cover names instead of the source.
+
+/** The Waiting cover's two lines, or null when neither is on screen. */
+function waitingCover(): string | null {
+  for (const [big, small] of [
+    ["Waiting for the source", "Nothing is sending to this feed yet"],
+    ["Video is off", "Turn it on on the Video feeds page"],
+    ["Waiting for the video relay", "It is starting up"],
+  ] as const) {
+    if (screen.queryByText(big)) return screen.queryByText(small) ? `${big} / ${small}` : `${big} / (no second line)`;
+  }
+  return null;
+}
+
+const PULL_STANDBY = makeFeed({ status: { state: "standby" } });
+
+test("a standby pull feed connects once on screen: the request is what starts the pull", async () => {
+  const { g } = await renderOnScreen(PULL_STANDBY);
+  try {
+    assert.equal(
+      feedCalls(g.calls).filter((c) => c.method === "POST").length,
+      1,
+      "expected a WHEP POST for a standby pull feed — without one the relay never dials the source",
+    );
+    assert.equal(!!screen.queryByText("Waiting for the source"), false, "a pull feed must not sit on Waiting");
+  } finally {
+    g.restore();
+  }
+});
+
+test("a standby pull feed with video switched off says video is off, and asks for nothing", async () => {
+  const { g } = await renderOnScreen(PULL_STANDBY, {}, { state: "off" });
+  try {
+    assert.deepEqual(feedCalls(g.calls), [], "nothing answers a playback request while the relay is off");
+    assert.equal(waitingCover(), "Video is off / Turn it on on the Video feeds page");
+  } finally {
+    g.restore();
+  }
+});
+
+const PUSH = { kind: "push", source: { kind: "push", protocol: "rtmp" } } as const;
+
+test("a relay feed while the relay is starting, downloading or failing waits for the relay, not the source", async () => {
+  const notRunning: VideoState["relay"][] = [
+    { state: "starting", version: null },
+    { state: "downloading", receivedBytes: 1, totalBytes: 2 },
+    { state: "failing", reason: "Port 1935 is in use by OBS Studio.", kind: "port-conflict", retryAt: null },
+  ];
+  for (const relay of notRunning) {
+    for (const feed of [PULL_STANDBY, makeFeed({ ...PUSH, status: { state: "standby" } })]) {
+      const { g, unmount } = await renderOnScreen(feed, {}, relay);
+      try {
+        assert.deepEqual(feedCalls(g.calls), [], `${relay.state}, ${feed.kind}: nothing answers while the relay is not running`);
+        assert.equal(waitingCover(), "Waiting for the video relay / It is starting up", `${relay.state}, ${feed.kind}`);
+      } finally {
+        unmount();
+        g.restore();
+      }
+    }
+  }
+});
+
+test("a push feed waiting for its device, with the relay running, shows Waiting for the source and asks for nothing", async () => {
+  const push = makeFeed({ ...PUSH, status: { state: "waiting" } });
+  const { g } = await renderOnScreen(push);
+  try {
+    assert.deepEqual(feedCalls(g.calls), [], "a push feed's waiting means there is nothing to connect to yet");
+    assert.equal(waitingCover(), "Waiting for the source / Nothing is sending to this feed yet");
   } finally {
     g.restore();
   }

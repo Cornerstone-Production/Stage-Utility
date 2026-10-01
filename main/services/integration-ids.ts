@@ -23,6 +23,7 @@ export const INTEGRATION_IDS = [
   "scores",
   "sensource",
   "smaart",
+  "video",
   "youtube",
   "wireless",
 ] as const;
@@ -57,6 +58,7 @@ export const CONNECTION_MANAGED_IDS = [
   "scores",
   "sensource",
   "smaart",
+  "video",
   "youtube",
 ] as const;
 

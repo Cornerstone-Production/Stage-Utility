@@ -245,7 +245,7 @@ as such rather than given a doc link it doesn't need.
 | `[surface-migration]` | A one-time internal layout-surface migration — internal plumbing, not an operator signal |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
 | `[updater]` | The update flow described above, and (browser side) the update lock failing to read |
-| `[video]` | Browser-side: a Video widget's feed failing on a screen, once per failing streak (the first failure, a reminder at most every 5 minutes, the recovery), and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |
+| `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, B-frames detected, and a push feed's password rotating; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |
 | `[view-import]` | Importing a view: plan retyping, patch variants, and preset counts: [Moving a view between installs](../moving-a-view.md) |
 | `[wireless]` | Connection setup, credential migration, and meter-rate changes: [Wireless](../integrations/wireless.md) |
 | `[youtube]` | The device-code connect flow: code issued, approved, or refused: [YouTube](../integrations/youtube.md) |

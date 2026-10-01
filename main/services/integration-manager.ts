@@ -35,6 +35,8 @@ import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
+import { relayConnectionState, relayLifecycle } from "./video/relay-lifecycle.js";
+import { videoService } from "./video/video-service.js";
 import { wirelessManager } from "./wireless-manager.js";
 // One definition of "this is the mask, not a value" and "is there anything in
 // this field", shared with the wireless half and the renderer rather than
@@ -518,6 +520,22 @@ const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+/**
+ * Video — the relay that turns a push/pull feed into video for layouts and
+ * Home. No config fields: the switch is the whole of "set up", and every
+ * feed and port lives on its own page (Video feeds) and its own card
+ * (Advanced) rather than in this dialog — see bespokePanelFor in
+ * integrations-panel.tsx.
+ */
+const VIDEO_DESCRIPTOR: IntegrationDescriptor = {
+  id: "video",
+  kind: "control",
+  label: "Video feeds",
+  description: "Runs the relay that turns encoder and camera streams into video for layouts and Home.",
+  docs: "video-feeds",
+  configSchema: [],
+};
+
 // OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
 // device state back. Targets are managed as a separate list (like wireless), so
 // the descriptor itself carries no config fields.
@@ -714,6 +732,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PVP_DESCRIPTOR,
   RESI_DESCRIPTOR,
   YOUTUBE_DESCRIPTOR,
+  VIDEO_DESCRIPTOR,
   OSC_DESCRIPTOR,
   ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
@@ -764,6 +783,7 @@ export interface OutOfBandSetup {
   oscTargets: number;
   rossTalkTargets: number;
   followedTeams: number;
+  videoFeeds: number;
 }
 
 /**
@@ -797,6 +817,7 @@ const OUT_OF_BAND_CONFIGURED = new Map<IntegrationId, (setup: OutOfBandSetup) =>
   ["osc", (s) => s.oscTargets > 0],
   ["rosstalk", (s) => s.rossTalkTargets > 0],
   ["scores", (s) => s.followedTeams > 0],
+  ["video", (s) => s.videoFeeds > 0],
 ]);
 
 /** Ids that answer "configured" from their own list rather than from config. */
@@ -990,6 +1011,10 @@ const SECRET_KEYS = new Map<IntegrationId, readonly string[]>([
   ["scores", []],
   ["resi", ["password"]],
   ["youtube", ["apiKey", "clientSecret", "refreshToken"]],
+  // A push feed's publish password and a pull feed's device password both
+  // live under secretsStore's own `video:<feedId>` slot (video-service.ts),
+  // never under this integration's own id — there is no video-level secret.
+  ["video", []],
   // safeSpaceId is here for the reason safespace-client.ts states in capitals:
   // "THE SPACE ID IS THE ENTIRE CREDENTIAL. There is no key, no token and no
   // account check." It was ordinary config, so it sat in settings.json and rode
@@ -1327,6 +1352,11 @@ class IntegrationManager {
     await this.applyScores();
     await this.applyResi();
     await this.applyYouTube();
+    // Start (or leave off) the video relay, per its own enabled flag and
+    // whatever pull/push feeds already exist. Not awaited: applyVideo()
+    // itself returns at once and the relay comes up (or doesn't) in the
+    // background — see its own comment.
+    this.applyVideo();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
@@ -1403,6 +1433,12 @@ class IntegrationManager {
       oscTargets: oscManager.listTargets().length,
       rossTalkTargets: rosstalkManager.listTargets().length,
       followedTeams: scoresStore.get().favourites.length,
+      // current(), not state(): getStates() is synchronous and this runs on
+      // every broadcast — see current()'s own comment on why it exists.
+      // Only a pull or push feed needs the relay at all — an embed or
+      // external feed plays with video switched off, so it must not count
+      // toward "configured" any more than it counts toward starting one.
+      videoFeeds: videoService.current().feeds.filter((f) => f.kind === "pull" || f.kind === "push").length,
     };
   }
 
@@ -1541,6 +1577,7 @@ class IntegrationManager {
       scores: () => this.applyScores(),
       resi: () => this.applyResi(),
       youtube: () => this.applyYouTube(),
+      video: () => this.applyVideo(),
       sensource: () => this.applySensource(),
       "ross-tsl": () => this.applyRossTsl(),
     };
@@ -1983,6 +2020,21 @@ class IntegrationManager {
         return result;
       }
 
+      if (id === "video") {
+        // This used to be a SECOND mapping
+        // from RelayStatus to a message, alongside relay-lifecycle.ts's own
+        // relayConnectionState() — the one place that mapping is supposed
+        // to live. Reusing it here means "starting"/"downloading" answer
+        // with exactly the same wording the connection row and the Video
+        // feeds page's own status line already show, rather than a
+        // separate hardcoded "not running" that collapsed every non-
+        // running, non-failing state into one generic line.
+        const relay = (await videoService.state()).relay;
+        const { state, message } = relayConnectionState(relay);
+        if (state === "connected") return { ok: true, message: message ?? "MediaMTX" };
+        return { ok: false, message: message ?? "The video relay is not running." };
+      }
+
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
       const msg = errorMessage(err);
@@ -2372,6 +2424,31 @@ class IntegrationManager {
         ? { connecting: "Connecting to YouTube", start: () => youtubeService.configure(cfg) }
         : null;
     });
+  }
+
+  /**
+   * The video relay: no host/config to read, unlike every applyService()
+   * caller above — its start/stop sequence is relay-lifecycle.ts's own
+   * (the download, the port check, the config file, the supervisor), driven
+   * from `enabled` alone. It runs only once at least one pull/push feed
+   * exists, which relay-lifecycle.ts decides for itself on every feed
+   * change (video-service.ts's own feedsChangedListener hook) — nothing
+   * here re-checks that.
+   *
+   * setEnabled() itself returns at once — the whole start sequence,
+   * including a first-ever download, runs in the background and reports
+   * through the connection listener above. NOT awaited, unlike every other
+   * applier: awaiting it here used to make init() (boot) wait up to five
+   * minutes for a download, a throwing ensureBinary fail boot entirely, and
+   * the switch's own HTTP request (this same call, from setEnabled() below)
+   * outlive the renderer's 15 s timeout.
+   */
+  private applyVideo(): void {
+    relayLifecycle.setConnectionListener((state, message) => {
+      this.setConnectionState("video", state, message);
+      this.broadcastStates();
+    });
+    relayLifecycle.setEnabled(this.states.get("video")?.enabled === true);
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */

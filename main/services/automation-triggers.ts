@@ -213,6 +213,7 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "scores", label: "Live scores" },
   { id: "sensource", label: "SenSource" },
   { id: "smaart", label: "Smaart" },
+  { id: "video", label: "Video relay" },
   { id: "youtube", label: "YouTube" },
   { id: "wireless", label: "Wireless" },
 ];

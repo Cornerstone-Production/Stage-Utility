@@ -137,6 +137,7 @@ const EXPECTED_RUNTIME = [
   "spl-history.json",
   "stream-starts.json",
   "update-notices.json",
+  "video-seen.json",
 ];
 
 describe("store classification", () => {

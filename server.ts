@@ -109,9 +109,14 @@ console.log(`[server] data directory: ${DATA_DIR}`);
 console.log("[server] initialising services...");
 await streamStartStore.init();
 await stageController.init();
+// Before integrationManager: its own init() calls applyVideo() (fire-and-
+// forget, but still synchronous up to that call), which reads
+// videoService.current() for the "configured" badge's feed count — that
+// must already be the real snapshot, not the pre-init default, and
+// loadSeen() must have already run before anything can attach a relay.
+await videoService.init();
 await integrationManager.init();
 await baptismTimerService.init();
-await videoService.init();
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 

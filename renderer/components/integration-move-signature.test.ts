@@ -3,7 +3,7 @@
 // useSlideOnMove re-runs its FLIP whenever the signature it is handed changes,
 // so the signature has to answer exactly one question: has any integration
 // crossed between the two grids? Carry more — a connection state, a message —
-// and every SSE push slides sixteen cards that never moved. Carry less and a
+// and every SSE push slides every card that never moved. Carry less and a
 // real move teleports.
 
 import { strict as assert } from "node:assert";
