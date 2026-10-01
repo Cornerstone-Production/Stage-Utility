@@ -733,6 +733,134 @@ test("a requested pull feed reads standby while the relay dials it, offline once
   }
 });
 
+// Seen on a dev server, 1 Oct 2026: every pull feed logged "went offline"
+// 9-15 s after "is live" as an operator switched browser tabs. A hidden tab
+// stops its player; the relay closes the on-demand source ten seconds later;
+// the request that had opened it was still inside its window, so the closed
+// source read as a failed dial. A source that answered its request is not
+// offline for being let go.
+test("a pull feed the relay closed after its viewer left reads standby, not offline", async (t) => {
+  const made = await videoService.addFeed({ name: "Tab cam", source: { kind: "pull", url: "rtsp://192.0.2.56/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let answer: RelayPath[] = [notReadyPath({ name: id })];
+  const relay = fakeRelay({ status: async () => answer });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const stateOf = async () => (await videoService.state()).feeds.find((f) => f.id === id)?.status.state;
+  try {
+    await pollOnce();
+    videoService.markRequested(id); // the tab opens a session
+    t.mock.timers.tick(2000);
+    answer = [readyPath({ name: id })];
+    await pollOnce();
+    assert.equal(await stateOf(), "live", "sanity: the dial answered");
+
+    answer = [notReadyPath({ name: id })]; // tab hidden, the relay closes the source
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS + 1000);
+    await pollOnce();
+    assert.equal(await stateOf(), "standby", "a source closed for want of a viewer is not offline");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a player retrying every two seconds against a dead source still reads offline once the dial window has run out", async (t) => {
+  // HLS asks for its playlist every couple of seconds. Timed from the LAST
+  // request, a dead source never aged past the dial window while anything
+  // kept asking, and sat on standby for as long as a screen tried it.
+  const made = await videoService.addFeed({ name: "Dead cam", source: { kind: "pull", url: "rtsp://192.0.2.57/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: id })] });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const stateOf = async () => (await videoService.state()).feeds.find((f) => f.id === id)?.status.state;
+  try {
+    await pollOnce();
+    for (let ms = 0; ms <= PULL_START_TIMEOUT_MS; ms += 2000) {
+      videoService.markRequested(id);
+      t.mock.timers.tick(2000);
+    }
+    await pollOnce();
+    assert.equal(await stateOf(), "offline");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a dead source asked for again after its requests lapsed is dialled afresh, not offline at once", async (t) => {
+  const made = await videoService.addFeed({ name: "Again cam", source: { kind: "pull", url: "rtsp://192.0.2.58/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: id })] });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const stateOf = async () => (await videoService.state()).feeds.find((f) => f.id === id)?.status.state;
+  try {
+    await pollOnce();
+    videoService.markRequested(id);
+    t.mock.timers.tick(RECENT_REQUEST_MS + 30_000);
+    await pollOnce();
+    assert.equal(await stateOf(), "standby", "sanity: the old request has lapsed");
+
+    videoService.markRequested(id);
+    await pollOnce();
+    assert.equal(await stateOf(), "standby", "a new request is a new dial, still inside its window");
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS);
+    await pollOnce();
+    assert.equal(await stateOf(), "offline", "and offline once that dial has run out");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
+// Seen on a dev server, 1 Oct 2026: BOX pointed at another feed's encoder,
+// which answers an unknown path's DESCRIBE with silence. The screen warned;
+// the server said nothing, so the relay looked fine and the address was the
+// last thing anyone checked.
+test("a pull feed whose device never answers is one warning per outage, naming the address, and one line when it does", async (t) => {
+  const made = await videoService.addFeed({ name: "Box cam", source: { kind: "pull", url: "rtsp://192.0.2.59:554/BOX", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let answer: RelayPath[] = [notReadyPath({ name: id })];
+  const relay = fakeRelay({ status: async () => answer });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const lines = captureConsole(t, "warn", "log");
+  const dial = () => lines.filter((l) => l.includes("Box cam:"));
+  try {
+    await pollOnce();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      videoService.markRequested(id); // a screen retrying, each attempt after the last lapsed
+      t.mock.timers.tick(PULL_START_TIMEOUT_MS);
+      await pollOnce();
+      t.mock.timers.tick(RECENT_REQUEST_MS);
+      await pollOnce();
+    }
+    assert.deepEqual(dial(), [
+      "[video] Box cam: nothing from rtsp://192.0.2.59:554/BOX within 10 s of the relay asking — check the device is on and the address and path are right",
+    ]);
+
+    answer = [readyPath({ name: id })]; // the address corrected, say
+    await pollOnce();
+    t.mock.timers.tick(DEFAULT_SETTLE_MS + 1000);
+    await pollOnce();
+    assert.equal(dial().length, 2);
+    assert.match(dial()[1]!, /^\[video\] Box cam: the device is answering again/);
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 // Driven on the real binary: after a respawn the first poll finds no paths,
 // and a pull feed read offline (so a screen did not ask for it) until the
 // poll after the reconcile, up to STATUS_POLL_MS later.

@@ -39,10 +39,12 @@ export interface FeedStateInput {
   path: RelayPath | undefined;
   bframesMark: BFramesMark | undefined;
   /** A pull feed's source is dialled by the relay only while something is
-   *  watching. True once a WHEP/HLS request named this feed long enough ago
-   *  that the relay's dial window has run out, and recently enough to still
-   *  count (video-service.ts's RECENT_REQUEST_MS) — a feed still being
-   *  dialled is not yet evidence of anything. */
+   *  watching. True once a WHEP/HLS request for this feed has gone
+   *  unanswered — no ready poll since — for the relay's whole dial window,
+   *  and something asked recently enough to still count (video-service.ts's
+   *  RECENT_REQUEST_MS). A feed still being dialled is not yet evidence of
+   *  anything, and nor is one that answered and was later closed for want
+   *  of a viewer. */
   recentlyRequested: boolean;
   /** Epoch ms this feed was last confirmed live, from the seen store; null if
    *  never. */

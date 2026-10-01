@@ -239,9 +239,9 @@ A pull or push feed's status pill reflects what the relay currently knows:
 |---|---|
 | Live | Playing over WebRTC, under a second behind |
 | Live, delayed | Playing, but only over HLS — a few seconds behind, from B-frames (above) or an unsupported codec |
-| Standby | Nothing to report yet: video is off, the relay is still starting, or — once it is up — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks |
+| Standby | Nothing to report yet: video is off, the relay is still starting, or — once it is up — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks. A pull feed that came up and was then closed because nothing watches it any more — a browser tab hidden, a widget scrolled away — is back on Standby, not Offline |
 | Waiting for source | A push feed nothing has ever sent to |
-| Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked the running relay for that did not come up within its 10-second dial, for 15 seconds after (a request to a relay that has since restarted does not count), and any pull or push feed the running relay has no path for (it could not be set up on the relay — see `could not reconcile` under Logging) |
+| Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked the running relay for that did not come up within its 10-second dial, until 25 seconds after the last request for it (a request to a relay that has since restarted does not count), and any pull or push feed the running relay has no path for (it could not be set up on the relay — see `could not reconcile` under Logging) |
 
 An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
 platform it plays through; Stage Utility cannot see whether that platform's
@@ -368,6 +368,12 @@ from the server:
   did not answer, once per outage per feed, and `is answering again`.
 - Each feed going live or delayed, and `went offline` once per outage, only
   for a feed that was showing a picture.
+- `<feed>: nothing from <address> within 10 s of the relay asking`: a pull
+  feed's device did not answer the relay's dial, once per outage however often
+  screens retry, and `the device is answering again` once it has. The usual
+  cause is a wrong address or path — some encoders answer a path they do not
+  have with silence rather than an error, which looks the same as a device
+  that is off.
 - B-frames detected on a feed, with which setting to change.
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
