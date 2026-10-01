@@ -76,8 +76,15 @@ test("a live push carries no replay flag; a late subscriber's replay does", asyn
 
   assert.equal(FakeUpstreamEventSource.instances.length, 1, "ensureEs() should have constructed exactly one EventSource");
   // The upstream EventSource delivers a genuine server push — must reach tab1
-  // as a live frame, with no `replay` field.
-  FakeUpstreamEventSource.instances[0]!.push("pco:live", { mode: "item" });
+  // as a live frame, with no `replay` field. The clock is pinned so the replay
+  // below can be checked for WHEN the frame arrived, not just that it did.
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    FakeUpstreamEventSource.instances[0]!.push("pco:live", { mode: "item" });
+  } finally {
+    Date.now = realNow;
+  }
 
   assert.equal(tab1.posted.length, 1);
   assert.equal(tab1.posted[0]!.replay, undefined, "a live push must not read as a replay");
@@ -91,5 +98,8 @@ test("a live push carries no replay flag; a late subscriber's replay does", asyn
 
   assert.equal(tab2.posted.length, 1);
   assert.equal(tab2.posted[0]!.replay, true, "a late subscriber's connect-time frame must be flagged as a replay");
-  assert.deepEqual(tab2.posted[0], { channel: "pco:live", data: { mode: "item" }, replay: true });
+  // `at` is when the cached frame arrived, which a tab needs to tell a cached
+  // snapshot newer than a read it joined from an older one ("Shared reads" in
+  // api.ts). It is the push's arrival, not the replay's.
+  assert.deepEqual(tab2.posted[0], { channel: "pco:live", data: { mode: "item" }, replay: true, at: 1_700_000_000_000 });
 });
