@@ -20,19 +20,20 @@
 // by video-object.test.tsx.
 
 import { useState } from "react";
-import { Loader2Icon } from "lucide-react";
+import { DownloadIcon, Loader2Icon, UploadIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 
 import type { IntegrationState } from "@main/types/integrations";
 import type { VideoFeedView } from "@main/types/video";
 
-import { FieldSet } from "../../components/ui";
+import { Button, FieldSet } from "../../components/ui";
 import { toggleIntegration } from "../../components/integrations-panel";
 import { useIntegrations } from "../../main/use-integration-states";
 import { useVideoState } from "../../main/video/use-video-state";
 import { flashTarget } from "../flash";
 import { VIDEO_PORTS_FLASH_ID } from "../../settings/sections/video-relay-ports";
 import { FeedEditor } from "./feed-editor";
+import { ExportPanel, ImportPanel } from "./feed-transfer-panels";
 import { FeedList } from "./feed-list";
 import { RelayDetailRow, RelayPill, RelaySwitch } from "./relay-status";
 
@@ -48,6 +49,8 @@ export function VideoFeedsRoute() {
   const [toggling, setToggling] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
+  /** Which of Export / Import holds the right column, in place of the editor. */
+  const [panel, setPanel] = useState<"export" | "import" | null>(null);
   /**
    * The feed a Save just returned, and the video:state `rev` the page held
    * when it did. Until a push has landed since then, the list still carries
@@ -90,13 +93,53 @@ export function VideoFeedsRoute() {
     flashTarget(VIDEO_PORTS_FLASH_ID);
   }
 
+  const editor = (
+    <FeedEditor
+      // Keyed by what's selected, so switching feeds (or starting a new
+      // one) remounts with a fresh draft rather than carrying over the
+      // previous feed's unsaved edits — Cancel handles reverting THIS
+      // feed's edits; this handles moving to a different one. NOT keyed
+      // off the saved feed vs. fromList — both share the selected feed's
+      // id, so the pushed list catching up to the save does not itself
+      // force a remount and discard any further in-progress edit.
+      key={selected?.id ?? "new"}
+      feed={selected}
+      isNew={selected === null}
+      kinds={state.kinds}
+      appLogo={null}
+      appLogoMonochrome={false}
+      relayRunning={state.relay.state === "running"}
+      onSaved={(feed) => {
+        setCreatingNew(false);
+        setSelectedId(feed.id);
+        setPending({ feed, rev: state.rev });
+      }}
+      onDeleted={() => {
+        setCreatingNew(false);
+        setPending(null);
+        setSelectedId(null);
+      }}
+      onCancelNew={() => setCreatingNew(false)}
+    />
+  );
+  const right =
+    panel === "export" ? <ExportPanel feeds={feeds} ports={state.ports} /> : panel === "import" ? <ImportPanel /> : editor;
+
   return (
     <FieldSet>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-line px-4 py-3.5">
         <h2 className="text-subheadline font-semibold text-fg">Video feeds</h2>
         <RelayPill relay={state.relay} />
         <span className="text-caption1 text-fg-muted">Shows camera and program feeds in layouts and on Home</span>
-        <RelaySwitch enabled={videoEnabled} toggling={toggling} onToggle={toggleVideo} />
+        <span className="ml-auto flex items-center gap-1">
+          <Button variant="transparent" size="small" aria-pressed={panel === "export"} className="aria-pressed:bg-fill aria-pressed:text-fg" onClick={() => setPanel(panel === "export" ? null : "export")}>
+            <DownloadIcon className="size-3.5" /> Export
+          </Button>
+          <Button variant="transparent" size="small" aria-pressed={panel === "import"} className="aria-pressed:bg-fill aria-pressed:text-fg" onClick={() => setPanel(panel === "import" ? null : "import")}>
+            <UploadIcon className="size-3.5" /> Import
+          </Button>
+          <RelaySwitch enabled={videoEnabled} toggling={toggling} onToggle={toggleVideo} />
+        </span>
       </div>
       <RelayDetailRow
         relay={state.relay}
@@ -111,42 +154,18 @@ export function VideoFeedsRoute() {
           screens={state.screens}
           selectedId={selected?.id ?? null}
           onSelect={(id) => {
+            setPanel(null);
             setCreatingNew(false);
             setPending(null);
             setSelectedId(id);
           }}
           onAddFeed={() => {
+            setPanel(null);
             setCreatingNew(true);
             setPending(null);
           }}
         />
-        <FeedEditor
-          // Keyed by what's selected, so switching feeds (or starting a new
-          // one) remounts with a fresh draft rather than carrying over the
-          // previous feed's unsaved edits — Cancel handles reverting THIS
-          // feed's edits; this handles moving to a different one. NOT keyed
-          // off the saved feed vs. fromList — both share the selected feed's
-          // id, so the pushed list catching up to the save does not itself
-          // force a remount and discard any further in-progress edit.
-          key={selected?.id ?? "new"}
-          feed={selected}
-          isNew={selected === null}
-          kinds={state.kinds}
-          appLogo={null}
-          appLogoMonochrome={false}
-          relayRunning={state.relay.state === "running"}
-          onSaved={(feed) => {
-            setCreatingNew(false);
-            setSelectedId(feed.id);
-            setPending({ feed, rev: state.rev });
-          }}
-          onDeleted={() => {
-            setCreatingNew(false);
-            setPending(null);
-            setSelectedId(null);
-          }}
-          onCancelNew={() => setCreatingNew(false)}
-        />
+        {right}
       </div>
     </FieldSet>
   );

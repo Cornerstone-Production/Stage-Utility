@@ -23,6 +23,15 @@ import { embedSrc } from "./embed.js";
 import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput } from "./feed-input.js";
+import {
+  assertVideoBundle,
+  buildPreview,
+  buildVideoBundle,
+  parseFeedIds,
+  planImport,
+  samePorts,
+  type FeedPlan,
+} from "./feed-transfer.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
@@ -42,7 +51,11 @@ import {
   type PushProtocol,
   type RelayStatus,
   type ScreenVideoHealth,
+  type ImportChoice,
+  type ImportPreview,
+  type ImportReport,
   type VideoFeed,
+  type VideoFeedsBundle,
   type VideoFeedsFile,
   type VideoFeedView,
   type VideoPlaybackReport,
@@ -60,6 +73,8 @@ const KICK_LOG_TEXT: Record<KickResult, string> = {
   none: "nothing was publishing",
   failed: "could not drop the current publisher",
 };
+
+const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
@@ -1717,6 +1732,197 @@ class VideoService {
     await this.publish();
     await this.notifyFeedsChanged();
     return true;
+  }
+
+  // ── Moving feeds between servers ───────────────────────────────────────
+
+  /** A feed's stored password, or undefined — the secret slot's one field. */
+  private async storedPassword(id: string): Promise<string | undefined> {
+    return (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined;
+  }
+
+  /**
+   * `GET /api/video/export`: the video feeds file. `feedIds` is the raw
+   * `?feeds=` value (null for every feed). Passwords come from the secrets
+   * store and only when asked for; none is minted for the file.
+   */
+  async exportBundle(
+    feedIds: string | null,
+    ports: boolean,
+    passwords: boolean,
+  ): Promise<{ ok: true; bundle: VideoFeedsBundle } | { ok: false; error: string }> {
+    const file = await loadFeedsFile();
+    const ids = parseFeedIds(feedIds, new Set(file.feeds.map((f) => f.id)));
+    if (!ids.ok) return ids;
+    const bundle = await buildVideoBundle(file, { feeds: ids.ids, ports, passwords }, (id) => this.storedPassword(id));
+    return { ok: true, bundle };
+  }
+
+  /** `POST /api/video/import/preview`: each feed in the file against what is here. */
+  async previewImport(raw: unknown): Promise<{ ok: true; preview: ImportPreview } | { ok: false; error: string }> {
+    let bundle: VideoFeedsBundle;
+    try {
+      bundle = assertVideoBundle(raw);
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+    const here = await loadFeedsFile();
+    const plans = await planImport(bundle, feedsOf(here), (id) => this.storedPassword(id), this.allowedKinds());
+    return { ok: true, preview: buildPreview(bundle, plans, here) };
+  }
+
+  /**
+   * `POST /api/video/import`: lands the file's feeds under their own ids.
+   *
+   * Never removes a feed and never touches the integration switch. All feed
+   * changes are ONE store update; the secrets follow, and a secret write that
+   * fails takes the feed changes (and any secret already written) back out
+   * and throws, so a failed import never reads as a partial success. The relay
+   * hears about it once, at the end.
+   */
+  async importFeeds(body: unknown): Promise<{ ok: true; report: ImportReport } | { ok: false; error: string }> {
+    const req = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+    if (req.ports !== undefined && typeof req.ports !== "boolean") return { ok: false, error: "ports must be true or false." };
+    // A Map, never an object keyed by what the body supplied.
+    const choices = new Map<string, ImportChoice>();
+    if (req.choices !== undefined) {
+      if (typeof req.choices !== "object" || req.choices === null || Array.isArray(req.choices)) {
+        return { ok: false, error: "choices must be an object of feed id to replace or keep." };
+      }
+      for (const [id, choice] of Object.entries(req.choices)) {
+        if (choice !== "replace" && choice !== "keep") return { ok: false, error: `The choice for ${id.slice(0, 40)} must be replace or keep.` };
+        choices.set(id, choice);
+      }
+    }
+    let bundle: VideoFeedsBundle;
+    try {
+      bundle = assertVideoBundle(req.bundle);
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
+    }
+
+    const before = await loadFeedsFile();
+    const plans = await planImport(bundle, feedsOf(before), (id) => this.storedPassword(id), this.allowedKinds());
+
+    interface Landed { plan: FeedPlan; outcome: "added" | "replaced" | "kept" | "same"; prior?: VideoFeed }
+    const landed: Landed[] = [];
+    await videoFeedsStore.update((current) => {
+      const feeds = feedsOf(current);
+      const byId = new Map(feeds.map((f) => [f.id, f]));
+      const next = [...feeds];
+      for (const plan of plans) {
+        if (!plan.parsed) continue;
+        const { id } = plan.preview;
+        const prior = byId.get(id);
+        const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source };
+        if (!prior) {
+          next.push(feed);
+          landed.push({ plan, outcome: "added" });
+        } else if (plan.preview.status === "same") {
+          landed.push({ plan, outcome: "same", prior });
+        } else if ((choices.get(id) ?? "replace") === "keep") {
+          landed.push({ plan, outcome: "kept", prior });
+        } else {
+          next[next.findIndex((f) => f.id === id)] = feed;
+          landed.push({ plan, outcome: "replaced", prior });
+        }
+      }
+      return { ...current, feeds: next };
+    });
+
+    // Secrets. Each one's previous slot is remembered first, so a failure can put it back.
+    const undo: Array<() => Promise<void>> = [];
+    const newPushPasswords: string[] = [];
+    let passwordsWritten = 0;
+    try {
+      for (const { plan, outcome, prior } of landed) {
+        if (outcome !== "added" && outcome !== "replaced") continue;
+        const { id } = plan.preview;
+        const parsed = plan.parsed!;
+        const slot = SECRET_SLOT(id);
+        const previous = await secretsStore.getSecrets(slot);
+        undo.push(() => (Object.keys(previous).length ? secretsStore.setSecrets(slot, previous) : secretsStore.clearSecrets(slot)));
+        const newKind = parsed.source.kind;
+        const oldKind = prior?.source.kind;
+        if (parsed.password !== undefined) {
+          if (parsed.password !== previous.password) {
+            await secretsStore.setSecret(slot, "password", parsed.password);
+            passwordsWritten++;
+          }
+        } else if (oldKind === newKind) {
+          // A replaced feed of the same kind keeps this server's password.
+        } else if (oldKind === undefined) {
+          if (newKind === "push") {
+            await secretsStore.setSecret(slot, "password", generatePushPassword());
+            newPushPasswords.push(parsed.name);
+          }
+        } else {
+          await this.updateFeedSecret(id, oldKind, newKind, undefined);
+          if (newKind === "push") newPushPasswords.push(parsed.name);
+        }
+      }
+    } catch (err) {
+      const failed: string[] = [];
+      for (const restore of undo.reverse()) {
+        try { await restore(); } catch (undoErr) { failed.push(errorMessage(undoErr)); }
+      }
+      const added = new Set(landed.filter((l) => l.outcome === "added").map((l) => l.plan.preview.id));
+      const replaced = new Map(landed.filter((l) => l.outcome === "replaced").map((l) => [l.plan.preview.id, l.prior!]));
+      try {
+        await videoFeedsStore.update((current) => ({
+          ...current,
+          feeds: feedsOf(current).filter((f) => !added.has(f.id)).map((f) => replaced.get(f.id) ?? f),
+        }));
+      } catch (undoErr) {
+        failed.push(errorMessage(undoErr));
+      }
+      if (failed.length) {
+        throw new Error(`${errorMessage(err)} (and the previous state could not be fully restored: ${failed.join("; ")})`, { cause: err });
+      }
+      throw err;
+    }
+
+    const names = (o: Landed["outcome"]): string[] =>
+      landed.filter((l) => l.outcome === o).map((l) => (o === "kept" || o === "same" ? l.prior!.name : l.plan.parsed!.name));
+    const report: ImportReport = {
+      added: names("added"),
+      replaced: names("replaced"),
+      kept: names("kept"),
+      same: names("same"),
+      skipped: plans.filter((p) => !p.parsed).map((p) => ({ name: p.preview.name, reason: p.preview.error ?? "Not usable here." })),
+      newPushPasswords,
+      passwordsWritten,
+      portsApplied: false,
+    };
+
+    if (report.added.length + report.replaced.length > 0) {
+      await this.publish();
+      await this.notifyFeedsChanged();
+    }
+
+    // Last: a ports change restarts a running relay, and it should come back up
+    // on feeds that are already saved. The feeds are in either way, so a ports
+    // failure is reported, not thrown.
+    if (req.ports === true && bundle.ports && !samePorts(bundle.ports, (await loadFeedsFile()).ports)) {
+      const r = await this.setPorts(bundle.ports);
+      if (r.ok) report.portsApplied = true;
+      else report.portsError = r.error;
+    }
+
+    const skippedText = report.skipped.length
+      ? `; skipped ${report.skipped.map((k) => `"${k.name}" (${k.reason})`).join(", ")}`
+      : "";
+    // Built whole, then scrubbed whole: the feed names and reasons in it came out of the file.
+    const summary =
+      `added ${report.added.length}, replaced ${report.replaced.length}, kept ${report.kept.length}, ` +
+      `same ${report.same.length}, skipped ${report.skipped.length}` +
+      (report.passwordsWritten ? `, wrote ${plural(report.passwordsWritten, "password")}` : "") +
+      (report.newPushPasswords.length ? `, made ${plural(report.newPushPasswords.length, "new publish password")}` : "") +
+      (report.portsApplied ? ", applied relay ports" : "") +
+      (report.portsError ? `, could not apply relay ports: ${report.portsError}` : "") +
+      skippedText;
+    console.log(`[video-import] ${scrub(summary)}`);
+    return { ok: true, report };
   }
 
   async usage(id: string): Promise<{ viewId: string; name: string }[]> {
