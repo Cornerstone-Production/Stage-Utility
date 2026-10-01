@@ -1175,10 +1175,14 @@ class VideoService {
    */
   markRequested(feedId: string): void {
     const now = Date.now();
+    const previous = this.requestedAt.get(feedId);
     this.requestedAt.set(feedId, now);
     // A request for a feed already showing a picture is a viewer joining it,
-    // not a dial — nothing for the relay to fail.
-    if (!this.lastPaths.get(feedId)?.ready && !this.unansweredSince.has(feedId)) this.unansweredSince.set(feedId, now);
+    // not a dial — nothing for the relay to fail. One after the last has
+    // lapsed starts a fresh dial: an old failure is not this one's.
+    if (this.lastPaths.get(feedId)?.ready) return;
+    const lapsed = previous === undefined || now - previous >= RECENT_REQUEST_MS;
+    if (lapsed || !this.unansweredSince.has(feedId)) this.unansweredSince.set(feedId, now);
   }
 
   /**
