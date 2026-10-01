@@ -15,6 +15,7 @@ const { callRoute } = await import("./route-harness.js");
 const { videoRoutes } = await import("./video-routes.js");
 const { secretsStore } = await import("../secrets.js");
 const { videoService } = await import("../video/video-service.js");
+const { videoFeedsStore } = await import("../video/feed-store.js");
 
 const PULL = { name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.31:554/box", username: "admin" }, password: "cam-pass-1" };
 const PUSH = { name: "OBS Lobby", source: { kind: "push", protocol: "srt" } };
@@ -88,7 +89,7 @@ test("export refuses a flag that is not 1 or 0", async () => {
   for (const q of ["?ports=yes", "?passwords=2"]) {
     const r = await callRoute(videoRoutes, `/api/video/export${q}`);
     assert.equal(r.status, 400, q);
-    assert.match((r.json as Json).error, /must be 1 or 0/);
+    assert.match((r.json as Json).error, /must be 1, 0, true or false/);
   }
 });
 
@@ -246,6 +247,7 @@ test("apply adds new feeds under the file's own id", async () => {
   const r = await apply({ bundle: bundleOf([{ id: "gym-cam", name: "GYM", source: { kind: "pull", url: "rtsp://192.0.2.50:554/gym", username: "" } }]) });
   assert.equal(r.status, 200, r.body);
   assert.deepEqual((r.json as Json).added, ["GYM"]);
+  assert.deepEqual((r.json as Json).addedIds, ["gym-cam"]);
   assert.deepEqual((await state()).feeds.map((f: Json) => f.id), ["gym-cam"], "the id came from the file, not from the name");
 });
 
@@ -426,4 +428,222 @@ test("both import routes read a body past the ordinary JSON cap, like /api/views
   const bundle = bundleOf([], { padding });
   assert.equal((await preview(bundle)).status, 200);
   assert.equal((await apply({ bundle })).status, 200);
+});
+
+// ── The review is what gets applied ─────────────────────────────────────
+
+const CHANGED = "Changed on this server since the review. Review the file again.";
+const statusesOf = (p: Json) => Object.fromEntries(p.feeds.map((f: Json) => [f.id, f.status]));
+/** The `expect` the UI sends: what the review saw of each local feed. */
+const heresOf = (p: Json) => Object.fromEntries(p.feeds.map((f: Json) => [f.id, f.here]));
+const GYM_SRC = { kind: "pull", url: "rtsp://192.0.2.50:554/gym", username: "" };
+
+test("a feed reviewed as same, then edited here, is skipped and the edit survives", async () => {
+  await add(EMBED);
+  const bundle = bundleOf([{ id: "resi", name: "Resi", source: EMBED.source }]);
+  const reviewed = (await preview(bundle)).json as Json;
+  assert.equal(statusesOf(reviewed).resi, "same");
+  const expect = heresOf(reviewed);
+  await callRoute(videoRoutes, "/api/video/feeds/resi", { method: "PATCH", body: { name: "Edited here" } });
+
+  const r = (await apply({ bundle, expect })).json as Json;
+  assert.deepEqual([r.added, r.replaced, r.same], [[], [], []]);
+  assert.deepEqual(r.skipped, [{ name: "Resi", reason: CHANGED }]);
+  assert.equal((await state()).feeds[0].name, "Edited here", "the local edit was overwritten");
+});
+
+// Driven in a browser, 1 Oct 2026: expect carried only the status. BOX
+// reviewed as "differs" was edited here to a third address while the review
+// was open; it still "differed", so the import overwrote an edit nobody saw.
+test("a feed reviewed as differs, then edited here to something else, is skipped", async () => {
+  await add({ name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.31:554/box", username: "" } });
+  const bundle = bundleOf([{ id: "box", name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.99:554/box", username: "" } }]);
+  const reviewed = (await preview(bundle)).json as Json;
+  assert.equal(statusesOf(reviewed).box, "differs");
+  await callRoute(videoRoutes, "/api/video/feeds/box", { method: "PATCH", body: { source: { kind: "pull", url: "rtsp://192.0.2.7:554/box", username: "" } } });
+
+  const r = (await apply({ bundle, expect: heresOf(reviewed) })).json as Json;
+  assert.deepEqual(r.replaced, []);
+  assert.deepEqual(r.skipped, [{ name: "BOX", reason: CHANGED }]);
+  assert.equal((await state()).feeds[0].source.url, "rtsp://192.0.2.7:554/box", "the local edit was overwritten");
+});
+
+test("a feed whose password changed here since the review is skipped, and the fingerprint is not the password's hash", async () => {
+  await add({ name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.31:554/box", username: "cam" }, password: "first-pass" });
+  const bundle = bundleOf([{ id: "box", name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.99:554/box", username: "cam" } }]);
+  const reviewed = (await preview(bundle)).json as Json;
+  assert.match(reviewed.feeds[0].here, /^[0-9a-f]{32}$/);
+  assert.ok(!JSON.stringify(reviewed).includes("first-pass"));
+  await callRoute(videoRoutes, "/api/video/feeds/box", { method: "PATCH", body: { password: "second-pass" } });
+
+  const r = (await apply({ bundle, expect: heresOf(reviewed) })).json as Json;
+  assert.deepEqual(r.skipped, [{ name: "BOX", reason: CHANGED }]);
+});
+
+test("the same race without expect is caught by the compare inside the write", async () => {
+  await add(EMBED);
+  const bundle = bundleOf([{ id: "resi", name: "Resi", source: EMBED.source }]);
+  const seen = (await preview(bundle)).json as Json;
+  assert.equal(seen.feeds[0].status, "same");
+  // The plan is built inside apply, so edit between the two via the store seam:
+  // the update callback is the only place that still sees the fresh feed.
+  const real = videoFeedsStore.update.bind(videoFeedsStore);
+  let first = true;
+  videoFeedsStore.update = (async (fn: Parameters<typeof real>[0]) => {
+    if (first) {
+      first = false;
+      await real((c) => ({ ...c, feeds: c.feeds.map((f) => ({ ...f, name: "Edited mid-flight" })) }));
+    }
+    return real(fn);
+  }) as typeof real;
+  try {
+    const r = (await apply({ bundle: bundleOf([{ id: "resi", name: "Resi 2", source: EMBED.source }]) })).json as Json;
+    assert.deepEqual(r.skipped, [{ name: "Resi 2", reason: CHANGED }]);
+    assert.deepEqual(r.replaced, []);
+  } finally {
+    videoFeedsStore.update = real;
+  }
+  assert.equal((await state()).feeds[0].name, "Edited mid-flight");
+});
+
+test("a feed reviewed as new that someone adds here first is skipped, with or without expect", async () => {
+  const bundle = bundleOf([{ id: "gym", name: "GYM", source: GYM_SRC }]);
+  const reviewed = (await preview(bundle)).json as Json;
+  assert.equal(statusesOf(reviewed).gym, "new");
+  const expect = heresOf(reviewed);
+  await add({ name: "GYM", source: { kind: "pull", url: "rtsp://192.0.2.77:554/other", username: "" } });
+
+  const withExpect = (await apply({ bundle, expect })).json as Json;
+  assert.deepEqual(withExpect.skipped, [{ name: "GYM", reason: CHANGED }]);
+  assert.equal((await state()).feeds[0].source.url, "rtsp://192.0.2.77:554/other", "the local feed was replaced unseen");
+});
+
+test("a feed deleted between the plan and the write is not added back", async () => {
+  const real = videoFeedsStore.update.bind(videoFeedsStore);
+  const same = bundleOf([{ id: "resi", name: "Resi", source: EMBED.source }]);
+  for (const choices of [{}, { resi: "keep" }]) {
+    await add(EMBED);
+    let first = true;
+    videoFeedsStore.update = (async (fn: Parameters<typeof real>[0]) => {
+      if (first) {
+        first = false;
+        await real((c) => ({ ...c, feeds: [] }));
+      }
+      return real(fn);
+    }) as typeof real;
+    try {
+      const r = (await apply({ bundle: same, choices })).json as Json;
+      assert.deepEqual(r.added, [], `re-added with ${JSON.stringify(choices)}`);
+      assert.deepEqual(r.skipped, [{ name: "Resi", reason: CHANGED }]);
+    } finally {
+      videoFeedsStore.update = real;
+    }
+    assert.deepEqual((await state()).feeds, []);
+  }
+});
+
+test("choices naming ids that are not in the file are ignored", async () => {
+  const box = await add(PULL);
+  await add(EMBED); // here, not in the file, and named by a choice
+  const r = await apply({
+    bundle: bundleOf([{ id: box, name: "BOX", source: { ...PULL.source, url: "rtsp://192.0.2.99:554/box" } }]),
+    choices: { ghost: "keep", "__proto__": "replace", resi: "replace", [box]: "replace" },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual((r.json as Json).replaced, ["BOX"]);
+  assert.deepEqual((await state()).feeds.map((f: Json) => f.id), [box, "resi"], "a choice for an id not in the file changed the feed list");
+});
+
+test("a malformed expect is a 400", async () => {
+  const bundle = bundleOf([]);
+  assert.equal((await apply({ bundle, expect: { a: "maybe" } })).status, 400);
+  assert.equal((await apply({ bundle, expect: ["a"] })).status, 400);
+});
+
+test("an import that changes nothing writes nothing and does not publish", async () => {
+  await add(EMBED);
+  const file = path.join(TMP, "video-feeds.json");
+  const before = (await fs.stat(file)).mtimeMs;
+  let published = 0;
+  const svc = videoService as unknown as { publish: () => Promise<void> };
+  const realPublish = svc.publish;
+  svc.publish = function (this: unknown) { published++; return realPublish.call(this); };
+  await new Promise((r) => setTimeout(r, 25));
+  try {
+    const r = (await apply({ bundle: bundleOf([{ id: "resi", name: "Resi", source: EMBED.source }]) })).json as Json;
+    assert.deepEqual(r.same, ["Resi"]);
+  } finally {
+    svc.publish = realPublish;
+  }
+  assert.equal(published, 0);
+  assert.equal((await fs.stat(file)).mtimeMs, before, "the feed file was rewritten for a no-op import");
+});
+
+// ── The rollback puts everything back ───────────────────────────────────
+
+/** Fails the Nth setSecret call and runs the rest as normal. */
+function failNthSetSecret(n: number): () => void {
+  const real = secretsStore.setSecret.bind(secretsStore);
+  let calls = 0;
+  secretsStore.setSecret = async (...a: Parameters<typeof real>) => {
+    if (++calls === n) throw new Error("disk full");
+    return real(...a);
+  };
+  return () => { secretsStore.setSecret = real; };
+}
+
+const ROLLBACK_FILE = (box: string) => bundleOf([
+  { id: box, name: "BOX", source: { ...PULL.source, url: "rtsp://192.0.2.99:554/box" }, password: "file-pass-99" },
+  { id: "gym", name: "GYM", source: GYM_SRC, password: "file-pass-98" },
+  { id: "cam2", name: "Cam2", source: GYM_SRC, password: "file-pass-97" },
+]);
+
+test("a failure on a later secret restores the earlier ones, empties slots that were empty, and restores the feeds", async () => {
+  const box = await add(PULL);
+  const restore = failNthSetSecret(3);
+  const cleared: string[] = [];
+  const realClear = secretsStore.clearSecrets.bind(secretsStore);
+  secretsStore.clearSecrets = async (slot: string) => { cleared.push(slot); return realClear(slot); };
+  try {
+    await assert.rejects(apply({ bundle: ROLLBACK_FILE(box) }), /disk full/);
+  } finally {
+    restore();
+    secretsStore.clearSecrets = realClear;
+  }
+  assert.equal(await pwOf(box), "cam-pass-1", "the replaced feed's previous password did not come back");
+  assert.equal(await pwOf("gym"), undefined, "a slot that was empty before holds the file's password");
+  assert.ok(cleared.includes("video:gym"), "the empty slot was not emptied through clearSecrets");
+  const feeds = (await state()).feeds as Json[];
+  assert.deepEqual(feeds.map((f) => f.id), [box]);
+  assert.equal(feeds[0].source.url, "rtsp://192.0.2.31:554/box");
+});
+
+test("a failed import logs the outcome of the rollback, scrubbed", async () => {
+  const box = await add(PULL);
+  const errors: string[] = [];
+  const realErr = console.error;
+  console.error = (...a: unknown[]) => { errors.push(a.map(String).join(" ")); };
+  const restore = failNthSetSecret(2);
+  try {
+    await assert.rejects(apply({ bundle: ROLLBACK_FILE(box) }));
+  } finally {
+    restore();
+  }
+  assert.deepEqual(errors.filter((l) => l.startsWith("[video-import]")), ["[video-import] import failed, nothing was changed: disk full"]);
+
+  // And when the restore itself fails.
+  errors.length = 0;
+  const restore2 = failNthSetSecret(2);
+  const realSet = secretsStore.setSecrets.bind(secretsStore);
+  secretsStore.setSecrets = async () => { throw new Error("still full"); };
+  try {
+    await assert.rejects(apply({ bundle: ROLLBACK_FILE(box) }), /could not be fully restored/);
+  } finally {
+    restore2();
+    secretsStore.setSecrets = realSet;
+    console.error = realErr;
+  }
+  const line = errors.find((l) => l.startsWith("[video-import]"))!;
+  assert.match(line, /^\[video-import\] import failed and could not restore: disk full/);
+  assert.match(line, /still full/);
 });

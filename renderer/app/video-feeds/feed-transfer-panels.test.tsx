@@ -60,10 +60,10 @@ const STATE: VideoState = {
 const PREVIEW = {
   server: "Prod", createdAt: "2026-10-01T00:00:00.000Z", hasPasswords: false,
   feeds: [
-    { id: "box", name: "BOX", kind: "pull", status: "differs", differences: [{ field: "url", here: "rtsp://192.0.2.31:554/box", file: "rtsp://192.0.2.99:554/box" }] },
-    { id: "gym", name: "GYM", kind: "pull", status: "new", differences: [] },
-    { id: "resi", name: "Resi", kind: "embed", status: "same", differences: [] },
-    { id: "odd", name: "Odd", kind: "teleport", status: "invalid", differences: [], error: "This build does not offer teleport." },
+    { id: "box", name: "BOX", kind: "pull", status: "differs", here: "a".repeat(32), differences: [{ field: "url", here: "rtsp://192.0.2.31:554/box", file: "rtsp://192.0.2.99:554/box" }] },
+    { id: "gym", name: "GYM", kind: "pull", status: "new", here: "", differences: [] },
+    { id: "resi", name: "Resi", kind: "embed", status: "same", here: "b".repeat(32), differences: [] },
+    { id: "odd", name: "Odd", kind: "teleport", status: "invalid", here: "", differences: [], error: "This build does not offer teleport." },
   ],
   absent: ["OBS Lobby"],
   ports: { file: { ...PORTS, rtmp: 2935 }, here: PORTS, same: false },
@@ -80,9 +80,12 @@ const FILE = {
   ports: { ...PORTS, rtmp: 2935 },
 };
 
+// What the review saw of each local feed, handed back so the server can tell an edit since.
+const EXPECT = { box: "a".repeat(32), gym: "", resi: "b".repeat(32), odd: "" };
+
 interface Call { method: string; url: string; body?: unknown }
 
-function stub(report: unknown = { added: ["GYM"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsWritten: 0, portsApplied: false }) {
+function stub(report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsWritten: 0, portsApplied: false }) {
   const calls: Call[] = [];
   const real = globalThis.fetch;
   const realIo = (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
@@ -221,7 +224,7 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
 
     const apply = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/import"));
     assert.ok(apply, "Import never posted");
-    assert.deepEqual(apply!.body, { bundle: FILE, choices: { box: "replace" }, ports: true });
+    assert.deepEqual(apply!.body, { bundle: FILE, choices: { box: "replace" }, expect: EXPECT, ports: true });
 
     assert.ok(screen.getByText("Imported 2 feeds"));
     assert.ok(screen.getByText(/Added GYM/));
@@ -254,7 +257,7 @@ test("Import with this server's feed kept and the ports left alone says exactly 
     await settle();
     await settle();
     const apply = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/import"));
-    assert.deepEqual(apply!.body, { bundle: FILE, choices: { box: "keep" }, ports: false });
+    assert.deepEqual(apply!.body, { bundle: FILE, choices: { box: "keep" }, expect: EXPECT, ports: false });
   } finally {
     g.restore();
   }

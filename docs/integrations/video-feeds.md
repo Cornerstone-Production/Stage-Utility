@@ -306,6 +306,12 @@ it replaces, unless the feed's kind changes. A new push feed from a file
 without a password gets a new publish password made here, and the result names
 it: its device needs the new password pasted in.
 
+The review is what gets applied: if a feed is edited, added, deleted or given
+a new password on this server between the review and **Import**, that feed is
+skipped with
+"Changed on this server since the review. Review the file again." and the
+rest still land.
+
 A file that is not a video feeds export, is the wrong version, lists a feed id
 twice or carries an id this server cannot use is refused whole, with the
 reason.
@@ -383,7 +389,12 @@ server's own log; see Logging below.
 
 ## Logging
 
-Exporting and importing feeds writes one line each, tagged `[video-export]` and `[video-import]`: the count of feeds, and whether passwords or relay ports were included or applied. A password is never in either.
+Exporting and importing feeds writes one line each, tagged `[video-export]`
+and `[video-import]`: the count of feeds, and whether passwords or relay ports
+were included or applied. The import line also names each skipped feed and
+why. An import that fails writes `import failed, nothing was changed:` and the
+reason, or `import failed and could not restore:` when putting things back
+failed too. A password is never in any of them.
 
 The relay itself writes `[video]` lines to [`/log`](../ops/updates-and-logs.md)
 from the server:

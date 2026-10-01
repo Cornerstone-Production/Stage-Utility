@@ -327,6 +327,8 @@ export function ImportPanel() {
         choices: Object.fromEntries(
           picked.preview.feeds.filter((f) => f.status === "differs").map((f) => [f.id, choiceFor(f.id)]),
         ),
+        // What the review showed, so a feed edited here since is not overwritten unseen.
+        expect: Object.fromEntries(picked.preview.feeds.map((f) => [f.id, f.here ?? ""])),
         ports: portsOn,
       });
       setReport(result);
@@ -488,7 +490,7 @@ function FeedRow({
 function ImportDone({ report, preview, onAgain }: { report: ImportReport; preview: ImportPreview; onAgain: () => void }) {
   const landed = report.added.length + report.replaced.length;
   const newPull = preview.feeds
-    .filter((f) => f.status === "new" && f.kind === "pull" && report.added.includes(f.name))
+    .filter((f) => f.status === "new" && f.kind === "pull" && report.addedIds.includes(f.id))
     .map((f) => f.name);
   return (
     <div className="flex flex-col gap-2 text-footnote text-fg">
@@ -502,8 +504,8 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
             {listOf(report.same)} {report.same.length === 1 ? "was" : "were"} already the same
           </li>
         )}
-        {report.skipped.map((k) => (
-          <li key={k.name}>
+        {report.skipped.map((k, i) => (
+          <li key={`${i}:${k.name}`}>
             Skipped {k.name}: {k.reason}
           </li>
         ))}

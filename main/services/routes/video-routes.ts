@@ -29,7 +29,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     const ports = queryFlag(url, "ports", false);
     const passwords = queryFlag(url, "passwords", false);
     if (ports === null || passwords === null) {
-      error(res, `${ports === null ? "ports" : "passwords"} must be 1 or 0.`);
+      error(res, `${ports === null ? "ports" : "passwords"} must be 1, 0, true or false.`);
       return;
     }
     // With passwords this GET answers live secrets, like the push address

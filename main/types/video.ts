@@ -309,6 +309,9 @@ export interface ImportFeedPreview {
   error?: string;
   /** Set when the file carries a password for this feed and the source kind can use one. */
   filePassword?: boolean;
+  /** Fingerprint of this server's feed under the same id as the review saw it,
+   *  "" when there was none. Hand it back in the import's `expect`. */
+  here?: string;
 }
 
 export interface ImportPreview {
@@ -327,11 +330,16 @@ export type ImportChoice = "replace" | "keep";
 export interface ImportRequest {
   bundle: unknown;
   choices?: Record<string, ImportChoice>;
+  /** The status each feed had in the review the operator saw. A feed that is
+   *  not that any more is skipped, not written. */
+  expect?: Record<string, string>;
   ports?: boolean;
 }
 
 export interface ImportReport {
   added: string[];
+  /** The ids of the added feeds, for matching without relying on names. */
+  addedIds: string[];
   replaced: string[];
   kept: string[];
   same: string[];

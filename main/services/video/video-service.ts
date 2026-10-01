@@ -3,8 +3,9 @@
 // The one owner of `video:state`. Every change goes through here and ends in
 // publish(), so the page, every widget and the hello burst see one snapshot.
 
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { isDeepStrictEqual } from "node:util";
 
 import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
@@ -73,6 +74,38 @@ const KICK_LOG_TEXT: Record<KickResult, string> = {
   none: "nothing was publishing",
   failed: "could not drop the current publisher",
 };
+
+const CHANGED_SINCE_REVIEW = "Changed on this server since the review. Review the file again.";
+
+/** Keys the review fingerprints below. Per process, so a fingerprint means
+ *  nothing off this server and nothing after a restart: a review that spans one
+ *  reads as changed, which is the safe answer. */
+const REVIEW_KEY = randomBytes(32);
+
+/**
+ * What the operator reviewed of one local feed: its name, source and stored
+ * password, or "" when there was none. The preview hands it out, the import
+ * hands it back, and a feed whose fingerprint has moved on is not written.
+ *
+ * A status alone could not carry this: a feed that "differs" from the file
+ * still differs after someone edits it here, to a different address the
+ * review never showed. Keyed (HMAC), never a plain hash, so a stored password
+ * cannot be guessed back from it.
+ */
+function reviewFingerprint(feed: VideoFeed | undefined, password: string | undefined): string {
+  if (!feed) return "";
+  return createHmac("sha256", REVIEW_KEY)
+    .update(JSON.stringify({ name: feed.name, source: feed.source, password: password ?? "" }))
+    .digest("hex")
+    .slice(0, 32);
+}
+const FINGERPRINT_FORMAT = /^(?:[0-9a-f]{32})?$/;
+
+/** The same feed, by what the import compares: name and source, or both absent. */
+function sameFeed(a: VideoFeed | undefined, b: VideoFeed | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return isDeepStrictEqual({ name: a.name, source: a.source }, { name: b.name, source: b.source });
+}
 
 const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
@@ -1768,7 +1801,10 @@ class VideoService {
     }
     const here = await loadFeedsFile();
     const plans = await planImport(bundle, feedsOf(here), (id) => this.storedPassword(id), this.allowedKinds());
-    return { ok: true, preview: buildPreview(bundle, plans, here) };
+    const preview = buildPreview(bundle, plans, here);
+    const local = new Map(feedsOf(here).map((f) => [f.id, f]));
+    for (const f of preview.feeds) f.here = reviewFingerprint(local.get(f.id), await this.storedPassword(f.id));
+    return { ok: true, preview };
   }
 
   /**
@@ -1794,6 +1830,19 @@ class VideoService {
         choices.set(id, choice);
       }
     }
+    // What each feed was when the operator reviewed it. A Map for the same reason.
+    const expect = new Map<string, string>();
+    if (req.expect !== undefined) {
+      if (typeof req.expect !== "object" || req.expect === null || Array.isArray(req.expect)) {
+        return { ok: false, error: "expect must be an object of feed id to the preview's here fingerprint." };
+      }
+      for (const [id, here] of Object.entries(req.expect)) {
+        if (typeof here !== "string" || !FINGERPRINT_FORMAT.test(here)) {
+          return { ok: false, error: `The expected fingerprint for ${id.slice(0, 40)} is not one the preview gave.` };
+        }
+        expect.set(id, here);
+      }
+    }
     let bundle: VideoFeedsBundle;
     try {
       bundle = assertVideoBundle(req.bundle);
@@ -1802,11 +1851,20 @@ class VideoService {
     }
 
     const before = await loadFeedsFile();
+    const seen = new Map(feedsOf(before).map((f) => [f.id, f]));
     const plans = await planImport(bundle, feedsOf(before), (id) => this.storedPassword(id), this.allowedKinds());
+    // Each reviewed feed's fingerprint now, against the one its review showed.
+    const movedOn = new Set<string>();
+    for (const [id, reviewed] of expect) {
+      if (reviewFingerprint(seen.get(id), await this.storedPassword(id)) !== reviewed) movedOn.add(id);
+    }
 
     interface Landed { plan: FeedPlan; outcome: "added" | "replaced" | "kept" | "same"; prior?: VideoFeed }
     const landed: Landed[] = [];
+    const changed: { name: string; reason: string }[] = [];
     await videoFeedsStore.update((current) => {
+      landed.length = 0;
+      changed.length = 0;
       const feeds = feedsOf(current);
       const byId = new Map(feeds.map((f) => [f.id, f]));
       const next = [...feeds];
@@ -1814,6 +1872,13 @@ class VideoService {
         if (!plan.parsed) continue;
         const { id } = plan.preview;
         const prior = byId.get(id);
+        // The plan was built from `seen`. A feed that is not what the plan saw
+        // (edited, added or deleted since) is left alone: the operator reviewed
+        // something else, and a delete must never turn into an add.
+        if (!sameFeed(seen.get(id), prior) || movedOn.has(id)) {
+          changed.push({ name: plan.preview.name, reason: CHANGED_SINCE_REVIEW });
+          continue;
+        }
         const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source };
         if (!prior) {
           next.push(feed);
@@ -1827,6 +1892,8 @@ class VideoService {
           landed.push({ plan, outcome: "replaced", prior });
         }
       }
+      // Nothing to write: hand back the object it was given, which the store reads as "no change".
+      if (!landed.some((l) => l.outcome === "added" || l.outcome === "replaced")) return current;
       return { ...current, feeds: next };
     });
 
@@ -1876,6 +1943,11 @@ class VideoService {
       } catch (undoErr) {
         failed.push(errorMessage(undoErr));
       }
+      // The caller gets the failure; the log gets the outcome of the rollback too.
+      const line = failed.length
+        ? `import failed and could not restore: ${errorMessage(err)} (restore: ${failed.join("; ")})`
+        : `import failed, nothing was changed: ${errorMessage(err)}`;
+      console.error(`[video-import] ${scrub(line)}`);
       if (failed.length) {
         throw new Error(`${errorMessage(err)} (and the previous state could not be fully restored: ${failed.join("; ")})`, { cause: err });
       }
@@ -1886,10 +1958,14 @@ class VideoService {
       landed.filter((l) => l.outcome === o).map((l) => (o === "kept" || o === "same" ? l.prior!.name : l.plan.parsed!.name));
     const report: ImportReport = {
       added: names("added"),
+      addedIds: landed.filter((l) => l.outcome === "added").map((l) => l.plan.preview.id),
       replaced: names("replaced"),
       kept: names("kept"),
       same: names("same"),
-      skipped: plans.filter((p) => !p.parsed).map((p) => ({ name: p.preview.name, reason: p.preview.error ?? "Not usable here." })),
+      skipped: [
+        ...plans.filter((p) => !p.parsed).map((p) => ({ name: p.preview.name, reason: p.preview.error ?? "Not usable here." })),
+        ...changed,
+      ],
       newPushPasswords,
       passwordsWritten,
       portsApplied: false,
