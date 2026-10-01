@@ -77,8 +77,8 @@ function generatePushPassword(): string {
 
 /** How often relay.status() is polled while something watches `video:state`. */
 export const STATUS_POLL_MS = 3000;
-/** How long after a WHEP/HLS request a pull feed the relay still reports
- *  not ready reads "offline" rather than "standby" — see feed-state.ts's
+/** How long after the last WHEP/HLS request a pull feed whose dial went
+ *  unanswered reads "offline" rather than "standby" — see feed-state.ts's
  *  `recentlyRequested`. Counted from PULL_START_TIMEOUT_MS: until the relay's
  *  own dial window has run out, a not-ready pull feed is still being dialled,
  *  and reading it offline then tore down the very session whose request had
@@ -376,6 +376,13 @@ class VideoService {
   /** Epoch ms a WHEP/HLS request last named a feed — see markRequested().
    *  Cleared on every status change and detach: it is about one process. */
   private readonly requestedAt = new Map<string, number>();
+  /** Epoch ms of the first request the relay has not answered with a ready
+   *  path: set by markRequested() only while the feed is not ready, deleted
+   *  the moment a poll sees it ready. What tells a dial that failed from a
+   *  session that ended — the relay closing an on-demand source nobody
+   *  watches any more is not the source going offline. Cleared with
+   *  requestedAt. */
+  private readonly unansweredSince = new Map<string, number>();
   /** The last FeedState logged for each feed, so "is live"/"is delayed"/
    *  "went offline" fire on the transition only. */
   private readonly lastLoggedState = new Map<string, FeedState | null>();
@@ -508,14 +515,17 @@ class VideoService {
     });
   }
 
-  /** Whether a request for this pull feed is old enough that the relay has
-   *  had its whole dial window, and recent enough to still count — see
-   *  RECENT_REQUEST_MS. */
+  /** Whether a request for this pull feed has gone unanswered for the
+   *  relay's whole dial window, and something has asked recently enough to
+   *  still count — see RECENT_REQUEST_MS. Timed from the FIRST unanswered
+   *  request, so a player retrying every couple of seconds cannot hold a
+   *  failing dial on standby for ever. */
   private dialRanOut(feedId: string): boolean {
-    const at = this.requestedAt.get(feedId);
-    if (at === undefined) return false;
-    const age = Date.now() - at;
-    return age >= PULL_START_TIMEOUT_MS && age < RECENT_REQUEST_MS;
+    const since = this.unansweredSince.get(feedId);
+    const last = this.requestedAt.get(feedId);
+    if (since === undefined || last === undefined) return false;
+    const now = Date.now();
+    return now - since >= PULL_START_TIMEOUT_MS && now - last < RECENT_REQUEST_MS;
   }
 
   private play(feed: VideoFeed): FeedPlay {
@@ -786,6 +796,7 @@ class VideoService {
     this.relayAnswered = false;
     this.reconciledFeedIds = new Set();
     this.requestedAt.clear();
+    this.unansweredSince.clear();
     this.versionAnnounced = false;
     // A reconcile or kick outage was about the relay just let go of; carried
     // into the next one it would swallow that relay's first failure as a
@@ -837,6 +848,7 @@ class VideoService {
     // A request made to the previous process says nothing about whether
     // this one could dial the source.
     this.requestedAt.clear();
+    this.unansweredSince.clear();
     if (status.state !== "running") this.lastPaths = new Map();
     void this.settleFeeds();
     // Last: a reconcile the readiness poll starts from here captures the
@@ -945,7 +957,10 @@ class VideoService {
       }
 
       const status = this.relayFeedStatus(feed.id, kind);
-      if (path?.ready) await this.recordSeen(feed.id, now);
+      if (path?.ready) {
+        this.unansweredSince.delete(feed.id);
+        await this.recordSeen(feed.id, now);
+      }
 
       const leftReady = this.logTransition(feed, status);
       // noteSeen()'s own write is throttled to once a minute, so the TRUE
@@ -1159,7 +1174,11 @@ class VideoService {
    * bitten by, avoided here by construction rather than by validation.
    */
   markRequested(feedId: string): void {
-    this.requestedAt.set(feedId, Date.now());
+    const now = Date.now();
+    this.requestedAt.set(feedId, now);
+    // A request for a feed already showing a picture is a viewer joining it,
+    // not a dial — nothing for the relay to fail.
+    if (!this.lastPaths.get(feedId)?.ready && !this.unansweredSince.has(feedId)) this.unansweredSince.set(feedId, now);
   }
 
   /**
@@ -1633,6 +1652,7 @@ class VideoService {
     this.pendingBFrames.delete(id);
     this.pendingBFramesAt.delete(id);
     this.requestedAt.delete(id);
+    this.unansweredSince.delete(id);
     this.lastLoggedState.delete(id);
     // Same reasoning, every output: a re-added feed under the same name
     // must not read struggling for up to a minute on a build that has never

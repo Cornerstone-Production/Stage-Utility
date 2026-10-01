@@ -241,7 +241,7 @@ A pull or push feed's status pill reflects what the relay currently knows:
 | Live, delayed | Playing, but only over HLS — a few seconds behind, from B-frames (above) or an unsupported codec |
 | Standby | Nothing to report yet: video is off, the relay is still starting, or — once it is up — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks |
 | Waiting for source | A push feed nothing has ever sent to |
-| Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked the running relay for that did not come up within its 10-second dial, for 15 seconds after (a request to a relay that has since restarted does not count), and any pull or push feed the running relay has no path for (it could not be set up on the relay — see `could not reconcile` under Logging) |
+| Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked the running relay for that did not come up within its 10-second dial, until 25 seconds after the last request for it (a request to a relay that has since restarted does not count). A pull feed that came up and was then closed because nothing watches it any more — a browser tab hidden, a widget scrolled away — goes back to Standby, not Offline, and any pull or push feed the running relay has no path for (it could not be set up on the relay — see `could not reconcile` under Logging) |
 
 An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
 platform it plays through; Stage Utility cannot see whether that platform's
