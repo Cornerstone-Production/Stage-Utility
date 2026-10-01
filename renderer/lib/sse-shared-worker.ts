@@ -73,12 +73,22 @@ function attach(channel: string): void {
   });
 }
 
-/** Replay cached state to one port, for the channels it just asked for. */
+/**
+ * Replay cached state to one port, for the channels it just asked for.
+ *
+ * Flagged `replay: true` — api.ts's worker `onmessage` reads exactly that field
+ * ("`replay` is the worker's word for 'this is the cached snapshot, not
+ * something the server just sent'") to set `onNotification`'s `replayed`
+ * argument. Without it, every replay posted here was indistinguishable from a
+ * live push once it reached a subscriber, which is the shared-worker transport
+ * this app uses by default (`sharedSse`) — so every `replayed`-aware guard in
+ * the renderer (the update lock among them) silently never saw one true.
+ */
 function replayTo(port: MessagePort, channels: Iterable<string>): void {
   for (const c of channels) {
     if (!HYDRATED_SET.has(c)) continue;
     if (!lastPayload.has(c)) continue;
-    port.postMessage({ channel: c, data: lastPayload.get(c) });
+    port.postMessage({ channel: c, data: lastPayload.get(c), replay: true });
   }
 }
 
