@@ -28,7 +28,7 @@ import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-b
 import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
-import { zonedDateKey } from "../app-timezone.js";
+import { datedExportFilename } from "../export-filename.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -51,25 +51,9 @@ function isSelectionList(v: unknown): v is CalendarSelection[] {
   );
 }
 
-/**
- * Operator-supplied text, safe to put in a quoted Content-Disposition value.
- *
- * Keeps only [a-z0-9-]: a quote or a path separator surviving here would be a
- * header injection, not a cosmetic problem. Bounded because some filesystems cap
- * a path component at 255 bytes. Exported so the plan export names its file the
- * same way rather than growing a fifth copy of this line.
- */
-export function filenameSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-}
-
 /** `stage-utility-view-left-mic-display-2026-08-17.json`. */
 export function exportFilename(name: string, now: Date): string {
-  const slug = filenameSlug(name);
-  // The app's zone, not the server's clock: a UTC box dates a file exported at
-  // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
-  // this and the config and archive exports are the other three copies.
-  return `stage-utility-view-${slug ? `${slug}-` : ""}${zonedDateKey(now.getTime())}.json`;
+  return datedExportFilename("stage-utility-view", name, now);
 }
 
 /**

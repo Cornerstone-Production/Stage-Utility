@@ -91,6 +91,17 @@ export function json(res: http.ServerResponse, data: unknown, status = 200): voi
   res.end(body);
 }
 
+/** A boolean query parameter: `1`/`0` (or `true`/`false`) with a default when
+ *  absent, and null for anything else. A query the caller got wrong is a 400, not
+ *  a silent fallback to a section they did not ask for. */
+export function queryFlag(url: URL, name: string, fallback: boolean): boolean | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null) return fallback;
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  return null;
+}
+
 export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {
   json(res, code ? { error: message, code } : { error: message }, status);
 }
