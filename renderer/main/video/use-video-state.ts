@@ -10,5 +10,5 @@ import type { VideoState } from "@main/types/video";
  *  every change is pushed as it is made. */
 export function useVideoState(): VideoState | null {
   const read = useCallback(() => invoke<VideoState>("video:state"), []);
-  return useStatusChannel<VideoState>(read, "video:state");
+  return useStatusChannel<VideoState>(read, "video:state").value;
 }
