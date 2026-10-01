@@ -96,11 +96,25 @@ export function useStageLiveWiring(accentColor: string | null | undefined): void
   // When Planning Center connects, refetch what depends on it. Without this,
   // connecting PCO leaves the service-type and plan lists stale — the operator
   // has just configured it and the dropdowns still say nothing is there.
+  //
+  // WHEN IT CONNECTS, not whenever it is connected. The channel carries every
+  // integration's state and fires on a change to any of them, which on a busy
+  // Sunday is every twenty seconds or so; refetching on each re-downloaded the
+  // stage state (60 KB), the service types and the plans, in every open tab, for
+  // as long as it stayed open.
   useEffect(() => {
+    // Unknown until the first message this page hears.
+    let wasConnected: boolean | undefined;
     return onNotification("integrations:state-changed", (payload: unknown) => {
       const states = payload as IntegrationState[];
-      const pco = states.find((s) => s.id === "planning-center");
-      if (pco?.connection !== "connected") return;
+      const connected = states.find((s) => s.id === "planning-center")?.connection === "connected";
+      const before = wasConnected;
+      wasConnected = connected;
+      if (!connected || before === true) return;
+      // The first message a page hears cannot say whether PCO JUST connected.
+      // What the page holds can: service types loaded means it opened with PCO
+      // up, and its reads are current.
+      if (before === undefined && (queryClient.getQueryData<unknown[]>(QUERY_KEYS.serviceTypes)?.length ?? 0) > 0) return;
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.serviceTypes });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
       // No service type in the key: prefix matching clears every variant.

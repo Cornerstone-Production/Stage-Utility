@@ -59,7 +59,7 @@ export function PatchView() {
   // display until somebody saved the patch again. clearOnReadFailure keeps the
   // old behaviour of showing nothing when the read fails.
   const readPatch = useCallback(() => invoke<PatchFile>("patch:get"), []);
-  const file = useStatusChannel<PatchFile>(readPatch, "patch:updated", true, {
+  const { value: file } = useStatusChannel<PatchFile>(readPatch, "patch:updated", true, {
     clearOnReadFailure: true,
   });
   useEffect(() => {

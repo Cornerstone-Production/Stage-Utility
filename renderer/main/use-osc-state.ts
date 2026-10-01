@@ -18,14 +18,14 @@ const NO_TARGETS: OscTarget[] = [];
  */
 export function useOscState(enabled = true): OscFeedbackDTO | null {
   const read = useCallback(() => invoke<OscFeedbackDTO>("osc:getFeedback"), []);
-  return useStatusChannel<OscFeedbackDTO>(read, "osc:feedback", enabled);
+  return useStatusChannel<OscFeedbackDTO>(read, "osc:feedback", enabled).value;
 }
 
 /** The configured OSC targets, kept live via the "osc:targets-changed" channel.
  *  Used by the layout editor's OSC-button inspector (target picker). */
 export function useOscTargets(): OscTarget[] {
   const read = useCallback(() => invoke<OscTarget[]>("osc:listTargets"), []);
-  return useStatusChannel<OscTarget[]>(read, "osc:targets-changed") ?? NO_TARGETS;
+  return useStatusChannel<OscTarget[]>(read, "osc:targets-changed").value ?? NO_TARGETS;
 }
 
 /** Resolve a button's feedback "active" state from the latest values. */

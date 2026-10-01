@@ -393,8 +393,11 @@ A service's own page does the same card by card. An attendance, sound or
 baptism record that cannot be read says so on its card, and the header's level
 reads *sound unavailable*, never *no sound recorded*. The Baptisms card appears
 for a failed read even on a service without baptisms, because the page cannot
-tell the two apart. A service whose record cannot be read opens to a note and a
-way back, not to nothing. Home's **Recent services** card, which stays hidden
+tell the two apart. A read that has not answered yet is the same case: the card
+shows the chart's shape while it loads and the level reads *loading*, never
+*no attendance recorded* or *no sound recorded* before anything has been read.
+A service the list does not hold, whose record cannot be read, opens to a note
+and a way back, not to nothing. Home's **Recent services** card, which stays hidden
 until something is recorded, shows the same note instead of hiding.
 
 **Export** is a button in the Recorded services header. It opens a date range —
@@ -408,6 +411,12 @@ to, where it means something specific rather than something all-time.
 
 A row is a summary that opens the service page; Delete lives on that page's
 header, not on the row. The shared `/history` link shows the same figures.
+
+A service opens the moment its row is clicked. The header, the rundown and, for
+the visible month, the sound come from the records the list already read, and
+the page's own reads replace them as they land; only the attendance chart waits
+on a read of its own. A link that names a service opens to that service's shape
+while the page loads, never to the list.
 
 Opening a service writes its key to the URL as `?service=`, so the address bar
 names exactly which occurrence is open — reload, bookmark or share it and the

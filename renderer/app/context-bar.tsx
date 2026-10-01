@@ -44,10 +44,10 @@ import {
 import { useBarFit } from "./bar-fit";
 import { useIsMobile, useCoarsePointer } from "../lib/use-media-query";
 import { formatDuration, lateBySec, recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
-import { useObsState } from "../main/use-obs-state";
-import { useReaperState } from "../main/use-reaper-state";
+import { useObsStatus } from "../main/use-obs-state";
+import { useReaperStatus } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
-import { useResiState, useYouTubeState } from "../main/use-stream-state";
+import { useResiStatus, useYouTubeStatus } from "../main/use-stream-state";
 import { DisconnectedPopover } from "./disconnected-popover";
 import { PageActionsEnd, PageTitle } from "./page-title";
 import type { ActivePage } from "./active-page";
@@ -64,7 +64,7 @@ import {
   UnplugIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useScoresState } from "../main/use-scores-state";
+import { useScoresStatus } from "../main/use-scores-state";
 import {
   ScoreActivityHost,
   ScoreCapsule,
@@ -73,7 +73,15 @@ import {
 } from "./score-activity";
 import { prefersReducedMotion } from "../lib/use-slide-on-move";
 
-/** Everything an item needs to render. Gathered by `useBarContext`. */
+/** Everything an item needs to render. Gathered by `useBarContext`.
+ *
+ * `obs`/`reaper`/`resi`/`youtube`/`scores` carry their value alone — the same
+ * `T | null` shape the layout objects read — plus a matching `*Known` flag.
+ * "recording", "streaming" and "integration-health" below must not read the
+ * quiet, resting `Idle` state (`No recorder`, `No stream`, `No integrations`)
+ * off a value that is `null` only because nothing has answered yet: see
+ * useStatusChannel's own header for the ambiguity a bare `null` cannot resolve
+ * on its own. */
 export interface BarItemContext {
   state: StageState | null | undefined;
   bar: ContextBarState;
@@ -82,11 +90,15 @@ export interface BarItemContext {
    *  stream elapsed time, and OBS's record clock, which is interpolated from a
    *  server-stamped anchor rather than pushed. See renderer/lib/server-clock.ts. */
   now: number;
-  obs: ReturnType<typeof useObsState>;
-  reaper: ReturnType<typeof useReaperState>;
+  obs: ObsStatusDTO | null;
+  obsKnown: boolean;
+  reaper: ReaperStatusDTO | null;
+  reaperKnown: boolean;
   integrations: ReturnType<typeof useIntegrations>;
   resi: StreamStatusDTO | null;
+  resiKnown: boolean;
   youtube: YouTubeStatusDTO | null;
+  youtubeKnown: boolean;
   scores: ScoresStatusDTO | null;
   /** True while this is the configurator's inert preview strip. Items that are
    *  interactive in the bar render as plain readings in there. */
@@ -134,12 +146,12 @@ export function useBarContext(): BarItemContext {
   const { state, pcoLive } = useDashboardState();
   // Shared with the layout objects that show the same facts - hooks, not
   // components, so a compact strip and a canvas box stay separate presentations.
-  const obs = useObsState();
-  const reaper = useReaperState();
+  const { value: obs, known: obsKnown } = useObsStatus();
+  const { value: reaper, known: reaperKnown } = useReaperStatus();
   const integrations = useIntegrations();
-  const resi = useResiState();
-  const youtube = useYouTubeState();
-  const scores = useScoresState();
+  const { value: resi, known: resiKnown } = useResiStatus();
+  const { value: youtube, known: youtubeKnown } = useYouTubeStatus();
+  const { value: scores } = useScoresStatus();
 
   // The SERVER's clock, ticking once a second. Every reading below is against a
   // server-stamped instant — the bar's own clock face included — so a console
@@ -147,7 +159,13 @@ export function useBarContext(): BarItemContext {
   const now = useServerClock(pcoLive?.serverNow);
 
   const bar = contextBarState(pcoLive, now);
-  return { state, bar, now, obs, reaper, integrations, resi, youtube, scores };
+  return {
+    state, bar, now,
+    obs, obsKnown, reaper, reaperKnown,
+    integrations,
+    resi, resiKnown, youtube, youtubeKnown,
+    scores,
+  };
 }
 
 /** The strip's own layout. Shared with the configurator's preview, so a bar that
@@ -414,7 +432,7 @@ export function integrationHealth(states: readonly IntegrationState[] | undefine
  * to drop, and dropping one brings back a bar that rearranges itself.
  */
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
-  const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
+  const { state, bar, now, obs, obsKnown, reaper, reaperKnown, integrations, resi, resiKnown, youtube, youtubeKnown } = ctx;
   switch (id) {
     case "clock": {
       // THE SECONDS ARE THE ONE PLACE THE LADDER TOUCHES DIGITS, and it is worth
@@ -535,6 +553,11 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       );
 
     case "integration-health": {
+      // Unknown is its own state, not "no integrations": the health item's two
+      // Idle readings are both claims (nothing set up / everything set up is
+      // fine), and neither is true merely because the read has not landed —
+      // `states` is `[]` either way.
+      if (!integrations.known) return <Idle glyph={PlugZapIcon}>{"—"}</Idle>;
       const { setUp, down } = integrationHealth(integrations?.states);
       // A count on its own is the least useful place to stop: it says something
       // is wrong mid-service and leaves you to open Integrations and read every
@@ -551,6 +574,11 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     }
 
     case "streaming": {
+      // Unknown is its own state. streamers() folds OBS's own streaming flag in
+      // alongside Resi/YouTube, so "connected" cannot be judged fairly until
+      // all three have answered — otherwise a platform that has not answered
+      // yet reads exactly like one that answered "not connected".
+      if (!resiKnown || !youtubeKnown || !obsKnown) return <Idle glyph={RadioOffIcon}>{"—"}</Idle>;
       // The same judgement Home makes, from the same function — including
       // "connected but not live", which mid-service is the state worth seeing.
       const list = streamers(resi, youtube, obs);
@@ -584,6 +612,9 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     }
 
     case "recording": {
+      // Unknown is its own state — see "streaming" above for the same reasoning
+      // with OBS and REAPER in place of the three streaming sources.
+      if (!obsKnown || !reaperKnown) return <Idle glyph={CircleOffIcon}>{"—"}</Idle>;
       // The same indicator Home draws, from the same function — including
       // "connected but not rolling", which is the state worth surfacing.
       const ind = recordIndicator(recorders(obs, reaper, now));

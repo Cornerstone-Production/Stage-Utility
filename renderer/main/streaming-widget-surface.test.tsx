@@ -13,10 +13,14 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
+// settle() below act-wraps a state update outside of render() itself (the
+// hydrate read's rejection), and React only recognizes that as inside a test
+// once it is told so explicitly.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Home's card reads live state through the app's SSE hook, which opens an
 // EventSource on mount. jsdom has none, and what this is about is which
@@ -50,29 +54,38 @@ const OBJ = {
   style: {},
 } as never;
 
-function textOf(home: boolean): string {
+/**
+ * `known` is false until the widget's OWN status hooks have settled — no
+ * `fetch` stub here, so the hydrate read rejects on its own and `known` still
+ * goes true, exactly as it does when a real integration is unreachable. That
+ * settling is what turns "not yet known" into the genuine "Offline" this file
+ * is about; without the await, every case here would read the placeholder
+ * dash instead.
+ */
+async function textOf(home: boolean): Promise<string> {
   cleanup();
   const { container } = render(React.createElement(ObjectContent as never, { o: OBJ, ctx: ctx(home) }));
+  await settle();
   return container.textContent ?? "";
 }
 
 describe("a Resi status widget", () => {
-  test("on HOME has a third line saying where Resi stands", () => {
-    const text = textOf(true);
+  test("on HOME has a third line saying where Resi stands", async () => {
+    const text = await textOf(true);
     assert.match(text, /Offline/, "the state word is missing");
     assert.match(text, /Resi not connected/, "Home lost the connection line");
   });
 
-  test("anywhere else it is the wall widget: the word, and no third line", () => {
+  test("anywhere else it is the wall widget: the word, and no third line", async () => {
     // The same line OBS status and REAPER status draw beside it. The connection
     // line is what makes the tile three-deep and small, and a wall wants one
     // word read from across a room.
-    const text = textOf(false);
+    const text = await textOf(false);
     assert.match(text, /Offline/);
     assert.ok(!/not connected/.test(text), "the wall widget kept Home's third line");
   });
 
-  test("and the two really are different — this is not asserting nothing", () => {
-    assert.notEqual(textOf(true), textOf(false));
+  test("and the two really are different — this is not asserting nothing", async () => {
+    assert.notEqual(await textOf(true), await textOf(false));
   });
 });

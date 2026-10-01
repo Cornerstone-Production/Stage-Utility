@@ -2381,7 +2381,7 @@ export function LayoutEditor({
               // `home` is the VIEW's identity, not the editor's: editing Home's
               // own layout must preview Home's cards, and editing anything else
               // must preview what that surface will draw.
-              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
+              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, onlineOutputIds: data.onlinePresence.onlineOutputIds, onlineKnown: data.onlinePresence.known }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
