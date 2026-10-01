@@ -30,7 +30,7 @@ import { useStatusChannel } from "./use-status-channel";
  */
 export function useServiceTimeline(enabled = true): ServiceTimeline | null {
   const read = useCallback(() => invoke<ServiceTimeline | null>("serviceTimeline:getCurrent"), []);
-  const pushed = useStatusChannel<ServiceTimeline>(read, "service-timeline:history", enabled);
+  const { value: pushed } = useStatusChannel<ServiceTimeline>(read, "service-timeline:history", enabled);
 
   // The last value THIS hook actually accepted, and the last `pushed` it has
   // already reacted to — React's own "adjusting state when a prop changes"

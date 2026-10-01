@@ -195,7 +195,8 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     wireless: d.wireless,
     // Real presence, from the heartbeat — Home's screens count and its readiness
     // list are two of the three things in the app that draw it.
-    onlineOutputIds: d.onlineOutputIds,
+    onlineOutputIds: d.onlinePresence.onlineOutputIds,
+    onlineKnown: d.onlinePresence.known,
     now: d.now,
     ndiSource: null,
     H: NOMINAL_H,

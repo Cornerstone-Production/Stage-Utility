@@ -17,14 +17,14 @@ import { useFailedReads } from "../../lib/use-failed-reads";
 import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
-import { confirm, EmptyState, ErrorNote, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { confirm, EmptyState, ErrorNote, Skeleton, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AppLink } from "../../app/app-link";
 import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail, SPL_METRICS_STORAGE_KEY, primaryMetricOf } from "./spl-history-section";
-import { RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
+import { AllServicesLink, RecordingDot, RecordingPill, ServiceHeader, SERVICE_SECTIONS, markSoundUnavailable, overrunStats, serviceRowFigures } from "./history-service-header";
 import { useStoredKeysVersion, StatStrip, type StatFigure } from "./history-chart";
 import { HistorySessionChart } from "./baptisms/session-chart";
 import { sessionWindow, clipToSession, planLaneItems } from "./baptisms/session-lane";
@@ -532,10 +532,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const shown = useHistoryShown();
   const [list, setList] = useState<ServiceTimeline[] | null>(() => shown?.last.timeline ?? null);
   const [selectedKey, setSelectedKey] = useSelectedServiceKey();
-  const [detail, setDetail] = useState<ServiceTimeline | null>(null);
+  // The open service's record and sound as its own reads (or a live push)
+  // answered them. The page draws `detail` and `spl`, below, which fall back
+  // to the copies the list already holds.
+  const [fetchedDetail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
-  const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
+  const [fetchedSpl, setSpl] = useState<ServiceSplHistory | null>(null);
+  /**
+   * The key each of the open service's reads last ANSWERED for — a record,
+   * nothing, or a failure. A read still in flight is how the page tells
+   * "loading" from "nothing recorded"; without it both drew the same empty
+   * state, and on a slow connection the Attendance card said "No attendance
+   * recorded" until the chart arrived and replaced it.
+   */
+  const [readFor, setReadFor] = useState<Readonly<Record<DetailRead, string | null>>>({
+    record: null,
+    attendance: null,
+    spl: null,
+  });
   // Baptism sessions (cross-linked to a service by time overlap). `null`
   // until the first fetch resolves — a failure resets it to `[]`, same as a
   // genuinely baptism-free month, but `loadFailed.has("baptisms")` is what
@@ -877,6 +892,26 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     [rows, selectedKey],
   );
 
+  /**
+   * The open service's record: its own read's answer once that lands, and
+   * until then the copy the list already holds — the same overlaid record,
+   * from the same store.
+   *
+   * Only the read's answer used to count, so a click on a slow connection left
+   * the list on screen until the read landed, and the page then jumped to the
+   * service. Opening from the list's copy draws the page on the click; the read
+   * still replaces it, which is what keeps a live service's record current.
+   */
+  const detail = fetchedDetail ?? selectedRow?.timeline ?? null;
+  /** A read of the open service still in flight — see `readFor`. */
+  const reading = (read: DetailRead) => selectedKey != null && readFor[read] !== selectedKey;
+  /** The open service's sound, the same way: the row's own read of the same
+   *  route stands in until the page's lands. A row that read NO sound is an
+   *  answer too, so only a row with no answer leaves the Sound card waiting. */
+  const rowSpl = selectedKey ? splByKey.get(selectedKey) : undefined;
+  const spl = fetchedSpl ?? (rowSpl && rowSpl !== "error" ? rowSpl : null);
+  const splPending = reading("spl") && (rowSpl === undefined || rowSpl === "error");
+
   // Live also while the open detail is an attendance-only record (no timeline
   // yet) — `detail` stays null for that branch, so its liveness comes from
   // `attendance` instead, but only when `detail` really has nothing to say
@@ -923,13 +958,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   useResyncOn([selectedKey, reloadKey], () => clearDetail());
 
   // Synchronous, so the panel clears in the same render the selection does —
-  // it never shows the previous service's numbers under an empty selection.
+  // it never shows the previous service's numbers under an empty selection, nor
+  // under the next service while that one's reads are still in flight (a merge
+  // moves straight from one service to another).
   useResyncOn([selectedKey], () => {
-    if (!selectedKey) {
-      setDetail(null);
-      setAttendance(null);
-      setSpl(null);
-    }
+    setDetail(null);
+    setAttendance(null);
+    setSpl(null);
   });
 
   useEffect(() => {
@@ -943,16 +978,22 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       empty();
       failDetail(read, `${what} for ${selectedKey}`, err);
     };
+    const answered = (read: DetailRead) => () => {
+      if (!cancelled) setReadFor((r) => ({ ...r, [read]: selectedKey }));
+    };
     invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
-      .catch(failed("record", "the service record", () => setDetail(null)));
+      .catch(failed("record", "the service record", () => setDetail(null)))
+      .finally(answered("record"));
     // Best-effort: pull the matching attendance + SPL records for the full report.
     invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
       .then((a) => !cancelled && setAttendance(a))
-      .catch(failed("attendance", "the attendance", () => setAttendance(null)));
+      .catch(failed("attendance", "the attendance", () => setAttendance(null)))
+      .finally(answered("attendance"));
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((s) => !cancelled && setSpl(s))
-      .catch(failed("spl", "the sound", () => setSpl(null)));
+      .catch(failed("spl", "the sound", () => setSpl(null)))
+      .finally(answered("spl"));
     return () => {
       cancelled = true;
     };
@@ -1174,6 +1215,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }
 
   if (list === null) {
+    // A link that names a service gets that service's shape, not the list's:
+    // the list skeleton turning into a service page is the same jump a click
+    // used to make.
+    if (selectedKey) return <ServiceLoading onBack={() => setSelectedKey(null)} />;
     return (
       <div className="py-6">
         <SkeletonRows rows={5} />
@@ -1219,6 +1264,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       ? [SERVICE_SECTIONS[0], { id: "history-baptisms", label: "Baptisms" }, ...SERVICE_SECTIONS.slice(1)]
       : SERVICE_SECTIONS;
     async function copyReport() {
+      // The page opens before the attendance and sound are read, and a report
+      // copied then would leave them out without saying so.
+      if (reading("attendance") || splPending) {
+        toast.info("This service is still loading — copy the report once its charts appear");
+        return;
+      }
       const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
       if (ok) toast.success("Report copied to clipboard");
       else toast.error("Couldn't copy the report");
@@ -1478,9 +1529,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       <div className="flex flex-col gap-4">
         <ServiceHeader
           timeline={detail}
-          attendance={attendance}
+          attendance={attendance ?? selectedRow?.attendance ?? null}
           spl={spl}
           soundUnavailable={detailFailed.has("spl")}
+          soundLoading={splPending}
           now={nowTick}
           readOnly={readOnly}
           meta={metaLine}
@@ -1713,11 +1765,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <AttendanceDetail detail={attendance} timeline={detail} />
           ) : detailFailed.has("attendance") ? (
             <ErrorNote>Couldn't load the attendance for this service.</ErrorNote>
+          ) : reading("attendance") ? (
+            <ChartLoading what="attendance" />
           ) : (
             <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
         </SectionCard>
-        <SoundSection spl={spl} failed={detailFailed.has("spl")} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} failed={detailFailed.has("spl")} loading={splPending} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1735,9 +1789,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const statusText = live ? `${lastOccupancy.toLocaleString()} in the room now` : "no items recorded";
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
+        <AllServicesLink onClick={() => setSelectedKey(null)} />
         {/* The same vocabulary as a service's own page — the green `recording`
             pill, "Sound", and cards — rather than the red LIVE badge and
             border-t dividers this page kept while the other one moved on. It
@@ -1761,7 +1813,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
         </SectionCard>
-        <SoundSection spl={spl} failed={detailFailed.has("spl")} timeline={detail} attendance={attendance} />
+        <SoundSection spl={spl} failed={detailFailed.has("spl")} loading={splPending} timeline={detail} attendance={attendance} />
       </div>
     );
   }
@@ -1776,12 +1828,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   ) {
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
+        <AllServicesLink onClick={() => setSelectedKey(null)} />
         <ErrorNote>Couldn't load this service's record. Nothing has been changed; reload the page to try again.</ErrorNote>
       </div>
     );
+  }
+
+  // ── Detail: opened, with nothing to draw yet — a service still arriving,
+  // whose attendance is all it has, or one the list does not hold. The list
+  // used to stay on screen here until a read landed, and the page then jumped
+  // to the service. A key nothing answers for still falls through to the list.
+  if (selectedKey && (reading("record") || reading("attendance"))) {
+    return <ServiceLoading onBack={() => setSelectedKey(null)} />;
   }
 
   // ── List view: services for the selected day. ──
@@ -2200,12 +2258,15 @@ function ExportPopover({
 function SoundSection({
   spl,
   failed,
+  loading,
   timeline,
   attendance,
 }: {
   spl: ServiceSplHistory | null;
   /** The record could not be read, which is not a service with no sound. */
   failed: boolean;
+  /** The record has not been read yet, which is not a service with no sound either. */
+  loading: boolean;
   timeline: ServiceTimeline | null;
   attendance: ServiceAttendance | null;
 }) {
@@ -2224,10 +2285,49 @@ function SoundSection({
         />
       ) : failed ? (
         <ErrorNote>Couldn't load the sound for this service.</ErrorNote>
+      ) : loading ? (
+        <ChartLoading what="sound" />
       ) : (
         <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
       )}
     </SectionCard>
+  );
+}
+
+/**
+ * A chart card whose record is still being read: the strip, the plot and the
+ * legend at the size they draw at, so the cards below do not move when they
+ * arrive. Measured off the Attendance card at 1280: 40 + 255 + 16, gap-3. The
+ * plot grows with its item lane's rows and the Sound card adds its item table
+ * under it, so this is the common case, not every case. The Trends card's
+ * loading state, for one service.
+ */
+function ChartLoading({ what }: { what: "attendance" | "sound" }) {
+  return (
+    <div data-history-loading={what} aria-busy="true" className="flex flex-col gap-3">
+      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-[255px] w-full" />
+      <Skeleton className="h-4 w-1/2" />
+      <span className="sr-only">Loading the {what}</span>
+    </div>
+  );
+}
+
+/**
+ * A service opened before anything about it has been read. The way back is
+ * real from the first frame; the rest is the page's shape.
+ */
+function ServiceLoading({ onBack }: { onBack: () => void }) {
+  return (
+    <div data-history-loading="service" aria-busy="true" className="flex flex-col gap-4">
+      <AllServicesLink onClick={onBack} />
+      <div className="flex flex-col gap-1.5">
+        <Skeleton className="h-6 w-64 max-w-full" />
+        <Skeleton className="h-4 w-96 max-w-full" />
+      </div>
+      <Skeleton className="h-[320px] w-full" />
+      <span className="sr-only">Loading this service</span>
+    </div>
   );
 }
 

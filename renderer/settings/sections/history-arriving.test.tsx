@@ -70,7 +70,7 @@ function arrivingAttendance() {
  *  specific routes — everything else 404s, which is the point: a call to a
  *  route this file didn't expect should fail loudly, not fall through to a
  *  default `{}`. */
-function installFetch(state: { list: unknown[]; attList: unknown[] }) {
+function installFetch(state: { list: unknown[]; attList: unknown[]; heldAttendance?: Promise<void> }) {
   (globalThis as unknown as { fetch: unknown }).fetch = async (
     input: string,
     init?: { method?: string },
@@ -98,6 +98,7 @@ function installFetch(state: { list: unknown[]; attList: unknown[] }) {
     if (attGet) {
       const key = decodeURIComponent(attGet[1]);
       const rec = state.attList.find((a) => (a as { serviceKey: string }).serviceKey === key) ?? null;
+      if (state.heldAttendance) await state.heldAttendance;
       return ok(rec);
     }
     const splGet = url.match(/^\/api\/spl\/history\/([^/]+)$/);
@@ -185,6 +186,38 @@ describe("History: a service still in its arrival ramp", () => {
     assert.ok(!txt.includes("Copy report"), `the Copy report control assumes a timeline and should not be offered: ${txt}`);
     // The items-table header row ("Item" / "Plan" / "Actual" columns) never renders.
     assert.ok(!txt.includes("PlanActual"), `an items table rendered with no timeline to build one from: ${txt}`);
+  });
+
+  test("(b2) opened before its attendance lands, it shows the service loading, not the list", async (t) => {
+    // The attendance is all an arriving service has, so there is nothing of it
+    // to draw until that read answers. The list used to stay on screen for
+    // that whole wait, and the page then jumped to the service.
+    let release: () => void = () => {};
+    const heldAttendance = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    installFetch({ list: [], attList: [arrivingAttendance()], heldAttendance });
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+
+    const row = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Sunday Gathering"));
+    assert.ok(row, "the row's button never rendered");
+    fireEvent.click(row!);
+    await settle();
+
+    assert.equal(view.container.querySelector('[data-history-loading="service"]') != null, true, "no loading page");
+    assert.equal(
+      [...view.container.querySelectorAll("button")].some((b) => text(b as HTMLElement).includes("Sunday Gathering")),
+      false,
+      "the list's row is still on screen",
+    );
+    assert.ok(text(view.container).includes("All services"), "the way back is there from the first frame");
+
+    await act(async () => release());
+    await settle();
+    assert.equal(view.container.querySelector("[data-history-loading]"), null);
+    assert.ok(view.container.querySelector("svg"), "the Attendance chart replaced the placeholder");
   });
 
   test("(d) the 'No service timings recorded yet' empty state is not shown", async (t) => {

@@ -78,7 +78,7 @@ export function useDashboardState(): UseDashboardStateResult {
  */
 export function useProPresenterStatus(enabled = true): ProPresenterStatusDTO | null {
   const read = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
-  return useStatusChannel<ProPresenterStatusDTO>(read, "propresenter:status", enabled);
+  return useStatusChannel<ProPresenterStatusDTO>(read, "propresenter:status", enabled).value;
 }
 
 /**

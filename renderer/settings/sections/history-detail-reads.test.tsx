@@ -1,5 +1,5 @@
 // history-detail-reads.test.tsx — one service's History page, when one of its
-// own reads fails.
+// own reads fails, or has not answered yet.
 //
 // The list's three loads already say when they fail (see "Which of the three
 // history loads FAILED" in service-history-section.tsx). The four reads behind
@@ -11,6 +11,11 @@
 //   sound            "No sound recorded for this service." — and the header's
 //                    level said "no sound recorded" too
 //   baptisms         the Baptisms card vanished, as on a weekend without any
+//
+// A read still in flight is the same mistake from the other side: nothing has
+// been read, so nothing may be claimed. On a slow connection a click left the
+// list on screen until the record landed, then jumped to the service; the
+// cards then said "No attendance recorded" until their charts arrived.
 //
 // Each log assertion names ITS read ("… for <key>"): the list's own rows read
 // every service's sound record from the same URL, and log a line a bare
@@ -40,7 +45,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ServiceHistorySection } = await import("./service-history-section.js");
-const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
+const { TooltipProvider, ConfirmHost, Toaster } = await import("../../components/ui/index.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -100,13 +105,15 @@ type DetailRead = "record" | "attendance" | "spl" | "baptisms";
 
 interface Setup {
   failing?: DetailRead;
+  /** Answer a service's own record read, for the in-flight cases below. */
+  recordFor?: (key: string) => unknown;
   /** Answer a service's own attendance read, for the race below. */
   attendanceFor?: (key: string) => unknown;
   /** Answer a service's sound record by key. */
   splFor?: (key: string) => unknown;
 }
 
-function stubFetch({ failing, attendanceFor, splFor }: Setup = {}) {
+function stubFetch({ failing, recordFor, attendanceFor, splFor }: Setup = {}) {
   return stubFetchWithLog((url, init) => {
     const method = init?.method ?? "GET";
     const read = (name: DetailRead, body: unknown) => {
@@ -127,7 +134,7 @@ function stubFetch({ failing, attendanceFor, splFor }: Setup = {}) {
     if (url === "/api/history/milestones") return ok([]);
     if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
     const tl = keyed("/api/service-timeline");
-    if (tl) return read("record", tl.timeline);
+    if (tl) return recordFor ? recordFor(tl.key) : read("record", tl.timeline);
     const att = keyed("/api/attendance/history");
     if (att) return attendanceFor ? attendanceFor(att.key) : read("attendance", att.attendance);
     const spl = keyed("/api/spl/history");
@@ -166,13 +173,162 @@ const historyLines = (logs: { tag: string; message: string }[]) => logs.filter((
 const loggedFor = (logs: { tag: string; message: string }[], what: string) =>
   historyLines(logs).some((l) => l.message.startsWith(`could not read ${what} for ${A.key}:`));
 
-test("a failed record read opens the service and says so, instead of doing nothing", async () => {
+test("a failed record read still opens the service from the list's own copy, and logs it", async () => {
+  // The list read that drew the row returned the same record, so the page has
+  // what it needs; the failure is a [history] line, not a page that says the
+  // service could not be loaded. A service the list does NOT hold says so —
+  // see history-service-url.test.tsx.
   const f = stubFetch({ failing: "record" });
   try {
     await openA();
-    assert.match(alerts(), /Couldn't load this service's record/i);
-    assert.equal(!!screen.queryByText(/All services/), true, "and the way back is there");
+    assert.equal(!!document.querySelector('[data-testid="history-service-header"]'), true, "the service opened");
+    assert.equal(/Couldn't load this service's record/i.test(alerts()), false);
     assert.ok(loggedFor(f.logs, "the service record"), `got ${JSON.stringify(f.logs)}`);
+  } finally {
+    f.restore();
+  }
+});
+
+/** A read that answers only when the test says so. */
+function held<T>(): { promise: Promise<T>; answer: (v: T) => void } {
+  let answer: (v: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    answer = resolve;
+  });
+  return { promise, answer };
+}
+
+const sectionLabels = () => [...document.querySelectorAll("section")].map((s) => s.getAttribute("aria-label"));
+const loadingCards = () =>
+  [...document.querySelectorAll("[data-history-loading]")].map((n) => n.getAttribute("data-history-loading"));
+
+test("a click opens the service at once while its own reads are in flight, and claims nothing", async () => {
+  // Every read of Evening held — its record, attendance and sound, and so the
+  // row's own sound read too, which is the same route.
+  const record = held<unknown>();
+  const attendance = held<unknown>();
+  const sound = held<unknown>();
+  const f = stubFetch({
+    recordFor: (key) => (key === A.key ? record.promise.then(ok) : ok(B.timeline)),
+    attendanceFor: (key) => (key === A.key ? attendance.promise.then(ok) : ok(B.attendance)),
+    splFor: (key) => (key === A.key ? sound.promise.then(ok) : ok(B.spl)),
+  });
+  try {
+    await openA();
+    assert.equal(
+      !!document.querySelector('[data-testid="history-service-header"]'),
+      true,
+      "the list stayed on screen until the record landed",
+    );
+    assert.deepEqual(sectionLabels(), ["Rundown", "Attendance", "Sound"]);
+    assert.deepEqual(loadingCards(), ["attendance", "sound"], "both charts say they are loading");
+    // Nothing yet claims the service recorded nothing — neither card, nor the
+    // header's level figure.
+    assert.equal(!!screen.queryByText(/No attendance recorded/i), false);
+    assert.equal(!!screen.queryByText(/No sound recorded/i), false);
+    assert.equal(!!screen.queryByText("loading"), true, "the header's level figure says it is loading");
+    assert.equal(alerts(), "");
+
+    await act(async () => {
+      record.answer(A.timeline);
+      attendance.answer(A.attendance);
+      sound.answer(A.spl);
+    });
+    await settle();
+    await settle();
+    assert.deepEqual(loadingCards(), [], "the charts replace the placeholders");
+    assert.equal(!!screen.queryByText("loading"), false);
+  } finally {
+    f.restore();
+  }
+});
+
+test("a service the row already read the sound of does not wait on the page's own read", async () => {
+  // The row's read of Evening's sound answered; the page's own read of the
+  // same route is held. The Sound card draws from the row's answer.
+  let splReads = 0;
+  const sound = held<unknown>();
+  const f = stubFetch({
+    splFor: (key) => {
+      if (key !== A.key) return ok(B.spl);
+      splReads += 1;
+      return splReads === 1 ? ok(A.spl) : sound.promise.then(ok);
+    },
+  });
+  try {
+    await openA();
+    assert.ok(splReads >= 2, "the page made its own read");
+    assert.deepEqual(loadingCards(), []);
+    assert.equal(!!screen.queryByText(/No sound recorded/i), false);
+  } finally {
+    f.restore();
+  }
+});
+
+test("Copy report waits for the attendance rather than copying a report without it", async () => {
+  // The page opens before its attendance is read, and the report's attendance
+  // line needs the full record. Copied in that window, it left the line out
+  // and said "Report copied".
+  const writes: string[] = [];
+  const nav = navigator as unknown as { clipboard?: unknown };
+  const win = window as unknown as { isSecureContext: boolean };
+  const hadClipboard = Object.getOwnPropertyDescriptor(nav, "clipboard");
+  const wasSecure = win.isSecureContext;
+  Object.defineProperty(nav, "clipboard", {
+    configurable: true,
+    value: { writeText: async (t: string) => void writes.push(t) },
+  });
+  win.isSecureContext = true;
+  const attendance = held<unknown>();
+  const f = stubFetch({
+    attendanceFor: (key) => (key === A.key ? attendance.promise.then(ok) : ok(B.attendance)),
+  });
+  try {
+    const view = render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ServiceHistorySection),
+        React.createElement(ConfirmHost),
+        React.createElement(Toaster),
+      ),
+    );
+    await settle();
+    await settle();
+    await open(view.container, "Evening");
+    fireEvent.click(screen.getByRole("button", { name: /Copy report/ }));
+    await settle();
+    assert.deepEqual(writes, [], "nothing is copied while the attendance is in flight");
+    assert.equal(!!screen.queryByText(/still loading/i), true, "and it says why");
+
+    await act(async () => attendance.answer(A.attendance));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /Copy report/ }));
+    await settle();
+    assert.equal(writes.length, 1);
+    assert.match(writes[0]!, /Peak attendance 1,196/);
+  } finally {
+    f.restore();
+    if (hadClipboard) Object.defineProperty(nav, "clipboard", hadClipboard);
+    else delete nav.clipboard;
+    win.isSecureContext = wasSecure;
+  }
+});
+
+test("a service whose attendance is still in flight says so, not 'No attendance recorded'", async () => {
+  const attendance = held<unknown>();
+  const f = stubFetch({
+    attendanceFor: (key) => (key === A.key ? attendance.promise.then(ok) : ok(B.attendance)),
+  });
+  try {
+    await openA();
+    assert.deepEqual(loadingCards(), ["attendance"]);
+    assert.equal(!!screen.queryByText(/No attendance recorded/i), false);
+    // A read that answers "none" is the only thing that may say so.
+    await act(async () => attendance.answer(null));
+    await settle();
+    assert.deepEqual(loadingCards(), []);
+    assert.equal(!!screen.queryByText(/No attendance recorded for this service/i), true);
   } finally {
     f.restore();
   }

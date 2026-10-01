@@ -32,12 +32,18 @@ export function usePlanItems(enabled = true): PlanItemsDTO | null {
   }, [fetchItems]);
 
   useEffect(() => {
-    return onNotification("stage:state-changed", (p) => {
+    // `stage:state-changed` is a hydrated channel (sse-channels.ts), so every
+    // mount into an already-open SSE stream replays its cached frame — on top
+    // of the `fetchItems()` mount effect above, that was a second, redundant
+    // `pco:getPlanItems` on every open. A replay is at best as new as this
+    // mount, which the effect above already covers, so it only seeds
+    // `planRef` here; a plan change is worth a refetch only when it arrives
+    // LIVE.
+    return onNotification("stage:state-changed", (p, replayed) => {
       const pid = (p as StageState | null)?.planId ?? null;
-      if (pid !== planRef.current) {
-        planRef.current = pid;
-        fetchItems();
-      }
+      const changed = pid !== planRef.current;
+      planRef.current = pid;
+      if (changed && !replayed) fetchItems();
     });
   }, [fetchItems]);
 

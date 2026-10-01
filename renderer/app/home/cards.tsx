@@ -43,17 +43,17 @@ import { joinWithAnd } from "../../lib/join-with-and";
 import { ErrorNote } from "../../components/ui/error-note";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
-import { useObsState } from "../../main/use-obs-state";
+import { useObsStatus } from "../../main/use-obs-state";
 import { usePvpState } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
 import { PvpNowObject, type PvpNowLabel } from "../../main/pvp-now";
-import { useReaperState } from "../../main/use-reaper-state";
-import { useSplState } from "../../main/use-spl-state";
+import { useReaperStatus } from "../../main/use-reaper-state";
+import { useSplStatus } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
-import { useResiState, useYouTubeState } from "../../main/use-stream-state";
+import { useResiStatus, useYouTubeStatus } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
-import { useScoresState } from "../../main/use-scores-state";
+import { useScoresStatus } from "../../main/use-scores-state";
 import { inkFor } from "../../main/score-ink";
 import { emptyReason, pickGame } from "../../main/scores-object";
 
@@ -651,7 +651,18 @@ export function RecordingCard({
    *  beside it, which is why it carries the same name. */
   showElapsed?: boolean;
 }) {
-  const list = recorders(useObsState(), useReaperState(), now);
+  const { value: obs, known: obsKnown } = useObsStatus();
+  const { value: reaper, known: reaperKnown } = useReaperStatus();
+  // Whether EVERY recorder this card speaks for has answered. "any" reads both
+  // sources at once, so it must wait for both — answering from whichever
+  // landed first would say "no recorder connected" on the strength of OBS
+  // alone while REAPER's own read is still in flight.
+  const known =
+    recorder === "OBS" ? obsKnown
+    : recorder === "REAPER" ? reaperKnown
+    : obsKnown && reaperKnown;
+  if (!known) return <Stat label={recorder === "any" ? "Recording" : recorder} value="—" />;
+  const list = recorders(obs, reaper, now);
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
   // Only LIVE takes a colour. Everything else is the page's own foreground, the
@@ -686,7 +697,19 @@ export function StreamingCard({
    *  does to the same object on a wall. */
   showElapsed?: boolean;
 }) {
-  const list = streamers(useResiState(), useYouTubeState(), useObsState());
+  const { value: resi, known: resiKnown } = useResiStatus();
+  const { value: youtube, known: youtubeKnown } = useYouTubeStatus();
+  const { value: obs, known: obsKnown } = useObsStatus();
+  // Whether EVERY platform this card speaks for has answered. "any" folds all
+  // three sources into one reading, so it must wait for all three — see
+  // RecordingCard's own note above for why "whichever landed first" is wrong.
+  const known =
+    platform === "Resi" ? resiKnown
+    : platform === "YouTube" ? youtubeKnown
+    : platform === "OBS" ? obsKnown
+    : resiKnown && youtubeKnown && obsKnown;
+  if (!known) return <Stat label={platform === "any" ? "Streaming" : platform} value="—" />;
+  const list = streamers(resi, youtube, obs);
   // The clock comes DOWN, from the one tick the page already runs. A card that
   // started its own interval would be a second clock per streaming widget, all
   // of them a fraction out of step with the countdown above them.
@@ -706,7 +729,10 @@ export function StreamingCard({
 
 /** The loudest meter right now, and which one. */
 export function SplCard({ meterId }: { meterId?: string | null } = {}) {
-  const spl = useSplState();
+  const { value: spl, known } = useSplStatus();
+  // Unknown is its own state: loudestSpl/pinnedSpl read "Smaart offline" off a
+  // `null` spl, which is also what the hook returns before its first answer.
+  if (!known) return <Stat label="SPL" value="—" />;
   // Unpinned is the untouched path: same call, same output as before the setting
   // existed. Pinning changes WHICH meter is read, never the composition.
   const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId) : loudestSpl(spl);
@@ -855,7 +881,7 @@ export function PvpNowCard({
  * and leaves the card where it sits.
  */
 export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
-  const scores = useScoresState();
+  const { value: scores, known } = useScoresStatus();
   const all = scores?.games ?? [];
   // The one whose status heads the card. THE SAME function the wall object uses,
   // so "auto" and a pinned team mean the same thing on both surfaces and a pin
@@ -867,6 +893,10 @@ export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
   const games = featured ? [featured, ...all.filter((g) => g !== featured)] : all;
 
   if (games.length === 0) {
+    // Unknown is its own state: `emptyReason`'s "No teams followed" is a claim
+    // about `scores.connected`, which a `null` scores answers the same way
+    // whether that is a settled fact or simply not landed yet.
+    if (!known) return <Stat label="Scores" value="—" />;
     // Three different facts, kept apart — "No games today" for a failed request
     // is a factual lie about the operator's own schedule. Shared with the wall
     // widget so the two cannot drift; the branches used to be written out here
@@ -956,12 +986,20 @@ function ScoresRow({ team, trailing }: { team: ScoreTeamDTO; trailing: boolean }
 export function ScreensCard({
   outputs,
   onlineOutputIds,
+  onlineKnown,
 }: {
   outputs: readonly Output[];
   onlineOutputIds: readonly string[];
+  /** Whether presence has answered yet — see useDisplayPresenceStatus. Unknown
+   *  is its own state: `onlineOutputIds` is empty both before the first read
+   *  and once genuinely nothing is connected, and only this tells them apart. */
+  onlineKnown: boolean;
 }) {
-  const online = splitByPresence(outputs, onlineOutputIds).online.length;
   const total = outputs.length;
+  if (!onlineKnown) {
+    return <Stat label="Screens" value={`—/${total}`} to="/screens" />;
+  }
+  const online = splitByPresence(outputs, onlineOutputIds).online.length;
   return (
     <Stat
       label="Screens"
@@ -987,6 +1025,7 @@ export function HomeCard({
   pcoLive,
   now,
   onlineOutputIds,
+  onlineKnown,
   secondsToStart,
   hoverSuppressed = false,
 }: {
@@ -1011,6 +1050,8 @@ export function HomeCard({
    * ever, so "all connected" on the front page meant nothing at all.
    */
   onlineOutputIds: readonly string[];
+  /** Whether presence has answered yet — see useDisplayPresenceStatus. */
+  onlineKnown: boolean;
   secondsToStart: number | null;
   /** This card's own right-click menu is open, so its chart (if it has one)
    *  must stop tracking the pointer underneath it. Only `home-recent-services`
@@ -1058,11 +1099,17 @@ export function HomeCard({
         />
       );
     case "home-screens":
-      return <ScreensCard outputs={state.outputs ?? []} onlineOutputIds={onlineOutputIds} />;
+      return (
+        <ScreensCard
+          outputs={state.outputs ?? []}
+          onlineOutputIds={onlineOutputIds}
+          onlineKnown={onlineKnown}
+        />
+      );
     case "home-next-service":
       return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
     case "home-readiness":
-      return <ReadinessCard checks={readinessChecks(state, onlineOutputIds)} />;
+      return <ReadinessCard checks={readinessChecks(state, onlineOutputIds, onlineKnown)} />;
     case "home-recent-services":
       return (
         <RecentServicesCard
