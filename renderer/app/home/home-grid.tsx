@@ -13,7 +13,7 @@ import { EllipsisIcon } from "lucide-react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
 import { HOME_VIEW_ID } from "@main/services/home-view";
 
-import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-renderer";
+import { ObjectContent, boxStyle, statusCtx, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
 import { boxesOf, rowsNeeded, type Box } from "./home-placement";
@@ -163,40 +163,27 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
   const d = useLayoutData(layout, HOME_VIEW_ID);
   // No state yet — the caller renders nothing rather than a grid of dashes.
   if (!d.state) return null;
-  // Assembled exactly as LayoutRenderer assembles it — the three renamed fields
-  // and the four Home supplies itself. Spelled out rather than spread-and-cast,
-  // so a new context field is a compile error here instead of an undefined at
-  // runtime on somebody's front page.
+  // Assembled exactly as LayoutRenderer assembles it — the renamed fields, the
+  // status channels statusCtx unpacks, and the four Home supplies itself.
+  // Spelled out rather than spread-and-cast, so a new context field is a compile
+  // error here instead of an undefined at runtime on somebody's front page.
   return {
+    ...statusCtx(d),
     state: d.state,
-    propresenter: d.propresenter,
+    propresenter: d.propresenterStatus.value,
     propInstances: d.propInstances,
     pcoLive: d.pcoLive,
-    planItems: d.planItems,
     transcript: d.transcript,
     spl: d.spl,
-    obs: d.obs,
-    reaper: d.reaper,
     pvp: d.pvp,
-    scores: d.scores,
-    resi: d.resi,
-    youtube: d.youtube,
     osc: d.osc,
-    cues: d.cues,
     peopleCount: d.peopleCount,
     serviceLow: d.serviceLow,
     serviceAttendance: d.serviceAttendance,
     servicePeak: d.servicePeaks.occupancy,
     servicePeakAttendance: d.servicePeaks.attendance,
-    baptism: d.baptism,
     serviceTimeline: d.serviceTimeline,
-    integrations: d.integrationsSnap.states,
-    integrationLabels: d.integrationsSnap.labels,
     wireless: d.wireless,
-    // Real presence, from the heartbeat — Home's screens count and its readiness
-    // list are two of the three things in the app that draw it.
-    onlineOutputIds: d.onlinePresence.onlineOutputIds,
-    onlineKnown: d.onlinePresence.known,
     now: d.now,
     ndiSource: null,
     H: NOMINAL_H,

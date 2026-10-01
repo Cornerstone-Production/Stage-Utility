@@ -9,6 +9,7 @@ import * as http from "http";
 import * as zlib from "node:zlib";
 
 import type { ViewKind } from "../../types/stage.js";
+import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 
 /** Everything a route handler needs about the request in flight. */
@@ -92,6 +93,21 @@ export function json(res: http.ServerResponse, data: unknown, status = 200): voi
 
 export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {
   json(res, code ? { error: message, code } : { error: message }, status);
+}
+
+/**
+ * A Planning Center read that failed: 502 with PCO's own reason, and a [pco]
+ * line naming which read.
+ *
+ * The line is the point. pco-service logs a retry, never the read that finally
+ * failed, so an outage used to leave a screen saying "Couldn't load the plan"
+ * and a log with nothing in it. 502 rather than 500 because the request was
+ * well-formed and the upstream is what is down — see pco-outage-status.test.ts.
+ */
+export function pcoReadFailed(res: http.ServerResponse, what: string, err: unknown): void {
+  const message = errorMessage(err);
+  console.warn(`[pco] ${scrub(what)} read failed: ${scrub(message)}`);
+  error(res, message, 502);
 }
 
 /**

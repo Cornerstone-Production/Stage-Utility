@@ -6,7 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty, pcoReadFailed } from "./context.js";
 import { errorMessage } from "../errors.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
@@ -483,7 +483,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       // the other way round: a 400 would blame the caller. Without a try this
       // reached the dispatcher's generic arm, which is 500 by design because a
       // status is opt-in.
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "plan attachments", err);
       }
       return;
     }
@@ -494,7 +494,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.listCurrentPlanItems());
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "plan items", err);
       }
       return;
     }
@@ -504,7 +504,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.listPlanChecklist());
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "checklist", err);
       }
       return;
     }
@@ -514,7 +514,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.listChecklistSources());
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "checklist sources", err);
       }
       return;
     }

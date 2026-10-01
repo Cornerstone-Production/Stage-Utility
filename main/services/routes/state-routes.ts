@@ -5,8 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error } from "./context.js";
-import { errorMessage } from "../errors.js";
+import { type RouteCtx, json, error, pcoReadFailed } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { SERVER_VERSION } from "../server-version.js";
 import { UPCOMING_DEFAULT_DAYS, UPCOMING_MAX_DAYS } from "../upcoming-plans.js";
@@ -42,7 +41,7 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       // the other way round: a 400 would blame the caller. Without a try this
       // reached the dispatcher's generic arm, which is 500 by design because a
       // status is opt-in.
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "service types", err);
       }
       return;
     }
@@ -51,7 +50,7 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.listTeamPositions());
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "team positions", err);
       }
       return;
     }
@@ -85,7 +84,7 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.listPlans(serviceTypeId));
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "plans", err);
       }
       return;
     }
