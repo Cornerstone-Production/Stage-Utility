@@ -78,11 +78,15 @@ export function cueButtonState(
 export function CueButton({
   config,
   cues,
+  known,
   interactive,
   ts,
 }: {
   config: { type: "cue-button"; cue: string; label?: string; showDevice?: boolean };
   cues: CuesLive | null;
+  /** Whether the manifest has answered. Until it has, an unresolved button
+   *  names nothing rather than calling itself "Unbound". */
+  known: boolean;
   interactive: boolean;
   ts: CSSProperties;
 }) {
@@ -124,7 +128,7 @@ export function CueButton({
     }
   }
 
-  const label = config.label || name || "Unbound";
+  const label = config.label || name || (known ? "Unbound" : "—");
   const line2 = said ?? (config.showDevice === false ? "" : sub);
 
   return (
