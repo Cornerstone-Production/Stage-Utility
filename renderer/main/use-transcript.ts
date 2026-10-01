@@ -21,6 +21,6 @@ const NO_LINES: TranscriptLineDTO[] = [];
  */
 export function useTranscript(enabled = true): TranscriptLineDTO[] {
   const read = useCallback(() => invoke<TranscriptLineDTO[]>("prodcom:getTranscript"), []);
-  const lines = useStatusChannel<TranscriptLineDTO[]>(read, "prodcom:transcript", enabled);
+  const { value: lines } = useStatusChannel<TranscriptLineDTO[]>(read, "prodcom:transcript", enabled);
   return Array.isArray(lines) ? lines : NO_LINES;
 }

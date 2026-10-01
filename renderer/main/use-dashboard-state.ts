@@ -18,26 +18,26 @@ interface UseDashboardStateResult {
    * hides cards by mood — needs to be told.
    */
   pcoLiveKnown: boolean;
-  propresenter: ProPresenterStatusDTO | null;
 }
 
 /**
- * State for the dashboard display: the base StageState (branding/displays) plus
- * the two live channels — PCO Services Live countdown ("pco:live") and
- * ProPresenter status ("propresenter:status").
+ * The base StageState (branding/displays) plus the PCO Services Live countdown
+ * ("pco:live") — what every surface built on the stage state needs.
+ *
+ * ProPresenter's status is NOT here, although it used to be: most of the
+ * surfaces that call this never draw it, and every one of them still read it
+ * and held its channel. That channel is the one whose subscribers keep the
+ * server's ProPresenter fallback poll at full rate. The surfaces that draw it
+ * call useProPresenterStatus themselves.
  */
 export function useDashboardState(): UseDashboardStateResult {
   const { state, isLoading, error } = useStageState();
   const [pcoLive, setPcoLive] = useState<PcoLiveDTO | null>(null);
   const [pcoLiveKnown, setPcoLiveKnown] = useState(false);
 
-  // ProPresenter is a StatusIntegration, so its hydrate and its pushes are
-  // version-stamped and ordered by useStatusChannel — see the note there.
-  const readPro = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
-  const propresenter = useStatusChannel<ProPresenterStatusDTO>(readPro, "propresenter:status");
-
-  // pco:live is NOT one: it comes from the live controller, not an integration,
-  // and carries no rev. It keeps the plain hydrate-then-subscribe shape.
+  // pco:live comes from the live controller, not an integration, and carries no
+  // rev, so it keeps the plain hydrate-then-subscribe shape rather than
+  // useStatusChannel's.
   //
   // Either half answers the "is it known yet?" question, and so does the read
   // FAILING: an unreachable server is the answer "we are not going to know",
@@ -63,23 +63,46 @@ export function useDashboardState(): UseDashboardStateResult {
     setPcoLiveKnown(true);
   }), []);
 
-  return { state, isLoading, error, pcoLive, pcoLiveKnown, propresenter };
+  return { state, isLoading, error, pcoLive, pcoLiveKnown };
+}
+
+/**
+ * ProPresenter's live status for the default instance ("propresenter:status").
+ *
+ * ProPresenter is a StatusIntegration, so its hydrate and its pushes are
+ * version-stamped and ordered by useStatusChannel — see the note there.
+ *
+ * @param enabled false where nothing on screen draws it. Off, it neither reads
+ *   nor subscribes, which is what lets the server's fallback poll drop to its
+ *   idle cadence (propresenter-service.ts, IDLE_INTERVAL_MS).
+ */
+export function useProPresenterStatus(enabled = true): ProPresenterStatusDTO | null {
+  const read = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
+  return useStatusChannel<ProPresenterStatusDTO>(read, "propresenter:status", enabled).value;
 }
 
 /**
  * All configured ProPresenter instances + their live status (for custom layouts
  * that pick which auditorium an object reads from). Hydrates once, then stays
  * live on the "propresenter:instances" channel. Always includes id "default".
+ *
+ * @param enabled false where nothing on screen draws it. Off, it neither reads
+ *   nor subscribes; the last list it had is kept, so a widget added back paints
+ *   at once and the read that re-runs corrects it.
  */
-export function usePropInstances(): PropInstancesDTO | null {
+export function usePropInstances(enabled = true): PropInstancesDTO | null {
   const [instances, setInstances] = useState<PropInstancesDTO | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<PropInstancesDTO>("propresenter:getInstances")
       .then((d) => { if (!cancelled && d) setInstances(d); })
       .catch(() => { /* not configured yet — ignore */ });
     return () => { cancelled = true; };
-  }, []);
-  useEffect(() => onNotification("propresenter:instances", (p) => setInstances(p as PropInstancesDTO)), []);
+  }, [enabled]);
+  useEffect(() => {
+    if (!enabled) return;
+    return onNotification("propresenter:instances", (p) => setInstances(p as PropInstancesDTO));
+  }, [enabled]);
   return instances;
 }

@@ -14,5 +14,5 @@ import type { VideoState } from "@main/types/video";
  *  alongside a quiet building pushes nothing here on its own. */
 export function useVideoState(): VideoState | null {
   const read = useCallback(() => invoke<VideoState>("video:state"), []);
-  return useStatusChannel<VideoState>(read, "video:state");
+  return useStatusChannel<VideoState>(read, "video:state").value;
 }

@@ -26,7 +26,7 @@ export function useConfiguredIntegrations(): Set<string> {
     () => invoke<{ states: IntegrationState[] }>("integrations:list").then((r) => r?.states ?? NO_STATES),
     [],
   );
-  const states = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed");
+  const { value: states } = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed");
   return useMemo(
     () => new Set((states ?? NO_STATES).filter((s) => s.configured).map((s) => s.id)),
     [states],
@@ -38,21 +38,30 @@ export interface IntegrationsSnapshot {
   states: IntegrationState[];
   /** Friendly descriptor label keyed by integration id (for display). */
   labels: Record<string, string>;
+  /** Whether ANY answer has landed yet — see useStatusChannel's own header.
+   *  `states` is `NO_STATES` (empty) both before the first answer and once
+   *  genuinely configured with nothing enabled; the context bar's
+   *  "integration-health" item must not read the first of those as "no
+   *  integrations" before this is true. */
+  known: boolean;
 }
 
 /**
  * Full integration snapshot — live `connection` state plus the friendly label
- * for each integration. Backs the "Integration status" layout object and its
- * editor picker. Hydrates from `integrations:list`, stays live via
- * `integrations:state-changed`.
+ * for each integration. Backs the "Integration status" layout object, its
+ * editor picker and the context bar's health item. Hydrates from
+ * `integrations:list`, stays live via `integrations:state-changed`.
  *
  * Ordering is useStatusChannel's, as above. The labels are lifted out of the same
  * read rather than fetched again, which is why they are set from inside the
  * thunk: they are DESCRIPTOR metadata, fixed for a server run and carried by no
  * broadcast, so they are correct even in the case the hook exists for — the one
  * where the read's `states` are dropped as older than a push already applied.
+ *
+ * @param enabled false where nothing on screen draws it — a layout with no
+ *   integration-status object. Off, it neither reads nor subscribes.
  */
-export function useIntegrations(): IntegrationsSnapshot {
+export function useIntegrations(enabled = true): IntegrationsSnapshot {
   const [labels, setLabels] = useState<Record<string, string>>(NO_LABELS);
   const read = useCallback(
     () =>
@@ -66,6 +75,6 @@ export function useIntegrations(): IntegrationsSnapshot {
       }),
     [],
   );
-  const states = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed");
-  return useMemo(() => ({ states: states ?? NO_STATES, labels }), [states, labels]);
+  const { value: states, known } = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed", enabled);
+  return useMemo(() => ({ states: states ?? NO_STATES, labels, known }), [states, labels, known]);
 }
