@@ -60,19 +60,25 @@ function timeline() {
   };
 }
 
-function installFetch(): void {
+function installFetch({ recordFails = false, heldList }: { recordFails?: boolean; heldList?: Promise<void> } = {}): void {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
     if (method !== "GET") return ok({ ok: true });
-    if (url === "/api/service-timeline") return ok([timeline()]);
+    if (url === "/api/service-timeline") {
+      if (heldList) await heldList;
+      return ok([timeline()]);
+    }
     if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (url === `/api/service-timeline/${encodeURIComponent(KEY)}`) return ok(timeline());
-    if (url.startsWith("/api/service-timeline/")) return ok(null);
+    if (url.startsWith("/api/service-timeline/")) {
+      if (recordFails) throw new TypeError("fetch failed");
+      return ok(null);
+    }
     if (url.startsWith("/api/attendance/history/")) return ok(null);
     if (url.startsWith("/api/spl/history/")) return ok(null);
     throw new Error(`unexpected fetch: ${method} ${url}`);
@@ -144,6 +150,26 @@ describe("History opens the service named in its URL", () => {
     );
   });
 
+  test("a link opened before the list has loaded shows the service's shape, not the list's", async () => {
+    // The list skeleton turning into a service page is the same jump a click
+    // used to make, so a link that names a service waits in that service's shape.
+    let release: () => void = () => {};
+    const heldList = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    installFetch({ heldList });
+    const { view } = renderHistoryAt(historyServiceHref(KEY));
+    for (let i = 0; i < 6; i++) await settle();
+
+    assert.equal(view.container.querySelector('[data-history-loading="service"]') != null, true, "no service placeholder");
+    assert.ok(text(view.container).includes("All services"), "the way back is there while it loads");
+
+    await act(async () => release());
+    for (let i = 0; i < 6; i++) await settle();
+    assert.equal(isOpen(view), true, "the service opened once the list landed");
+    assert.equal(view.container.querySelector('[data-history-loading="service"]'), null);
+  });
+
   test("an unknown key falls back to the list rather than an empty page", async () => {
     installFetch();
     const { view } = renderHistoryAt(historyServiceHref(OTHER_KEY));
@@ -155,6 +181,18 @@ describe("History opens the service named in its URL", () => {
       "an unknown key must not open a detail page",
     );
     assert.ok(text(view.container).includes("Sunday 11:00"), "the list must still render, not an empty page");
+  });
+
+  test("a key the list does not hold, whose record cannot be read, says so", async () => {
+    // A service the list holds opens from the list's own copy whatever its
+    // own read does (history-detail-reads.test.tsx). One it does not hold has
+    // nothing to draw, and a failure must not read as "no such service".
+    installFetch({ recordFails: true });
+    const { view } = renderHistoryAt(historyServiceHref(OTHER_KEY));
+    for (let i = 0; i < 6; i++) await settle();
+
+    assert.match(text(view.container), /Couldn't load this service's record/);
+    assert.ok(text(view.container).includes("All services"), "and the way back is there");
   });
 
   test("selecting a row opens it immediately and writes ?service=<key> back to the URL", async () => {
