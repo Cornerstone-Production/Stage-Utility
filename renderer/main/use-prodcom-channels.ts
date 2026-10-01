@@ -15,6 +15,6 @@ const NO_CHANNELS: ProdcomChannelDTO[] = [];
  */
 export function useProdcomChannels(enabled = true): ProdcomChannelDTO[] {
   const read = useCallback(() => invoke<ProdcomChannelDTO[]>("prodcom:getChannels"), []);
-  const channels = useStatusChannel<ProdcomChannelDTO[]>(read, "prodcom:channels", enabled);
+  const { value: channels } = useStatusChannel<ProdcomChannelDTO[]>(read, "prodcom:channels", enabled);
   return Array.isArray(channels) ? channels : NO_CHANNELS;
 }

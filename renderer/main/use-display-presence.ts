@@ -38,10 +38,17 @@ interface PresenceDTO {
   rev?: number;
 }
 
+export interface DisplayPresenceResult {
+  onlineOutputIds: readonly string[];
+  /** Whether ANY answer has landed yet — see useStatusChannel's own header.
+   *  Empty ids while this is false is "we do not know", not "none online":
+   *  Home's readiness list and screens count must say so rather than reading
+   *  every screen as offline for the width of one slow read. */
+  known: boolean;
+}
+
 /**
- * Output ids with a live heartbeat. Empty means "none, or we do not know" — the
- * safe direction: a dot that is dark invites a look at the screen, a dot that is
- * lit says there is nothing to look at.
+ * Output ids with a live heartbeat, plus whether presence has answered yet.
  *
  * Hydrated as well as subscribed, exactly like useObsState. The SSE hello burst
  * does carry a presence snapshot and api.ts caches it for a late subscriber —
@@ -56,11 +63,28 @@ interface PresenceDTO {
  * PRESENT: on an `enabled` false→true flip the previous set would otherwise
  * persist and render as lit, reporting screens as Connected on the strength of a
  * read that just failed — the exact class of lie this hook exists to remove.
+ * `known` still goes true on that failed read: it settled the window, even
+ * though the honest reading of "we do not know" it lands on is the same empty
+ * set unknown itself renders — the caller judges the two apart by `known`,
+ * never by whether the id list happens to be empty.
  */
-export function useDisplayPresence(enabled = true): readonly string[] {
+export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult {
   const read = useCallback(() => invoke<PresenceDTO>("displays:getPresence"), []);
-  const presence = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
+  const { value: presence, known } = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
     clearOnReadFailure: true,
   });
-  return enabled ? (presence?.connected ?? EMPTY) : EMPTY;
+  return {
+    onlineOutputIds: enabled ? (presence?.connected ?? EMPTY) : EMPTY,
+    known: enabled ? known : false,
+  };
+}
+
+/**
+ * The ids alone, for a caller that does not judge "none online" against "we do
+ * not know" — the custom-layout screen tile, which already draws a screen with
+ * no heartbeat as offline whether that is settled or merely not yet known, the
+ * same way it would before the very first read of any kind ever lands.
+ */
+export function useDisplayPresence(enabled = true): readonly string[] {
+  return useDisplayPresenceStatus(enabled).onlineOutputIds;
 }

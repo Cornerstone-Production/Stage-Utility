@@ -159,6 +159,15 @@ ctx.onconnect = (e: MessageEvent) => {
       report();
       // Only what this port did not already have, so a re-subscribe (which happens
       // on every mount and unmount) does not re-deliver state it is already showing.
+      //
+      // This is necessarily a PORT-WIDE union across every callback the tab
+      // holds, not a per-callback fact — a channel a persistent subscriber (the
+      // context bar's own pco:live, held for the tab's whole life) already wanted
+      // stays out of `added` even though it is brand new to whatever JUST asked
+      // for it. That gap is real and is not this function's to close: api.ts's
+      // `onNotification` also replays from ITS OWN cache to every new callback
+      // directly, on both transports, which is what catches a new subscriber
+      // arriving after this port's set has already settled.
       replayTo(port, [...wanted].filter((c) => !previous.has(c)));
     } else if (m.type === "wake") {
       // A tab became visible. A kiosk can sit untouched for days, and the machine

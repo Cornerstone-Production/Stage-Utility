@@ -101,6 +101,7 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
     embedChain: [],
     insideEmbedTile: false,
     onlineOutputIds: [],
+    onlineKnown: true,
     ...overrides,
   };
 }

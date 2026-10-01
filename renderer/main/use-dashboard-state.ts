@@ -34,7 +34,7 @@ export function useDashboardState(): UseDashboardStateResult {
   // ProPresenter is a StatusIntegration, so its hydrate and its pushes are
   // version-stamped and ordered by useStatusChannel — see the note there.
   const readPro = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
-  const propresenter = useStatusChannel<ProPresenterStatusDTO>(readPro, "propresenter:status");
+  const { value: propresenter } = useStatusChannel<ProPresenterStatusDTO>(readPro, "propresenter:status");
 
   // pco:live is NOT one: it comes from the live controller, not an integration,
   // and carries no rev. It keeps the plain hydrate-then-subscribe shape.
