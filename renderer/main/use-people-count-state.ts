@@ -13,7 +13,7 @@ import { useStatusChannel } from "./use-status-channel";
  */
 export function usePeopleCountState(enabled = true): PeopleCountDTO | null {
   const read = useCallback(() => invoke<PeopleCountDTO>("people:getCount"), []);
-  return useStatusChannel<PeopleCountDTO>(read, "people:count", enabled);
+  return useStatusChannel<PeopleCountDTO>(read, "people:count", enabled).value;
 }
 
 /** Mean peak in-room across finished recorded services (the "average service"),

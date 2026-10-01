@@ -34,7 +34,12 @@ re-send the plan, slot configuration and layouts along with it.
 - **Volatile and static data are on separate channels**, both deduplicated against
   their own last value. A setter called with the value it already had sends nothing.
 - **Clients subscribe to what they render.** A screen showing mic slots is not sent
-  the transcript.
+  the transcript. A layout — Home, a custom view, a console — reads and subscribes
+  only to the sources its placed widgets draw, so a wall showing a clock asks for
+  nothing else. A hidden widget and one inside an embedded view still count. A
+  Home tile set to show only during a service, or only the rest of the week,
+  does not count until it shows. The layout editor is the exception: it
+  subscribes to everything, so every widget's preview has data.
 - **Nothing is produced for nobody.** An integration with no subscribers stops
   resolving and serialising.
 - **Images are content-addressed and immutable.** Logos, layout images and people's
