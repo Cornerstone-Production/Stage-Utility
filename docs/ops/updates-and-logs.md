@@ -205,9 +205,9 @@ as such rather than given a doc link it doesn't need.
 | `[obs]` | Connection state, and recording/streaming/virtual-camera transitions: [OBS](../integrations/obs.md) |
 | `[osc]` | Target init, hostname resolution, and send-socket errors: [OSC](../integrations/osc.md) |
 | `[patch]` | Browser-side: the patch sheet or its weekly variant failing to load |
-| `[pco]` | Planning Center rate-limit headroom, refused unsafe URLs, and (under `STAGE_UTILITY_DEBUG`) every request: [Planning Center](../integrations/planning-center.md) |
+| `[pco]` | Planning Center rate-limit headroom, refused unsafe URLs, each read that failed after its retries, named (`[pco] plan items read failed: …`, and the same for the calendar, checklist, plans and the rest — a service order or SPL rundown then reads "Couldn't load the plan"), and (under `STAGE_UTILITY_DEBUG`) every request: [Planning Center](../integrations/planning-center.md) |
 | `[pco-calendar]` | Calendar instances with no start time, left undrawn: [Calendar](../integrations/planning-center.md#calendar) |
-| `[photo-cache]` | Person photos cached from Planning Center: prunes, and fetch/redirect/size refusals: [Planning Center](../integrations/planning-center.md) |
+| `[photo-cache]` | Person photos cached from Planning Center: prunes, fetch/redirect/size refusals, and a smaller copy PCO would not give, with what was served instead: [Planning Center](../integrations/planning-center.md#photos) |
 | `[plan-export]` | A view bundle built for export to another install, and its counts: [Moving a view between installs](../moving-a-view.md) |
 | `[plans]` | The upcoming-plans list refreshing or failing, and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[prodcom]` | Connection state, transcript source (websocket vs. SSE fallback), and idle/heartbeat timeouts: [ProdCom](../integrations/prodcom.md) |

@@ -46,7 +46,7 @@ import {
   MENU_ITEM,
   menuContent,
 } from "../components/ui";
-import { ObjectContent, boxStyle, useLayoutData, type LayoutRenderCtx } from "../main/layout-renderer";
+import { ObjectContent, boxStyle, statusCtx, useLayoutData, type LayoutRenderCtx } from "../main/layout-renderer";
 import {
   findById,
   mapById,
@@ -2383,7 +2383,7 @@ export function LayoutEditor({
               // must preview what that surface will draw.
               // The editor's own canvas is never the real screen a switched-off
               // display would refuse HLS on, so a Video widget here always may.
-              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, onlineOutputIds: data.onlinePresence.onlineOutputIds, onlineKnown: data.onlinePresence.known, allowHls: true }}
+              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}

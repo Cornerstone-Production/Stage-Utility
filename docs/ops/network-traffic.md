@@ -42,13 +42,20 @@ re-send the plan, slot configuration and layouts along with it.
   subscribes to everything, so every widget's preview has data.
 - **Nothing is produced for nobody.** An integration with no subscribers stops
   resolving and serialising.
-- **Images are content-addressed and immutable.** Logos, layout images and people's
-  photos are named by a hash of their bytes and cached for a year — a changed image
-  is a new URL. A slots DISPLAY also has its photos cropped to the column shape
-  they are drawn at, which is a tall sliver — that is the saving. An inline
-  mic-slots object on a custom layout is whatever size it was dragged to, so
-  nothing server-side knows its shape: it receives the whole image and the
-  browser crops it. Larger, for the slots on that layout only.
+- **Images are content-addressed and immutable.** Logos and layout images are
+  named by a hash of their bytes, and a person's photo by Planning Center's URL,
+  which changes when the photo does; all are cached for a year, except a
+  full-size photo standing in for a smaller copy Planning Center has not sent. A slots DISPLAY
+  has its photos cropped to the column shape they are drawn at, which is a tall
+  sliver — that is the saving. An inline mic-slots object on a custom layout is
+  whatever size it was dragged to, so nothing server-side knows its shape: it
+  receives the whole image and the browser crops it.
+- **Photos come at the size they are drawn.** Each slot asks for the device
+  pixels its photo covers, so a Screens-page preview, drawn at under half size,
+  downloads a fraction of what the screen itself does: for an 11-slot and a
+  9-slot mic board, 330 KB of photos on a 2x laptop screen and 100 KB at 1x,
+  against 837 KB on the full-size screens. See
+  [Photos](../integrations/planning-center.md#photos).
 
 Idle, the stream is silent: measured at 0 bytes over 12 seconds on a server with
 nothing happening.

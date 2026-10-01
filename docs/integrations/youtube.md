@@ -160,6 +160,7 @@ one of them reads as one design:
 
 | | |
 |---|---|
+| — | dimmed. The screen has just loaded and YouTube has not answered yet |
 | Offline | dimmed. YouTube is not set up, or cannot be reached |
 | Off air | grey — reachable, nothing going out |
 | Off air, late | amber, with how late beside it |

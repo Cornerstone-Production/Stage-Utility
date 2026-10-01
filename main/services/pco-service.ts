@@ -3,6 +3,7 @@
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
+import { setAvatarGeometry } from "./avatar-geometry.js";
 import { errorMessage } from "./errors.js";
 import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
@@ -472,10 +473,7 @@ const AVATAR_PX = 1000;
 /** Upgrade a PCO avatar URL to high resolution. PCO's `?g=WxH#` param controls
  *  geometry (# = centered crop); rewrite an existing geometry or append one. */
 function highResAvatar(url: string): string {
-  if (/[?&]g=\d+x\d+(%23|#)?/.test(url)) {
-    return url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${AVATAR_PX}x${AVATAR_PX}%23`);
-  }
-  return url + (url.includes("?") ? "&" : "?") + `g=${AVATAR_PX}x${AVATAR_PX}%23`;
+  return setAvatarGeometry(url, `${AVATAR_PX}x${AVATAR_PX}%23`);
 }
 
 /** One PCO plan row → PlanDTO. Shared by the future and past listings. */

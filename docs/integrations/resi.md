@@ -75,6 +75,7 @@ one of them reads as one design:
 
 | | |
 |---|---|
+| — | dimmed. The screen has just loaded and Resi has not answered yet |
 | Offline | dimmed. Resi is not set up, or cannot be reached |
 | Off air | grey — reachable, nothing going out |
 | Live | green, with the elapsed time underneath |

@@ -69,8 +69,15 @@ function fromManifest(manifest: CueManifest): CuesLive {
   return { manifest, states };
 }
 
-export function useCueLive(enabled: boolean): CuesLive | null {
+/**
+ * The live cues, plus whether the manifest read has answered — success, an
+ * empty answer or a failure. A push alone does not count: it carries one pair
+ * and no manifest, so before the read lands every button is still unresolved,
+ * and "Unbound" then is a claim about a manifest nobody has seen.
+ */
+export function useCueLiveStatus(enabled: boolean): { value: CuesLive | null; known: boolean } {
   const [live, setLive] = useState<CuesLive | null>(null);
+  const [known, setKnown] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -78,7 +85,9 @@ export function useCueLive(enabled: boolean): CuesLive | null {
     const read = () =>
       invoke<CueManifest>("cues:manifest")
         .then((m) => {
-          if (!alive || !m) return;
+          if (!alive) return;
+          setKnown(true);
+          if (!m) return;
           setLive((prev) => {
             // Pushes that landed during the read win over the read's snapshot.
             const fresh = fromManifest(m);
@@ -88,10 +97,11 @@ export function useCueLive(enabled: boolean): CuesLive | null {
           });
         })
         .catch(() => {
-          /* Not swallowed: with no manifest every cue button on the page renders
-             "Unbound" and fires nothing, which is the failure, said on the
-             screen the operator is looking at. The next manifest event or a
-             remount re-reads. */
+          /* Not swallowed: `known` goes true with no manifest, so every cue
+             button on the page renders "Unbound" and fires nothing, which is
+             the failure, said on the screen the operator is looking at. The
+             next manifest event or a remount re-reads. */
+          if (alive) setKnown(true);
         });
     void read();
     const off = onNotification("cues:all", (payload) => {
@@ -105,5 +115,11 @@ export function useCueLive(enabled: boolean): CuesLive | null {
     };
   }, [enabled]);
 
-  return live;
+  return { value: live, known };
+}
+
+/** The cues alone, for the inspector's picker, which says "Loading cues…"
+ *  rather than drawing a claim off a `null`. */
+export function useCueLive(enabled: boolean): CuesLive | null {
+  return useCueLiveStatus(enabled).value;
 }

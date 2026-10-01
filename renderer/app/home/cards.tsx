@@ -1042,7 +1042,7 @@ export function HomeCard({
   pcoLive: PcoLiveDTO | null;
   now: number;
   /**
-   * Output ids with a live heartbeat, from `useDisplayPresence` by way of
+   * Output ids with a live heartbeat, from `useDisplayPresenceStatus` by way of
    * `LayoutRenderCtx.onlineOutputIds` — the single supplier, on every path.
    *
    * This used to be `outputs.filter(o => o.viewId)`, which is ROUTED, not

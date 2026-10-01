@@ -271,7 +271,9 @@ screen is the only way to bring one into a tile.
 
 A screen tile's status dot means a **browser is actually open on that display**.
 Each display page heartbeats, and a screen that stops reporting goes dark within
-ninety seconds — whether it was unplugged, switched off or simply closed. It is
+ninety seconds — whether it was unplugged, switched off or simply closed. On a
+page that has just loaded the dot is not drawn until the first heartbeat reading
+arrives, so a wall of tiles does not read as a wall of dark screens. It is
 not a routing light: what a screen is or is not showing (unrouted, blacked out,
 a deleted view) is named in the body of the tile itself.
 
