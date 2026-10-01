@@ -57,8 +57,11 @@ export interface IntegrationsSnapshot {
  * thunk: they are DESCRIPTOR metadata, fixed for a server run and carried by no
  * broadcast, so they are correct even in the case the hook exists for — the one
  * where the read's `states` are dropped as older than a push already applied.
+ *
+ * @param enabled false where nothing on screen draws it — a layout with no
+ *   integration-status object. Off, it neither reads nor subscribes.
  */
-export function useIntegrations(): IntegrationsSnapshot {
+export function useIntegrations(enabled = true): IntegrationsSnapshot {
   const [labels, setLabels] = useState<Record<string, string>>(NO_LABELS);
   const read = useCallback(
     () =>
@@ -72,6 +75,6 @@ export function useIntegrations(): IntegrationsSnapshot {
       }),
     [],
   );
-  const { value: states, known } = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed");
+  const { value: states, known } = useStatusChannel<IntegrationState[]>(read, "integrations:state-changed", enabled);
   return useMemo(() => ({ states: states ?? NO_STATES, labels, known }), [states, labels, known]);
 }

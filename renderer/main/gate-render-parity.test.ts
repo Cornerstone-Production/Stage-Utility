@@ -54,9 +54,43 @@ function topLevelFunction(lines: string[], name: string): string {
   return lines.slice(head, end + 1).join("\n");
 }
 
-/** Every `ctx.<field>` named in a chunk of source. */
+/** Every `ctx` field a chunk of source reads: `ctx.<field>`, and the names in a
+ *  `const { … } = ctx`, which read those fields just as surely. */
 function ctxReads(text: string): Set<string> {
-  return new Set([...text.matchAll(/\bctx\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+  const found = new Set([...text.matchAll(/\bctx\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+  for (const m of text.matchAll(/\{([^{}]*)\}\s*=\s*ctx\b(?!\s*\.)/g)) {
+    for (const part of m[1].split(",")) {
+      const key = part.trim();
+      assert.ok(!key.startsWith("..."), "a rest element taken out of ctx — the scan cannot attribute what it reads");
+      const field = key.split(/[:=]/)[0].trim();
+      if (field) found.add(field);
+    }
+  }
+  return found;
+}
+
+/**
+ * Components the renderer hands `ctx` to that live in another file, and why
+ * none of their reads belong to the object that hands it over.
+ *
+ * EmbeddedView draws a different View. Its widgets' channels are opened by the
+ * gate's walk INTO that view (collectLayoutTypes), under their own types, so
+ * attributing them to view-embed or screen-embed would demand gates those two
+ * do not need.
+ */
+const DRAWS_ANOTHER_VIEW = new Set(["EmbeddedView"]);
+
+/**
+ * Every function a chunk hands the whole `ctx` to: a component given
+ * `ctx={ctx}` or `ctx={{ ...ctx, … }}`, and a call taking `ctx` as any direct
+ * argument — `f(ctx)`, `f(ctx, x)`, `f(x, ctx)`.
+ */
+function handedCtx(text: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of text.matchAll(/<(\w+)[^>]*?\bctx=\{(?:ctx\}|\{\s*\.\.\.ctx\b)/gs)) names.add(m[1]);
+  for (const m of text.matchAll(/\b(\w+)\((?:[^()]*?,\s*)?ctx\s*[,)]/g)) names.add(m[1]);
+  for (const name of DRAWS_ANOTHER_VIEW) names.delete(name);
+  return names;
 }
 
 /** The `case "type":` arms of a switch, each with the source up to the next arm. */
@@ -83,15 +117,29 @@ function switchArms(lines: string[], header: string): Map<string, string> {
 // ---------------------------------------------------------------- the gates
 
 /**
- * Each gated `ctx` field, and the object types whose presence opens it.
+ * Each gated `ctx` field, and the object types whose presence opens it — and
+ * each `ctx` field a hook feeds with NO gate.
  *
  * Read out of `useLayoutData`: `const spl = useSplState(want(["spl-meter"]))`
  * gates the local `spl`, and the `LayoutRenderCtx` literal maps that local onto
  * the ctx field a widget reads. A hook called with no `want()` is ungated —
- * always subscribed, so nothing has to name it.
+ * read and subscribed on every layout surface, whatever it holds — which is
+ * what `ungated` lists.
  */
-function gatedFields(): Map<string, Set<string>> {
+function scanGates(): { gated: Map<string, Set<string>>; ungated: string[] } {
   const useLayoutData = topLevelFunction(RENDERER, "useLayoutData");
+
+  // Every local a hook assigns, gated or not: `const x = useX(…)`,
+  // `const { a, b } = useY(…)` and `const [a, b] = useZ(…)`. Matched on the assignment, which prose in a
+  // comment does not produce.
+  const hookLocals = new Set<string>();
+  for (const m of useLayoutData.matchAll(/const (\w+) = use\w+\(/g)) hookLocals.add(m[1]);
+  for (const m of useLayoutData.matchAll(/const [{[]([^}\]]*)[}\]] = use\w+\(/g)) {
+    for (const name of m[1].split(",")) {
+      const local = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
+      if (local.trim()) hookLocals.add(local.trim());
+    }
+  }
 
   // Gates hoisted into a local first: `const peopleWanted = want([...])`.
   const named = new Map<string, string[]>();
@@ -130,7 +178,8 @@ function gatedFields(): Map<string, Set<string>> {
   }
   parts.push(cur);
 
-  const out = new Map<string, Set<string>>();
+  const gated = new Map<string, Set<string>>();
+  const ungated: string[] = [];
   for (const part of parts) {
     const t = part.trim();
     if (!t) continue;
@@ -138,9 +187,10 @@ function gatedFields(): Map<string, Set<string>> {
     const field = colon < 0 ? t : t.slice(0, colon).trim();
     const local = colon < 0 ? t : /^[A-Za-z_$][\w$]*/.exec(t.slice(colon + 1).trim())?.[0] ?? "";
     const gate = byLocal.get(local);
-    if (gate) out.set(field, gate);
+    if (gate) gated.set(field, gate);
+    else if (hookLocals.has(local)) ungated.push(field);
   }
-  return out;
+  return { gated, ungated: ungated.sort() };
 }
 
 // ---------------------------------------------------------------- the reads
@@ -153,7 +203,8 @@ function gatedFields(): Map<string, Set<string>> {
  *  - closures declared at the top of `ObjectBody` that close over `ctx`
  *    (`streamingReadout` reads ctx.resi, ctx.youtube and ctx.obs — that last one
  *    is where `stream-status` was missing a gate);
- *  - components and helpers handed the whole `ctx` (`ctx={ctx}`, `f(ctx)`);
+ *  - components and helpers handed the whole `ctx` (`ctx={ctx}`, a spread of
+ *    it, or `ctx` as any argument), followed as deep as the hand-offs go;
  *  - `HomeCard`, which is handed named props off `ctx`. A Home card's channels
  *    are decided in ITS switch, not in the shared branch that renders it — the
  *    branch passes `onlineOutputIds` for all fifteen types and only two use it.
@@ -181,15 +232,26 @@ function readsByType(): Map<string, Set<string>> {
   }
 
   /** A chunk's own reads, plus those of everything it hands `ctx` to. */
-  const expand = (text: string): Set<string> => {
+  const expand = (text: string, seen: Set<string> = new Set()): Set<string> => {
     const found = ctxReads(text);
+    const follow = (key: string, source: string) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      expand(source, seen).forEach((f) => found.add(f));
+    };
     for (const [name, source] of closures) {
-      if (new RegExp(`\\b${name}\\(`).test(text)) ctxReads(source).forEach((f) => found.add(f));
+      if (new RegExp(`\\b${name}\\(`).test(text)) follow(`closure:${name}`, source);
     }
-    const handed = new Set<string>();
-    for (const m of text.matchAll(/<(\w+)[^>]*\bctx=\{ctx\}/gs)) handed.add(m[1]);
-    for (const m of text.matchAll(/\b(\w+)\(ctx\)/g)) handed.add(m[1]);
-    for (const name of handed) ctxReads(topLevelFunction(RENDERER, name)).forEach((f) => found.add(f));
+    for (const name of handedCtx(text)) {
+      const source = topLevelFunction(RENDERER, name);
+      // Reads are matched on the name `ctx`. A function that takes the context
+      // under another name would read it unseen, so it is refused, not skipped.
+      const lines = source.split("\n");
+      const signature = lines.slice(0, lines.findIndex((l) => /\)\s*(?::[^=]*)?\{\s*$/.test(l)) + 1).join("\n");
+      const renamed = /\b(\w+)\s*:\s*LayoutRenderCtx\b/.exec(signature);
+      assert.ok(!renamed || renamed[1] === "ctx", `${name} takes the render context as "${renamed?.[1]}" — the scan reads only \`ctx\``);
+      follow(name, source);
+    }
     return found;
   };
 
@@ -237,7 +299,7 @@ function readsByType(): Map<string, Set<string>> {
 
 // ---------------------------------------------------------------- the guard
 
-const GATED = gatedFields();
+const { gated: GATED, ungated: UNGATED } = scanGates();
 const READS = readsByType();
 
 describe("every channel a widget draws is one its layout subscribes to", () => {
@@ -258,7 +320,23 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     for (const field of ["obs", "reaper", "resi", "onlineOutputIds"]) {
       assert.ok(GATED.has(field), `ctx.${field} is gated in useLayoutData but the scan did not see it`);
     }
-    assert.ok(GATED.size >= 4);
+  });
+
+  test("every source useLayoutData reads is gated, except the three the canvas itself draws", () => {
+    // The stage state, PCO Live and the server clock feed the canvas and nearly
+    // every widget on it, so every layout reads them. Anything else a hook
+    // feeds in ungated is read and subscribed on a wall showing one clock: six
+    // sources sat that way — the baptism timer, the plan rundown, the service
+    // timeline, the integration list and both ProPresenter snapshots — until
+    // each was given a gate. A seventh fails here instead.
+    //
+    // Exact, and a list rather than a count. It also keeps the parse honest: a
+    // gate the scan stops seeing shows up here as ungated.
+    assert.deepEqual(UNGATED, [
+      "now",
+      "pcoLive",
+      "state",
+    ]);
   });
 
   test("no arm reads a channel its type is not gated for", () => {
