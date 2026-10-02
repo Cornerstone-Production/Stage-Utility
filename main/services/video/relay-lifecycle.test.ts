@@ -897,40 +897,34 @@ test("a makeRelay that keeps throwing backs off between retries, not a flat 1 s 
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
 
-  // Ticked in small, fixed steps with many settle() rounds after EACH one
-  // — not two large ticks with a fixed settle() budget in between. The
-  // chain a retry firing kicks off (ensureBinary -> busyPorts -> the
-  // config write -> supervisor.start -> attach -> catch -> stop()) needs
-  // more real event-loop turns to fully resolve than a modest, fixed
-  // settle() count reliably provides — confirmed directly: 400 rounds of
-  // settle() after one 1 s tick was NOT always enough for the chain
-  // triggered by that tick to finish, which made an earlier version of
-  // this test pass whether or not the bug it was meant to catch was
-  // present. Sampling supervisors.length every 1 s of mocked time for 30 s
-  // sidesteps needing to know
-  // exactly how many turns is "enough" — by second 30, every real
-  // continuation the mocked clock could have triggered by then has had
-  // ample real time to run.
-  for (let sec = 0; sec < 30; sec++) {
-    t.mock.timers.tick(1000);
-    for (let i = 0; i < 60; i++) await settle();
-  }
-  // Every supervisor created was also stopped — none left orphaned.
-  for (const s of supervisors) assert.equal(s.stopCalls, 1);
+  // Stepped one attempt at a time, waiting on each attempt's own evidence (a
+  // new supervisor, and a fresh failing status naming when it retries) in
+  // real time. An earlier version ticked 1 s at a time with a fixed number of
+  // settle() rounds after each, and failed on a loaded CI runner (3 attempts
+  // by 30 s where 4 were due) because the retry chain had not finished in
+  // that many turns. Nothing here depends on how fast the chain runs.
+  let lastRetryAt: number | null = null;
+  const relay = () => videoService.current().relay as { state: string; retryAt?: number | null };
+  const failedAgain = (n: number) => () =>
+    supervisors.length === n && relay().state === "failing" && typeof relay().retryAt === "number" && relay().retryAt !== lastRetryAt;
 
-  // The backoff between attempts is 1, 2, 4, 8, 16, 32 s, then 60 s
-  // (restartDelayMs), so at most 5 attempts land inside 30 s: at once, then
-  // at 1, 3, 7 and 15 s, the next not until 31 s. A flat 1 s floor would
-  // instead make a new supervisor very nearly every second — about 30 over
-  // the same window.
-  assert.ok(
-    supervisors.length <= 6,
-    `expected at most ~5 attempts across 30 s of backoff, got ${supervisors.length} — the retry never backed off`,
-  );
-  assert.ok(supervisors.length >= 4, `expected the backoff schedule to have produced several attempts by 30 s, got ${supervisors.length}`);
-  // The count is the whole claim. The exact gap between attempts on a 1 s
-  // sampling grid depends on how fast the chain resolves under load, and
-  // asserting its shape made this test flake without saying anything more.
+  for (let k = 0; k < 5; k++) {
+    await waitUntil(failedAgain(k + 1));
+    lastRetryAt = relay().retryAt ?? null;
+    if (k === 4) break;
+    // The backoff after attempt k+1 is restartDelayMs(k): 1, 2, 4, 8 s. Short
+    // of it by 1 ms, nothing may start. A flat 1 s floor starts the next
+    // attempt here from the second wait on, which is the bug this guards.
+    const delay = restartDelayMs(k);
+    t.mock.timers.tick(delay - 1);
+    const early = await waitUntil(() => supervisors.length > k + 1, 300).then(() => true, () => false);
+    assert.equal(early, false, `attempt ${k + 2} started before its ${delay} ms backoff — the retry never backed off`);
+    t.mock.timers.tick(1);
+  }
+
+  // Every supervisor created was also stopped — none left orphaned.
+  await waitUntil(() => supervisors.every((s) => s.stopCalls === 1));
+  assert.equal(supervisors.length, 5);
 });
 
 // prelaunchOutage was never reset
