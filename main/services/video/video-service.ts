@@ -83,19 +83,20 @@ const CHANGED_SINCE_REVIEW = "Changed on this server since the review. Review th
 const REVIEW_KEY = randomBytes(32);
 
 /**
- * What the operator reviewed of one local feed: its name, source and stored
- * password, or "" when there was none. The preview hands it out, the import
- * hands it back, and a feed whose fingerprint has moved on is not written.
+ * What the operator reviewed of one local feed: its name, its source and how
+ * many times its secret has been written, or "" when there was none. The
+ * preview hands it out, the import hands it back, and a feed whose fingerprint
+ * has moved on is not written.
  *
  * A status alone could not carry this: a feed that "differs" from the file
  * still differs after someone edits it here, to a different address the
- * review never showed. Keyed (HMAC), never a plain hash, so a stored password
- * cannot be guessed back from it.
+ * review never showed. The password itself is never part of it — a change to
+ * one shows up as a new revision, not as a hash of the value.
  */
-function reviewFingerprint(feed: VideoFeed | undefined, password: string | undefined): string {
+function reviewFingerprint(feed: VideoFeed | undefined, secretRevision: number): string {
   if (!feed) return "";
   return createHmac("sha256", REVIEW_KEY)
-    .update(JSON.stringify({ name: feed.name, source: feed.source, password: password ?? "" }))
+    .update(JSON.stringify({ name: feed.name, source: feed.source, secretRevision }))
     .digest("hex")
     .slice(0, 32);
 }
@@ -1329,7 +1330,7 @@ class VideoService {
     if (inFlight) return inFlight;
     const mint = (async () => {
       const fresh = generatePushPassword();
-      await secretsStore.setSecret(SECRET_SLOT(feed.id), "password", fresh);
+      await this.setFeedPassword(feed.id, fresh);
       console.warn(`[video] ${scrub(feed.name)}: made a new publish password (none was stored)`);
       return fresh;
     })();
@@ -1564,7 +1565,7 @@ class VideoService {
     const { feeds } = await loadFeedsFile();
     const feed = feeds.find((f) => f.id === id);
     if (!feed || feed.source.kind !== "push") return null;
-    await secretsStore.setSecret(SECRET_SLOT(id), "password", generatePushPassword());
+    await this.setFeedPassword(id, generatePushPassword());
     const applied = await this.reconcileRelay();
 
     let kicked: KickResult = "none";
@@ -1618,7 +1619,7 @@ class VideoService {
     const password = added.source.kind === "push" ? generatePushPassword() : parsed.password;
     if (password) {
       try {
-        await secretsStore.setSecret(SECRET_SLOT(added.id), "password", password);
+        await this.setFeedPassword(added.id, password);
       } catch (err) {
         await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
         throw err;
@@ -1691,22 +1692,22 @@ class VideoService {
     password: string | undefined,
   ): Promise<void> {
     if (newKind === "push") {
-      if (oldKind !== "push") await secretsStore.setSecret(SECRET_SLOT(id), "password", generatePushPassword());
+      if (oldKind !== "push") await this.setFeedPassword(id, generatePushPassword());
       return;
     }
     if (newKind === "pull") {
       if (oldKind !== "pull") {
-        if (password) await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
-        else await secretsStore.clearSecrets(SECRET_SLOT(id));
+        if (password) await this.setFeedPassword(id, password);
+        else await this.clearFeedSecret(id);
         return;
       }
       if (password !== undefined) {
-        if (password === "") await secretsStore.clearSecrets(SECRET_SLOT(id));
-        else await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
+        if (password === "") await this.clearFeedSecret(id);
+        else await this.setFeedPassword(id, password);
       }
       return;
     }
-    if (oldKind === "pull" || oldKind === "push") await secretsStore.clearSecrets(SECRET_SLOT(id));
+    if (oldKind === "pull" || oldKind === "push") await this.clearFeedSecret(id);
   }
 
   async removeFeed(id: string): Promise<boolean> {
@@ -1720,7 +1721,7 @@ class VideoService {
     if (!feeds.some((f) => f.id === id)) return false;
 
     await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    await this.clearFeedSecret(id);
     // A future feed CAN mint this same id again (feedIdFor() is deterministic
     // from the name), but that is a new feed with a new relay path — nothing
     // about this one's old poll data, request or log history describes it.
@@ -1769,6 +1770,33 @@ class VideoService {
 
   // ── Moving feeds between servers ───────────────────────────────────────
 
+  /** How many times this process has written each feed's secret. Every write
+   *  goes through the three helpers below, so the review fingerprint can tell
+   *  a password changed since the review without the password itself ever
+   *  being hashed. Never deleted: a feed removed and re-added with a new
+   *  password must still read as changed. */
+  private readonly secretRevision = new Map<string, number>();
+
+  private bumpSecretRevision(id: string): void {
+    this.secretRevision.set(id, (this.secretRevision.get(id) ?? 0) + 1);
+  }
+
+  private async setFeedPassword(id: string, password: string): Promise<void> {
+    await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
+    this.bumpSecretRevision(id);
+  }
+
+  private async clearFeedSecret(id: string): Promise<void> {
+    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    this.bumpSecretRevision(id);
+  }
+
+  private async restoreFeedSecrets(id: string, previous: Record<string, string>): Promise<void> {
+    if (Object.keys(previous).length) await secretsStore.setSecrets(SECRET_SLOT(id), previous);
+    else await secretsStore.clearSecrets(SECRET_SLOT(id));
+    this.bumpSecretRevision(id);
+  }
+
   /** A feed's stored password, or undefined — the secret slot's one field. */
   private async storedPassword(id: string): Promise<string | undefined> {
     return (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined;
@@ -1803,7 +1831,7 @@ class VideoService {
     const plans = await planImport(bundle, feedsOf(here), (id) => this.storedPassword(id), this.allowedKinds());
     const preview = buildPreview(bundle, plans, here);
     const local = new Map(feedsOf(here).map((f) => [f.id, f]));
-    for (const f of preview.feeds) f.here = reviewFingerprint(local.get(f.id), await this.storedPassword(f.id));
+    for (const f of preview.feeds) f.here = reviewFingerprint(local.get(f.id), this.secretRevision.get(f.id) ?? 0);
     return { ok: true, preview };
   }
 
@@ -1856,7 +1884,7 @@ class VideoService {
     // Each reviewed feed's fingerprint now, against the one its review showed.
     const movedOn = new Set<string>();
     for (const [id, reviewed] of expect) {
-      if (reviewFingerprint(seen.get(id), await this.storedPassword(id)) !== reviewed) movedOn.add(id);
+      if (reviewFingerprint(seen.get(id), this.secretRevision.get(id) ?? 0) !== reviewed) movedOn.add(id);
     }
 
     interface Landed { plan: FeedPlan; outcome: "added" | "replaced" | "kept" | "same"; prior?: VideoFeed }
@@ -1908,19 +1936,19 @@ class VideoService {
         const parsed = plan.parsed!;
         const slot = SECRET_SLOT(id);
         const previous = await secretsStore.getSecrets(slot);
-        undo.push(() => (Object.keys(previous).length ? secretsStore.setSecrets(slot, previous) : secretsStore.clearSecrets(slot)));
+        undo.push(() => this.restoreFeedSecrets(id, previous));
         const newKind = parsed.source.kind;
         const oldKind = prior?.source.kind;
         if (parsed.password !== undefined) {
           if (parsed.password !== previous.password) {
-            await secretsStore.setSecret(slot, "password", parsed.password);
+            await this.setFeedPassword(id, parsed.password);
             passwordsWritten++;
           }
         } else if (oldKind === newKind) {
           // A replaced feed of the same kind keeps this server's password.
         } else if (oldKind === undefined) {
           if (newKind === "push") {
-            await secretsStore.setSecret(slot, "password", generatePushPassword());
+            await this.setFeedPassword(id, generatePushPassword());
             newPushPasswords.push(parsed.name);
           }
         } else {
