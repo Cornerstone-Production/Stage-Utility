@@ -271,3 +271,83 @@ export interface VideoState {
    *  the struggling ones. See ScreenVideoHealth's own comment. */
   screens: ScreenVideoHealth[];
 }
+
+// ── Moving feeds between servers ────────────────────────────────────────────
+
+/** The file `GET /api/video/export` writes and the import reads. Feeds keep
+ *  their ids: a Video widget names its feed by id, so a moved view resolves
+ *  only if the feed arrives under the same one. `password` and `ports` are
+ *  present only when the export asked for them. */
+export interface VideoFeedsBundle {
+  kind: "stage-utility-video-feeds";
+  version: 1;
+  appVersion: string;
+  createdAt: string;
+  source: { server: string };
+  feeds: { id: string; name: string; source: VideoSource; password?: string }[];
+  ports?: VideoPorts;
+}
+
+export type ImportFeedStatus = "new" | "same" | "differs" | "invalid";
+
+/** One field that differs between a file's feed and the one here. A password
+ *  difference carries no values, ever. */
+export interface FeedDifference {
+  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password";
+  here?: string;
+  file?: string;
+}
+
+export interface ImportFeedPreview {
+  id: string;
+  name: string;
+  /** The file's source kind; whatever the file said when it is not one this build knows. */
+  kind: string;
+  status: ImportFeedStatus;
+  differences: FeedDifference[];
+  /** Set with "invalid": why this build cannot take the feed. */
+  error?: string;
+  /** Set when the file carries a password for this feed and the source kind can use one. */
+  filePassword?: boolean;
+  /** Fingerprint of this server's feed under the same id as the review saw it,
+   *  "" when there was none. Hand it back in the import's `expect`. */
+  here?: string;
+}
+
+export interface ImportPreview {
+  server: string;
+  createdAt: string;
+  hasPasswords: boolean;
+  feeds: ImportFeedPreview[];
+  /** Names of feeds here that the file does not have. An import never removes them. */
+  absent: string[];
+  /** Only when the file carries ports. */
+  ports?: { file: VideoPorts; here: VideoPorts; same: boolean };
+}
+
+export type ImportChoice = "replace" | "keep";
+
+export interface ImportRequest {
+  bundle: unknown;
+  choices?: Record<string, ImportChoice>;
+  /** The status each feed had in the review the operator saw. A feed that is
+   *  not that any more is skipped, not written. */
+  expect?: Record<string, string>;
+  ports?: boolean;
+}
+
+export interface ImportReport {
+  added: string[];
+  /** The ids of the added feeds, for matching without relying on names. */
+  addedIds: string[];
+  replaced: string[];
+  kept: string[];
+  same: string[];
+  skipped: { name: string; reason: string }[];
+  /** Push feeds that got a freshly made publish password: their devices need it. */
+  newPushPasswords: string[];
+  passwordsWritten: number;
+  portsApplied: boolean;
+  /** Set when the ports were asked for and could not be saved; the feeds are already in. */
+  portsError?: string;
+}

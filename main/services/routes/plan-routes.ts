@@ -7,8 +7,8 @@
 import { buildPlanBundle, planExportPreview } from "../plan-export.js";
 import { errorMessage } from "../errors.js";
 import { zonedDateKey } from "../app-timezone.js";
-import { filenameSlug } from "./view-routes.js";
-import { type RouteCtx, json, error } from "./context.js";
+import { filenameSlug } from "../export-filename.js";
+import { type RouteCtx, json, error, queryFlag } from "./context.js";
 
 /** `sunday-am-2026-09-08.stage-plan.json`. Dated in the APP's zone, never the
  *  server's clock — a UTC box names a file exported at 22:30 in Chicago for the
@@ -16,17 +16,6 @@ import { type RouteCtx, json, error } from "./context.js";
 export function planExportFilename(serviceTypeName: string, now: Date): string {
   const slug = filenameSlug(serviceTypeName);
   return `${slug ? `${slug}-` : ""}${zonedDateKey(now.getTime())}.stage-plan.json`;
-}
-
-/** `1`/`0` (or `true`/`false`) with a default, and nothing else — a query the
- *  caller got wrong is a 400, not a silent fallback to a section they did not
- *  ask for. */
-function flag(url: URL, name: string, fallback: boolean): boolean | null {
-  const raw = url.searchParams.get(name);
-  if (raw === null) return fallback;
-  if (raw === "1" || raw === "true") return true;
-  if (raw === "0" || raw === "false") return false;
-  return null;
 }
 
 /** `slots=type|all`, defaulting to "type". Null is a query the caller got wrong,
@@ -90,8 +79,8 @@ export async function planRoutes(c: RouteCtx): Promise<void> {
       error(res, `slots must be "type" or "all", not "${url.searchParams.get("slots")}"`);
       return;
     }
-    const patch = flag(url, "patch", true);
-    const presets = flag(url, "presets", false);
+    const patch = queryFlag(url, "patch", true);
+    const presets = queryFlag(url, "presets", false);
     if (patch === null || presets === null) {
       error(res, "patch and presets must be 1 or 0");
       return;

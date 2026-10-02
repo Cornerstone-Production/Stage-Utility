@@ -563,7 +563,9 @@ export type IpcChannel =
   | "update:status"
   | "video:addFeed"
   | "video:feedUsage"
+  | "video:importFeeds"
   | "video:newPushPassword"
+  | "video:previewImport"
   | "video:pushAddress"
   | "video:removeFeed"
   | "video:setPorts"
@@ -1090,6 +1092,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
     case "video:setPorts":
       return patch<T>("/api/video/ports", p);
+    // The video feeds file: `bundle` is the parsed file as the operator picked it.
+    case "video:previewImport":
+      return post<T>("/api/video/import/preview", p.bundle);
+    case "video:importFeeds":
+      return post<T>("/api/video/import", p);
 
     // ── Views (content) ──────────────────────────────────────────────────
     case "views:add":

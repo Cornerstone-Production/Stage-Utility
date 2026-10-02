@@ -2,8 +2,10 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readBody, queryFlag, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { datedExportFilename } from "../export-filename.js";
 import { isCrossOrigin } from "../http-origin.js";
+import { scrub } from "../scrub.js";
 import { videoService } from "../video/video-service.js";
 import { PUSH_PROTOCOLS, type PushProtocol } from "../../types/video.js";
 
@@ -20,6 +22,51 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
   }
   if (method === "GET" && pathname === "/api/video/feeds") {
     json(res, { feeds: (await videoService.state()).feeds });
+    return;
+  }
+  // GET /api/video/export?feeds=a,b&ports=1&passwords=1 — the feeds as one file.
+  if (method === "GET" && pathname === "/api/video/export") {
+    const ports = queryFlag(url, "ports", false);
+    const passwords = queryFlag(url, "passwords", false);
+    if (ports === null || passwords === null) {
+      error(res, `${ports === null ? "ports" : "passwords"} must be 1, 0, true or false.`);
+      return;
+    }
+    // With passwords this GET answers live secrets, like the push address
+    // route below: a browser cross-site request is refused the same way.
+    if (passwords && isCrossOrigin(req.headers.origin, req.headers.host)) {
+      error(res, "cross-origin request rejected", 403);
+      return;
+    }
+    const r = await videoService.exportBundle(url.searchParams.get("feeds"), ports, passwords);
+    if (!r.ok) {
+      error(res, r.error);
+      return;
+    }
+    // The count and the two flags only; never a password, and no feed name.
+    const n = r.bundle.feeds.length;
+    const summary = `exported ${n} feed${n === 1 ? "" : "s"}${passwords ? ", with passwords" : ""}${ports ? ", with relay ports" : ""}`;
+    console.log(`[video-export] ${scrub(summary)}`);
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "content-disposition": `attachment; filename="${datedExportFilename("stage-utility-video-feeds", "", new Date())}"`,
+      "cache-control": "no-store",
+    });
+    res.end(JSON.stringify(r.bundle, null, 2));
+    return;
+  }
+  // The file's own size is small, but it is the config ceiling every import
+  // route here shares, and a file can be edited by hand.
+  if (method === "POST" && pathname === "/api/video/import/preview") {
+    const r = await videoService.previewImport(await readBody(req, MAX_CONFIG_BODY_BYTES));
+    if (r.ok) json(res, r.preview);
+    else error(res, r.error);
+    return;
+  }
+  if (method === "POST" && pathname === "/api/video/import") {
+    const r = await videoService.importFeeds(await readBody(req, MAX_CONFIG_BODY_BYTES));
+    if (r.ok) json(res, r.report);
+    else error(res, r.error);
     return;
   }
   if (method === "PATCH" && pathname === "/api/video/ports") {

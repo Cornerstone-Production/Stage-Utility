@@ -261,6 +261,61 @@ fields for that source, each with its label above it. Under **Save**,
 before it removes anything, naming those layouts again; the widgets in them
 then show their offline state.
 
+The header also holds **Export** and **Import**, covered under
+[Moving feeds between servers](#moving-feeds-between-servers).
+
+## Moving feeds between servers
+
+**Export** and **Import** in the page's header move feeds to or from another
+Stage Utility, in either direction, without the rest of a configuration. Each
+opens in place of the editor; selecting a feed or **Add feed** brings the
+editor back.
+
+**What the file carries.** `stage-utility-video-feeds-<date>.json` holds the
+feeds you tick: each one's id, name and source. Feeds keep their ids, so a view
+moved with them (see [Moving a view](../moving-a-view.md)) finds its Video
+widgets' feeds on the other server. Two things are opt-in:
+
+- **Relay ports**: the six ports, as saved.
+- **Passwords**: a pull feed's camera password and a push feed's publish
+  password. The file holds them in plain text, and anyone with it can publish
+  to those feeds and log in to those cameras; the panel says so when the box is
+  ticked. Keep the file off shared drives.
+
+The full config snapshot (**Settings → Advanced → Data**) carries the
+feeds and the ports too, but never any password.
+
+**What an import does.** Choosing a file shows every feed in it against what is
+on this server, each tagged:
+
+- **New**: not here; it is added under the file's id.
+- **Same as here**: nothing to do.
+- **Differs**: the changed fields are listed (`address old → new`; a password
+  only reads "password differs", never the values), with a choice per feed:
+  **Use the file's** (the default) or **Keep this server's**.
+- **Can't import**: this build cannot take the feed (a source kind it does not
+  offer, an address with a login inside it); the reason is shown and the feed is
+  skipped.
+
+An import never removes a feed: the ones the file does not have are named and
+left alone. It never touches the **Video feeds** on/off switch, and it works
+with the switch off. A file that carries ports shows a **Use the file's relay
+ports** box, off by default; ticking it saves them, which restarts a running
+relay. A file with no passwords leaves this server's passwords alone on a feed
+it replaces, unless the feed's kind changes. A new push feed from a file
+without a password gets a new publish password made here, and the result names
+it: its device needs the new password pasted in.
+
+The review is what gets applied: if a feed is edited, added, deleted or given
+a new password on this server between the review and **Import**, that feed is
+skipped with
+"Changed on this server since the review. Review the file again." and the
+rest still land.
+
+A file that is not a video feeds export, is the wrong version, lists a feed id
+twice or carries an id this server cannot use is refused whole, with the
+reason.
+
 ## The Video widget
 
 Place a Video widget on a layout or a Home card and point it at a feed with
@@ -333,6 +388,13 @@ Each transition into or out of struggling is a `[video]` line on the
 server's own log; see Logging below.
 
 ## Logging
+
+Exporting and importing feeds writes one line each, tagged `[video-export]`
+and `[video-import]`: the count of feeds, and whether passwords or relay ports
+were included or applied. The import line also names each skipped feed and
+why. An import that fails writes `import failed, nothing was changed:` and the
+reason, or `import failed and could not restore:` when putting things back
+failed too. A password is never in any of them.
 
 The relay itself writes `[video]` lines to [`/log`](../ops/updates-and-logs.md)
 from the server:

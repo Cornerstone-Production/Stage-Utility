@@ -108,7 +108,10 @@ A **Video** widget's feed is set up the same way: on the Video feeds page, per
 install, and the file carries no feeds either. The widget keeps its feed id. A
 feed's id comes from the name it was first given, so a feed on the destination
 created under the same name plays in its place; with no such feed the widget
-shows its offline state until one is chosen.
+shows its offline state until one is chosen. To bring the feeds along, export
+them from the Video feeds page and import them on the other server: they keep
+their ids, so the widgets find them. See
+[Moving feeds between servers](integrations/video-feeds.md#moving-feeds-between-servers).
 
 Objects bound to absent gear, a missing screen or a missing feed **keep their
 bindings** and render as unconfigured (a Video widget as offline). Nothing is
