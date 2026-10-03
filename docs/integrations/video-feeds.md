@@ -233,13 +233,18 @@ video** there instead, while it keeps playing normally on every other screen.
 
 ## Feed states
 
-A pull or push feed's status pill reflects what the relay currently knows:
+A pull or push feed's status pill reflects what the relay currently knows, and
+for a pull feed with the Video feeds page open, what its camera answered to a
+[check](#checking-pulled-feeds):
 
 | Pill | Meaning |
 |---|---|
 | Live | Playing over WebRTC, under a second behind |
 | Live, delayed | Playing, but only over HLS — a few seconds behind, from B-frames (above) or an unsupported codec |
-| Standby | Nothing to report yet: video is off, the relay is still starting, or — once it is up — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks. A pull feed that came up and was then closed because nothing watches it any more — a browser tab hidden, a widget scrolled away — is back on Standby, not Offline |
+| Ready | A pull feed whose camera answered a check and described its stream, with nothing pulling it right now. Its line reads "Camera answers · H.264 1920 × 1080 · checked 4 s ago", leaving out what the camera did not say. See [Checking pulled feeds](#checking-pulled-feeds) |
+| Not answering | A pull feed whose camera failed the check, with the reason in red under it: no answer within 5 seconds, a refused connection, a missing path or a refused login. Logged once per outage |
+| Checking | A pull feed whose first check since the page opened has not come back yet |
+| Standby | Nothing to report yet: video is off, the relay is still starting, a pull feed that cannot be checked (SRT, which says so on its line), or — before a check has answered — a pull feed nothing is currently watching. A pull feed connects to its source only while a widget or the editor's preview has it open, so the relay cannot tell an idle feed from a down one until something looks. A pull feed that came up and was then closed because nothing watches it any more — a browser tab hidden, a widget scrolled away — is back on Standby, not Offline |
 | Waiting for source | A push feed nothing has ever sent to |
 | Offline | Was live and is not any more — shows how long ago. Also a pull feed something asked the running relay for that did not come up within its 10-second dial, until 25 seconds after the last request for it (a request to a relay that has since restarted does not count), and any pull or push feed the running relay has no path for (it could not be set up on the relay — see `could not reconcile` under Logging) |
 
@@ -247,6 +252,59 @@ An embed feed shows **Live on YouTube** or **Live on Resi** instead, naming the
 platform it plays through; Stage Utility cannot see whether that platform's
 own stream is actually live. An external feed shows no pill at all — Stage
 Utility cannot see whether its source is live.
+
+## Checking pulled feeds
+
+The relay pulls a camera only while something shows it, so without a check every
+pulled feed would read Standby until clicked, and a wrong address would look the
+same as a camera that is simply idle. While the Video feeds page is open, the
+server asks each pulled camera to describe its stream, without streaming it:
+
+- Once when the page opens and every 15 seconds after, only while a Video feeds
+  page is open. The server starts only for a client that names `video:probe`
+  (this page); another page, a display connecting, or a client with no channel
+  filter at all (curl, Home Assistant) starts nothing. With the page closed,
+  nothing is asked. The relay's own **Live** and **Live,
+  delayed** win: a feed the relay already has playing is not checked.
+- An RTSP or RTSPS address gets a `DESCRIBE`; an HTTP or HTTPS (HLS) address gets
+  a GET of its playlist. Neither starts a stream. Each has 5 seconds to answer.
+  An RTSPS camera's self-signed certificate is accepted.
+- The feed's **Username** and **Password** are used when the camera asks for a
+  login (Basic or Digest). A camera that wants one with none saved says so; one
+  that refuses the saved one says that.
+- SRT cannot be asked without streaming it, so an SRT feed stays on Standby, and
+  its line says it shows **Live** once something plays it.
+- With the Video feeds switch off nothing is asked.
+- A camera that answers `406 Not Acceptable` is busy answering someone else
+  (some encoders take one `DESCRIBE` at a time, so two servers checking the same
+  camera, or a check while the relay connects, can collide). It is asked twice
+  more a moment apart; if it is still busy, the row keeps what it showed and
+  nothing is logged. A feed that has never answered reads **Checking** with
+  "The camera is busy answering another request · trying again". A feed the
+  relay was asked for in the last 25 seconds is not checked, so the check does
+  not collide with the relay's own dial.
+
+The reason under **Not answering** names the camera's host. The answers it can
+give are:
+
+- no answer for this path (the camera connected and said nothing, which is how
+  many encoders answer a path they do not have);
+- a refused connection on a port, or not reachable;
+- no stream at this path;
+- a login wanted, or refused;
+- "The camera asks for a login method this check can't use": Digest with
+  another algorithm than MD5 (SHA-256, MD5-sess) or only `auth-int`, with no
+  Basic offered as well;
+- "answered, but not with RTSP" or "not with a playlist": something else is
+  listening at that address;
+- "answered with more than a camera should": a reply past 64 KB, read no
+  further;
+- "The address could not be checked": the address does not parse;
+- the camera's own status for anything else. A redirect (3xx) is shown that
+  way, as the camera's own status, and is not followed.
+
+"checked 4 s ago" is the server's own age of the answer plus how long the page
+has held it, so a display whose clock is wrong still reads right.
 
 ## The Video feeds page
 
@@ -441,6 +499,13 @@ from the server:
   cause is a wrong address or path — some encoders answer a path they do not
   have with silence rather than an error, which looks the same as a device
   that is off.
+- `<feed>: <reason> (<address>)`: a pulled camera did not pass a check made
+  while the Video feeds page was open — see [Checking pulled feeds](#checking-pulled-feeds).
+  It shares the dial line's one-per-outage rule and its recovery, so a camera
+  that is down writes one line whether the relay's dial or a check found it
+  first, and `the device is answering again` once. The address is logged
+  without any username or password. `could not check the pulled feeds` when a
+  round cannot read the feed list.
 - B-frames detected on a feed, with which setting to change.
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push

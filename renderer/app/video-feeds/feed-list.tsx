@@ -2,12 +2,14 @@
 // (its name and status pill, its source line, and a line on how it plays),
 // with "Add feed" directly under the last row.
 
+import { useEffect, useState } from "react";
 import { PlusIcon } from "lucide-react";
 
-import type { FeedState, ScreenVideoHealth, VideoFeedView } from "@main/types/video";
+import type { FeedState, ScreenVideoHealth, VideoFeedView, VideoProbeEntry, VideoProbeState } from "@main/types/video";
 
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { formatClock } from "../../lib/clock-format";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 
 /**
@@ -47,8 +49,79 @@ function pillFor(feed: VideoFeedView): { label: string; tint: string; dot: strin
   }
 }
 
-function FeedPill({ feed }: { feed: VideoFeedView }) {
-  const pill = pillFor(feed);
+type Pill = { label: string; tint: string; dot: string };
+
+/** The camera check's wording, as the approved status design has it. */
+const BUSY_LINE = "The camera is busy answering another request · trying again";
+const SRT_UNCHECKED_LINE = "SRT can't be checked without streaming it · shows Live once something plays it";
+
+/** "H264" is how the camera's description spells it; the page says "H.264". */
+function codecLabel(codec: string): string {
+  return codec.replace(/^H(26[45])$/, "H.$1");
+}
+
+/** "4 s ago", or minutes once it has been that long. */
+function agoText(ageMs: number): string {
+  const s = Math.max(0, Math.round(ageMs / 1000));
+  return s < 60 ? `${s} s ago` : `${Math.floor(s / 60)} min ago`;
+}
+
+/**
+ * How long ago a camera was checked, without the viewer's clock or the
+ * server's being right about the time of day. The server says how old the
+ * answer was when it sent the snapshot (its own `at` minus its own
+ * `checkedAt`, both one clock); this adds how long this page has held that
+ * snapshot, on a monotonic clock. A wall display hours out from the server
+ * still reads "4 s ago".
+ */
+export function checkedAgeMs(probe: VideoProbeState, entry: VideoProbeEntry, receivedAt: number, now: number): number {
+  return Math.max(0, probe.at - entry.checkedAt) + Math.max(0, now - receivedAt);
+}
+
+/**
+ * What a camera check says about a PULLED feed, or null to leave the row to
+ * the relay's own reading.
+ *
+ * Precedence, as the design has it: the relay's own Live or Delayed first
+ * (null here, so the existing pill and line stand); then what the probe found.
+ * A feed the probe has no entry for (the switch is off, or the page has not
+ * heard yet) is also null: Standby as before. Push, embed and external feeds
+ * are never probed and never reach this.
+ */
+export function probeView(
+  feed: VideoFeedView,
+  entry: VideoProbeEntry | undefined,
+  ageMs: number,
+): { pill: Pill; line: { text: string; bad: boolean } | null } | null {
+  if (feed.source.kind !== "pull" || !entry) return null;
+  const state = feed.status.state;
+  if (state === "live" || state === "delayed") return null;
+  switch (entry.state) {
+    case "ready": {
+      const picture = [entry.codec ? codecLabel(entry.codec) : null, entry.width && entry.height ? `${entry.width} × ${entry.height}` : null]
+        .filter((p): p is string => p !== null)
+        .join(" ");
+      const parts = ["Camera answers", ...(picture ? [picture] : []), `checked ${agoText(ageMs)}`];
+      return { pill: { label: "Ready", tint: "bg-fill text-fg-muted", dot: "bg-live-9" }, line: { text: parts.join(" · "), bad: false } };
+    }
+    case "failed": {
+      const since = entry.since !== undefined ? ` · since ${formatClock(entry.since)}` : "";
+      return {
+        pill: { label: "Not answering", tint: "bg-danger-9/11 text-danger-11", dot: "bg-current" },
+        line: { text: `${entry.reason ?? "The camera did not answer"}${since}`, bad: true },
+      };
+    }
+    case "unchecked":
+      return { pill: { label: "Standby", tint: "bg-fill text-fg-muted", dot: "bg-current" }, line: { text: SRT_UNCHECKED_LINE, bad: false } };
+    case "checking":
+      return {
+        pill: { label: "Checking", tint: "bg-fill text-fg-subtle", dot: "bg-current video-probe-checking-dot" },
+        line: { text: entry.busy ? BUSY_LINE : "Checking…", bad: false },
+      };
+  }
+}
+
+function FeedPill({ pill }: { pill: Pill | null }) {
   if (!pill) return null;
   return (
     <span
@@ -125,9 +198,27 @@ export function bFramesHint(feed: VideoFeedView): string | null {
   return bFramesSentence(isObsWhipFeed(feed));
 }
 
+/** A monotonic clock (host clock steps cannot move it), re-read every
+ *  `everyMs` — what keeps "checked 4 s ago" from freezing between probe
+ *  answers. Always ticking, so it is never more than one interval stale when a
+ *  result first appears. */
+function useNow(everyMs: number): number {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(performance.now()), everyMs);
+    return () => clearInterval(t);
+  }, [everyMs]);
+  return now;
+}
+
+/** How often the "checked N s ago" text is re-read. */
+const AGE_REFRESH_MS = 5000;
+
 export function FeedList({
   draft,
   feeds,
+  probe,
+  probeReceivedAt,
   screens,
   selectedId,
   onSelect,
@@ -136,15 +227,22 @@ export function FeedList({
   /** The unsaved feed being created, shown as the last row; null otherwise. */
   draft?: { name: string; source: string } | null;
   feeds: readonly VideoFeedView[];
+  /** The camera checks, or null before the page has heard any. */
+  probe: VideoProbeState | null;
+  /** performance.now() when `probe` arrived; see checkedAgeMs. */
+  probeReceivedAt: number;
   screens: readonly ScreenVideoHealth[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onAddFeed: () => void;
 }) {
+  const now = useNow(AGE_REFRESH_MS);
   return (
     <div className="flex min-w-0 flex-col">
       {feeds.length === 0 && !draft && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
       {feeds.map((feed) => {
+        const entry = probe?.feeds[feed.id];
+        const checked = probeView(feed, entry, probe && entry ? checkedAgeMs(probe, entry, probeReceivedAt, now) : 0);
         const meta = feedMeta(feed, screens);
         const hint = bFramesHint(feed);
         return (
@@ -159,10 +257,11 @@ export function FeedList({
             )}
           >
             <span className="col-start-1 row-start-1 min-w-0 text-[14px] leading-[18px] font-semibold text-fg">{feed.name}</span>
-            <FeedPill feed={feed} />
+            <FeedPill pill={checked ? checked.pill : pillFor(feed)} />
             <span className="col-start-1 font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]">{feed.sourceLine}</span>
-            {meta.length > 0 && (
+            {(checked?.line || meta.length > 0) && (
               <span className="col-span-2 flex flex-wrap gap-x-3.5 gap-y-1 text-caption1 text-fg-subtle">
+                {checked?.line && <span className={checked.line.bad ? "text-danger-11" : undefined}>{checked.line.text}</span>}
                 {meta.map((m) => (
                   <span key={m}>{m}</span>
                 ))}

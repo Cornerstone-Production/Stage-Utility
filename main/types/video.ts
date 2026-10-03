@@ -272,6 +272,37 @@ export interface VideoState {
   screens: ScreenVideoHealth[];
 }
 
+// ── Checking pulled feeds ───────────────────────────────────────────────────
+
+/** What asking a pulled camera to describe its stream found. "checking" is the
+ *  state before a feed's first answer since a page began watching; "unchecked"
+ *  is a source that cannot be asked without streaming it (SRT). */
+export interface VideoProbeEntry {
+  state: "checking" | "ready" | "failed" | "unchecked";
+  /** "H264", "H265" and so on, from the camera's own description. */
+  codec?: string;
+  width?: number;
+  height?: number;
+  /** An operator-readable sentence; only on "failed". */
+  reason?: string;
+  /** When the camera was last asked, ms since epoch. */
+  checkedAt: number;
+  /** When the current run of failed answers began; only on "failed". */
+  since?: number;
+  /** Only on "checking": the camera was reached but was busy answering
+   *  another request, so no answer has come yet and the check is trying again. */
+  busy?: true;
+}
+
+/** The `video:probe` channel: results by feed id. Only pulled feeds appear. */
+export interface VideoProbeState {
+  feeds: Record<string, VideoProbeEntry>;
+  /** The server's clock when this snapshot was made, ms since epoch. With each
+   *  entry's `checkedAt` it gives an age that does not depend on the viewer's
+   *  clock: a wall display can be hours out. */
+  at: number;
+}
+
 // ── Moving feeds between servers ────────────────────────────────────────────
 
 /** The file `GET /api/video/export` writes and the import reads. Feeds keep

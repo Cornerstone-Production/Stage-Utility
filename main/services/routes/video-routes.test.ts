@@ -415,3 +415,13 @@ test("PATCH /api/video/ports refuses two ports set to the same value", async () 
   assert.equal(r.status, 400);
   assert.match((r.json as { error: string }).error, /must be different/);
 });
+
+// The read behind the Video feeds page's own hydrate: useStatusChannel()
+// reads GET /api/video/probe once beside subscribing, so a stale replayed
+// frame from an earlier page is corrected by the server's present snapshot.
+test("GET /api/video/probe answers the same snapshot video:probe pushes; empty while nobody watches", async () => {
+  const r = await callRoute(videoRoutes, "/api/video/probe");
+  assert.equal(r.status, 200);
+  assert.deepEqual((r.json as { feeds: unknown }).feeds, {});
+  assert.equal(typeof (r.json as { at: unknown }).at, "number", "stamped with the server's clock, for the page's ages");
+});

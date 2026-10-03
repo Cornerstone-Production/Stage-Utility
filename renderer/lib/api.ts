@@ -566,6 +566,7 @@ export type IpcChannel =
   | "video:importFeeds"
   | "video:newPushPassword"
   | "video:previewImport"
+  | "video:probe"
   | "video:pushAddress"
   | "video:removeFeed"
   | "video:setPorts"
@@ -1065,6 +1066,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // ── Video feeds ────────────────────────────────────────────────────
     case "video:state":
       return apiFetch<T>("/api/video/state");
+    case "video:probe":
+      return apiFetch<T>("/api/video/probe");
     case "video:addFeed":
       return post<T>("/api/video/feeds", p);
     case "video:updateFeed": {
