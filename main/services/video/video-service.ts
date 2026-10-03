@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
 import { isDeepStrictEqual } from "node:util";
 
 import { withoutDataDir } from "../app-paths.js";
-import { addSubscriptionListener, broadcast, channelInDemand } from "../broadcaster.js";
+import { addSubscriptionListener, broadcast, channelInDemand, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { getLanIp } from "../lan-ip.js";
 import { relayArchivePresent, relayBinaryPresent } from "./acquire.js";
@@ -36,6 +36,8 @@ import {
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
+import { probeFeed, type ProbeResult } from "./probe.js";
+import { ProbeScheduler } from "./probe-scheduler.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import { RelayLogWatcher } from "./relay-log.js";
@@ -59,6 +61,7 @@ import {
   type VideoFeedsBundle,
   type VideoFeedsFile,
   type VideoFeedView,
+  type VideoProbeState,
   type VideoPlaybackReport,
   type VideoPorts,
   type VideoSourceKind,
@@ -185,6 +188,28 @@ export const videoPollDeps: {
     return t;
   },
   clearInterval: (t) => clearInterval(t),
+};
+
+/**
+ * The probe scheduler's seams: demand, its timer and the probe itself,
+ * injected for the same reason videoPollDeps is — a test captures the interval
+ * and drives a fake camera instead of waiting PROBE_INTERVAL_MS for real.
+ */
+export const videoProbeDeps: {
+  inDemand: () => boolean;
+  setInterval: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearInterval: (t: NodeJS.Timeout) => void;
+  probe: typeof probeFeed;
+} = {
+  inDemand: () => channelNamedByClient("video:probe"),
+  setInterval: (fn, ms) => {
+    const t = setInterval(fn, ms);
+    // A camera check must never be what keeps the process alive.
+    t.unref();
+    return t;
+  },
+  clearInterval: (t) => clearInterval(t),
+  probe: probeFeed,
 };
 
 /** The first half of each feed's source line, per kind. */
@@ -444,6 +469,31 @@ class VideoService {
    *  keyed by feed id, so a screen retrying through the run writes one line,
    *  not one per attempt. */
   private readonly dialOutage = new OutageLog();
+  /** A probe round that could not run at all (the feed list would not load). */
+  private readonly probeRoundOutage = new OutageLog();
+  /** Whether the Video feeds switch is on — told by integration-manager. */
+  private videoEnabled = false;
+  /** Asks each pulled camera to describe its stream while the Video feeds
+   *  page is open, and says so on `video:probe`. See probe-scheduler.ts. */
+  private readonly probes = new ProbeScheduler({
+    inDemand: () => videoProbeDeps.inDemand(),
+    isEnabled: () => this.videoEnabled,
+    loadFeeds: async () => (await loadFeedsFile()).feeds,
+    getPassword: async (id) => (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined,
+    isReady: (id) => this.lastPaths.get(id)?.ready === true,
+    isDialling: (id) => {
+      const last = this.requestedAt.get(id);
+      return last !== undefined && Date.now() - last < RECENT_REQUEST_MS;
+    },
+    probe: (target) => videoProbeDeps.probe(target),
+    publish: (state) => broadcast("video:probe", state),
+    onResult: (feed, result, now) => this.reportProbe(feed, result, now),
+    onRoundError: (err) => this.reportProbeRoundFailure(err),
+    onRoundOk: () => this.reportProbeRoundOk(),
+    setInterval: (fn, ms) => videoProbeDeps.setInterval(fn, ms),
+    clearInterval: (t) => videoProbeDeps.clearInterval(t),
+    now: () => Date.now(),
+  });
   /** "reconcile" and "push-kick": calls made on a feed change or a password
    *  rotation, not on a timer, so a success is the next call, maybe hours
    *  away. The default settle window waits for a success to hold, which
@@ -919,6 +969,20 @@ class VideoService {
   subscriptionsChanged(): void {
     if (this.relay && videoPollDeps.inDemand()) this.startPolling();
     else this.stopPolling();
+    this.probes.subscriptionsChanged();
+  }
+
+  /** The `video:probe` snapshot: the hello burst and `GET /api/video/probe`. */
+  probeState(): VideoProbeState {
+    return this.probes.current();
+  }
+
+  /** integration-manager.ts's applyVideo(): the Video feeds switch. Off, no
+   *  camera is asked and none is claimed about. */
+  setVideoEnabled(enabled: boolean): void {
+    if (this.videoEnabled === enabled) return;
+    this.videoEnabled = enabled;
+    this.probes.switchChanged();
   }
 
   private startPolling(): void {
@@ -1132,9 +1196,45 @@ class VideoService {
         );
       }
     } else if (ready) {
-      const decision = this.dialOutage.ok(feed.id, now);
-      if (decision.log) console.log(`[video] ${scrub(feed.name)}: the device is answering again${scrub(decision.note)}`);
+      this.reportDeviceAnswering(feed, now);
     }
+  }
+
+  private reportDeviceAnswering(feed: VideoFeed, now: number): void {
+    const decision = this.dialOutage.ok(feed.id, now);
+    if (decision.log) console.log(`[video] ${scrub(feed.name)}: the device is answering again${scrub(decision.note)}`);
+  }
+
+  /**
+   * A camera's answer to a probe, on the SAME per-feed log as the relay's dial
+   * (`dialOutage`, same key and kind), so a camera that is down writes one
+   * line per outage whether the relay or a probe found it first, and one
+   * recovery line. Nothing is logged for a probe that changes nothing.
+   *
+   * The line is built whole and scrubbed whole: the reason names the camera's
+   * host, and the feed name came off an HTTP body. The address goes through
+   * withoutCredentials(); the probe itself never puts a credential in a reason.
+   */
+  private reportProbe(feed: VideoFeed, result: ProbeResult, now: number): void {
+    if (result.state === "failed") {
+      if (feed.source.kind !== "pull") return;
+      const decision = this.dialOutage.fail(feed.id, "dial", now);
+      if (!decision.log) return;
+      const line = `${feed.name}: ${result.reason} (${withoutCredentials(feed.source.url)})${decision.note}`;
+      console.warn(`[video] ${scrub(line)}`);
+    } else if (result.state === "ready") {
+      this.reportDeviceAnswering(feed, now);
+    }
+  }
+
+  private reportProbeRoundOk(): void {
+    const decision = this.probeRoundOutage.ok("probe-round", Date.now());
+    if (decision.log) console.log(`[video] checking the pulled feeds is working again${scrub(decision.note)}`);
+  }
+
+  private reportProbeRoundFailure(err: unknown): void {
+    const decision = this.probeRoundOutage.fail("probe-round", "round", Date.now());
+    if (decision.log) console.warn(`[video] could not check the pulled feeds: ${scrub(errorMessage(err))}${scrub(decision.note)}`);
   }
 
   /**
@@ -1487,9 +1587,12 @@ class VideoService {
    * instead: a password rotation never adds or removes a relay feed, so
    * there is nothing for relay-lifecycle to start or stop over it.
    */
-  private async notifyFeedsChanged(): Promise<boolean> {
+  private async notifyFeedsChanged(feedId?: string): Promise<boolean> {
     const applied = await this.reconcileRelay();
     this.feedsChangedListener?.();
+    // A camera just given a new address or login, or a feed just gone, should
+    // not wait up to a probe interval to say so.
+    this.probes.feedsChanged(feedId);
     return applied;
   }
 
@@ -1626,7 +1729,7 @@ class VideoService {
       }
     }
     await this.publish();
-    await this.notifyFeedsChanged();
+    await this.notifyFeedsChanged(added.id);
     return { ok: true, feed: await this.view(added) };
   }
 
@@ -1662,7 +1765,7 @@ class VideoService {
     }));
     await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
     await this.publish();
-    await this.notifyFeedsChanged();
+    await this.notifyFeedsChanged(id);
     return { ok: true, feed: await this.view(feed) };
   }
 
@@ -1764,7 +1867,7 @@ class VideoService {
     // instead of "waiting" — the old feed's history, not its own.
     await this.forgetSeenSafely(id);
     await this.publish();
-    await this.notifyFeedsChanged();
+    await this.notifyFeedsChanged(id);
     return true;
   }
 

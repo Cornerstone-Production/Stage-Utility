@@ -41,6 +41,26 @@ export function channelHasSubscribers(channel: string): boolean {
 }
 
 /**
+ * Clients that NAMED a channel in their reported filter — not merely clients
+ * that have not reported one yet, which `channelHasSubscribers` counts as
+ * wanting everything.
+ *
+ * For a producer whose work lands on somebody else's equipment: probing a
+ * camera because a display happened to connect, or because curl or a
+ * Home Assistant client has no filter at all, is traffic nobody asked for.
+ * Registered by remote-server.ts at load. With no transport registered nobody
+ * has named anything, so this is false — the opposite default to the boolean
+ * above, deliberately.
+ */
+let namedSubscriberCheck: ((channel: string) => boolean) | null = null;
+export function setNamedSubscriberCheck(fn: (channel: string) => boolean): void {
+  namedSubscriberCheck = fn;
+}
+export function channelNamedByClient(channel: string): boolean {
+  return namedSubscriberCheck ? namedSubscriberCheck(channel) : false;
+}
+
+/**
  * HOW MANY clients want a channel, for a producer that says so in the log.
  *
  * Beside the boolean rather than replacing it. Every producer in this app asks

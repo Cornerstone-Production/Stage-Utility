@@ -421,6 +421,15 @@
   .video-connecting-pulse {
     animation: video-connecting-pulse 1.2s ease-in-out infinite;
   }
+  /* The Video feeds list's "Checking" pill dot (the approved status design:
+     1.2s, down to 0.25 and back). Held still, not collapsed to one flash, when
+     the operating system asks for reduced motion. */
+  .video-probe-checking-dot {
+    animation: video-connecting-pulse 1.2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .video-probe-checking-dot { animation: none !important; }
+  }
   /* One place that honours the operating system's reduced-motion setting, rather
      than per-component motion-reduce: variants that each have to be remembered.
      Not `animation: none` globally - a spinner that stops spinning reads as a

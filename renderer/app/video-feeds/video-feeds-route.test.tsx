@@ -38,6 +38,7 @@ const { createMemoryHistory, createRootRoute, createRouter, RouterProvider } = a
 // LayoutObjectConfig) — see video-object.test.tsx's own note on this.
 type VideoState = import("@main/types/video").VideoState;
 type VideoFeedView = import("@main/types/video").VideoFeedView;
+type VideoProbeState = import("@main/types/video").VideoProbeState;
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
@@ -148,6 +149,8 @@ interface FetchStubOptions {
    *  when the switch is off AND when it is on with no relay feed yet).
    *  Default false. */
   videoIntegrationEnabled?: boolean;
+  /** What GET /api/video/probe answers — the camera checks. Default: none yet. */
+  probe?: VideoProbeState;
 }
 
 /** Every request the page makes, matched by method and path — including the
@@ -161,6 +164,9 @@ function stubFetch(state: VideoState, opts: FetchStubOptions = {}) {
     calls.push({ method, url, body });
     if (method === "GET" && url.endsWith("/api/video/state")) {
       return { ok: true, status: 200, json: async () => state, text: async () => "" } as unknown as Response;
+    }
+    if (method === "GET" && url.endsWith("/api/video/probe")) {
+      return { ok: true, status: 200, json: async () => opts.probe ?? { feeds: {}, at: Date.now() }, text: async () => "" } as unknown as Response;
     }
     if (method === "GET" && url.endsWith("/api/integrations")) {
       const body = {
@@ -1708,6 +1714,190 @@ test("Save with an empty or scheme-only address shows an error and sends nothing
       assert.ok(screen.getByText(/^Enter the address/), `expected the address error for ${JSON.stringify(url)}`);
     }
     assert.equal(g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/video/feeds")), false, "no request for an address-less feed");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── Camera checks (video:probe) ─────────────────────────────────────────────
+//
+// What the page shows from the server's checks of pulled cameras: the Ready,
+// Not answering, Standby (SRT) and Checking pills with the approved status
+// design's wording, and the relay's own Live winning over any of them.
+//
+// NOT covered here, and why: the Checking dot's pulse and its being held still
+// under prefers-reduced-motion are CSS (renderer/styles.css,
+// .video-probe-checking-dot), and jsdom loads no stylesheet. Driven in a real
+// browser instead, in light and dark. This file proves the class is on the dot.
+
+const { probeView, checkedAgeMs } = await import("./feed-list.js");
+
+const NOW = 1_800_000_000_000;
+
+function rowOf(name: string): HTMLElement {
+  const row = screen.getAllByText(name).map((el) => el.closest("button")).find((b): b is HTMLButtonElement => b !== null);
+  assert.ok(row, `no list row for ${name}`);
+  return row;
+}
+
+test("probeView: the Ready line says what answered and how long ago, and drops what it does not know", () => {
+  const feed = pullFeed();
+  const view = (entry: import("@main/types/video").VideoProbeEntry, ageMs: number) => probeView(feed, entry, ageMs);
+  assert.deepEqual(view({ state: "ready", codec: "H264", width: 1920, height: 1080, checkedAt: 0 }, 4000)?.line, {
+    text: "Camera answers · H.264 1920 × 1080 · checked 4 s ago",
+    bad: false,
+  });
+  assert.equal(view({ state: "ready", codec: "H265", checkedAt: 0 }, 4000)?.line?.text, "Camera answers · H.265 · checked 4 s ago", "no size known");
+  assert.equal(view({ state: "ready", width: 1280, height: 720, checkedAt: 0 }, 0)?.line?.text, "Camera answers · 1280 × 720 · checked 0 s ago", "no codec known");
+  assert.equal(view({ state: "ready", checkedAt: 0 }, 125_000)?.line?.text, "Camera answers · checked 2 min ago", "nothing about the picture");
+  assert.equal(view({ state: "ready", codec: "MJPEG", checkedAt: 0 }, 0)?.line?.text, "Camera answers · MJPEG · checked 0 s ago", "an unfamiliar codec is shown as the camera spells it");
+  assert.deepEqual(view({ state: "ready", checkedAt: 0 }, 0)?.pill, { label: "Ready", tint: "bg-fill text-fg-muted", dot: "bg-live-9" });
+});
+
+test("checkedAgeMs counts the server's own age of the answer plus how long this page has held it, whatever either clock says", () => {
+  const entry = { state: "ready" as const, checkedAt: 5_000_000 };
+  // The server's clock is years away from anything the browser would say; only differences are used.
+  assert.equal(checkedAgeMs({ feeds: {}, at: 5_004_000 }, entry, 1000, 1000), 4000, "just received");
+  assert.equal(checkedAgeMs({ feeds: {}, at: 5_004_000 }, entry, 1000, 8000), 11_000, "held for 7 s since");
+  assert.equal(checkedAgeMs({ feeds: {}, at: 5_004_000 }, entry, Number.POSITIVE_INFINITY, 8000), 4000, "not stamped yet counts as just received");
+  assert.equal(checkedAgeMs({ feeds: {}, at: 4_000_000 }, entry, 0, 0), 0, "an answer from the server's future is never negative");
+});
+
+test("probeView: the other four states, and when it stands aside", () => {
+  const feed = pullFeed();
+  assert.equal(probeView(feed, undefined, 0), null, "no entry: the row is as it was");
+  assert.deepEqual(probeView(feed, { state: "unchecked", checkedAt: 0 }, 0)?.line, {
+    text: "SRT can't be checked without streaming it · shows Live once something plays it",
+    bad: false,
+  });
+  assert.equal(probeView(feed, { state: "unchecked", checkedAt: 0 }, 0)?.pill.label, "Standby");
+  assert.equal(probeView(feed, { state: "checking", checkedAt: 0 }, 0)?.pill.label, "Checking");
+  assert.equal(probeView(feed, { state: "checking", checkedAt: 0 }, 0)?.line?.text, "Checking…");
+  assert.match(probeView(feed, { state: "checking", checkedAt: 0 }, 0)!.pill.dot, /video-probe-checking-dot/);
+  const busy = probeView(feed, { state: "checking", checkedAt: 0, busy: true }, 0)!;
+  assert.equal(busy.pill.label, "Checking", "the pill stays Checking");
+  assert.deepEqual(busy.line, { text: "The camera is busy answering another request · trying again", bad: false });
+  const failed = probeView(feed, { state: "failed", reason: "The camera refused the login · check the username and password", checkedAt: 0 }, 0)!;
+  assert.equal(failed.pill.label, "Not answering");
+  assert.equal(failed.line?.bad, true);
+  assert.equal(failed.line?.text, "The camera refused the login · check the username and password");
+  const since = probeView(feed, { state: "failed", reason: "x", checkedAt: 0, since: NOW - 60_000 }, 0)!;
+  assert.match(since.line!.text, /^x · since \d/);
+
+  for (const state of ["live", "delayed"] as const) {
+    const live = pullFeed({ status: state === "live" ? { state: "live" } : { state: "delayed", delayedBecause: "b-frames" } });
+    assert.equal(probeView(live, { state: "failed", reason: "x", checkedAt: 0 }, 0), null, `${state} wins over a probe result`);
+  }
+  for (const other of [pushFeed(), externalFeed(), embedFeed()]) {
+    assert.equal(probeView(other, { state: "failed", reason: "x", checkedAt: 0 }, 0), null, `a ${other.kind} feed is never described by a camera check`);
+  }
+});
+
+test("each probe state renders its pill and sub-line on the page, from what the server pushes", async () => {
+  const feeds = [
+    pullFeed({ id: "ready-cam", name: "Ready cam", status: { state: "standby" } }),
+    pullFeed({ id: "bad-cam", name: "Bad cam", status: { state: "standby" } }),
+    pullFeed({ id: "srt-cam", name: "SRT cam", status: { state: "standby" }, sourceLine: "Pulled from a device · srt://192.0.2.9:9000", source: { kind: "pull", url: "srt://192.0.2.9:9000", username: "" } }),
+    pullFeed({ id: "wait-cam", name: "Wait cam", status: { state: "standby" } }),
+    pullFeed({ id: "none-cam", name: "None cam", status: { state: "standby" } }),
+  ];
+  const g = stubGlobals(
+    { ...makeState(feeds), kinds: ALL_KINDS },
+    {
+      probe: {
+        at: Date.now(),
+        feeds: {
+          "ready-cam": { state: "ready", codec: "H264", width: 1280, height: 720, checkedAt: Date.now() - 4000 },
+          "bad-cam": { state: "failed", reason: "No answer from 192.0.2.5 for this path · check the address and path", checkedAt: Date.now(), since: Date.now() - 60_000 },
+          "srt-cam": { state: "unchecked", checkedAt: Date.now() },
+          "wait-cam": { state: "checking", checkedAt: Date.now() },
+        },
+      },
+    },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+
+    const ready = within(rowOf("Ready cam"));
+    assert.ok(ready.getByText("Ready"));
+    assert.match(ready.getByText(/^Camera answers/).textContent!, /^Camera answers · H\.264 1280 × 720 · checked \d+ s ago$/);
+
+    const bad = within(rowOf("Bad cam"));
+    assert.ok(bad.getByText("Not answering"));
+    const reason = bad.getByText(/^No answer from 192\.0\.2\.5 for this path · check the address and path · since /);
+    assert.match(reason.className, /text-danger-11/, "the reason reads in the danger tone");
+
+    const srt = within(rowOf("SRT cam"));
+    assert.ok(srt.getByText("Standby"));
+    assert.ok(srt.getByText("SRT can't be checked without streaming it · shows Live once something plays it"));
+
+    const waiting = within(rowOf("Wait cam"));
+    assert.ok(waiting.getByText("Checking"));
+    assert.ok(waiting.getByText("Checking…"));
+    assert.match(waiting.getByText("Checking").querySelector("span")!.className, /video-probe-checking-dot/);
+
+    const none = within(rowOf("None cam"));
+    assert.ok(none.getByText("Standby"), "no probe data: Standby, as before");
+    assert.equal(none.queryByText(/Camera answers|Checking|Not answering/), null);
+  } finally {
+    g.restore();
+  }
+});
+
+test("the relay's own Live wins over a probe result, and a push feed is untouched by one", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed({ id: "live-cam", name: "Live cam", status: { state: "live", width: 1920, height: 1080 } }), pushFeed({ id: "push-cam", name: "Push cam" })]), kinds: ALL_KINDS },
+    { probe: { at: Date.now(), feeds: { "live-cam": { state: "failed", reason: "stale news", checkedAt: Date.now() }, "push-cam": { state: "failed", reason: "should not show", checkedAt: Date.now() } } } },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    const live = within(rowOf("Live cam"));
+    assert.ok(live.getByText("Live"));
+    assert.ok(live.getByText("WebRTC · under 1 s behind"), "its own sub-line, unchanged");
+    assert.equal(live.queryByText("Not answering"), null);
+    assert.equal(screen.queryByText("stale news"), null);
+
+    const push = within(rowOf("Push cam"));
+    assert.ok(push.getByText("Waiting for source"), "a push feed keeps its relay status");
+    assert.equal(screen.queryByText("should not show"), null);
+  } finally {
+    g.restore();
+  }
+});
+
+test("'checked N s ago' follows the server's own ages, not the browser's clock: a display hours out still reads 4 s", async () => {
+  // The server's snapshot is stamped a day and a bit away from this machine's clock.
+  const serverAt = Date.now() + 26 * 3600 * 1000;
+  const g = stubGlobals(
+    { ...makeState([pullFeed({ id: "skew-cam", name: "Skew cam", status: { state: "standby" } })]), kinds: ALL_KINDS },
+    { probe: { at: serverAt, feeds: { "skew-cam": { state: "ready", codec: "H264", checkedAt: serverAt - 4000 } } } },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    assert.match(within(rowOf("Skew cam")).getByText(/^Camera answers/).textContent!, /checked [4-5] s ago$/, "the browser's clock leaked into the age");
+  } finally {
+    g.restore();
+  }
+});
+
+test("a busy camera that has never answered says so on a Checking row", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed({ id: "busy-cam", name: "Busy cam", status: { state: "standby" } })]), kinds: ALL_KINDS },
+    { probe: { at: Date.now(), feeds: { "busy-cam": { state: "checking", busy: true, checkedAt: Date.now() } } } },
+  );
+  try {
+    mount();
+    await settle();
+    await settle();
+    const row = within(rowOf("Busy cam"));
+    assert.ok(row.getByText("Checking"));
+    assert.ok(row.getByText("The camera is busy answering another request · trying again"));
   } finally {
     g.restore();
   }

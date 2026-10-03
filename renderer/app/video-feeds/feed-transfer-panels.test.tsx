@@ -95,6 +95,7 @@ function stub(report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: [
     const url = String(input);
     calls.push({ method, url, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
     if (url.endsWith("/api/video/state")) return ok(STATE);
+    if (url.endsWith("/api/video/probe")) return ok({ feeds: {} });
     if (url.endsWith("/api/integrations")) return ok({ descriptors: [], states: [] });
     if (url.endsWith("/usage")) return ok({ layouts: [] });
     if (/\/push(\?.*)?$/.test(url)) return ok({ protocol: "srt", address: "srt://192.0.2.1:8890", password: "x" });
