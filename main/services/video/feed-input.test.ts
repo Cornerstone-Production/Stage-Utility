@@ -105,3 +105,12 @@ test("the SRT rules are SRT's alone: an RTSP pull keeps its username and any pas
   const r = parseFeedInput({ name: "P", source: { kind: "pull", url: "rtsp://10.0.0.1/s", username: "admin" }, password: "pw" }, ALL);
   assert.equal(r.ok, true);
 });
+
+test("a pull address that is only a scheme is refused, not saved as a feed that cannot play", () => {
+  for (const url of ["rtsp://", "srt://", "rtsps://"]) {
+    const r = parseFeedInput({ name: "Cam", source: { kind: "pull", url, username: "" } }, new Set(["pull"]));
+    assert.equal(r.ok, false, `${url} was accepted`);
+    if (!r.ok) assert.match(r.error, /what comes after the scheme/);
+  }
+  assert.equal(parseFeedInput({ name: "Cam", source: { kind: "pull", url: "rtsp://192.0.2.10/stream", username: "" } }, new Set(["pull"])).ok, true);
+});

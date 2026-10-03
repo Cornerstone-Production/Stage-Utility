@@ -253,10 +253,15 @@ Utility cannot see whether its source is live.
 One card: the list of feeds on the left, the selected feed's editor on the
 right. Each row shows the feed's name, its status pill, a source line (the
 kind, then the address or embed reference) and a line on how it plays. **Add
-feed** sits under the last row.
+feed** sits under the last row. Pressing it adds a highlighted draft row at
+the end of the list, marked "Not saved", that follows the name and address as
+they are typed; it goes away on **Cancel** or when another feed is selected,
+and **Save** replaces it with the real feed.
 
 The editor shows the feed's live picture, its **Name** and **Source**, and the
-fields for that source, each with its label above it. Under **Save**,
+fields for that source, each with its label above it. A new feed's **Name**
+and **Address** start empty, with "New feed" and "rtsp://" as placeholders;
+saving without a name is refused. Under **Save**,
 **Cancel** and **Delete feed** it says which layouts use the feed. Delete asks
 before it removes anything, naming those layouts again; the widgets in them
 then show their offline state.
