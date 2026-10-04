@@ -35,6 +35,8 @@ export interface StripItem {
   /** Sound only: what this item peaked at, already formatted. The lane marks it
    *  with a tick; the strip is where the NUMBER is read. */
   peak?: string | null;
+  /** Sound only: the clock time of that peak, in the chart's axis words. */
+  when?: string | null;
 }
 
 /**
@@ -117,6 +119,7 @@ export function StatStrip({ figures, hover, live, right, announce = true }: Stat
             // Only when the caller has one. The attendance lane never does, and
             // a "Peaked —" column on every hover is noise.
             ...(hover.item.peak ? [{ key: "__peak", label: "Peaked at", value: hover.item.peak }] : []),
+            ...(hover.item.when ? [{ key: "__when", label: "When", value: hover.item.when }] : []),
           ]
           : []),
       ]

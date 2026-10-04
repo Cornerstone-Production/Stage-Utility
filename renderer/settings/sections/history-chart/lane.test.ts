@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { LANE_LABEL_PADDING, MAX_EXTRA_LANES, laneLabel, laneSegments, segmentAt, type LaneItem } from "./lane.js";
+import { LANE_LABEL_PADDING, MAX_EXTRA_LANES, laneLabel, laneSegments, peakInstant, segmentAt, type LaneItem } from "./lane.js";
 
 /** A deterministic measurer: 6px per character, like a condensed 11px mono. */
 const measure = (s: string) => s.length * 6;
@@ -220,5 +220,32 @@ describe("overlapping items", () => {
     const segs = laneSegments(overlapping, opts);
     const x = segs[0].x0 + (segs[0].x1 - segs[0].x0) * 0.8;
     assert.equal(segmentAt(segs, x, "service")?.item.itemId, "doors");
+  });
+});
+
+describe("peakInstant", () => {
+  const A = "2026-09-17T20:15:00.000Z";
+  const B = "2026-09-17T20:30:00.000Z";
+  const at = (min: number, v: number) => ({ t: Date.parse(A) + min * 60_000, v });
+
+  test("the loudest point inside the item, wherever it falls", () => {
+    assert.deepEqual(peakInstant([at(-5, 120), at(1, 90), at(7, 80), at(14, 85), at(20, 130)], A, B), at(1, 90));
+  });
+
+  test("the window is half-open: the start counts, the end does not", () => {
+    assert.deepEqual(peakInstant([at(0, 95), at(15, 200)], A, B), at(0, 95));
+  });
+
+  test("the first of two equal maxima wins", () => {
+    assert.deepEqual(peakInstant([at(2, 90), at(9, 90)], A, B), at(2, 90));
+  });
+
+  test("a gap — no point inside the item — has no peak", () => {
+    assert.equal(peakInstant([at(-3, 99), at(16, 99)], A, B), null);
+    assert.equal(peakInstant([], A, B), null);
+  });
+
+  test("a live item runs to the end of the series", () => {
+    assert.deepEqual(peakInstant([at(1, 80), at(500, 90)], A, null), at(500, 90));
   });
 });

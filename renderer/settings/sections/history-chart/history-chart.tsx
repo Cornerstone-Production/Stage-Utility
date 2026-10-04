@@ -163,6 +163,15 @@ const LANE_ROW_H = 16;
 const LANE_GAP = 3;
 /** The milestone band: a 6px triangle, then the label under it. */
 const MARK_BAND_H = 24;
+/** The item-peak row above the plot: a 10px downward triangle with 4px above it,
+ *  so the row is 14px taller than the plot's own top pad. */
+const PEAK_ROW_H = 14;
+const PEAK_ROW_TOP = 4;
+const PEAK_TRI_W = 12;
+const PEAK_TRI_H = 10;
+/** The hover column on a peak's line, and how far below the peak point it runs. */
+const PEAK_HIT_W = 10;
+const PEAK_HIT_BELOW = 4;
 
 export function HistoryChart({
   series,
@@ -192,6 +201,12 @@ export function HistoryChart({
    *  of `hoverX`: the marks sit BELOW the plot, where the plot's own pointer
    *  handler has already decided there is nothing under the cursor. */
   const [hoverMark, setHoverMark] = useState<string | null>(null);
+  /** The item whose peak the pointer is on (its triangle or the column down to
+   *  the peak point), and the one whose triangle has keyboard focus. Their own
+   *  state for the same reason as `hoverMark`: the triangle sits above the plot,
+   *  outside what the plot's pointer handler reads. */
+  const [hoverPeak, setHoverPeak] = useState<string | null>(null);
+  const [focusPeak, setFocusPeak] = useState<string | null>(null);
 
   // 1 unit = 1 px: the SVG's viewBox tracks the measured container width rather
   // than a fixed 600, so a measured label width in CSS px can be compared
@@ -217,8 +232,26 @@ export function HistoryChart({
   const W = width;
   const plotX0 = PAD_L;
   const plotX1 = W - PAD_R;
-  const plotY0 = PAD_T;
-  const plotY1 = PAD_T + PLOT_H;
+  /** What is actually drawn. `series` is the whole offering — see ChartSeries.on. */
+  const shown = useMemo(() => series.filter((s) => s.on !== false), [series]);
+  // The peak row is reserved only when a peak triangle will be drawn, so every
+  // other chart keeps exactly the height it had. Everything below derives from
+  // `plotY0`, which is what keeps the hover rows honest.
+  const peakPoints = useMemo(() => {
+    if (!peakMarks) return [];
+    const primary = shown.find((s) => s.role === "primary");
+    if (!primary) return [];
+    const out: { item: LaneItem; t: number; v: number }[] = [];
+    for (const item of items) {
+      if (!item.peakLabel || item.peakAt == null) continue;
+      const p = primary.points.find((q) => q.t === item.peakAt);
+      if (p) out.push({ item, t: p.t, v: p.v });
+    }
+    return out;
+  }, [peakMarks, shown, items]);
+  const peakRowH = peakPoints.length ? PEAK_ROW_H : 0;
+  const plotY0 = PAD_T + peakRowH;
+  const plotY1 = plotY0 + PLOT_H;
   const marks = milestones ?? [];
   // The milestone band sits between the axis and the item lane, so a chart that
   // has both keeps them apart. A chart with no milestones loses the band
@@ -227,8 +260,6 @@ export function HistoryChart({
   const markBandH = marks.length ? MARK_BAND_H : 0;
   const laneY0 = markY0 + markBandH;
 
-  /** What is actually drawn. `series` is the whole offering — see ChartSeries.on. */
-  const shown = useMemo(() => series.filter((s) => s.on !== false), [series]);
   const all = useMemo(() => shown.flatMap((s) => s.points), [shown]);
   const axis = useMemo(() => niceAxis(all.map((p) => p.v), yScale), [all, yScale]);
 
@@ -352,12 +383,31 @@ export function HistoryChart({
    * so the pointer is already on one, and snapping a crosshair that follows the
    * cursor across an hour would make it stutter for no gain.
    */
-  const hoverT = pointerT == null || xAxis !== "date" ? pointerT : nearestNodeT(shown, pointerT) ?? pointerT;
+  const activePeak = peakPoints.find((p) => peakKey(p.item) === (hoverPeak ?? focusPeak)) ?? null;
+  const hoverT = activePeak
+    ? activePeak.t
+    : pointerT == null || xAxis !== "date" ? pointerT : nearestNodeT(shown, pointerT) ?? pointerT;
   /** Where the crosshair stands. One expression with `hoverT`, so the line, the
    *  date and the figures cannot come apart. */
-  const crosshairX = hoverT != null && Number.isFinite(hoverT) ? xOf(hoverT) : hoverX;
+  const crosshairX = activePeak
+    ? null
+    : hoverT != null && Number.isFinite(hoverT) ? xOf(hoverT) : hoverX;
   const hoveredSegment: LaneSegment | null =
     hoverX != null && hoverRow && hoverRow !== "plot" ? segmentAt(segments, hoverX, hoverRow) : null;
+  /** The peak whose line is drawn: the one under the pointer or focus, or the
+   *  one belonging to the item block the pointer is on. */
+  const litPeakKey = activePeak ? peakKey(activePeak.item) : hoveredSegment ? peakKey(hoveredSegment.item) : null;
+  const stripItem = (it: LaneItem) => ({
+    number: it.sequence + 1,
+    title: it.title || "Untitled",
+    ran: fmtDur(it.actualSec),
+    planned: fmtDur(it.plannedSec),
+    peak: it.peakLabel ?? null,
+    when: (() => {
+      const p = peakPoints.find((q) => peakKey(q.item) === peakKey(it));
+      return p ? formatClock(p.t, { seconds: true }) : null;
+    })(),
+  });
   const hoverValues = hoverT == null
     ? []
     : shown.flatMap((s) => {
@@ -374,15 +424,7 @@ export function HistoryChart({
       // answered "2:32 pm", a reading of a scale this chart does not have.
       time: axisText(hoverT),
       values: hoverValues,
-      item: hoveredSegment
-        ? {
-          number: hoveredSegment.item.sequence + 1,
-          title: hoveredSegment.item.title || "Untitled",
-          ran: fmtDur(hoveredSegment.item.actualSec),
-          planned: fmtDur(hoveredSegment.item.plannedSec),
-          peak: hoveredSegment.item.peakLabel ?? null,
-        }
-        : null,
+      item: activePeak ? stripItem(activePeak.item) : hoveredSegment ? stripItem(hoveredSegment.item) : null,
     };
   const liveStrip = live && all.length
     ? {
@@ -437,8 +479,15 @@ export function HistoryChart({
     if (x < plotX0 || x > plotX1) {
       setHoverX(null);
       setHoverRow(null);
+      setHoverPeak(null);
       return;
     }
+    // A peak's column — its triangle and the line down to just below the peak
+    // point — answers for the item, ahead of the plot's own moment readout.
+    const onPeak = peakPoints
+      .filter((p) => Math.abs(x - xOf(p.t)) <= PEAK_HIT_W / 2 && y >= PEAK_ROW_TOP && y <= yOf(p.v) + PEAK_HIT_BELOW)
+      .sort((a, b) => Math.abs(x - xOf(a.t)) - Math.abs(x - xOf(b.t)))[0];
+    setHoverPeak(onPeak ? peakKey(onPeak.item) : null);
     setHoverX(x);
     setHoverRow(
       y <= plotY1 ? "plot"
@@ -495,16 +544,14 @@ export function HistoryChart({
           </button>
         );
       })}
-      {/* The lane's peak tick, NAMED. It shipped as an unlabelled coloured chip
-          on an item block, and the first thing anybody asked about the sound
-          chart was what it was. The swatch is the mark: a vertical bar in the
-          primary series' colour, the same thing drawn on the lane. */}
-      {peakMarks && items.some((it) => it.peakLabel) && (
+      {/* The peak triangle, NAMED: the first thing anybody asked about the sound
+          chart was what its mark was. The swatch is the mark itself, in the
+          primary series' colour. */}
+      {peakPoints.length > 0 && (
         <span data-legend-peak-mark className="inline-flex items-center gap-1.5">
-          <span
-            className="inline-block h-2.5 w-[3px] rounded-[1px]"
-            style={{ background: primarySeriesColor(shown) }}
-          />
+          <svg width="12" height="9" viewBox="0 0 12 9" aria-hidden="true">
+            <path d="M0 0H12L6 9Z" fill={primarySeriesColor(shown)} />
+          </svg>
           Item peak
         </span>
       )}
@@ -575,6 +622,7 @@ export function HistoryChart({
         onPointerLeave={() => {
           setHoverX(null);
           setHoverRow(null);
+          setHoverPeak(null);
         }}
         onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
       >
@@ -799,25 +847,6 @@ export function HistoryChart({
                 vectorEffect="non-scaling-stroke"
                 strokeDasharray={outline ? "3 2" : undefined}
               />
-              {/* Sound only: this item's loudest reading, marked on its block.
-                  FULL segment height, in the series colour. It was a 4px nub on
-                  the top edge, drawn to keep it off the item's own label, and
-                  what that produced was an unexplained blue chip nobody could
-                  identify. Drawn BEFORE the label instead, so the text reads
-                  over the tick rather than the tick being shortened to dodge it,
-                  and named "Item peak" in the legend below. */}
-              {peakMarks && seg.item.peakLabel && w > 8 && (
-                <line
-                  data-peak-mark={seg.item.itemId}
-                  x1={(seg.x0 + seg.x1) / 2}
-                  y1={y}
-                  x2={(seg.x0 + seg.x1) / 2}
-                  y2={y + LANE_ROW_H}
-                  stroke={primarySeriesColor(shown)}
-                  strokeWidth={3}
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
               {label.kind !== "none" && (
                 <text
                   x={seg.x0 + 6}
@@ -907,6 +936,80 @@ export function HistoryChart({
                     : label}
                 </text>
               )}
+            </g>
+          );
+        })}
+
+        {/* Item peaks: a downward triangle in the row above the plot, at the
+            instant the item was loudest. Its line down to the peak point and the
+            point itself draw only while the item is lit — hovered here, on the
+            line, on its lane block, or focused — so the plot carries no extra
+            ink at rest. The hit column covers the triangle and the whole line. */}
+        {peakPoints.length > 0 && (
+          <line
+            data-peak-row=""
+            x1={plotX0}
+            x2={plotX1}
+            y1={plotY0 - 4}
+            y2={plotY0 - 4}
+            stroke="var(--color-line)"
+            strokeWidth={1}
+            opacity={0.7}
+            pointerEvents="none"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {peakPoints.map((p) => {
+          const key = peakKey(p.item);
+          const x = xOf(p.t);
+          if (!Number.isFinite(x) || x < plotX0 || x > plotX1) return null;
+          const py = yOf(p.v);
+          const lit = litPeakKey === key;
+          const color = primarySeriesColor(shown);
+          const triTop = PEAK_ROW_TOP + 4;
+          const tip = triTop + PEAK_TRI_H;
+          return (
+            <g
+              key={key}
+              data-peak-mark={p.item.itemId}
+              role="button"
+              tabIndex={0}
+              aria-label={`${p.item.title || "Untitled"} peaked at ${p.item.peakLabel} at ${formatClock(p.t, { seconds: true })}`}
+              onFocus={() => setFocusPeak(key)}
+              onBlur={() => setFocusPeak((cur) => (cur === key ? null : cur))}
+              className="focus-visible:outline-none"
+            >
+              {lit && (
+                <>
+                  <line
+                    data-peak-line={p.item.itemId}
+                    x1={x}
+                    x2={x}
+                    y1={tip}
+                    y2={py}
+                    stroke={color}
+                    strokeWidth={1.5}
+                    strokeDasharray="2 3"
+                    pointerEvents="none"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle data-peak-dot={p.item.itemId} cx={x} cy={py} r={3} fill={color} pointerEvents="none" />
+                </>
+              )}
+              <rect
+                data-peak-hit={p.item.itemId}
+                x={x - PEAK_HIT_W / 2}
+                y={PEAK_ROW_TOP}
+                width={PEAK_HIT_W}
+                height={py - PEAK_ROW_TOP + PEAK_HIT_BELOW}
+                fill="transparent"
+              />
+              <path
+                data-peak-triangle={p.item.itemId}
+                d={`M${x - PEAK_TRI_W / 2},${triTop}H${x + PEAK_TRI_W / 2}L${x},${tip}Z`}
+                fill={color}
+                pointerEvents="none"
+              />
             </g>
           );
         })}
@@ -1073,6 +1176,12 @@ function seriesLineWidth(s: ChartSeries): number {
 /** The primary series' colour, or the accent token when there is none — what a
  *  mark that belongs to no particular series (the lane's peak tick, its legend
  *  swatch) draws in. */
+/** One key per item run: a record can reopen an item, so `itemId` alone is not
+ *  unique. */
+function peakKey(it: LaneItem): string {
+  return `${it.itemId}:${it.sequence}`;
+}
+
 function primarySeriesColor(shown: readonly ChartSeries[]): string {
   return shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)";
 }

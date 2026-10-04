@@ -9,6 +9,7 @@ import {
   HistoryChart,
   addDefaultOnce,
   hasStoredChoice,
+  peakInstant,
   readStoredKeys,
   seedStoredKeys,
   serviceWindowOf,
@@ -538,6 +539,10 @@ export function SplDetail({
       };
     });
 
+  // Where each item was loudest, off the line the chart draws. Only the raw
+  // peak line has an instant to give: the per-item fallback is one level per
+  // item, so its "maximum" would be an arbitrary edge of the block.
+  const peakLine = hasRaw ? series.find((s) => s.role === "primary")?.points ?? null : null;
   const laneItems: LaneItem[] = items.map((it) => {
     const st = primaryKey ? metricStat(it, primaryKey, detail) : null;
     return {
@@ -550,6 +555,7 @@ export function SplDetail({
       plannedSec: plannedById.get(it.itemId) ?? null,
       actualSec: it.endedAt ? Math.round((Date.parse(it.endedAt) - Date.parse(it.startedAt)) / 1000) : null,
       peakLabel: st?.max != null ? dB(st.max) : null,
+      peakAt: peakLine ? peakInstant(peakLine, it.startedAt, it.endedAt)?.t ?? null : null,
     };
   });
 
