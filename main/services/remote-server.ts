@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 
 import {
   addBroadcastListener,
+  setNamedSubscriberCheck,
   setSubscriberCheck,
   setSubscriberCount,
   subscriptionsChanged,
@@ -335,6 +336,23 @@ function countSubscribers(channel: string): number {
   return n;
 }
 
+/** Whether any connected client (stream or poll) has EXPLICITLY named this
+ *  channel in its reported filter. A client with no filter yet is not counted:
+ *  see broadcaster.ts's channelNamedByClient for who needs the difference. */
+export function hasNamedSubscriber(channel: string): boolean {
+  for (const client of sseClients) {
+    const cid = resCid.get(client);
+    if (cid && clientChannels.get(cid)?.has(channel)) return true;
+  }
+  for (const cid of eventPoll.clientIds()) {
+    if (clientChannels.get(cid)?.has(channel)) return true;
+  }
+  return false;
+}
+// At load, not in start(): nothing about it needs a listening socket, and a
+// test of the wiring can then drive handleRequest() without binding a port.
+setNamedSubscriberCheck(hasNamedSubscriber);
+
 /**
  * Where a hello-burst frame goes.
  *
@@ -443,6 +461,9 @@ export function writeHelloBurst(res: EventSink): void {
   // function cannot await — and returns the last snapshot init() or publish()
   // computed (see video-service.ts).
   sseWrite(res, "video:state", videoService.current());
+  // The camera checks' results: empty until the Video feeds page has been
+  // open for a moment, and cleared again when the last one closes.
+  sseWrite(res, "video:probe", videoService.probeState());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

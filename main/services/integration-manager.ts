@@ -2459,7 +2459,9 @@ class IntegrationManager {
       this.setConnectionState("video", state, message);
       this.broadcastStates();
     });
-    relayLifecycle.setEnabled(this.states.get("video")?.enabled === true);
+    const enabled = this.states.get("video")?.enabled === true;
+    videoService.setVideoEnabled(enabled);
+    relayLifecycle.setEnabled(enabled);
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */

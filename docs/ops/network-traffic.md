@@ -85,6 +85,15 @@ them.
 - **The relay's own status poll runs only while something watches**
   `video:state` — the Video feeds page open, or a Video widget on screen
   anywhere. With nobody watching, the server asks the relay nothing.
+- **Pulled cameras are checked only while the Video feeds page is open** — one
+  RTSP `DESCRIBE` or HLS playlist GET per pulled camera every 15 seconds, never
+  a stream. A client that names `video:probe` in its channel filter is what
+  starts it; a display connecting, another page, or a client with no filter
+  (curl, Home Assistant) does not. With the page closed the server sends the
+  cameras nothing. A camera that wants a login takes two connections per check
+  (the first is refused, the second carries the login), and a busy one
+  (`406`) is asked up to two more times a moment apart, so up to three asks
+  per check.
 
 ## Leaving your network
 

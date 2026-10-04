@@ -20,6 +20,11 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     json(res, await videoService.state());
     return;
   }
+  // The latest camera checks; the same snapshot `video:probe` pushes.
+  if (method === "GET" && pathname === "/api/video/probe") {
+    json(res, videoService.probeState());
+    return;
+  }
   if (method === "GET" && pathname === "/api/video/feeds") {
     json(res, { feeds: (await videoService.state()).feeds });
     return;

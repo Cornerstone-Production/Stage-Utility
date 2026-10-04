@@ -29,7 +29,7 @@ import type { VideoFeedView } from "@main/types/video";
 import { Button, FieldSet } from "../../components/ui";
 import { toggleIntegration } from "../../components/integrations-panel";
 import { useIntegrations } from "../../main/use-integration-states";
-import { useVideoState } from "../../main/video/use-video-state";
+import { useVideoProbe, useVideoState } from "../../main/video/use-video-state";
 import { flashTarget } from "../flash";
 import { VIDEO_PORTS_FLASH_ID } from "../../settings/sections/video-relay-ports";
 import { FeedEditor, type DraftRow } from "./feed-editor";
@@ -44,6 +44,9 @@ const ADVANCED_ROUTE: string = "/settings/advanced";
 
 export function VideoFeedsRoute() {
   const state = useVideoState();
+  // Subscribing is what makes the server ask each pulled camera about its
+  // stream, so it lives here and nowhere else: only while this page is open.
+  const { probe, receivedAt: probeReceivedAt } = useVideoProbe();
   const { states } = useIntegrations();
   const router = useRouter();
   const [toggling, setToggling] = useState(false);
@@ -157,6 +160,8 @@ export function VideoFeedsRoute() {
         <FeedList
           draft={panel === null && selected === null ? draftRow : null}
           feeds={feeds}
+          probe={probe}
+          probeReceivedAt={probeReceivedAt}
           screens={state.screens}
           selectedId={selected?.id ?? null}
           onSelect={(id) => {
