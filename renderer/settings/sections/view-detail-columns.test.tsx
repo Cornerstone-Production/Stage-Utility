@@ -43,7 +43,6 @@ function props(kind: ViewKind = "script"): Parameters<typeof ViewDetail>[0] {
     canDelete: true,
     stageState: { views: [VIEW], outputs: [] },
     wirelessChannels: [],
-    teamPositions: [],
     localSlots: [],
     slotsDirty: false,
     isSavingSlots: false,

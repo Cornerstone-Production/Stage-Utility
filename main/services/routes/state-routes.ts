@@ -10,6 +10,8 @@ import { stageController } from "../stage-controller.js";
 import { SERVER_VERSION } from "../server-version.js";
 import { UPCOMING_DEFAULT_DAYS, UPCOMING_MAX_DAYS } from "../upcoming-plans.js";
 
+const SAFE_SERVICE_TYPE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 export async function stateRoutes(c: RouteCtx): Promise<void> {
   const { res, pathname, url, method } = c;
     // ── Health ────────────────────────────────────────────────────────────
@@ -47,8 +49,25 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "GET" && pathname === "/api/team-positions") {
+      // `?all=1`: every service type's positions, each tagged with its type. A
+      // type that cannot be read comes back in `failed`, so this is a 200 unless
+      // the type list itself is unreachable.
+      const wantsAll = url.searchParams.get("all") === "1";
+      const requested = url.searchParams.get("serviceTypeId");
+      // The id is spliced into a Planning Center URL path, so it is checked
+      // here rather than trusted. Absent is fine (the live type); present and
+      // not shaped like an id is the caller's mistake.
+      if (!wantsAll && requested !== null && !SAFE_SERVICE_TYPE_ID.test(requested)) {
+        error(res, "serviceTypeId is not a valid service type id");
+        return;
+      }
       try {
-        json(res, await stageController.listTeamPositions());
+        json(
+          res,
+          wantsAll
+            ? await stageController.listAllTeamPositions()
+            : await stageController.listTeamPositions(requested ?? undefined),
+        );
       } catch (err) {
         pcoReadFailed(res, "team positions", err);
       }

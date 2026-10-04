@@ -536,6 +536,7 @@ export type IpcChannel =
   | "stage:getBrandingSource"
   | "stage:getRemoteUrl"
   | "stage:getState"
+  | "stage:listAllTeamPositions"
   | "stage:listPlans"
   | "stage:listServiceTypes"
   | "stage:listTeamPositions"
@@ -628,8 +629,14 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>(`/api/plans?serviceTypeId=${encodeURIComponent(id)}`);
     }
 
-    case "stage:listTeamPositions":
-      return apiFetch<T>("/api/team-positions");
+    case "stage:listTeamPositions": {
+      // The type being EDITED, when the caller names one; the server's live type otherwise.
+      const id = p.serviceTypeId as string | undefined;
+      return apiFetch<T>(id ? `/api/team-positions?serviceTypeId=${encodeURIComponent(id)}` : "/api/team-positions");
+    }
+
+    case "stage:listAllTeamPositions":
+      return apiFetch<T>("/api/team-positions?all=1");
 
     // ── ScriptView (in-app ScriptViewer replacement) ────────────────────
     case "scriptview:listLayouts":

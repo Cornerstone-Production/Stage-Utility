@@ -40,7 +40,7 @@ import type {
 } from "../types/calendar.js";
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -998,10 +998,43 @@ export class StageController {
     return this.state;
   }
 
-  async listTeamPositions(): Promise<TeamPositionDTO[]> {
+  /** Positions for one service type: the one asked for, or the live one when
+   *  none is. The slot editor asks for the type it is EDITING, which is not
+   *  always the live one. */
+  async listTeamPositions(serviceTypeId?: string): Promise<TeamPositionDTO[]> {
     this.assertPco();
-    if (!this.state.serviceTypeId) return [];
-    return pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, this.state.serviceTypeId);
+    const id = serviceTypeId ?? this.state.serviceTypeId;
+    if (!id) return [];
+    return pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, id);
+  }
+
+  /**
+   * Positions for EVERY service type, each tagged with its type.
+   *
+   * One type at a time: Planning Center rate-limits, and each call is cached per
+   * type, so a second look costs nothing. A type that cannot be read is skipped
+   * and named in `failed` rather than failing the whole list. The `[pco]` line is
+   * one per call, not one per type, so an outage is one line.
+   */
+  async listAllTeamPositions(): Promise<AllTeamPositionsDTO> {
+    this.assertPco();
+    const types = await pcoService.listServiceTypes(this.pcoAppId!, this.pcoSecret!);
+    const positions: TypedTeamPositionDTO[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    for (const t of types) {
+      try {
+        const rows = await pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, t.id);
+        for (const r of rows) positions.push({ ...r, serviceTypeId: t.id, serviceTypeName: t.name });
+      } catch (err) {
+        failed.push(t.name);
+        reasons.push(`${t.name}: ${errorMessage(err)}`);
+      }
+    }
+    if (failed.length > 0) {
+      console.warn(`[pco] team positions read failed for ${scrub(String(failed.length))} of ${scrub(String(types.length))} service types (${scrub(reasons.join("; "))})`);
+    }
+    return { positions, failed };
   }
 
   /**

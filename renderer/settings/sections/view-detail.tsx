@@ -53,7 +53,6 @@ export function ViewDetail({
   startEditing,
   stageState,
   wirelessChannels,
-  teamPositions,
   localSlots,
   slotsDirty,
   isSavingSlots,
@@ -69,7 +68,7 @@ export function ViewDetail({
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotsPreview" | "slotsTargetTypeName" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
+  "stageState" | "wirelessChannels" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotsPreview" | "slotsTargetTypeName" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
 > & { view: View; canDelete: boolean; startEditing?: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -334,7 +333,6 @@ export function ViewDetail({
           <SlotEditor
             view={view}
             wirelessChannels={wirelessChannels}
-            teamPositions={teamPositions}
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}

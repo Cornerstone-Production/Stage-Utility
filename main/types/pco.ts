@@ -202,6 +202,20 @@ export interface TeamPositionDTO {
   positionName: string;
 }
 
+/** A team position tagged with the service type it belongs to — the shape of
+ *  `/api/team-positions?all=1`. */
+export interface TypedTeamPositionDTO extends TeamPositionDTO {
+  serviceTypeId: string;
+  serviceTypeName: string;
+}
+
+/** Every service type's positions. `failed` names the types that could not be
+ *  read, so a partial answer says it is partial. */
+export interface AllTeamPositionsDTO {
+  positions: TypedTeamPositionDTO[];
+  failed: string[];
+}
+
 /** One position a slot will accept, with an optional note filter scoped to it.
  *  `name` omitted = any position (the note is then the only constraint). An entry
  *  with neither is a misconfiguration and never matches — see slot-resolver. */

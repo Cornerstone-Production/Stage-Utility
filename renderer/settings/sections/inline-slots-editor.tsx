@@ -39,16 +39,10 @@ export function InlineSlotsEditor({
   const { state } = useStageState();
   const queryClient = useQueryClient();
   const serviceTypeId = state?.serviceTypeId ?? null;
-  const pcoConfigured = !!state?.pcoConfigured;
 
   const { data: wirelessChannels = [] } = useQuery({
     queryKey: ["wireless:listChannels"],
     queryFn: () => ipc<WirelessChannel[]>("wireless:listChannels"),
-  });
-  const { data: teamPositions = [] } = useQuery({
-    queryKey: ["stage:listTeamPositions", serviceTypeId],
-    queryFn: () => ipc<TeamPositionDTO[]>("stage:listTeamPositions"),
-    enabled: !!serviceTypeId && pcoConfigured,
   });
   const { data: slotPresets = [] } = useQuery({
     queryKey: ["presets:list"],
@@ -338,7 +332,6 @@ export function InlineSlotsEditor({
                   slots={g.slots}
                   startIndex={g.start}
                   wirelessChannels={wirelessChannels}
-                  teamPositions={teamPositions}
                   sharesWith={sharesWith}
                   onChange={updateSlot}
                   onRemove={removeSlot}

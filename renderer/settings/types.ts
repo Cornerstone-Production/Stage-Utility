@@ -116,7 +116,6 @@ export interface SectionProps {
   serviceTypes: ServiceTypeDTO[];
   plans: PlanDTO[];
   wirelessChannels: WirelessChannel[];
-  teamPositions: TeamPositionDTO[];
   layoutTemplates: LayoutTemplate[];
   localSlots: Slot[];
   slotsDirty: boolean;
