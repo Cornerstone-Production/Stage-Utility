@@ -482,7 +482,7 @@ test("a refused save shows the server's error text under the buttons, and nothin
 
     const nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
     assert.ok(nameInput, "expected a Name input");
-    fireEvent.change(nameInput, { target: { value: "" } });
+    fireEvent.change(nameInput, { target: { value: "x".repeat(61) } });
 
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
@@ -542,6 +542,7 @@ test("Add feed then Save calls video:addFeed with the form's name and source", a
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
 
+    fireEvent.change(container.querySelector('input[aria-label="Name"]') as HTMLInputElement, { target: { value: "New feed" } });
     const channelInput = container.querySelector('input[aria-label="Channel"]') as HTMLInputElement;
     assert.ok(channelInput, "expected the embed Channel field on a fresh draft (kinds[0] is \"embed\")");
     fireEvent.change(channelInput, { target: { value: "UC1234567890123456789012" } });
@@ -583,6 +584,7 @@ test("the just-saved feed stays selected until the pushed list contains it — t
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
 
+    fireEvent.change(container.querySelector('input[aria-label="Name"]') as HTMLInputElement, { target: { value: "Online stream" } });
     const channelInput = container.querySelector('input[aria-label="Channel"]') as HTMLInputElement;
     fireEvent.change(channelInput, { target: { value: "UC9876543210987654321098" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -621,7 +623,7 @@ test("Cancel while creating a new feed returns to the previously selected feed",
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
     nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
-    assert.equal(nameInput.value, "New feed", "expected a blank draft after Add feed");
+    assert.equal(nameInput.value, "", "expected a blank draft after Add feed");
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await settle();
@@ -867,7 +869,7 @@ test("a pull feed's Address, Username and password fields render, the Magewell c
     assert.equal(username.value, "");
     const password = container.querySelector('input[aria-label="Password"]') as HTMLInputElement;
     assert.equal(password.value, "", "a stored password is never sent to the client");
-    assert.ok(screen.getByText(/Magewell Ultra Stream/), "expected the Magewell callout for a pull feed");
+    assert.equal(screen.queryByText(/Magewell Ultra Stream/), null, "the Magewell hint box is gone");
 
     fireEvent.change(address, { target: { value: "rtsp://192.0.2.99:8554/stream9" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1586,4 +1588,127 @@ test("with no relay running, neither note fires even for applied:false and kicke
   const notes = await rotateAndCheckNotes({ state: "off" }, false, "failed");
   assert.equal(notes.appliedNote, false, "no relay running — the note must not fire even though applied is false");
   assert.equal(notes.kickedNote, false, "no relay running — the note must not fire even though kicked is \"failed\"");
+});
+
+// ── The draft row, and empty fields with placeholders ───────────────────────
+//
+// What is NOT unit-tested: that the draft row is highlighted like a selected
+// row. jsdom loads no stylesheet, so a class check would only compare strings;
+// it was driven in a browser instead.
+
+const draftRow = () => screen.queryByTestId("draft-feed-row");
+
+test("a new feed's fields start empty with placeholders; an existing feed shows its values", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    let name = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    let address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
+    assert.equal(name.value, "Program (IMAG)", "an existing feed shows its real name");
+    assert.equal(address.value, "rtsp://192.0.2.21:8554/stream2", "an existing feed shows its real address");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    name = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+    address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
+    assert.equal(name.value, "");
+    assert.equal(name.placeholder, "New feed");
+    assert.equal(address.value, "");
+    assert.equal(address.placeholder, "rtsp://");
+  } finally {
+    g.restore();
+  }
+});
+
+test("Add feed shows a draft row that follows the typed name and address, and Cancel removes it", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    assert.equal(draftRow() === null, true, "no draft row before Add feed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    let row = draftRow();
+    assert.ok(row, "expected a draft row right after Add feed");
+    assert.equal(row!.getAttribute("aria-current"), "true");
+    assert.ok(row!.textContent!.includes("New feed"), "an empty name reads New feed");
+    assert.ok(row!.textContent!.includes("Not saved"));
+    assert.ok(row!.textContent!.includes("Not set up yet"));
+
+    fireEvent.change(container.querySelector('input[aria-label="Name"]') as HTMLInputElement, { target: { value: "Lobby cam" } });
+    fireEvent.change(container.querySelector('input[aria-label="Address"]') as HTMLInputElement, { target: { value: "rtsp://192.0.2.7/x" } });
+    row = draftRow();
+    assert.ok(row!.textContent!.includes("Lobby cam"), "the row follows the Name box");
+    assert.ok(row!.textContent!.includes("rtsp://192.0.2.7/x"), "the row shows the address");
+    assert.equal(row!.textContent!.includes("Not set up yet"), false);
+
+    fireEvent.click(row!);
+    assert.ok(draftRow(), "clicking the draft row keeps it");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await settle();
+    assert.equal(draftRow() === null, true, "Cancel removes the draft row");
+  } finally {
+    g.restore();
+  }
+});
+
+test("selecting another feed removes the draft row", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed(), embedFeed({ id: "feed-2", name: "Lobby relay" })]), kinds: ALL_KINDS });
+  try {
+    mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    assert.ok(draftRow());
+    fireEvent.click(screen.getByText("Lobby relay"));
+    await settle();
+    assert.equal(draftRow() === null, true, "selecting a feed drops the draft row");
+  } finally {
+    g.restore();
+  }
+});
+
+test("Save with an empty name shows the error and sends nothing", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    fireEvent.change(container.querySelector('input[aria-label="Address"]') as HTMLInputElement, { target: { value: "rtsp://192.0.2.7/x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    assert.ok(screen.getByText("Give the feed a name"));
+    assert.equal(g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/video/feeds")), false, "no request for an unnamed feed");
+  } finally {
+    g.restore();
+  }
+});
+
+test("Save with an empty or scheme-only address shows an error and sends nothing", async () => {
+  const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+    await settle();
+    fireEvent.change(container.querySelector('input[aria-label="Name"]') as HTMLInputElement, { target: { value: "Lobby cam" } });
+    for (const url of ["", "rtsp://", "  rtsp://  "]) {
+      fireEvent.change(container.querySelector('input[aria-label="Address"]') as HTMLInputElement, { target: { value: url } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settle();
+      assert.ok(screen.getByText(/^Enter the address/), `expected the address error for ${JSON.stringify(url)}`);
+    }
+    assert.equal(g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/video/feeds")), false, "no request for an address-less feed");
+  } finally {
+    g.restore();
+  }
 });

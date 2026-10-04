@@ -19,7 +19,7 @@
 // OfflineBody), which is exactly what this page shows and is already covered
 // by video-object.test.tsx.
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { DownloadIcon, Loader2Icon, UploadIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 
@@ -32,7 +32,7 @@ import { useIntegrations } from "../../main/use-integration-states";
 import { useVideoState } from "../../main/video/use-video-state";
 import { flashTarget } from "../flash";
 import { VIDEO_PORTS_FLASH_ID } from "../../settings/sections/video-relay-ports";
-import { FeedEditor } from "./feed-editor";
+import { FeedEditor, type DraftRow } from "./feed-editor";
 import { ExportPanel, ImportPanel } from "./feed-transfer-panels";
 import { FeedList } from "./feed-list";
 import { RelayDetailRow, RelayPill, RelaySwitch } from "./relay-status";
@@ -49,6 +49,8 @@ export function VideoFeedsRoute() {
   const [toggling, setToggling] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
+  /** The new feed's typed name and address, for the list's draft row only. */
+  const [draftRow, setDraftRow] = useState<DraftRow>({ name: "", source: "" });
   /** Which of Export / Import holds the right column, in place of the editor. */
   const [panel, setPanel] = useState<"export" | "import" | null>(null);
   /**
@@ -61,6 +63,8 @@ export function VideoFeedsRoute() {
    * not carry that id at all.
    */
   const [pending, setPending] = useState<{ feed: VideoFeedView; rev: number } | null>(null);
+
+  const onDraftChange = useCallback((d: DraftRow) => setDraftRow(d), []);
 
   if (!state) {
     return (
@@ -120,6 +124,7 @@ export function VideoFeedsRoute() {
         setSelectedId(null);
       }}
       onCancelNew={() => setCreatingNew(false)}
+      onDraftChange={onDraftChange}
     />
   );
   const right =
@@ -150,6 +155,7 @@ export function VideoFeedsRoute() {
       />
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_360px]">
         <FeedList
+          draft={panel === null && selected === null ? draftRow : null}
           feeds={feeds}
           screens={state.screens}
           selectedId={selected?.id ?? null}
@@ -161,6 +167,7 @@ export function VideoFeedsRoute() {
           }}
           onAddFeed={() => {
             setPanel(null);
+            setDraftRow({ name: "", source: "" });
             setCreatingNew(true);
             setPending(null);
           }}

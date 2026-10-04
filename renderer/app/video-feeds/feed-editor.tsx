@@ -124,15 +124,15 @@ interface Draft {
 
 function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]): Draft {
   return {
-    name: feed?.name ?? "New feed",
+    name: feed?.name ?? "",
     kind: feed?.source.kind ?? kinds[0] ?? "embed",
-    pullUrl: feed?.source.kind === "pull" ? feed.source.url : "rtsp://",
+    pullUrl: feed?.source.kind === "pull" ? feed.source.url : "",
     pullUsername: feed?.source.kind === "pull" ? feed.source.username : "",
     pullPassword: "",
     pushProtocol: feed?.source.kind === "push" ? feed.source.protocol : "srt",
     embedPlayer: feed?.source.kind === "embed" ? feed.source.player : "youtube-channel",
     embedRef: feed?.source.kind === "embed" ? feed.source.ref : "",
-    externalUrl: feed?.source.kind === "external" ? feed.source.url : "https://",
+    externalUrl: feed?.source.kind === "external" ? feed.source.url : "",
   };
 }
 
@@ -185,10 +185,29 @@ export interface FeedEditorProps {
    *  not take effect" notes are gated on it, so they never fire merely
    *  because no relay is running (video switched off, say). */
   relayRunning: boolean;
+  /** A new feed's typed name and address as they change, for the list's
+   *  draft row. Only called while `isNew`. */
+  onDraftChange?: (draft: DraftRow) => void;
 }
 
-export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew, relayRunning }: FeedEditorProps) {
+/** What the list's draft row shows of a feed that is not saved yet: the
+ *  typed name and the address-like field for the chosen source ("" for a
+ *  push feed, whose address only exists once saved). */
+export interface DraftRow {
+  name: string;
+  source: string;
+}
+
+function draftRowOf(d: Draft): DraftRow {
+  const source = d.kind === "pull" ? d.pullUrl : d.kind === "external" ? d.externalUrl : d.kind === "embed" ? d.embedRef : "";
+  return { name: d.name.trim(), source: source.trim() };
+}
+
+export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew, relayRunning, onDraftChange }: FeedEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(feed, kinds));
+  useEffect(() => {
+    if (isNew) onDraftChange?.(draftRowOf(draft));
+  }, [isNew, draft, onDraftChange]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -221,9 +240,20 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
   }
 
   async function handleSave() {
+    if (draft.name.trim() === "") {
+      setError("Give the feed a name");
+      return;
+    }
     const source = sourcePayload();
     if (!source) {
       setError("This build does not support that source yet.");
+      return;
+    }
+    // The server answers an empty address with a bare "invalid" and accepts a
+    // scheme-only one ("rtsp://") as a feed that can never play; the empty
+    // field used to be pre-filled with that scheme, so both are caught here.
+    if ((source.kind === "pull" || source.kind === "external") && /^([a-z][a-z0-9+.-]*:\/\/)?$/i.test(source.url.trim())) {
+      setError("Enter the address, including what comes after the scheme (for example rtsp://192.0.2.10/stream)");
       return;
     }
     setSaving(true);
@@ -323,7 +353,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       )}
 
       <StackedField label="Name" description="What layouts and Home show. Renaming keeps every layout using it.">
-        <Input aria-label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <Input aria-label="Name" placeholder="New feed" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
       </StackedField>
 
       <StackedField label="Source">
@@ -349,6 +379,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           >
             <Input
               aria-label="Address"
+              placeholder="rtsp://"
               className="font-mono text-caption1"
               value={draft.pullUrl}
               onChange={(e) => setDraft({ ...draft, pullUrl: e.target.value })}
@@ -393,11 +424,6 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
               </div>
             )}
           </StackedField>
-
-          <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">
-            <b>Magewell Ultra Stream:</b> turn on its RTSP server as the second output. It keeps streaming to Resi on the
-            first.
-          </p>
         </>
       )}
 
@@ -463,6 +489,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         >
           <Input
             aria-label="WebRTC (WHEP) or HLS address"
+            placeholder="https://"
             className="font-mono text-caption1"
             value={draft.externalUrl}
             onChange={(e) => setDraft({ ...draft, externalUrl: e.target.value })}

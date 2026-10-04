@@ -93,6 +93,12 @@ export function parseFeedInput(
       return { ok: false, error: "Pull source protocol must be rtsp, rtsps, srt, http, or https." };
     }
 
+    // `rtsp://` and `srt://` alone parse, with an empty host, and saved a feed
+    // that could never play. The editor's own check says the same words.
+    if (url.hostname === "") {
+      return { ok: false, error: "Enter the address, including what comes after the scheme (for example rtsp://192.0.2.10/stream)." };
+    }
+
     if (hasUserinfo(url)) {
       return { ok: false, error: "Put the username and password in their own fields, not the address." };
     }

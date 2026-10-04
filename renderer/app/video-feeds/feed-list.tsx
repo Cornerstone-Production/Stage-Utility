@@ -126,12 +126,15 @@ export function bFramesHint(feed: VideoFeedView): string | null {
 }
 
 export function FeedList({
+  draft,
   feeds,
   screens,
   selectedId,
   onSelect,
   onAddFeed,
 }: {
+  /** The unsaved feed being created, shown as the last row; null otherwise. */
+  draft?: { name: string; source: string } | null;
   feeds: readonly VideoFeedView[];
   screens: readonly ScreenVideoHealth[];
   selectedId: string | null;
@@ -140,7 +143,7 @@ export function FeedList({
 }) {
   return (
     <div className="flex min-w-0 flex-col">
-      {feeds.length === 0 && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
+      {feeds.length === 0 && !draft && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}
       {feeds.map((feed) => {
         const meta = feedMeta(feed, screens);
         const hint = bFramesHint(feed);
@@ -169,6 +172,22 @@ export function FeedList({
           </button>
         );
       })}
+      {draft && (
+        <div aria-current="true" data-testid="draft-feed-row" className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-line bg-accent/12 px-4 py-3 text-left">
+          <span className="col-start-1 row-start-1 min-w-0 text-[14px] leading-[18px] font-semibold text-fg [overflow-wrap:anywhere]">
+            {draft.name || "New feed"}
+          </span>
+          <span className="col-start-2 row-start-1 justify-self-end self-start inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-fill px-2 py-0.5 text-caption1 font-medium text-fg-muted">
+            <span className="size-1.5 rounded-full bg-current" />
+            Not saved
+          </span>
+          {draft.source ? (
+            <span className="col-start-1 font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]">{draft.source}</span>
+          ) : (
+            <span className="col-start-1 text-caption1 text-fg-subtle">Not set up yet</span>
+          )}
+        </div>
+      )}
       <div className="flex items-center gap-2 px-4 py-3">
         <Button type="button" variant="accent" size="small" onClick={onAddFeed}>
           <PlusIcon className="size-3.5" />
