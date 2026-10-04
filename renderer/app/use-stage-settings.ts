@@ -38,7 +38,6 @@ import {
   useStageStateQuery,
   useServiceTypes,
   usePlans,
-  useTeamPositions,
   useWirelessChannels,
   useLayoutTemplates,
   useSlotPresets,
@@ -168,7 +167,6 @@ export function useStageSettings(pinnedViewId?: string) {
   const { data: stageState, isLoading: stageLoading } = useStageStateQuery();
   const { data: serviceTypes = [] } = useServiceTypes(stageState);
   const { data: plans = [] } = usePlans(stageState);
-  const { data: teamPositions = [] } = useTeamPositions(stageState);
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const { data: layoutTemplates = [] } = useLayoutTemplates();
   const { data: slotPresets = [] } = useSlotPresets();
@@ -938,7 +936,6 @@ export function useStageSettings(pinnedViewId?: string) {
     stageLoading,
     serviceTypes,
     plans,
-    teamPositions,
     wirelessChannels,
     layoutTemplates,
     slotPresets,

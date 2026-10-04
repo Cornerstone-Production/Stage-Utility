@@ -63,7 +63,6 @@ function props(view: View): Parameters<typeof ViewDetail>[0] {
     canDelete: true,
     stageState: { views: [view], outputs: [] },
     wirelessChannels: [],
-    teamPositions: [],
     localSlots: [],
     slotsDirty: false,
     isSavingSlots: false,

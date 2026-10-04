@@ -109,6 +109,8 @@ declare global {
   type TaperWindow = Stage.TaperWindow;
   type TeamMemberDTO = Stage.TeamMemberDTO;
   type TeamPositionDTO = Stage.TeamPositionDTO;
+  type TypedTeamPositionDTO = Stage.TypedTeamPositionDTO;
+  type AllTeamPositionsDTO = Stage.AllTeamPositionsDTO;
   type TranscriptLineDTO = Stage.TranscriptLineDTO;
   type UpcomingPlan = Stage.UpcomingPlan;
   type UpcomingPlansDTO = Stage.UpcomingPlansDTO;
