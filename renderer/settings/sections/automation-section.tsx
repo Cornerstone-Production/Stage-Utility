@@ -39,7 +39,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { usePvpState } from "../../main/use-pvp-state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DownloadIcon, OctagonXIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, SearchIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { automationRegistryQuery } from "../../lib/automation-registry";
@@ -193,6 +193,14 @@ function NeedsSetupBadge({ issues }: { issues: RuleIssue[] }) {
     </span>
   );
 }
+/** A small neutral pill on a row, for a fact about the rule that changes what Run does. */
+function RowPill({ children, ...rest }: { children: React.ReactNode } & React.HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span {...rest} className="shrink-0 max-sm:hidden rounded-full bg-fill px-1.5 py-px text-caption2 font-medium text-fg-muted">
+      {children}
+    </span>
+  );
+}
 /** One button in the Companion offer, as far as the editor reads it. */
 interface OfferedButton {
   page: number;
@@ -215,6 +223,124 @@ interface CompanionPairsReply {
   buttons?: OfferedButton[];
 }
 
+/** How long a first press on a confirm rule's Run waits for the second. */
+const RUN_CONFIRM_MS = 5000;
+
+/** What the last manual run of a rule did, kept by the section so a search that
+ *  unmounts the row does not lose it. Until the next run or a reload. */
+interface RunResult {
+  at: number;
+  outcome: "fired" | "simulated" | "failed";
+  detail: string;
+}
+
+const RUN_TONE: Record<RunResult["outcome"], string> = {
+  fired: "text-ok-11",
+  simulated: "text-warn-11",
+  failed: "text-danger-11",
+};
+
+function runResultText(r: RunResult): string {
+  const at = formatClock(r.at, { seconds: true });
+  if (r.outcome === "simulated") return `Simulated at ${at} · nothing was sent`;
+  if (r.outcome === "failed") return `Run by hand at ${at} · failed: ${r.detail}`;
+  return `Run by hand at ${at} · done`;
+}
+
+/**
+ * One rule's Run, shared by a single rule's row and each half of a pair's.
+ *
+ * A confirm rule's first press arms the button; a second within RUN_CONFIRM_MS
+ * fires. The timer is the only thing that resets it. Disarming while armed
+ * cancels the question at once (`asking`), and the timer clears the state.
+ */
+function useRunByHand(
+  rule: { id: string; confirmRequired?: boolean },
+  disarmed: boolean,
+  onRan: (id: string, r: RunResult) => void,
+) {
+  const [armed, setArmed] = useState(false);
+  const [running, setRunning] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), RUN_CONFIRM_MS);
+    return () => clearTimeout(t);
+  }, [armed]);
+  const asking = armed && !disarmed;
+
+  async function run() {
+    if (rule.confirmRequired && !asking) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
+    setRunning(true);
+    try {
+      const r = await invoke<{ outcome: RunResult["outcome"]; detail: string }>("automation:runRule", {
+        id: rule.id,
+        confirmed: rule.confirmRequired === true,
+      });
+      onRan(rule.id, { at: Date.now(), ...r });
+    } catch (e) {
+      // A refusal (disarmed from another tab, a stale confirm flag) reads the
+      // same as an action that failed: the row says why nothing happened.
+      onRan(rule.id, { at: Date.now(), outcome: "failed", detail: errorMessage(e) });
+    } finally {
+      setRunning(false);
+    }
+  }
+  return { asking, running, run };
+}
+
+/** Fires the action once, now: not the trigger, the conditions, the cooldown or
+ *  once-per-service, and not the rule's own switch. Simulate and the disarm
+ *  switch still apply. A confirm rule asks first, by turning into "Run it?". */
+function RunButton({
+  rule,
+  label,
+  disarmed,
+  onRan,
+}: {
+  rule: { id: string; name: string; confirmRequired?: boolean };
+  /** The words on the button; a pair's halves say which half. */
+  label: string;
+  disarmed: boolean;
+  onRan: (id: string, r: RunResult) => void;
+}) {
+  const { asking, running, run } = useRunByHand(rule, disarmed, onRan);
+  return (
+    <Button
+      variant="filled"
+      size="small"
+      className={"h-7 shrink-0 text-footnote " + (asking ? "bg-amber-3 text-amber-11 hover:bg-amber-4" : "")}
+      data-run-button={asking ? "armed" : "idle"}
+      data-run-rule={rule.id}
+      aria-label={`${label} ${rule.name}`}
+      disabled={disarmed || running}
+      tooltip={disarmed ? "Disarmed" : ""}
+      onClick={() => void run()}
+    >
+      <PlayIcon className="size-3.5" />
+      {asking ? "Run it?" : label}
+    </Button>
+  );
+}
+
+/** The result line, with an optional prefix naming a pair's half. */
+function RunResultLine({ result, half }: { result: RunResult; half?: string }) {
+  return (
+    <div
+      role="status"
+      data-run-result={result.outcome}
+      {...(half ? { "data-run-half": half } : {})}
+      className={`text-caption1 ${RUN_TONE[result.outcome]}`}
+    >
+      {half ? `${half}: ` : ""}
+      {runResultText(result)}
+    </div>
+  );
+}
+
 // ── One rule's row ────────────────────────────────────────────────────────────
 
 /**
@@ -229,11 +355,18 @@ interface CompanionPairsReply {
 function RuleRow({
   rule,
   registry,
+  disarmed,
+  lastRun,
+  onRan,
   onOpen,
   onChanged,
 }: {
   rule: RuleWithIssues;
   registry: Registry;
+  /** The panic switch is on: nothing runs, by trigger or by hand. */
+  disarmed: boolean;
+  lastRun: RunResult | undefined;
+  onRan: (id: string, r: RunResult) => void;
   onOpen: () => void;
   onChanged: () => void;
 }) {
@@ -282,10 +415,16 @@ function RuleRow({
             onChanged();
           }}
         />
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen}>
+        <div className="min-w-0 flex-1">
+        <button type="button" className="block w-full min-w-0 text-left" onClick={onOpen}>
           <div className="flex min-w-0 items-baseline gap-2">
             <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
             {needsSetup && <NeedsSetupBadge issues={issues} />}
+            {/* Two quiet pills from the Run mockup: a rule that is off can still
+                be run by hand, and a confirm rule's Run asks first. Hidden on a phone,
+                where they would crush the name; the switch and the button say the same. */}
+            {!rule.enabled && <RowPill data-rule-pill="off">Off</RowPill>}
+            {rule.confirmRequired && <RowPill data-rule-pill="confirm">Confirm first</RowPill>}
             {/* The names this cue used to answer to, quietly. A cue is renamed
                 when its Companion button is relabelled, and the old name stays
                 live — so this is the only place the rules list says that the URL
@@ -317,6 +456,8 @@ function RuleRow({
               nothing for a rule that has never been reconciled. */}
           {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
         </button>
+        {lastRun && <RunResultLine result={lastRun} />}
+        </div>
         {/* The same one word a pair's row carries, for a cue with no partner:
             which side of the Home Assistant / Everything else split this row is
             on, without reading the heading above it. */}
@@ -331,6 +472,7 @@ function RuleRow({
             {hidden ? "voice only" : "Home"}
           </span>
         )}
+        <RunButton rule={rule} label="Run" disarmed={disarmed} onRan={onRan} />
       </div>
     </div>
   );
@@ -353,6 +495,11 @@ function PairRow({
   guarded,
   cueState,
   issues,
+  on,
+  off,
+  disarmed,
+  lastRuns,
+  onRan,
   onOpen,
 }: {
   base: string;
@@ -366,14 +513,23 @@ function PairRow({
   /** Both halves' issues, combined — either half needing setup is the pair
    *  needing setup, the same as RuleRow's own badge one field down. */
   issues: RuleIssue[];
+  /** The two halves, each run by its own button. */
+  on: Rule;
+  off: Rule;
+  disarmed: boolean;
+  lastRuns: ReadonlyMap<string, RunResult>;
+  onRan: (id: string, r: RunResult) => void;
   onOpen: () => void;
 }) {
+  const onResult = lastRuns.get(on.id);
+  const offResult = lastRuns.get(off.id);
   return (
     <div className="rounded-lg border border-line bg-surface p-3" data-cue-pair-row={base}>
       <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex w-full min-w-0 items-center gap-2 text-left"
           onClick={onOpen}
           aria-label={`${name} pair`}
         >
@@ -406,6 +562,16 @@ function PairRow({
             {hidden ? "voice only" : "Home"}
           </span>
         </button>
+        {onResult && <RunResultLine result={onResult} half="On" />}
+        {offResult && <RunResultLine result={offResult} half="Off" />}
+        </div>
+        {/* One Run per half: a pair is two rules, and each is run, confirmed
+            and disarmed on its own. Stacked on a phone, where two buttons
+            beside the name would crush it. */}
+        <div className="flex shrink-0 flex-col gap-1 sm:flex-row">
+          <RunButton rule={on} label="Run on" disarmed={disarmed} onRan={onRan} />
+          <RunButton rule={off} label="Run off" disarmed={disarmed} onRan={onRan} />
+        </div>
       </div>
     </div>
   );
@@ -693,6 +859,14 @@ export function AutomationSection() {
     return rule ? { kind: "rule", rule } : null;
   }, [editing, pairRows, rules, togglePairs, cueStateData]);
 
+  // The last manual run of each rule, until the next one or a reload.
+  // A Map, not a record: the key is a rule id, which arrives over the wire.
+  const [lastRuns, setLastRuns] = useState<ReadonlyMap<string, RunResult>>(new Map());
+  const noteRan = useCallback(
+    (id: string, r: RunResult) => setLastRuns((cur) => new Map(cur).set(id, r)),
+    [],
+  );
+
   /** One row. A pair is ONE row holding both halves; everything else is a rule. */
   const renderEntry = (entry: RuleListEntry) => {
     if (entry.kind === "rule") {
@@ -701,6 +875,9 @@ export function AutomationSection() {
           key={entry.key}
           rule={entry.rule}
           registry={registry!}
+          disarmed={settings.disarmed}
+          lastRun={lastRuns.get(entry.rule.id)}
+          onRan={noteRan}
           onOpen={() => setEditing({ kind: "rule", id: entry.rule.id })}
           onChanged={refresh}
         />
@@ -718,6 +895,11 @@ export function AutomationSection() {
         guarded={hasServiceGuard(p.on.conditions) && hasServiceGuard(p.off.conditions)}
         cueState={cueStateFor(cueStateData?.states, p.base)}
         issues={[...(p.on.issues ?? []), ...(p.off.issues ?? [])]}
+        on={p.on}
+        off={p.off}
+        disarmed={settings.disarmed}
+        lastRuns={lastRuns}
+        onRan={noteRan}
         onOpen={() => setEditing({ kind: "pair", id: p.on.id })}
       />
     );

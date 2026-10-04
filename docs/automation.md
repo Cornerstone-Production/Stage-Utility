@@ -322,8 +322,10 @@ trigger other than Called by name. An ON/OFF pair is ONE row, named by the words
 it is spoken as.
 
 A row is a summary: the enable switch, the name, any former names, the
-service-guard badge, whether Home Assistant has an entity for it, and the
-one-line *when … then*. Pressing the row — anywhere but the enable switch —
+service-guard badge, whether Home Assistant has an entity for it, the
+one-line *when … then*, and a **Run** button (see
+[Run by hand](#run-by-hand)). Pressing the row — anywhere but the enable switch
+or Run —
 opens the editor in a dialog over the list, so the list and the search field
 stay where they are. **Test** and **Delete** are in its footer beside **Cancel**
 and **Save**; Escape, the overlay and Cancel all discard the draft, and a save
@@ -598,12 +600,52 @@ outcome is recorded, including skips and the reason for them.
 **Simulate mode** (on by default) — rules evaluate fully and the resolved action is
 logged, but nothing reaches a device. Leave it on while you build.
 
-**Per-rule enable and Test fire** — the enable switch is on the row; **Test** is in
-the editor's footer. Test runs the action immediately, ignoring the trigger, so you
-can prove the action before arming the rule. It respects simulate.
+**Per-rule enable and Run by hand** — the enable switch is on the row, beside a
+**Run** button. See [Run by hand](#run-by-hand).
 
 **Disarm all** — stops every rule at once regardless of its own switch, and persists
-across a restart. Simulate is for building; disarm is for stopping.
+across a restart, and refuses a manual run too. Simulate is for building; disarm
+is for stopping.
+
+### Run by hand
+
+**Run**, on every rule row, fires the rule's action once, now. It is explicit
+operator intent, so it bypasses what decides *when* a rule fires: the trigger, the
+conditions, the cooldown, once per service, and the rule's own enable switch — a
+disabled rule can be run. It does not bypass what decides *whether* anything may
+act:
+
+- **Simulate** — a run in simulate mode is logged as `simulated` and sends
+  nothing. The row says so.
+- **Disarm all** — while disarmed the button is disabled, and the server refuses
+  the request with `409` and the reason.
+- **Confirm before running** — a rule with that switch on needs a second press
+  within five seconds: the first turns the button into **Run it?**, and it lapses
+  back if nobody presses again. The server also refuses such a rule with `428`
+  unless the request says `confirmed: true`, so a stray API call cannot skip the
+  question.
+
+Under the row's summary a line says what happened, until the next run or a page
+reload: *Run by hand at 8:45:30 PM · done*, *Simulated at … · nothing was sent*,
+or *Run by hand at … · failed: <reason>*. An action that cannot do its job right
+now — a baptism action with the timer idle, a Companion press whose button has
+gone — fails with its own reason, and that is the line.
+
+A run is logged in the Activity log with the reason `manual` and who ran it
+(`console` for the app's own pages, a token's label for an API caller), and on
+`/log` as `[automation] "<rule>" run by hand from <caller>: <outcome>`. It sets
+the rule's last-fired time, so a later automatic fire inside the cooldown is
+suppressed. It does not use up **once per service**.
+
+**Test** in the editor's footer is the same run, by the same route, for the saved
+rule: it respects simulate and disarm, and asks first when the rule is marked
+confirm before running.
+
+A pair's row has one Run button per half, **Run on** and **Run off**, stacked on
+a narrow screen. Each runs its own rule exactly as above: it asks first when that
+half is marked confirm before running (the other half is not armed by it), is
+disabled while disarmed, and reports under the row on its own line, prefixed
+*On:* or *Off:*.
 
 **Cooldown** — a value oscillating across a threshold produces real crossings each
 time. The cooldown stops one flapping sensor firing repeatedly.
