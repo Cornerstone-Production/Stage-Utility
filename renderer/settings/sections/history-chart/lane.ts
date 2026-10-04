@@ -23,10 +23,37 @@ export interface LaneItem {
   actualSec: number | null;
   /** Sound only: this item's loudest reading, already formatted.
    *
-   *  Does two things, and both are the point: it puts a tick on the block, and
-   *  it is what the stat strip says when that block is hovered. A tick with no
-   *  number anywhere is a mark nobody can read. */
+   *  Does two things, and both are the point: it is the number the
+   *  stat strip says when the item or its peak marker is hovered, and what makes
+   *  the item a candidate for a marker at all. A mark with no number anywhere
+   *  is a mark nobody can read. */
   peakLabel?: string | null;
+  /** Sound only: the instant (epoch ms) of the loudest point of the drawn line
+   *  inside this item, from `peakInstant`. Absent when the line has no point
+   *  inside the item — the chart then draws no peak marker for it, rather than
+   *  guessing the middle of the block. */
+  peakAt?: number | null;
+}
+
+/**
+ * The loudest point of a series inside one item's window [start, end), the
+ * first one when two tie. null when the series has no point inside it. An item
+ * still live (`endedAt` null) runs to the end of the series.
+ */
+export function peakInstant(
+  points: readonly { t: number; v: number }[],
+  startedAt: string,
+  endedAt: string | null,
+): { t: number; v: number } | null {
+  const start = Date.parse(startedAt);
+  const end = endedAt ? Date.parse(endedAt) : Infinity;
+  if (!Number.isFinite(start) || Number.isNaN(end)) return null;
+  let best: { t: number; v: number } | null = null;
+  for (const p of points) {
+    if (p.t < start || p.t >= end) continue;
+    if (!best || p.v > best.v) best = p;
+  }
+  return best;
 }
 
 /** A placed item block. `x0`/`x1` are plot coordinates, already clipped to the plot. */

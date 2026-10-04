@@ -291,8 +291,9 @@ test("the sound section draws the chart and offers its Smaart metrics in Customi
     // The per-item table is KEPT — it carries Max and Leq per metric, which the
     // line does not, and nothing in this change replaces it.
     assert.ok(screen.getByRole("table"), "the per-item table went missing");
-    // The peak mark the spec asks for, on the item's lane block.
-    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 1);
+    // The per-item step has no loudest instant to put a triangle at, so it
+    // draws none rather than guess the middle of the block.
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
 
     fireEvent.click(screen.getByLabelText("Customize sound"));
     const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
@@ -341,16 +342,13 @@ test("the sound chart plots the real sample series when the route has one", asyn
   }
 });
 
-test("the item peak tick is full height, named in the legend, and switchable", async () => {
-  // It shipped as a 4px nub on the top edge of an item block in the series
-  // colour, with nothing on the page naming it — the first question anybody
-  // asked about the sound chart was what the blue chip was.
-  //
-  // Height is asserted off the drawn attributes, which is the one thing about
-  // it jsdom CAN see: the tick is an SVG <line> with explicit coordinates, not
-  // a styled box.
+test("the item peak is a triangle at the loudest bucket, named in the legend, and switchable", async () => {
+  // It shipped as a tick on the item's block at its midpoint, with nothing on
+  // the page naming it. The triangle is at the loudest point of the line the
+  // chart draws. The fixture's last bucket (T0 + 33 min, 99 dB) is the loudest
+  // inside the Message item, which is nowhere near its midpoint (T0 + 20 min).
   const realFetch = globalThis.fetch;
-  globalThis.fetch = splFetch({ series: false });
+  globalThis.fetch = splFetch({ series: true });
   try {
     render(
       React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
@@ -361,16 +359,27 @@ test("the item peak tick is full height, named in the legend, and switchable", a
     await act(async () => {
       await Promise.resolve();
     });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    const mark = document.querySelector("[data-peak-mark]") as SVGLineElement;
-    assert.ok(mark, "no peak mark");
-    const height = Number(mark.getAttribute("y2")) - Number(mark.getAttribute("y1"));
-    // LANE_ROW_H. A 4px nub is the bug.
-    assert.equal(height, 16, `the peak tick is ${height}px tall, not the segment's full 16`);
+    const mark = document.querySelector("[data-peak-mark]");
+    assert.ok(mark, "no peak marker");
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 1);
+    const tri = mark.querySelector("[data-peak-triangle]") as SVGPathElement;
+    assert.ok(tri, "the marker is not a triangle");
+    const tipX = Number(/L([\d.]+),/.exec(tri.getAttribute("d") ?? "")?.[1]);
+    // The last vertex of the peak line is the T0 + 33 min bucket: the loudest.
+    const lineD = (document.querySelector("[data-series-line='max']") as SVGPathElement).getAttribute("d") ?? "";
+    const lastX = Number(lineD.split("L").pop()?.split(",")[0]);
+    assert.ok(Math.abs(tipX - lastX) < 0.05, `the triangle is at ${tipX}, the loudest point is at ${lastX}`);
+    // The tick in the lane is gone.
+    assert.equal(document.querySelectorAll("[data-lane-row] [data-peak-mark]").length, 0);
 
     const named = document.querySelector("[data-legend-peak-mark]") as HTMLElement;
     assert.ok(named, "the legend does not name the peak mark");
     assert.equal(named.textContent, "Item peak", `the legend reads ${named.textContent}`);
+    assert.ok(named.querySelector("svg path"), "the legend swatch is not a triangle");
 
     // And it is a choice, not a fixture.
     fireEvent.click(screen.getByLabelText("Customize sound"));
@@ -379,7 +388,8 @@ test("the item peak tick is full height, named in the legend, and switchable", a
     await act(async () => {
       await Promise.resolve();
     });
-    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0, "unticking Item peaks left the tick drawn");
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0, "unticking Item peaks left the triangle drawn");
+    assert.equal(document.querySelectorAll("[data-peak-row]").length, 0, "unticking Item peaks left the row drawn");
     assert.equal(document.querySelectorAll("[data-legend-peak-mark]").length, 0, "the legend still names a mark that is off");
     cleanup();
     await flushReact();

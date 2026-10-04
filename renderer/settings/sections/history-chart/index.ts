@@ -43,4 +43,4 @@ export {
   type ChartSeries,
   type YScale,
 } from "./geometry";
-export { laneLabel, laneSegments, segmentAt, type LaneItem, type LaneSegment } from "./lane";
+export { laneLabel, laneSegments, peakInstant, segmentAt, type LaneItem, type LaneSegment } from "./lane";

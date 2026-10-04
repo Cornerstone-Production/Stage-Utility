@@ -558,11 +558,20 @@ flat across the time it ran. A read that FAILS is not that: the chart says
 step as the whole answer, and the server logs the reason on a `[spl-series]`
 line.
 
-Either way an item's peak mark is a tick through the middle of its block rather
-than at the loudest instant, because the instant is not in the per-item record.
-It is drawn the full height of the block in the primary line's colour, named
-**Item peak** in the legend, and switched under Chart in Customize. Hover the
-block and the strip says what it peaked at.
+Each item's **peak** is a small downward triangle in a row above the plot, in the
+primary line's colour, at the loudest point of the line inside that item. Only
+the triangle shows at rest. Hover it, the column of line down to the peak point,
+or the item's block in the lane: a dotted line runs from the triangle to the peak
+point, a dot marks the point, and the strip says what the item peaked at and
+when. Within about 10 px either side of that line the peak readout takes
+precedence over the plot's moment-under-the-pointer readout. Each triangle is a
+tab stop and shows the same readout on focus. The number is the item's recorded
+maximum; the position is the loudest point on the drawn line, which can read a
+fraction lower than the recorded figure where samples are bucketed. An item the
+line has no point inside gets no triangle, and so does every item on the per-item
+step, which has no loudest instant. The row exists only on the sound chart and
+only while a triangle is drawn. It is named **Item peak** in the legend, and
+switched, along with the triangle, line and row, under Chart in Customize.
 
 **The item lane** is two rows under the axis: pre-service items outlined above,
 in-service items filled below, each spanning the time it actually ran. A block is
@@ -581,7 +590,7 @@ metrics to surface.
 
 The Smaart metric choice does more than pick table columns: the first one still
 ticked is the **primary** — the metric the chart's line is read from when the
-service has no raw samples, the one each item's peak mark and the strip's Peak
+service has no raw samples, the one each item's peak triangle and the strip's Peak
 and Message figures report, and the one the raw series is requested for. Untick
 every metric and the chart says so rather than drawing an empty plot.
 
