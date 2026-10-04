@@ -86,6 +86,17 @@ export type CueCallResult =
   | { status: 404; body: { error: string; reason: "unknown" } }
   | { status: 409; body: { error: string; reason: CueBlockReason; plan?: string } };
 
+/** How a rule's action ended, as the log words it. */
+export type RunOutcome = "fired" | "simulated" | "failed";
+
+/**
+ * What running a rule by hand answers with: a STATUS plus a body, decided here
+ * so the refusals live beside the guards that produce them, as CueCallResult's do.
+ */
+export type RunNowResult =
+  | { status: 200; body: { outcome: RunOutcome; detail: string } }
+  | { status: 404 | 409 | 428; body: { error: string } };
+
 /** ISO timestamp -> epoch ms, or null when absent or unparseable. */
 function parseMs(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -397,12 +408,46 @@ class AutomationEngine {
     return this.listRules();
   }
 
-  /** Run a rule's action now, ignoring its trigger. Explicit operator intent, so it
-   *  runs even for a disabled rule — but still honours simulate. */
-  async testFire(id: string): Promise<{ ok: boolean; detail: string }> {
-    const rule = this.rules.find((r) => r.id === id);
-    if (!rule) throw new Error(`Automation: unknown rule ${id}`);
-    return this.runAction(rule, "test fire");
+  /**
+   * Run a rule's action once, now, on behalf of an operator at a console.
+   *
+   * The ONE manual path: the row's Run button and the editor's Test both come
+   * here. It bypasses what decides WHEN a rule fires — the trigger, the
+   * conditions, the cooldown, oncePerService and the rule's own switch — because
+   * the operator has decided it should. It does not bypass what decides WHETHER
+   * anything may act: simulate (the action's own `simulate` flag) and the disarm
+   * switch (refused 409). A rule marked confirmRequired needs `confirmed`, so a
+   * stray API call cannot skip the question the console asks.
+   *
+   * Sets lastFiredAt, so a later automatic fire sees the cooldown. Does NOT set
+   * oncePerService: "once per service" is about the automatic fire, and a button
+   * press during rehearsal should not use it up.
+   *
+   * Built-in cues are runnable too: they are looked up in rulesWithBuiltins.
+   */
+  async runNow(id: string, opts: { caller: string; confirmed?: boolean }): Promise<RunNowResult> {
+    const rule = this.rulesWithBuiltins().find((r) => r.id === id);
+    if (!rule) {
+      console.warn(`[automation] run by hand from ${scrub(opts.caller)}: unknown rule ${scrub(id)}`);
+      return { status: 404, body: { error: `There is no rule ${id}` } };
+    }
+    const refuse = (status: 409 | 428, error: string, why: string): RunNowResult => {
+      this.log(rule, "suppressed", `${error} (manual)`, opts.caller);
+      console.warn(`[automation] "${scrub(rule.name)}" run by hand from ${scrub(opts.caller)}: refused (${scrub(why)})`);
+      return { status, body: { error } };
+    };
+    if (this.settings.disarmed) {
+      return refuse(409, "Automation is disarmed, so nothing will run", "disarmed");
+    }
+    if (rule.confirmRequired && opts.confirmed !== true) {
+      return refuse(428, `"${rule.name}" is marked confirm before running; send confirmed: true`, "confirm-required");
+    }
+    this.lastFiredAt.set(rule.id, Date.now());
+    const result = await this.runAction(rule, "manual", opts.caller);
+    console.log(
+      `[automation] "${scrub(rule.name)}" run by hand from ${scrub(opts.caller)}: ${scrub(result.outcome)} (${scrub(result.detail)})`,
+    );
+    return { status: 200, body: { outcome: result.outcome, detail: result.detail } };
   }
 
   // ── Called cues ────────────────────────────────────────────────────────────
@@ -861,12 +906,16 @@ class AutomationEngine {
     return null;
   }
 
-  private async runAction(rule: Rule, why: string, caller?: string): Promise<{ ok: boolean; detail: string }> {
+  private async runAction(
+    rule: Rule,
+    why: string,
+    caller?: string,
+  ): Promise<{ ok: boolean; detail: string; outcome: RunOutcome }> {
     const action = AUTOMATION_ACTIONS[rule.action.id];
     if (!action) {
       const detail = `unknown action "${rule.action.id}"`;
-      this.log(rule, "failed", detail);
-      return { ok: false, detail };
+      this.log(rule, "failed", detail, caller);
+      return { ok: false, detail, outcome: "failed" };
     }
     let result: { ok: boolean; detail: string };
     try {
@@ -876,9 +925,9 @@ class AutomationEngine {
       // stop the engine or the next rule.
       result = { ok: false, detail: errorMessage(e) };
     }
-    const outcome = !result.ok ? "failed" : this.settings.simulate ? "simulated" : "fired";
+    const outcome: RunOutcome = !result.ok ? "failed" : this.settings.simulate ? "simulated" : "fired";
     this.log(rule, outcome, `${result.detail} (${why})`, caller);
-    return result;
+    return { ...result, outcome };
   }
 
   private log(

@@ -358,7 +358,7 @@ export type IpcChannel =
   | "automation:rules"
   | "automation:setSettings"
   | "automation:settings"
-  | "automation:testRule"
+  | "automation:runRule"
   | "automation:updateRule"
   | "backup:getSchedule"
   | "backup:runNow"
@@ -1465,7 +1465,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "automation:addRule": return post("/api/automation/rules", params);
     case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
     case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
-    case "automation:testRule": return post(`/api/automation/rules/${(params as { id: string }).id}/test`);
+    case "automation:runRule": {
+      const { id, confirmed } = params as { id: string; confirmed?: boolean };
+      return post(`/api/automation/rules/${encodeURIComponent(id)}/run`, { confirmed: confirmed === true });
+    }
     case "automation:settings": return apiFetch("/api/automation/settings");
     case "automation:setSettings": return post("/api/automation/settings", params);
     case "automation:log": return apiFetch("/api/automation/log");

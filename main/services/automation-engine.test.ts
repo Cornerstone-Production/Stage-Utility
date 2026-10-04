@@ -16,6 +16,7 @@ process.env.HOME = path.join(TMP, "home");
 const { automationEngine } = await import("./automation-engine.js");
 const { automationLog } = await import("./automation-log.js");
 const { AUTOMATION_TRIGGERS } = await import("./automation-triggers.js");
+const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
 
 // A trigger that fires on ANY snapshot, ignoring prev entirely. The real triggers
 // all carry their own `prev === null` guard, which means they mask whether the
@@ -28,6 +29,26 @@ AUTOMATION_TRIGGERS["test.always"] = {
   channel: "pco:live",
   params: [],
   didFire: () => true,
+};
+
+// An action with a side effect the tests can count, and one that fails the way a
+// baptism action does when the timer is idle. `log.message` cannot show whether
+// simulate really stopped the action: it does nothing either way.
+const sent: string[] = [];
+AUTOMATION_ACTIONS["test.record"] = {
+  id: "test.record",
+  label: "Record (test only)",
+  params: [],
+  run: async (_params, ctx) => {
+    if (!ctx.simulate) sent.push("sent");
+    return { ok: true, detail: ctx.simulate ? "would send" : "sent" };
+  },
+};
+AUTOMATION_ACTIONS["test.fail"] = {
+  id: "test.fail",
+  label: "Fail (test only)",
+  params: [],
+  run: async () => ({ ok: false, detail: "the timer is idle, so there is no next person" }),
 };
 
 after(async () => {
@@ -191,13 +212,124 @@ describe("simulate and test-fire", () => {
     await automationEngine.__handleBroadcast("pco:live", live("item"), NOW + 1000);
     assert.equal(automationLog.list()[0].outcome, "simulated");
   });
+});
 
-  test("test fire runs the action ignoring the trigger, and respects disabled", async () => {
-    await automationEngine.setSettings({ simulate: true, disarmed: false });
-    const id = await ruleFiringOnServiceStart({ enabled: false });
-    const r = await automationEngine.testFire(id);
-    assert.equal(r.ok, true, "test fire is explicit operator intent — it runs even when disabled");
-    assert.equal(fires(), 1);
+describe("run by hand", () => {
+  beforeEach(async () => {
+    await automationEngine.init();
+    await automationEngine.setSettings({ simulate: false, disarmed: false });
+    sent.length = 0;
+  });
+
+  const rec = (over: Record<string, unknown> = {}) =>
+    ruleFiringOnServiceStart({ action: { id: "test.record", params: {} }, ...over });
+  const run = (id: string, o: { confirmed?: boolean; caller?: string } = {}) =>
+    automationEngine.runNow(id, { caller: o.caller ?? "console", confirmed: o.confirmed });
+
+  test("fires while its conditions fail, inside its cooldown, and when disabled", async () => {
+    const id = await rec({
+      enabled: false,
+      cooldownSec: 3600,
+      conditions: [{ id: "service.type-is", params: { serviceTypeId: "nope" } }],
+    });
+    const first = await run(id);
+    assert.deepEqual(first, { status: 200, body: { outcome: "fired", detail: "sent" } });
+    const second = await run(id); // the first run's cooldown does not stop a second by hand
+    assert.equal(second.status, 200);
+    assert.equal(sent.length, 2);
+  });
+
+  test("fires after oncePerService has been used, and does not use it up", async () => {
+    const id = await rec({ oncePerService: true, cooldownSec: 0 });
+    // The service key comes from the bus, so a snapshot has to have flowed
+    // before the manual run for there to be a key to (wrongly) mark.
+    await automationEngine.__handleBroadcast("pco:live", live("preservice"), NOW);
+    await run(id);
+    assert.equal(sent.length, 1);
+    await automationEngine.__handleBroadcast("pco:live", live("item"), NOW + 1000);
+    assert.equal(sent.length, 2, "the manual run did not consume the once-per-service fire");
+    await automationEngine.__handleBroadcast("pco:live", live("preservice"), NOW + 2000);
+    await automationEngine.__handleBroadcast("pco:live", live("item"), NOW + 3000);
+    assert.equal(sent.length, 2, "the automatic fire did consume it");
+    await run(id);
+    assert.equal(sent.length, 3, "and a manual run is still allowed after that");
+  });
+
+  test("is refused while disarmed, and nothing runs", async () => {
+    const id = await rec();
+    await automationEngine.setSettings({ disarmed: true });
+    const r = await run(id);
+    assert.equal(r.status, 409);
+    assert.match((r.body as { error: string }).error, /disarmed/i);
+    assert.equal(sent.length, 0);
+  });
+
+  test("simulate answers simulated and the action sends nothing", async () => {
+    const id = await rec();
+    await automationEngine.setSettings({ simulate: true });
+    const r = await run(id);
+    assert.deepEqual(r, { status: 200, body: { outcome: "simulated", detail: "would send" } });
+    assert.equal(sent.length, 0);
+    assert.equal(automationLog.list()[0].outcome, "simulated");
+  });
+
+  test("sets lastFiredAt: an automatic fire inside the cooldown is suppressed", async () => {
+    const id = await rec({ cooldownSec: 3600 });
+    await run(id);
+    sent.length = 0;
+    await automationEngine.__handleBroadcast("pco:live", live("preservice"), NOW);
+    await automationEngine.__handleBroadcast("pco:live", live("item"), NOW + 1000);
+    assert.equal(sent.length, 0);
+    assert.ok(automationLog.list().some((e) => e.outcome === "suppressed" && /cooldown/i.test(e.detail)));
+  });
+
+  test("a confirm rule is refused 428 without confirmed, and runs with it", async () => {
+    const id = await rec({ confirmRequired: true });
+    const refused = await run(id);
+    assert.equal(refused.status, 428);
+    assert.equal(sent.length, 0);
+    const done = await run(id, { confirmed: true });
+    assert.equal(done.status, 200);
+    assert.equal(sent.length, 1);
+  });
+
+  test("the log entry says it was manual and who ran it", async () => {
+    const id = await rec();
+    await run(id, { caller: "console" });
+    const e = automationLog.list()[0];
+    assert.equal(e.outcome, "fired");
+    assert.equal(e.caller, "console");
+    assert.match(e.detail, /\(manual\)/);
+  });
+
+  test("a failing action returns its own reason", async () => {
+    const id = await rec({ action: { id: "test.fail", params: {} } });
+    const r = await run(id);
+    assert.deepEqual(r, {
+      status: 200,
+      body: { outcome: "failed", detail: "the timer is idle, so there is no next person" },
+    });
+    assert.equal(automationLog.list()[0].outcome, "failed");
+  });
+
+  test("an unknown rule is 404", async () => {
+    assert.equal((await run("nope")).status, 404);
+  });
+
+  test("the server log names the rule, the caller and the outcome, scrubbed", async () => {
+    const id = await rec({ name: "Doors\nforged line" });
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+    try {
+      await run(id, { caller: "ha token" });
+    } finally {
+      console.log = real;
+    }
+    const mine = lines.filter((l) => l.startsWith("[automation]") && l.includes("run by hand"));
+    assert.equal(mine.length, 1);
+    assert.match(mine[0], /from ha token: fired/);
+    assert.ok(!mine[0].includes("\n"), "a newline in the rule name must not split the log line");
   });
 });
 

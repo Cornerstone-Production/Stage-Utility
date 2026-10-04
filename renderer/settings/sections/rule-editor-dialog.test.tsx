@@ -137,6 +137,9 @@ let requests: { method: string; url: string; body: string | null }[] = [];
 let CREATED: StubRule | null = null;
 /** A rule id the server refuses to update, as it refuses a duplicate cue name. */
 let REFUSE: { id: string; error: string } | null = null;
+/** Answer POST .../run the way the server does for a confirm rule: 428 until the
+ *  body says `confirmed: true`. */
+let RUN_NEEDS_CONFIRM = false;
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
   const url = String(input);
@@ -165,6 +168,21 @@ let REFUSE: { id: string; error: string } | null = null;
       const rule = RULES.find((r) => r.id === id);
       const answered = { ...rule, issues: [] };
       return { ok: true, status: 200, json: async () => answered, text: async () => JSON.stringify(answered) };
+    }
+    if (method === "POST" && url.endsWith("/run")) {
+      const confirmed = (JSON.parse(String(init?.body ?? "{}")) as { confirmed?: boolean }).confirmed === true;
+      if (RUN_NEEDS_CONFIRM && !confirmed) {
+        const refusal = { error: "marked confirm before running" };
+        return {
+          ok: false,
+          status: 428,
+          statusText: "Precondition Required",
+          json: async () => refusal,
+          text: async () => JSON.stringify(refusal),
+        };
+      }
+      const done = { outcome: "fired", detail: "ran" };
+      return { ok: true, status: 200, json: async () => done, text: async () => JSON.stringify(done) };
     }
     if (method === "DELETE") RULES = RULES.filter((r) => r.id !== id);
     if (method === "POST" && url.endsWith("/api/automation/rules") && CREATED) {
@@ -285,6 +303,7 @@ beforeEach(() => {
   RULES = [];
   CREATED = null;
   REFUSE = null;
+  RUN_NEEDS_CONFIRM = false;
   requests = [];
 });
 afterEach(async () => {
@@ -311,6 +330,32 @@ describe("one rule", () => {
     assert.equal(field("Name")?.value, "Rule take_screens");
     assert.equal(field("Cue name")?.value, "take_screens");
     assert.equal(field("Spoken as")?.value, "the screens");
+  });
+
+  test("Test on a confirm rule is answered 428, asks, and resends with confirmed", async () => {
+    RUN_NEEDS_CONFIRM = true;
+    await mount();
+    await openRow("Rule take_screens");
+    await press(button("Test"), "Test");
+    const sent = () => requests.filter((r) => r.url.endsWith("/run")).map((r) => JSON.parse(r.body ?? "{}"));
+    assert.deepEqual(sent(), [{ confirmed: false }], "the first call must go without confirmed");
+    assert.ok(button("Run it"), "the confirm dialog did not open on the 428");
+
+    await press(button("Run it"), "Run it");
+    assert.deepEqual(sent(), [{ confirmed: false }, { confirmed: true }]);
+  });
+
+  test("declining the confirm sends no second call", async () => {
+    RUN_NEEDS_CONFIRM = true;
+    await mount();
+    await openRow("Rule take_screens");
+    await press(button("Test"), "Test");
+    // Two Cancel buttons exist (the editor's and the dialog's); the dialog's is
+    // the last one in the document.
+    const cancels = [...document.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Cancel");
+    await press(cancels.at(-1), "the confirm dialog's Cancel");
+    assert.equal(button("Run it"), null, "the confirm dialog stayed open");
+    assert.equal(requests.filter((r) => r.url.endsWith("/run")).length, 1);
   });
 
   test("Cancel throws the change away and writes nothing", async () => {
@@ -714,7 +759,7 @@ describe("a pair", () => {
     await press(tab("Turn off"), "the Turn off tab");
     await press(button("Test turn off"), "Test turn off");
     assert.deepEqual(
-      requests.filter((r) => r.url.endsWith("/test")).map((r) => r.url.split("/").at(-2)),
+      requests.filter((r) => r.url.endsWith("/run")).map((r) => r.url.split("/").at(-2)),
       ["rule-projectors_off"],
     );
   });

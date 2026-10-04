@@ -171,7 +171,7 @@ as such rather than given a doc link it doesn't need.
 | `[archive]` | A data-archive read, write or import failure: [Data archive](../data-archive.md) |
 | `[attachment-cache]` | Plan attachments cached from Planning Center: prunes, and fetch/redirect/size refusals: [Planning Center](../integrations/planning-center.md) |
 | `[attendance-recorder]` | The attendance-trend recorder's debounced save failing to persist |
-| `[automation]` | Rules added, changed, removed, saved with issues, or failing to fire; on the browser, the rule list failing to load: [Automation](../automation.md) |
+| `[automation]` | Rules added, changed, removed, saved with issues, failing to fire, or run by hand from a Run button (who ran it, and what came of it); on the browser, the rule list failing to load: [Automation](../automation.md) |
 | `[automation-log]` | The Activity log itself failing to persist an entry to disk |
 | `[backup]` | The scheduled automatic backup writing, or failing: [Automatic backups](reliability.md#automatic-backups) |
 | `[baptism]` | Session-store eviction at the cap, sessions stored more than once under one id, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/scriptview-and-baptisms.md#logging) |
