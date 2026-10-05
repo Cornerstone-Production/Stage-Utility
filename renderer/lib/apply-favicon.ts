@@ -4,7 +4,8 @@
 // operator app and every kiosk display follow a logo change without a reload.
 //
 // The stored logo is already a square PNG: the Branding cropper always exports a
-// square region, so there is nothing to letterbox.
+// square region, so there is nothing to letterbox. It may arrive as a
+// /branding-images/ URL or a data URL; either works as an icon.
 //
 // RECOLOR. With "Recolor to match theme" on (the default) the app draws the logo
 // as a CSS mask filled with the theme's foreground, because a single-colour logo
@@ -13,6 +14,9 @@
 // filled with the ink that contrasts with the browser's colour scheme, and the
 // result is the tab icon. Without that, white ink vanishes on a light tab strip.
 // With it off the logo is used exactly as uploaded.
+
+import { errorMessage } from "@main/services/errors";
+import { logToServer } from "./client-log";
 
 /** The icon both HTML documents ship. apply-favicon.test.ts keeps them in step. */
 export const STOCK_FAVICON = "/app-icon.png";
@@ -61,9 +65,24 @@ let request: { logo: string | null; monochrome: boolean } = { logo: null, monoch
 let seq = 0;
 /** Key of the raster currently in flight, so a repeat broadcast does not start another. */
 let inflight: string | null = null;
-/** (ink, logo) → the icon href. Bounded: a logo changes rarely. */
-const cache = new Map<string, string>();
-const CACHE_MAX = 4;
+/** What was settled for an (ink, logo). A failure carries the time it may be tried
+ *  again; a success never expires. */
+interface Entry {
+  href: string;
+  retryAt: number | null;
+}
+/** (ink, logo) → its entry. Bounded: a logo changes rarely. */
+const cache = new Map<string, Entry>();
+export const CACHE_MAX = 4;
+/**
+ * How long a failed recolor stands before it is tried again. A dropped image
+ * request should not cost the page its recolored icon for good, and an image that
+ * will never decode should cost one attempt a minute, not one per broadcast.
+ */
+const FAILURE_RETRY_MS = 60_000;
+/** Keys already reported, so retries of the same failure add no more lines. */
+const warned = new Set<string>();
+const WARNED_MAX = 16;
 let scheme: MediaQueryList | null = null;
 
 function prefersDark(): boolean {
@@ -117,27 +136,36 @@ function resolve(): void {
   const ink = prefersDark() ? INK.dark : INK.light;
   const key = `${ink}|${logo}`;
   const hit = cache.get(key);
-  if (hit) return settle(hit, hit === logo);
+  // A failure inside its cool-down is still the answer; after it, it is tried again.
+  if (hit && (hit.retryAt === null || Date.now() < hit.retryAt)) return settle(hit.href, hit.href === logo);
   if (inflight === key) return;
 
   const token = ++seq;
   inflight = key;
-  const remember = (href: string) => {
-    if (cache.size >= CACHE_MAX) cache.clear();
-    cache.set(key, href);
+  const remember = (href: string, retryAt: number | null) => {
+    if (cache.size >= CACHE_MAX && !cache.has(key)) cache.clear();
+    cache.set(key, { href, retryAt });
     if (token !== seq) return; // a newer answer got here first
     inflight = null;
     setIcon(href, href === logo);
   };
-  rasterize(logo, ink).then(remember, (err: unknown) => {
-    // The tab still gets the logo, just not recoloured. Remembered as the answer
-    // for this logo and ink so a failing image warns once, not on every broadcast.
-    console.warn(
-      "[branding] the tab icon could not be recolored; using the logo as uploaded:",
-      err instanceof Error ? err.message : err,
-    );
-    remember(logo);
-  });
+  rasterize(logo, ink).then(
+    (href) => remember(href, null),
+    (err: unknown) => {
+      // The tab still gets the logo, just not recoloured. Said once per (ink,
+      // logo) however many times it is retried, and sent to the server's log: a
+      // console nobody has open is no evidence on a Sunday morning.
+      if (!warned.has(key)) {
+        if (warned.size >= WARNED_MAX) warned.clear();
+        warned.add(key);
+        logToServer(
+          "branding",
+          `the tab icon could not be recolored; using the logo as uploaded: ${errorMessage(err)}`,
+        );
+      }
+      remember(logo, Date.now() + FAILURE_RETRY_MS);
+    },
+  );
 }
 
 /**
@@ -161,5 +189,11 @@ export function __resetForTests(fn: Rasterizer | null = null): void {
   seq++;
   inflight = null;
   cache.clear();
+  warned.clear();
   rasterize = fn ?? rasterizeInCanvas;
+}
+
+/** Test seam: how many (ink, logo) results are held. */
+export function __cacheSize(): number {
+  return cache.size;
 }

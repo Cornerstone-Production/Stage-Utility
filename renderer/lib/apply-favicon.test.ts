@@ -14,12 +14,12 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { after, afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
-const { applyFavicon, STOCK_FAVICON, INK, __resetForTests } = await import("./apply-favicon.js");
+const { applyFavicon, STOCK_FAVICON, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
 
 after(() => teardown());
 
@@ -64,12 +64,25 @@ function fakeScheme(dark: boolean) {
   };
 }
 
+/** What reached the server's /api/log/client. Stubbed so no test sends a request. */
+const posts: { tag: string; message: string }[] = [];
+const realFetch = globalThis.fetch;
+
 beforeEach(() => {
   for (const l of links()) l.remove();
   __resetForTests();
   delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  posts.length = 0;
+  globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
+    if (String(url) === "/api/log/client") posts.push(JSON.parse(init?.body ?? "{}"));
+    return { ok: true };
+  }) as unknown as typeof fetch;
 });
-afterEach(() => __resetForTests());
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  mock.timers.reset();
+  __resetForTests();
+});
 
 describe("applyFavicon without recoloring", () => {
   test("a logo becomes the icon, null restores the stock one", () => {
@@ -241,6 +254,156 @@ describe("when the logo cannot be recolored", () => {
     assert.equal(href(), LOGO);
     assert.equal(seen.length, 1);
     assert.match(seen[0] ?? "", /\[branding\].*failed to load/);
+  });
+
+  test("is sent to the server's log, once", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    await warnings(async () => {
+      applyFavicon(LOGO, true);
+      r.calls[0]?.reject(new Error("the logo image failed to load"));
+      await tick();
+      applyFavicon(LOGO, true);
+      await tick();
+    });
+    assert.equal(posts.length, 1, `expected one /api/log/client post, got ${posts.length}`);
+    assert.equal(posts[0]?.tag, "branding");
+    assert.match(posts[0]?.message ?? "", /the tab icon could not be recolored.*failed to load/);
+  });
+
+  describe("and tries again later", () => {
+    /** Fails the first raster of LOGO and leaves the clock at t=0 of the cool-down. */
+    async function failedOnce() {
+      mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+      const r = controlled();
+      __resetForTests(r.fn);
+      applyFavicon(LOGO, true);
+      r.calls[0]?.reject(new Error("the logo image failed to load"));
+      await tick();
+      assert.equal(href(), LOGO, "a failed recolor should show the logo as uploaded");
+      return r;
+    }
+
+    test("not inside the cool-down", async () => {
+      const r = await failedOnce();
+      mock.timers.tick(59_000);
+      applyFavicon(LOGO, true);
+      applyFavicon(LOGO, true);
+      assert.equal(r.calls.length, 1, "a failed recolor was retried inside the cool-down");
+      assert.equal(href(), LOGO);
+    });
+
+    test("after it, and a retry that works replaces the logo with the tinted icon", async () => {
+      const r = await failedOnce();
+      mock.timers.tick(61_000);
+      applyFavicon(LOGO, true);
+      assert.equal(r.calls.length, 2, "a failed recolor was never retried");
+      r.calls[1]?.resolve("data:image/png;base64,RETRIED");
+      await tick();
+      assert.equal(href(), "data:image/png;base64,RETRIED");
+      applyFavicon(LOGO, true);
+      assert.equal(r.calls.length, 2, "a recolor that worked was rasterized again");
+    });
+
+    test("and says so once however often it fails", async () => {
+      const seen: string[] = [];
+      const real = console.warn;
+      console.warn = (...args: unknown[]) => void seen.push(args.map(String).join(" "));
+      try {
+        const r = await failedOnce();
+        for (let i = 1; i <= 3; i++) {
+          mock.timers.tick(61_000);
+          applyFavicon(LOGO, true);
+          assert.equal(r.calls.length, i + 1);
+          r.calls[i]?.reject(new Error("the logo image failed to load"));
+          await tick();
+        }
+      } finally {
+        console.warn = real;
+      }
+      assert.equal(seen.length, 1, `a retried failure was reported ${seen.length} times`);
+      assert.equal(posts.length, 1, `a retried failure was sent to the server ${posts.length} times`);
+      assert.equal(href(), LOGO);
+    });
+  });
+});
+
+describe("overlapping requests", () => {
+  test("recolor on, off, on again ends on the tinted icon", async () => {
+    // The first raster is cancelled by the switch to "off", so the third call has
+    // to start its own: a leftover in-flight marker made it wait for one that was
+    // never going to land.
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true);
+    applyFavicon(LOGO, false);
+    applyFavicon(LOGO, true);
+    for (const [i, call] of r.calls.entries()) call.resolve(`data:image/png;base64,T${i}`);
+    await tick();
+    assert.match(href() ?? "", /^data:image\/png;base64,T/, "stuck on the logo after Recolor was turned back on");
+  });
+
+  test("a stale arrival does not let a repeat broadcast start a duplicate raster", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true);
+    applyFavicon(OTHER, true); // supersedes the first, and is the one in flight
+    r.calls[0]?.resolve("data:image/png;base64,STALE");
+    await tick();
+    applyFavicon(OTHER, true);
+    assert.equal(r.calls.length, 2, "the stale arrival cleared the newer raster's in-flight marker");
+  });
+
+  test("a scheme change while a raster loads starts one for the new ink, and its result wins", async () => {
+    const scheme = fakeScheme(false);
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true);
+    scheme.flip(true);
+    assert.equal(r.calls.length, 2, "the new scheme waited on a raster for the old ink");
+    assert.deepEqual(r.calls.map((c) => c.ink), [INK.light, INK.dark]);
+    r.calls[1]?.resolve("data:image/png;base64,DARKINK");
+    await tick();
+    r.calls[0]?.resolve("data:image/png;base64,LIGHTINK");
+    await tick();
+    assert.equal(href(), "data:image/png;base64,DARKINK");
+  });
+});
+
+describe("the cache", () => {
+  test("a cached failure still shows the logo with no declared type", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    await (async () => {
+      const real = console.warn;
+      console.warn = () => {};
+      try {
+        applyFavicon(LOGO, true);
+        r.calls[0]?.reject(new Error("the logo image failed to load"));
+        await tick();
+      } finally {
+        console.warn = real;
+      }
+    })();
+    applyFavicon(null, true);
+    assert.equal(links()[0]?.getAttribute("type"), "image/png", "the stock icon should declare PNG");
+    applyFavicon(LOGO, true); // answered from the cache, inside the cool-down
+    assert.equal(r.calls.length, 1);
+    assert.equal(href(), LOGO);
+    assert.equal(links()[0]?.hasAttribute("type"), false, "a cached raw logo was given a PNG type");
+  });
+
+  test("stays bounded", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    const total = CACHE_MAX * 2 + 1;
+    for (let i = 0; i < total; i++) {
+      applyFavicon(`/branding-images/${i}.png`, true);
+      r.calls[i]?.resolve(`data:image/png;base64,T${i}`);
+      await tick();
+      assert.ok(__cacheSize() <= CACHE_MAX, `${__cacheSize()} entries after ${i + 1} logos, cap is ${CACHE_MAX}`);
+    }
+    assert.ok(__cacheSize() > 0, "the cache was emptied rather than bounded");
   });
 });
 
