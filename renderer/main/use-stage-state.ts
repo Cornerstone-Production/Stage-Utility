@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { invoke, onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
+import { applyFavicon } from "../lib/apply-favicon";
 import { setDisplayHourCycle } from "../lib/clock-format";
 import { isPreviewSlug } from "./preview-url";
 
@@ -74,6 +75,9 @@ function publish(next: UseStageStateResult): void {
 function adoptState(next: StageState): void {
   setDisplayHourCycle(next.hourCycle);
   applyAccentVar(next.accentColor);
+  // The tab icon follows the uploaded logo, from a hydrated state only, for the
+  // accent's reason: a consumer that has not loaded yet must not reset it.
+  applyFavicon(next.appLogo);
   publish({ state: next, isLoading: false, error: null });
 }
 

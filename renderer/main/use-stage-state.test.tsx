@@ -263,6 +263,50 @@ describe("the brand accent", () => {
   });
 });
 
+/**
+ * The browser tab icon follows Branding → Logo on every surface, because every
+ * surface adopts its StageState here. Driven through the real hook and a real
+ * broadcast, and read off the `<link>` rather than out of the source.
+ */
+describe("the tab icon", () => {
+  const LOGO = "/branding-images/0123abcd.png";
+  const link = () => document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  const href = () => link()?.getAttribute("href");
+
+  beforeEach(() => {
+    link()?.remove();
+    const el = document.createElement("link");
+    el.setAttribute("rel", "icon");
+    el.setAttribute("type", "image/png");
+    el.setAttribute("href", "/app-icon.png");
+    document.head.appendChild(el);
+  });
+
+  test("is not touched by a consumer that has not hydrated", () => {
+    link()?.setAttribute("href", LOGO);
+    render(React.createElement(OneConsumer)); // no settle: state still null
+    assert.equal(href(), LOGO, "an un-hydrated consumer reset the tab icon");
+  });
+
+  test("a hydrated logo becomes the tab icon, and clearing it restores the stock icon", async () => {
+    render(React.createElement(OneConsumer));
+    await settle();
+    assert.equal(href(), "/app-icon.png", "no logo should leave the stock icon");
+
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO });
+    });
+    assert.equal(href(), LOGO, "the uploaded logo never reached the tab icon");
+    assert.equal(link()?.hasAttribute("type"), false, "a stale image/png type was left on a custom icon");
+
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: null });
+    });
+    assert.equal(href(), "/app-icon.png", "removing the logo left the old one in the tab");
+    assert.equal(link()?.getAttribute("type"), "image/png");
+  });
+});
+
 describe("a failed hydrate", () => {
   test("is reported, not left silently blank", async () => {
     // A shared cache that never retries and never says anything would leave
