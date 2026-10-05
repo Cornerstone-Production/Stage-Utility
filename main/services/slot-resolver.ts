@@ -2,8 +2,8 @@
 // No I/O — takes data already fetched and returns resolved Slot[].
 
 import { clamp } from "./clamp.js";
-import { normalizePcoPersonId } from "./pco-person-id.js";
-import type { Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
+import { isPcoPersonId, normalizePcoPersonId } from "./pco-person-id.js";
+import type { PersonCardDTO, Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
 const EMPTY_DEVICE: SlotDevice = {
@@ -353,6 +353,21 @@ export function fitAvatarToColumn(
     : url + (url.includes("?") ? "&" : "?") + `g=${geometry}`;
 }
 
+const NO_PEOPLE: ReadonlyMap<string, PersonCardDTO> = new Map();
+
+/** The normalised IDs of by-person slots whose person is not on this roster: the
+ *  ones the person directory has to read from Planning Center. */
+export function unrosteredPersonIds(slots: Slot[], members: TeamMemberDTO[]): string[] {
+  const rostered = new Set(members.map((m) => m.personId));
+  const out = new Set<string>();
+  for (const slot of slots) {
+    if (slot.link.kind !== "pco" || slot.link.matchBy !== "person") continue;
+    const id = normalizePcoPersonId(slot.link.personId);
+    if (isPcoPersonId(id) && !rostered.has(id)) out.add(id);
+  }
+  return [...out];
+}
+
 export function resolveSlots(
   slots: Slot[],
   members: TeamMemberDTO[],
@@ -360,6 +375,9 @@ export function resolveSlots(
   /** See AvatarFit: whether the caller knows the shape of the box that will
    *  draw these photos. A display does; nothing else does. */
   avatarFit: AvatarFit = "column",
+  /** People read from Planning Center by ID (person-directory.ts), for by-person
+   *  slots whose person is not on this roster. */
+  people: ReadonlyMap<string, PersonCardDTO> = NO_PEOPLE,
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
@@ -404,9 +422,14 @@ export function resolveSlots(
     let shownPositions: string[] | undefined;
     if (link.kind === "pco" && link.matchBy === "person") {
       // Normalised, so the AC-prefixed ID from a Planning Center page URL matches.
-      // Only people on this plan's roster can fill it; there is no wider lookup.
+      // The roster first, since it is this plan's; otherwise the person as read
+      // from Planning Center by ID, so they show whether scheduled or not.
       const want = normalizePcoPersonId(link.personId);
       member = want ? (members.find((m) => m.personId === want) ?? null) : null;
+      if (!member && want) {
+        const card = people.get(want);
+        if (card) member = { id: `person:${want}`, personId: want, name: card.name, photoUrl: card.photoUrl, teamPositionName: null, teamName: null, status: "C", notes: null };
+      }
     } else if (link.kind === "pco" && link.matchBy === "position") {
       const sig = positionSignature(link.positions);
       let taken = claimed.get(sig);

@@ -33,20 +33,24 @@ Sub-variants group with their base: `Vocals (BGVs)` fills a slot asking for
 
 ### By person
 
-A slot linked by person shows one individual, whatever position they are
-scheduled in. Enter their Planning Center person ID, copied from their page in
-Planning Center: the URL ends `/people/AC12345678`. The `AC` form, the bare number
-and the whole link all work.
+A slot linked by person always shows one individual, whether or not they are
+scheduled on the plan, and whatever position they hold. Enter their Planning
+Center person ID, copied from their page in Planning Center: the URL ends
+`/people/AC12345678`. The `AC` form, the bare number and the whole link all work.
 
-| Scheduled on the plan | Slot shows |
+When the person is on the plan, the name and photo come from the plan's roster.
+When they are not, the server reads them from Planning Center by ID once and
+keeps them.
+
+| The ID | Slot shows |
 |---|---|
-| yes, confirmed or unconfirmed | that person |
-| declined, or not scheduled | nothing |
+| on the plan | the person, from the roster |
+| not on the plan | the person, read by ID |
+| no such person in Planning Center | nothing; logged once as `[pco] no Planning Center person` |
+| Planning Center unreachable | nothing until a retry succeeds, ten minutes apart; each failure logged |
 
-The ID is matched against the plan's own roster, so a person who is not
-scheduled on the plan the board shows never fills the slot. A by-person slot
-takes no part in position matching or notes: the same person can also fill a
-position slot on the same board.
+A by-person slot takes no part in position matching or notes: the same person can
+also fill a position slot on the same board.
 
 ### Slots that share people
 

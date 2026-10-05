@@ -108,10 +108,10 @@ function PersonIdField({ value, onChange }: { value: string; onChange: (personId
       />
       <p className={cn("text-caption2", id && !valid ? "text-red-11" : "text-gray-9")}>
         {!id
-          ? "From the person's Planning Center page. Fills only while they are scheduled on the plan."
+          ? "From the person's Planning Center page. Shows them whether or not they are on the plan."
           : !valid
             ? "Not a Planning Center person ID. Copy it from the person's page, e.g. AC12345678."
-            : `Planning Center person ${id}. Fills only while they are scheduled on the plan.`}
+            : `Planning Center person ${id}.`}
       </p>
     </div>
   );
@@ -342,7 +342,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, s
                 accept — the first one with someone available fills it, so a slot can cover acoustic OR
                 electric week to week. Give a position a note to pin it to one person (e.g. &quot;1&quot; for the
                 vocalist noted 1, &quot;HH&quot; for a handheld). Tick &quot;Any position&quot; to match on the note alone.
-                By person ID: always this one person, from the AC number on their Planning Center page, and only while they are scheduled on the plan.
+                By person ID: always this one person, from the AC number on their Planning Center page, whether or not they are on the plan.
               </InfoHint>
               <Select
                 value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
