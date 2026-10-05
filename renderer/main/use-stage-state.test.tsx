@@ -83,6 +83,7 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { useStageState, __resetForTests } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../lib/api.js");
+const { __resetForTests: __resetFavicon } = await import("../lib/apply-favicon.js");
 
 /**
  * Let everything in flight settle BEFORE anything is asserted or torn down.
@@ -260,6 +261,76 @@ describe("the brand accent", () => {
       emitStateChanged({ ...BASE, accentColor: "#112233" });
     });
     assert.equal(accent(), "#112233", "the branding colour never reached the page");
+  });
+});
+
+/**
+ * The browser tab icon follows Branding → Logo on every surface, because every
+ * surface adopts its StageState here. Driven through the real hook and a real
+ * broadcast, and read off the `<link>` rather than out of the source.
+ */
+describe("the tab icon", () => {
+  const LOGO = "/branding-images/0123abcd.png";
+  const link = () => document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  const href = () => link()?.getAttribute("href");
+
+  beforeEach(() => {
+    __resetFavicon();
+    link()?.remove();
+    const el = document.createElement("link");
+    el.setAttribute("rel", "icon");
+    el.setAttribute("type", "image/png");
+    el.setAttribute("href", "/app-icon.png");
+    document.head.appendChild(el);
+  });
+
+  test("is not touched by a consumer that has not hydrated", () => {
+    link()?.setAttribute("href", LOGO);
+    render(React.createElement(OneConsumer)); // no settle: state still null
+    assert.equal(href(), LOGO, "an un-hydrated consumer reset the tab icon");
+  });
+
+  test("a hydrated logo becomes the tab icon, and clearing it restores the stock icon", async () => {
+    render(React.createElement(OneConsumer));
+    await settle();
+    assert.equal(href(), "/app-icon.png", "no logo should leave the stock icon");
+
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO });
+    });
+    assert.equal(href(), LOGO, "the uploaded logo never reached the tab icon");
+    assert.equal(link()?.hasAttribute("type"), false, "a stale image/png type was left on a custom icon");
+
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: null });
+    });
+    assert.equal(href(), "/app-icon.png", "removing the logo left the old one in the tab");
+    assert.equal(link()?.getAttribute("type"), "image/png");
+  });
+
+  test("Recolor on tints the tab icon, Recolor off leaves the logo as uploaded", async () => {
+    // The flag has to travel from the broadcast to applyFavicon: this is the
+    // test that the hook passes `appLogoMonochrome` at all.
+    const asked: string[] = [];
+    __resetFavicon(async (logo, ink) => {
+      asked.push(`${logo} ${ink}`);
+      return "data:image/png;base64,TINTED";
+    });
+    render(React.createElement(OneConsumer));
+    await settle();
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: true });
+    });
+    await settle();
+    assert.equal(href(), "data:image/png;base64,TINTED", "Recolor on never reached the tab icon");
+    assert.deepEqual(asked, [`${LOGO} #161b22`]);
+
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false });
+    });
+    await settle();
+    assert.equal(href(), LOGO, "Recolor off still showed the tinted icon");
+    __resetFavicon();
   });
 });
 
