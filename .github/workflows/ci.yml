@@ -115,11 +115,12 @@ jobs:
         run: npm test -- --test-shard=${{ matrix.shard }}/4
 
   # The one check that says the whole gate passed. It runs whatever the others
-  # did (`always()`), so a failed shard turns it red rather than leaving it
-  # skipped, and a skipped gate (the release PR) skips it too.
+  # did, so a failed shard turns it red rather than leaving it skipped; a
+  # cancelled run stays cancelled rather than reading as a failure; and a skipped
+  # gate (the release PR) skips it too.
   build:
     needs: [checks, test]
-    if: ${{ always() && !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
+    if: ${{ !cancelled() && !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
     runs-on: ubuntu-latest
     steps:
       - name: Every check and every test shard passed
