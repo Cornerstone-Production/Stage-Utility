@@ -220,7 +220,7 @@ and in its own chrome.
 | | |
 |---|---|
 | **App name** | shown in the sidebar and the kiosk's top bar. Set it to your organization's name |
-| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name and used as the browser tab icon on every page. The tab icon is the logo as uploaded, never recolored, and returns to the stock icon when the logo is removed |
+| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name and used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark theme; with it off, it is the logo as uploaded. Removing the logo restores the stock icon |
 | **Recolor to match theme** | for a single-color logo — recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
 | **Accent color** | the brand color for buttons, selection, links and focus, app-wide. Status colors (live / over / caution) are unaffected. Clear to use the built-in default |
 | **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray |

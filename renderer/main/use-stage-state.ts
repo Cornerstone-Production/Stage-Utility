@@ -77,7 +77,7 @@ function adoptState(next: StageState): void {
   applyAccentVar(next.accentColor);
   // The tab icon follows the uploaded logo, from a hydrated state only, for the
   // accent's reason: a consumer that has not loaded yet must not reset it.
-  applyFavicon(next.appLogo);
+  applyFavicon(next.appLogo, next.appLogoMonochrome);
   publish({ state: next, isLoading: false, error: null });
 }
 

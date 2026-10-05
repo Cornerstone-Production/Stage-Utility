@@ -83,6 +83,7 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { useStageState, __resetForTests } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../lib/api.js");
+const { __resetForTests: __resetFavicon } = await import("../lib/apply-favicon.js");
 
 /**
  * Let everything in flight settle BEFORE anything is asserted or torn down.
@@ -274,6 +275,7 @@ describe("the tab icon", () => {
   const href = () => link()?.getAttribute("href");
 
   beforeEach(() => {
+    __resetFavicon();
     link()?.remove();
     const el = document.createElement("link");
     el.setAttribute("rel", "icon");
@@ -304,6 +306,31 @@ describe("the tab icon", () => {
     });
     assert.equal(href(), "/app-icon.png", "removing the logo left the old one in the tab");
     assert.equal(link()?.getAttribute("type"), "image/png");
+  });
+
+  test("Recolor on tints the tab icon, Recolor off leaves the logo as uploaded", async () => {
+    // The flag has to travel from the broadcast to applyFavicon: this is the
+    // test that the hook passes `appLogoMonochrome` at all.
+    const asked: string[] = [];
+    __resetFavicon(async (logo, ink) => {
+      asked.push(`${logo} ${ink}`);
+      return "data:image/png;base64,TINTED";
+    });
+    render(React.createElement(OneConsumer));
+    await settle();
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: true });
+    });
+    await settle();
+    assert.equal(href(), "data:image/png;base64,TINTED", "Recolor on never reached the tab icon");
+    assert.deepEqual(asked, [`${LOGO} #161b22`]);
+
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false });
+    });
+    await settle();
+    assert.equal(href(), LOGO, "Recolor off still showed the tinted icon");
+    __resetFavicon();
   });
 });
 
