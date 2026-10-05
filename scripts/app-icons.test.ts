@@ -11,12 +11,38 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { inflateSync } from "node:zlib";
+
+import { JSDOM } from "jsdom";
 
 // @ts-expect-error -- a plain .mjs script with no type declarations
 const { buildIcons } = await import("./build-icons.mjs");
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLIC = path.join(ROOT, "public");
+
+/**
+ * A PNG's header and pixels, decompressed. The compressed bytes are not compared:
+ * zlib builds differ between Node versions and compress the same pixels to
+ * different bytes. Anything after IEND fails, so nothing can ride along unseen.
+ */
+function decodePng(file: Buffer, name: string): { header: Buffer; pixels: Buffer } {
+  let at = 8;
+  let header: Buffer | null = null;
+  const idat: Buffer[] = [];
+  for (;;) {
+    const len = file.readUInt32BE(at);
+    const type = file.toString("ascii", at + 4, at + 8);
+    const data = file.subarray(at + 8, at + 8 + len);
+    at += 12 + len;
+    if (type === "IHDR") header = data;
+    else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+  }
+  assert.equal(at, file.length, `public/${name} has bytes after its IEND chunk`);
+  assert.ok(header, `public/${name} has no IHDR chunk`);
+  return { header, pixels: inflateSync(Buffer.concat(idat)) };
+}
 
 test("every committed icon is exactly what build-icons.mjs produces", () => {
   const built = buildIcons() as Record<string, string | Buffer>;
@@ -26,10 +52,15 @@ test("every committed icon is exactly what build-icons.mjs produces", () => {
   );
   for (const [name, data] of Object.entries(built)) {
     const committed = readFileSync(path.join(PUBLIC, name));
-    assert.ok(
-      committed.equals(Buffer.from(data)),
-      `public/${name} differs from what scripts/build-icons.mjs draws. Run \`npm run icons\` and commit the result.`,
-    );
+    const drawn = Buffer.from(data);
+    const message = `public/${name} differs from what scripts/build-icons.mjs draws. Run \`npm run icons\` and commit the result.`;
+    if (name.endsWith(".png")) {
+      const a = decodePng(committed, name);
+      const b = decodePng(drawn, name);
+      assert.ok(a.header.equals(b.header) && a.pixels.equals(b.pixels), message);
+    } else {
+      assert.ok(committed.equals(drawn), message);
+    }
   }
 });
 
@@ -47,10 +78,11 @@ test("the PNG icons are the sizes their names and the manifest say", () => {
 test("every icon the HTML documents and the manifest name exists in public/", () => {
   const named: string[] = [];
   for (const doc of ["index.html", "app.html"]) {
-    const html = readFileSync(path.join(ROOT, doc), "utf8").replace(/<!--[\s\S]*?-->/g, "");
-    const tags = html.match(/<link\b[^>]*\brel="(?:icon|apple-touch-icon)"[^>]*>/g) ?? [];
+    // Parsed, so a commented-out link is not an element and is not counted.
+    const parsed = new JSDOM(readFileSync(path.join(ROOT, doc), "utf8")).window.document;
+    const tags = [...parsed.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]')];
     assert.equal(tags.length, 2, `${doc} should declare one rel="icon" and one rel="apple-touch-icon"`);
-    for (const tag of tags) named.push(/\bhref="\/([^"]+)"/.exec(tag)?.[1] ?? `(no href in ${doc})`);
+    for (const tag of tags) named.push(tag.getAttribute("href")?.replace(/^\//, "") ?? `(no href in ${doc})`);
   }
   const manifest = JSON.parse(readFileSync(path.join(PUBLIC, "manifest.webmanifest"), "utf8")) as {
     icons: { src: string; purpose: string }[];
