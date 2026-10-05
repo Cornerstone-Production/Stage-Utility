@@ -16,6 +16,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
+import { JSDOM } from "jsdom";
+
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
@@ -410,11 +412,13 @@ describe("the cache", () => {
 describe("the stock icon", () => {
   for (const doc of ["index.html", "app.html"]) {
     test(`${doc} ships STOCK_FAVICON`, () => {
-      const html = readFileSync(path.join(ROOT, doc), "utf8").replace(/<!--[\s\S]*?-->/g, "");
-      const tags = html.match(/<link\b[^>]*\brel="icon"[^>]*>/g) ?? [];
+      // Parsed, not pattern-matched: a commented-out <link> is not an element, so
+      // it can neither satisfy this nor count as a second icon.
+      const parsed = new JSDOM(readFileSync(path.join(ROOT, doc), "utf8")).window.document;
+      const tags = [...parsed.querySelectorAll('link[rel="icon"]')];
       assert.equal(tags.length, 1, `${doc} should declare exactly one rel="icon" link`);
-      assert.match(tags[0] ?? "", new RegExp(`href="${STOCK_FAVICON}"`));
-      assert.match(tags[0] ?? "", new RegExp(`type="${STOCK_FAVICON_TYPE.replace("+", "\\+")}"`));
+      assert.equal(tags[0]?.getAttribute("href"), STOCK_FAVICON);
+      assert.equal(tags[0]?.getAttribute("type"), STOCK_FAVICON_TYPE);
     });
   }
 });
