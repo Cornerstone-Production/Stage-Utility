@@ -49,6 +49,7 @@ describe("operator paths", () => {
 
   it("does not claim asset requests", () => {
     assert.equal(isOperatorPath("/assets/index-abc123.js"), false);
-    assert.equal(isOperatorPath("/app-icon.png"), false);
+    assert.equal(isOperatorPath("/apple-touch-icon.png"), false);
+    assert.equal(isOperatorPath("/favicon.svg"), false);
   });
 });

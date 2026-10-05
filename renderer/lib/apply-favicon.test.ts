@@ -19,7 +19,7 @@ import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
-const { applyFavicon, STOCK_FAVICON, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
+const { applyFavicon, STOCK_FAVICON, STOCK_FAVICON_TYPE, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
 
 after(() => teardown());
 
@@ -386,7 +386,7 @@ describe("the cache", () => {
       }
     })();
     applyFavicon(null, true);
-    assert.equal(links()[0]?.getAttribute("type"), "image/png", "the stock icon should declare PNG");
+    assert.equal(links()[0]?.getAttribute("type"), STOCK_FAVICON_TYPE, "the stock icon should declare its own type");
     applyFavicon(LOGO, true); // answered from the cache, inside the cool-down
     assert.equal(r.calls.length, 1);
     assert.equal(href(), LOGO);
@@ -414,6 +414,7 @@ describe("the stock icon", () => {
       const tags = html.match(/<link\b[^>]*\brel="icon"[^>]*>/g) ?? [];
       assert.equal(tags.length, 1, `${doc} should declare exactly one rel="icon" link`);
       assert.match(tags[0] ?? "", new RegExp(`href="${STOCK_FAVICON}"`));
+      assert.match(tags[0] ?? "", new RegExp(`type="${STOCK_FAVICON_TYPE.replace("+", "\\+")}"`));
     });
   }
 });
