@@ -46,7 +46,7 @@ Orientation for working in the codebase.
 | `npm run server` | Backend via `tsx server.ts` on `:8788` (dev) |
 | `npm start` | Backend via `node --import tsx server.ts` (production) |
 | `npm run build` | Build both bundles into `build/renderer/` |
-| `npm test` | The whole suite, on Node's test runner |
+| `npm test` | The whole suite, on Node's test runner. Arguments pass through: `npm test -- --test-shard=2/4` runs the second quarter, as CI does |
 | `npm run type-check` | `tsc --noEmit` |
 | `npm run lint` | ESLint (flat config + react-hooks) |
 | `npm run format` | Format with `oxfmt` |
