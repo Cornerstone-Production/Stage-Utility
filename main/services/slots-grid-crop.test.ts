@@ -89,7 +89,8 @@ describe("the controller wires both to the whole image", () => {
 
   test("and the display keeps its column crop", () => {
     const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
-    const call = /slotsByView\[view\.id\] = resolveSlots\(([^;]*)\)/.exec(src);
+    // Every resolution goes through the controller's resolve() helper.
+    const call = /slotsByView\[view\.id\] = this\.resolve\(([^;]*)\)/.exec(src);
     assert.ok(call, "could not find the view slots resolution");
     assert.doesNotMatch(call[1], /"whole"/, "a display should keep its byte saving");
   });

@@ -10,7 +10,7 @@ import { test, describe } from "node:test";
 
 import { readFileSync } from "node:fs";
 
-import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel } from "./slot-resolver.js";
+import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel, unrosteredPersonIds } from "./slot-resolver.js";
 import type { Slot, SlotLink, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -175,6 +175,60 @@ describe("claiming between slots", () => {
       team, NO_DEVICES,
     );
     assert.deepEqual(names(out), ["Sarah", "Sarah"]);
+  });
+
+  test("a person ID matches however Planning Center shows it", () => {
+    // The API id is the bare number; Planning Center's page URL shows AC + number,
+    // and that is what an operator copies. Each of these is the same person.
+    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    for (const typed of [
+      "113920177",
+      "AC113920177",
+      "ac113920177",
+      " AC113920177 ",
+      "https://services.planningcenteronline.com/people/AC113920177",
+      "https://people.planningcenteronline.com/people/AC113920177/profile",
+    ]) {
+      const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: typed })], team, NO_DEVICES);
+      assert.deepEqual(names(out), ["Ethan"], `"${typed}" did not match the person`);
+    }
+  });
+
+  test("a person ID that is not on the roster, or not an ID, fills nothing", () => {
+    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    for (const typed of ["1630425", "", "   ", "AC", "Ethan", "1338318035"]) {
+      const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: typed })], team, NO_DEVICES);
+      assert.deepEqual(names(out), [null], `"${typed}" filled the slot`);
+    }
+  });
+
+  test("a person not on the roster fills from the person directory", () => {
+    const people = new Map([["1630425", { name: "Nathan Bong", photoUrl: "https://x/n.jpg" }]]);
+    const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: "AC1630425" })], [], NO_DEVICES, "whole", people);
+    assert.deepEqual(names(out), ["Nathan Bong"], "an unscheduled person left the slot empty");
+    assert.match(out[0]?.photoUrl ?? "", /^https:\/\/x\/n\.jpg/, "the directory's photo was not used");
+  });
+
+  test("a person on the roster is drawn from the roster, not the directory", () => {
+    const team = [member("113920177", "Ethan (roster)", "Audio - FOH (A1)")];
+    const people = new Map([["113920177", { name: "Ethan (directory)", photoUrl: null }]]);
+    const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: "113920177" })], team, NO_DEVICES, "whole", people);
+    assert.deepEqual(names(out), ["Ethan (roster)"]);
+  });
+
+  test("only by-person IDs the roster lacks are asked of the directory", () => {
+    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    const ids = unrosteredPersonIds(
+      [
+        slot("a", { kind: "pco", matchBy: "person", personId: "AC113920177" }, 0),
+        slot("b", { kind: "pco", matchBy: "person", personId: " AC1630425 " }, 1),
+        slot("c", { kind: "pco", matchBy: "person", personId: "Nathan" }, 2),
+        slot("d", { kind: "pco", matchBy: "person", personId: "1630425" }, 3),
+        slot("e", pos({ name: "Vocals" }), 4),
+      ],
+      team,
+    );
+    assert.deepEqual(ids, ["1630425"]);
   });
 
   test("spacer and empty slots resolve to nothing and claim nobody", () => {
@@ -458,14 +512,15 @@ describe("which path each caller takes", () => {
   // every real photo goes back to being cropped to a shape nobody measured.
   test("an inline slots-grid asks for the whole image", () => {
     const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
-    const call = /slotsByLayoutObject\[oid\]\s*=\s*resolveSlots\(([^;]*)\)/.exec(src);
+    // Every resolution goes through the controller's resolve() helper.
+    const call = /slotsByLayoutObject\[oid\]\s*=\s*this\.resolve\(([^;]*)\)/.exec(src);
     assert.ok(call, "could not find the inline slots resolution in stage-controller.ts");
     assert.match(call[1], /"whole"/, "an inline grid is being cropped to a guessed shape");
   });
 
   test("a slots View keeps the column crop", () => {
     const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
-    const call = /slotsByView\[view\.id\]\s*=\s*resolveSlots\(([^;]*)\)/.exec(src);
+    const call = /slotsByView\[view\.id\]\s*=\s*this\.resolve\(([^;]*)\)/.exec(src);
     assert.ok(call, "could not find the view slots resolution in stage-controller.ts");
     assert.doesNotMatch(call[1], /"whole"/, "a display should keep its byte saving");
   });
