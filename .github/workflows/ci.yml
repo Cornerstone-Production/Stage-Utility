@@ -22,22 +22,23 @@ on:
 permissions:
   contents: read
 
+# Three jobs run side by side so the slowest one sets the wait, not the sum:
+# lint, type-check, build and audit in one; the test suite split four ways across
+# the others (Node's --test-shard, with the file patterns in scripts/run-tests.mjs
+# only); and `build`, which passes only when all of them did. The suite is most
+# of the time: every test file runs in its own process, on a 4-core runner. Coverage
+# used to run the suite a second time here; it is informational and moved to
+# coverage.yml on a schedule.
+#
+# `build` keeps the single name release.yml writes as a commit status, so a PR
+# and the release PR read the same check.
 jobs:
-  build:
+  checks:
+    name: lint, type-check, build
     if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The suite asks git questions about history. A release-notes override
-          # names a commit and the guard beside it checks that the commit is
-          # actually reachable, which is the whole point -- a typo'd SHA that
-          # silently does nothing is the failure it exists to catch. In a
-          # shallow clone the object is not there, so the check cannot answer
-          # and the guard reports a failure it has no business reporting.
-          # secret-scan.yml and commit-lint.yml already take the whole history
-          # for the same kind of reason.
-          fetch-depth: 0
 
       # Pinning is only worth anything if it holds. It already slipped once: the
       # references pinned in one PR were complete, and a second PR merged
@@ -68,9 +69,6 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
-      - name: Test
-        run: npm test
-
       - name: Build
         run: npm run build
 
@@ -81,34 +79,57 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
-      # Informational, never a gate.
-      #
-      # A percentage threshold rewards tests written to touch lines rather than
-      # to catch bugs, which is the opposite of what the suite does today. What
-      # this is for is visibility: the HTTP route handlers are the least-covered
-      # code in the project and the only LAN-facing surface, which is where the
-      # prototype-pollution bug lived. A PR that drops one further should be
-      # visible in the log without failing anyone's build.
-      - name: Coverage (routes and services)
-        continue-on-error: true
+  test:
+    name: test (${{ matrix.shard }}/4)
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every shard runs to the end, so one PR shows every failing test, not the
+      # first quarter's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The suite asks git questions about history. A release-notes override
+          # names a commit and the guard beside it checks that the commit is
+          # actually reachable, which is the whole point -- a typo'd SHA that
+          # silently does nothing is the failure it exists to catch. In a
+          # shallow clone the object is not there, so the check cannot answer
+          # and the guard reports a failure it has no business reporting.
+          # secret-scan.yml and commit-lint.yml already take the whole history
+          # for the same kind of reason.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test -- --test-shard=${{ matrix.shard }}/4
+
+  # The one check that says the whole gate passed. It runs whatever the others
+  # did (`always()`), so a failed shard turns it red rather than leaving it
+  # skipped, and a skipped gate (the release PR) skips it too.
+  build:
+    needs: [checks, test]
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every check and every test shard passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          TESTS: ${{ needs.test.result }}
         run: |
-          set -uo pipefail
-          node --import tsx --test --experimental-test-coverage \
-            "main/**/*.test.ts" "renderer/**/*.test.ts" "scripts/**/*.test.ts" \
-            > /tmp/cov.txt 2>&1 || true
-
-          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep "all files" /tmp/cov.txt >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Least-covered server modules — the LAN-facing surface:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          awk '/start of coverage report/,/end of coverage report/' /tmp/cov.txt \
-            | grep -oE "[a-z0-9-]+\.tsx? +\| +[0-9.]+" \
-            | awk '{gsub(/\|/,""); print $2, $1}' | sort -n | head -10 \
-            >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-          grep "all files" /tmp/cov.txt || true
+          echo "lint, type-check, build: $CHECKS"
+          echo "tests: $TESTS"
+          if [ "$CHECKS" != success ] || [ "$TESTS" != success ]; then
+            echo "::error::the gate did not pass"
+            exit 1
+          fi
