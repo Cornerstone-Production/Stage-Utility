@@ -107,6 +107,7 @@ const REQUEST_FACING = [
   "home-assistant-yaml.ts",
   "integration-manager.ts",
   "pco-service.ts",
+  "person-directory.ts",
   "plan-export.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
@@ -376,6 +377,9 @@ function requestFacingFiles(): string[] {
     // attacker's string, verbatim, and this file was missing from the list.
     path.join(HERE, "integration-manager.ts"),
     path.join(HERE, "pco-service.ts"),
+    // Its lines name a by-person slot's person ID, which the operator types into
+    // the slot editor and saves over HTTP; scrubbed at the logger.
+    path.join(HERE, "person-directory.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),

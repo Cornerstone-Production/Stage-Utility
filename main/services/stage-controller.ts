@@ -45,7 +45,8 @@ import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js"
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
-import { resolveSlots } from "./slot-resolver.js";
+import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
+import { PersonDirectory } from "./person-directory.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
@@ -333,6 +334,18 @@ export class StageController {
   private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
+  /** People named by by-person slots but not on the roster, read from PCO by ID. */
+  private readonly personDirectory = new PersonDirectory(
+    () => {
+      const appId = this.pcoAppId;
+      const secret = this.pcoSecret;
+      return appId && secret ? (id: string) => pcoService.getPerson(appId, secret, id) : null;
+    },
+    () => {
+      this.recomputeResolved();
+      this.broadcast();
+    },
+  );
   /** `serviceTypeId:planId` the roster above belongs to, so a failed refresh can
    *  tell "the same plan, momentarily unreachable" from "a different plan". */
   private teamMembersKey: string | null = null;
@@ -704,6 +717,8 @@ export class StageController {
   setPcoCredentials(appId: string | null, secret: string | null, countdownTarget?: "plan-start" | "service-time"): void {
     this.pcoAppId = appId;
     this.pcoSecret = secret;
+    // Every person read under the old credentials may not hold under the new ones.
+    this.personDirectory.reset();
     if (countdownTarget) this.pcoCountdownTarget = countdownTarget;
     this.state = { ...this.state, pcoConfigured: !!(appId && secret) };
     void this.refreshServiceWindows(); // creds (re)applied — (re)compute reconnect windows
@@ -1876,16 +1891,16 @@ export class StageController {
       !target ||
       (target.serviceTypeId === this.state.serviceTypeId && target.planId === this.state.planId);
     if (live) {
-      return { slots: resolveSlots(slots, this.teamMembers, this.deviceStatuses), roster: "live" };
+      return { slots: this.resolve(slots, this.teamMembers), roster: "live" };
     }
     if (!target.planId) {
-      return { slots: resolveSlots(slots, [], this.deviceStatuses), roster: "none" };
+      return { slots: this.resolve(slots, []), roster: "none" };
     }
     const { members, reason } = await this.previewRoster(target.serviceTypeId, target.planId);
     if (reason) {
-      return { slots: resolveSlots(slots, [], this.deviceStatuses), roster: "unavailable", reason };
+      return { slots: this.resolve(slots, []), roster: "unavailable", reason };
     }
-    return { slots: resolveSlots(slots, members, this.deviceStatuses), roster: "plan" };
+    return { slots: this.resolve(slots, members), roster: "plan" };
   }
 
   /**
@@ -4060,6 +4075,14 @@ export class StageController {
     this.recomputeResolved();
   }
 
+  /** resolveSlots with the person directory, asking it for any by-person ID the
+   *  roster does not have. Every slot resolution goes through here, so none can
+   *  leave a by-person slot empty for want of the lookup. */
+  private resolve(raw: Slot[], members: TeamMemberDTO[], avatarFit: AvatarFit = "column"): Slot[] {
+    this.personDirectory.want(unrosteredPersonIds(raw, members));
+    return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people);
+  }
+
   /** Resolve every slots-View, then derive the per-output descriptors and the
    *  legacy compat shim (displays/slotsByDisplay/slots) from outputs + views. */
   private recomputeResolved(): void {
@@ -4067,7 +4090,7 @@ export class StageController {
     for (const view of this.state.views) {
       if (view.kind !== "slots") continue;
       const raw = this.rawSlotsByView.get(view.id) ?? [];
-      slotsByView[view.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
+      slotsByView[view.id] = this.resolve(raw, this.teamMembers);
     }
 
     // Inline mic-slots objects on custom layouts — resolved by object id. We
@@ -4083,7 +4106,7 @@ export class StageController {
       // and let `object-fit: cover` crop it in the one place that does. The view
       // path above keeps the column crop: a display's box genuinely IS that
       // shape. See AvatarFit.
-      slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses, "whole");
+      slotsByLayoutObject[oid] = this.resolve(raw, this.teamMembers, "whole");
     };
     forEachInlineSlotsGrid(this.state.views, resolveObjectSlots);
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
@@ -4096,7 +4119,7 @@ export class StageController {
     // first and falls back to slotsByView for anything not resolved here.
     forEachViewSourcedSlotsGrid(this.state.views, (oid, sourceViewId) => {
       const raw = this.rawSlotsByView.get(sourceViewId) ?? [];
-      slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses, "whole");
+      slotsByLayoutObject[oid] = this.resolve(raw, this.teamMembers, "whole");
     });
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};

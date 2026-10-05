@@ -51,6 +51,27 @@ Sub-variants group with their base: `Vocals (BGVs)` fills a slot asking for
 A position matches by name, not by type. A name ticked from another service type
 fills the slot on any type that has a position with that name.
 
+### By person
+
+A slot linked by person always shows one individual, whether or not they are
+scheduled on the plan, and whatever position they hold. Enter their Planning
+Center person ID, copied from their page in Planning Center: the URL ends
+`/people/AC12345678`. The `AC` form, the bare number and the whole link all work.
+
+When the person is on the plan, the name and photo come from the plan's roster.
+When they are not, the server reads them from Planning Center by ID once and
+keeps them.
+
+| The ID | Slot shows |
+|---|---|
+| on the plan | the person, from the roster |
+| not on the plan | the person, read by ID |
+| no such person in Planning Center | nothing; logged once as `[pco] no Planning Center person` |
+| Planning Center unreachable | nothing until a retry succeeds, ten minutes apart; each failure logged |
+
+A by-person slot takes no part in position matching or notes: the same person can
+also fill a position slot on the same board.
+
 ### Slots that share people
 
 **Slots listing an identical set of positions compete for the same people; slots

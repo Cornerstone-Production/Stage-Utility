@@ -32,6 +32,7 @@ import {
   confirm,
 } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { isPcoPersonId, normalizePcoPersonId } from "@main/services/pco-person-id";
 import { ColorField } from "../../components/ui/color-field";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionRangeEditor } from "./position-picker";
@@ -89,6 +90,30 @@ interface SlotRowProps {
    *  dragged as one unit, so grabbing any row in a group moves the whole group). */
   dragAttributes: DraggableAttributes;
   dragListeners: DraggableSyntheticListeners;
+}
+
+/** The by-person ID box, with a line saying what it will match. The value is kept
+ *  as typed; the resolver normalises it (pco-person-id.ts). */
+function PersonIdField({ value, onChange }: { value: string; onChange: (personId: string) => void }) {
+  const id = normalizePcoPersonId(value);
+  const valid = isPcoPersonId(id);
+  return (
+    <div className="flex flex-1 min-w-0 flex-col gap-1">
+      <Input
+        value={value}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        placeholder="AC12345678, or the person's Planning Center link"
+        className="min-w-0"
+      />
+      <p className={cn("text-caption2", id && !valid ? "text-red-11" : "text-gray-9")}>
+        {!id
+          ? "From the person's Planning Center page. Shows them whether or not they are on the plan."
+          : !valid
+            ? "Not a Planning Center person ID. Copy it from the person's page, e.g. AC12345678."
+            : `Planning Center person ${id}.`}
+      </p>
+    </div>
+  );
 }
 
 function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
@@ -316,7 +341,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
                 accept — the first one with someone available fills it, so a slot can cover acoustic OR
                 electric week to week. Give a position a note to pin it to one person (e.g. &quot;1&quot; for the
                 vocalist noted 1, &quot;HH&quot; for a handheld). Tick &quot;Any position&quot; to match on the note alone.
-                By person ID: locks to one individual.
+                By person ID: always this one person, from the AC number on their Planning Center page, whether or not they are on the plan.
               </InfoHint>
               <Select
                 value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
@@ -340,16 +365,9 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
                 }
               />
             ) : (
-              <Input
+              <PersonIdField
                 value={(slot.link as { kind: "pco"; matchBy: "person"; personId: string }).personId}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  onChange({
-                    ...slot,
-                    link: { kind: "pco", matchBy: "person", personId: e.target.value },
-                  })
-                }
-                placeholder="PCO Person ID"
-                className="flex-1 min-w-0"
+                onChange={(personId) => onChange({ ...slot, link: { kind: "pco", matchBy: "person", personId } })}
               />
             )}
           </div>

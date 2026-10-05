@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PersonCardDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
 import { setAvatarGeometry } from "./avatar-geometry.js";
 import { errorMessage } from "./errors.js";
@@ -20,6 +20,14 @@ import { serviceWindow } from "./service-window.js";
  * ask again every tick. Matching on the message text instead would break the
  * moment the wording changed — and the wording is operator-facing copy.
  */
+/** A 404 from PCO: the thing asked for does not exist. A real answer, not a failure. */
+export class PcoNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PcoNotFoundError";
+  }
+}
+
 export class PcoAuthError extends Error {
   constructor() {
     super("PCO auth failed — check App ID/Secret in Integrations settings");
@@ -463,6 +471,28 @@ function teamMembersCacheKey(appId: string, serviceTypeId: string, planId: strin
  *  live under …/uploads/person/…, so this reliably flags "no real photo". */
 function isInitialsAvatar(url: string): boolean {
   return /\/uploads\/initials\//i.test(url);
+}
+
+/**
+ * A person's photo from PCO attributes, tried in order: the first attribute set
+ * with any photo field wins. PCO's auto-generated initials placeholder counts as
+ * no photo, so the kiosk shows its own default avatar; a real photo is upgraded
+ * from the 224px default to a near-native crop.
+ */
+function personPhoto(...attrSets: Array<Record<string, unknown> | undefined>): string | null {
+  let url: string | null = null;
+  for (const a of attrSets) {
+    if (!a) continue;
+    url =
+      (a.photo_thumbnail_url != null && String(a.photo_thumbnail_url)) ||
+      (a.photo_url != null && String(a.photo_url)) ||
+      (a.avatar != null && String(a.avatar)) ||
+      (a.photo_thumbnail != null && String(a.photo_thumbnail)) ||
+      null;
+    if (url) break;
+  }
+  if (!url || isInitialsAvatar(url)) return null;
+  return highResAvatar(url);
 }
 
 /** Near-native size to request from PCO. Source originals are ~1000px square, so
@@ -914,7 +944,8 @@ class PcoService {
       }
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new Error(`PCO API error ${response.status}: ${body || response.statusText}`);
+        const message = `PCO API error ${response.status}: ${body || response.statusText}`;
+        throw response.status === 404 ? new PcoNotFoundError(message) : new Error(message);
       }
 
       const json = await response.json() as PcoResponse<T>;
@@ -1471,6 +1502,34 @@ class PcoService {
     return tz;
   }
 
+  /**
+   * One person by Planning Center ID, for a by-person slot whose person is not
+   * scheduled on the plan. Null when PCO has no such person (a 404); any other
+   * failure throws. Cached long: a name and photo rarely change.
+   */
+  async getPerson(appId: string, secret: string, personId: string): Promise<PersonCardDTO | null> {
+    const cacheKey = `person:${appId}:${personId}`;
+    const cached = this.cacheGet<PersonCardDTO>(cacheKey);
+    if (cached) return cached;
+    let json: PcoResponse;
+    try {
+      json = await this.request(`${PCO_BASE}/people/${encodeURIComponent(personId)}`, appId, secret);
+    } catch (err) {
+      if (err instanceof PcoNotFoundError) return null;
+      throw err;
+    }
+    const node = Array.isArray(json.data) ? json.data[0] : json.data;
+    if (!node) return null;
+    const a = node.attributes;
+    const joined = [a.first_name, a.last_name].filter((v) => v != null && String(v) !== "").join(" ");
+    const card: PersonCardDTO = {
+      name: (a.full_name != null && String(a.full_name)) || joined || "Unknown",
+      photoUrl: personPhoto(a),
+    };
+    this.cacheSet(cacheKey, card, TTL_LONG_MS);
+    return card;
+  }
+
   async listTeamMembers(
     appId: string,
     secret: string,
@@ -1502,35 +1561,8 @@ class PcoService {
 
       if (personRel && !Array.isArray(personRel)) {
         personId = personRel.id;
-        const personNode = includedById.get(personRel.id);
-        if (personNode) {
-          // PCO Person exposes photo_thumbnail_url / photo_url; try variants.
-          const attrs = personNode.attributes;
-          photoUrl =
-            (attrs.photo_thumbnail_url != null && String(attrs.photo_thumbnail_url)) ||
-            (attrs.photo_url != null && String(attrs.photo_url)) ||
-            (attrs.avatar != null && String(attrs.avatar)) ||
-            (attrs.photo_thumbnail != null && String(attrs.photo_thumbnail)) ||
-            null;
-        }
-        // Fall back to photo fields on the team_member item itself.
-        if (!photoUrl) {
-          const a = item.attributes;
-          photoUrl =
-            (a.photo_thumbnail_url != null && String(a.photo_thumbnail_url)) ||
-            (a.photo_url != null && String(a.photo_url)) ||
-            (a.avatar != null && String(a.avatar)) ||
-            (a.photo_thumbnail != null && String(a.photo_thumbnail)) ||
-            null;
-        }
-        // PCO returns an auto-generated gray "initials" avatar for people with no
-        // real photo (…/uploads/initials/AB.png). Treat those as no photo so the
-        // kiosk shows our themed default avatar; otherwise upgrade the real photo
-        // from PCO's 224px default to a near-native high-res crop.
-        if (photoUrl) {
-          if (isInitialsAvatar(photoUrl)) photoUrl = null;
-          else photoUrl = highResAvatar(photoUrl);
-        }
+        // The included Person first, then the photo fields on the team_member row.
+        photoUrl = personPhoto(includedById.get(personRel.id)?.attributes, item.attributes);
       }
 
       if (teamRel && !Array.isArray(teamRel)) {

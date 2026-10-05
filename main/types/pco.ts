@@ -185,6 +185,13 @@ export interface PcoAttachmentDTO {
   sourceLabel: string | null;
 }
 
+/** One Planning Center person looked up by ID: what a by-person slot draws when
+ *  the person is not on the plan's roster. */
+export interface PersonCardDTO {
+  name: string;
+  photoUrl: string | null;
+}
+
 export interface TeamMemberDTO {
   id: string;
   name: string;
