@@ -83,7 +83,7 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { useStageState, __resetForTests } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../lib/api.js");
-const { __resetForTests: __resetFavicon } = await import("../lib/apply-favicon.js");
+const { __resetForTests: __resetFavicon, STOCK_FAVICON, STOCK_FAVICON_TYPE } = await import("../lib/apply-favicon.js");
 
 /**
  * Let everything in flight settle BEFORE anything is asserted or torn down.
@@ -279,8 +279,8 @@ describe("the tab icon", () => {
     link()?.remove();
     const el = document.createElement("link");
     el.setAttribute("rel", "icon");
-    el.setAttribute("type", "image/png");
-    el.setAttribute("href", "/app-icon.png");
+    el.setAttribute("type", STOCK_FAVICON_TYPE);
+    el.setAttribute("href", STOCK_FAVICON);
     document.head.appendChild(el);
   });
 
@@ -293,19 +293,19 @@ describe("the tab icon", () => {
   test("a hydrated logo becomes the tab icon, and clearing it restores the stock icon", async () => {
     render(React.createElement(OneConsumer));
     await settle();
-    assert.equal(href(), "/app-icon.png", "no logo should leave the stock icon");
+    assert.equal(href(), STOCK_FAVICON, "no logo should leave the stock icon");
 
     act(() => {
       emitStateChanged({ ...BASE, appLogo: LOGO });
     });
     assert.equal(href(), LOGO, "the uploaded logo never reached the tab icon");
-    assert.equal(link()?.hasAttribute("type"), false, "a stale image/png type was left on a custom icon");
+    assert.equal(link()?.hasAttribute("type"), false, "a stale type was left on a custom icon");
 
     act(() => {
       emitStateChanged({ ...BASE, appLogo: null });
     });
-    assert.equal(href(), "/app-icon.png", "removing the logo left the old one in the tab");
-    assert.equal(link()?.getAttribute("type"), "image/png");
+    assert.equal(href(), STOCK_FAVICON, "removing the logo left the old one in the tab");
+    assert.equal(link()?.getAttribute("type"), STOCK_FAVICON_TYPE);
   });
 
   test("Recolor on tints the tab icon, Recolor off leaves the logo as uploaded", async () => {

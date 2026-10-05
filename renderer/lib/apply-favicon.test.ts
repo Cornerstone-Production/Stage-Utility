@@ -21,7 +21,7 @@ import { JSDOM } from "jsdom";
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
-const { applyFavicon, STOCK_FAVICON, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
+const { applyFavicon, STOCK_FAVICON, STOCK_FAVICON_TYPE, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
 
 after(() => teardown());
 
@@ -388,7 +388,7 @@ describe("the cache", () => {
       }
     })();
     applyFavicon(null, true);
-    assert.equal(links()[0]?.getAttribute("type"), "image/png", "the stock icon should declare PNG");
+    assert.equal(links()[0]?.getAttribute("type"), STOCK_FAVICON_TYPE, "the stock icon should declare its own type");
     applyFavicon(LOGO, true); // answered from the cache, inside the cool-down
     assert.equal(r.calls.length, 1);
     assert.equal(href(), LOGO);
@@ -418,6 +418,7 @@ describe("the stock icon", () => {
       const tags = [...parsed.querySelectorAll('link[rel="icon"]')];
       assert.equal(tags.length, 1, `${doc} should declare exactly one rel="icon" link`);
       assert.equal(tags[0]?.getAttribute("href"), STOCK_FAVICON);
+      assert.equal(tags[0]?.getAttribute("type"), STOCK_FAVICON_TYPE);
     });
   }
 });
