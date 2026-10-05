@@ -230,7 +230,16 @@ anything.
 npm run lint && npm run type-check && npm test && npm run build
 ```
 
-CI runs the same four. Lint is clean; a new warning is yours to fix.
+CI runs the same four, plus `npm audit --audit-level=high`. Lint is clean; a new
+warning is yours to fix.
+
+CI runs them side by side rather than one after another: lint, type-check, build
+and the audit in one job, and the test suite split across four more with
+`npm test -- --test-shard=N/4`. A PR shows each, plus one `build` check that
+passes only when all of them did. The release workflow verifies a push with the
+same split, minus the audit and the action-pin check. Coverage is not part of the
+PR gate: `coverage.yml` reports it for `beta` weekly, and on demand from the
+Actions tab once the workflow is on `main`.
 
 Not every check runs on every pull request. The secret scan, the commit
 convention check and CodeQL run on all of them, and are required on `beta`.

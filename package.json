@@ -22,7 +22,7 @@
     "start": "node --import tsx server.ts",
     "lint": "eslint .",
     "icons": "node scripts/build-icons.mjs",
-    "test": "node --import tsx --test \"main/**/*.test.ts\" \"renderer/**/*.test.ts\" \"renderer/**/*.test.tsx\" \"scripts/**/*.test.ts\"",
+    "test": "node scripts/run-tests.mjs",
     "type-check": "tsc --noEmit",
     "format": "oxfmt ."
   },
