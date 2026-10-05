@@ -177,6 +177,31 @@ describe("claiming between slots", () => {
     assert.deepEqual(names(out), ["Sarah", "Sarah"]);
   });
 
+  test("a person ID matches however Planning Center shows it", () => {
+    // The API id is the bare number; Planning Center's page URL shows AC + number,
+    // and that is what an operator copies. Each of these is the same person.
+    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    for (const typed of [
+      "113920177",
+      "AC113920177",
+      "ac113920177",
+      " AC113920177 ",
+      "https://services.planningcenteronline.com/people/AC113920177",
+      "https://people.planningcenteronline.com/people/AC113920177/profile",
+    ]) {
+      const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: typed })], team, NO_DEVICES);
+      assert.deepEqual(names(out), ["Ethan"], `"${typed}" did not match the person`);
+    }
+  });
+
+  test("a person ID that is not on the roster, or not an ID, fills nothing", () => {
+    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    for (const typed of ["1630425", "", "   ", "AC", "Ethan", "1338318035"]) {
+      const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: typed })], team, NO_DEVICES);
+      assert.deepEqual(names(out), [null], `"${typed}" filled the slot`);
+    }
+  });
+
   test("spacer and empty slots resolve to nothing and claim nobody", () => {
     const team = [member("p1", "Sarah", "Vocals")];
     const out = resolveSlots(

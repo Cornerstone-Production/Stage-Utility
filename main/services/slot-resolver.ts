@@ -2,6 +2,7 @@
 // No I/O — takes data already fetched and returns resolved Slot[].
 
 import { clamp } from "./clamp.js";
+import { normalizePcoPersonId } from "./pco-person-id.js";
 import type { Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -402,7 +403,10 @@ export function resolveSlots(
     // whole range the slot was configured to accept.
     let shownPositions: string[] | undefined;
     if (link.kind === "pco" && link.matchBy === "person") {
-      member = members.find((m) => m.personId === link.personId) ?? null;
+      // Normalised, so the AC-prefixed ID from a Planning Center page URL matches.
+      // Only people on this plan's roster can fill it; there is no wider lookup.
+      const want = normalizePcoPersonId(link.personId);
+      member = want ? (members.find((m) => m.personId === want) ?? null) : null;
     } else if (link.kind === "pco" && link.matchBy === "position") {
       const sig = positionSignature(link.positions);
       let taken = claimed.get(sig);

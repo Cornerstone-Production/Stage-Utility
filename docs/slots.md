@@ -31,6 +31,23 @@ an unmatched slot stays empty rather than showing the wrong face.
 Sub-variants group with their base: `Vocals (BGVs)` fills a slot asking for
 `Vocals`.
 
+### By person
+
+A slot linked by person shows one individual, whatever position they are
+scheduled in. Enter their Planning Center person ID, copied from their page in
+Planning Center: the URL ends `/people/AC12345678`. The `AC` form, the bare number
+and the whole link all work.
+
+| Scheduled on the plan | Slot shows |
+|---|---|
+| yes, confirmed or unconfirmed | that person |
+| declined, or not scheduled | nothing |
+
+The ID is matched against the plan's own roster, so a person who is not
+scheduled on the plan the board shows never fills the slot. A by-person slot
+takes no part in position matching or notes: the same person can also fill a
+position slot on the same board.
+
 ### Slots that share people
 
 **Slots listing an identical set of positions compete for the same people; slots
