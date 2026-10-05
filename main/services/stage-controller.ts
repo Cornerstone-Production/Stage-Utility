@@ -46,7 +46,7 @@ import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
-import { migrateInlineBrandingImages } from "./branding-image-store.js";
+import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
@@ -2543,8 +2543,16 @@ export class StageController {
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
     if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
 
+    // Images arrive as base64 data URLs. settingsStore.patch stores them as files,
+    // but only for the copy it writes: merged into this.state as-is, the full data
+    // URL (up to ~1.5 MB each) rode in every stage:state broadcast until the next
+    // restart reloaded the reference from disk. Store them here, before the merge,
+    // so memory and disk hold the same `/branding-images/` URL. A failure throws
+    // before this.state is touched, and reaches the caller as it always did.
+    const stored = await externalizeBrandingImages(stateNext);
+
     // Settings-only fields (originals + crops), never broadcast.
-    const settingsNext: Record<string, unknown> = { ...stateNext };
+    const settingsNext: Record<string, unknown> = { ...stored };
     if (partial.logoOriginal !== undefined) settingsNext.appLogoOriginal = partial.logoOriginal;
     if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
     if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
@@ -2576,7 +2584,7 @@ export class StageController {
         avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
       }),
     );
-    this.state = { ...this.state, ...stateNext };
+    this.state = { ...this.state, ...stored };
     await settingsStore.patch(settingsNext);
     this.broadcast();
     return this.state;
