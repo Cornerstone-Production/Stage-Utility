@@ -110,6 +110,22 @@ describe("getUpcomingPlanList caching", () => {
     assert.equal(incomplete().length, 2, "a second outage after a recovery must be logged");
   });
 
+  it("says once that the list is unavailable while every type stays down, and when it is back", async (t) => {
+    // Nothing unavailable is cached, so every request while Planning Center is
+    // down reads it again and lands on the unavailable answer.
+    const lines = captureConsole(t, "log", "warn");
+    const down = () => lines.filter((l) => l.includes("[plans] upcoming list unavailable"));
+    failing.add("1");
+    failing.add("2");
+    for (let i = 0; i < 4; i++) await listAt(t, i * 1000);
+    assert.equal(reads.length, 8, "each request read both types, so this proves the line is deduplicated, not skipped");
+    assert.equal(down().length, 1, `one outage, one line: ${JSON.stringify(down())}`);
+
+    failing.clear();
+    await listAt(t, 3000 + UPCOMING_CACHE_MS + 1);
+    assert.equal(lines.filter((l) => l.includes("[plans] upcoming list available again")).length, 1, JSON.stringify(lines));
+  });
+
   it("still labels a plan from the partial list", async (t) => {
     captureConsole(t, "log", "warn");
     failing.add("2");

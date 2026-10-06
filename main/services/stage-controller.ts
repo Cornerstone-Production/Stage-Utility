@@ -1005,6 +1005,8 @@ export class StageController {
       return this.upcomingUnavailable(failures[0]!, now);
     }
 
+    const back = this.plansOutage.ok("upcoming", now);
+    if (back.log) console.log(`[plans] upcoming list available again${scrub(back.note)}`);
     const plans = sortUpcoming(perType.flat());
     this.upcomingCache = {
       at: now,
@@ -1019,9 +1021,12 @@ export class StageController {
     return { plans, cacheAgeMs: 0 };
   }
 
-  /** The unavailable answer: the last good list when there is one, else nothing. */
+  /** The unavailable answer: the last good list when there is one, else nothing.
+   *  Logged once per outage: nothing unavailable is cached, so while Planning
+   *  Center is down every request lands here. */
   private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
-    console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}`);
+    const decision = this.plansOutage.fail("upcoming", reason, now);
+    if (decision.log) console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}${scrub(decision.note)}`);
     const cached = this.upcomingCache;
     if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
     return { plans: [], cacheAgeMs: 0, unavailable: reason };
