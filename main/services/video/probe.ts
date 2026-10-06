@@ -141,11 +141,29 @@ const basicHeader = (t: ProbeTarget): string => `Basic ${Buffer.from(`${t.userna
 
 const LOGIN_REQUIRED = "The camera wants a login · add the username and password";
 const LOGIN_REFUSED = "The camera refused the login · check the username and password";
+/** The relay checks the certificate too (MediaMTX does unless given a
+ *  sourceFingerprint, which this app never sets), so a camera this cannot
+ *  trust is one the relay cannot pull: say so rather than report it ready. */
+const UNTRUSTED_CERT_REASON = "The camera's certificate is not trusted, so the relay cannot pull it either · use an address without TLS, or give the camera a trusted certificate";
+
+/** Node's codes for a certificate it would not trust: self-signed, an unknown
+ *  issuer, expired, or issued for another name. */
+const UNTRUSTED_CERT = new Set([
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
 
 /** What a connection error says, in the operator's words. */
 function describeConnectError(err: unknown, host: string, port: number, connected: boolean): string {
   const code = (err as NodeJS.ErrnoException | null)?.code;
   if (code === "ECONNREFUSED") return `${host} refused the connection on port ${port}`;
+  if (code !== undefined && UNTRUSTED_CERT.has(code)) return UNTRUSTED_CERT_REASON;
   if (connected) return `${host} closed the connection without answering · check the address and path`;
   return `${host} is not reachable`;
 }
@@ -196,8 +214,6 @@ function rtspExchange(
           {
             host: connectHost,
             port,
-            // Cameras sign their own certificates.
-            rejectUnauthorized: false,
             ...(net.isIP(connectHost) === 0 ? { servername: connectHost } : {}),
           },
           onConnect,
@@ -396,7 +412,6 @@ function probeHls(target: ProbeTarget, deadline: number): Promise<ProbeResult> {
       // finished response puts the socket back in a keep-alive pool, where
       // req.destroy() can no longer reach it and the camera holds it open.
       agent: false,
-      ...(secure ? { rejectUnauthorized: false } : {}),
     };
     const req = (secure ? https : http).request(options, (res) => {
       const status = res.statusCode ?? 0;

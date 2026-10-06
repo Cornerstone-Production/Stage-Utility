@@ -3,8 +3,8 @@
 // HLS playlist. Real sockets, the real probe; nothing mocked.
 //
 // rtsps:// is proved against a self-signed certificate made on the spot with
-// the system's openssl (no key is committed); that one test skips where
-// openssl is absent.
+// the system's openssl (no key is committed): refused, as the relay refuses
+// it. That one test skips where openssl is absent.
 
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
@@ -406,7 +406,7 @@ function selfSignedPair(): { key: string; cert: string } | null {
 
 const pair = selfSignedPair();
 
-test("rtsps:// is probed over TLS even though the camera's certificate is self-signed", { skip: pair === null ? "openssl is not available" : false }, async () => {
+test("an rtsps:// camera with a self-signed certificate is refused before anything is sent", { skip: pair === null ? "openssl is not available" : false }, async () => {
   const requests: string[] = [];
   const server = tls.createServer({ key: pair!.key, cert: pair!.cert }, (socket) => {
     openSockets.add(socket);
@@ -419,9 +419,10 @@ test("rtsps:// is probed over TLS even though the camera's certificate is self-s
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as net.AddressInfo).port;
-  const result = await probeFeed({ url: `rtsps://127.0.0.1:${port}/BOX`, username: "", password: "" });
-  assert.deepEqual(result, { state: "ready", codec: "H264", width: 1920, height: 1080 });
-  assert.equal(requests[0], `DESCRIBE rtsps://127.0.0.1:${port}/BOX RTSP/1.0`);
+  const result = await probeFeed({ url: `rtsps://127.0.0.1:${port}/BOX`, username: "admin", password: "pw" });
+  assert.equal(result.state, "failed");
+  assert.match(result.state === "failed" ? result.reason : "", /certificate is not trusted/);
+  assert.deepEqual(requests, [], "no DESCRIBE, and so no login, crosses an unverified connection");
 });
 
 // ── Digest edge cases ───────────────────────────────────────────────────────
