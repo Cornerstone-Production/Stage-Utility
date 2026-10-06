@@ -412,6 +412,35 @@ describe("MediaMtxRelay.status", () => {
   });
 });
 
+describe("MediaMtxRelay.status picks the picture track", () => {
+  it("reports the video track when the path lists its audio track first", async () => {
+    runtimePaths = [
+      {
+        name: "cam1",
+        ready: true,
+        readyTime: "2026-09-28T00:00:00Z",
+        source: { type: "webRTCSession", id: "sess-1" },
+        tracks2: [
+          { codec: "Opus", codecProps: { sampleRate: 48000, channelCount: 2 } },
+          { codec: "H265", codecProps: { width: 1920, height: 1080, profile: "Main" } },
+        ],
+      },
+    ];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const [path] = await relay.status();
+    assert.deepEqual(path!.video, { codec: "H265", width: 1920, height: 1080, profile: "Main" });
+  });
+
+  it("falls back to the first track when none has a picture size yet", async () => {
+    runtimePaths = [
+      { name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "H264" }, { codec: "Opus", codecProps: {} }] },
+    ];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const [path] = await relay.status();
+    assert.deepEqual(path!.video, { codec: "H264", width: undefined, height: undefined, profile: undefined });
+  });
+});
+
 describe("MediaMtxRelay.kickPublisher", () => {
   it("an rtmpConn publisher is kicked at /v3/rtmpconns/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "rtmpConn", id: "conn-1" } }];

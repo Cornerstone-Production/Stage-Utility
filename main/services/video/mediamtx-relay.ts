@@ -166,7 +166,11 @@ export class MediaMtxRelay implements VideoRelay {
   async status(): Promise<RelayPath[]> {
     const list = (await this.request("GET", "/v3/paths/list")) as RuntimePathsListResponse;
     return (list.items ?? []).map((item) => {
-      const track = item.tracks2?.[0];
+      // The picture's track, not just the first: a publisher may list its
+      // audio first, and an audio track has no size. A track whose size is
+      // not known yet (an H.264 stream still waiting for its first frame)
+      // falls back to the first one listed.
+      const track = item.tracks2?.find((t) => t.codecProps?.width !== undefined) ?? item.tracks2?.[0];
       return {
         name: item.name,
         ready: item.ready,
