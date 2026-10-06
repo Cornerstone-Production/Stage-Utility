@@ -117,6 +117,8 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
   const pro = propresenter;
   const connected = !!pro?.connected;
+  // "Offline" is a claim, so it waits for ProPresenter's first answer.
+  const unconnectedText = propresenterKnown ? "ProPresenter offline" : "—";
   const splVal = resolveSplValue(spl);
   const previewSrc =
     connected && pro?.slidePreviewKey
@@ -233,7 +235,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
             <div className="flex flex-1 items-center min-h-0">
               <span className="text-[clamp(1.3rem,5vmin,3rem)] font-medium leading-tight line-clamp-4">
-                {connected ? (pro?.currentSlideText ?? "—") : propresenterKnown ? "ProPresenter offline" : "—"}
+                {connected ? (pro?.currentSlideText ?? "—") : unconnectedText}
               </span>
             </div>
           </div>
