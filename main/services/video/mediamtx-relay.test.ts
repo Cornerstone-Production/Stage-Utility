@@ -10,6 +10,7 @@ import * as http from "node:http";
 import { afterEach, before, after, describe, it } from "node:test";
 
 import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { OutageLog } from "../repeat-log.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
 import { RelayReconcileError, type RelayFeed } from "./relay.js";
 
@@ -250,13 +251,34 @@ describe("MediaMtxRelay.reconcile", () => {
       (err: Error) => {
         assert.ok(err instanceof RelayReconcileError, "a partial failure carries which paths failed");
         assert.deepEqual((err as RelayReconcileError).failedPaths, ["cam1"]);
-        assert.match(err.message, /1 of 3 relay paths/);
+        assert.match(err.message, /could not set up relay paths/);
         assert.match(err.message, /cam1: invalid source/);
         assert.equal(err.message.includes("obs1"), false, "only the failed path is named");
         return true;
       },
     );
     assert.deepEqual([...configPaths.keys()], ["obs1"], "obs1 added and orphan removed despite cam1 failing");
+  });
+
+  it("the same failing path reads as the same failure on a retry, so it is one outage", async () => {
+    // The first reconcile has three writes, one rejected; the retry has only the
+    // rejected one left (the other two are in place). The message used to carry
+    // "1 of 3" and then "1 of 1", and the caller's OutageLog keys on the message,
+    // so one outage was logged twice.
+    configPaths.set("orphan", { ...PATH_EXTRAS, source: "publisher" });
+    rejectWritesTo = "cam1";
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const messages: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await relay.reconcile([PULL, PUSH]).then(
+        () => assert.fail("the reconcile must reject while cam1 is refused"),
+        (err: Error) => messages.push(err.message),
+      );
+    }
+    assert.equal(messages[0], messages[1]);
+    const outage = new OutageLog();
+    const logged = messages.map((m) => outage.fail("reconcile", m, Date.now()).log);
+    assert.deepEqual(logged, [true, false], "the second failure of the same path is not a new outage");
   });
 
   it("a second reconcile with no changes makes no writes", async () => {

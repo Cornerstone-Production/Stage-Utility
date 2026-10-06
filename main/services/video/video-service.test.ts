@@ -1251,7 +1251,7 @@ test("a reconcile that rejects one feed's path still hands the relay the others,
   const relay = fakeRelay({
     reconcile: async () => {
       if (failId !== null) {
-        throw new RelayReconcileError(`could not set up 1 of 2 relay paths (${failId}: MediaMTX answered 500)`, [failId]);
+        throw new RelayReconcileError(`could not set up relay paths (${failId}: MediaMTX answered 500)`, [failId]);
       }
     },
   });

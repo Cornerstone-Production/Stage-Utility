@@ -180,8 +180,12 @@ export class MediaMtxRelay implements VideoRelay {
       }
     }
     if (failures.length > 0) {
+      // Names the paths and the reasons, never how many were attempted: a retry
+      // only attempts what is still pending, so a count ("1 of 3", then "1 of 1")
+      // would make one outage read as a new one to the caller's OutageLog, which
+      // keys on the message.
       throw new RelayReconcileError(
-        `could not set up ${failures.length} of ${writes.length} relay paths (${failures.map((f) => `${f.name}: ${f.reason}`).join("; ")})`,
+        `could not set up relay paths (${failures.map((f) => `${f.name}: ${f.reason}`).join("; ")})`,
         failures.map((f) => f.name),
       );
     }
