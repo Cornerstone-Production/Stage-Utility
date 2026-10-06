@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
+import { syncBuiltinESMExports } from "node:module";
 import * as path from "node:path";
 import { test } from "node:test";
 
@@ -334,4 +335,33 @@ test("mode does not touch services that are already identical", async () => {
     plan.differingServices.length,
     "exactly the services the readout said would change",
   );
+});
+
+test("a merge whose write tears leaves this box's own CSV whole", async () => {
+  await splHistoryStore.upsert(record("st1:pTorn:t1", "2026-10-05"));
+  const dir = await writeRaw("2026-10-05_st1-pTorn-t1", "at,db\n09:00,80\n");
+  const zip = await buildArchive();
+  const mine = "at,db\n09:05,91\n";
+  await fs.writeFile(path.join(dir, "spl.csv"), mine);
+
+  // A full card under the CSV: its write gets three bytes down, then fails. The
+  // record store's own writes go through untouched.
+  const real = fs.writeFile;
+  (await import("node:fs/promises")).default.writeFile = (async (file: Parameters<typeof real>[0], data: string | Uint8Array, opts?: Parameters<typeof real>[2]) => {
+    if (!String(file).includes("spl.csv")) return real(file, data, opts);
+    await real(file, typeof data === "string" ? data.slice(0, 3) : data.subarray(0, 3));
+    throw new Error("ENOSPC: no space left on device");
+  }) as unknown as typeof real;
+  syncBuiltinESMExports();
+  let res: Awaited<ReturnType<typeof importArchive>>;
+  try {
+    res = await importArchive(zip, { merge: ["st1:pTorn:t1"] });
+  } finally {
+    (await import("node:fs/promises")).default.writeFile = real;
+    syncBuiltinESMExports();
+  }
+
+  assert.ok(res.rawFilesFailed.some((f) => f.file.endsWith("spl.csv") && /ENOSPC/.test(f.reason)), JSON.stringify(res.rawFilesFailed));
+  assert.equal(await fs.readFile(path.join(dir, "spl.csv"), "utf8"), mine, "the rows this box recorded survived the failed write");
+  assert.deepEqual((await fs.readdir(dir)).filter((n) => n.endsWith(".tmp")), [], "no scratch file left beside it");
 });

@@ -28,6 +28,7 @@ import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
 import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
+import { atomicWrite } from "../write-queue.js";
 import { encodeRow, parseRows } from "../csv.js";
 import {
   mergeAttendanceRecord,
@@ -483,7 +484,11 @@ export async function importArchive(
           // interleaved. Keep what is here rather than produce a ragged file.
           if (existing) out = mergeCsv(existing, out, parseRows, encodeRow) ?? existing;
         }
-        await fs.writeFile(dest, name.endsWith(".csv") ? out : bytes);
+        // Aside and renamed into place: a merge rewrites a CSV this box recorded,
+        // and a write torn halfway (a full card) would otherwise leave the
+        // operator's own rows truncated. The appender reopens by path on every
+        // append, so a rename cannot strand a live recording's next row.
+        await atomicWrite(dest, name.endsWith(".csv") ? out : bytes);
       } catch (err) {
         // One unwritable member must not abort an import whose records are already
         // applied — but swallowing it reported success for work that did not
