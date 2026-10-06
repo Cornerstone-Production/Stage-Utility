@@ -112,14 +112,14 @@ export function buildScriptViewColumns(
 
   if (spec.showClock && clocks) {
     cols.push({
-      key: "clock", header: "Clock", width: "6.5rem", cellClassName: "text-fg-subtle font-mono tabular-nums",
+      key: "clock", header: "Clock", width: "6.5rem", cellClassName: "font-mono tabular-nums", textClassName: "text-fg-soft",
       render: (it) => { const ms = clocks.get(it.id); return ms != null ? fmtClock(ms, timeZone) : ""; },
     });
   }
 
   if (spec.showLength) {
     cols.push({
-      key: "len", header: "Time", width: "4.75rem", cellClassName: "text-fg-subtle font-mono tabular-nums",
+      key: "len", header: "Time", width: "4.75rem", cellClassName: "font-mono tabular-nums", textClassName: "text-fg-soft",
       render: (it) => { const s = fmtLen(it.lengthSec); return s ? (it.servicePosition === "pre" ? `- ${s}` : s) : ""; },
     });
   }
@@ -134,9 +134,9 @@ export function buildScriptViewColumns(
       const meta = parts.join("  ·  ");
       return (
         <div className="flex flex-col leading-tight">
-          <span className={`font-medium ${isCurrent ? "text-live-11" : "text-fg"}`}>{it.title}</span>
-          {meta && <span className="text-caption2 italic text-accent/85">{meta}</span>}
-          {spec.showItemNotes && it.description && <span className="text-caption2 text-fg-subtle whitespace-pre-line mt-0.5">{it.description}</span>}
+          <span className={`font-medium ${isCurrent ? "text-live-11" : "text-fg-strong"}`}>{it.title}</span>
+          {meta && <span className="text-caption2 italic text-accent-text">{meta}</span>}
+          {spec.showItemNotes && it.description && <span className="text-fg-strong whitespace-pre-line mt-[0.45em]">{it.description}</span>}
         </div>
       );
     },
@@ -146,7 +146,8 @@ export function buildScriptViewColumns(
     cols.push({
       key: `role:${role.id}`,
       header: role.name,
-      cellClassName: "text-fg-muted whitespace-pre-line",
+      cellClassName: "whitespace-pre-line",
+      textClassName: "text-fg-strong",
       render: (it) => resolveRole(role, it.notesByCategory),
     });
   }

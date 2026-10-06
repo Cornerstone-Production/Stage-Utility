@@ -166,6 +166,10 @@ export interface RundownColumn {
   width?: string;
   headerClassName?: string;
   cellClassName?: string;
+  /** The column's ink, split from `cellClassName` because both shapes draw it: the
+   *  table puts it on the cell, the stacked shape on the value beside the column's
+   *  label. Absent = the stacked shape's default, `text-fg-muted`. */
+  textClassName?: string;
   render: (item: PlanItemDTO, ctx: { isCurrent: boolean }) => ReactNode;
 }
 
@@ -293,7 +297,7 @@ export function RundownTable({
                 ) : (
                   <div key={c.key} className="flex gap-1.5 text-caption2">
                     <span className="shrink-0 text-fg-subtle">{c.header}</span>
-                    <span className="min-w-0 whitespace-pre-line text-fg-muted">{body}</span>
+                    <span className={`min-w-0 whitespace-pre-line ${c.textClassName ?? "text-fg-muted"}`}>{body}</span>
                   </div>
                 );
               })}
@@ -364,7 +368,7 @@ export function RundownTable({
               {shownColumns.map((c) => (
                 <td
                   key={c.key}
-                  className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.cellClassName ?? ""}`}
+                  className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.cellClassName ?? ""} ${c.textClassName ?? ""}`}
                 >
                   {c.render(it, { isCurrent })}
                 </td>

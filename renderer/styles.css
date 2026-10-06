@@ -216,9 +216,12 @@
   --color-fg-muted:       var(--su-fg-muted);
   --color-fg-subtle:      var(--su-fg-subtle);
   --color-fg-faint:       var(--su-fg-faint);
+  --color-fg-strong:      var(--su-fg-strong);
+  --color-fg-soft:        var(--su-fg-soft);
   --color-accent:         var(--su-accent);
   --color-accent-hover:   var(--su-accent-hover);
   --color-accent-active:  var(--su-accent-active);
+  --color-accent-text:    var(--su-accent-text);
   --color-on-accent:      var(--su-on-accent);
   --color-focus:          var(--su-focus);
   --color-field:          var(--su-field);
@@ -264,6 +267,14 @@
   --su-fg-muted:       #5c6470;
   --su-fg-subtle:      #9aa1ab;
   --su-fg-faint:       #b8bec6;
+  /* The two steps the rundown needs either side of the ramp: --su-fg-strong is
+     the brightest ink there is (what department notes and item notes draw in),
+     --su-fg-soft sits between --su-fg and --su-fg-muted (the Clock and Time
+     columns). Only the rundown reads them, and it is always on a dark ground, so
+     the light values below are for completeness — .kiosk and .kiosk-surface
+     carry the ones that render. */
+  --su-fg-strong:      #000000;
+  --su-fg-soft:        #2f353d;
   /* Brand accent — THEMEABLE. --brand-accent is overridden at runtime from
      Branding → Accent color (per org; empty = this per-theme default). Ramp
      derives via color-mix, so one picked hex works in both themes. */
@@ -271,6 +282,14 @@
   --su-accent:         var(--brand-accent);
   --su-accent-hover:   color-mix(in srgb, var(--brand-accent), black 12%);
   --su-accent-active:  color-mix(in srgb, var(--brand-accent), black 22%);
+  /* The accent as TEXT on a dark ground (the rundown's key/BPM line): the picked
+     hex lifted 45% toward white, so it keeps its hue and follows Branding but no
+     longer depends on the operator's blue being bright enough to read on black.
+     #2e6691 drawn at 85% (as this line used to) is 2.6:1 on #0a0a0a; lifted it is
+     8.2:1. Declared on :root, not .kiosk: --color-accent-text
+     resolves HERE, so a kiosk preview inside the light app inherits this value
+     rather than an undefined one. Never use it on a light ground. */
+  --su-accent-text:    color-mix(in srgb, var(--brand-accent), white 45%);
   --su-on-accent:      #ffffff;
   --su-focus:          var(--brand-accent);   /* focus ring */
   --su-field:          var(--gray-a2);  /* input / control fill */
@@ -310,6 +329,8 @@
   --su-fg-muted:       #9a9aa2;
   --su-fg-subtle:      #63636b;
   --su-fg-faint:       rgba(255, 255, 255, 0.32);
+  --su-fg-strong:      #ffffff;
+  --su-fg-soft:        rgba(255, 255, 255, 0.82);
   /* A lighter accent reads better on near-black (mockup default); still themeable. */
   --brand-accent:      #6aa6df;
   /* On dark, accent states lighten (not darken). */
@@ -333,6 +354,8 @@
   --su-fg-muted:       rgba(255, 255, 255, 0.70);
   --su-fg-subtle:      rgba(255, 255, 255, 0.45);
   --su-fg-faint:       rgba(255, 255, 255, 0.34);
+  --su-fg-strong:      #ffffff;                    /* department + item notes */
+  --su-fg-soft:        rgba(255, 255, 255, 0.82);  /* rundown Clock and Time */
   --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
   --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 18px rgba(0, 0, 0, 0.45);
@@ -610,8 +633,10 @@
   --color-fg-muted:       rgba(255, 255, 255, 0.70);
   --color-fg-subtle:      rgba(255, 255, 255, 0.45);
   --color-fg-faint:       rgba(255, 255, 255, 0.34);
+  --color-fg-strong:      #ffffff;
+  --color-fg-soft:        rgba(255, 255, 255, 0.82);
 
-  /* Not only foregrounds. The nine above cover text and lines; a kiosk surface
+  /* Not only foregrounds. The eleven above cover text and lines; a kiosk surface
      also draws FILLS and a WARNING colour, and those resolved from :root too —
      which for a light page means colours picked to sit on #f7f8fa, landing on
      #0a0a0a. Measured on this ground:
@@ -626,7 +651,7 @@
        the calendar states a failure in. The dark #ffca16 is 12.93:1.
 
      Literals, matching the .dark values of the same Radix steps, for the same
-     reason the nine above are literals: redefining --gray-a5 here would reach
+     reason the eleven above are literals: redefining --gray-a5 here would reach
      everything else derived from it. */
   --color-fill-active:    rgba(255, 255, 255, 0.13);
   --color-warn-11:        #ffca16;
