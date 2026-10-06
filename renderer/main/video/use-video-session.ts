@@ -449,16 +449,22 @@ export function probeWebrtc(
         { signal: controller.signal },
       );
       poll = setInterval(() => {
-        void whep.pc.getStats().then((report) => {
-          let frames = 0;
-          report.forEach((r: { type?: string; kind?: string; framesReceived?: number; framesDecoded?: number }) => {
-            if (r.type === "inbound-rtp" && r.kind === "video") frames = Math.max(frames, r.framesReceived ?? 0, r.framesDecoded ?? 0);
-          });
-          const stream = sink.srcObject;
-          if (frames === 0 || !(stream && typeof stream === "object") || !settle()) return;
-          sink.srcObject = null;
-          cb.onUsable({ url, session: whep, stream: stream as MediaStream });
-        });
+        whep.pc
+          .getStats()
+          .then((report) => {
+            let frames = 0;
+            report.forEach((r: { type?: string; kind?: string; framesReceived?: number; framesDecoded?: number }) => {
+              if (r.type === "inbound-rtp" && r.kind === "video") frames = Math.max(frames, r.framesReceived ?? 0, r.framesDecoded ?? 0);
+            });
+            const stream = sink.srcObject;
+            if (frames === 0 || !(stream && typeof stream === "object") || !settle()) return;
+            sink.srcObject = null;
+            cb.onUsable({ url, session: whep, stream: stream as MediaStream });
+          })
+          // A peer connection whose stats cannot be read can never show it has
+          // frames, so waiting out PROBE_TIMEOUT_MS would only hold its relay
+          // session open; a read landing after the probe settled is a no-op.
+          .catch((err: unknown) => fail(errorMessage(err)));
       }, PROBE_POLL_MS);
     })
     .catch((err: unknown) => fail(errorMessage(err)));
