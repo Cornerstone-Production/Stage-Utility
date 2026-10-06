@@ -576,6 +576,15 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   const [copyHint, setCopyHint] = useState<string | null>(null);
   const [justCopied, setJustCopied] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
+  /** The timer that turns "Copied" back into "Copy": a second copy restarts
+   *  it, and leaving the editor cancels it. */
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
   /** Every request this component makes — a preview
    *  load() or a rotation — takes a ticket, and a response is applied only
    *  if its own ticket is still the newest one issued. Without this, two
@@ -654,7 +663,8 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
           () => {
             setCopyHint(null);
             setJustCopied(true);
-            setTimeout(() => setJustCopied(false), COPIED_LABEL_MS);
+            if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+            copiedTimer.current = setTimeout(() => setJustCopied(false), COPIED_LABEL_MS);
           },
           () => {
             addressRef.current?.select();
