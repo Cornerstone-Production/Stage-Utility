@@ -18,12 +18,10 @@ export function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
 }
 
-/** Build a pretty ScriptView URL from names (falls back to ids when unnamed).
- *  `search` (a location.search, "?plan=1&text=150") rides along, for a move
- *  within a page that must not drop the plan it is browsing or its text size. */
-export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: string, search = ""): string {
+/** Build a pretty ScriptView URL from names (falls back to ids when unnamed). */
+export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: string): string {
   const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slugify(layoutName ?? layoutId);
-  return `/scriptview/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}${search}`;
+  return `/scriptview/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}`;
 }
 
 // ScriptView landing at "/scriptview". Lists PCO service types, each with a layout

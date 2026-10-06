@@ -43,7 +43,7 @@ export interface PlanLink {
 // `…/plans/12345678`, `…/plans/12345678/live`, and the API-shaped
 // `…/service_types/123/plans/12345678`. Digits only: a plan id is a number, and
 // matching `plans/` against anything else would take "plans/new" for a plan.
-const PLAN_LINK = /(?:service_types\/(\d+)\/)?plans\/(\d+)/;
+const PLAN_LINK = /(?:service_types\/(\d+)\/)?plans\/(\d+)(?!\w)/;
 
 /** The plan a pasted link names, or null when the text names none. */
 export function parsePlanLink(text: string): PlanLink | null {

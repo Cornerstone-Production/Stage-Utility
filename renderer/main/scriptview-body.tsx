@@ -219,12 +219,12 @@ export function ScriptViewHeader({
 
   // The page's header carries a plan switcher and a text-size control on top of
   // what a display's does, which stops fitting below ~1100px with a real plan
-  // title (measured: a 900px cut-off, as the mock has, wraps at 1024 once the
-  // series name is more than a few words). The countdown and the clock give way
-  // first, since the machine's own screen shows a clock; the title is held to a
-  // share of the width so it truncates instead of forcing a wrap; and below what
-  // still fits the bar wraps rather than clipping. `min-h-14` is the old fixed
-  // height whenever nothing wraps.
+  // title (measured: wraps at 1024 once the series name is more than a few
+  // words). The clock gives way first, since the machine's own screen shows one;
+  // the Remaining/Over countdown stays, as it is what an operator reads during a
+  // service. The title is held to a share of the width so it truncates instead of
+  // forcing a wrap, and below what still fits the bar wraps rather than clipping.
+  // `min-h-14` is the old fixed height whenever nothing wraps.
   const crowded = afterIdentity ? "max-[1100px]:hidden" : "";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 min-h-14 py-1 shrink-0 border-b border-line bg-black/40">
@@ -246,7 +246,7 @@ export function ScriptViewHeader({
           </span>
         )}
         {timer && (
-          <div className={`flex flex-col items-end leading-none ${crowded}`}>
+          <div className="flex flex-col items-end leading-none">
             <span className="text-caption2 uppercase tracking-wider text-fg-subtle">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
             <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
           </div>

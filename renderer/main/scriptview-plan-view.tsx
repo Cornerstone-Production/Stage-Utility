@@ -263,9 +263,10 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               value={currentLayoutKey}
               onChange={(e) => {
                 const id = e.target.value;
-                // The query goes with it: ?plan= is the plan this page is browsing and
-                // ?text= its size, and a layout change is not a reason to drop either.
-                window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name, window.location.search);
+                // Through the router, keeping the query: ?plan= is the plan this page
+                // is browsing, ?text= its size and ?transport= how a panel hears the
+                // server, and a layout change is not a reason to drop any of them.
+                navigateTo(scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name), {}, { keepSearch: true });
               }}
               className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong" aria-label="Layout">
               {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}

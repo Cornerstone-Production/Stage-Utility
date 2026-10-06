@@ -82,6 +82,9 @@ interface Opts {
   /** The ids the rundown route knows for a type; any other planId comes back empty. */
   known?: string[];
   live?: unknown;
+  /** Holds the rundown answer for a plan (null = the default) until the promise
+   *  settles, so a test can have two reads in flight and settle them out of order. */
+  hold?: (planId: string | null) => Promise<void> | undefined;
 }
 
 /** A fetch that answers like the server, and records every request. */
@@ -98,16 +101,23 @@ function stubServer(o: Opts = {}) {
     if (url.includes("/api/pco/live")) return ok(o.live ?? null);
     if (url.includes("/api/scriptview/rundown")) {
       const q = new URL(url, "http://x").searchParams;
-      const typeId = q.get("serviceTypeId") ?? "";
       const id = q.get("planId");
-      if (typeId === "st2") return ok(rundown("st2", "901", "Youth night", !id, false));
-      if (!id) return ok(rundown("st1", "302", "Sunday", true, true));
-      if (!known.includes(id)) return ok({ ...rundown("st1", "", "", false, false), planId: null, items: [], serviceTimes: [] });
-      return ok(rundown("st1", id, PLANS.find((p) => p.planId === id)?.title ?? id, id === "302", id === "302"));
+      const held = o.hold?.(id);
+      const answer = rundownAnswer(q);
+      return held ? held.then(() => answer) : answer;
     }
     return ok({});
   });
   return { ...f, calls };
+
+  function rundownAnswer(q: URLSearchParams) {
+    const typeId = q.get("serviceTypeId") ?? "";
+    const id = q.get("planId");
+    if (typeId === "st2") return ok(rundown("st2", "901", "Youth night", !id, false));
+    if (!id) return ok(rundown("st1", "302", "Sunday", true, true));
+    if (!known.includes(id)) return ok({ ...rundown("st1", "", "", false, false), planId: null, items: [], serviceTimes: [] });
+    return ok(rundown("st1", id, PLANS.find((p) => p.planId === id)?.title ?? id, id === "302", id === "302"));
+  }
 }
 
 /** The real route shape: /scriptview/$serviceType/$layout, mounted at `url`. */
@@ -432,6 +442,78 @@ test("a rundown read that fails is still an error, not a browse", async () => {
     await mountAt("/scriptview/weekend/audio?plan=303");
     assert.ok(f.logs.some((l) => l.tag === "scriptview" && /rundown/.test(l.message)));
     assert.equal(page().includes("isn't one of this service type's plans"), false, "a failure is not reported as a missing plan");
+  } finally {
+    f.restore();
+  }
+});
+
+/** A promise and the function that settles it. */
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((r) => (release = r));
+  return { promise, release };
+}
+
+test("a layout change keeps the plan being browsed, and the text size, in the address", async () => {
+  const f = stubServer();
+  try {
+    const router = await mountAt("/scriptview/weekend/all-columns?plan=303&text=150");
+    const select = screen.getByLabelText("Layout") as HTMLSelectElement;
+    await act(async () => void fireEvent.change(select, { target: { value: "svl1" } }));
+    for (let i = 0; i < 6; i++) await settle();
+    assert.equal(router.state.location.pathname, "/scriptview/weekend/audio");
+    assert.equal(String(planParam(router)), "303", "still browsing 303");
+    assert.equal(String((router.state.location.search as Record<string, unknown>).text), "150");
+    assert.equal(badge(), "browsing");
+  } finally {
+    f.restore();
+  }
+});
+
+test("the arrows wait for the page's own plan: forward before it has loaded does not jump to the first plan", async () => {
+  const gate = deferred();
+  const f = stubServer({ hold: () => gate.promise });
+  try {
+    const router = await mountAt("/scriptview/weekend/audio");
+    assert.equal(button("Next plan")?.disabled, true);
+    assert.equal(button("Previous plan")?.disabled, true);
+    gate.release();
+    for (let i = 0; i < 6; i++) await settle();
+    assert.equal(button("Next plan")?.disabled, false);
+    assert.equal(planParam(router), undefined, "nothing was navigated while it loaded");
+  } finally {
+    f.restore();
+  }
+});
+
+test("stepping on drops the previous plan from the screen at once, rather than drawing it under the new one's name", async () => {
+  const gate = deferred();
+  const f = stubServer({ hold: (id) => (id === "303" ? gate.promise : undefined) });
+  try {
+    await mountAt("/scriptview/weekend/audio");
+    assert.ok(page().includes("Sunday"));
+    await click(button("Next plan"));
+    assert.equal(page().includes("Sunday"), false, "303 has not answered, and 302 must not still be on screen");
+    gate.release();
+    for (let i = 0; i < 6; i++) await settle();
+    assert.ok(page().includes("Special"));
+  } finally {
+    f.restore();
+  }
+});
+
+test("a slow answer for the plan stepped away from does not overwrite the one stepped to", async () => {
+  const slow303 = deferred();
+  const f = stubServer({ hold: (id) => (id === "303" ? slow303.promise : undefined) });
+  try {
+    const router = await mountAt("/scriptview/weekend/audio?plan=303");
+    await click(button("Previous plan"));
+    assert.equal(String(planParam(router)), "302");
+    assert.ok(page().includes("Sunday"), "302 answered");
+    slow303.release();
+    for (let i = 0; i < 6; i++) await settle();
+    assert.ok(page().includes("Sunday"), "302 is still what is on screen");
+    assert.equal(page().includes("Special"), false, "303's late answer was dropped");
   } finally {
     f.restore();
   }

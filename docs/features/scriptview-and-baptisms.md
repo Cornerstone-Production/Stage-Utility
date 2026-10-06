@@ -141,7 +141,9 @@ app's own plan when the page is for the type the app is on, otherwise the
 nearest upcoming one. The header carries **‹ plan ▾ ›** after the plan's title to
 look at another plan of the same type. The arrows step through that type's plans
 in date order and stop at the ends; the menu lists them with their dates and
-times, the one on screen selected and the followed one marked. It is the same
+times, the one on screen selected and the followed one marked when that is known
+(always on the plan being followed; otherwise only for the service type the app is
+on). It is the same
 list, and the same stepping, as the plan switcher in the slots editor, so it
 covers the next two months and the last week.
 
@@ -151,9 +153,10 @@ plan the app follows; nothing here changes it.
 A badge says which you are looking at. **Following** (green) is the plan the page
 would open on with no choice made. **Browsing** (amber) is any other plan, with a
 **Back to live** button beside it. The live highlight, the Live badge and the
-Remaining and Over timer belong to the followed plan alone; a plan you are
-browsing shows its own **Starts in** countdown instead, and none once it has
-started. Planning Center's live position never moves a page that is browsing.
+Remaining and Over timer belong to the app's own plan alone. Any other plan, one
+you are browsing or the next plan of a service type the app is not on, shows its
+own **Starts in** countdown instead, and none once it has started. Planning
+Center's live position never moves a page that is browsing.
 
 The top of the menu takes a pasted Planning Center plan link
 (`…/plans/<id>`, with or without a trailing `/live` or `/edit`): Enter opens that
@@ -183,10 +186,13 @@ rounded, a number outside 50–300 is held to the nearest end, and text that is 
 a number changes nothing.
 
 It scales the rundown — every column, the clock and the item details — and not the
-header, which stays the size it is. Above 100% the rundown no longer shrinks its
-type to fit a wide column set into the screen, since that would undo the size
-chosen; a layout too wide for the size scrolls sideways, so use fewer columns or a
-smaller size. Browsers without CSS `zoom` (Firefox before 126) ignore the setting.
+header, which stays the size it is. A bigger size leaves the rundown less width to
+work with, so it picks its shape from that width, as it does for a narrower screen:
+a 1100px screen at 150% lays out as 733px and drops the Clock column, and at 200%
+it becomes stacked blocks. Above 100% the rundown also stops shrinking its type to
+fit a wide column set, since that would undo the size chosen; use fewer columns or
+a smaller size for a dense layout. Browsers without CSS `zoom` (Firefox before 126)
+ignore the setting.
 
 Each screen remembers its own size in that browser: the page, and each display by
 its id, so a booth laptop at 100% does not resize a display across the room.
@@ -207,6 +213,11 @@ than centring a fixed column:
 | under 640 | stacked blocks, each column labelled |
 | 640–1024 | table without the clock column |
 | over 1024 | every column, full width |
+
+The page's header makes room for the switcher and the text-size control on a
+narrow screen: below 1100px the clock is dropped (the Remaining and Over timer
+stays), the plan title shortens, and below what still fits the bar wraps onto a
+second line.
 
 # Baptisms
 

@@ -7,7 +7,6 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import { startsInTimer } from "./pco-timer.js";
-import { ALL_COLUMNS_LAYOUT_ID, scriptViewUrl } from "./scriptview-index-view.js";
 import { dropdownPlans, parsePlanLink, placePastedPlan, plansOfType, stepPlan } from "./scriptview-plan-choice.js";
 
 function plan(serviceTypeId: string, planId: string, serviceTypeName = serviceTypeId): UpcomingPlan {
@@ -59,7 +58,7 @@ describe("a pasted link", () => {
   });
 
   test("names nothing when the text is not a plan link", () => {
-    for (const bad of ["", "hello", "https://example.com/plans/new", "plans/", "12345678", "https://services.planningcenteronline.com/service_types/55"]) {
+    for (const bad of ["", "hello", "https://example.com/plans/new", "plans/", "12345678", "https://services.planningcenteronline.com/service_types/55", "https://services.planningcenteronline.com/plans/123abc"]) {
       assert.equal(parsePlanLink(bad), null, `"${bad}" is not a plan link`);
     }
   });
@@ -112,17 +111,5 @@ describe("a plan that is not the app's counts down to its own start", () => {
     assert.equal(startsInTimer([], NOW), null);
     assert.equal(startsInTimer(undefined, NOW), null);
     assert.equal(startsInTimer(["not a date"], NOW), null);
-  });
-});
-
-describe("moving between layouts on a ScriptView page", () => {
-  test("keeps the query, so a browsed plan and a text size survive the move", () => {
-    assert.equal(scriptViewUrl("Weekend", "svl1", "Audio", "?plan=303&text=150"), "/scriptview/weekend/audio?plan=303&text=150");
-    assert.equal(scriptViewUrl("Weekend", ALL_COLUMNS_LAYOUT_ID, undefined, "?plan=303"), "/scriptview/weekend/all-columns?plan=303");
-  });
-
-  test("adds nothing when there is no query", () => {
-    assert.equal(scriptViewUrl("Weekend", "svl1", "Audio"), "/scriptview/weekend/audio");
-    assert.equal(scriptViewUrl("Weekend", "svl1", "Audio", ""), "/scriptview/weekend/audio");
   });
 });

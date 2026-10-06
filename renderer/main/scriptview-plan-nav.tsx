@@ -48,8 +48,12 @@ export function ScriptViewPlanNav(props: ScriptViewPlanNavProps) {
   const { serviceTypeId, serviceTypeName, plans, plansLoaded, currentPlanId, followedPlanId, following, fallbackLabel, timeZone, onSelect, onOpenElsewhere } = props;
   const typePlans = plansOfType(plans, serviceTypeId);
   const stops = dropdownPlans(typePlans, serviceTypeId);
-  const back = plansLoaded ? stepPlan(typePlans, serviceTypeId, currentPlanId, -1) : null;
-  const forward = plansLoaded ? stepPlan(typePlans, serviceTypeId, currentPlanId, 1) : null;
+  // Inert until both the list and the current plan are known: with the plan
+  // still loading, `stepTarget` would read "no plan" as "before the first one"
+  // and send the forward arrow to the earliest plan in the list.
+  const known = plansLoaded && currentPlanId !== null;
+  const back = known ? stepPlan(typePlans, serviceTypeId, currentPlanId, -1) : null;
+  const forward = known ? stepPlan(typePlans, serviceTypeId, currentPlanId, 1) : null;
 
   const [open, setOpen] = useState(false);
   const [pasted, setPasted] = useState("");

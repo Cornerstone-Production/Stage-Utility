@@ -73,19 +73,23 @@ export function useSearchParam(name: string): [string | null, (value: string | n
 }
 
 /** Go to another path, keeping the router's own state (no reload). With no
- *  router above, a plain navigation. */
-export function useNavigateTo(): (to: string, search?: Record<string, string>) => void {
+ *  router above, a plain navigation. `keepSearch` carries the current address's
+ *  other params along (a page changing layout keeps `?plan=` and `?text=`);
+ *  `search` is then laid over them. */
+export function useNavigateTo(): (to: string, search?: Record<string, string>, opts?: { keepSearch?: boolean }) => void {
   const router = useRouterHandle();
   return useCallback(
-    (to, search = {}) => {
+    (to, search = {}, opts) => {
       if (router) {
-        const typed: Record<string, unknown> = {};
+        const typed: Record<string, unknown> = opts?.keepSearch ? { ...router.state.location.search } : {};
         for (const [k, v] of Object.entries(search)) typed[k] = forSearch(v);
         void router.navigate({ to, search: typed });
         return;
       }
-      const q = new URLSearchParams(search).toString();
-      window.location.assign(q ? `${to}?${q}` : to);
+      const q = opts?.keepSearch ? new URLSearchParams(window.location.search) : new URLSearchParams();
+      for (const [k, v] of Object.entries(search)) q.set(k, v);
+      const qs = q.toString();
+      window.location.assign(qs ? `${to}?${qs}` : to);
     },
     [router],
   );
