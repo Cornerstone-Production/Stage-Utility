@@ -5,6 +5,7 @@ import { applyAccentVar } from "../lib/apply-accent";
 import { applyFavicon } from "../lib/apply-favicon";
 import { setDisplayHourCycle } from "../lib/clock-format";
 import { isPreviewSlug } from "./preview-url";
+import { errorMessage } from "@main/services/errors";
 
 interface UseStageStateResult {
   state: StageState | null;
@@ -122,7 +123,7 @@ function hydrate(): void {
       // retries (see `subscribe`), so a server that was down at page load does
       // not blank the wall for ever.
       console.error("[useStageState] hydrate error", err);
-      publish({ state: snapshot.state, isLoading: false, error: String(err) });
+      publish({ state: snapshot.state, isLoading: false, error: errorMessage(err) });
     });
 }
 

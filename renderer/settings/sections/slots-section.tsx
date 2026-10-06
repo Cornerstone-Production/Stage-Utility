@@ -40,6 +40,7 @@ import { useStageState } from "../../main/use-stage-state";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { SlotsTargetPill } from "./slots-target-pill";
 import { PlanSwitcher } from "./plan-switcher";
+import { errorMessage } from "@main/services/errors";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -949,7 +950,7 @@ export function PresetsPanel({
         (!Array.isArray(parsed) && parsed.name) || file.name.replace(/\.slots\.json$|\.json$/i, "") || "Imported";
       await handlers.handleImportPreset(importedName, slots);
     } catch (err) {
-      toast.error(`Couldn't read that file: ${String(err)}`);
+      toast.error(`Couldn't read that file: ${errorMessage(err)}`);
     }
   }
 

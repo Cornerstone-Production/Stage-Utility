@@ -130,7 +130,7 @@ export function useStageSettings(pinnedViewId?: string) {
       if (opts.ok) toast.success(opts.ok);
       return next;
     } catch (err) {
-      toast.error(opts.fail ? `${opts.fail}: ${String(err)}` : errorMessage(err));
+      toast.error(opts.fail ? `${opts.fail}: ${errorMessage(err)}` : errorMessage(err));
       return null;
     }
   }
@@ -282,7 +282,7 @@ export function useStageSettings(pinnedViewId?: string) {
       queryClient.setQueryData(["stage:getState"], next);
       toast.success("Refreshed from Planning Center.");
     } catch (err) {
-      toast.error(`Refresh failed: ${String(err)}`);
+      toast.error(`Refresh failed: ${errorMessage(err)}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -317,7 +317,7 @@ export function useStageSettings(pinnedViewId?: string) {
       else if (status.behind > 0) toast.success(`${status.behind} update${status.behind === 1 ? "" : "s"} available.`);
       else toast.success("You're up to date.");
     } catch (err) {
-      toast.error(`Update check failed: ${String(err)}`);
+      toast.error(`Update check failed: ${errorMessage(err)}`);
     }
   }
 
@@ -331,7 +331,7 @@ export function useStageSettings(pinnedViewId?: string) {
       markUpdatePending();
       toast.success("Updating… this page will reload automatically when it's done.");
     } catch (err) {
-      toast.error(`Failed to start update: ${String(err)}`);
+      toast.error(`Failed to start update: ${errorMessage(err)}`);
     }
   }
 
@@ -471,7 +471,7 @@ export function useStageSettings(pinnedViewId?: string) {
       // the one thing this editor must not be ambiguous about.
       slotsTarget.announceSaved();
     } catch (err) {
-      toast.error(`Failed to save slots: ${String(err)}`);
+      toast.error(`Failed to save slots: ${errorMessage(err)}`);
     } finally {
       setIsSavingSlots(false);
     }
@@ -523,7 +523,7 @@ export function useStageSettings(pinnedViewId?: string) {
       if (created) setSelectedViewId(created.id);
       return created?.id ?? null;
     } catch (err) {
-      toast.error(`Failed to add view: ${String(err)}`);
+      toast.error(`Failed to add view: ${errorMessage(err)}`);
       return null;
     }
   }
@@ -540,7 +540,7 @@ export function useStageSettings(pinnedViewId?: string) {
       if (created) setSelectedViewId(created.id);
       toast.success("View duplicated.");
     } catch (err) {
-      toast.error(`Failed to duplicate view: ${String(err)}`);
+      toast.error(`Failed to duplicate view: ${errorMessage(err)}`);
     }
   }
 
@@ -594,7 +594,7 @@ export function useStageSettings(pinnedViewId?: string) {
         // editor to restart on the layout it just pulled.
         return { rev: revOf(queryClient.getQueryData<StageState>(["stage:getState"]), id), discarded: true };
       }
-      toast.error(`Failed to save layout: ${String(err)}`);
+      toast.error(`Failed to save layout: ${errorMessage(err)}`);
       throw err;
     }
   }
@@ -636,7 +636,7 @@ export function useStageSettings(pinnedViewId?: string) {
       await slotsTarget.invalidate();
       toast.success("Slots copied.");
     } catch (err) {
-      toast.error(`Failed to copy slots: ${String(err)}`);
+      toast.error(`Failed to copy slots: ${errorMessage(err)}`);
     }
   }
 
@@ -649,7 +649,7 @@ export function useStageSettings(pinnedViewId?: string) {
       queryClient.setQueryData(["presets:list"], presets);
       toast.success(`Saved arrangement "${name}".`);
     } catch (err) {
-      toast.error(`Failed to save arrangement: ${String(err)}`);
+      toast.error(`Failed to save arrangement: ${errorMessage(err)}`);
     }
   }
 
@@ -678,7 +678,7 @@ export function useStageSettings(pinnedViewId?: string) {
       await slotsTarget.invalidate();
       toast.success("Arrangement applied.");
     } catch (err) {
-      toast.error(`Failed to apply arrangement: ${String(err)}`);
+      toast.error(`Failed to apply arrangement: ${errorMessage(err)}`);
     }
   }
 
@@ -721,7 +721,7 @@ export function useStageSettings(pinnedViewId?: string) {
       queryClient.setQueryData(["presets:list"], presets);
       toast.success("Arrangement overwritten with current slots.");
     } catch (err) {
-      toast.error(`Failed to overwrite arrangement: ${String(err)}`);
+      toast.error(`Failed to overwrite arrangement: ${errorMessage(err)}`);
     }
   }
 
@@ -866,7 +866,7 @@ export function useStageSettings(pinnedViewId?: string) {
       await ipc("displays:refresh", { id: id ?? "" });
       toast.success(id ? "Refresh sent to display." : "Refresh sent to all displays.");
     } catch (err) {
-      toast.error(`Failed to refresh display: ${String(err)}`);
+      toast.error(`Failed to refresh display: ${errorMessage(err)}`);
     }
   }
 

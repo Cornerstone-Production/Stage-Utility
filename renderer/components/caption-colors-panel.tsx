@@ -9,6 +9,7 @@ import { ColorField } from "./ui/color-field";
 import { Switch } from "./ui/switch";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
+import { errorMessage } from "@main/services/errors";
 
 // Collapsible "Transcription colors" disclosure shown under the ProdCom integration.
 // Lists every channel ProdCom has, whether or not it has spoken, and lets the
@@ -29,7 +30,7 @@ export function CaptionColorsPanel() {
     try {
       await invoke("captions:setChannelColor", { channel, color });
     } catch (err) {
-      toast.error(`Failed to save color: ${String(err)}`);
+      toast.error(`Failed to save color: ${errorMessage(err)}`);
     }
   }
 
@@ -37,7 +38,7 @@ export function CaptionColorsPanel() {
     try {
       await invoke("captions:setFollowProdcomColors", { on });
     } catch (err) {
-      toast.error(`Failed to save setting: ${String(err)}`);
+      toast.error(`Failed to save setting: ${errorMessage(err)}`);
     }
   }
 

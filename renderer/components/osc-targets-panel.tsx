@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
+import { errorMessage } from "@main/services/errors";
 
 function TargetBadge({ connection, message }: { connection: ConnectionState; message: string | null }) {
   if (connection === "connected") {
@@ -63,7 +64,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
       const next = await ipc<OscTarget[]>("osc:updateTarget", { id: target.id, patch: p });
       onChange(next);
     } catch (err) {
-      toast.error(`Failed to save: ${String(err)}`);
+      toast.error(`Failed to save: ${errorMessage(err)}`);
     }
   }
   const patchConfig = (p: Record<string, unknown>) => patch({ config: p });
@@ -74,7 +75,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
     try {
       setTestResult(await ipc<{ ok: boolean; message?: string }>("osc:testTarget", { id: target.id }));
     } catch (err) {
-      setTestResult({ ok: false, message: String(err) });
+      setTestResult({ ok: false, message: errorMessage(err) });
     } finally {
       setIsTesting(false);
     }
@@ -84,7 +85,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
     try {
       onChange(await ipc<OscTarget[]>("osc:removeTarget", { id: target.id }));
     } catch (err) {
-      toast.error(`Failed to remove: ${String(err)}`);
+      toast.error(`Failed to remove: ${errorMessage(err)}`);
     }
   }
 
@@ -184,7 +185,7 @@ export function OscTargetsPanel({ className }: { className?: string }) {
     try {
       applyUpdate(await ipc<OscTarget[]>("osc:addTarget", {}));
     } catch (err) {
-      toast.error(`Failed to add target: ${String(err)}`);
+      toast.error(`Failed to add target: ${errorMessage(err)}`);
     }
   }
 
@@ -196,7 +197,7 @@ export function OscTargetsPanel({ className }: { className?: string }) {
       setPortInput(next.port);
       toast.success(`OSC feedback port set to ${next.port}`);
     } catch (err) {
-      toast.error(`Failed to set port: ${String(err)}`);
+      toast.error(`Failed to set port: ${errorMessage(err)}`);
     }
   }
 

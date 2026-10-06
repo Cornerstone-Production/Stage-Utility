@@ -14,6 +14,7 @@ import {
 } from "../components/ui";
 import { usePlanItems } from "./use-plan-items";
 import { useStageState } from "./use-stage-state";
+import { errorMessage } from "@main/services/errors";
 
 /**
  * Which items in THIS plan start each phase of the timer.
@@ -47,7 +48,7 @@ export function BaptismTriggersPanel() {
     try {
       await invoke("settings:setBaptismAutoStart", partial);
     } catch (err) {
-      toast.error(`Couldn't save: ${String(err)}`);
+      toast.error(`Couldn't save: ${errorMessage(err)}`);
     }
   }
 
@@ -85,7 +86,7 @@ export function BaptismTriggersPanel() {
         baptismItemId: next.baptismItemId || null,
       });
     } catch (err) {
-      toast.error(`Couldn't save: ${String(err)}`);
+      toast.error(`Couldn't save: ${errorMessage(err)}`);
     }
   }
 

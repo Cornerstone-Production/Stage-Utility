@@ -197,7 +197,7 @@ export function SenSourceScopePicker({
       const next = await invoke<IntegrationState>("integrations:setConfig", { id: "sensource", config: patch });
       onStateChange(next);
     } catch (err) {
-      toast.error(`Could not save: ${String(err)}`);
+      toast.error(`Could not save: ${errorMessage(err)}`);
     }
   }
 
