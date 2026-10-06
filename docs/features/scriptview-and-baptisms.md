@@ -66,8 +66,18 @@ view.
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
 
-Each has per-element toggles for the clock, item time, song key, BPM,
-arrangement, item notes and total time.
+Each has per-element toggles for the clock, item time, song key, BPM, time
+signature, arrangement, item notes and total time. A layout saved before the time
+signature switch existed shows it.
+
+The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Elevation Rhythm`:
+the key chosen on the plan item, then the BPM, time signature and name of its song
+arrangement in Planning Center. Anything the arrangement does not set is left out.
+That line is drawn in the Branding accent lifted toward white, so it stays legible
+on the dark display whatever accent is chosen. Item notes sit below it in the same
+size and full white as the department note columns. The Clock and Time columns
+draw at 82% white; column labels, section rows and the total-time footer stay
+dimmer so the content is the brightest thing on screen.
 
 A rundown whose layouts or category roles cannot be read says so above the
 table: without the layouts it shows all columns, and without the roles it shows
