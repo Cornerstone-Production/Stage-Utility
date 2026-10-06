@@ -25,6 +25,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
 import {
   isDefaultRundownPlan,
   planWindow,
@@ -388,6 +389,9 @@ export class StageController {
     /** Some service type could not be read: reused for a shorter time. */
     partial: boolean;
   } | null = null;
+  /** Plan-list reads that keep failing, said once per outage. Keys:
+   *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
+  private readonly plansOutage = new OutageLog();
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -1528,7 +1532,32 @@ export class StageController {
     // The plan this page follows when nothing is asked for: the app's own plan on
     // the active type, if it still resolves. When it does not, the default falls
     // to the nearest upcoming plan, and so must the flag below.
-    const followed = isActiveType && this.state.planId ? await resolve(this.state.planId) : null;
+    //
+    // It only LABELS the page when a planId was asked for (the plan itself is the
+    // one named), so a read that fails then must not fail the request: a browse
+    // step to a plan in the upcoming list answered without touching the recent
+    // list before the label followed the default, and has to keep answering. The
+    // label degrades to the comparison it made against the app's own plan, and the
+    // failure is said once on /log. With no planId the plan IS the followed one, so
+    // there the failure propagates to the caller as it always did.
+    let followed: PlanDTO | null = null;
+    let followedUnresolved = false;
+    if (isActiveType && this.state.planId) {
+      try {
+        followed = await resolve(this.state.planId);
+        const recovered = this.plansOutage.ok(`followed:${serviceTypeId}`, Date.now());
+        if (recovered.log) console.log(`[plans] the followed plan can be read again${scrub(recovered.note)}`);
+      } catch (err) {
+        if (!planId) throw err;
+        followedUnresolved = true;
+        const decision = this.plansOutage.fail(`followed:${serviceTypeId}`, errorMessage(err), Date.now());
+        if (decision.log) {
+          console.warn(
+            `[plans] could not resolve the followed plan to label a rundown; comparing against the app's own plan instead: ${scrub(errorMessage(err))}${scrub(decision.note)}`,
+          );
+        }
+      }
+    }
     const plan = planId ? await resolve(planId) : (followed ?? plans[0] ?? null);
     if (!plan) return empty;
 
@@ -1561,7 +1590,7 @@ export class StageController {
       isDefaultPlan: isDefaultRundownPlan({
         requestedPlanId: planId ?? null,
         resolvedPlanId: plan.id,
-        activeTypePlanId: followed?.id ?? null,
+        activeTypePlanId: followedUnresolved ? this.state.planId : (followed?.id ?? null),
         nextUpcomingPlanId: plans[0]?.id ?? null,
       }),
     };

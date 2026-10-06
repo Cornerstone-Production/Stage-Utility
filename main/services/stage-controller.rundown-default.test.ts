@@ -23,6 +23,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
 const { pcoService } = await import("./pco-service.js");
+const { captureConsole } = await import("./fixtures/capture-console.js");
 
 type Mutable = {
   state: Record<string, unknown>;
@@ -88,6 +89,37 @@ describe("getServiceCueRundown's isDefaultPlan", () => {
       assert.equal(await flag(ACTIVE, "p2"), false);
     } finally {
       ctl.state = kept;
+    }
+  });
+
+  it("a browse request still answers when the followed plan's own read fails, and says so once", async (t) => {
+    // Resolving the followed plan to label the page reaches the recent-plans list
+    // when the app's plan is not in the upcoming one. That read is not what the
+    // request asked for: a plan named in the request that IS in the upcoming list
+    // answered before the label followed the default, and must not start to 502.
+    const lines = captureConsole(t, "warn");
+    const kept = ctl.state;
+    const keptRecent = svc.listRecentPlans;
+    ctl.state = { ...kept, planId: "gone" };
+    svc.listRecentPlans = async () => {
+      throw new Error("Planning Center returned 503");
+    };
+    try {
+      const first = await stageController.getServiceCueRundown(ACTIVE, "p1");
+      assert.equal(first.planId, "p1", "the request named a plan in the upcoming list and must be answered");
+      assert.equal(first.isDefaultPlan, false, "compared against the app's own plan when the default could not be resolved");
+      const again = await stageController.getServiceCueRundown(ACTIVE, "p3");
+      assert.equal(again.planId, "p3");
+      assert.equal(
+        lines.filter((l) => l.includes("[plans] could not resolve the followed plan")).length,
+        1,
+        `one outage, one line: ${JSON.stringify(lines)}`,
+      );
+      // With no planId the followed plan IS the answer, so its failure still propagates.
+      await assert.rejects(() => stageController.getServiceCueRundown(ACTIVE), /503/);
+    } finally {
+      ctl.state = kept;
+      svc.listRecentPlans = keptRecent;
     }
   });
 
