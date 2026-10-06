@@ -26,6 +26,15 @@ test("pull allows rtsp, rtsps, srt, http(s) and refuses userinfo in the address"
   assert.match((r as { error: string }).error, /own fields/);
   assert.equal(parseFeedInput({ name: "P", source: { kind: "pull", url: "udp://h:1", username: "" } }, ALL).ok, false);
 });
+test("an SRT address that carries a passphrase is refused, and says where it goes", () => {
+  for (const url of ["srt://h:9000?passphrase=correct-horse-battery", "srt://h:9000?streamid=x&Passphrase=correct-horse-battery", "srt://h:9000?passphrase="]) {
+    const r = parseFeedInput({ name: "P", source: { kind: "pull", url, username: "" } }, ALL);
+    assert.equal(r.ok, false, url);
+    assert.match((r as { error: string }).error, /passphrase in the Password field, not the address/, url);
+  }
+  // streamid is not a secret: it stays accepted.
+  assert.equal(parseFeedInput({ name: "P", source: { kind: "pull", url: "srt://h:9000?streamid=read:cam", username: "" } }, ALL).ok, true);
+});
 test("push needs a known protocol", () => {
   assert.equal(parseFeedInput({ name: "P", source: { kind: "push", protocol: "rtsp" } }, ALL).ok, false);
   assert.equal(parseFeedInput({ name: "P", source: { kind: "push", protocol: "whip" } }, ALL).ok, true);

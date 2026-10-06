@@ -118,6 +118,13 @@ export function parseFeedInput(
       return { ok: false, error: "Put the username and password in their own fields, not the address." };
     }
 
+    // The address is stored in video-feeds.json and broadcast on video:state
+    // and /api/video/feeds; the Password field is kept in the secrets store
+    // and never sent anywhere. The key is matched without regard to case.
+    if (url.protocol === "srt:" && [...url.searchParams.keys()].some((key) => key.toLowerCase() === "passphrase")) {
+      return { ok: false, error: "Put the SRT passphrase in the Password field, not the address." };
+    }
+
     const username = typeof source.username === "string" ? source.username : "";
     if (username.length > 100) {
       return { ok: false, error: "Username must be at most 100 characters." };

@@ -178,7 +178,8 @@ username, or a passphrase that breaks either rule, is refused when the feed
 is saved; the relay itself refuses one outside that length on every attempt.
 That includes the stored password: changing a feed's address to an SRT one,
 with the old password left in place, is refused until a passphrase that fits
-is entered.
+is entered. An SRT address with a `passphrase=` value in it is refused too,
+since the address is stored and shown to every screen and the password is not.
 The relay only dials the address while something is actually showing the feed
 (a Video widget on screen, or the editor's own preview); nothing else keeps
 it connected. Once a password is stored, the field says "A password is
