@@ -631,7 +631,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
 
     case "stage:listTeamPositions": {
-      // The type being EDITED, when the caller names one; the server's live type otherwise.
+      // The type being EDITED, when the caller names one; the service type selected in the app otherwise.
       const id = p.serviceTypeId as string | undefined;
       return apiFetch<T>(id ? `/api/team-positions?serviceTypeId=${encodeURIComponent(id)}` : "/api/team-positions");
     }

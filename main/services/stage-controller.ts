@@ -1065,9 +1065,9 @@ export class StageController {
     return this.state;
   }
 
-  /** Positions for one service type: the one asked for, or the live one when
-   *  none is. The slot editor asks for the type it is EDITING, which is not
-   *  always the live one. */
+  /** Positions for one service type: the one asked for, or the service type
+   *  selected in the app (`state.serviceTypeId`) when none is. The slot editor
+   *  asks for the type it is EDITING, which is not always the selected one. */
   async listTeamPositions(serviceTypeId?: string): Promise<TeamPositionDTO[]> {
     this.assertPco();
     const id = serviceTypeId ?? this.state.serviceTypeId;
