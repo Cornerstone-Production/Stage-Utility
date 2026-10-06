@@ -320,6 +320,9 @@ export function ImportPanel() {
     }
   }
 
+  // The file's own source for each feed, found by id: the review's rows are
+  // the server's order, which nothing here may assume matches the file's.
+  const fileSources = new Map((picked?.bundle.feeds ?? []).map((f) => [f.id, f.source]));
   const choiceFor = (id: string): ImportChoice => choices.get(id) ?? "replace";
   const toImport = picked
     ? picked.preview.feeds.filter((f) => f.status === "new" || (f.status === "differs" && choiceFor(f.id) === "replace")).length
@@ -402,11 +405,11 @@ export function ImportPanel() {
             {picked.preview.hasPasswords ? "with passwords" : "no passwords"}
           </div>
           <div className="flex flex-col">
-            {picked.preview.feeds.map((f, i) => (
+            {picked.preview.feeds.map((f) => (
               <FeedRow
                 key={f.id}
                 feed={f}
-                source={picked.bundle.feeds[i]?.source}
+                source={fileSources.get(f.id)}
                 choice={choiceFor(f.id)}
                 onChoice={(c) => setChoices(new Map(choices).set(f.id, c))}
               />

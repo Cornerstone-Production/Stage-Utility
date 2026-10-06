@@ -89,6 +89,8 @@ function stub(
   report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsWritten: 0, portsApplied: false },
   /** Holds the review's answer until it settles, for a test that needs it in flight. */
   previewGate?: Promise<void>,
+  /** What the review answers; the server's own order, whatever the file's is. */
+  preview: unknown = PREVIEW,
 ) {
   const calls: Call[] = [];
   const real = globalThis.fetch;
@@ -105,7 +107,7 @@ function stub(
     if (/\/push(\?.*)?$/.test(url)) return ok({ protocol: "srt", address: "srt://192.0.2.1:8890", password: "x" });
     if (url.endsWith("/api/video/import/preview")) {
       await previewGate;
-      return ok(PREVIEW);
+      return ok(preview);
     }
     if (url.endsWith("/api/video/import")) return ok(report);
     return ok({});
@@ -249,6 +251,24 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
     assert.ok(screen.getByText(/OBS has a new publish password on this server: paste the new publish password into each device/));
     assert.ok(screen.getByText(/GYM is pulled from a device/));
     assert.ok(screen.getByRole("button", { name: "Import another" }));
+  } finally {
+    g.restore();
+  }
+});
+
+test("Import shows each new feed's own address when the review lists the feeds in another order than the file", async () => {
+  const g = stub(undefined, undefined, { ...PREVIEW, feeds: [...PREVIEW.feeds].reverse() });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /Import/ }));
+    await settle();
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([JSON.stringify(FILE)], "feeds.json", { type: "application/json" })] } });
+    await settle();
+    await settle();
+    assert.ok(screen.getByText("rtsp://192.0.2.50:554/gym"), "the new feed showed another feed's address");
   } finally {
     g.restore();
   }
