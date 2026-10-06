@@ -429,8 +429,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       const hasSlotsLayout = "slotsLayout" in body
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
-      const hasServiceCueLayout = "serviceCueLayoutId" in body
-        && (body.serviceCueLayoutId === null || typeof body.serviceCueLayoutId === "string");
+      // `scriptViewLayoutId` is what this field was called before ServiceCue was
+      // renamed, and what the API reference told a script to send; it is still
+      // read, with the current name winning when both are present.
+      const serviceCueLayoutId = "serviceCueLayoutId" in body ? body.serviceCueLayoutId : body.scriptViewLayoutId;
+      const hasServiceCueLayout = serviceCueLayoutId === null || typeof serviceCueLayoutId === "string";
       const hasHideChrome = typeof body.hideChrome === "boolean";
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
@@ -483,7 +486,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         }
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
-      if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, body.serviceCueLayoutId as string | null);
+      if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
