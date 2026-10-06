@@ -329,6 +329,9 @@ export class RelaySupervisor extends EventEmitter {
     const child = this.child;
     const done = new Promise<void>((resolve) => this.stopWaiters.push(resolve));
     child.kill("SIGTERM");
+    // A second stop() before the exit replaces the first one's timer, which
+    // onExit() could then never clear.
+    this.killTimer = cleared(this.killTimer);
     this.killTimer = setTimeout(() => {
       child.kill("SIGKILL");
     }, STOP_KILL_AFTER_MS);

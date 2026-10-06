@@ -476,6 +476,21 @@ describe("RelaySupervisor", () => {
     assert.equal(children.length, 1, "stop() must schedule no restart, however long we wait afterward");
   });
 
+  it("a second stop() before the exit leaves no SIGKILL timer behind to fire after it", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+
+    const first = sup.stop();
+    const second = sup.stop();
+    children[0]!.emit("exit", 0, null);
+    await Promise.all([first, second]);
+
+    t.mock.timers.tick(10_000);
+    assert.ok(!children[0]!.killCalls.includes("SIGKILL"), "a timer from the first stop() outlived the exit and signalled it");
+  });
+
   it("stop() resolves immediately, with no kill, when nothing is running (a mid-backoff wait)", async (t) => {
     enableClock(t);
     const { spawnImpl, children } = fakeSpawn();
