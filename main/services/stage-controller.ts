@@ -4,6 +4,8 @@
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
+import { getUserDataPath } from "./app-paths.js";
+import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -429,6 +431,20 @@ export class StageController {
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
+    // FIRST, before any store is read: a release that renames a store's file
+    // leaves the old one on disk, and it is moved into place here. It is also what
+    // keeps a config snapshot taken right after boot complete — a snapshot reads
+    // the data directory by the NEW names, so an unmoved file would be missing
+    // from the automatic backup. One failing move does not stop the rest; the old
+    // file is still there, so it is named loudly and the box keeps serving.
+    // Here rather than in server.ts so a test can run it: the call is part of
+    // init(), which is what slug-migration.test.ts and others already drive.
+    for (const f of (await adoptLegacyStoreFiles(getUserDataPath())).failures) {
+      console.error(
+        `[${scrub(f.logTag)}] could not move ${scrub(f.legacy)} to ${scrub(f.current)}: ${scrub(f.error)}. ` +
+          `The old file is untouched; what it holds will not load until it is moved by hand.`,
+      );
+    }
     await notesStore.init();
     // Beside notesStore, because `get` is synchronous and reads the module cache
     // directly: without this the first render after a restart answered from an

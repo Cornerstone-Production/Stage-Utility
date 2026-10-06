@@ -63,10 +63,6 @@ process.on("uncaughtException", (err) => {
 });
 
 import { getUserDataPath } from "./main/services/app-paths.js";
-// Every store registers itself when its module loads (see stores.ts), and the
-// move below reads that registry.
-import "./main/services/stores.js";
-import { adoptLegacyStoreFiles } from "./main/services/store-file-adoption.js";
 import { SYSTEM_DATA_DIRS, wrongDataDirWarning } from "./main/services/port-holder.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
@@ -96,21 +92,6 @@ import { videoService } from "./main/services/video/video-service.js";
 const DATA_DIR = getUserDataPath();
 await fs.mkdir(DATA_DIR, { recursive: true });
 console.log(`[server] data directory: ${DATA_DIR}`);
-
-// A release that renames a store's file leaves the old one on disk. Moved into
-// place here, before anything reads a store — and before a config snapshot can be
-// taken, which reads this directory by the NEW names and would otherwise leave
-// out a store nobody had touched yet. One failing move does not stop the rest;
-// the old file is still there, so it is named loudly and the box keeps serving.
-{
-  const { failures } = await adoptLegacyStoreFiles(DATA_DIR);
-  for (const f of failures) {
-    console.error(
-      `[${f.logTag}] could not move ${f.legacy} to ${f.current}: ${f.error}. The old file is untouched; ` +
-        `what it holds will not load until it is moved by hand.`,
-    );
-  }
-}
 
 // A second copy started by hand (or a leftover service unit) from the home-dir
 // default, alongside a real install that already has one, has silently raced
