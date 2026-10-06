@@ -60,6 +60,7 @@ const RUNDOWN: ScriptViewRundownDTO = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 type Read = "layouts" | "types" | "noteCats" | "rundown";

@@ -41,6 +41,7 @@ const RUNDOWN = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 type Read = "layouts" | "roles" | "rundown";

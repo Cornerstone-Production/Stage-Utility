@@ -18,6 +18,7 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
+import { displayTextSizeKey } from "./scriptview-text-size";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
 import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
@@ -689,7 +690,7 @@ function renderView(
     case "script":
       return (
         <KioskFrame state={state} screen={screen} kind={kind}>
-          <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
+          <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} textSizeKey={displayTextSizeKey(displayId)} />
         </KioskFrame>
       );
     case "spl-rundown":

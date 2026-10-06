@@ -24,6 +24,7 @@ import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZone
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import {
+  isDefaultRundownPlan,
   planWindow,
   sameIds,
   sortUpcoming,
@@ -1470,7 +1471,7 @@ export class StageController {
   async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
     const empty: ScriptViewRundownDTO = {
       serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
-      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false,
+      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false, isDefaultPlan: true,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
 
@@ -1526,6 +1527,12 @@ export class StageController {
       serviceTimes,
       timeZone,
       isActivePlan: isActiveType && plan.id === this.state.planId,
+      isDefaultPlan: isDefaultRundownPlan({
+        requestedPlanId: planId ?? null,
+        resolvedPlanId: plan.id,
+        activeTypePlanId: isActiveType ? this.state.planId : null,
+        nextUpcomingPlanId: plans[0]?.id ?? null,
+      }),
     };
   }
 

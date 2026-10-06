@@ -372,7 +372,7 @@ Two things to know:
 **ScriptView**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone) |
+| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone). With no `planId`: the app's plan for the active service type, else the nearest upcoming one. `isDefaultPlan` says whether the plan returned is that one |
 | GET / POST | `/api/scriptview/layouts` | List / save global layouts |
 | GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
 | GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |

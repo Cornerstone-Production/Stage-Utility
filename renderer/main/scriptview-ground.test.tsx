@@ -29,6 +29,8 @@ const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { ScriptView } = await import("./script-view.js");
 const { ScriptViewPlan } = await import("./scriptview-plan-view.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -53,6 +55,7 @@ const RUNDOWN: ScriptViewRundownDTO = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 function stubFetch() {
@@ -80,6 +83,23 @@ async function mountInto(element: React.ReactElement): Promise<void> {
   await settle();
 }
 
+/** The page reads its plan from the URL and its plan list through React Query, so
+ *  it mounts the way the app does: under a router and a query client. */
+async function mountPage(): Promise<void> {
+  const rootRoute = createRootRoute({});
+  const route = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/scriptview/$serviceType/$layout",
+    component: () => React.createElement(ScriptViewPlan, { serviceTypeParam: "weekend", layoutParam: "audio" }),
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([route]),
+    history: createMemoryHistory({ initialEntries: ["/scriptview/weekend/audio"] }),
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  await mountInto(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
+}
+
 test("the Script View draws its rundown on a kiosk ground", async () => {
   const f = stubFetch();
   try {
@@ -93,7 +113,7 @@ test("the Script View draws its rundown on a kiosk ground", async () => {
 test("the ScriptView page draws its rundown on a kiosk ground", async () => {
   const f = stubFetch();
   try {
-    await mountInto(React.createElement(ScriptViewPlan, { serviceTypeParam: "weekend", layoutParam: "audio" }));
+    await mountPage();
     assert.deepEqual(tableGround(), { table: true, ground: true });
   } finally {
     f.restore();

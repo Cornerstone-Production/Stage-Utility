@@ -6,6 +6,12 @@ import { useServerClock } from "@renderer/lib/server-clock";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
+import { ScriptViewPlanNav } from "./scriptview-plan-nav";
+import { PAGE_TEXT_SIZE_KEY } from "./scriptview-text-size";
+import { TextSizeControl } from "./scriptview-text-size-control";
+import { useTextSize } from "./use-scriptview-text-size";
+import { useUpcomingPlans } from "../settings/sections/plan-switcher";
+import { useNavigateTo, useSearchParam } from "../lib/use-search-param";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
 import { invoke } from "../lib/api";
@@ -18,6 +24,10 @@ import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 // parts are name slugs (e.g. /scriptview/weekend/audio) resolved to ids here, with
 // raw ids still accepted for backward-compatible bookmarks. Follows the type's
 // live-or-next plan; highlights the live item when this type is running.
+//
+// `?plan=<id>` browses another plan of the type without touching the app's own
+// (see ScriptViewPlanNav); no param = following. `?text=<percent>` sets the
+// rundown's text size (see useTextSize).
 export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeParam: string; layoutParam: string }) {
   const { state, error: stateError, pcoLive } = useDashboardState();
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
@@ -27,7 +37,12 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [error, setError] = useState<string | null>(null);
   // Which of the lists FAILED, as opposed to came back empty. Each failure used
   // to draw a plausible page that was wrong; see where they render.
-  const { failed, fail, clear } = useFailedReads<"types" | "layouts" | "roles" | "rundown">("scriptview");
+  const { failed, fail, clear } = useFailedReads<"types" | "layouts" | "roles" | "rundown" | "plans" | "plan">("scriptview");
+  // The plan this page browses to, kept in the address so a refresh stays put.
+  // Null = follow whatever the server resolves for the type.
+  const [planParam, setPlanParam] = useSearchParam("plan");
+  const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY);
+  const navigateTo = useNavigateTo();
 
   // The service types and the plan come from Planning Center, so they are asked
   // for only once it is connected (see pcoConnected), and until then the body
@@ -111,9 +126,13 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // screen with nothing to say it no longer matched the URL. A poll that
   // refetches the SAME type never runs this, so a failed retry still keeps
   // the last good rundown exactly as intended below.
-  useResyncOn([resolvedTypeId], () => {
+  //
+  // The browsed plan is part of the same key, for the same reason: stepping to
+  // another plan must not leave the last one drawn under the new one's name.
+  useResyncOn([resolvedTypeId, planParam], () => {
     setRundown(null);
-    clear("rundown");
+    setError(null);
+    clear("rundown", "plan");
   });
 
   // Rundown items change rarely; refetch on a slow timer. Live position arrives
@@ -123,12 +142,23 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     if (!resolvedTypeId || !pcoConfigured) return;
     let cancelled = false;
     const load = () =>
-      invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: resolvedTypeId })
+      invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: resolvedTypeId, ...(planParam ? { planId: planParam } : {}) })
         .then((r) => {
           if (cancelled) return;
+          clear("rundown");
+          // The server answers an unknown plan with an empty rundown rather than
+          // an error. Drawn as a rundown it would read as a plan with no items;
+          // a plan the operator asked for by id and did not get is said so, and
+          // logged, since a pasted link is how it happens.
+          if (planParam && r.planId === null) {
+            setRundown(null);
+            setError("That plan isn't one of this service type's plans.");
+            fail("plan", `plan ${planParam} under service type ${resolvedTypeId}`, new Error("not among this service type's plans"));
+            return;
+          }
+          clear("plan");
           setRundown(r);
           setError(null);
-          clear("rundown");
         })
         .catch((e: unknown) => {
           if (cancelled) return;
@@ -138,7 +168,18 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     load();
     const t = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [resolvedTypeId, pcoConfigured, fail, clear]);
+  }, [resolvedTypeId, planParam, pcoConfigured, fail, clear]);
+
+  // The plans the switcher walks: the slots editor's own list, asked for only
+  // once Planning Center is connected.
+  const upcoming = useUpcomingPlans({ enabled: !!pcoConfigured });
+  // The read failed (an Error), or answered that Planning Center could not be
+  // reached (a string). Neither is an empty list, and each is said and logged.
+  const planListProblem = upcoming.error ?? upcoming.unavailable;
+  useEffect(() => {
+    if (planListProblem) fail("plans", "the plan list", planListProblem);
+    else clear("plans");
+  }, [planListProblem, fail, clear]);
 
   const now = useServerClock(pcoLive?.serverNow);
 
@@ -160,6 +201,17 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // object cannot compute one of them differently — see scriptview-body.tsx.
   const render = useScriptViewRender(rundown, layout, roles, pcoLive, now);
 
+  // Following = no plan chosen, or the chosen plan IS the one the server would
+  // resolve with no choice (the server says so; see isDefaultPlan). While a
+  // browsed plan loads, or when it never resolves, it reads as Browsing.
+  const following = !planParam || rundown?.isDefaultPlan === true;
+  // The plan the page would follow, for marking it in the menu: known from the
+  // rundown when following, else from the list's own flag for the app's plan
+  // (set only for the active type, which is the only type that has one).
+  const followedPlanId = following
+    ? rundown?.planId ?? null
+    : upcoming.plans.find((p) => p.serviceTypeId === resolvedTypeId && p.isCurrent)?.planId ?? null;
+
   return (
     // FULL BLEED, like a console. The shell's content column keeps its
     // horizontal gutter on every page, chromeless or not, and a console cancels
@@ -178,6 +230,25 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         appLogo={state?.appLogo}
         appLogoMonochrome={state?.appLogoMonochrome}
         now={now}
+        afterIdentity={
+          resolvedTypeId && pcoConfigured ? (
+            <ScriptViewPlanNav
+              serviceTypeId={resolvedTypeId}
+              serviceTypeName={serviceType?.name ?? null}
+              plans={upcoming.plans}
+              plansLoaded={upcoming.loaded}
+              currentPlanId={planParam ?? rundown?.planId ?? null}
+              followedPlanId={followedPlanId}
+              following={following}
+              fallbackLabel={[rundown?.planTitle ?? rundown?.planSeriesTitle, rundown?.planDates].filter(Boolean).join(" · ") || null}
+              timeZone={rundown?.timeZone ?? state?.timezone ?? null}
+              onSelect={(id) => setPlanParam(id)}
+              onOpenElsewhere={(typeId, typeName, planId) =>
+                navigateTo(scriptViewUrl(typeName ?? typeId, currentLayoutKey, layout?.name), { plan: planId })
+              }
+            />
+          ) : null
+        }
         nav={
           <Tooltip label="All services">
             <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
@@ -186,29 +257,36 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           </Tooltip>
         }
         trailing={
+          <>
           <Tooltip label="Layout">
             <select
               value={currentLayoutKey}
               onChange={(e) => {
                 const id = e.target.value;
-                window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
+                // Through the router, keeping the query: ?plan= is the plan this page
+                // is browsing, ?text= its size and ?transport= how a panel hears the
+                // server, and a layout change is not a reason to drop any of them.
+                navigateTo(scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name), {}, { keepSearch: true });
               }}
               className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong" aria-label="Layout">
               {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}
               <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
             </select>
           </Tooltip>
+          <TextSizeControl size={textSize} onChange={setTextSize} />
+          </>
         }
       />
 
-      {(failed.has("layouts") || failed.has("roles")) && (
+      {(failed.has("layouts") || failed.has("roles") || failed.has("plans")) && (
         <div className="flex flex-col gap-1.5 px-4 pt-2">
           {failed.has("layouts") && <ErrorNote>Couldn't load the column layouts, so all columns are shown.</ErrorNote>}
           {failed.has("roles") && <ErrorNote>Couldn't load the category roles, so no note columns are shown.</ErrorNote>}
+          {failed.has("plans") && <ErrorNote>Couldn't load the plan list, so the plan arrows and menu have no plans to offer.</ErrorNote>}
         </div>
       )}
 
-      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} />
+      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} textScale={textSize / 100} />
     </div>
   );
 }

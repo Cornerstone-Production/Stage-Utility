@@ -29,7 +29,7 @@ you define once looks identical wherever it shows up:
 
 | | Follows | Columns from |
 |---|---|---|
-| **The `/scriptview` pages** | the service type in the URL | the layout in the URL |
+| **The `/scriptview` pages** | the service type in the URL, on the plan the app follows unless `?plan=` says otherwise | the layout in the URL |
 | **A Script view** on a display | the app's active plan | its **Columns** setting |
 | **An Embedded view object** inside a custom layout | the app's active plan | the Script view it points at |
 
@@ -144,6 +144,75 @@ this layout shows — "Lighting has a cue here" is useful to a stage manager wit
 showing the cue text. Colours are assigned from the category name and are not
 configurable, since Planning Center has no colour for a note category.
 
+## Plan switcher
+
+A ScriptView page opens on the plan the app follows for its service type: the
+app's own plan when the page is for the type the app is on, otherwise the
+nearest upcoming one. The header carries **‹ plan ▾ ›** after the plan's title to
+look at another plan of the same type. The arrows step through that type's plans
+in date order and stop at the ends; the menu lists them with their dates and
+times, the one on screen selected and the followed one marked when that is known
+(always on the plan being followed; otherwise only for the service type the app is
+on). It is the same
+list, and the same stepping, as the plan switcher in the slots editor, so it
+covers the next two months and the last week.
+
+It moves **this page only**. The Plan page, and so every display, stays on the
+plan the app follows; nothing here changes it.
+
+A badge says which you are looking at. **Following** (green) is the plan the page
+would open on with no choice made. **Browsing** (amber) is any other plan, with a
+**Back to live** button beside it. The live highlight, the Live badge and the
+Remaining and Over timer belong to the app's own plan alone. Any other plan, one
+you are browsing or the next plan of a service type the app is not on, shows its
+own **Starts in** countdown instead, and none once it has started. Planning
+Center's live position never moves a page that is browsing.
+
+The top of the menu takes a pasted Planning Center plan link
+(`…/plans/<id>`, with or without a trailing `/live` or `/edit`): Enter opens that
+plan. A link to a plan of another service type opens that type's page on it.
+Planning Center's plan address names no service type, so which type owns a plan is
+found in the plan list above; a plan of another type that is older than a week, or
+further out than the list reaches, is not found there and is reported as not being
+one of this type's plans. The long form, `…/service_types/<id>/plans/<id>`, names
+its type and always resolves.
+
+The choice is kept in the address as `?plan=<id>`, so a refresh or a copied link
+stays on the plan, and so does changing the layout; no `?plan=` means following. A plan the page cannot find
+says so in place of the rundown, with Back to live in reach, and a
+[scriptview] line on [`/log`](../ops/updates-and-logs.md) names it. A plan list that
+could not be read says so under the header and leaves the arrows off; the page
+keeps following its own plan. With Planning Center not connected the switcher is
+absent.
+
+## Text size
+
+The ScriptView page's header carries **A−**, a percentage and **A+**. The buttons
+step the rundown's text in 10-point increments between 50% and 300%; from a size
+that is not a multiple of ten they land on the next one in the direction pressed
+(137% goes to 140% with A+ and 130% with A−). Click the percentage to type a size:
+Enter or leaving the field applies it, Escape puts the old one back, a decimal is
+rounded, a number outside 50–300 is held to the nearest end, and text that is not
+a number changes nothing.
+
+It scales the rundown — every column, the clock and the item details — and not the
+header, which stays the size it is. A bigger size leaves the rundown less width to
+work with, so it picks its shape from that width, as it does for a narrower screen:
+a 1100px screen at 150% lays out as 733px and drops the Clock column, and at 200%
+it becomes stacked blocks. Above 100% the rundown also stops shrinking its type to
+fit a wide column set, since that would undo the size chosen; use fewer columns or
+a smaller size for a dense layout. Browsers without CSS `zoom` (Firefox before 126)
+ignore the setting.
+
+Each screen remembers its own size in that browser: the page, and each display by
+its id, so a booth laptop at 100% does not resize a display across the room.
+
+A display has no control for it. Set its size from its link with `?text=<percent>`
+(`/display-1?text=150`, held to the same 50–300 range): the size applies at once
+and is remembered, so the link only has to be opened with it once. `?text=` also
+works on a ScriptView page, and wins over what that page remembered. An Embedded
+view object inside a layout takes neither; it keeps its own font size.
+
 ## On different screens
 
 ScriptView renders on stage panels, laptops and phones, and changes shape rather
@@ -154,6 +223,11 @@ than centring a fixed column:
 | under 640 | stacked blocks, each column labelled |
 | 640–1024 | table without the clock column |
 | over 1024 | every column, full width |
+
+The page's header makes room for the switcher and the text-size control on a
+narrow screen: below 1100px the clock is dropped (the Remaining and Over timer
+stays), the plan title shortens, and below what still fits the bar wraps onto a
+second line.
 
 # Baptisms
 

@@ -61,6 +61,17 @@ one-off address handed to someone outside Production, so opening it can't lead
 to Settings or another display. Soft by design, like the toggle it matches —
 editing the URL undoes it — a guardrail, not access control.
 
+## Text size on a Script view
+
+Append `?text=<percent>` to the address of a display showing a Script view —
+`/display-1?text=150` — and its rundown renders at that size, 50 to 300; a value
+outside the range is held to the nearest end and one that is not a number is
+ignored. The display keeps the size afterwards, so it need only be opened with the
+parameter once. It has no on-screen control, since a wall display has no keyboard;
+on the `/scriptview/<service type>/<layout>` page the same size is set with the
+A− and A+ buttons in its header. See
+[Text size](features/scriptview-and-baptisms.md#text-size).
+
 ## Operator pages
 
 These render in the operator app: one page with a sidebar and the live service
@@ -118,7 +129,9 @@ heading and no sidebar or header, for a stage tablet or a producer's second
 screen, and each rundown under it, `/scriptview/<service type>/<layout>`, is the
 whole window. The operator's copy of the launcher is `/scriptview/manage`, in the
 sidebar under Content, with the app's usual chrome; `/scriptview/presets`, which
-edits layouts, keeps the chrome too.
+edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
+of that type without changing the one the app follows; see
+[Plan switcher](features/scriptview-and-baptisms.md#plan-switcher).
 
 ## Polling transport
 

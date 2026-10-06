@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  isDefaultRundownPlan,
   keepPlan,
   planWindow,
   sortUpcoming,
@@ -153,5 +154,24 @@ describe("which service types the switcher covers", () => {
 
   it("a non-empty one means exactly those", () => {
     assert.deepEqual(switcherTypes(TYPES, ["b"]).map((t) => t.id), ["b"]);
+  });
+});
+
+describe("which rundown plan counts as the default", () => {
+  const base = { resolvedPlanId: "p2", activeTypePlanId: null, nextUpcomingPlanId: "p1" };
+
+  it("is the default whenever no plan was asked for", () => {
+    assert.equal(isDefaultRundownPlan({ ...base, requestedPlanId: null }), true);
+  });
+
+  it("on the active type, the default is the app's own plan", () => {
+    const active = { ...base, activeTypePlanId: "p2" };
+    assert.equal(isDefaultRundownPlan({ ...active, requestedPlanId: "p2" }), true);
+    assert.equal(isDefaultRundownPlan({ ...active, resolvedPlanId: "p1", requestedPlanId: "p1" }), false, "the nearest plan is not the default for the active type");
+  });
+
+  it("on any other type, the default is the nearest upcoming plan", () => {
+    assert.equal(isDefaultRundownPlan({ ...base, resolvedPlanId: "p1", requestedPlanId: "p1" }), true);
+    assert.equal(isDefaultRundownPlan({ ...base, requestedPlanId: "p2" }), false);
   });
 });

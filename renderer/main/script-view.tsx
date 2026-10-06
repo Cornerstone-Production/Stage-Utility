@@ -11,6 +11,7 @@ import { useResyncOn } from "../lib/use-resync-on";
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
+import { useTextSize } from "./use-scriptview-text-size";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
 interface ScriptViewProps {
@@ -24,6 +25,12 @@ interface ScriptViewProps {
   /** Row text sizing — see ScriptViewBody. A layout object passes "" so the
    *  rows scale with the object's own font size instead of the viewport. */
   textSizeClass?: string;
+  /** Where this screen keeps its own text size (see scriptview-text-size.ts),
+   *  and the key whose presence turns `?text=<percent>` on. A display passes
+   *  one; a layout object embedding this does not, so a size on the display's
+   *  link cannot resize an object inside its layout. A display has no control
+   *  for it: the size is set from the address. */
+  textSizeKey?: string;
 }
 
 /**
@@ -44,7 +51,8 @@ interface ScriptViewProps {
  * route wraps it in the full screen and the safe-area insets, a layout object
  * wraps it in the object. That is the whole reason it can be embedded.
  */
-export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClass, autoScroll }: ScriptViewProps) {
+export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClass, textSizeKey, autoScroll }: ScriptViewProps) {
+  const [textSize] = useTextSize(textSizeKey ?? null);
   const { state, isLoading, error: stateError, pcoLive } = useDashboardState();
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   // Null until the first read lands. "The last good list" only exists once one
@@ -205,6 +213,7 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
               : null
         }
         textSizeClass={textSizeClass}
+        textScale={textSize / 100}
         autoScroll={autoScroll}
       />
     </div>

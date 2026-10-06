@@ -170,6 +170,11 @@ export interface ScriptViewRundownDTO {
    *  feed applies to it. Actual "live" (badge/highlight) additionally requires
    *  pcoLive.mode === "item" — this flag alone does NOT mean a service is running. */
   isActivePlan: boolean;
+  /** True when this is the plan the server resolves for this service type with
+   *  no `planId` — the app's own plan for the active type, else the nearest
+   *  upcoming one. How a page that was handed a `planId` tells whether it is
+   *  looking at the followed plan or at another one. */
+  isDefaultPlan: boolean;
 }
 
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */

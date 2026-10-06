@@ -29,6 +29,7 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ScriptViewPlan } = await import("./scriptview-plan-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
@@ -36,7 +37,12 @@ after(() => unmountAndTeardown(cleanup, teardown));
 // The stage state is one cache for the whole page, and the stream replays its
 // last frame to a late subscriber; without both resets, one case's
 // `pcoConfigured` is the next case's starting state.
+// The page asks for the plan switcher's list through react-query, as the real
+// app's provider allows. A fresh client per case so one case's cached list is not
+// the next one's starting state.
+let queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
 afterEach(() => {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   cleanup();
   resetStageState();
   resetReplayCache();
@@ -53,6 +59,7 @@ const RUNDOWN: ScriptViewRundownDTO = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 type Failing = "types" | "layouts" | "roles" | "state" | null;
@@ -80,9 +87,9 @@ function stubFetch(failing: Failing, pcoConfigured = true, answers: { types?: ()
 async function mount(serviceTypeParam = "weekend"): Promise<void> {
   render(
     React.createElement(
-      TooltipProvider,
-      null,
-      React.createElement(ScriptViewPlan, { serviceTypeParam, layoutParam: "audio" }),
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(TooltipProvider, null, React.createElement(ScriptViewPlan, { serviceTypeParam, layoutParam: "audio" })),
     ),
   );
   await settle();
@@ -282,7 +289,11 @@ test("a slug switch whose new rundown fails to load drops the stale plan, rather
   });
   try {
     const el = (serviceTypeParam: string) =>
-      React.createElement(TooltipProvider, null, React.createElement(ScriptViewPlan, { serviceTypeParam, layoutParam: "audio" }));
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(TooltipProvider, null, React.createElement(ScriptViewPlan, { serviceTypeParam, layoutParam: "audio" })),
+      );
     const view = render(el("weekend"));
     await settle();
     await settle();

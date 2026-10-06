@@ -21,7 +21,7 @@ import { Loader2Icon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
 import { BrandLogo } from "../components/brand-logo";
-import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { computePcoTimer, fmtDuration, startsInTimer } from "./pco-timer";
 import { RundownTable } from "./rundown-table";
 import { useSplHistory } from "./use-spl-state";
 import {
@@ -74,7 +74,10 @@ export function useScriptViewRender(
   // only when the PCO controller is on a plan item (preservice countdown ≠ live).
   const isActivePlan = !!rundown?.isActivePlan;
   const liveNow = isActivePlan && pcoLive?.mode === "item";
-  const timer = isActivePlan ? computePcoTimer(pcoLive, now) : null;
+  // The live timer belongs to the app's plan alone. Any other plan, one browsed
+  // to or the next one of a type the app is not on, counts down to its own start
+  // instead, and never shows Remaining or Over.
+  const timer = isActivePlan ? computePcoTimer(pcoLive, now) : startsInTimer(rundown?.serviceTimes, now);
 
   return {
     items,
@@ -115,6 +118,7 @@ export function ScriptViewBody({
   error,
   notice,
   textSizeClass,
+  textScale,
   autoScroll,
 }: {
   rundown: ScriptViewRundownDTO | null;
@@ -129,6 +133,9 @@ export function ScriptViewBody({
    *  inherit the container's font-size instead, which is how a layout object
    *  gets a size that tracks the box it was given rather than the screen. */
   textSizeClass?: string;
+  /** The operator's text size as a multiplier on top of `textSizeClass` (1.5 =
+   *  150%). Scales the rundown only, never the header. Absent = 1. */
+  textScale?: number;
   /** Keep the live PCO item scrolled into view. Absent = on, which is what the
    *  standalone page has always done. */
   autoScroll?: boolean;
@@ -163,6 +170,7 @@ export function ScriptViewBody({
           accentRole={layout?.accentRole ?? null}
           roles={roles}
           {...(textSizeClass != null ? { textSizeClass } : {})}
+          {...(textScale != null ? { textScale } : {})}
           {...(autoScroll != null ? { autoScroll } : {})}
           footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
         />
@@ -186,6 +194,7 @@ export function ScriptViewHeader({
   appLogoMonochrome,
   now,
   nav,
+  afterIdentity,
   trailing,
 }: {
   rundown: ScriptViewRundownDTO | null;
@@ -197,6 +206,8 @@ export function ScriptViewHeader({
   appLogoMonochrome?: boolean;
   now: number;
   nav?: ReactNode;
+  /** Right after the plan's title block: the page's plan switcher. */
+  afterIdentity?: ReactNode;
   trailing?: ReactNode;
 }) {
   const { liveNow, timer, over, svcTimes } = render;
@@ -206,10 +217,19 @@ export function ScriptViewHeader({
   const ss = String(clock.getSeconds()).padStart(2, "0");
   const ampm = clock.getHours() < 12 ? "AM" : "PM";
 
+  // The page's header carries a plan switcher and a text-size control on top of
+  // what a display's does, which stops fitting below ~1100px with a real plan
+  // title (measured: wraps at 1024 once the series name is more than a few
+  // words). The clock gives way first, since the machine's own screen shows one;
+  // the Remaining/Over countdown stays, as it is what an operator reads during a
+  // service. The title is held to a share of the width so it truncates instead of
+  // forcing a wrap, and below what still fits the bar wraps rather than clipping.
+  // `min-h-14` is the old fixed height whenever nothing wraps.
+  const crowded = afterIdentity ? "max-[1100px]:hidden" : "";
   return (
-    <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 min-h-14 py-1 shrink-0 border-b border-line bg-black/40">
       {nav}
-      <div className="flex items-center gap-2 min-w-0">
+      <div className={`flex items-center gap-2 min-w-0 ${afterIdentity ? "max-w-[clamp(6rem,24vw,22rem)]" : ""}`}>
         {appLogo && <BrandLogo logo={appLogo} monochrome={appLogoMonochrome ?? true} className="size-6 rounded text-fg" />}
         <div className="flex flex-col min-w-0 leading-tight">
           <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
@@ -218,6 +238,7 @@ export function ScriptViewHeader({
           </span>
         </div>
       </div>
+      {afterIdentity}
       <div className="ml-auto flex items-center gap-4 tabular-nums">
         {liveNow && (
           <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-live-11">
@@ -230,7 +251,7 @@ export function ScriptViewHeader({
             <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
           </div>
         )}
-        <div className="flex flex-col items-end leading-none">
+        <div className={`flex flex-col items-end leading-none ${crowded}`}>
           <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
           <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
         </div>
