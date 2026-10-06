@@ -1754,7 +1754,10 @@ class VideoService {
     // Re-running parseFeedInput is what makes a name-only PATCH ({ name }) valid
     // without a second copy of the name rules: it is this same call with the
     // existing source (and, now, the body's own password) handed back through.
-    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds());
+    // A pull feed's stored password stays when the body carries none (see
+    // updateFeedSecret); any other kind's is cleared, so there is none to keep.
+    const kept = existing.source.kind === "pull" ? await this.storedPassword(id) : undefined;
+    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds(), kept);
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
     // The id never changes on update — it is the layout binding's permanent

@@ -270,6 +270,30 @@ test("a pull feed's password lives only in secretsStore — never in the feed fi
   assert.equal((await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" })).status, 200);
 });
 
+test("a PATCH to an SRT address is refused when the saved password cannot be its passphrase, and changes nothing", async () => {
+  const { secretsStore } = await import("../secrets.js");
+  const made = await callRoute(videoRoutes, "/api/video/feeds", {
+    method: "POST",
+    body: { name: "Switch cam", source: { kind: "pull", url: "rtsp://192.0.2.44:8554/s", username: "" }, password: "admin123" },
+  });
+  assert.equal(made.status, 201);
+  const id = (made.json as { feed: { id: string } }).feed.id;
+  try {
+    const srt = { kind: "pull", url: "srt://192.0.2.44:9000", username: "" };
+    const refused = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { source: srt } });
+    assert.equal(refused.status, 400);
+    assert.match((refused.json as { error: string }).error, /10 to 80 characters/);
+    const stored = (await callRoute(videoRoutes, "/api/video/state")).json as { feeds: { id: string; source: { url: string } }[] };
+    assert.equal(stored.feeds.find((f) => f.id === id)?.source.url, "rtsp://192.0.2.44:8554/s", "the refused edit was saved anyway");
+    assert.equal((await secretsStore.getSecrets(`video:${id}`)).password, "admin123");
+
+    const fixed = await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "PATCH", body: { source: srt, password: "a-long-passphrase" } });
+    assert.equal(fixed.status, 200, "a passphrase entered with the change must let it through");
+  } finally {
+    await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" });
+  }
+});
+
 test("changing a feed's kind moves its secret correctly: push clears on -> external, pull gets nothing carried over from a former push, embed/external never touch secrets", async () => {
   const { secretsStore } = await import("../secrets.js");
 

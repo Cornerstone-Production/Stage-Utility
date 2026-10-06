@@ -176,6 +176,9 @@ passphrase in Password. It is 10 to 80 characters of plain ASCII — letters,
 digits, spaces and punctuation, as an encoder's own settings page takes. A
 username, or a passphrase that breaks either rule, is refused when the feed
 is saved; the relay itself refuses one outside that length on every attempt.
+That includes the stored password: changing a feed's address to an SRT one,
+with the old password left in place, is refused until a passphrase that fits
+is entered.
 The relay only dials the address while something is actually showing the feed
 (a Video widget on screen, or the editor's own preview); nothing else keeps
 it connected. Once a password is stored, the field says "A password is

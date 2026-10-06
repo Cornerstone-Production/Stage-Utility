@@ -23,9 +23,24 @@ function hasUserinfo(u: URL): boolean {
  *  "characters" the same count as MediaMTX's bytes. */
 const PLAIN_ASCII = /^[\x20-\x7E]*$/;
 
+/** Why `passphrase` is not one MediaMTX accepts for an SRT pull, or null. */
+function passphraseProblem(passphrase: string): string | null {
+  if (!PLAIN_ASCII.test(passphrase)) return "An SRT passphrase can use only plain letters, digits, spaces and punctuation.";
+  if (passphrase.length < 10 || passphrase.length > 80) return "An SRT passphrase must be 10 to 80 characters long.";
+  return null;
+}
+
+/**
+ * `keptPassword` is the password already stored for the feed being edited,
+ * which an input that carries none leaves in place. An SRT address takes the
+ * stored one as its passphrase, so it is held to the same rules as one typed
+ * now: an RTSP password changed over to an SRT address would otherwise save,
+ * and then be refused by the relay on every dial.
+ */
 export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
+  keptPassword?: string,
 ): { ok: true; name: string; source: VideoSource; password?: string } | { ok: false; error: string } {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid input." };
@@ -123,11 +138,10 @@ export function parseFeedInput(
     // byte and the length sentence is exact.
     if (url.protocol === "srt:") {
       if (username !== "") return { ok: false, error: "SRT uses a passphrase only, no username: leave Username empty." };
-      if (password && !PLAIN_ASCII.test(password)) {
-        return { ok: false, error: "An SRT passphrase can use only plain letters, digits, spaces and punctuation." };
-      }
-      if (password && (password.length < 10 || password.length > 80)) {
-        return { ok: false, error: "An SRT passphrase must be 10 to 80 characters long." };
+      const passphrase = password ?? keptPassword;
+      const problem = passphrase ? passphraseProblem(passphrase) : null;
+      if (problem) {
+        return { ok: false, error: password === undefined ? `${problem} The password saved for this feed would be used; enter a new one.` : problem };
       }
     }
 
