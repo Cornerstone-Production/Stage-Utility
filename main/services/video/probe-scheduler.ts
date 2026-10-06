@@ -17,8 +17,6 @@
 // store and writes no log; what to say about an answer is the owner's
 // `onResult`, so the log shares the relay dial's one-line-per-outage rule.
 
-import { createHash } from "node:crypto";
-
 import type { VideoFeed, VideoProbeEntry, VideoProbeState } from "../../types/video.js";
 import { probeKind, type ProbeResult, type ProbeTarget } from "./probe.js";
 
@@ -51,9 +49,9 @@ export interface ProbeSchedulerDeps {
   now: () => number;
 }
 
-/** What a feed was last asked with, hashed so no password is held beside it. */
-function signature(target: ProbeTarget): string {
-  return createHash("sha256").update(JSON.stringify([target.url, target.username, target.password])).digest("hex");
+/** Was a feed asked with this address and login both times? */
+function sameTarget(a: ProbeTarget | undefined, b: ProbeTarget): boolean {
+  return a !== undefined && a.url === b.url && a.username === b.username && a.password === b.password;
 }
 
 type RevisionSnapshot = { global: number; feeds: ReadonlyMap<string, number> };
@@ -61,13 +59,13 @@ type RevisionSnapshot = { global: number; feeds: ReadonlyMap<string, number> };
 export class ProbeScheduler {
   private readonly results = new Map<string, VideoProbeEntry>();
   /** The address and login each result was got with. A change resets it. */
-  private readonly signatures = new Map<string, string>();
+  private readonly targets = new Map<string, ProbeTarget>();
   /** The probe each feed is being asked right now, by what it was asked with.
    *  A second round (watching stopped and started again within a probe's
    *  length, which a page connecting does) joins it instead of asking the
    *  camera again: some cameras answer a DESCRIBE made while another is open
    *  with 406, which would read as Not answering. */
-  private readonly inFlight = new Map<string, { sig: string; promise: Promise<ProbeResult> }>();
+  private readonly inFlight = new Map<string, { target: ProbeTarget; promise: Promise<ProbeResult> }>();
   private timer: NodeJS.Timeout | null = null;
   /** Bumped when watching stops: an answer from before it is dropped. */
   private generation = 0;
@@ -139,7 +137,7 @@ export class ProbeScheduler {
     // "checking", never at a result from an hour ago.
     const hadResults = this.results.size > 0;
     this.results.clear();
-    this.signatures.clear();
+    this.targets.clear();
     if (hadResults) this.deps.publish(this.current());
   }
 
@@ -172,14 +170,14 @@ export class ProbeScheduler {
     for (const id of [...this.results.keys()]) {
       if (ids.has(id)) continue;
       this.results.delete(id);
-      this.signatures.delete(id);
+      this.targets.delete(id);
       changed = true;
     }
     if (!this.deps.isEnabled()) {
       // Off: nothing is asked, and nothing is claimed about any feed.
       if (this.results.size > 0) {
         this.results.clear();
-        this.signatures.clear();
+        this.targets.clear();
         changed = true;
       }
       if (changed) this.deps.publish(this.current());
@@ -207,27 +205,26 @@ export class ProbeScheduler {
     if (generation !== this.generation) return;
     // The edit may have landed while the password read was open.
     if (this.changedSince(id, seen)) return;
-    const sig = signature(target);
     const now = this.deps.now();
 
     if (probeKind(target.url) === null) {
-      if (this.signatures.get(id) !== sig || this.results.get(id)?.state !== "unchecked") {
-        this.signatures.set(id, sig);
+      if (!sameTarget(this.targets.get(id), target) || this.results.get(id)?.state !== "unchecked") {
+        this.targets.set(id, target);
         this.results.set(id, { state: "unchecked", checkedAt: now });
         this.deps.publish(this.current());
       }
       return;
     }
 
-    if (this.signatures.get(id) !== sig) {
-      this.signatures.set(id, sig);
+    if (!sameTarget(this.targets.get(id), target)) {
+      this.targets.set(id, target);
       this.results.set(id, { state: "checking", checkedAt: now });
       this.deps.publish(this.current());
     }
 
-    const result = await this.ask(id, sig, target);
+    const result = await this.ask(id, target);
     // Watching stopped, or a feed was added, edited or removed while this ran.
-    if (generation !== this.generation || this.changedSince(id, seen) || this.signatures.get(id) !== sig) return;
+    if (generation !== this.generation || this.changedSince(id, seen) || !sameTarget(this.targets.get(id), target)) return;
     // A camera busy answering someone else is no news: keep what it showed.
     // Only a feed that has never answered says so, or it reads Checking for ever.
     if (result.state === "busy") {
@@ -244,13 +241,13 @@ export class ProbeScheduler {
     this.deps.onResult(feed, result, answeredAt);
   }
 
-  private ask(id: string, sig: string, target: ProbeTarget): Promise<ProbeResult> {
+  private ask(id: string, target: ProbeTarget): Promise<ProbeResult> {
     const joined = this.inFlight.get(id);
-    if (joined?.sig === sig) return joined.promise;
+    if (joined && sameTarget(joined.target, target)) return joined.promise;
     const promise = this.deps.probe(target).finally(() => {
       if (this.inFlight.get(id)?.promise === promise) this.inFlight.delete(id);
     });
-    this.inFlight.set(id, { sig, promise });
+    this.inFlight.set(id, { target, promise });
     return promise;
   }
 
