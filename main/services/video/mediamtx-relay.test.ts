@@ -52,6 +52,9 @@ let failPathsListWith: string | null = null;
 /** When set, `GET /v3/config/paths/list` answers 500 with this raw text,
  *  which is not JSON. */
 let rawPathsListBody: string | null = null;
+/** When set, an add or replace of this path answers 400, as the relay does
+ *  for a config it will not accept. */
+let rejectWritesTo: string | null = null;
 
 function bootState(): void {
   configPaths = new Map();
@@ -60,6 +63,7 @@ function bootState(): void {
   failPathsList = false;
   failPathsListWith = null;
   rawPathsListBody = null;
+  rejectWritesTo = null;
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
@@ -110,6 +114,7 @@ function handle(method: string, url: string, body: unknown, res: http.ServerResp
   const addMatch = /^\/v3\/config\/paths\/add\/([^/]+)$/.exec(url);
   if (method === "POST" && addMatch) {
     const name = decodeURIComponent(addMatch[1]);
+    if (name === rejectWritesTo) return send(res, 400, { error: "invalid source" });
     if (configPaths.has(name)) return send(res, 400, { error: "path already exists" });
     configPaths.set(name, { ...PATH_EXTRAS, ...(body as Record<string, unknown>) });
     return send(res, 200, {});
@@ -234,6 +239,22 @@ describe("MediaMtxRelay.reconcile", () => {
     const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([srtPull]);
     assert.equal(configPaths.get("cam2")?.source, "srt://h:9000?streamid=x&passphrase=p%40ss");
+  });
+
+  it("a path the relay rejects does not keep the others from being added or removed, and reconcile still rejects naming it", async () => {
+    configPaths.set("orphan", { ...PATH_EXTRAS, source: "publisher" });
+    rejectWritesTo = "cam1";
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    await assert.rejects(
+      () => relay.reconcile([PULL, PUSH]),
+      (err: Error) => {
+        assert.match(err.message, /1 of 3 relay paths/);
+        assert.match(err.message, /cam1: invalid source/);
+        assert.equal(err.message.includes("obs1"), false, "only the failed path is named");
+        return true;
+      },
+    );
+    assert.deepEqual([...configPaths.keys()], ["obs1"], "obs1 added and orphan removed despite cam1 failing");
   });
 
   it("a second reconcile with no changes makes no writes", async () => {

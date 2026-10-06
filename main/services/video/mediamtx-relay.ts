@@ -35,6 +35,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 
+import { errorMessage } from "../errors.js";
 import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
@@ -151,15 +152,35 @@ export class MediaMtxRelay implements VideoRelay {
       await this.request("PATCH", "/v3/config/global/patch", { authInternalUsers: desiredUsers });
     }
 
+    // Every path is attempted whatever an earlier one did: a path the relay
+    // rejects must not keep the others from being added, replaced or removed.
+    // The failures are rethrown together, so the caller still sees a failed
+    // reconcile and retries.
     const plan = planReconcile(feeds, current);
-    for (const [name, conf] of plan.add) {
-      await this.request("POST", `/v3/config/paths/add/${encodeURIComponent(name)}`, conf);
+    const writes: [string, () => Promise<unknown>][] = [
+      ...plan.add.map(([name, conf]): [string, () => Promise<unknown>] => [
+        name,
+        () => this.request("POST", `/v3/config/paths/add/${encodeURIComponent(name)}`, conf),
+      ]),
+      ...plan.replace.map(([name, conf]): [string, () => Promise<unknown>] => [
+        name,
+        () => this.request("POST", `/v3/config/paths/replace/${encodeURIComponent(name)}`, conf),
+      ]),
+      ...plan.remove.map((name): [string, () => Promise<unknown>] => [
+        name,
+        () => this.request("DELETE", `/v3/config/paths/delete/${encodeURIComponent(name)}`),
+      ]),
+    ];
+    const failures: string[] = [];
+    for (const [name, write] of writes) {
+      try {
+        await write();
+      } catch (err) {
+        failures.push(`${name}: ${errorMessage(err)}`);
+      }
     }
-    for (const [name, conf] of plan.replace) {
-      await this.request("POST", `/v3/config/paths/replace/${encodeURIComponent(name)}`, conf);
-    }
-    for (const name of plan.remove) {
-      await this.request("DELETE", `/v3/config/paths/delete/${encodeURIComponent(name)}`);
+    if (failures.length > 0) {
+      throw new Error(`could not set up ${failures.length} of ${writes.length} relay paths (${failures.join("; ")})`);
     }
   }
 
