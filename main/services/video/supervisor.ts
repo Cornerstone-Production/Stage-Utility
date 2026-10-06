@@ -445,9 +445,9 @@ export class RelaySupervisor extends EventEmitter {
     // and reports it ONLY through 'error'. An EventEmitter with no 'error'
     // listener THROWS on that event by Node's own special case, crashing
     // this entire server over one bad path. 'exit' may still fire
-    // afterward (code null, signal null, per Node's docs); handledBySpawnError
-    // skips it so the same failure is not reported, and restarted, twice.
-    let handledBySpawnError = false;
+    // afterward (code null, signal null, per Node's docs); onExit() has
+    // already forgotten this child by then, so the exit handler below skips
+    // it and the same failure is not reported, and restarted, twice.
     // `on`, not `once`: a kill can fail more than once (stop() escalating
     // SIGTERM to SIGKILL), and an 'error' with no listener left throws,
     // taking the server down with it.
@@ -459,7 +459,6 @@ export class RelaySupervisor extends EventEmitter {
       // spawn() never actually created a process; that is the one case
       // this is a spawn failure at all.
       if (child.pid === undefined) {
-        handledBySpawnError = true;
         this.onExit(null, `could not start: ${errorMessage(err)}`);
         return;
       }
@@ -472,7 +471,6 @@ export class RelaySupervisor extends EventEmitter {
       // exit is stale and must not touch the newer child's timers, pid
       // file or status.
       if (this.child !== child) return;
-      if (handledBySpawnError) return;
       this.onExit(code, undefined, signal ?? null);
     });
     this.armHealthyTimer();
