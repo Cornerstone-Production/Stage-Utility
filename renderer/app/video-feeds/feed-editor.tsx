@@ -39,6 +39,7 @@ import { invoke } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
 import { VideoObject } from "../../main/video/video-object";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
+import { SIDE_PANE } from "./side-pane";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
   pull: "Pull from a device (RTSP, SRT, HLS)",
@@ -342,10 +343,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
   const warning = !isNew && feed ? delayWarning(feed) : null;
 
   return (
-    <aside
-      aria-label="Feed settings"
-      className="flex min-w-0 flex-col gap-3.5 border-t border-line bg-surface-raised p-4 min-[900px]:border-l min-[900px]:border-t-0"
-    >
+    <aside aria-label="Feed settings" className={SIDE_PANE}>
       <h2 className="text-subheadline font-semibold text-fg">{isNew ? "New feed" : feed?.name}</h2>
 
       <div className="aspect-video w-full overflow-hidden rounded-[10px] bg-black">

@@ -108,18 +108,9 @@ export function RelayDetailRow({
   // that failed or a plain crash loop all send the operator to a page with
   // nothing on it that helps.
   const showChangePorts = relay.state === "running" || (relay.state === "failing" && relay.kind === "port-conflict");
-  // Called as a plain function, NOT `<RelayDetail .../>` — that JSX form
-  // always produces a truthy element object (a description of "call this
-  // component"), never the null RelayDetail itself sometimes returns, so
-  // checking ITS result for null always saw an object and never skipped
-  // anything. RelayDetail takes no ref, no children and uses no hooks, so
-  // calling it directly is exactly as safe as JSX would be, and actually
-  // reads its return value.
-  const detail = RelayDetail({ relay, enabled, binaryPresent, archivePresent });
-  // This row used to render its bordered/padded strip
-  // unconditionally, so "off, switched off, binary already downloaded" (the
-  // one case with nothing to say — RelayDetail returns null and
-  // showChangePorts is false) rendered a strip with nothing in it, just a
+  const detail = relayDetail({ relay, enabled, binaryPresent, archivePresent });
+  // "Off, switched off, binary already downloaded" has nothing to say (no
+  // detail, no ports link); the strip is left out rather than rendered as a
   // border and padding around empty space.
   if (detail === null && !showChangePorts) return null;
   return (
@@ -130,10 +121,10 @@ export function RelayDetailRow({
   );
 }
 
-/** The asset's own file name, sent by the server rather than derived here by
- *  splitting `placeArchiveAt` on "/" — that breaks on Windows, where the
- *  path the server names uses "\". */
-function RelayDetail({
+/** The detail strip's content for the relay's state, or null when there is
+ *  nothing to say. A function returning nodes, not a component: the caller
+ *  needs to know whether it returned null, which a JSX element never is. */
+function relayDetail({
   relay,
   enabled,
   binaryPresent,
@@ -143,7 +134,7 @@ function RelayDetail({
   enabled: boolean;
   binaryPresent: boolean;
   archivePresent: boolean;
-}) {
+}): ReactNode {
   if (relay.state === "off") {
     if (enabled) {
       return <Detail>Video is on. The relay starts when a feed pulls from a device or a device pushes to it.</Detail>;
@@ -197,6 +188,8 @@ function RelayDetail({
         <>
           <Detail>{relay.reason}</Detail>
           {relay.retryAt !== null && <Detail>Next try at {formatClock(relay.retryAt, { seconds: true })}</Detail>}
+          {/* The asset's file name comes from the server, not from splitting
+              `placeArchiveAt` on "/", which breaks where the path uses "\". */}
           {relay.assetName && relay.placeArchiveAt && (
             <Detail>
               Or place {relay.assetName} in {relay.placeArchiveAt} in Stage Utility's data folder by hand.

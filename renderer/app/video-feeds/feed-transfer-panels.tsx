@@ -29,11 +29,10 @@ import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
 import { joinWithAnd } from "../../lib/join-with-and";
 import { useStageState } from "../../main/use-stage-state";
+import { SIDE_PANE } from "./side-pane";
 
 const BUNDLE_KIND = "stage-utility-video-feeds";
 
-const ASIDE =
-  "flex min-w-0 flex-col gap-3.5 border-t border-line bg-surface-raised p-4 min-[900px]:border-l min-[900px]:border-t-0";
 const LABEL = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
 const MONO = "font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]";
 
@@ -133,7 +132,7 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
   };
 
   return (
-    <aside aria-label="Export video feeds" className={ASIDE}>
+    <aside aria-label="Export video feeds" className={SIDE_PANE}>
       <h2 className="text-subheadline font-semibold text-fg">Export video feeds</h2>
 
       <div className="flex flex-col gap-1.5">
@@ -352,7 +351,7 @@ export function ImportPanel() {
   };
 
   return (
-    <aside aria-label="Import video feeds" className={ASIDE}>
+    <aside aria-label="Import video feeds" className={SIDE_PANE}>
       <h2 className="text-subheadline font-semibold text-fg">Import video feeds</h2>
       <input
         ref={fileRef}

@@ -2,11 +2,9 @@
 // the page's heading, the feed list as its wide pane and the editor beside it,
 // as the approved design lays it out.
 //
-// The relay's status line and on/off switch belong in this card's header too,
-// and arrive with the relay; there is nothing to report on without one. Per
-// the approved design, the pill and the switch sit
-// on the SAME row as the page's own h1 and sub-title, not a separate one —
-// see relay-status.tsx's own header comment.
+// The relay's status pill and on/off switch sit on the SAME row as the page's
+// own heading and sub-title, per the approved design — see relay-status.tsx's
+// own header comment.
 // useVideoState()'s `kinds` already limits the Source dropdown to what this
 // build offers, so nothing here changes when that list widens.
 //
@@ -19,7 +17,7 @@
 // OfflineBody), which is exactly what this page shows and is already covered
 // by video-object.test.tsx.
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { DownloadIcon, Loader2Icon, UploadIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 
@@ -66,8 +64,6 @@ export function VideoFeedsRoute() {
    * not carry that id at all.
    */
   const [pending, setPending] = useState<{ feed: VideoFeedView; rev: number } | null>(null);
-
-  const onDraftChange = useCallback((d: DraftRow) => setDraftRow(d), []);
 
   if (!state) {
     return (
@@ -127,11 +123,12 @@ export function VideoFeedsRoute() {
         setSelectedId(null);
       }}
       onCancelNew={() => setCreatingNew(false)}
-      onDraftChange={onDraftChange}
+      onDraftChange={setDraftRow}
     />
   );
-  const right =
-    panel === "export" ? <ExportPanel feeds={feeds} ports={state.ports} /> : panel === "import" ? <ImportPanel /> : editor;
+  let right = editor;
+  if (panel === "export") right = <ExportPanel feeds={feeds} ports={state.ports} />;
+  else if (panel === "import") right = <ImportPanel />;
 
   return (
     <FieldSet>
