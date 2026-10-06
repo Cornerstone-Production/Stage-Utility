@@ -123,6 +123,40 @@ describe("the URL actually handed to fetch()", () => {
     assert.throws(() => pinnedToPco("not a url at all"), /cannot parse/);
   });
 
+  it("refuses a path that climbs out of the endpoint it was built for", () => {
+    // `?serviceTypeId=` is spliced into the path, and fetch resolves `..`: without
+    // this the app's credentials fetched /people/v2/people for any LAN caller.
+    for (const climbing of [
+      `${PCO}/service_types/1/../../../people/v2/people?x=/plans`,
+      `${PCO}/service_types/1/%2e%2e/%2E%2e/people/v2/people`,
+      `${PCO}/service_types/1/..\\..\\people/v2/people`,
+      `${PCO}/service_types/..`,
+    ]) {
+      assert.throws(() => pinnedToPco(climbing), /climbs out/, climbing);
+    }
+  });
+
+  it("still passes a real path, and a `..` that is only part of the query", () => {
+    const real = `${PCO}/service_types/123/plans/456/items?include=item_notes&per_page=100`;
+    assert.equal(pinnedToPco(real), real);
+    const inQuery = `${PCO}/service_types/123/plans?filter=../x`;
+    assert.equal(pinnedToPco(inQuery), inQuery);
+  });
+
+  it("is what stops a service type id from reading another product, end to end", async (t) => {
+    // Through the real read, with fetch recording what leaves the process.
+    const sent: string[] = [];
+    t.mock.method(globalThis, "fetch", async (url: string) => {
+      sent.push(String(url));
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+    await assert.rejects(
+      pcoService.listTeamPositions("app", "secret", "7/../../../people/v2/people?x="),
+      /climbs out/,
+    );
+    assert.deepEqual(sent, [], "a request left for another endpoint");
+  });
+
   it("cannot be walked off-origin by a pathname that starts //", () => {
     const origin = new URL(PCO).origin;
     for (const hostile of [

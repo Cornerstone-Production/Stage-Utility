@@ -36,6 +36,15 @@ export class PcoAuthError extends Error {
 }
 import { scrub } from "./scrub.js";
 
+/** A URL handed to the credentialed fetch that it will not send. Deterministic,
+ *  so requestInner never retries it. */
+class PcoUrlRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PcoUrlRefused";
+  }
+}
+
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 
 /**
@@ -336,7 +345,17 @@ export function pinnedToPco(url: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`pcoFetch was handed a URL it cannot parse: ${scrub(url)}`);
+    throw new PcoUrlRefused(`pcoFetch was handed a URL it cannot parse: ${scrub(url)}`);
+  }
+  // A service type or plan id is spliced into the path, and
+  // `.../service_types/1/../../../people/v2/people?x=` is what a caller's id can
+  // turn into. fetch resolves the dot segments, so the credentials would go to
+  // another PCO product's endpoint than the one this URL was built for, and the
+  // parse above cannot see it: it only sees the resolved path. Checked on the
+  // string as it was handed over (a backslash counts as a slash, as the URL
+  // parser reads it). Real ids are numbers; nothing legitimate has a `..` segment.
+  if (/[/\\](?:\.|%2e){2}(?:[/\\]|$)/i.test(url.split(/[?#]/, 1)[0])) {
+    throw new PcoUrlRefused(`pcoFetch was handed a URL that climbs out of its path: ${scrub(url)}`);
   }
   // The same rebuild pcoUrlFrom uses. The two differ only in what they do with a
   // candidate that is not PCO's — reject, or force — never in how the URL is put
@@ -928,7 +947,8 @@ class PcoService {
       try {
         response = await this.pcoFetch(url, appId, secret, {}, apiVersion);
       } catch (err) {
-        if (attempt >= MAX_RETRIES) throw err;
+        // A URL the fetch refuses to send is the same refusal on every attempt.
+        if (err instanceof PcoUrlRefused || attempt >= MAX_RETRIES) throw err;
         await this.sleep(this.backoffMs(attempt, null));
         continue;
       }
