@@ -4,8 +4,8 @@
 //
 // The Source select offers exactly video:state's `kinds` (the kinds this
 // build accepts; see allowedKinds() in main/services/video/video-service.ts).
-// A kind with no field group here yet is refused at Save rather than guessed
-// at.
+// draftSource() switches over every VideoSourceKind, so a new kind does not
+// compile until it has a field group here.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -18,6 +18,7 @@ import {
   type KickResult,
   type PushProtocol,
   type VideoFeedView,
+  type VideoSource,
   type VideoSourceKind,
 } from "@main/types/video";
 
@@ -199,8 +200,34 @@ export interface DraftRow {
 }
 
 function draftRowOf(d: Draft): DraftRow {
-  const source = d.kind === "pull" ? d.pullUrl : d.kind === "external" ? d.externalUrl : d.kind === "embed" ? d.embedRef : "";
-  return { name: d.name.trim(), source: source.trim() };
+  return { name: d.name.trim(), source: draftAddress(d).trim() };
+}
+
+function draftAddress(d: Draft): string {
+  switch (d.kind) {
+    case "pull":
+      return d.pullUrl;
+    case "external":
+      return d.externalUrl;
+    case "embed":
+      return d.embedRef;
+    case "push":
+      return "";
+  }
+}
+
+/** What Save sends for the draft's chosen kind. */
+function draftSource(d: Draft): VideoSource {
+  switch (d.kind) {
+    case "pull":
+      return { kind: "pull", url: d.pullUrl, username: d.pullUsername };
+    case "push":
+      return { kind: "push", protocol: d.pushProtocol };
+    case "embed":
+      return { kind: "embed", player: d.embedPlayer, ref: d.embedRef };
+    case "external":
+      return { kind: "external", url: d.externalUrl };
+  }
 }
 
 export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onSaved, onDeleted, onCancelNew, relayRunning, onDraftChange }: FeedEditorProps) {
@@ -225,30 +252,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
     setError(null);
   }
 
-  /** null for a kind with no field group here yet (see the file header). */
-  function sourcePayload():
-    | { kind: "pull"; url: string; username: string }
-    | { kind: "push"; protocol: PushProtocol }
-    | { kind: "embed"; player: EmbedPlayer; ref: string }
-    | { kind: "external"; url: string }
-    | null {
-    if (draft.kind === "pull") return { kind: "pull", url: draft.pullUrl, username: draft.pullUsername };
-    if (draft.kind === "push") return { kind: "push", protocol: draft.pushProtocol };
-    if (draft.kind === "embed") return { kind: "embed", player: draft.embedPlayer, ref: draft.embedRef };
-    if (draft.kind === "external") return { kind: "external", url: draft.externalUrl };
-    return null;
-  }
-
   async function handleSave() {
     if (draft.name.trim() === "") {
       setError("Give the feed a name");
       return;
     }
-    const source = sourcePayload();
-    if (!source) {
-      setError("This build does not support that source yet.");
-      return;
-    }
+    const source = draftSource(draft);
     // The server answers an empty address with a bare "invalid" and accepts a
     // scheme-only one ("rtsp://") as a feed that can never play; the empty
     // field used to be pre-filled with that scheme, so both are caught here.
@@ -679,12 +688,11 @@ function PushAddressFields({ feedId, protocol, relayRunning }: { feedId: string;
   // not work. `applied` false wins when both are true: the new password is
   // not live at the relay yet, so whether the kick itself also failed is
   // moot until it is.
-  const rotationNote =
-    relayRunning && rotation && (!rotation.applied || rotation.kicked === "failed")
-      ? !rotation.applied
-        ? "The relay did not take the new password yet; it will on its next start"
-        : "The device already sending could not be dropped; it keeps sending until it reconnects"
-      : null;
+  let rotationNote: string | null = null;
+  if (relayRunning && rotation) {
+    if (!rotation.applied) rotationNote = "The relay did not take the new password yet; it will on its next start";
+    else if (rotation.kicked === "failed") rotationNote = "The device already sending could not be dropped; it keeps sending until it reconnects";
+  }
 
   return (
     <>
