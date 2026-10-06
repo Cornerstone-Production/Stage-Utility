@@ -91,11 +91,12 @@ async function sha256OfFile(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
-type DownloadResult = { ok: true; sha256: string } | { ok: false; reason: string };
+type DownloadResult = { ok: true } | { ok: false; reason: string };
 
-/** Streams the response to `<archive>.part`, hashing as it goes, and refuses
- *  past MAX_DOWNLOAD_BYTES of ACTUAL received bytes — not the declared
- *  Content-Length, which a chunked response may omit entirely. */
+/** Streams the response to `<archive>.part` and refuses past
+ *  MAX_DOWNLOAD_BYTES of ACTUAL received bytes — not the declared
+ *  Content-Length, which a chunked response may omit entirely. The caller
+ *  hashes the file itself, so what is verified is what reached the disk. */
 async function downloadToPart(
   url: string,
   partPath: string,
@@ -115,7 +116,6 @@ async function downloadToPart(
   const declared = Number(response.headers.get("content-length"));
   const total = Number.isFinite(declared) && declared > 0 ? declared : totalHint;
 
-  const hash = createHash("sha256");
   const file = await fsp.open(partPath, "w");
   const reader = response.body.getReader();
   let received = 0;
@@ -130,11 +130,10 @@ async function downloadToPart(
         await reader.cancel().catch(() => {});
         return { ok: false, reason: `download of ${url} exceeded ${MAX_DOWNLOAD_BYTES} bytes; refused` };
       }
-      hash.update(value);
       await file.write(value);
       onProgress?.(received, total);
     }
-    return { ok: true, sha256: hash.digest("hex") };
+    return { ok: true };
   } catch (err) {
     return { ok: false, reason: `download of ${url} failed: ${errorMessage(err)}` };
   } finally {
@@ -310,14 +309,15 @@ async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: Ens
     await fsp.unlink(partPath).catch(() => {});
     return { ok: false, reason: downloaded.reason, placeArchiveAt: downloadsDir, assetName: asset.name };
   }
-  if (downloaded.sha256 !== asset.sha256) {
+  const got = await sha256OfFile(partPath);
+  if (got !== asset.sha256) {
     await fsp.unlink(partPath).catch(() => {});
     // Same reasoning as the hand-placed check above — no logging here; the
     // caller logs once per outage from the returned `reason`, not once per
     // retry from this call.
     return {
       ok: false,
-      reason: `checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${downloaded.sha256}`,
+      reason: `checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${got}`,
       placeArchiveAt: downloadsDir,
       assetName: asset.name,
     };
