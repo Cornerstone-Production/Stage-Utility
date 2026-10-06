@@ -27,6 +27,7 @@ import {
 import { Button, Checkbox, ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
+import { joinWithAnd } from "../../lib/join-with-and";
 import { useStageState } from "../../main/use-stage-state";
 
 const BUNDLE_KIND = "stage-utility-video-feeds";
@@ -36,10 +37,6 @@ const ASIDE =
 const LABEL = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
 const MONO = "font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]";
 
-function listOf(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
 /** The short line under a feed's name: the address, or the kind and protocol. */
@@ -93,6 +90,12 @@ function portsLine(p: VideoPorts): string {
   return `RTMP ${p.rtmp} · SRT ${p.srt} · UDP ${p.webrtcUdp} · and three loopback ports`;
 }
 
+/** A group checkbox's state: all ticked, none, or some. */
+function groupState(ticked: number, total: number): boolean | "indeterminate" {
+  if (ticked === total) return true;
+  return ticked === 0 ? false : "indeterminate";
+}
+
 /** A push feed always has a publish password; a pull feed has one only when it was saved. */
 function passwordKind(f: VideoFeedView): "publish" | "camera" | null {
   if (f.source.kind === "push") return "publish";
@@ -140,7 +143,7 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
             <Checkbox
               // A partly-ticked group paints as `mixed`, which the base look does not cover.
               className="mt-0.5 aria-[checked=mixed]:border-accent aria-[checked=mixed]:bg-accent"
-              checked={allTicked ? true : none ? false : "indeterminate"}
+              checked={groupState(chosen.length, feeds.length)}
               onCheckedChange={(v) => setUnticked(v === true ? new Set() : new Set(feeds.map((f) => f.id)))}
               aria-label="All feeds"
             />
@@ -195,9 +198,9 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
           <Note tone="warn">
             The file will hold these passwords in plain text. Anyone with the file can{" "}
             {[
-              publishNames.length ? `publish to ${listOf(publishNames)}` : "",
+              publishNames.length ? `publish to ${joinWithAnd(publishNames)}` : "",
               cameraNames.length
-                ? `log in to the ${listOf(cameraNames)} ${cameraNames.length === 1 ? "camera" : "cameras"}`
+                ? `log in to the ${joinWithAnd(cameraNames)} ${cameraNames.length === 1 ? "camera" : "cameras"}`
                 : "",
             ].filter(Boolean).join(" and ")}
             . Keep it off shared drives.
@@ -404,7 +407,7 @@ export function ImportPanel() {
           </div>
           {picked.preview.absent.length > 0 && (
             <p className="text-caption1 text-fg-muted">
-              {listOf(picked.preview.absent)} {picked.preview.absent.length === 1 ? "is" : "are"} not in the file. They stay as they
+              {joinWithAnd(picked.preview.absent)} {picked.preview.absent.length === 1 ? "is" : "are"} not in the file. They stay as they
               are; an import never removes a feed.
             </p>
           )}
@@ -496,12 +499,12 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
     <div className="flex flex-col gap-2 text-footnote text-fg">
       <div className="font-semibold">Imported {plural(landed, "feed")}</div>
       <ul className="flex list-disc flex-col gap-1 pl-4">
-        {report.added.length > 0 && <li>Added {listOf(report.added)}</li>}
-        {report.replaced.length > 0 && <li>Replaced {listOf(report.replaced)} with the file&apos;s</li>}
-        {report.kept.length > 0 && <li>Kept this server&apos;s {listOf(report.kept)}</li>}
+        {report.added.length > 0 && <li>Added {joinWithAnd(report.added)}</li>}
+        {report.replaced.length > 0 && <li>Replaced {joinWithAnd(report.replaced)} with the file&apos;s</li>}
+        {report.kept.length > 0 && <li>Kept this server&apos;s {joinWithAnd(report.kept)}</li>}
         {report.same.length > 0 && (
           <li>
-            {listOf(report.same)} {report.same.length === 1 ? "was" : "were"} already the same
+            {joinWithAnd(report.same)} {report.same.length === 1 ? "was" : "were"} already the same
           </li>
         )}
         {report.skipped.map((k, i) => (
@@ -515,13 +518,13 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
       {report.portsError && <Note tone="warn">The relay ports were not changed: {report.portsError}</Note>}
       {report.newPushPasswords.length > 0 && (
         <Note tone="warn">
-          {listOf(report.newPushPasswords)} {report.newPushPasswords.length === 1 ? "has" : "have"} a new publish password on this
+          {joinWithAnd(report.newPushPasswords)} {report.newPushPasswords.length === 1 ? "has" : "have"} a new publish password on this
           server: paste the new publish password into each device.
         </Note>
       )}
       {newPull.length > 0 && (
         <Note tone="info">
-          {listOf(newPull)} {newPull.length === 1 ? "is" : "are"} pulled from {newPull.length === 1 ? "a device" : "devices"} on the
+          {joinWithAnd(newPull)} {newPull.length === 1 ? "is" : "are"} pulled from {newPull.length === 1 ? "a device" : "devices"} on the
           network the file came from. {newPull.length === 1 ? "It plays" : "They play"} here only if this server can reach{" "}
           {newPull.length === 1 ? "its" : "their"} device address{newPull.length === 1 ? "" : "es"}.
         </Note>
