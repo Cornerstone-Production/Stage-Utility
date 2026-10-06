@@ -33,6 +33,7 @@ import {
   switcherTypes,
   toUpcoming,
   UPCOMING_CACHE_MS,
+  UPCOMING_PARTIAL_CACHE_MS,
 } from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
 import type {
@@ -379,7 +380,14 @@ export class StageController {
    * edits three service types in a row, and when PCO goes down mid-edit the last
    * good list is a far better answer than an empty one.
    */
-  private upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null = null;
+  private upcomingCache: {
+    at: number;
+    days: number;
+    allowed: string[];
+    plans: UpcomingPlan[];
+    /** Some service type could not be read: reused for a shorter time. */
+    partial: boolean;
+  } | null = null;
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -944,7 +952,7 @@ export class StageController {
       cached &&
       cached.days === days &&
       sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
-      now - cached.at < UPCOMING_CACHE_MS
+      now - cached.at < (cached.partial ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
       return { plans: cached.plans, cacheAgeMs: now - cached.at };
     }
@@ -978,7 +986,13 @@ export class StageController {
     }
 
     const plans = sortUpcoming(perType.flat());
-    this.upcomingCache = { at: now, days, allowed: [...this.state.allowedServiceTypeIds], plans };
+    this.upcomingCache = {
+      at: now,
+      days,
+      allowed: [...this.state.allowedServiceTypeIds],
+      plans,
+      partial: failures.length > 0,
+    };
     console.log(
       `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
     );
