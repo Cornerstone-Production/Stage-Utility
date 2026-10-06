@@ -286,6 +286,9 @@ export function ImportPanel() {
   const [dragging, setDragging] = useState(false);
 
   async function take(file: File): Promise<void> {
+    // A drop while a file is already being reviewed would race it: whichever
+    // preview answered last would win, not the file chosen last.
+    if (busy) return;
     setError(null);
     setReport(null);
     setBusy(true);
