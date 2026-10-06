@@ -1,4 +1,4 @@
-// What the ScriptView rundown puts on a screen: how bright its text is, how the
+// What the ServiceCue rundown puts on a screen: how bright its text is, how the
 // item's notes and its key/BPM/meter line are drawn, and where the time signature
 // lands.
 //

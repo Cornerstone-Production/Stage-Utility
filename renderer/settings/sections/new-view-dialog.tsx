@@ -41,7 +41,7 @@ const KIND_LABELS: Record<ViewKind, string> = externKeyed({
   stage: "Stage",
   transcription: "Transcription",
   custom: "Custom Layout",
-  script: "Script",
+  script: "ServiceCue",
   "spl-rundown": "SPL Rundown",
   calendar: "Calendar",
 });

@@ -1462,7 +1462,7 @@ class PcoService {
   }
 
   /** Scheduled service start times for a plan (ISO), earliest first — the
-   *  time_type=service plan_times. Anchors the ScriptView projected clock. */
+   *  time_type=service plan_times. Anchors the ServiceCue projected clock. */
   async listPlanServiceTimes(
     appId: string,
     secret: string,
@@ -1857,7 +1857,7 @@ class PcoService {
    * Fetch + cache a plan's plan_times ONCE, for everything that needs them.
    *
    * The start countdown, the auto-rollover end, the derived item clock, the
-   * ScriptView projected clock and the reconnect scheduler all read this one
+   * ServiceCue projected clock and the reconnect scheduler all read this one
    * list, fetched whole and filtered by the caller.
    *
    * "Once" was aspirational until this was the only fetch: three copies of the
@@ -1865,7 +1865,7 @@ class PcoService {
    * pulled three times over — and two of them asked for per_page=50 while the
    * comment on this one explains why 50 is not enough. A plan routinely carries
    * rehearsal, call, review and several service times, so the short page quietly
-   * clipped the tail of the two lists that fed the ScriptView clock and the
+   * clipped the tail of the two lists that fed the ServiceCue clock and the
    * reconnect scheduler.
    *
    * Cached LONG — plan times are effectively static day-of. The key carries the

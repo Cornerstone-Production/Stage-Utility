@@ -1,4 +1,4 @@
-// view-detail-columns.test.tsx — a Script view's Columns picker, when the
+// view-detail-columns.test.tsx — a ServiceCue view's Columns picker, when the
 // column sets fail to load.
 //
 // The read used to `.catch(() => setScriptViewLayouts([]))`. The picker then

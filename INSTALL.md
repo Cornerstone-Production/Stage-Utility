@@ -368,9 +368,9 @@ Then work through the sidebar:
    custom-layout editor.
 4. **Plan**, **Screens** — pick a plan (or Auto) and toggle which
    **Active Service Types** auto-selection considers, build views (slots, dashboard,
-   stage, captions, script, SPL rundown, or a custom visual layout), and route each
+   stage, captions, ServiceCue, SPL rundown, or a custom visual layout), and route each
    screen to a view.
-5. **ScriptView** *(optional)* — choose which service types appear on the `/scriptview`
+5. **ServiceCue** *(optional)* — choose which service types appear on the `/servicecue`
    landing page and define global column layouts (Audio/Video/Lighting/…). **History**
    (SPL + attendance + item timing) and **Baptisms** appear once there's data.
 6. **Advanced** — set the **Public address (DNS)** if you reach the server via a DNS

@@ -174,8 +174,8 @@ as such rather than given a doc link it doesn't need.
 | `[automation]` | Rules added, changed, removed, saved with issues, failing to fire, or run by hand from a Run button (who ran it, and what came of it); on the browser, the rule list failing to load: [Automation](../automation.md) |
 | `[automation-log]` | The Activity log itself failing to persist an entry to disk |
 | `[backup]` | The scheduled automatic backup writing, or failing: [Automatic backups](reliability.md#automatic-backups) |
-| `[baptism]` | Session-store eviction at the cap, sessions stored more than once under one id, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/scriptview-and-baptisms.md#logging) |
-| `[baptism-lane]` | The Session chart's server-side span data dropping a span with an unreadable boundary timestamp: [The Session chart](../features/scriptview-and-baptisms.md#the-session-chart) |
+| `[baptism]` | Session-store eviction at the cap, sessions stored more than once under one id, auto-start/arm decisions, raw-event failures; on the browser, a Baptisms card read or delete failing: [Baptisms](../features/servicecue-and-baptisms.md#logging) |
+| `[baptism-lane]` | The Session chart's server-side span data dropping a span with an unreadable boundary timestamp: [The Session chart](../features/servicecue-and-baptisms.md#the-session-chart) |
 | `[baptism-replay]` | A data-archive rebuild skipping baptism rows it could not place, and why: [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced) |
 | `[baptism-timer]` | The live timer's own persistence: debounced save failures, a save that failed at shutdown, a dismissed save-failure notice |
 | `[bar-config]` | The context bar's one-time migration splitting service type out of a plan item, on the one start that needed it: [The context bar](../features/context-bar.md) |
@@ -223,8 +223,8 @@ as such rather than given a doc link it doesn't need.
 | `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
 | `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
 | `[screens]` | Browser-side: the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
-| `[scriptview]` | Browser-side: ScriptView's settings, types, note categories, rundown or plan list failing to load, or a `?plan=` the service type does not have |
-| `[scriptview-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/scriptview-and-baptisms.md#category-roles) |
+| `[scriptview]` | Browser-side: ServiceCue's settings, types, note categories, rundown or plan list failing to load, or a `?plan=` the service type does not have |
+| `[scriptview-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
 | `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller: [SenSource](../integrations/sensource.md) |

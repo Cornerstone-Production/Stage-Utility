@@ -1352,7 +1352,7 @@ export function AdvancedSection({
               </Field>
 
               {/* The one thing worth keeping from the Connect tab's Tools list.
-                  Every other entry there — ScriptView, Patch, History, Baptisms —
+                  Every other entry there — ServiceCue, Patch, History, Baptisms —
                   is in the rail; the raw log is not, and it was the only route to
                   it. Advanced is where the rest of the diagnostics already live. */}
               <Field orientation="horizontal">

@@ -1,4 +1,4 @@
-// Where the ScriptView text size comes from on each screen: the display View
+// Where the ServiceCue text size comes from on each screen: the display View
 // kind (script-view.tsx) has no control, so its size is the address's `?text=`,
 // else what that display remembered; the standalone page starts the same way and
 // then answers its A- / A+ control; a rundown embedded in a layout object has no
@@ -172,7 +172,7 @@ test("the page and a display keep separate sizes", async () => {
 });
 
 test("the page also starts from ?text=, and its control moves on from there", async () => {
-  window.history.replaceState({}, "", "/scriptview/weekend/all-columns?text=200");
+  window.history.replaceState({}, "", "/servicecue/weekend/all-columns?text=200");
   const f = stubFetch();
   try {
     await mountPage();

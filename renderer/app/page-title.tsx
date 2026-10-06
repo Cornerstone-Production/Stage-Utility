@@ -69,7 +69,7 @@ export function titleMinWidth(label: string): string {
  * The page's name, at the head of the strip.
  *
  * Only when the URL IS this page. A child route draws its own heading — the
- * layout editor puts the view's name in an editable field, a ScriptView plan
+ * layout editor puts the view's name in an editable field, a ServiceCue plan
  * draws ScriptViewHeader — so the section's name in the strip above it would be
  * a second, wronger title. That is the exact-versus-prefix distinction #383
  * established, and it survives the merge unchanged.

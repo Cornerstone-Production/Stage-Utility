@@ -1,4 +1,4 @@
-// The ScriptView page's plan switcher: ‹ plan ▾ › with a Following / Browsing
+// The ServiceCue page's plan switcher: ‹ plan ▾ › with a Following / Browsing
 // badge, a paste field in its menu, and the choice kept in the address as
 // `?plan=<id>`.
 //
@@ -120,7 +120,7 @@ function stubServer(o: Opts = {}) {
   }
 }
 
-/** The real route shape: /scriptview/$serviceType/$layout, mounted at `url`. */
+/** The real route shape: /servicecue/$serviceType/$layout, mounted at `url`. */
 function PageRoute() {
   const p = useParams({ strict: false }) as { serviceType?: string; layout?: string };
   return React.createElement(ScriptViewPlan, { serviceTypeParam: p.serviceType ?? "", layoutParam: p.layout ?? "" });
@@ -128,7 +128,7 @@ function PageRoute() {
 
 async function mountAt(url: string) {
   const rootRoute = createRootRoute({});
-  const route = createRoute({ getParentRoute: () => rootRoute, path: "/scriptview/$serviceType/$layout", component: PageRoute });
+  const route = createRoute({ getParentRoute: () => rootRoute, path: "/servicecue/$serviceType/$layout", component: PageRoute });
   const router = createRouter({ routeTree: rootRoute.addChildren([route]), history: createMemoryHistory({ initialEntries: [url] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(
@@ -163,7 +163,7 @@ async function click(el: HTMLElement | null): Promise<void> {
 test("on the plan the app follows it says Following, with no way back to live", async () => {
   const f = stubServer();
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.equal(badge(), "following");
     assert.equal(hasText("Back to live"), false);
     assert.ok(page().includes("Sunday"), "the followed plan's own title is on the page");
@@ -180,7 +180,7 @@ test("on the plan the app follows it says Following, with no way back to live", 
 test("an arrow moves the page to the next plan, in the address, and it reads Browsing with Back to live", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio");
+    const router = await mountAt("/servicecue/weekend/audio");
     await click(button("Next plan"));
     assert.equal(String(planParam(router)), "303");
     assert.ok(router.state.location.href.includes("plan=303"), router.state.location.href);
@@ -197,7 +197,7 @@ test("an arrow moves the page to the next plan, in the address, and it reads Bro
 test("Back to live drops the param and reads Following again", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio?plan=303");
+    const router = await mountAt("/servicecue/weekend/audio?plan=303");
     assert.equal(badge(), "browsing");
     await click([...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Back to live") ?? null);
     assert.equal(planParam(router), undefined);
@@ -210,7 +210,7 @@ test("Back to live drops the param and reads Following again", async () => {
 test("stepping onto the followed plan reads Following, from the server's own word", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio?plan=303");
+    const router = await mountAt("/servicecue/weekend/audio?plan=303");
     await click(button("Previous plan"));
     assert.equal(String(planParam(router)), "302");
     assert.equal(badge(), "following", "plan 302 is the app's plan, so it is the followed one even with a param");
@@ -222,7 +222,7 @@ test("stepping onto the followed plan reads Following, from the server's own wor
 test("a refresh stays put: ?plan= on load shows that plan, browsing", async () => {
   const f = stubServer();
   try {
-    await mountAt("/scriptview/weekend/audio?plan=301");
+    await mountAt("/servicecue/weekend/audio?plan=301");
     assert.equal(badge(), "browsing");
     assert.ok(page().includes("Early"));
   } finally {
@@ -233,11 +233,11 @@ test("a refresh stays put: ?plan= on load shows that plan, browsing", async () =
 test("the arrows stop at the first and last plan instead of wrapping", async () => {
   const f = stubServer();
   try {
-    await mountAt("/scriptview/weekend/audio?plan=301");
+    await mountAt("/servicecue/weekend/audio?plan=301");
     assert.equal(button("Previous plan")?.disabled, true);
     assert.equal(button("Next plan")?.disabled, false);
     cleanup();
-    await mountAt("/scriptview/weekend/audio?plan=303");
+    await mountAt("/servicecue/weekend/audio?plan=303");
     assert.equal(button("Next plan")?.disabled, true);
     assert.equal(button("Previous plan")?.disabled, false);
   } finally {
@@ -248,7 +248,7 @@ test("the arrows stop at the first and last plan instead of wrapping", async () 
 test("it walks this service type's plans only, never another type's", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio?plan=303");
+    const router = await mountAt("/servicecue/weekend/audio?plan=303");
     // 901 (Youth) sits between 302 and 303 by date in the shared list; stepping
     // back must skip it.
     await click(button("Previous plan"));
@@ -261,7 +261,7 @@ test("it walks this service type's plans only, never another type's", async () =
 test("nothing it does writes the app's plan: no request but GETs, through step, paste and back", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio");
+    const router = await mountAt("/servicecue/weekend/audio");
     await click(button("Next plan"));
     await click(button("Previous plan"));
     await click(button("Choose a plan"));
@@ -283,11 +283,11 @@ test("a browsed plan counts down to its own start and shows no Live, Remaining o
   const live = { mode: "item", currentItemId: "i1", label: "Welcome", lengthSec: 600, liveStartAt: new Date().toISOString(), targetAt: null, serverNow: new Date().toISOString(), currentItemTitle: "Welcome", nextItemTitle: null, serviceTimeId: null, serviceTimeStartsAt: null };
   const f = stubServer({ live });
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.ok(page().includes("Remaining"), "the followed plan carries the live timer");
     assert.ok(page().includes("Live"));
     cleanup();
-    await mountAt("/scriptview/weekend/audio?plan=303");
+    await mountAt("/servicecue/weekend/audio?plan=303");
     assert.ok(page().includes("Starts in"), "a browsed plan shows its own countdown");
     assert.equal(page().includes("Remaining"), false);
     assert.equal(page().includes("Over"), false);
@@ -300,14 +300,14 @@ test("a browsed plan counts down to its own start and shows no Live, Remaining o
 test("pasting a link to a plan of this type browses to it", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio");
+    const router = await mountAt("/servicecue/weekend/audio");
     await click(button("Choose a plan"));
     const field = screen.getByLabelText("Paste a Planning Center plan link");
     await act(async () => void fireEvent.change(field, { target: { value: "https://services.planningcenteronline.com/plans/303/live" } }));
     await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
     for (let i = 0; i < 6; i++) await settle();
     assert.equal(String(planParam(router)), "303");
-    assert.equal(router.state.location.pathname, "/scriptview/weekend/audio");
+    assert.equal(router.state.location.pathname, "/servicecue/weekend/audio");
   } finally {
     f.restore();
   }
@@ -316,13 +316,13 @@ test("pasting a link to a plan of this type browses to it", async () => {
 test("pasting a link to another service type's plan opens that type's page on it", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio");
+    const router = await mountAt("/servicecue/weekend/audio");
     await click(button("Choose a plan"));
     const field = screen.getByLabelText("Paste a Planning Center plan link");
     await act(async () => void fireEvent.change(field, { target: { value: "https://services.planningcenteronline.com/plans/901" } }));
     await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
     for (let i = 0; i < 6; i++) await settle();
-    assert.equal(router.state.location.pathname, "/scriptview/youth/audio");
+    assert.equal(router.state.location.pathname, "/servicecue/youth/audio");
     assert.equal(String(planParam(router)), "901");
     assert.ok(page().includes("Youth night"));
   } finally {
@@ -333,7 +333,7 @@ test("pasting a link to another service type's plan opens that type's page on it
 test("text that is not a plan link says so in the menu and goes nowhere", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/audio");
+    const router = await mountAt("/servicecue/weekend/audio");
     await click(button("Choose a plan"));
     const field = screen.getByLabelText("Paste a Planning Center plan link");
     await act(async () => void fireEvent.change(field, { target: { value: "hello" } }));
@@ -348,7 +348,7 @@ test("text that is not a plan link says so in the menu and goes nowhere", async 
 test("a link whose plan this type does not have says so on the page, and reaches the log", async () => {
   const f = stubServer();
   try {
-    await mountAt("/scriptview/weekend/audio?plan=777");
+    await mountAt("/servicecue/weekend/audio?plan=777");
     assert.match(alerts(), /isn't one of this service type's plans/i);
     assert.ok(f.logs.some((l) => l.tag === "scriptview" && /plan 777/.test(l.message)), `expected a [scriptview] line, got ${JSON.stringify(f.logs)}`);
     assert.equal(badge(), "browsing", "an unresolved plan is not the followed one");
@@ -361,7 +361,7 @@ test("a link whose plan this type does not have says so on the page, and reaches
 test("the menu lists this type's plans, the current one selected", async () => {
   const f = stubServer();
   try {
-    await mountAt("/scriptview/weekend/audio?plan=303");
+    await mountAt("/servicecue/weekend/audio?plan=303");
     await click(button("Choose a plan"));
     const options = [...document.querySelectorAll('[role="option"]')];
     assert.deepEqual(
@@ -381,7 +381,7 @@ test("the menu lists this type's plans, the current one selected", async () => {
 test("a failed plan list says so, logs it, and leaves the arrows off", async () => {
   const f = stubServer({ upcoming: () => { throw new TypeError("fetch failed"); } });
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.match(alerts(), /Couldn't load the plan list/i);
     assert.ok(f.logs.some((l) => l.tag === "scriptview" && /plan list/.test(l.message)), JSON.stringify(f.logs));
     assert.equal(button("Next plan")?.disabled, true);
@@ -395,7 +395,7 @@ test("a failed plan list says so, logs it, and leaves the arrows off", async () 
 test("a plan list Planning Center could not refresh is reported the same way", async () => {
   const f = stubServer({ upcoming: () => ok({ plans: [], cacheAgeMs: 0, unavailable: "Planning Center answered 503" }) });
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.match(alerts(), /Couldn't load the plan list/i);
     assert.ok(f.logs.some((l) => l.tag === "scriptview" && /503/.test(l.message)), JSON.stringify(f.logs));
   } finally {
@@ -406,7 +406,7 @@ test("a plan list Planning Center could not refresh is reported the same way", a
 test("an empty list is not an error: disabled arrows and a plain line in the menu", async () => {
   const f = stubServer({ upcoming: () => ok({ plans: [], cacheAgeMs: 0 }) });
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.equal(alerts(), "");
     assert.equal(button("Next plan")?.disabled, true);
     await click(button("Choose a plan"));
@@ -420,7 +420,7 @@ test("an empty list is not an error: disabled arrows and a plain line in the men
 test("with Planning Center not connected there is no switcher and no plan list asked for", async () => {
   const f = stubServer({ pcoConfigured: false });
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.equal(button("Next plan"), null);
     assert.equal(f.calls.some((c) => c.url.includes("/api/plans/upcoming")), false);
     assert.equal(alerts(), "", "not connected is a state, not a failure");
@@ -439,7 +439,7 @@ test("a rundown read that fails is still an error, not a browse", async () => {
     return ok(null);
   });
   try {
-    await mountAt("/scriptview/weekend/audio?plan=303");
+    await mountAt("/servicecue/weekend/audio?plan=303");
     assert.ok(f.logs.some((l) => l.tag === "scriptview" && /rundown/.test(l.message)));
     assert.equal(page().includes("isn't one of this service type's plans"), false, "a failure is not reported as a missing plan");
   } finally {
@@ -457,11 +457,11 @@ function deferred() {
 test("a layout change keeps the plan being browsed, and the text size, in the address", async () => {
   const f = stubServer();
   try {
-    const router = await mountAt("/scriptview/weekend/all-columns?plan=303&text=150");
+    const router = await mountAt("/servicecue/weekend/all-columns?plan=303&text=150");
     const select = screen.getByLabelText("Layout") as HTMLSelectElement;
     await act(async () => void fireEvent.change(select, { target: { value: "svl1" } }));
     for (let i = 0; i < 6; i++) await settle();
-    assert.equal(router.state.location.pathname, "/scriptview/weekend/audio");
+    assert.equal(router.state.location.pathname, "/servicecue/weekend/audio");
     assert.equal(String(planParam(router)), "303", "still browsing 303");
     assert.equal(String((router.state.location.search as Record<string, unknown>).text), "150");
     assert.equal(badge(), "browsing");
@@ -474,7 +474,7 @@ test("the arrows wait for the page's own plan: forward before it has loaded does
   const gate = deferred();
   const f = stubServer({ hold: () => gate.promise });
   try {
-    const router = await mountAt("/scriptview/weekend/audio");
+    const router = await mountAt("/servicecue/weekend/audio");
     assert.equal(button("Next plan")?.disabled, true);
     assert.equal(button("Previous plan")?.disabled, true);
     gate.release();
@@ -490,7 +490,7 @@ test("stepping on drops the previous plan from the screen at once, rather than d
   const gate = deferred();
   const f = stubServer({ hold: (id) => (id === "303" ? gate.promise : undefined) });
   try {
-    await mountAt("/scriptview/weekend/audio");
+    await mountAt("/servicecue/weekend/audio");
     assert.ok(page().includes("Sunday"));
     await click(button("Next plan"));
     assert.equal(page().includes("Sunday"), false, "303 has not answered, and 302 must not still be on screen");
@@ -506,7 +506,7 @@ test("a slow answer for the plan stepped away from does not overwrite the one st
   const slow303 = deferred();
   const f = stubServer({ hold: (id) => (id === "303" ? slow303.promise : undefined) });
   try {
-    const router = await mountAt("/scriptview/weekend/audio?plan=303");
+    const router = await mountAt("/servicecue/weekend/audio?plan=303");
     await click(button("Previous plan"));
     assert.equal(String(planParam(router)), "302");
     assert.ok(page().includes("Sunday"), "302 answered");

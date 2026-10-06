@@ -1,5 +1,5 @@
-// scriptview-plan-view-reads.test.tsx — the standalone ScriptView page
-// (/scriptview/{type}/{layout}), when one of its reads fails.
+// scriptview-plan-view-reads.test.tsx — the standalone ServiceCue page
+// (/servicecue/{type}/{layout}), when one of its reads fails.
 //
 // All three reads used to `.catch(() => set…([]))`, and each failure drew a
 // plausible page that was wrong:

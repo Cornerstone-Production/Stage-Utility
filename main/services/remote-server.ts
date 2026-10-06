@@ -33,6 +33,7 @@ import { getUserDataPath } from "./app-paths.js";
 import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
+import { legacyPageRoutes } from "./routes/legacy-page-routes.js";
 import { logRoutes } from "./routes/log-routes.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
@@ -140,8 +141,11 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * videoProxyRoutes belongs here for the same reason logRoutes does: none of
  * `/video/<feedId>/whep|whip|<file>` starts with /api/, so the static-build
  * arm below would serve the SPA shell for every one of them.
+ *
+ * legacyPageRoutes is first: a moved page (/scriptview…) is redirected before
+ * anything else looks at it, so no later module is asked about the old path.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes, videoProxyRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, logRoutes, videoProxyRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -544,7 +548,7 @@ export class RemoteServer {
       urlPath = "/index.html";
     } else if (isOperatorPath(pathname)) {
       // Checked before the generic fall-through so a nested route like
-      // /scriptview/sunday/full reaches app.html rather than the kiosk SPA
+      // /servicecue/sunday/full reaches app.html rather than the kiosk SPA
       // fallback. The dev server applies the same test (vite.config.ts).
       urlPath = "/app.html";
     } else {

@@ -274,7 +274,7 @@ function longSessionStepMs(spanMs: number): number {
  * minutes to a few hours, and its 10-minute floor (for anything under 90
  * minutes) is right for that. A baptism SESSION is commonly much shorter — a
  * single press-to-press segment is often under a minute (see
- * docs/features/scriptview-and-baptisms.md's "Armed, then running") — and
+ * docs/features/servicecue-and-baptisms.md's "Armed, then running") — and
  * `timeTicks`'s own floor draws NO axis at all, zero ticks, for any session
  * under ten minutes. Changing that floor would also change History's own
  * attendance and sound charts, which this fix must not touch.

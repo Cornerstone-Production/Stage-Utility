@@ -5,7 +5,8 @@
 // to. These render nothing and replace themselves.
 
 import { useEffect } from "react";
-import { useRouter } from "@tanstack/react-router";
+import { redirect, useRouter } from "@tanstack/react-router";
+import { MOVED_PAGE_PREFIXES, legacyPageRedirect } from "../../main/services/routes/operator-paths";
 
 /** Where each retired path now points. */
 export const MOVED_ROUTES: Record<string, string> = {
@@ -29,4 +30,25 @@ export function makeRedirect(to: string) {
     }, [router]);
     return null;
   };
+}
+
+/**
+ * Route patterns for the pages that moved to a new prefix (/scriptview to
+ * /servicecue): the prefix itself and everything under it.
+ *
+ * Not in MOVED_ROUTES because a fixed target cannot carry the rest of the path
+ * or the query string, and a display's address is made of both. The server
+ * redirects a direct load with a 301 (legacy-page-routes.ts); this is the same
+ * answer for an in-app link or a pushState that never reaches the server.
+ */
+export const MOVED_PAGE_ROUTE_PATTERNS: readonly string[] = MOVED_PAGE_PREFIXES.flatMap(([from]) => [from, `${from}/$`]);
+
+/**
+ * `beforeLoad` for those routes: throws a redirect to the new location, so the
+ * old page never renders and Back does not bounce off it.
+ */
+export function redirectMovedPage(location: { pathname: string; search: unknown; hash: string }): never {
+  const to = legacyPageRedirect(location.pathname);
+  if (to === null) throw new Error(`redirectMovedPage was given ${location.pathname}, which did not move`);
+  throw redirect({ to, search: location.search as Record<string, unknown>, hash: location.hash || undefined, replace: true });
 }

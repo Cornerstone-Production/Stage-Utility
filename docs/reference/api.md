@@ -270,7 +270,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
 | GET / POST | `/api/spl/trend` | Whether History's attendance trend also draws the SPL trend line, and which metric it plots (`{shown, metric}`) |
-| GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
+| GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
 | GET | `/api/pco/calendar?viewId=…[&month=YYYY-MM]` | A month as a six-week grid of days, bucketed in the app time zone and filtered by the view's calendars and tags. Omit `month` for the current one. 400 if `month` is malformed or more than 36 months away; 502 if Planning Center cannot be reached |
@@ -369,14 +369,14 @@ Two things to know:
   derived from; removing it is a separate, irreversible decision. A merge does
   move the raw samples, because otherwise a later rebuild would undo the merge.
 
-**ScriptView**
+**ServiceCue**
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone). With no `planId`: the app's plan for the active service type, else the nearest upcoming one. `isDefaultPlan` says whether the plan returned is that one |
 | GET / POST | `/api/scriptview/layouts` | List / save global layouts |
 | GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
 | GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |
-| GET / POST | `/api/scriptview/roles` | List / save [category roles](../features/scriptview-and-baptisms.md#category-roles) |
+| GET / POST | `/api/scriptview/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | POST | `/api/scriptview/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
 
 **Patch sheet** — see [Patch sheet](../patch-sheet/README.md).

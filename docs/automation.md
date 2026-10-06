@@ -277,7 +277,7 @@ for "idle", because before it runs we do not know that it is idle.
 > `MA is switched off` — rather than dialling the last address the card held.
 
 > **Advance the baptism timer** is one action, not four. It does whatever the
-> [baptism timer's](features/scriptview-and-baptisms.md) own operator panel
+> [baptism timer's](features/servicecue-and-baptisms.md) own operator panel
 > would do right now — start a session, begin person 1 once a grouped session
 > arms, close a testimony or a baptism, move to the next person — so a single
 > [action button](reference/widgets.md#control) or Companion key runs the whole

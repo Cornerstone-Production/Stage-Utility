@@ -362,7 +362,7 @@ it.
 | Home, and everything an operator does | `localhost:3000/` | `http://<host>/` |
 | A display | `localhost:3000/display-1` | `http://<host>/display-1` |
 | Settings | `localhost:3000/settings` | `http://<host>/settings` |
-| ScriptView | `localhost:3000/scriptview` | `http://<host>/scriptview` |
+| ServiceCue | `localhost:3000/servicecue` | `http://<host>/servicecue` |
 | API and SSE | proxied to `:8788` | `http://<host>/api/*` |
 
 Every address is in [Display URLs](../display-urls.md).

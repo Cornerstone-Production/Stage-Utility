@@ -97,7 +97,7 @@ describe("the projection", () => {
   });
 
   test("treats a later item with no length as zero rather than refusing", () => {
-    // Matches ScriptView's projected clock column: a half-filled-in plan reads
+    // Matches ServiceCue's projected clock column: a half-filled-in plan reads
     // early, not blank.
     const p = plan(item("welcome", 300), item("song", 0), item("message", 1800));
     assert.equal(projectedServiceEndMs(live(), p, T0), T0 + (300 + 1800) * 1000);

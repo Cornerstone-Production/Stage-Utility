@@ -80,7 +80,7 @@ describe("the gutter is decided in one place", () => {
   const consoleRoute = withoutComments(readFileSync(path.join(HERE, "console-route.tsx"), "utf8"));
 
   test("the shell withholds the padding on a console", () => {
-    // The predicate generalised when ScriptView's rundown turned out to have the
+    // The predicate generalised when ServiceCue's rundown turned out to have the
     // same problem — it is `isFullBleedPath` now, of which a console is one case.
     // See scriptview-full-bleed.test.ts, which pins the membership.
     //

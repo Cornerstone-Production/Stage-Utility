@@ -1,4 +1,4 @@
-// The ScriptView layout editor: what its "Shows" list offers, and the ground its
+// The ServiceCue layout editor: what its "Shows" list offers, and the ground its
 // preview draws the rundown on.
 //
 // Both are things that render, keep every other test green, and are wrong:

@@ -29,7 +29,7 @@ const UNKNOWN: PlanItemsStatus = { value: null, known: false, failed: false };
  * A plan change drops the rundown it held unless that rundown is already the
  * new plan's. Kept, plan A's items read as plan B's for the length of B's read,
  * and for good if that read failed, with nothing on screen to say so — the rule
- * script-view-plan-switch.test.tsx holds ScriptView to, where showing the wrong
+ * script-view-plan-switch.test.tsx holds ServiceCue to, where showing the wrong
  * plan was worse than showing nothing. Only the latest read may land, so a slow
  * answer for the plan just left cannot overwrite the one for the plan now live.
  *

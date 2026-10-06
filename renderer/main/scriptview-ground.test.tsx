@@ -6,7 +6,7 @@
 // surface that loses `.kiosk-surface` keeps rendering, keeps passing every
 // class-name assertion, and draws black department notes on a near-black panel.
 // The page was pinned by a source match in scriptview-full-bleed.test.ts; the
-// Script View (which is also what an embedded view of kind `script` renders,
+// ServiceCue view (which is also what an embedded view of kind `script` renders,
 // through embedded-view.tsx) was not pinned at all.
 //
 // Asked of RENDERED output: the table's nearest `.kiosk-surface` ancestor, with a
@@ -89,18 +89,18 @@ async function mountPage(): Promise<void> {
   const rootRoute = createRootRoute({});
   const route = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/scriptview/$serviceType/$layout",
+    path: "/servicecue/$serviceType/$layout",
     component: () => React.createElement(ScriptViewPlan, { serviceTypeParam: "weekend", layoutParam: "audio" }),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([route]),
-    history: createMemoryHistory({ initialEntries: ["/scriptview/weekend/audio"] }),
+    history: createMemoryHistory({ initialEntries: ["/servicecue/weekend/audio"] }),
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await mountInto(React.createElement(QueryClientProvider, { client }, React.createElement(RouterProvider, { router } as never)));
 }
 
-test("the Script View draws its rundown on a kiosk ground", async () => {
+test("the ServiceCue view draws its rundown on a kiosk ground", async () => {
   const f = stubFetch();
   try {
     await mountInto(React.createElement(ScriptView, { scriptViewLayoutId: "svl1" }));
@@ -110,7 +110,7 @@ test("the Script View draws its rundown on a kiosk ground", async () => {
   }
 });
 
-test("the ScriptView page draws its rundown on a kiosk ground", async () => {
+test("the ServiceCue page draws its rundown on a kiosk ground", async () => {
   const f = stubFetch();
   try {
     await mountPage();

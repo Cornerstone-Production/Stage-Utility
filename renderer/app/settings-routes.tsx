@@ -5,7 +5,7 @@
 // a section that misbehaves after this is a wiring problem, not a rewritten one.
 //
 // The prop-free sections (Integrations, Automation, History, Baptisms, Patch,
-// ScriptView) need no wrapper and are routed directly.
+// ServiceCue) need no wrapper and are routed directly.
 
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";

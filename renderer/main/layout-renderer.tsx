@@ -979,7 +979,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         // The zone the app REASONS in when the operator has set one — a display
         // driven from a UTC box must read the venue's clock, not the box's. Unset
         // falls back to the viewer's own zone rather than the server's host zone,
-        // which is what fmtClock does for ScriptView's projected times: an
+        // which is what fmtClock does for ServiceCue's projected times: an
         // unconfigured UTC server would otherwise put every screen an hour(s) out.
         // hourCycle is deliberately not passed — formatClock reads the app-wide
         // 12h/24h setting, the same as every other clock in the app.

@@ -1,6 +1,6 @@
 // One rundown, called from three places — and it has to stay that way.
 //
-// The requirement was that nothing looks different between the ScriptView page,
+// The requirement was that nothing looks different between the ServiceCue page,
 // the `script` View-kind and the layout object. That was true the day it was
 // built, verified in a browser: the rundown TABLE hashed identically on the page
 // and inside a custom layout. A browser check proves it once; this stops it
@@ -43,7 +43,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (f: string) => fs.readFileSync(path.join(HERE, f), "utf8");
 
 /** The three files that put a plan rundown on a screen. The layout object no
- *  longer names ScriptView itself — every embedded View of every kind goes
+ *  longer names ServiceCue itself — every embedded View of every kind goes
  *  through embedded-view.tsx, so that is the surface now. */
 const SURFACES = {
   page: "scriptview-plan-view.tsx",
@@ -68,7 +68,7 @@ describe("the rundown has one implementation", () => {
     // RundownTable is the row-level primitive. The moment a surface reaches for
     // it directly it has its own copy of the markup around it, which is exactly
     // how the three rundowns drifted apart the first time. Only the shared body
-    // and the ScriptView settings preview may use it.
+    // and the ServiceCue settings preview may use it.
     for (const [name, file] of Object.entries(SURFACES)) {
       const src = read(file);
       assert.ok(

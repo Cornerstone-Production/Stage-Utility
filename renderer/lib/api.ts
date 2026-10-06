@@ -638,7 +638,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "stage:listAllTeamPositions":
       return apiFetch<T>("/api/team-positions?all=1");
 
-    // ── ScriptView (in-app ScriptViewer replacement) ────────────────────
+    // ── ServiceCue ──────────────────────────────────────────────────────
     case "scriptview:listLayouts":
       return apiFetch<T>("/api/scriptview/layouts");
 

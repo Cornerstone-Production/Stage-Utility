@@ -52,7 +52,7 @@ describe("retired layout objects convert to their own replacement", () => {
     });
   }
 
-  test("service-order picks the given script view id", () => {
+  test("service-order picks the given ServiceCue view id", () => {
     const retired = LAYOUT_OBJECTS["service-order"].retired!;
     const converted = retired.convert(LAYOUT_OBJECTS["service-order"].config(), { scriptViewId: "v1" });
     assert.equal(converted.type, "view-embed");

@@ -104,7 +104,7 @@ export function fmtDuration(totalSec: number): string {
  *    known either. Adding up the remaining items alone would quietly report the
  *    end of a service whose clock has not started.
  *
- * A LATER item with no length contributes 0, matching ScriptView's projected
+ * A LATER item with no length contributes 0, matching ServiceCue's projected
  * clock column — a half-filled-in plan reads early rather than blank.
  *
  * Items PCO marks `service_position: "post"` are left out. The question is when

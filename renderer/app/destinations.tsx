@@ -82,11 +82,11 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: VideoFeedsRoute,
   },
   {
-    // The OPERATOR's launcher, in the shell. The same page at /scriptview is
+    // The OPERATOR's launcher, in the shell. The same page at /servicecue is
     // the one a stage tablet opens and renders with no chrome, the same split
     // /history and /history/manage make.
-    path: "/scriptview/manage",
-    label: "ScriptView",
+    path: "/servicecue/manage",
+    label: "ServiceCue",
     description: "Pick a service to open its rundown.",
     icon: <ListChecksIcon className="size-4" />,
     Component: ScriptViewIndex,
@@ -190,7 +190,7 @@ export const UNGROUPED_PATHS = ["/"];
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/scriptview/manage", "/patch"] },
+  { label: "Content", paths: ["/servicecue/manage", "/patch"] },
   // Where it shows.
   { label: "Screens", paths: ["/screens", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.
@@ -228,7 +228,7 @@ function ScriptViewPlanRoute() {
  * patch and edit it from there. Routing only the viewers is exactly how both
  * editors became unreachable when Settings dissolved — see reachable.test.ts.
  *
- * `/patch/edit` and `/scriptview/presets` are literal segments and cannot
+ * `/patch/edit` and `/servicecue/presets` are literal segments and cannot
  * collide with `$serviceType/$layout`, which is three deep.
  */
 /**
@@ -255,7 +255,7 @@ const HISTORY_SHARED_PAGE = {
  * ever say what it is — the same reason a console draws its own name in the
  * layout editor.
  */
-/** The tablet's ScriptView launcher: chromeless, so it draws its own heading. */
+/** The tablet's ServiceCue launcher: chromeless, so it draws its own heading. */
 function ScriptViewShared() {
   return <ScriptViewIndex standalone />;
 }
@@ -279,7 +279,7 @@ export interface NestedRoute {
    * Name for the shell's header and the mobile top bar.
    *
    * Omitted where the page draws its own heading — the layout editor puts the
-   * view's name in an editable field, a ScriptView plan draws ScriptViewHeader —
+   * view's name in an editable field, a ServiceCue plan draws ScriptViewHeader —
    * in which case the chrome falls back to the parent destination's name rather
    * than stacking a second title above the page's own.
    */
@@ -297,16 +297,16 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
     Component: ServiceHistoryShared,
     ...HISTORY_SHARED_PAGE,
   },
-  // Titled here for the same reason /history is: /scriptview/manage does not
-  // prefix-match /scriptview, so the tablet's page would have no name.
+  // Titled here for the same reason /history is: /servicecue/manage does not
+  // prefix-match /servicecue, so the tablet's page would have no name.
   {
-    path: "/scriptview",
+    path: "/servicecue",
     Component: ScriptViewShared,
-    label: "ScriptView",
+    label: "ServiceCue",
     description: "Pick a service and a layout to open its rundown.",
   },
-  { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
-  { path: "/scriptview/presets", Component: ScriptViewSection },
+  { path: "/servicecue/$serviceType/$layout", Component: ScriptViewPlanRoute },
+  { path: "/servicecue/presets", Component: ScriptViewSection },
   { path: "/patch/edit", Component: PatchSection },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },

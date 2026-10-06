@@ -80,6 +80,12 @@ describe("summarizeChangelog", () => {
       summarizeChangelog(["fix(a11y): the icon set opens from the keyboard"]),
       ["accessibility — the icon set opens from the keyboard"],
     );
+    // The scope a feature was committed under before it was renamed. Commits on
+    // beta are never rewritten, so the notes are where the new name has to appear.
+    assert.deepEqual(
+      summarizeChangelog(["feat(scriptview): text size on the page"]),
+      ["ServiceCue — text size on the page"],
+    );
     // A scope that already says what it is passes through untouched.
     assert.deepEqual(summarizeChangelog(["fix(scores): a thing"]), ["scores — a thing"]);
   });

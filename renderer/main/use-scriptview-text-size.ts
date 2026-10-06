@@ -1,4 +1,4 @@
-// The ScriptView text size a screen is showing, and how it is changed.
+// The ServiceCue text size a screen is showing, and how it is changed.
 //
 // Start order: a valid `?text=` in the address, then what this screen remembered,
 // then 100. A `?text=` is also remembered, so it is how a display with no

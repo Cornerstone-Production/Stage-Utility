@@ -1,4 +1,4 @@
-// scriptview-body.tsx — the ScriptView rundown, everything except navigation.
+// scriptview-body.tsx — the ServiceCue rundown, everything except navigation.
 //
 // Extracted so the standalone page, the `script` View-kind and the layout object
 // are not three renderings that agree — they are one rendering, called three
@@ -232,7 +232,7 @@ export function ScriptViewHeader({
       <div className={`flex items-center gap-2 min-w-0 ${afterIdentity ? "max-w-[clamp(6rem,24vw,22rem)]" : ""}`}>
         {appLogo && <BrandLogo logo={appLogo} monochrome={appLogoMonochrome ?? true} className="size-6 rounded text-fg" />}
         <div className="flex flex-col min-w-0 leading-tight">
-          <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
+          <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ServiceCue"}</span>
           <span className="text-caption2 text-fg-subtle truncate">
             {[rundown?.planSeriesTitle ? rundown?.planTitle : null, rundown?.planDates, svcTimes || null].filter(Boolean).join("  ·  ")}
           </span>

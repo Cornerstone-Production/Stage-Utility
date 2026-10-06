@@ -1,7 +1,7 @@
-// pco.ts — Planning Center, ScriptView and slots.
+// pco.ts — Planning Center, ServiceCue and slots.
 //
 // Plans, items, teams and attachments as PCO returns them, plus the two things
-// built on top: ScriptView layouts and the slot model the stage display fills.
+// built on top: ServiceCue layouts and the slot model the stage display fills.
 //
 // Split out of stage.ts, which had grown to 1,509 lines. Every name is still
 // re-exported from stage.ts, so no import anywhere had to change.
@@ -104,8 +104,7 @@ export interface PlanItemsDTO {
   noteCategories: string[];
 }
 
-/** A saved ScriptView layout — a named column preset (our in-app ScriptViewer
- *  replacement). GLOBAL: one set of layouts applies across every service type.
+/** A saved ServiceCue layout — a named column preset. GLOBAL: one set of layouts applies across every service type.
  *  Columns reference category ROLES, not names. Names are defined per service type and
  *  vary between them, so a name-based column rendered empty wherever that service type
  *  used a different word for the same thing. A role whose members are all absent is
@@ -143,13 +142,13 @@ export interface ScriptViewLayout {
   accentRole?: string | null;
 }
 
-/** ScriptView-wide config: which PCO service types appear on the landing page
+/** ServiceCue-wide config: which PCO service types appear on the landing page
  *  (ordered). Empty = fall back to types that have layouts. */
 export interface ScriptViewConfig {
   serviceTypeIds: string[];
 }
 
-/** The resolved rundown for a ScriptView page: the chosen plan's items + columns,
+/** The resolved rundown for a ServiceCue page: the chosen plan's items + columns,
  *  plus whether this service type is the one currently running live. */
 export interface ScriptViewRundownDTO {
   serviceTypeId: string;

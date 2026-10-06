@@ -878,7 +878,7 @@ export function OutputsSection({
                   // used to say the built-in kinds "would open an editor with
                   // nothing to edit" — which was simply wrong: a slots view's
                   // editor is where its slot set and column positions live, and
-                  // a script view's is where its column preset is chosen.
+                  // a ServiceCue view's is where its column preset is chosen.
                   // Greying this out left no way to edit a mic board at all.
                   onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
                 }

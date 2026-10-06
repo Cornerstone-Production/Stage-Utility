@@ -68,7 +68,7 @@ const PRIMARY_DISPLAY_ID = "display-1";
  * The embedded-view font size that shipped as the palette default, and the one
  * that replaced it.
  *
- * `OLD` rendered at ~32px on a 1080-tall screen where the ScriptView page renders
+ * `OLD` rendered at ~32px on a 1080-tall screen where the ServiceCue page renders
  * at ~17px, so an embed came out at nearly double the page and showed a third of
  * the rundown. Changing the palette default fixed new objects and did nothing for
  * existing ones: the value is written into the object when it is placed, so
@@ -1122,7 +1122,7 @@ export class StageController {
 
   /**
    * The active plan's full rundown (items + note-category columns) for the
-   * ScriptViewer / SPL-rundown dashboards. Empty when unconfigured / no plan.
+   * ServiceCue / SPL-rundown dashboards. Empty when unconfigured / no plan.
    * `noteCategories` is the canonical column order, narrowed to those actually
    * used by at least one item.
    */
@@ -1373,7 +1373,7 @@ export class StageController {
     return this.state;
   }
 
-  // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────
+  // ── ServiceCue ──────────────────────────────────────────────────────────
 
   async listScriptViewLayouts(): Promise<ScriptViewLayout[]> {
     return scriptViewLayoutsStore.load();
@@ -1398,7 +1398,7 @@ export class StageController {
     );
     if (orphaned.length > 0) {
       console.log(
-        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ScriptView preset — ` +
+        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ServiceCue preset — ` +
           `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
       );
       const views = this.state.views.map((v) =>
@@ -1465,7 +1465,7 @@ export class StageController {
     return pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId);
   }
 
-  /** Resolve the rundown for a ScriptView page. planId picks a specific plan;
+  /** Resolve the rundown for a ServiceCue page. planId picks a specific plan;
    *  otherwise the live plan (when this IS the active type) or the nearest
    *  upcoming plan. `isLive` gates the live-item highlight in the renderer. */
   async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
@@ -2960,7 +2960,7 @@ export class StageController {
     return this.state;
   }
 
-  /** Pick which saved ScriptView column preset a "script" View renders. */
+  /** Pick which saved ServiceCue column preset a "script" View renders. */
   async setViewScriptViewLayout(id: string, scriptViewLayoutId: string | null): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:setScriptViewLayout — view ${id} not found`);
@@ -2971,7 +2971,7 @@ export class StageController {
     if (scriptViewLayoutId) {
       const known = await scriptViewLayoutsStore.load();
       if (!known.some((l) => l.id === scriptViewLayoutId)) {
-        throw new Error(`views:setScriptViewLayout — no ScriptView layout ${scriptViewLayoutId}`);
+        throw new Error(`views:setScriptViewLayout — no ServiceCue layout ${scriptViewLayoutId}`);
       }
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, scriptViewLayoutId } : v));

@@ -897,7 +897,7 @@ once the testimony pass has run), `baptism_count`, `baptism_paused`,
 `baptism_avg_testimony`, `baptism_avg_baptism`, `baptism_mode`. All the clocks
 tick live between updates, off the same delivery-compensated clock as the PCO
 countdown. **Advance** is the one action to bind to a physical key — it does
-whatever the [operator panel's](../features/scriptview-and-baptisms.md) own
+whatever the [operator panel's](../features/servicecue-and-baptisms.md) own
 main button would do right now, in whichever phase the timer is in. Pressed
 while the baptism section is armed, **Next** starts "First person in" the same
 way Advance does, rather than skipping them — a key already bound to Next

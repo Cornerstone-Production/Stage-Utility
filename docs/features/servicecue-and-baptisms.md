@@ -1,25 +1,25 @@
-# ScriptView and Baptisms
+# ServiceCue and Baptisms
 
 Two operator surfaces built on the Planning Center plan.
 
-# ScriptView
+# ServiceCue
 
-A rundown dashboard at `/scriptview` — every plan item with the note columns your
+A rundown dashboard at `/servicecue` — every plan item with the note columns your
 department cares about, section headers, lengths, a clock and a live countdown.
 The current item highlights while a service is running. That address and the
 rundowns under it render without the app's sidebar and header, for a stage
-tablet; the same launcher with the chrome is **ScriptView** in the sidebar, at
-`/scriptview/manage`.
+tablet; the same launcher with the chrome is **ServiceCue** in the sidebar, at
+`/servicecue/manage`.
 
 Pick a service type from the landing page and it opens at a readable, shareable
-URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows
+URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ScriptView**, with a live preview. The layouts
+Configure it under **Settings → ServiceCue**, with a live preview. The layouts
 and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
-landing page, a ScriptView page and a Script display, which ask Planning Center
-for nothing until it is connected. A Script display with no service type
+landing page, a ServiceCue page and a ServiceCue display, which ask Planning Center
+for nothing until it is connected. A ServiceCue display with no service type
 selected says that instead.
 
 ## Where the rundown can appear
@@ -29,13 +29,13 @@ you define once looks identical wherever it shows up:
 
 | | Follows | Columns from |
 |---|---|---|
-| **The `/scriptview` pages** | the service type in the URL, on the plan the app follows unless `?plan=` says otherwise | the layout in the URL |
-| **A Script view** on a display | the app's active plan | its **Columns** setting |
-| **An Embedded view object** inside a custom layout | the app's active plan | the Script view it points at |
+| **The `/servicecue` pages** | the service type in the URL, on the plan the app follows unless `?plan=` says otherwise | the layout in the URL |
+| **A ServiceCue view** on a display | the app's active plan | its **Columns** setting |
+| **An Embedded view object** inside a custom layout | the app's active plan | the ServiceCue view it points at |
 
 The third is how you put the rundown under your own objects on one screen instead
 of stacking two browser tabs. Add an **Embedded view** object to a custom layout
-and point it at a Script view.
+and point it at a ServiceCue view.
 
 The embed shows the rundown only — no back arrow and no layout switcher. Its
 header (plan title, countdown, clock) is off by default, since a layout usually
@@ -47,10 +47,10 @@ to walk over and touch the display. It only ever scrolls the embed itself, never
 the layout around it. Turn it off for a box deliberately parked on the top of the
 plan — a pre-service checklist, or one only tall enough for a row or two.
 
-**Font size** is the object's own, and starts at the size the ScriptView page
+**Font size** is the object's own, and starts at the size the ServiceCue page
 renders at so the two match. Reach for it when a dense column set needs more rows
 on screen: row height is driven mostly by how many columns are shown, because
-notes wrap inside narrow ones. Choosing a **Columns** preset on the Script view
+notes wrap inside narrow ones. Choosing a **Columns** preset on the ServiceCue view
 gains far more rows than shrinking the type does.
 
 An **Embedded view** object can point at any view, including one holding a custom
@@ -113,7 +113,7 @@ priority, and you can reorder it.
 A role whose members a service type doesn't define is hidden rather than shown as
 an empty column.
 
-**Managing them:** Settings → ScriptView → Category roles. Rename, add or remove
+**Managing them:** Settings → ServiceCue → Category roles. Rename, add or remove
 members, reorder. Two diagnostics flag problems you would otherwise notice only by
 absence — categories in no role (which can never appear as a column) and
 categories in more than one (ambiguous, since two columns would claim the note).
@@ -146,7 +146,7 @@ configurable, since Planning Center has no colour for a note category.
 
 ## Plan switcher
 
-A ScriptView page opens on the plan the app follows for its service type: the
+A ServiceCue page opens on the plan the app follows for its service type: the
 app's own plan when the page is for the type the app is on, otherwise the
 nearest upcoming one. The header carries **‹ plan ▾ ›** after the plan's title to
 look at another plan of the same type. The arrows step through that type's plans
@@ -187,7 +187,7 @@ absent.
 
 ## Text size
 
-The ScriptView page's header carries **A−**, a percentage and **A+**. The buttons
+The ServiceCue page's header carries **A−**, a percentage and **A+**. The buttons
 step the rundown's text in 10-point increments between 50% and 300%; from a size
 that is not a multiple of ten they land on the next one in the direction pressed
 (137% goes to 140% with A+ and 130% with A−). Click the percentage to type a size:
@@ -210,12 +210,12 @@ its id, so a booth laptop at 100% does not resize a display across the room.
 A display has no control for it. Set its size from its link with `?text=<percent>`
 (`/display-1?text=150`, held to the same 50–300 range): the size applies at once
 and is remembered, so the link only has to be opened with it once. `?text=` also
-works on a ScriptView page, and wins over what that page remembered. An Embedded
+works on a ServiceCue page, and wins over what that page remembered. An Embedded
 view object inside a layout takes neither; it keeps its own font size.
 
 ## On different screens
 
-ScriptView renders on stage panels, laptops and phones, and changes shape rather
+ServiceCue renders on stage panels, laptops and phones, and changes shape rather
 than centring a fixed column:
 
 | Width | Shape |

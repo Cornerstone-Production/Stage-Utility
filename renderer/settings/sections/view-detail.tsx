@@ -45,7 +45,7 @@ const PREVIEW_ASPECTS = [
   { id: "ultritouch-4", label: "Ultritouch-4 · 1366 x 485", ratio: 1366 / 485 },
 ];
 
-/** Sentinel for the ScriptView column picker's "all columns" choice. */
+/** Sentinel for the ServiceCue column picker's "all columns" choice. */
 const ALL_COLUMNS = "__all__";
 
 export function ViewDetail({
@@ -82,9 +82,9 @@ export function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
-  // The ScriptView column presets, for a "script" View's Columns picker. Fetched
+  // The ServiceCue column presets, for a "script" View's Columns picker. Fetched
   // here rather than threaded through SectionProps: only this branch needs them,
-  // and they change when someone edits a preset in the ScriptView section.
+  // and they change when someone edits a preset in the ServiceCue section.
   const [scriptViewLayouts, setScriptViewLayouts] = useState<ScriptViewLayout[]>([]);
   // A failed read is not "no column sets". Drawn as one, the picker offered only
   // All columns and labelled this view's own set "not found".
@@ -101,7 +101,7 @@ export function ViewDetail({
         clear("layouts");
       })
       .catch((err: unknown) => {
-        if (!cancelled) fail("layouts", "the column sets for a Script view", err);
+        if (!cancelled) fail("layouts", "the column sets for a ServiceCue view", err);
       });
     return () => {
       cancelled = true;
@@ -351,7 +351,7 @@ export function ViewDetail({
             <div className="flex flex-col">
               <span className="text-caption1 text-fg">Columns</span>
               <span className="text-caption2 text-fg-muted">
-                The same saved column sets the ScriptView pages use, so a department's columns are
+                The same saved column sets the ServiceCue pages use, so a department's columns are
                 defined once and a display and a browser tab cannot disagree about them.
               </span>
             </div>
@@ -381,7 +381,7 @@ export function ViewDetail({
             )}
           </div>
           <p className="text-caption2 text-fg-muted">
-            The Script view renders the active plan's rundown — the same table as the ScriptView
+            The ServiceCue view renders the active plan's rundown — the same table as the ServiceCue
             pages, following whichever plan the app is set to. Max SPL per item lives on the
             SPL rundown view.
           </p>

@@ -958,7 +958,7 @@ export function Inspector({
             </Button>
             {retired.replacedBy === "view-embed" && scriptViews.length === 0 && (
               <span className="text-caption2 text-fg-subtle">
-                Make a Script view first and this will have something to point at.
+                Make a ServiceCue view first and this will have something to point at.
               </span>
             )}
           </div>

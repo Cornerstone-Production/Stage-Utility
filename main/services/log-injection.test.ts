@@ -118,10 +118,16 @@ const REQUEST_FACING = [
   "routes/client-log-routes.ts",
   "routes/context.ts",
   "routes/cue-routes.ts",
+  // Logs nothing: it answers a path with a redirect or hands the request on.
+  "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
+  // Logs nothing: it reads the request path and query and echoes them into a
+  // Location header, which Node refuses to write if either carries a control
+  // character.
+  "routes/legacy-page-routes.ts",
   "routes/log-paths.ts",
   "routes/log-routes.ts",
   "routes/operator-paths.ts",

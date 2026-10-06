@@ -21,7 +21,7 @@ registers rather than two apps.
 
 | | **Kiosk / Display** | **Settings / Admin** |
 |---|---|---|
-| Where | Stage monitors, `/`, `/display-N`, `/scriptview` | Settings window (`settings-window.html`) |
+| Where | Stage monitors, `/`, `/display-N`, `/servicecue` | Settings window (`settings-window.html`) |
 | Entry | `index.html` (`.kiosk` on `<html>`) → `renderer/main/*` | `settings-window.html` → `renderer/settings/*` |
 | Theme | **Always dark**, fixed (`.kiosk` token overrides) | **Light or dark**, user-toggleable (`.dark`) |
 | Type sizing | **Responsive** (`clamp()`, `vmin`, fractions of canvas height) | **Fixed** px / Apple-HIG utility classes |
@@ -316,7 +316,7 @@ adapts to surrounding text color) or full-color `<img>`.
 scrolling content pane; on mobile a top bar + hamburger drawer. The nav is **grouped**
 via `SidebarGroupLabel` (Content / Output / Identity / System) with quiet uppercase
 labels and a **quiet active state** (accent-tint fill, accent icon — no saturated
-block). Sections: Plan, Views, ScriptView, Displays, Integrations, Connect, Branding,
+block). Sections: Plan, Views, ServiceCue, Displays, Integrations, Connect, Branding,
 History, Baptisms, Advanced.
 
 **Theme.** `.dark` on `<html>`, key `stage-utility-theme`, no-flash inline script in

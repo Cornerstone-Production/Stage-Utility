@@ -1,4 +1,4 @@
-// Which plans the ScriptView page's switcher offers, where its arrows go, and what
+// Which plans the ServiceCue page's switcher offers, where its arrows go, and what
 // a pasted Planning Center link means. No React, no fetch.
 //
 // The list is the slots editor's own (`plans:upcoming`) and the stepping is its

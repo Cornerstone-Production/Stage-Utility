@@ -3,7 +3,7 @@ import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 import { resolveRole, roleAppliesTo } from "./role-resolve";
 import { formatClock } from "../lib/clock-format";
 
-// Shared column/clock logic for ScriptView, used by both the standalone page and
+// Shared column/clock logic for ServiceCue, used by both the standalone page and
 // the settings preview so they render identically. Resolves a layout's per-element
 // toggles, projects the wall-clock per item, and builds the RundownTable columns.
 

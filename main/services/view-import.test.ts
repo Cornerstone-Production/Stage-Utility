@@ -215,12 +215,12 @@ describe("importing a bundle", () => {
   });
 });
 
-describe("a bundle carrying two ScriptView presets with one id", () => {
+describe("a bundle carrying two ServiceCue presets with one id", () => {
   // mergeTargets, twenty lines below the code this covers, grows its `have` set
   // inside the loop and says why in a comment: "two incoming targets sharing an
   // id would otherwise both be appended, leaving a duplicate id in the store."
   //
-  // The ScriptView merge is the same shape re-implemented, and it computed the
+  // The ServiceCue merge is the same shape re-implemented, and it computed the
   // add-list with a filter BEFORE the loop grew the seen-set — so it dropped the
   // guard the sibling ten lines away was written to keep. An export cannot
   // normally produce this, but an import is the one place a hand-edited or
