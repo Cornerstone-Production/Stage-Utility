@@ -1166,6 +1166,48 @@ test("relayTarget keeps answering 503 for a feed the last reconcile failed to ha
   }
 });
 
+test("a reconcile that rejects one feed's path still hands the relay the others, and is retried", async (t) => {
+  const { RelayReconcileError } = await import("./relay.js");
+  // The id a feed named "Foyer" mints. The relay rejects its path from the very
+  // first reconcile, so nothing has ever marked either feed as given.
+  let failId: string | null = "foyer";
+  const relay = fakeRelay({
+    reconcile: async () => {
+      if (failId !== null) {
+        throw new RelayReconcileError(`could not set up 1 of 2 relay paths (${failId}: MediaMTX answered 500)`, [failId]);
+      }
+    },
+  });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  const lines = captureConsole(t, "warn"); // before the adds: the first failed reconcile is the one logged
+  const first = await videoService.addFeed({ name: "Narthex", source: { kind: "pull", url: "rtsp://192.0.2.66/s", username: "" } });
+  const second = await videoService.addFeed({ name: "Foyer", source: { kind: "pull", url: "rtsp://192.0.2.67/s", username: "" } });
+  assert.ok(first.ok && second.ok);
+  const firstId = (first as { feed: { id: string } }).feed.id;
+  const secondId = (second as { feed: { id: string } }).feed.id;
+  assert.equal(secondId, "foyer", "the test's rejected path is the second feed's id");
+  try {
+    assert.equal(await videoService.reconcileRelay(), false, "a partial failure is still a failed reconcile, so the readiness poll retries");
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` }, "the feed whose path was set up must play");
+    assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN, "the feed whose path was rejected stays refused");
+    assert.ok(
+      lines.some((line) => line.includes("[video] could not reconcile the relay") && line.includes(secondId)),
+      `the failure must be logged on a [video] line: ${JSON.stringify(lines)}`,
+    );
+
+    failId = null;
+    assert.equal(await videoService.reconcileRelay(), true);
+    assert.notDeepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN, "the retry hands the relay the feed");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(firstId);
+    await videoService.removeFeed(secondId);
+  }
+});
+
 // relayTarget() must forward to the ports the RUNNING
 // relay was actually STARTED with, never the store's current ports — a
 // ports change (PATCH /api/video/ports) writes the store at once,

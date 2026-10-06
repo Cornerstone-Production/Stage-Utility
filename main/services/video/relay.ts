@@ -24,8 +24,23 @@ export interface RelayPath {
   readers: number;
 }
 
+/** What `reconcile` throws when the relay took the user change and some
+ *  paths but rejected others. `failedPaths` names the paths that were NOT
+ *  set up (a feed's path is its id), so a caller can still treat every other
+ *  feed as given to the relay. The message names each failure. */
+export class RelayReconcileError extends Error {
+  constructor(
+    message: string,
+    readonly failedPaths: readonly string[],
+  ) {
+    super(message);
+    this.name = "RelayReconcileError";
+  }
+}
+
 export interface VideoRelay {
-  /** Make the relay's paths and publish users match `feeds` exactly. */
+  /** Make the relay's paths and publish users match `feeds` exactly. Throws
+   *  a RelayReconcileError when only some paths failed. */
   reconcile(feeds: RelayFeed[]): Promise<void>;
   /** Every path the relay has, or throws when the relay does not answer. */
   status(): Promise<RelayPath[]>;

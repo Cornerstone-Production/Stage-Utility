@@ -493,7 +493,9 @@ from the server:
 - `could not reconcile the relay`: its paths or publish users could not be
   set, once the relay's API had answered at least once (never for the first
   moment of a start, before it has opened), and `reconciling the relay is
-  working again` on the next success.
+  working again` on the next success. When the relay rejects only some paths
+  the line names them, every other feed still plays, and the named ones read
+  offline until a retry sets them up.
 - `proxy to relay failed for <feed>`: a screen's or OBS's request the relay
   did not answer, once per outage per feed, and `is answering again`.
 - Each feed going live or delayed, and `went offline` once per outage, only

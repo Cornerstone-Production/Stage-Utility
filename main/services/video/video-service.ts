@@ -41,7 +41,7 @@ import { ProbeScheduler } from "./probe-scheduler.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import { RelayLogWatcher } from "./relay-log.js";
-import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
+import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
 import type { SupervisorStatus } from "./supervisor.js";
 import {
@@ -1559,8 +1559,9 @@ class VideoService {
   private async reconcileOnce(): Promise<boolean> {
     if (!this.relay || this.supervisor?.status().state !== "running") return true;
     const generation = this.relayGeneration;
+    let feeds: RelayFeed[] = [];
     try {
-      const feeds = await this.relayFeeds();
+      feeds = await this.relayFeeds();
       await this.relay.reconcile(feeds);
       // Both are facts about the process that was current when this
       // started; a respawn in between gets its own reconcile from the
@@ -1580,6 +1581,15 @@ class VideoService {
       void this.pollOnce();
       return true;
     } catch (err) {
+      // A relay that rejected some paths still answered, and took every other
+      // one: those feeds are given to it, and only the named ones stay 503.
+      // The failure is still returned below, so the readiness poll retries.
+      if (err instanceof RelayReconcileError && generation === this.relayGeneration) {
+        const failed = new Set(err.failedPaths);
+        this.reconciledFeedIds = new Set(feeds.filter((f) => !failed.has(f.id)).map((f) => f.id));
+        this.relayAnswered = true;
+        void this.pollOnce();
+      }
       // Returned either way: the caller (the readiness poll) retries.
       if (!this.reconcileFailureIsNews()) return false;
       const message = errorMessage(err);

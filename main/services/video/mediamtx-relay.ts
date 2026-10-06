@@ -38,7 +38,7 @@ import { isDeepStrictEqual } from "node:util";
 import { errorMessage } from "../errors.js";
 import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
-import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
+import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
 import { apiUser, type RelayUser } from "./mediamtx-config.js";
 
 const REQUEST_TIMEOUT_MS = 5000;
@@ -171,16 +171,19 @@ export class MediaMtxRelay implements VideoRelay {
         () => this.request("DELETE", `/v3/config/paths/delete/${encodeURIComponent(name)}`),
       ]),
     ];
-    const failures: string[] = [];
+    const failures: { name: string; reason: string }[] = [];
     for (const [name, write] of writes) {
       try {
         await write();
       } catch (err) {
-        failures.push(`${name}: ${errorMessage(err)}`);
+        failures.push({ name, reason: errorMessage(err) });
       }
     }
     if (failures.length > 0) {
-      throw new Error(`could not set up ${failures.length} of ${writes.length} relay paths (${failures.join("; ")})`);
+      throw new RelayReconcileError(
+        `could not set up ${failures.length} of ${writes.length} relay paths (${failures.map((f) => `${f.name}: ${f.reason}`).join("; ")})`,
+        failures.map((f) => f.name),
+      );
     }
   }
 

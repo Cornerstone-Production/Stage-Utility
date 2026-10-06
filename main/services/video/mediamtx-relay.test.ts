@@ -11,7 +11,7 @@ import { afterEach, before, after, describe, it } from "node:test";
 
 import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
-import type { RelayFeed } from "./relay.js";
+import { RelayReconcileError, type RelayFeed } from "./relay.js";
 
 /** Keys `GET /v3/config/paths/list` reports beyond what this app ever sets
  *  — recording, run-on-demand, every other protocol's own timeouts — so a
@@ -248,6 +248,8 @@ describe("MediaMtxRelay.reconcile", () => {
     await assert.rejects(
       () => relay.reconcile([PULL, PUSH]),
       (err: Error) => {
+        assert.ok(err instanceof RelayReconcileError, "a partial failure carries which paths failed");
+        assert.deepEqual((err as RelayReconcileError).failedPaths, ["cam1"]);
         assert.match(err.message, /1 of 3 relay paths/);
         assert.match(err.message, /cam1: invalid source/);
         assert.equal(err.message.includes("obs1"), false, "only the failed path is named");
