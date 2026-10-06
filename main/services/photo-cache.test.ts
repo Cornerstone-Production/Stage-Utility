@@ -10,6 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { before, describe, it } from "node:test";
 
+import { captureConsole } from "./fixtures/capture-console.js";
 import { getPhotoPath, isAllowedPhotoUrl, readCapped } from "./photo-cache.js";
 
 describe("photo proxy host allowlist", () => {
@@ -156,5 +157,30 @@ describe("getPhotoPath", () => {
     syncBuiltinESMExports();
     const again = await getPhotoPath(photo(7));
     assert.equal(await fsp.readFile(again!, "utf8"), "photo-bytes", "served the torn file");
+  });
+});
+
+describe("what the failure lines say about the URL", () => {
+  before(async () => {
+    process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "photo-cache-"));
+  });
+
+  // /photos?u= is the caller's string, and the URL parser drops a newline before it
+  // checks the host, so this one is allowed, fetched and logged.
+  const allowedWithNewline = "https://avatars.planningcenteronline.com/uploads/a.png\n[server] forged line";
+
+  it("keeps a newline in a refused URL from forging a line on /log", async (t) => {
+    const lines = captureConsole(t, "warn", "error");
+    assert.equal(await getPhotoPath("https://evil.test/a.png\n[server] forged line"), null);
+    assert.ok(lines.length > 0, "a refusal says nothing");
+    for (const l of lines) assert.doesNotMatch(l, /\n/, `a newline reached the log: ${JSON.stringify(l)}`);
+  });
+
+  it("keeps a newline in a URL PCO answered with an error from forging a line", async (t) => {
+    const lines = captureConsole(t, "warn", "error");
+    t.mock.method(globalThis, "fetch", async () => new Response("no", { status: 404 }));
+    assert.equal(await getPhotoPath(allowedWithNewline), null);
+    assert.ok(lines.length > 0, "a failed fetch says nothing");
+    for (const l of lines) assert.doesNotMatch(l, /\n/, `a newline reached the log: ${JSON.stringify(l)}`);
   });
 });
