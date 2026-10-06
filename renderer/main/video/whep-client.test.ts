@@ -68,6 +68,25 @@ test("a POST that fails outright closes the peer connection and rethrows", async
   assert.equal(FakePeerConnection.instances.at(-1)?.closed, true, "a failed POST left the peer connection open");
 });
 
+test("an offer that cannot be made closes the peer connection and rethrows, with nothing POSTed", async () => {
+  const posts: string[] = [];
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (_input: string | URL, init?: RequestInit) => {
+    posts.push(init?.method ?? "GET");
+    return { status: 201, ok: true, headers: { get: () => null }, text: async () => FAKE_SDP } as unknown as Response;
+  }) as typeof fetch;
+  const realCreateOffer = FakePeerConnection.prototype.createOffer;
+  FakePeerConnection.prototype.createOffer = async () => {
+    throw new Error("createOffer failed");
+  };
+  try {
+    await assert.rejects(() => startWhep("/video/p/whep", video), /createOffer failed/);
+  } finally {
+    FakePeerConnection.prototype.createOffer = realCreateOffer;
+  }
+  assert.equal(FakePeerConnection.instances.at(-1)?.closed, true, "a failed offer left the peer connection open");
+  assert.deepEqual(posts, [], "nothing should reach the relay when there is no offer");
+});
+
 test("an absolute, cross-origin endpoint's relative Location resolves against THAT origin, not the page's", async () => {
   const calls: { method: string; url: string }[] = [];
   (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (input: string | URL, init?: RequestInit) => {
