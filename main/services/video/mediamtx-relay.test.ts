@@ -476,6 +476,26 @@ describe("MediaMtxRelay.status picks the picture track", () => {
     assert.deepEqual(path!.video, { codec: "H265", width: 1920, height: 1080, profile: "Main" });
   });
 
+  it("an audio-first publisher with no picture size yet still reports its video track, not the audio", async () => {
+    // Before the first keyframe no track has a width, and the fallback was the
+    // first one listed: Opus.
+    for (const video of ["H264", "H265", "VP8", "VP9", "AV1", "M-JPEG", "MJPEG", "MPEG-4 Video", "MPEG-1/2 Video"]) {
+      runtimePaths = [
+        { name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "Opus", codecProps: {} }, { codec: video }] },
+      ];
+      const relay = new MediaMtxRelay(port, API_PASSWORD);
+      const [path] = await relay.status();
+      assert.equal(path!.video?.codec, video, `${video} listed after Opus`);
+    }
+  });
+
+  it("a path with no video track at all still reports the first one listed", async () => {
+    runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "Opus", codecProps: {} }] }];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const [path] = await relay.status();
+    assert.equal(path!.video?.codec, "Opus");
+  });
+
   it("falls back to the first track when none has a picture size yet", async () => {
     runtimePaths = [
       { name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "H264" }, { codec: "Opus", codecProps: {} }] },

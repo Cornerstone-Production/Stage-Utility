@@ -60,6 +60,16 @@ interface GlobalConfig {
   authInternalUsers?: RelayUser[];
 }
 
+/** MediaMTX's names for the video codecs it can carry (v1.21.1 spells them AV1,
+ *  VP9, VP8, H265, H264, M-JPEG, MPEG-4 Video and MPEG-1/2 Video), compared with
+ *  everything but letters and digits dropped so a spelling change such as MJPEG
+ *  for M-JPEG still counts. Anything else it lists is audio or data. */
+const VIDEO_CODECS = new Set(["AV1", "VP9", "VP8", "H265", "H264", "MJPEG", "MPEG4VIDEO", "MPEG12VIDEO"]);
+
+function isVideoCodec(codec: string): boolean {
+  return VIDEO_CODECS.has(codec.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+}
+
 interface RuntimePathItem {
   name: string;
   ready: boolean;
@@ -197,8 +207,13 @@ export class MediaMtxRelay implements VideoRelay {
       // The picture's track, not just the first: a publisher may list its
       // audio first, and an audio track has no size. A track whose size is
       // not known yet (an H.264 stream still waiting for its first frame)
-      // falls back to the first one listed.
-      const track = item.tracks2?.find((t) => t.codecProps?.width !== undefined) ?? item.tracks2?.[0];
+      // falls back to the first VIDEO track, so an audio-first publisher does
+      // not report Opus as its picture; only a path with no video track at all
+      // falls through to whatever is listed first.
+      const track =
+        item.tracks2?.find((t) => t.codecProps?.width !== undefined) ??
+        item.tracks2?.find((t) => isVideoCodec(t.codec)) ??
+        item.tracks2?.[0];
       return {
         name: item.name,
         ready: item.ready,
