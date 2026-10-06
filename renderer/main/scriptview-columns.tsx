@@ -1,4 +1,4 @@
-import type { RundownColumn } from "./rundown-table";
+import type { RundownColumn, RundownShape } from "./rundown-table";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 import { resolveRole, roleAppliesTo } from "./role-resolve";
 import { formatClock } from "../lib/clock-format";
@@ -98,6 +98,17 @@ export function totalLengthSec(items: PlanItemDTO[]): number {
   return items.reduce((sum, it) => sum + (it.lengthSec > 0 ? it.lengthSec : 0), 0);
 }
 
+/** What makes the item's notes read like the department notes beside them.
+ *
+ *  The table shape draws a department note at the table's own size and inherited
+ *  line height; this cell sits in a `leading-tight` column, so it asks for the
+ *  normal one back. The stacked shape draws every value in `text-caption2`
+ *  (which brings its own line height), and the title column no longer sets a
+ *  weight on its wrapper, so this is normal weight too. */
+export function itemNotesSizing(shape: RundownShape): string {
+  return shape === "stacked" ? "text-caption2" : "leading-normal";
+}
+
 /** Build the RundownTable columns for a spec. `clocks` (from computeClocks) drives
  *  the Clock column; omit/null to hide it even when showClock is on. `timeZone`
  *  renders the clock in the plan's local time. */
@@ -128,7 +139,7 @@ export function buildScriptViewColumns(
 
   cols.push({
     key: "title", header: "Item",
-    render: (it, { isCurrent }) => {
+    render: (it, { isCurrent, shape }) => {
       const parts: string[] = [];
       if (spec.showKey && it.songKey) parts.push(`Key ${it.songKey}`);
       if (spec.showBpm && it.bpm) parts.push(`${it.bpm} BPM`);
@@ -139,7 +150,7 @@ export function buildScriptViewColumns(
         <div className="flex flex-col leading-tight">
           <span className={`font-medium ${isCurrent ? "text-live-11" : "text-fg-strong"}`}>{it.title}</span>
           {meta && <span className="text-caption2 italic text-accent-text">{meta}</span>}
-          {spec.showItemNotes && it.description && <span className="text-fg-strong whitespace-pre-line mt-[0.45em]">{it.description}</span>}
+          {spec.showItemNotes && it.description && <span className={`text-fg-strong whitespace-pre-line mt-[0.45em] ${itemNotesSizing(shape)}`}>{it.description}</span>}
         </div>
       );
     },

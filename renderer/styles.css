@@ -671,6 +671,13 @@
  * exactly as .kiosk and .dark lift their own accent states. #2e6691 → 5.22:1. */
 :root:not(.dark) .kiosk-surface {
   --color-accent: color-mix(in srgb, var(--brand-accent), white 22%);
+
+  /* The key/BPM line's accent, as the REAL kiosk draws it. There --brand-accent is
+     the operator's pick or, unset, .dark's #6aa6df, lifted 45%; here --brand-accent
+     is the light default #2e6691 unless picked, which would lift a darker blue
+     than any display shows. --brand-accent-set exists only when picked (see
+     apply-accent.ts), so its fallback is .dark's default — keep the two in step. */
+  --color-accent-text: color-mix(in srgb, var(--brand-accent-set, #6aa6df), white 45%);
 }
 
 

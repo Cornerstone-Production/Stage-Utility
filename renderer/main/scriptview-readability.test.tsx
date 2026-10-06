@@ -64,7 +64,7 @@ const layout = (over: Partial<ScriptViewLayout> = {}): ScriptViewLayout => ({
 function titleCell(item: PlanItemDTO, l: ScriptViewLayout | null = null, isCurrent = false): HTMLElement {
   const col = columns(l).find((c) => c.key === "title")!;
   const host = document.createElement("div");
-  host.innerHTML = renderToStaticMarkup(<>{col.render(item, { isCurrent })}</>);
+  host.innerHTML = renderToStaticMarkup(<>{col.render(item, { isCurrent, shape: "full" })}</>);
   return host;
 }
 
@@ -212,6 +212,71 @@ describe("rundown text brightness, through the real table", () => {
   });
 });
 
+describe("the stacked shape sizes the item's notes like a department note", () => {
+  /** The size and weight a cell resolves to: the nearest ancestor-or-self carrying one. */
+  function effective(el: Element, root: Element): { size: string; weight: string } {
+    let size = "inherited";
+    let weight = "normal";
+    let sizeDone = false;
+    let weightDone = false;
+    for (let e: Element | null = el; e && e !== root.parentElement; e = e.parentElement) {
+      const cls = e.className.toString().split(/\s+/);
+      const s = cls.find((c) => /^text-(caption\d|\[clamp)/.test(c));
+      const w = cls.find((c) => /^font-(medium|semibold|bold)$/.test(c));
+      if (s && !sizeDone) { size = s; sizeDone = true; }
+      if (w && !weightDone) { weight = w; weightDone = true; }
+    }
+    return { size, weight };
+  }
+
+  function stacked(): HTMLElement {
+    const g = globalThis as unknown as { ResizeObserver: unknown };
+    const real = g.ResizeObserver;
+    g.ResizeObserver = class {
+      constructor(private cb: (e: { contentRect: { width: number } }[]) => void) {}
+      observe() { this.cb([{ contentRect: { width: 400 } }]); }
+      unobserve() {}
+      disconnect() {}
+    };
+    try {
+      const { container } = render(<RundownTable items={[SONG]} columns={columns()} roles={[ROLE]} />);
+      assert.equal(container.querySelector("table"), null, "this width did not take the stacked shape");
+      return container;
+    } finally {
+      g.ResizeObserver = real;
+    }
+  }
+
+  test("the same size and weight as the department note beside it", () => {
+    // The title column used to sit in a `font-medium` wrapper, so under 640px the
+    // item's notes inherited the full table size at weight 500 while every
+    // department note was text-caption2 at normal weight.
+    const root = stacked();
+    const row = root.querySelector("div.border-b")!;
+    const desc = [...row.querySelectorAll("span")].find((e) => e.textContent === SONG.description)!;
+    const note = [...row.querySelectorAll("span.min-w-0")].find((e) => e.textContent === "* Play per arrangement")!;
+    const d = effective(desc, row);
+    const n = effective(note, row);
+    assert.deepEqual(d, n, `item notes ${JSON.stringify(d)} vs department note ${JSON.stringify(n)}`);
+    assert.deepEqual(n, { size: "text-caption2", weight: "normal" });
+  });
+
+  test("the title keeps its weight", () => {
+    const root = stacked();
+    const title = [...root.querySelectorAll("span")].find((e) => e.textContent === SONG.title)!;
+    assert.equal(effective(title, root).weight, "font-medium");
+  });
+
+  test("in the table shape the notes ask for the normal line height back", () => {
+    // The Item column is `leading-tight`; a department note cell inherits the
+    // normal one, so the item's notes must not.
+    const desc = [...titleCell(SONG).querySelectorAll("span")].find((e) => e.textContent === SONG.description)!;
+    const cls = desc.className.split(/\s+/);
+    assert.ok(cls.includes("leading-normal"), `item notes sit in the tight line height: ${desc.className}`);
+    assert.ok(!cls.includes("text-caption2"), "item notes are small in the table shape");
+  });
+});
+
 describe("styles.css defines every token the rundown names", () => {
   const CSS = postcss.parse(readFileSync(new URL("../styles.css", import.meta.url), "utf8"));
   /** Declaration NODES on a selector — a comment that mentions a token cannot satisfy this. */
@@ -239,8 +304,22 @@ describe("styles.css defines every token the rundown names", () => {
     });
   }
 
-  test("accent-text is the Branding accent mixed with white, everywhere it can render", () => {
+  test("accent-text is a Tailwind colour, derived from --brand-accent on :root", () => {
     assert.equal(themeDecl("--color-accent-text"), "var(--su-accent-text)");
     assert.equal(decl(":root", "--su-accent-text"), "color-mix(in srgb, var(--brand-accent), white 45%)");
+  });
+
+  test("a kiosk surface in the light app lifts the accent the real kiosk lifts", () => {
+    // On the real kiosk --brand-accent is the operator's pick or .dark's default;
+    // in the light app the unpicked value is the LIGHT default, a darker blue no
+    // display shows. The surface must use the pick when there is one and .dark's
+    // default when not, lifted by the same 45%.
+    const darkDefault = decl(".dark", "--brand-accent");
+    assert.ok(darkDefault, ".dark declares no --brand-accent");
+    assert.equal(
+      decl(":root:not(.dark) .kiosk-surface", "--color-accent-text"),
+      `color-mix(in srgb, var(--brand-accent-set, ${darkDefault}), white 45%)`,
+      "the light-app kiosk surface does not resolve the accent line the way the kiosk does",
+    );
   });
 });

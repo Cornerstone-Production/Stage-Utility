@@ -273,9 +273,12 @@ and `EmbeddedView` all carry it.
 Inside it, foregrounds come from the semantic tokens (`text-fg`, `text-fg-muted`,
 `text-fg-subtle`, `text-fg-faint`, and the rundown's `text-fg-strong` and
 `text-fg-soft`) — **never** a Radix palette step. `.kiosk-surface` re-declares those
-six, the ground, surface and line colours, one fill and the warning colour and
-nothing else, so `text-gray-7` on a kiosk ground still
-follows the app theme: `#484848` in dark, 2.16:1. Status colours (`--red-*`,
+six, the ground, surface and line colours, one fill and the warning colour. A
+second rule, `:root:not(.dark) .kiosk-surface`, applies only in the light app and
+sets the two accent colours (`--color-accent`, lifted 22%, and `--color-accent-text`,
+lifted 45% from the operator's pick or, unset, the dark default `#6aa6df`, as the
+real kiosk draws it). Nothing else is re-declared, so `text-gray-7` on a kiosk
+ground still follows the app theme: `#484848` in dark, 2.16:1. Status colours (`--red-*`,
 `--green-*`, `--amber-*`) are the exception and stay — a state that means something has
 to keep its hue on both grounds.
 

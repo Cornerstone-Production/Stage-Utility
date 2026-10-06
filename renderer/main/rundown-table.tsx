@@ -170,7 +170,18 @@ export interface RundownColumn {
    *  table puts it on the cell, the stacked shape on the value beside the column's
    *  label. Absent = the stacked shape's default, `text-fg-muted`. */
   textClassName?: string;
-  render: (item: PlanItemDTO, ctx: { isCurrent: boolean }) => ReactNode;
+  render: (item: PlanItemDTO, ctx: RundownCellContext) => ReactNode;
+}
+
+/** The three shapes the rundown takes, by the width of its box. */
+export type RundownShape = "stacked" | "compact" | "full";
+
+export interface RundownCellContext {
+  isCurrent: boolean;
+  /** Which shape this cell is drawn in. The stacked shape sets every column's value
+   *  in `text-caption2`, so a cell that must read at the same size as the other
+   *  columns' values (the item's notes) has to know. */
+  shape: RundownShape;
 }
 
 export function RundownTable({
@@ -218,7 +229,7 @@ export function RundownTable({
   }, []);
   // No page max-width anywhere: a centerd column leaves dead margins on a stage panel
   // and shrinks the text relative to the viewport. The SHAPE changes instead.
-  const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
+  const shape: RundownShape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
   // Re-fit whenever the column set or the row content changes: both move the
   // natural width, and neither is a resize the observer would see.
   const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass]);
@@ -289,11 +300,11 @@ export function RundownTable({
               } : undefined}
             >
               {shownColumns.map((c) => {
-                const body = c.render(it, { isCurrent });
+                const body = c.render(it, { isCurrent, shape });
                 if (body == null || body === "") return null;
                 // Every column keeps its header as a label, since the columns are gone.
                 return c.key === "title" ? (
-                  <div key={c.key} className="font-medium">{body}</div>
+                  <div key={c.key}>{body}</div>
                 ) : (
                   <div key={c.key} className="flex gap-1.5 text-caption2">
                     <span className="shrink-0 text-fg-subtle">{c.header}</span>
@@ -370,7 +381,7 @@ export function RundownTable({
                   key={c.key}
                   className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.cellClassName ?? ""} ${c.textClassName ?? ""}`}
                 >
-                  {c.render(it, { isCurrent })}
+                  {c.render(it, { isCurrent, shape })}
                 </td>
               ))}
             </tr>
