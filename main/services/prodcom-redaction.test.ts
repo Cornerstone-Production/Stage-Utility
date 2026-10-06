@@ -297,6 +297,35 @@ describe("a sensitive keyword never reaches a display", () => {
     );
   });
 
+  it("is asterisked on screen when the keyword list lands after the line", async (t) => {
+    // A connection's keyword read is its own request, so a line can be spoken
+    // and broadcast before it lands. Redaction is applied as the transcript is
+    // read out, so that first broadcast carried the word; what has to happen is
+    // a re-send once the keywords are in, or the display keeps the word until
+    // somebody next speaks.
+    const seen = spyOnTranscriptBroadcasts();
+    const stub = await startProdComStub({
+      channels: CHANNELS,
+      keywords: GLOBAL_KEYWORDS,
+      channelKeywords: CHANNEL_KEYWORDS,
+      delayRequestMs: (url) => (url.pathname === "/api/v1/keywords" ? 400 : 0),
+    });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, null);
+    svc.feedFinal(row("early", "CH-B", `paging ${GLOBAL_WORD} before the list is in`, 0));
+    assert.ok(JSON.stringify(seen).includes(GLOBAL_WORD), "precondition: the line went out before the list landed");
+    await stub.waitForRequest((r) => r.url.startsWith("/api/v1/keywords"));
+    await svc.settled();
+
+    const last = JSON.stringify(seen.at(-1) ?? null);
+    assert.ok(last.includes("paging *******"), `the display was left showing the line unredacted: ${last}`);
+    assert.ok(!last.toLowerCase().includes(GLOBAL_WORD), `a sensitive keyword is still on screen: ${last}`);
+  });
+
   it("is asterisked on a line that arrives live over the websocket", async (t) => {
     const { stub, svc } = await connected(t);
     stub.wsTranscript(row("live1", "CH-A", `${GLOBAL_WORD} is in the lobby`));
