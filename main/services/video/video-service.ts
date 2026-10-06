@@ -2118,11 +2118,16 @@ class VideoService {
 
     // Last: a ports change restarts a running relay, and it should come back up
     // on feeds that are already saved. The feeds are in either way, so a ports
-    // failure is reported, not thrown.
+    // failure is reported, not thrown: a save that fails (a full disk) as much
+    // as a refusal.
     if (req.ports === true && bundle.ports && !samePorts(bundle.ports, (await loadFeedsFile()).ports)) {
-      const r = await this.setPorts(bundle.ports);
-      if (r.ok) report.portsApplied = true;
-      else report.portsError = r.error;
+      try {
+        const r = await this.setPorts(bundle.ports);
+        if (r.ok) report.portsApplied = true;
+        else report.portsError = r.error;
+      } catch (err) {
+        report.portsError = errorMessage(err);
+      }
     }
 
     const skippedText = report.skipped.length
