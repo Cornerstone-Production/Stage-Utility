@@ -93,7 +93,7 @@ export function nextFitScale(
  * Back-derives the natural width from the live scroll width, the same approach as
  * FitText and ServiceOrderObject's auto-fit.
  */
-function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: number, deps: unknown[]): number {
+function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: number, deps: unknown[], enabled = true): number {
   const [scale, setScale] = useState(1);
 
   // Start every fit from unscaled. A `w-full` table always fills its box, so once
@@ -115,13 +115,13 @@ function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: num
   // floor.
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
-    if (!wrap) return;
+    if (!wrap || !enabled) return;
     const next = nextFitScale({ availW: wrap.clientWidth, scrollW: wrap.scrollWidth, scale });
     if (next !== scale) setScale(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wrapRef, scale, width, ...deps]);
+  }, [wrapRef, scale, width, enabled, ...deps]);
 
-  return scale;
+  return enabled ? scale : 1;
 }
 
 /** The nearest ancestor that actually scrolls vertically, or null. */
@@ -180,6 +180,7 @@ export function RundownTable({
   footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
+  textScale = 1,
 }: {
   items: PlanItemDTO[];
   columns: RundownColumn[];
@@ -197,6 +198,17 @@ export function RundownTable({
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
   textSizeClass?: string;
+  /**
+   * The operator's text size as a multiplier (1.5 = 150%), on top of
+   * `textSizeClass`. 1 changes nothing at all.
+   *
+   * Above 1 the width fit stands down. The fit shrinks the type until the
+   * columns fit, which would hand back exactly what the operator just asked
+   * for: with it running, A+ on a wide layout would do nothing. A size past
+   * 100% is a choice to read bigger text, and a layout too wide for it scrolls
+   * sideways. At or below 1 the fit still applies, to the already-reduced size.
+   */
+  textScale?: number;
 }) {
   const currentRef = useRef<HTMLTableRowElement | null>(null);
 
@@ -217,7 +229,14 @@ export function RundownTable({
   const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
   // Re-fit whenever the column set or the row content changes: both move the
   // natural width, and neither is a resize the observer would see.
-  const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass]);
+  const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass, textScale], textScale <= 1);
+  // Applied by CSS `zoom` on an element inside the measured wrapper, not by a
+  // font-size: the rundown's chrome (section headers, the key/BPM line, item
+  // notes, the footer) is sized in fixed px tokens that a font-size multiplier
+  // never reaches, and the operator asked for every column, the clock and the
+  // item details to grow together. Zoom also scales the cell padding with the
+  // text, as browser zoom does. No style at all at 1.
+  const zoomStyle = textScale === 1 ? undefined : { zoom: textScale };
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
@@ -255,11 +274,14 @@ export function RundownTable({
     const row = currentRef.current;
     if (!row) return;
     scrollRowIntoView(row);
-  }, [currentItemId, autoScroll, items]);
+    // `textScale`: a size change moves every row, and the live one should not be
+    // left off the screen by it.
+  }, [currentItemId, autoScroll, items, textScale]);
 
   if (shape === "stacked") {
     return (
-      <div ref={wrapRef} className={`flex flex-col ${textSizeClass}`}>
+      <div ref={wrapRef} className={textSizeClass}>
+      <div className="flex flex-col" style={zoomStyle}>
         {items.map((it) => {
           const isCurrent = currentItemId != null && currentItemId === it.id;
           if (it.itemType === "header") {
@@ -302,6 +324,7 @@ export function RundownTable({
         })}
         {footer && <div className="px-3 py-2 text-caption1 text-fg-muted">{footer}</div>}
       </div>
+      </div>
     );
   }
 
@@ -312,6 +335,7 @@ export function RundownTable({
     // resize; a percentage resolves against the inherited size by itself, and is
     // exactly a no-op at scale 1.
     <div ref={wrapRef} className={textSizeClass}>
+    <div style={zoomStyle}>
     <table className="w-full border-collapse" style={{ fontSize: `${fitScale * 100}%` }}>
       <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
@@ -383,6 +407,7 @@ export function RundownTable({
         </tfoot>
       )}
     </table>
+    </div>
     </div>
   );
 }

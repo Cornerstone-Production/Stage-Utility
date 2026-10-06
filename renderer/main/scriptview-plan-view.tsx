@@ -6,6 +6,9 @@ import { useServerClock } from "@renderer/lib/server-clock";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
+import { PAGE_TEXT_SIZE_KEY } from "./scriptview-text-size";
+import { TextSizeControl } from "./scriptview-text-size-control";
+import { useTextSize } from "./use-scriptview-text-size";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
 import { invoke } from "../lib/api";
@@ -18,6 +21,7 @@ import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 // parts are name slugs (e.g. /scriptview/weekend/audio) resolved to ids here, with
 // raw ids still accepted for backward-compatible bookmarks. Follows the type's
 // live-or-next plan; highlights the live item when this type is running.
+// `?text=<percent>` sets the rundown's text size (see useTextSize).
 export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeParam: string; layoutParam: string }) {
   const { state, error: stateError, pcoLive } = useDashboardState();
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
@@ -28,6 +32,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // Which of the lists FAILED, as opposed to came back empty. Each failure used
   // to draw a plausible page that was wrong; see where they render.
   const { failed, fail, clear } = useFailedReads<"types" | "layouts" | "roles" | "rundown">("scriptview");
+  const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY);
 
   // The service types and the plan come from Planning Center, so they are asked
   // for only once it is connected (see pcoConnected), and until then the body
@@ -186,6 +191,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           </Tooltip>
         }
         trailing={
+          <>
           <Tooltip label="Layout">
             <select
               value={currentLayoutKey}
@@ -198,6 +204,8 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
             </select>
           </Tooltip>
+          <TextSizeControl size={textSize} onChange={setTextSize} />
+          </>
         }
       />
 
@@ -208,7 +216,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         </div>
       )}
 
-      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} />
+      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} textScale={textSize / 100} />
     </div>
   );
 }

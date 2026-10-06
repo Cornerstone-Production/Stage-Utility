@@ -115,6 +115,7 @@ export function ScriptViewBody({
   error,
   notice,
   textSizeClass,
+  textScale,
   autoScroll,
 }: {
   rundown: ScriptViewRundownDTO | null;
@@ -129,6 +130,9 @@ export function ScriptViewBody({
    *  inherit the container's font-size instead, which is how a layout object
    *  gets a size that tracks the box it was given rather than the screen. */
   textSizeClass?: string;
+  /** The operator's text size as a multiplier on top of `textSizeClass` (1.5 =
+   *  150%). Scales the rundown only, never the header. Absent = 1. */
+  textScale?: number;
   /** Keep the live PCO item scrolled into view. Absent = on, which is what the
    *  standalone page has always done. */
   autoScroll?: boolean;
@@ -163,6 +167,7 @@ export function ScriptViewBody({
           accentRole={layout?.accentRole ?? null}
           roles={roles}
           {...(textSizeClass != null ? { textSizeClass } : {})}
+          {...(textScale != null ? { textScale } : {})}
           {...(autoScroll != null ? { autoScroll } : {})}
           footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
         />

@@ -134,6 +134,31 @@ this layout shows — "Lighting has a cue here" is useful to a stage manager wit
 showing the cue text. Colours are assigned from the category name and are not
 configurable, since Planning Center has no colour for a note category.
 
+## Text size
+
+The ScriptView page's header carries **A−**, a percentage and **A+**. The buttons
+step the rundown's text in 10-point increments between 50% and 300%; from a size
+that is not a multiple of ten they land on the next one in the direction pressed
+(137% goes to 140% with A+ and 130% with A−). Click the percentage to type a size:
+Enter or leaving the field applies it, Escape puts the old one back, a decimal is
+rounded, a number outside 50–300 is held to the nearest end, and text that is not
+a number changes nothing.
+
+It scales the rundown — every column, the clock and the item details — and not the
+header, which stays the size it is. Above 100% the rundown no longer shrinks its
+type to fit a wide column set into the screen, since that would undo the size
+chosen; a layout too wide for the size scrolls sideways, so use fewer columns or a
+smaller size. Browsers without CSS `zoom` (Firefox before 126) ignore the setting.
+
+Each screen remembers its own size in that browser: the page, and each display by
+its id, so a booth laptop at 100% does not resize a display across the room.
+
+A display has no control for it. Set its size from its link with `?text=<percent>`
+(`/display-1?text=150`, held to the same 50–300 range): the size applies at once
+and is remembered, so the link only has to be opened with it once. `?text=` also
+works on a ScriptView page, and wins over what that page remembered. An Embedded
+view object inside a layout takes neither; it keeps its own font size.
+
 ## On different screens
 
 ScriptView renders on stage panels, laptops and phones, and changes shape rather
