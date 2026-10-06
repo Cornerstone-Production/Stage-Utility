@@ -226,7 +226,11 @@ export function RundownTable({
   }, []);
   // No page max-width anywhere: a centerd column leaves dead margins on a stage panel
   // and shrinks the text relative to the viewport. The SHAPE changes instead.
-  const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
+  // From the width the table actually has: inside a zoomed element the wrapper's
+  // own width is `textScale` times what the table can use, so 150% on a 1100px
+  // screen is laid out as 733px and must pick the shape for 733.
+  const usable = width / textScale;
+  const shape = usable < 640 ? "stacked" : usable < 1024 ? "compact" : "full";
   // Re-fit whenever the column set or the row content changes: both move the
   // natural width, and neither is a resize the observer would see.
   const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass, textScale], textScale <= 1);

@@ -81,8 +81,9 @@ export function readStoredSize(key: string, storage: SizeStorage | null = browse
   }
 }
 
-/** Remember `size`. Returns false when storage refused, so the caller can say
- *  the size will not survive a reload; the size still applies until then. */
+/** Remember `size`. Returns false when storage refused, which the callers
+ *  accept: the size still applies until a reload, and a blocked storage is not
+ *  something an operator can act on, so it is not logged. */
 export function writeStoredSize(key: string, size: number, storage: SizeStorage | null = browserStorage()): boolean {
   if (!storage) return false;
   try {
