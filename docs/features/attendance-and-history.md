@@ -393,8 +393,11 @@ A service's own page does the same card by card. An attendance, sound or
 baptism record that cannot be read says so on its card, and the header's level
 reads *sound unavailable*, never *no sound recorded*. The Baptisms card appears
 for a failed read even on a service without baptisms, because the page cannot
-tell the two apart. A service whose record cannot be read opens to a note and a
-way back, not to nothing. Home's **Recent services** card, which stays hidden
+tell the two apart. A read that has not answered yet is the same case: the card
+shows the chart's shape while it loads and the level reads *loading*, never
+*no attendance recorded* or *no sound recorded* before anything has been read.
+A service the list does not hold, whose record cannot be read, opens to a note
+and a way back, not to nothing. Home's **Recent services** card, which stays hidden
 until something is recorded, shows the same note instead of hiding.
 
 **Export** is a button in the Recorded services header. It opens a date range —
@@ -408,6 +411,12 @@ to, where it means something specific rather than something all-time.
 
 A row is a summary that opens the service page; Delete lives on that page's
 header, not on the row. The shared `/history` link shows the same figures.
+
+A service opens the moment its row is clicked. The header, the rundown and, for
+the visible month, the sound come from the records the list already read, and
+the page's own reads replace them as they land; only the attendance chart waits
+on a read of its own. A link that names a service opens to that service's shape
+while the page loads, never to the list.
 
 Opening a service writes its key to the URL as `?service=`, so the address bar
 names exactly which occurrence is open — reload, bookmark or share it and the
@@ -549,11 +558,20 @@ flat across the time it ran. A read that FAILS is not that: the chart says
 step as the whole answer, and the server logs the reason on a `[spl-series]`
 line.
 
-Either way an item's peak mark is a tick through the middle of its block rather
-than at the loudest instant, because the instant is not in the per-item record.
-It is drawn the full height of the block in the primary line's colour, named
-**Item peak** in the legend, and switched under Chart in Customize. Hover the
-block and the strip says what it peaked at.
+Each item's **peak** is a small downward triangle in a row above the plot, in the
+primary line's colour, at the loudest point of the line inside that item. Only
+the triangle shows at rest. Hover it, the column of line down to the peak point,
+or the item's block in the lane: a dotted line runs from the triangle to the peak
+point, a dot marks the point, and the strip says what the item peaked at and
+when. Within about 10 px either side of that line the peak readout takes
+precedence over the plot's moment-under-the-pointer readout. Each triangle is a
+tab stop and shows the same readout on focus. The number is the item's recorded
+maximum; the position is the loudest point on the drawn line, which can read a
+fraction lower than the recorded figure where samples are bucketed. An item the
+line has no point inside gets no triangle, and so does every item on the per-item
+step, which has no loudest instant. The row exists only on the sound chart and
+only while a triangle is drawn. It is named **Item peak** in the legend, and
+switched, along with the triangle, line and row, under Chart in Customize.
 
 **The item lane** is two rows under the axis: pre-service items outlined above,
 in-service items filled below, each spanning the time it actually ran. A block is
@@ -572,7 +590,7 @@ metrics to surface.
 
 The Smaart metric choice does more than pick table columns: the first one still
 ticked is the **primary** — the metric the chart's line is read from when the
-service has no raw samples, the one each item's peak mark and the strip's Peak
+service has no raw samples, the one each item's peak triangle and the strip's Peak
 and Message figures report, and the one the raw series is requested for. Untick
 every metric and the chart says so rather than drawing an empty plot.
 
@@ -685,7 +703,7 @@ name rather than being folded into either list.
 Rebuilding here also clears a save-failure line on the **Baptisms** tab, and
 the Timer card's own note beside it, for any session the merge just added or
 updated — the same clearing a rebuild started from either of those two places
-already does. See [Recovery](scriptview-and-baptisms.md#recovery) for what
+already does. See [Recovery](servicecue-and-baptisms.md#recovery) for what
 that note shows and exactly when a line clears.
 
 While a service is recording, **Reset pacing** (in the live service's detail

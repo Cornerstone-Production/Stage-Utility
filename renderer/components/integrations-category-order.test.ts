@@ -30,7 +30,7 @@ describe("the integrations grid's category order", () => {
     assert.deepEqual([...CATEGORY_ORDER_IDS].sort(), [...INTEGRATION_IDS].sort());
   });
 
-  test("sixteen, exactly, and each named once", () => {
+  test("seventeen, exactly, and each named once", () => {
     // An exact sorted list, not a bare count. The duplicate check is separate
     // because a list holding one id twice and missing another has the right
     // length and the right set is not enough to say so.
@@ -49,6 +49,7 @@ describe("the integrations grid's category order", () => {
       "scores",
       "sensource",
       "smaart",
+      "video",
       "wireless",
       "youtube",
     ];

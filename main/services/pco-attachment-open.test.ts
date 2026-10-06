@@ -30,17 +30,17 @@ afterEach(() => {
 
 describe("openAttachment's signed-link cache", () => {
   test("serves a repeat from cache, but a fresh request goes back to Planning Center", async () => {
-    const first = await pcoService.openAttachment("app", "secret", "st", "plan", "a1");
-    const again = await pcoService.openAttachment("app", "secret", "st", "plan", "a1");
+    const first = await pcoService.openAttachment("app", "secret", "11", "21", "31");
+    const again = await pcoService.openAttachment("app", "secret", "11", "21", "31");
     assert.equal(posts, 1, "a repeat inside the TTL must not POST again");
     assert.equal(again.url, first.url);
 
-    const fresh = await pcoService.openAttachment("app", "secret", "st", "plan", "a1", { fresh: true });
+    const fresh = await pcoService.openAttachment("app", "secret", "11", "21", "31", { fresh: true });
     assert.equal(posts, 2, "fresh: true was answered from the cache — the expired link is handed straight back");
     assert.notEqual(fresh.url, first.url, "a fresh open must return the new link, not the cached one");
 
     // And the fresh result replaces the cached one for the next ordinary caller.
-    const after = await pcoService.openAttachment("app", "secret", "st", "plan", "a1");
+    const after = await pcoService.openAttachment("app", "secret", "11", "21", "31");
     assert.equal(posts, 2);
     assert.equal(after.url, fresh.url, "the fresh link was not cached for the next caller");
   });

@@ -19,7 +19,7 @@ const bundle = (over: Record<string, unknown> = {}) => ({
     id: "view-1", name: "Left Display", kind: "custom", createdAt: 0,
     layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] },
   }],
-  sideData: { slots: {}, notes: {}, scriptviewLayouts: [] },
+  sideData: { slots: {}, notes: {}, serviceCueLayouts: [] },
   targets: { osc: [], rosstalk: [] },
   images: {},
   ...over,
@@ -96,7 +96,7 @@ describe("importing a bundle", () => {
 
   test("slot rows that are not a list are refused before any write", async () => {
     await assert.rejects(
-      () => applyViewBundle(bundle({ sideData: { slots: { "view-1": { "st": "nope" } }, notes: {}, scriptviewLayouts: [] } })),
+      () => applyViewBundle(bundle({ sideData: { slots: { "view-1": { "st": "nope" } }, notes: {}, serviceCueLayouts: [] } })),
       /not a list/,
     );
     assert.deepEqual(await viewsStore.load(), []);
@@ -215,12 +215,12 @@ describe("importing a bundle", () => {
   });
 });
 
-describe("a bundle carrying two ScriptView presets with one id", () => {
+describe("a bundle carrying two ServiceCue presets with one id", () => {
   // mergeTargets, twenty lines below the code this covers, grows its `have` set
   // inside the loop and says why in a comment: "two incoming targets sharing an
   // id would otherwise both be appended, leaving a duplicate id in the store."
   //
-  // The ScriptView merge is the same shape re-implemented, and it computed the
+  // The ServiceCue merge is the same shape re-implemented, and it computed the
   // add-list with a filter BEFORE the loop grew the seen-set — so it dropped the
   // guard the sibling ten lines away was written to keep. An export cannot
   // normally produce this, but an import is the one place a hand-edited or
@@ -228,20 +228,20 @@ describe("a bundle carrying two ScriptView presets with one id", () => {
   // corrupted.
 
   test("appends the preset once, not twice", async () => {
-    const { scriptViewLayoutsStore } = await import("./scriptview-layouts-store.js");
-    await scriptViewLayoutsStore.save([] as never);
+    const { serviceCueLayoutsStore } = await import("./servicecue-layouts-store.js");
+    await serviceCueLayoutsStore.save([] as never);
 
     await applyViewBundle(bundle({
       sideData: {
         slots: {}, notes: {},
-        scriptviewLayouts: [
+        serviceCueLayouts: [
           { id: "dup", name: "First", columns: [] },
           { id: "dup", name: "Second", columns: [] },
         ],
       },
     }));
 
-    const saved = await scriptViewLayoutsStore.load();
+    const saved = await serviceCueLayoutsStore.load();
     const dupes = saved.filter((l: { id: string }) => l.id === "dup");
     assert.equal(dupes.length, 1, `"dup" landed ${dupes.length} times: ${JSON.stringify(saved)}`);
     assert.equal(dupes[0].name, "First", "the first one wins, like a target does");
@@ -269,7 +269,7 @@ const planBundle = (over: Record<string, unknown> = {}, sideOver: Record<string,
   views: [slotsView("view-1", "Mic Board")],
   sideData: {
     slots: { "view-1": { "st-src": [slotRow("r1"), slotRow("r2")] } },
-    notes: {}, scriptviewLayouts: [],
+    notes: {}, serviceCueLayouts: [],
     ...sideOver,
   },
   ...over,
@@ -343,7 +343,7 @@ describe("landing a plan under a different service type", () => {
     // A view export carries every type's boards and names no plan. Re-keying one
     // of them would be picking which, and the file does not say.
     const report = await applyViewBundle(
-      bundle({ sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, scriptviewLayouts: [] } }),
+      bundle({ sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, serviceCueLayouts: [] } }),
       { serviceTypeId: "st-dst" },
     );
     const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;

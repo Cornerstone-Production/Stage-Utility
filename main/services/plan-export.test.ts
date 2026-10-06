@@ -170,7 +170,7 @@ describe("the preview and the file agree", () => {
     assert.equal(p.rows, 3);
     assert.deepEqual(p.patchVariants, [{ sheetName: "Analog", variantName: "Sunday rig" }]);
     assert.equal(p.presets, 1);
-    assert.equal(p.scriptviewLayouts, 0);
+    assert.equal(p.serviceCueLayouts, 0);
   });
 
   test("at the other scope, because the file at that scope is bigger", async () => {
@@ -198,7 +198,7 @@ describe("a plain view export is unchanged", () => {
     assert.equal("plan" in b, false, "a view export must not carry a plan section");
     assert.equal("roots" in b, false, "a view export has one root and says so by ordering");
     assert.deepEqual(Object.keys(b.sideData.slots["obj-grid"]!).sort(), ["st-1", "st-2"]);
-    assert.deepEqual(Object.keys(b.sideData), ["slots", "notes", "scriptviewLayouts"]);
+    assert.deepEqual(Object.keys(b.sideData), ["slots", "notes", "serviceCueLayouts"]);
   });
 
   test("the key order of the envelope is untouched", async () => {

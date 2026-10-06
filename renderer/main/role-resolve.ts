@@ -1,4 +1,4 @@
-import type { CategoryRole } from "../../main/types/scriptview-roles.js";
+import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 const norm = (s: string) => s.trim().toLowerCase();
 

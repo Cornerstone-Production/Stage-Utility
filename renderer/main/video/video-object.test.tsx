@@ -1,0 +1,781 @@
+// renderer/main/video/video-object.test.tsx — the widget's gates and states,
+// driven through the REAL component with a stubbed fetch, RTCPeerConnection
+// and IntersectionObserver — never a unit test of the boolean logic in
+// isolation, because the bug each of these guards is what a screen SHOWS or
+// SENDS, not what a helper returns.
+//
+// NOT covered here, and why: jsdom loads no stylesheet and reports every
+// offsetHeight/getBoundingClientRect as zero, so the corner name tag's
+// placement, the "N s behind" badge's position and the connecting pulse's
+// animation cannot be seen from this file. They are checked in Chromium
+// instead, against the approved design: a stage display playing all three
+// states, and the pulse's computed animation. What this file asserts is that
+// each is rendered, and when.
+
+import { strict as assert } from "node:assert";
+import { after, afterEach, beforeEach, mock, test } from "node:test";
+
+import { act } from "react";
+
+import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
+import { installFakeHls } from "../../test-fixtures/fake-hls.js";
+import { captureConsole } from "../../../main/services/fixtures/capture-console.js";
+
+const teardown = installRenderDom();
+
+const { render, screen, cleanup } = await import("@testing-library/react");
+const React = await import("react");
+const { VideoObject } = await import("./video-object.js");
+const { __resetReplayCacheForTests } = await import("../../lib/api.js");
+const { __resetPlaybackRegistryForTests, anyPlaying, drainReports } = await import("./playback-reports.js");
+
+// VideoState/VideoFeedView are NOT ambient globals (unlike LayoutObject and
+// LayoutObjectConfig, aliased in renderer/types.d.ts from main/types/stage —
+// main/types/video.ts is not one of that file's re-exports), so these are
+// real imports.
+type VideoState = import("@main/types/video").VideoState;
+type VideoFeedView = import("@main/types/video").VideoFeedView;
+
+after(() => unmountAndTeardown(cleanup, teardown));
+
+// ── Fixtures ─────────────────────────────────────────────────────────────────
+
+function makeFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
+  return {
+    id: "feed-1",
+    name: "Program (IMAG)",
+    kind: "pull",
+    sourceLine: "rtsp://192.0.2.21:8554/stream2",
+    source: { kind: "pull", url: "rtsp://192.0.2.21:8554/stream2", username: "" },
+    play: { via: "relay", whep: "/video/feed-1/whep", hls: "/video/feed-1/index.m3u8" },
+    status: { state: "live" },
+    ...overrides,
+  };
+}
+
+const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+
+function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state: "running", version: "1.21.1", ports: TEST_PORTS }): VideoState {
+  return {
+    rev: 1,
+    relay,
+    kinds: ["pull", "push", "embed", "external"],
+    ports: TEST_PORTS,
+    binaryPresent: true,
+    archivePresent: true,
+    feeds,
+    screens: [],
+  };
+}
+
+type VideoConfig = Extract<LayoutObjectConfig, { type: "video" }>;
+
+/** Both the LayoutObject and its own already-narrowed config, typed as
+ *  VideoObject's props actually want them — no `as` cast at the call site. */
+function makeObject(overrides: Partial<VideoConfig> = {}): { o: LayoutObject; config: VideoConfig } {
+  const config: VideoConfig = { type: "video", feedId: "feed-1", ...overrides };
+  return { o: { id: "obj-1", x: 0, y: 0, w: 1, h: 1, z: 0, config }, config };
+}
+
+/** Every call the widget makes, in order, for a test to inspect. */
+function stubFetch(state: VideoState) {
+  const calls: { method: string; url: string }[] = [];
+  const fn = (async (input: string | URL, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    const url = String(input);
+    calls.push({ method, url });
+    if (url.endsWith("/api/video/state")) {
+      return { ok: true, status: 200, json: async () => state, text: async () => "" } as unknown as Response;
+    }
+    if (method === "POST" && url.includes("/whep")) {
+      return {
+        ok: true,
+        status: 201,
+        headers: { get: (h: string) => (h === "Location" ? `${url}/1f2e3d4c` : null) },
+        text: async () => FAKE_SDP,
+        json: async () => ({}),
+      } as unknown as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as unknown as Response;
+  }) as typeof fetch;
+  return { fn, calls };
+}
+
+/** The one stubbed IntersectionObserver, handing the test its callback — jsdom
+ *  ships no IntersectionObserver at all, so without this useOnScreen's whole
+ *  body is skipped and nothing here would ever go on screen. */
+class StubObserver {
+  static last: StubObserver | null = null;
+  /** Every instance since the last reset — for a test rendering more than one
+   *  widget, where `.last` alone can only ever address the most recently
+   *  mounted one. */
+  static instances: StubObserver[] = [];
+  readonly cb: (entries: { isIntersecting: boolean }[]) => void;
+  constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+    this.cb = cb;
+    StubObserver.last = this;
+    StubObserver.instances.push(this);
+  }
+  observe(): void {}
+  disconnect(): void {}
+  unobserve(): void {}
+}
+
+function stubGlobals(state: VideoState) {
+  const { fn, calls } = stubFetch(state);
+  const realFetch = globalThis.fetch;
+  const realIo = (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
+  const realAbortController = globalThis.AbortController;
+  const realAbortSignal = globalThis.AbortSignal;
+  globalThis.fetch = fn;
+  const restorePc = installFakePeerConnection();
+  (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = StubObserver;
+  // jsdom's OWN AbortController/AbortSignal, not Node's: a jsdom-rendered
+  // <video>'s addEventListener validates a `{ signal }` option's realm, and
+  // the widget's real playback code builds `new AbortController()` from
+  // whatever is on globalThis at the time — Node's version is structurally
+  // identical but fails jsdom's `instanceof AbortSignal` check, so every
+  // attempt appeared to "drop" instantly with that exact message. Scoped to
+  // THIS test file rather than test-dom.ts: swapping it there broke an
+  // unrelated clock test elsewhere in the suite in a way this file's narrow
+  // fix does not.
+  globalThis.AbortController = window.AbortController;
+  globalThis.AbortSignal = window.AbortSignal;
+  return {
+    calls,
+    restore() {
+      globalThis.fetch = realFetch;
+      restorePc();
+      (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = realIo;
+      globalThis.AbortController = realAbortController;
+      globalThis.AbortSignal = realAbortSignal;
+    },
+  };
+}
+
+// Every request to a FEED's playback endpoint — not only a WHEP POST/DELETE,
+// so a future HLS or other /video/<id>/... call is caught by the same
+// assertion — excluding the state-list read, which legitimately fires
+// regardless of the preview/on-screen gates (see use-video-state.ts).
+const feedCalls = (calls: { method: string; url: string }[]) =>
+  calls.filter((c) => c.url.includes("/video/") && !c.url.includes("/api/video/state"));
+
+/**
+ * `settle()` (test-dom.ts) awaits a REAL `setTimeout(…, 0)` to hand off to
+ * React's scheduler — which hangs forever once `mock.timers.enable({ apis:
+ * ["setTimeout"] })` is active, because a fake timer only fires on an
+ * explicit `tick()`. `setImmediate` is a different API, left un-mocked, so
+ * this drains the same real macrotask queue without depending on the clock
+ * these tests are busy controlling.
+ */
+async function settleFake(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+}
+
+beforeEach(() => {
+  cleanup();
+  __resetReplayCacheForTests();
+  __resetPlaybackRegistryForTests();
+  StubObserver.last = null;
+  StubObserver.instances = [];
+  FakePeerConnection.reset();
+});
+afterEach(() => cleanup());
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+test("preview route: paused, and nothing is requested until Play is pressed", async () => {
+  const originalPath = window.location.pathname;
+  history.pushState({}, "", "/preview-abc");
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
+    await settle();
+    await settle();
+
+    // Fired BEFORE the no-request check, so the on-screen gate is already
+    // open — the ONLY thing left withholding a request is the preview gate
+    // itself. Checking this with the observer still non-intersecting would
+    // pass for the wrong reason: removing the preview gate outright would
+    // stay green here, because the on-screen gate alone already blocks it.
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settle();
+    await settle();
+
+    assert.equal(!!screen.queryByText("Video paused in preview"), true, "expected the preview-paused copy");
+    assert.deepEqual(feedCalls(g.calls), [], "expected no request to a feed's playback endpoint before Play is pressed, even on screen");
+
+    const play = screen.getByText("Play");
+    act(() => play.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await settle();
+    await settle();
+
+    assert.ok(feedCalls(g.calls).length > 0, "expected Play to start the session it had withheld");
+  } finally {
+    g.restore();
+    history.pushState({}, "", originalPath);
+  }
+});
+
+test("off screen: no request; on screen: one POST; off again past the teardown: the session is DELETEd", async () => {
+  const g = stubGlobals(makeState([makeFeed()]));
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
+    await settleFake();
+    await settleFake();
+
+    assert.deepEqual(feedCalls(g.calls), [], "expected no request while off screen");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settleFake();
+    await settleFake();
+
+    assert.equal(feedCalls(g.calls).filter((c) => c.method === "POST").length, 1, "expected exactly one POST once on screen");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+
+    assert.equal(
+      feedCalls(g.calls).filter((c) => c.method === "DELETE").length,
+      1,
+      "expected the session DELETEd once the teardown delay passed off screen",
+    );
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a hidden document behaves like off screen", async () => {
+  const g = stubGlobals(makeState([makeFeed()]));
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
+    await settleFake();
+    await settleFake();
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settleFake();
+    await settleFake();
+    assert.equal(feedCalls(g.calls).filter((c) => c.method === "POST").length, 1, "expected the on-screen POST first");
+
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+
+    assert.equal(
+      feedCalls(g.calls).filter((c) => c.method === "DELETE").length,
+      1,
+      "expected a hidden document to tear the session down exactly like scrolling off screen",
+    );
+  } finally {
+    mock.timers.reset();
+    // `defineProperty` on `document` set an OWN property that shadows the
+    // prototype's real getter — restoring a captured prototype descriptor
+    // would not have undone that. Deleting the own property does.
+    delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+    g.restore();
+  }
+});
+
+test("an embed feed renders an iframe with mute=1 and no <video>; off screen removes it", async () => {
+  const feed = makeFeed({
+    kind: "embed",
+    source: { kind: "embed", player: "youtube-channel", ref: "UCabcdefghijklmnopqrstuv" },
+    play: { via: "embed", src: "https://www.youtube.com/embed/live_stream?channel=UCabcdefghijklmnopqrstuv&autoplay=1&mute=1&controls=0&playsinline=1" },
+    status: { state: "embed" },
+  });
+  const g = stubGlobals(makeState([feed]));
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const { container } = render(
+      React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }),
+    );
+    await settleFake();
+    await settleFake();
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settleFake();
+    await settleFake();
+
+    // Never a DOM node as an assert operand below — node:assert inspects
+    // `actual` to build a failure message, and stringifying a live jsdom
+    // element does not terminate in any useful time (a failing assertion
+    // like that hung this exact suite for 20+ seconds before every query here
+    // was coerced to a boolean first).
+    const iframe = container.querySelector("iframe");
+    assert.ok(iframe, "expected an iframe for an embed feed");
+    assert.ok(iframe?.getAttribute("src")?.includes("mute=1"), "expected the embed src to carry mute=1");
+    assert.equal(!!container.querySelector("video"), false, "an embed feed must render no <video> element");
+
+    // An iframe has no on-screen concept of its own: left mounted, it keeps
+    // decoding a YouTube/Resi stream off screen and in a hidden tab.
+    act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+
+    assert.equal(!!container.querySelector("iframe"), false, "expected the iframe removed once off screen past the teardown delay");
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a render error inside the player shows the can't-play state, and a sibling still renders", async (t) => {
+  // A deliberately malformed feed: `play` is null, so reading `feed.play.via`
+  // during render throws — a REAL render-phase error, not a simulated one.
+  const broken = { ...makeFeed(), play: null as unknown as VideoFeedView["play"] };
+  const g = stubGlobals(makeState([broken]));
+  captureConsole(t, "error"); // React logs the caught error; expected noise, not a failure
+  try {
+    render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement("span", null, "sibling-marker"),
+        React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }),
+      ),
+    );
+    await settle();
+    await settle();
+
+    assert.equal(!!screen.queryByText("sibling-marker"), true, "a sibling must keep rendering beside the failed widget");
+    assert.equal(!!screen.queryByText("This screen can't play video"), true, "expected the can't-play fallback");
+  } finally {
+    g.restore();
+  }
+});
+
+test("whenOffline: logo with no app logo configured shows the message state", async () => {
+  const feed = makeFeed({ status: { state: "offline" } });
+  const g = stubGlobals(makeState([feed]));
+  try {
+    render(
+      React.createElement(VideoObject, {
+        ...makeObject({ whenOffline: "logo" }),
+        appLogo: null,
+        appLogoMonochrome: false,
+        allowHls: true,
+      }),
+    );
+    await settle();
+    await settle();
+
+    assert.equal(!!screen.queryByText(`${feed.name} is offline`), true, "expected the message state with no logo to draw from");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── what the picture shows over itself ────────────────────────────────────
+//
+// jsdom's <video> has no requestVideoFrameCallback; this puts one on its
+// prototype that hands each registration back, so a test can deliver "a
+// frame" to whichever attempt is watching.
+
+function captureFrames(): { fire: () => void; restore: () => void } {
+  const proto = window.HTMLVideoElement.prototype as unknown as {
+    requestVideoFrameCallback?: (cb: () => void) => number;
+    cancelVideoFrameCallback?: (h: number) => void;
+  };
+  const pending: (() => void)[] = [];
+  proto.requestVideoFrameCallback = (cb) => pending.push(cb);
+  proto.cancelVideoFrameCallback = () => {};
+  return {
+    fire: () => {
+      for (const cb of pending.splice(0)) cb();
+    },
+    restore: () => {
+      delete proto.requestVideoFrameCallback;
+      delete proto.cancelVideoFrameCallback;
+    },
+  };
+}
+
+const EXTERNAL_HLS = makeFeed({
+  kind: "external",
+  sourceLine: "http://192.0.2.60/obs/index.m3u8",
+  source: { kind: "external", url: "http://192.0.2.60/obs/index.m3u8" },
+  play: { via: "external", url: "http://192.0.2.60/obs/index.m3u8", protocol: "hls" },
+  status: { state: null },
+});
+
+const EMBED = makeFeed({
+  kind: "embed",
+  source: { kind: "embed", player: "youtube-channel", ref: "UCabcdefghijklmnopqrstuv" },
+  play: { via: "embed", src: "https://www.youtube.com/embed/live_stream?channel=UCabcdefghijklmnopqrstuv&autoplay=1&mute=1&controls=0&playsinline=1" },
+  status: { state: "embed" },
+});
+
+/** A relay feed WebRTC cannot carry at all — the encoder has B-frames, so the
+ *  only way to play it is HLS. */
+const B_FRAMES_FEED = makeFeed({ status: { state: "delayed", delayedBecause: "b-frames" } });
+
+/** The corner name tag: a span whose whole text is the feed's name (the
+ *  Connecting line carries the name too, inside a longer sentence). */
+const nameTag = (name: string) => screen.queryAllByText(name, { exact: true }).length > 0;
+
+async function renderOnScreen(
+  feed: VideoFeedView,
+  config: Partial<VideoConfig> = {},
+  relay?: VideoState["relay"],
+  allowHls = true,
+) {
+  const g = stubGlobals(makeState([feed], relay));
+  const utils = render(React.createElement(VideoObject, { ...makeObject(config), appLogo: null, appLogoMonochrome: false, allowHls }));
+  await settle();
+  await settle();
+  act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+  await settle();
+  await settle();
+  return { ...utils, g };
+}
+
+test("the <video> is muted and has no controls", async () => {
+  const { container, g } = await renderOnScreen(makeFeed());
+  try {
+    const video = container.querySelector("video");
+    assert.equal(!!video, true, "expected a <video> for a relay feed");
+    assert.equal(video!.muted, true, "the <video> must be muted");
+    assert.equal(video!.controls, false, "the <video> must show no controls");
+  } finally {
+    g.restore();
+  }
+});
+
+test("an embed's iframe takes no pointer events, so a tap on a screen cannot pause or unmute it", async () => {
+  const { container, g } = await renderOnScreen(EMBED);
+  try {
+    const iframe = container.querySelector("iframe");
+    assert.equal(!!iframe, true, "expected an iframe");
+    assert.equal(iframe!.style.pointerEvents, "none");
+  } finally {
+    g.restore();
+  }
+});
+
+test("the name tag shows over a playing picture, and not with Show feed name off", async () => {
+  let r = await renderOnScreen(EMBED);
+  try {
+    assert.equal(nameTag(EMBED.name), true, "expected the name tag over an embed");
+  } finally {
+    r.g.restore();
+    cleanup();
+  }
+  r = await renderOnScreen(EMBED, { showLabel: false });
+  try {
+    assert.equal(nameTag(EMBED.name), false, "Show feed name off must hide the tag");
+  } finally {
+    r.g.restore();
+  }
+});
+
+test("the name tag waits for a picture: none while connecting, one once a frame arrives", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(makeFeed());
+  try {
+    assert.equal(!!screen.queryByText(`Connecting to ${makeFeed().name}`), true, "expected the Connecting state first");
+    assert.equal(nameTag(makeFeed().name), false, "no name tag over the Connecting state");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(nameTag(makeFeed().name), true, "expected the name tag once the picture is live");
+    assert.equal(!!screen.queryByText(`Connecting to ${makeFeed().name}`), false, "the cover must lift on the first frame");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("an HLS picture carries the \"N s behind\" badge", async () => {
+  const frames = captureFrames();
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(EXTERNAL_HLS);
+  try {
+    assert.equal(!!screen.queryByText(/s behind$/), false, "no badge before a frame");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText("3 s behind"), true, "expected the badge with hls.js's latency, rounded");
+  } finally {
+    undoHls();
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("a WebRTC picture carries no badge", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(makeFeed());
+  try {
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText(/s behind$/), false, "a WebRTC picture is not behind");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+// ── the per-screen "Use HLS on this screen" switch ─────────────────────────
+
+test("a B-frame feed on an HLS-off screen shows the can't-play state and requests nothing", async () => {
+  // installFakeHls defines MediaSource, which is what makes this environment
+  // otherwise ABLE to play HLS — without it, jsdom has no HLS player of its
+  // own either way, and the assertions below would pass whether or not
+  // `allowHls` did anything at all.
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(B_FRAMES_FEED, {}, undefined, false);
+  try {
+    assert.equal(!!screen.queryByText("This screen can't play video"), true, "expected the can't-play cover");
+    assert.deepEqual(feedCalls(g.calls), [], "a screen with HLS off must never attempt this feed's playback endpoint at all");
+    assert.equal(
+      g.calls.some((c) => c.url.includes("index.m3u8")),
+      false,
+      "expected no index.m3u8 request from an HLS-off screen",
+    );
+  } finally {
+    undoHls();
+    g.restore();
+  }
+});
+
+test("the same B-frame feed plays over HLS once the screen allows it", async () => {
+  const frames = captureFrames();
+  const undoHls = installFakeHls();
+  const { g } = await renderOnScreen(B_FRAMES_FEED, {}, undefined, true);
+  try {
+    assert.equal(!!screen.queryByText("This screen can't play video"), false, "expected an attempt, not the can't-play cover");
+    act(() => frames.fire());
+    await settle();
+    assert.equal(!!screen.queryByText(/s behind$/), true, "expected the HLS picture's delayed badge once allowed");
+  } finally {
+    undoHls();
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("a feed id the loaded list does not name shows removed copy, not the come-back promise", async () => {
+  const { g } = await renderOnScreen(makeFeed({ id: "some-other-feed" }));
+  try {
+    assert.equal(!!screen.queryByText("This feed was removed"), true, "a deleted feed must say it was removed");
+    assert.equal(!!screen.queryByText("Choose another feed for this widget"), true, "expected the corrected second line");
+    assert.equal(!!screen.queryByText("It will appear here when the source comes back"), false, "a deleted feed never comes back on its own");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── a feed nothing is sending to yet ─────────────────────────────────────
+//
+// A pull feed reads "standby" until something asks for it: the relay dials an
+// on-demand source only once a reader connects, so for a pull feed standby is
+// the reason to connect, not a reason to wait. Only a push feed's "waiting"
+// means there is nothing to connect to — and nothing answers while the relay
+// itself is not running, which the cover names instead of the source.
+
+/** The Waiting cover's two lines, or null when neither is on screen. */
+function waitingCover(): string | null {
+  for (const [big, small] of [
+    ["Waiting for the source", "Nothing is sending to this feed yet"],
+    ["Video is off", "Turn video on to play this feed"],
+    ["Waiting for the video relay", "It is starting up"],
+  ] as const) {
+    if (screen.queryByText(big)) return screen.queryByText(small) ? `${big} / ${small}` : `${big} / (no second line)`;
+  }
+  return null;
+}
+
+const PULL_STANDBY = makeFeed({ status: { state: "standby" } });
+
+test("a standby pull feed connects once on screen: the request is what starts the pull", async () => {
+  const { g } = await renderOnScreen(PULL_STANDBY);
+  try {
+    assert.equal(
+      feedCalls(g.calls).filter((c) => c.method === "POST").length,
+      1,
+      "expected a WHEP POST for a standby pull feed — without one the relay never dials the source",
+    );
+    assert.equal(!!screen.queryByText("Waiting for the source"), false, "a pull feed must not sit on Waiting");
+  } finally {
+    g.restore();
+  }
+});
+
+test("a standby pull feed with video switched off says video is off, and asks for nothing", async () => {
+  const { g } = await renderOnScreen(PULL_STANDBY, {}, { state: "off" });
+  try {
+    assert.deepEqual(feedCalls(g.calls), [], "nothing answers a playback request while the relay is off");
+    assert.equal(waitingCover(), "Video is off / Turn video on to play this feed");
+  } finally {
+    g.restore();
+  }
+});
+
+const PUSH = { kind: "push", source: { kind: "push", protocol: "rtmp" } } as const;
+
+test("a relay feed while the relay is starting, downloading or failing waits for the relay, not the source", async () => {
+  const notRunning: VideoState["relay"][] = [
+    { state: "starting", version: null },
+    { state: "downloading", receivedBytes: 1, totalBytes: 2 },
+    { state: "failing", reason: "Port 1935 is in use by OBS Studio.", kind: "port-conflict", retryAt: null },
+  ];
+  for (const relay of notRunning) {
+    for (const feed of [PULL_STANDBY, makeFeed({ ...PUSH, status: { state: "standby" } })]) {
+      const { g, unmount } = await renderOnScreen(feed, {}, relay);
+      try {
+        assert.deepEqual(feedCalls(g.calls), [], `${relay.state}, ${feed.kind}: nothing answers while the relay is not running`);
+        assert.equal(waitingCover(), "Waiting for the video relay / It is starting up", `${relay.state}, ${feed.kind}`);
+      } finally {
+        unmount();
+        g.restore();
+      }
+    }
+  }
+});
+
+test("a push feed waiting for its device, with the relay running, shows Waiting for the source and asks for nothing", async () => {
+  const push = makeFeed({ ...PUSH, status: { state: "waiting" } });
+  const { g } = await renderOnScreen(push);
+  try {
+    assert.deepEqual(feedCalls(g.calls), [], "a push feed's waiting means there is nothing to connect to yet");
+    assert.equal(waitingCover(), "Waiting for the source / Nothing is sending to this feed yet");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── registerPlayback: what actually reaches the presence heartbeat ─────────
+
+test("a live relay picture registers with the presence heartbeat; going off screen unregisters it", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    render(React.createElement(VideoObject, { ...makeObject(), appLogo: null, appLogoMonochrome: false, allowHls: true }));
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected nothing registered before the widget is even on screen");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: true }]));
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected nothing registered while still Connecting — not yet actually playing");
+
+    act(() => frames.fire());
+    await settleFake();
+    assert.equal(anyPlaying(), true, "expected the live picture registered");
+    const reports = await drainReports();
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.feedId, "feed-1");
+    assert.equal(reports[0]!.via, "webrtc");
+
+    act(() => StubObserver.last?.cb([{ isIntersecting: false }]));
+    act(() => {
+      mock.timers.tick(3000);
+    });
+    await settleFake();
+    await settleFake();
+    assert.equal(anyPlaying(), false, "expected the widget unregistered once it went off screen");
+  } finally {
+    mock.timers.reset();
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("an embed feed's picture never registers — Stage Utility cannot measure an iframe's playback", async () => {
+  const frames = captureFrames();
+  const { g } = await renderOnScreen(EMBED);
+  try {
+    assert.ok(nameTag(EMBED.name), "expected the embed actually showing, for this to be a real test of the gate");
+    assert.equal(anyPlaying(), false, "an embed must never occupy a registry slot the heartbeat treats as 'playing'");
+    assert.deepEqual(await drainReports(), []);
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("two instances of one layout object each report, and unmounting one leaves the other reporting", async () => {
+  // An embed tile and its expanded copy draw the same layout object twice,
+  // under the same object id.
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    const obj = makeObject();
+    const copy = (key: string) => React.createElement(VideoObject, { key, ...obj, appLogo: null, appLogoMonochrome: false, allowHls: true });
+    const { rerender } = render(React.createElement("div", null, copy("tile"), copy("expanded")));
+    await settle();
+    await settle();
+    act(() => {
+      for (const o of StubObserver.instances) o.cb([{ isIntersecting: true }]);
+    });
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+    assert.equal((await drainReports()).length, 2, "each rendered instance must report, not one per object id");
+
+    rerender(React.createElement("div", null, copy("tile")));
+    await settle();
+    await settle();
+    assert.equal(anyPlaying(), true, "the instance still on screen must still be registered");
+    assert.equal((await drainReports()).length, 1, "the instance still on screen must still report");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("two widget instances playing the same feed register under two separate keys, each reported", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed()]));
+  try {
+    const objA = makeObject();
+    const objB = { o: { ...objA.o, id: "obj-2" }, config: objA.config };
+    render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement(VideoObject, { ...objA, appLogo: null, appLogoMonochrome: false, allowHls: true }),
+        React.createElement(VideoObject, { ...objB, appLogo: null, appLogoMonochrome: false, allowHls: true }),
+      ),
+    );
+    await settle();
+    await settle();
+    assert.equal(StubObserver.instances.length, 2, "expected one IntersectionObserver per widget instance");
+
+    act(() => {
+      for (const o of StubObserver.instances) o.cb([{ isIntersecting: true }]);
+    });
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+
+    const reports = await drainReports();
+    assert.equal(reports.length, 2, "expected one report PER WIDGET INSTANCE, not one per feed");
+    assert.deepEqual(
+      reports.map((r) => r.feedId),
+      ["feed-1", "feed-1"],
+    );
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});

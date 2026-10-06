@@ -1,7 +1,7 @@
-// pco.ts — Planning Center, ScriptView and slots.
+// pco.ts — Planning Center, ServiceCue and slots.
 //
 // Plans, items, teams and attachments as PCO returns them, plus the two things
-// built on top: ScriptView layouts and the slot model the stage display fills.
+// built on top: ServiceCue layouts and the slot model the stage display fills.
 //
 // Split out of stage.ts, which had grown to 1,509 lines. Every name is still
 // re-exported from stage.ts, so no import anywhere had to change.
@@ -86,9 +86,11 @@ export interface PlanItemDTO {
   /** Per-note-category content (e.g. {"Audio": "...", "Vocals": "..."}). */
   notesByCategory: Record<string, string>;
   description: string | null;
-  /** Song meta (present on "song" items): selected key, arrangement BPM + name. */
+  /** Song meta (present on "song" items): selected key, arrangement BPM, meter + name. */
   songKey?: string | null;
   bpm?: number | null;
+  /** Time signature off the arrangement ("4/4", "6/8"), as PCO writes it. */
+  meter?: string | null;
   arrangementName?: string | null;
   /** PCO service_position: "pre" | "during" | "post" (drives pre-service styling). */
   servicePosition?: string | null;
@@ -102,13 +104,12 @@ export interface PlanItemsDTO {
   noteCategories: string[];
 }
 
-/** A saved ScriptView layout — a named column preset (our in-app ScriptViewer
- *  replacement). GLOBAL: one set of layouts applies across every service type.
+/** A saved ServiceCue layout — a named column preset. GLOBAL: one set of layouts applies across every service type.
  *  Columns reference category ROLES, not names. Names are defined per service type and
  *  vary between them, so a name-based column rendered empty wherever that service type
  *  used a different word for the same thing. A role whose members are all absent is
  *  hidden instead. */
-export interface ScriptViewLayout {
+export interface ServiceCueLayout {
   id: string;
   name: string;
   order: number;
@@ -123,6 +124,7 @@ export interface ScriptViewLayout {
   showLength?: boolean;       // length / "Time" column
   showKey?: boolean;          // song key in the title meta line
   showBpm?: boolean;          // BPM in the title meta line
+  showMeter?: boolean;        // time signature in the title meta line
   showArrangement?: boolean;  // arrangement name in the title meta line
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer
@@ -140,15 +142,15 @@ export interface ScriptViewLayout {
   accentRole?: string | null;
 }
 
-/** ScriptView-wide config: which PCO service types appear on the landing page
+/** ServiceCue-wide config: which PCO service types appear on the landing page
  *  (ordered). Empty = fall back to types that have layouts. */
-export interface ScriptViewConfig {
+export interface ServiceCueConfig {
   serviceTypeIds: string[];
 }
 
-/** The resolved rundown for a ScriptView page: the chosen plan's items + columns,
+/** The resolved rundown for a ServiceCue page: the chosen plan's items + columns,
  *  plus whether this service type is the one currently running live. */
-export interface ScriptViewRundownDTO {
+export interface ServiceCueRundownDTO {
   serviceTypeId: string;
   planId: string | null;
   planTitle: string | null;
@@ -167,6 +169,11 @@ export interface ScriptViewRundownDTO {
    *  feed applies to it. Actual "live" (badge/highlight) additionally requires
    *  pcoLive.mode === "item" — this flag alone does NOT mean a service is running. */
   isActivePlan: boolean;
+  /** True when this is the plan the server resolves for this service type with
+   *  no `planId` — the app's own plan for the active type, else the nearest
+   *  upcoming one. How a page that was handed a `planId` tells whether it is
+   *  looking at the followed plan or at another one. */
+  isDefaultPlan: boolean;
 }
 
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */
@@ -207,6 +214,20 @@ export interface TeamPositionDTO {
   teamId: string;
   teamName: string;
   positionName: string;
+}
+
+/** A team position tagged with the service type it belongs to — the shape of
+ *  `/api/team-positions?all=1`. */
+export interface TypedTeamPositionDTO extends TeamPositionDTO {
+  serviceTypeId: string;
+  serviceTypeName: string;
+}
+
+/** Every service type's positions. `failed` names the types that could not be
+ *  read, so a partial answer says it is partial. */
+export interface AllTeamPositionsDTO {
+  positions: TypedTeamPositionDTO[];
+  failed: string[];
 }
 
 /** One position a slot will accept, with an optional note filter scoped to it.

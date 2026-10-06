@@ -31,10 +31,23 @@ export type StoreClass =
   /** Recorded history and logs: observations of what happened. Not restored. */
   | "runtime";
 
+/** The file a store used before it was renamed, and the log tag its migration speaks under. */
+export interface RenamedFrom {
+  filename: string;
+  logTag: string;
+}
+
 export interface RegisteredStore {
   /** Filename for a DataStore; the legacy single-document name for a keyed one. */
   filename: string;
   classification: StoreClass;
+  /**
+   * The name this store's file had before a release renamed it. An install that
+   * upgrades has the old file on disk: store-file-adoption.ts moves it into
+   * place, and config-snapshot maps it when an OLD backup is restored. Declared
+   * once, here, so those two cannot disagree about which names moved.
+   */
+  renamedFrom?: RenamedFrom;
   /**
    * Whether the store is one file or a DIRECTORY of per-service files.
    *
@@ -73,4 +86,9 @@ export function storesOfClass(classification: StoreClass): RegisteredStore[] {
 /** Filenames a config snapshot carries. Derived, never hand-maintained. */
 export function configFilenames(): string[] {
   return storesOfClass("config").map((s) => s.filename);
+}
+
+/** Every store that was renamed, with the name it replaced. */
+export function renamedStores(): (RegisteredStore & { renamedFrom: RenamedFrom })[] {
+  return allStores().filter((s): s is RegisteredStore & { renamedFrom: RenamedFrom } => s.renamedFrom !== undefined);
 }

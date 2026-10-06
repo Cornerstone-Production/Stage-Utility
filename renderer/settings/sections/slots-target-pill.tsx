@@ -15,6 +15,7 @@ import { Button, ButtonGroup, toast, confirm } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
 import { useEditingTarget } from "./editing-target";
+import { errorMessage } from "@main/services/errors";
 
 /** Which board the editor is showing. Not the wire shape — see `SlotsTarget`. */
 export type SlotsTargetSide = "default" | "plan";
@@ -225,7 +226,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
       toast.success(`Reverted ${label} to the default.`);
       return true;
     } catch (err) {
-      toast.error(`Failed to revert: ${String(err)}`);
+      toast.error(`Failed to revert: ${errorMessage(err)}`);
       return false;
     }
   }
@@ -248,7 +249,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
       toast.success(`${label} is now ${namedType(typeName)} default.`);
       return true;
     } catch (err) {
-      toast.error(`Failed to set as default: ${String(err)}`);
+      toast.error(`Failed to set as default: ${errorMessage(err)}`);
       return false;
     }
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { OPERATOR_PATHS, isOperatorPath } from "./operator-paths.js";
+import { MOVED_PAGE_PREFIXES, OPERATOR_PATHS, isOperatorPath, legacyPageRedirect } from "./operator-paths.js";
 
 describe("operator paths", () => {
   it("claims every operator surface, with and without a trailing slash", () => {
@@ -11,7 +11,8 @@ describe("operator paths", () => {
   });
 
   it("claims nested operator routes", () => {
-    assert.ok(isOperatorPath("/scriptview/sunday/full"));
+    assert.ok(isOperatorPath("/servicecue/sunday/full"));
+    assert.ok(isOperatorPath("/scriptview/sunday/full"), "a moved page stays claimed until it is redirected");
     assert.ok(isOperatorPath("/patch/rack-a"));
   });
 
@@ -49,6 +50,29 @@ describe("operator paths", () => {
 
   it("does not claim asset requests", () => {
     assert.equal(isOperatorPath("/assets/index-abc123.js"), false);
-    assert.equal(isOperatorPath("/app-icon.png"), false);
+    assert.equal(isOperatorPath("/apple-touch-icon.png"), false);
+    assert.equal(isOperatorPath("/favicon.svg"), false);
+  });
+});
+
+describe("legacyPageRedirect", () => {
+  it("maps the old prefix to the new one and keeps the path and the query", () => {
+    assert.equal(legacyPageRedirect("/scriptview"), "/servicecue");
+    assert.equal(legacyPageRedirect("/scriptview/"), "/servicecue/");
+    assert.equal(legacyPageRedirect("/scriptview/weekend/audio", "?text=150&plan=1"), "/servicecue/weekend/audio?text=150&plan=1");
+  });
+
+  it("answers null for a path that did not move, including a lookalike", () => {
+    for (const p of ["/servicecue", "/servicecue/weekend/audio", "/scriptviewer", "/api/servicecue/layouts", "/history", "/"]) {
+      assert.equal(legacyPageRedirect(p, "?x=1"), null, `${p} must not be redirected`);
+    }
+  });
+
+  it("every moved prefix lands on a page the server serves, never on another moved one", () => {
+    for (const [from, to] of MOVED_PAGE_PREFIXES) {
+      assert.ok(isOperatorPath(from), `${from} is not claimed, so a build without the redirect would 404 it`);
+      assert.ok(isOperatorPath(to), `${to} is not an operator path`);
+      assert.equal(legacyPageRedirect(to), null, `${to} redirects again — a loop`);
+    }
   });
 });

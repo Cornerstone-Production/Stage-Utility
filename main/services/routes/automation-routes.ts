@@ -269,13 +269,28 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 
-  const testMatch = pathname.match(/^\/api\/automation\/rules\/([^/]+)\/test$/);
-  if (method === "POST" && testMatch) {
-    try {
-      json(res, await automationEngine.testFire(testMatch[1]));
-    } catch (err) {
-      error(res, errorMessage(err), 400);
+  // POST /api/automation/rules/:id/run — { confirmed?: boolean }
+  // Run the rule's action once, now. The row's Run button and the editor's Test
+  // both land here; see AutomationEngine.runNow for what it bypasses and what it
+  // still respects. Runs actions that press buttons on real gear, so it takes the
+  // same caller check /api/action/invoke does: a browser on this server's own
+  // page (logged as "console"), or a bearer token (logged under its label).
+  const runMatch = pathname.match(/^\/api\/automation\/rules\/([^/]+)\/run$/);
+  if (method === "POST" && runMatch) {
+    let caller = "console";
+    if (!isSameOriginBrowser(req.headers)) {
+      const token = await cueTokens.verify(bearerOf(req.headers.authorization));
+      if (!token) {
+        console.warn(`[automation] refused POST ${scrub(pathname)}: ${scrub(refusalReason(req.headers.authorization))}`);
+        error(res, "A bearer token is required for a request with no Origin", 401);
+        return;
+      }
+      caller = token.label;
     }
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const result = await automationEngine.runNow(runMatch[1], { caller, confirmed: body.confirmed === true });
+    if (result.status === 200) json(res, result.body);
+    else error(res, result.body.error, result.status);
     return;
   }
 

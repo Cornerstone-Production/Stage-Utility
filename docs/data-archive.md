@@ -233,7 +233,7 @@ adding a second copy. A session merely left as it was — unchanged, newer in
 the store, or disagreeing with the rows — never clears the entry, since
 nothing about the stored record changed; nor does one the rebuild could not
 restore (an unreadable finish time, or a store already full). See
-[Recovery](features/scriptview-and-baptisms.md#recovery) for what the note
+[Recovery](features/servicecue-and-baptisms.md#recovery) for what the note
 itself shows.
 
 ### Raw in the bundle, effective in the workbook

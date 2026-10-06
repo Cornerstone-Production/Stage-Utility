@@ -129,7 +129,7 @@ describe("storing a choice", () => {
   });
 
   it("does NOT refuse an id Planning Center no longer offers", async () => {
-    // The opposite of setViewScriptViewLayout, deliberately. Refusing would make
+    // The opposite of setViewServiceCueLayout, deliberately. Refusing would make
     // every later save fail once a tag is deleted upstream; the picker marks the
     // stale choice instead and lets the operator remove it.
     await stageController.setViewCalendarFilters("v-open", [], [{ id: "tag-gone", name: "Deleted" }]);

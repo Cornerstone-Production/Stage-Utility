@@ -1,17 +1,21 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
-import { useStatusChannel } from "./use-status-channel";
+import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 /**
- * Live OBS output state, pushed on the "obs:status" channel. Hydrates once on
- * mount (the channel only broadcasts on change) then stays live. Shared by the
- * custom-layout "OBS status" object and its editor inspector.
+ * Live OBS output state, pushed on the "obs:status" channel, plus whether it
+ * has answered yet. Hydrates once on mount (the channel only broadcasts on
+ * change) then stays live. Shared by the custom-layout OBS, recorder and
+ * streaming widgets, their editor inspector, Home's recording/streaming cards
+ * and the context bar — every one judges "connected" from `value`, and must not
+ * say "not connected" before `known` is true. See useStatusChannel's own
+ * header.
  *
  * Ordering between the hydrate and the first push is useStatusChannel's job —
  * see the note there for the staleness this used to have.
  */
-export function useObsState(enabled = true): ObsStatusDTO | null {
+export function useObsStatus(enabled = true): StatusChannelResult<ObsStatusDTO> {
   const read = useCallback(() => invoke<ObsStatusDTO>("obs:getStatus"), []);
   return useStatusChannel<ObsStatusDTO>(read, "obs:status", enabled);
 }

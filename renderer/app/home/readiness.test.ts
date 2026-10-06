@@ -105,6 +105,26 @@ describe("readiness", () => {
     assert.equal(new Set(checks.map((c) => c.id)).size, checks.length);
     for (const c of checks) assert.ok(c.label.length > 0, `${c.id} has no label`);
   });
+
+  test("presence not yet known does not fail the online check", () => {
+    // Same inputs as "an offline screen is not ready, and is named" above
+    // (empty onlineOutputIds), but presence has not answered yet. Without the
+    // third argument this reads exactly like every screen being offline —
+    // which is the bug: on a return visit to Home, `onlineOutputIds` is empty
+    // for the width of a slow read whether or not anything is actually online,
+    // and the readiness list must not tell the operator to go fix a screen
+    // that may be fine.
+    const checks = readinessChecks(ready, [], false);
+    const online = checks.find((c) => c.id === "online")!;
+    assert.equal(online.ok, true, "unknown presence was reported as a failing check");
+    assert.doesNotMatch(online.detail, /not connected/, "unknown presence read as a specific offline claim");
+  });
+
+  test("once presence is known, the same empty set is a real failure again", () => {
+    const checks = readinessChecks(ready, [], true);
+    const online = checks.find((c) => c.id === "online")!;
+    assert.equal(online.ok, false, "a settled empty presence must still fail the check");
+  });
 });
 
 describe("splitByPresence", () => {

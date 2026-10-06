@@ -29,7 +29,7 @@ URL" feeling:
 1. **There is no router.** `renderer/main/router.tsx` uses
    `createMemoryHistory()`, which ignores the URL by design, and
    `renderer/main/root-view.tsx` then branches on `window.location.pathname`
-   through an if/else chain. `/history`, `/patch`, `/baptism` and `/scriptview`
+   through an if/else chain. `/history`, `/patch`, `/baptism` and `/servicecue`
    are full-screen islands. Every move between them is a full page load, and
    there is nowhere to hang a navigation bar.
 
@@ -40,7 +40,7 @@ URL" feeling:
    toggle; the History settings tab can.
 
 3. **Two features have two front doors, and two more only appear to.**
-   `SECTION_PAGE` in `renderer/settings/settings-view.tsx` maps ScriptView,
+   `SECTION_PAGE` in `renderer/settings/settings-view.tsx` maps ServiceCue,
    Patch, History and Baptisms to standalone pages, but only two are duplicates:
 
    - **History** — `history-view.tsx` (38 lines) renders `ServiceHistorySection`,
@@ -50,7 +50,7 @@ URL" feeling:
      duplicate.
    - **Patch** — `patch-view.tsx` (272 lines) is a volunteer-facing read view
      built on `resolvePatch`. The settings tab is the editor. Different surfaces.
-   - **ScriptView** — `scriptview-index-view.tsx` (158 lines) is the rundown
+   - **ServiceCue** — `servicecue-index-view.tsx` (158 lines) is the rundown
      viewer. The settings tab is the column-preset editor. Different surfaces.
 
    Whichever door has navigation is the one that gets used, and today that is
@@ -131,7 +131,7 @@ output surfaces**.
 
 - **The operator app** — browser-history routing, persistent navigation, one
   shell. Every surface a human drives: Home, Consoles, Screens, Patch,
-  ScriptView, History, Baptisms, Automation, and a small Settings area for
+  ServiceCue, History, Baptisms, Automation, and a small Settings area for
   genuine configuration. `settings-window.html` retires and its sections become
   routes. (The rail is settled in Section 2.)
 - **The output surface** — screens pinned at `/display-N`. Chrome-free, forced
@@ -208,7 +208,7 @@ declared surface, rather than remaining a third presentation.
   `root-view.tsx`'s path-switch is deleted.
 - Twelve settings sections become routes. `settings-view.tsx` (1,506 lines)
   sheds its tab-state machinery.
-- History and Baptisms collapse to one route each; Patch and ScriptView keep both
+- History and Baptisms collapse to one route each; Patch and ServiceCue keep both
   surfaces, with the editor reached from the viewer.
 - Object rendering is already shared between the editor and the kiosk renderer
   (Section 5), so this phase inherits WYSIWYG rather than having to build it.
@@ -233,7 +233,7 @@ already carry all of it.
 
 ```
 [logo] <appName>
-Home · Consoles ▸ · Screens · Patch · ScriptView · History · Baptisms · Automation
+Home · Consoles ▸ · Screens · Patch · ServiceCue · History · Baptisms · Automation
 ─────────
 Settings · theme · version
 ```
@@ -256,7 +256,7 @@ Connect, Branding, Advanced. Everything else in today's settings panel is work
 and moves to the rail.
 
 **Front doors resolve by kind, not uniformly.** History and Baptisms are true
-duplicates and collapse to one route each. Patch and ScriptView are not: the
+duplicates and collapse to one route each. Patch and ServiceCue are not: the
 standalone page is the surface people use (the volunteer patch view, the rundown
 viewer) and the settings tab is its editor. For those two the rail item is the
 **viewer**, with the editor reachable from it — configuration hanging off the
@@ -340,7 +340,7 @@ online.
 
 **Idle.** Next service with a countdown, this week's plan summary, and a
 **readiness** block: integrations connected, Outputs online, patch sheet current
-for this plan, ScriptView populated. "What is not ready for Sunday" is the
+for this plan, ServiceCue populated. "What is not ready for Sunday" is the
 question the app cannot currently answer.
 
 Beneath both: attendance trend, SPL averages and service duration as headline
@@ -576,7 +576,7 @@ configure anything.
 
 **Phase 1a — The operator shell (additive).** A third entry point with
 browser-history routing, the rail and the context bar. It takes over `/patch`,
-`/history`, `/baptism` and `/scriptview` from the kiosk bundle and adds
+`/history`, `/baptism` and `/servicecue` from the kiosk bundle and adds
 `/automation` and `/integrations`. The existing settings panel keeps working,
 untouched, at `/settings`. Nothing is removed, so a fault is recoverable by not
 using the new URLs. Six of the twelve sections (`scriptview`, `integrations`,

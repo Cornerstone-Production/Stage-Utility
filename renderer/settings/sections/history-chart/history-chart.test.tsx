@@ -40,6 +40,7 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
 const { fireEvent, render, screen, cleanup } = await import("@testing-library/react");
 const { HistoryChart } = await import("./history-chart.js");
 const { CustomizePopover } = await import("./customize.js");
+const { formatClock } = await import("../../../lib/clock-format.js");
 import type { ChartSeries } from "./geometry.js";
 import type { LaneItem } from "./lane.js";
 
@@ -106,6 +107,15 @@ const ITEMS: LaneItem[] = [
   },
 ];
 
+/** Near the START of "welcome" (15-30 min), nowhere near its midpoint. */
+const PEAK_AT = T0 + 16 * MIN;
+/** The fixture items with one peak, on "welcome" (sequence 1, so "Item 2"). */
+function peakItems(over: Partial<LaneItem> = {}): LaneItem[] {
+  return ITEMS.map((it) => (it.itemId === "welcome"
+    ? { ...it, peakLabel: "94 dB", peakAt: PEAK_AT, ...over }
+    : it));
+}
+
 const FIGURES = [
   { key: "peak", label: "Peak", value: "160" },
   { key: "lowest", label: "Lowest", value: "100" },
@@ -140,6 +150,19 @@ function stripEl(): HTMLElement {
   const el = document.querySelector("[data-history-strip]");
   assert.ok(el, "the chart drew no stat strip at all — nothing here can be read off it");
   return el as HTMLElement;
+}
+
+/** Pointer coordinates for a spot in the item lane at SVG x. The y is derived
+ *  from the drawn svg height, so it follows the chart if the plot moves. */
+function svgPoint(x: number) {
+  const svgEl = document.querySelector("svg[role=img]") as SVGSVGElement;
+  const h = Number(svgEl.getAttribute("height"));
+  // Four px above the bottom: inside the service row's block.
+  return { clientX: x, clientY: ((h - 8) / h) * SVG_H };
+}
+
+function formatTime(t: number): string {
+  return formatClock(t, { seconds: true });
 }
 
 describe("the stat strip", () => {
@@ -458,24 +481,6 @@ describe("the plot", () => {
     );
   });
 
-  test("a peak mark runs the full height of its block", () => {
-    // It was a 4px nub on the top edge, kept short so it would not cross the
-    // item's own title. What that produced was an unexplained coloured chip.
-    // It is full height and drawn UNDER the label instead, and named in the
-    // legend — see the legend test below.
-    render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
-    const g = document.querySelector("[data-lane-row='service']") as SVGGElement;
-    const rect = g.querySelector("[data-lane-segment]") as SVGRectElement;
-    const mark = g.querySelector("[data-peak-mark]") as SVGLineElement;
-    const top = Number(rect.getAttribute("y"));
-    assert.equal(Number(mark.getAttribute("y1")), top);
-    assert.equal(
-      Number(mark.getAttribute("y2")) - top,
-      Number(rect.getAttribute("height")),
-      "the mark does not span the block",
-    );
-  });
-
   test("the time axis is ticked through the service, not only at its ends", () => {
     // The fixture is 20:00 -> 21:00 of samples, so the domain is an hour: the
     // fine step, every ten minutes. Two labels an hour apart say nothing about
@@ -703,29 +708,231 @@ describe("the item lane", () => {
     assert.ok(Number(seg.getAttribute("width")) > 50, `collapsed to ${seg.getAttribute("width")}`);
   });
 
-  test("hovering an item with a peak puts the NUMBER in the strip", () => {
-    // A tick on a block with the number nowhere is a mark nobody can read.
-    render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
-    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
+  test("hovering an item block with a peak puts the NUMBER and the time in the strip", () => {
+    // A peak with the number nowhere is a mark nobody can read.
+    render(chart({ items: peakItems() }));
+    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, svgPoint(250));
     const strip = stripEl();
     assert.ok(strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
     assert.ok(strip.textContent?.includes("94 dB"), strip.textContent ?? "");
+    assert.ok(strip.textContent?.includes("When"), strip.textContent ?? "");
   });
 
   test("an item with no peak gets no empty Peaked column", () => {
     render(chart());
-    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, { clientX: 480, clientY: 205 });
+    fireEvent.pointerMove(document.querySelector("svg") as SVGSVGElement, svgPoint(480));
     const strip = stripEl();
     assert.ok(strip.textContent?.includes("Item 3"), "the lane hover did not register");
     assert.ok(!strip.textContent?.includes("Peaked at"), strip.textContent ?? "");
+    assert.ok(!strip.textContent?.includes("When"), strip.textContent ?? "");
+  });
+});
+
+// The peak markers: a triangle in a row above the plot, at the item's loudest
+// instant, with a line to the peak point that exists only while hovered.
+//
+// NOT UNIT-TESTED, and why: where the triangle lands on screen, the 10px hit
+// column under a real pointer, and the hover colours all need a stylesheet and
+// layout, which jsdom does not have. The pointer is simulated at SVG
+// coordinates here and the real thing was driven in a headless browser; see
+// the PR for the screenshots.
+describe("item peak markers", () => {
+  const peakSeries = () =>
+    series({
+      fill: false,
+      points: Array.from({ length: 61 }, (_, i) => ({ t: T0 + i * MIN, v: i === 16 ? 190 : 100 + (i % 7) })),
+    });
+  const peakChart = (props: Partial<React.ComponentProps<typeof HistoryChart>> = {}) =>
+    chart({ series: [peakSeries()], items: peakItems(), ...props });
+
+  const svgEl = () => document.querySelector("svg[role=img]") as SVGSVGElement;
+  const svgH = () => Number(svgEl().getAttribute("height"));
+  /** Where the triangle's tip is: the L command of its path. */
+  function tipOf(): { x: number; y: number } {
+    const d = (document.querySelector("[data-peak-triangle]") as SVGPathElement).getAttribute("d") ?? "";
+    const m = /L([\d.]+),([\d.]+)Z/.exec(d);
+    assert.ok(m, `the triangle's path has no tip: ${d}`);
+    return { x: Number(m[1]), y: Number(m[2]) };
+  }
+  const xOfT = (t: number) => 44 + ((t - T0) / (60 * MIN)) * (640 - 44 - 14);
+  /** A pointer at SVG coordinates (the chart divides by the mocked rect). */
+  function at(x: number, y: number) {
+    fireEvent.pointerMove(svgEl(), { clientX: x, clientY: (y / svgH()) * SVG_H });
+  }
+
+  test("the triangle sits at the series maximum, not the middle of the block", () => {
+    render(peakChart());
+    const tip = tipOf();
+    const loud = xOfT(PEAK_AT);
+    const mid = xOfT(T0 + 22.5 * MIN);
+    assert.ok(Math.abs(tip.x - loud) < 0.05, `tip x ${tip.x}, the loudest instant is at ${loud}`);
+    assert.ok(Math.abs(tip.x - mid) > 30, "the triangle is at the midpoint");
   });
 
-  test("a peak mark only where the caller gave one (the sound chart)", () => {
-    render(chart());
+  test("the triangle is 12 wide, 10 tall, in the primary series colour", () => {
+    render(peakChart());
+    const tri = document.querySelector("[data-peak-triangle]") as SVGPathElement;
+    assert.equal(tri.getAttribute("fill"), "var(--green-9)");
+    const [, x0, y0, x1, x, y] = /M([\d.]+),([\d.]+)H([\d.]+)L([\d.]+),([\d.]+)Z/.exec(tri.getAttribute("d") ?? "")?.map(Number) ?? [];
+    assert.equal(x1 - x0, 12);
+    assert.equal(y - y0, 10);
+    assert.equal(x, (x0 + x1) / 2);
+  });
+
+  test("the marker row exists only when there is a peak to mark", () => {
+    render(chart({ series: [peakSeries()] }));
+    const plain = svgH();
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
+    assert.equal(document.querySelectorAll("[data-peak-row]").length, 0);
     cleanup();
-    render(chart({ items: ITEMS.map((i) => ({ ...i, peakLabel: "94 dB" })) }));
-    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 3);
+
+    render(peakChart());
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 1);
+    assert.equal(svgH() - plain, 14, "the marker row did not make room above the plot");
+    cleanup();
+
+    // A caller that gives no peak (every other chart) gets no extra top space.
+    render(chart({ series: [peakSeries()], items: ITEMS }));
+    assert.equal(svgH(), plain);
+  });
+
+  test("an item with no point inside it gets no triangle and no row", () => {
+    render(peakChart());
+    const withRow = svgH();
+    cleanup();
+    // The peak instant is one the drawn line has no point at.
+    render(peakChart({ items: peakItems({ peakAt: PEAK_AT + 7_000 }) }));
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
+    assert.equal(document.querySelectorAll("[data-legend-peak-mark]").length, 0);
+    assert.equal(svgH(), withRow - 14);
+    cleanup();
+    // And an item with a peak figure but no instant at all: no midpoint guess.
+    render(peakChart({ items: peakItems({ peakAt: null }) }));
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
+  });
+
+  test("the lane block carries no tick any more", () => {
+    render(peakChart());
+    for (const row of document.querySelectorAll("[data-lane-row]")) {
+      assert.equal(row.querySelectorAll("line, [data-peak-mark]").length, 0, "a tick is drawn in the lane");
+    }
+  });
+
+  test("at rest the line and the dot are not drawn; only the triangle is", () => {
+    render(peakChart());
+    assert.equal(document.querySelectorAll("[data-peak-triangle]").length, 1);
+    assert.equal(document.querySelectorAll("[data-peak-line]").length, 0, "the line is drawn at rest");
+    assert.equal(document.querySelectorAll("[data-peak-dot]").length, 0, "the dot is drawn at rest");
+  });
+
+  test("hovering the triangle draws the line from its tip down to the peak point, and the dot", () => {
+    render(peakChart());
+    const tip = tipOf();
+    at(tip.x, tip.y - 4);
+    const line = document.querySelector("[data-peak-line]") as SVGLineElement;
+    const dot = document.querySelector("[data-peak-dot]") as SVGCircleElement;
+    assert.ok(line, "no line on hover");
+    assert.ok(dot, "no dot on hover");
+    assert.equal(Number(line.getAttribute("x1")), tip.x);
+    assert.equal(Number(line.getAttribute("x2")), tip.x);
+    assert.equal(Number(line.getAttribute("y1")), tip.y);
+    assert.equal(Number(dot.getAttribute("r")), 3);
+    assert.equal(Number(line.getAttribute("y2")), Number(dot.getAttribute("cy")), "the line stops short of the peak point");
+    // The point is ON the drawn SPL line: the same x,y the series path has.
+    const d = (document.querySelector("[data-series-line='occupancy']") as SVGPathElement).getAttribute("d") ?? "";
+    assert.ok(
+      d.includes(`${tip.x.toFixed(1)},${Number(dot.getAttribute("cy")).toFixed(1)}`),
+      `the peak point is not a vertex of the line: ${d.slice(0, 200)}`,
+    );
+  });
+
+  test("hovering mid-plot on the line shows the item readout, with When", () => {
+    render(peakChart());
+    const tip = tipOf();
+    const dotY = () => Number((document.querySelector("[data-peak-dot]") as SVGCircleElement).getAttribute("cy"));
+    at(tip.x, tip.y + 2);
+    const peakY = dotY();
+    const midY = (tip.y + peakY) / 2;
+    at(tip.x + 4, midY);
+    const strip = stripEl();
+    const text = strip.textContent ?? "";
+    assert.ok(text.includes("Item 2"), text);
+    assert.ok(text.includes("94 dB"), text);
+    assert.ok(text.includes("When"), text);
+    assert.ok(document.querySelector("[data-peak-line]"), "the line is not drawn on hover");
+    assert.equal(document.querySelectorAll("[data-crosshair]").length, 0, "the crosshair doubles the peak line");
+    // The readout is about the peak's instant, not where the pointer sits.
+    assert.ok(text.includes(formatTime(PEAK_AT)), `${text} does not carry ${formatTime(PEAK_AT)}`);
+  });
+
+  test("just outside the 10px column the plot's own readout comes back", () => {
+    render(peakChart());
+    const tip = tipOf();
+    at(tip.x, tip.y + 2);
+    const peakY = Number((document.querySelector("[data-peak-dot]") as SVGCircleElement).getAttribute("cy"));
+    const midY = (tip.y + peakY) / 2;
+    at(tip.x + 6, midY);
+    const text = stripEl().textContent ?? "";
+    assert.ok(!text.includes("When"), `outside the column the peak readout still answers: ${text}`);
+    assert.ok(!text.includes("Peaked at"), text);
+    assert.equal(document.querySelectorAll("[data-peak-line]").length, 0);
+    assert.equal(document.querySelectorAll("[data-crosshair]").length, 1);
+    // And below the peak point (past the 4px of slack) it is the plot again.
+    at(tip.x, peakY + 8);
+    assert.ok(!(stripEl().textContent ?? "").includes("When"));
+  });
+
+  test("hovering the item's lane block lights its line too", () => {
+    render(peakChart());
+    fireEvent.pointerMove(svgEl(), svgPoint(250));
+    assert.ok(document.querySelector("[data-peak-line]"), "the line stays dark while its block is hovered");
+    assert.ok(document.querySelector("[data-peak-dot]"));
+    assert.ok((stripEl().textContent ?? "").includes("When"));
+  });
+
+  test("focusing the triangle shows the same readout, and blurring clears it", () => {
+    render(peakChart());
+    const g = document.querySelector("[data-peak-mark]") as SVGGElement;
+    assert.equal(g.getAttribute("role"), "button");
+    assert.equal(g.getAttribute("tabindex"), "0");
+    assert.match(g.getAttribute("aria-label") ?? "", /^Welcome peaked at 94 dB at \d{1,2}[:.]\d{2}[:.]\d{2}/);
+    fireEvent.focus(g);
+    const text = stripEl().textContent ?? "";
+    assert.ok(text.includes("When") && text.includes("94 dB"), text);
+    assert.ok(document.querySelector("[data-peak-line]"));
+    fireEvent.blur(g);
+    assert.equal(document.querySelectorAll("[data-peak-line]").length, 0);
+    assert.ok(!(stripEl().textContent ?? "").includes("When"));
+  });
+
+  test("a pointer on the plot answers for itself while a triangle still holds focus", () => {
+    // A click on the triangle focuses it and leaves it focused; the readout
+    // must follow the pointer again once it is on the plot, not stay on the peak.
+    render(peakChart());
+    fireEvent.focus(document.querySelector("[data-peak-mark]") as SVGGElement);
+    assert.ok((stripEl().textContent ?? "").includes("When"), "focus shows the peak's readout");
+    fireEvent.pointerMove(svgEl(), svgPoint(560));
+    assert.ok(!(stripEl().textContent ?? "").includes("When"), "the readout is stuck on the focused peak");
+    assert.equal(document.querySelectorAll("[data-crosshair]").length, 1, "the crosshair follows the pointer");
+    assert.equal(document.querySelectorAll("[data-peak-line]").length, 0);
+  });
+
+  test("Item peaks off hides the triangle, the row and the legend entry", () => {
+    render(peakChart());
+    const on = svgH();
+    cleanup();
+    render(peakChart({ peakMarks: false }));
+    assert.equal(document.querySelectorAll("[data-peak-mark]").length, 0);
+    assert.equal(document.querySelectorAll("[data-peak-row]").length, 0);
+    assert.equal(document.querySelectorAll("[data-legend-peak-mark]").length, 0);
+    assert.equal(svgH(), on - 14);
+  });
+
+  test("the legend swatch is a downward triangle", () => {
+    render(peakChart());
+    const legend = document.querySelector("[data-legend-peak-mark]") as HTMLElement;
+    assert.ok(legend.querySelector("svg path"), "the swatch is not a triangle");
+    assert.equal(legend.textContent, "Item peak");
   });
 });
 

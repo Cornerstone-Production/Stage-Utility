@@ -10,7 +10,7 @@
 //
 //  - `duplicateView` once listed the fields to KEEP, so a duplicated console
 //    came back as a display with `surface`, `slotsLayout` and
-//    `scriptViewLayoutId` all dropped. It spreads the source now, and this
+//    `serviceCueLayoutId` all dropped. It spreads the source now, and this
 //    checks the spread still reaches a field added after that fix.
 //  - a view bundle carries `views` verbatim; nothing enforces that.
 //  - views.json is in CONFIG_FILES, so the flag rides in every config snapshot.

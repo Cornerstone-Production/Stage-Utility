@@ -83,7 +83,6 @@ export function ViewEditorRoute() {
           startEditing
           stageState={s.stageState}
           wirelessChannels={s.wirelessChannels}
-          teamPositions={s.teamPositions}
           layoutTemplates={s.layoutTemplates}
           localSlots={s.localSlots}
           slotsDirty={s.slotsDirty}

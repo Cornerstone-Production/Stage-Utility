@@ -2,7 +2,10 @@ import { useEffect, useSyncExternalStore } from "react";
 import { invoke, onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
+import { applyFavicon } from "../lib/apply-favicon";
 import { setDisplayHourCycle } from "../lib/clock-format";
+import { isPreviewSlug } from "./preview-url";
+import { errorMessage } from "@main/services/errors";
 
 interface UseStageStateResult {
   state: StageState | null;
@@ -73,6 +76,9 @@ function publish(next: UseStageStateResult): void {
 function adoptState(next: StageState): void {
   setDisplayHourCycle(next.hourCycle);
   applyAccentVar(next.accentColor);
+  // The tab icon follows the uploaded logo, from a hydrated state only, for the
+  // accent's reason: a consumer that has not loaded yet must not reset it.
+  applyFavicon(next.appLogo, next.appLogoMonochrome);
   publish({ state: next, isLoading: false, error: null });
 }
 
@@ -117,7 +123,7 @@ function hydrate(): void {
       // retries (see `subscribe`), so a server that was down at page load does
       // not blank the wall for ever.
       console.error("[useStageState] hydrate error", err);
-      publish({ state: snapshot.state, isLoading: false, error: String(err) });
+      publish({ state: snapshot.state, isLoading: false, error: errorMessage(err) });
     });
 }
 
@@ -212,7 +218,7 @@ export function useStageState(): UseStageStateResult {
     const path = window.location.pathname;
     // The settings console (+ its live-preview iframes) must not reload out from
     // under an operator mid-edit; only the display / volunteer surfaces self-reload.
-    if (path.startsWith("/preview-") || path.startsWith("/settings")) return;
+    if (isPreviewSlug(path.slice(1)) || path.startsWith("/settings")) return;
     const own = (window as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ?? null;
     let reloading = false;
     let seen: string | null = null;

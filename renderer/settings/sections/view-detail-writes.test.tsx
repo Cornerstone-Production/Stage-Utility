@@ -1,7 +1,7 @@
 // view-detail-writes.test.tsx — the two fire-and-forget writes ViewDetail
 // issues directly (not through handlers): the console chrome toggle
-// (views:setHideChrome) and the Script view Columns picker
-// (views:setScriptViewLayout). Both used to be `void invoke(...)` with no
+// (views:setHideChrome) and the ServiceCue view Columns picker
+// (views:setServiceCueLayout). Both used to be `void invoke(...)` with no
 // `.catch` — a rejected POST reached neither the screen nor /log, and the
 // control just silently did nothing (its value comes from the `view` prop,
 // so it snaps back with no explanation once the parent re-renders).
@@ -48,12 +48,12 @@ const CONSOLE_VIEW = {
   hideChrome: false,
 } as View;
 
-const SCRIPT_VIEW = {
+const SERVICE_CUE_VIEW = {
   id: "v2",
   name: "Booth script",
   kind: "script",
   createdAt: "2026-01-01T00:00:00.000Z",
-  scriptViewLayoutId: null,
+  serviceCueLayoutId: null,
 } as View;
 
 /** Only what these branches read; everything else is inert here. */
@@ -63,7 +63,6 @@ function props(view: View): Parameters<typeof ViewDetail>[0] {
     canDelete: true,
     stageState: { views: [view], outputs: [] },
     wirelessChannels: [],
-    teamPositions: [],
     localSlots: [],
     slotsDirty: false,
     isSavingSlots: false,
@@ -93,7 +92,7 @@ function mount(view: View) {
 test("a failed console-chrome toggle toasts, rather than doing nothing silently", async () => {
   const f = stubFetchWithLog((url, init) => {
     if (init?.method === "PATCH" && url.includes(`/api/views/${CONSOLE_VIEW.id}`)) return reply(500, { error: "boom" });
-    if (url.includes("/api/scriptview/layouts")) return ok([]);
+    if (url.includes("/api/servicecue/layouts")) return ok([]);
     return ok({});
   });
   try {
@@ -109,12 +108,12 @@ test("a failed console-chrome toggle toasts, rather than doing nothing silently"
 
 test("a failed Columns save toasts, rather than doing nothing silently", async () => {
   const f = stubFetchWithLog((url, init) => {
-    if (url.includes("/api/scriptview/layouts")) return ok([{ id: "svl-audio", name: "Audio", order: 0 }]);
-    if (init?.method === "PATCH" && url.includes(`/api/views/${SCRIPT_VIEW.id}`)) return reply(500, { error: "boom" });
+    if (url.includes("/api/servicecue/layouts")) return ok([{ id: "svl-audio", name: "Audio", order: 0 }]);
+    if (init?.method === "PATCH" && url.includes(`/api/views/${SERVICE_CUE_VIEW.id}`)) return reply(500, { error: "boom" });
     return ok({});
   });
   try {
-    mount(SCRIPT_VIEW);
+    mount(SERVICE_CUE_VIEW);
     await settle();
     await settle();
     fireEvent.change(screen.getByRole("combobox", { name: "Columns" }), { target: { value: "svl-audio" } });

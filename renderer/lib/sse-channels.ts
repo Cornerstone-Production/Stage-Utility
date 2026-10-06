@@ -53,6 +53,13 @@ export const HYDRATED_CHANNELS = [
   // "broadcast on change" leaves a late subscriber blank indefinitely — exactly
   // the case this list exists for.
   "wireless:channels",
+  // Feeds are STATE, and rarely change mid-service — a display or the Video
+  // feeds page opened after the burst would show nothing until an operator
+  // happened to edit a feed.
+  "video:state",
+  // Camera checks for pulled feeds: results, not events, so a page opened
+  // after the last answer is served the latest one at once.
+  "video:probe",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);

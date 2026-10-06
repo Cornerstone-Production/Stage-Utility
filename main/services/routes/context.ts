@@ -9,6 +9,8 @@ import * as http from "http";
 import * as zlib from "node:zlib";
 
 import type { ViewKind } from "../../types/stage.js";
+import { errorMessage } from "../errors.js";
+import { PcoUrlRefused } from "../pco-path.js";
 import { scrub } from "../scrub.js";
 
 /** Everything a route handler needs about the request in flight. */
@@ -90,8 +92,41 @@ export function json(res: http.ServerResponse, data: unknown, status = 200): voi
   res.end(body);
 }
 
+/** A boolean query parameter: `1`/`0` (or `true`/`false`) with a default when
+ *  absent, and null for anything else. A query the caller got wrong is a 400, not
+ *  a silent fallback to a section they did not ask for. */
+export function queryFlag(url: URL, name: string, fallback: boolean): boolean | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null) return fallback;
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  return null;
+}
+
 export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {
   json(res, code ? { error: message, code } : { error: message }, status);
+}
+
+/**
+ * A Planning Center read that failed: 502 with PCO's own reason, and a [pco]
+ * line naming which read.
+ *
+ * The line is the point. pco-service logs a retry, never the read that finally
+ * failed, so an outage used to leave a screen saying "Couldn't load the plan"
+ * and a log with nothing in it. 502 rather than 500 because the request was
+ * well-formed and the upstream is what is down — see pco-outage-status.test.ts.
+ */
+export function pcoReadFailed(res: http.ServerResponse, what: string, err: unknown): void {
+  const message = errorMessage(err);
+  // The caller named something that is not a Planning Center id: its mistake, not
+  // an outage, and PCO was never asked. 400, and the message names the parameter.
+  if (err instanceof PcoUrlRefused) {
+    console.warn(`[pco] ${scrub(what)} read refused: ${scrub(message)}`);
+    error(res, message, 400);
+    return;
+  }
+  console.warn(`[pco] ${scrub(what)} read failed: ${scrub(message)}`);
+  error(res, message, 502);
 }
 
 /**

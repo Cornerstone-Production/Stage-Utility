@@ -84,7 +84,7 @@ const { act, useEffect } = await import("react");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { RenderObject } = await import("./layout-renderer.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { useDisplayPresence } = await import("./use-display-presence.js");
+const { useDisplayPresenceStatus } = await import("./use-display-presence.js");
 
 const STATE: StageState = { ...DEFAULT_STAGE_STATE, views: [ROUTED_VIEW], outputs: [] };
 
@@ -192,12 +192,12 @@ describe("the dot means connected, not merely routed", () => {
 
 /** Probe: renders whatever the hook returns, so the hook itself is on the path. */
 function Probe({ enabled, onIds }: { enabled: boolean; onIds: (ids: readonly string[]) => void }) {
-  const ids = useDisplayPresence(enabled);
+  const ids = useDisplayPresenceStatus(enabled).onlineOutputIds;
   useEffect(() => { onIds(ids); }, [ids, onIds]);
   return React.createElement("span", null, ids.join(","));
 }
 
-describe("useDisplayPresence", () => {
+describe("useDisplayPresenceStatus", () => {
   test("reads the connected set on mount, rather than waiting for a change", async () => {
     // Presence broadcasts ONLY when it changes, so a hook that only subscribed
     // would render every dot dark in a quiet building until somebody unplugged
@@ -211,7 +211,7 @@ describe("useDisplayPresence", () => {
   test("disabled, it subscribes to nothing and reports nothing", async () => {
     // The objection that kept the fake in place: an object on a wall display has
     // no business subscribing to presence. It does not have to — the gate is the
-    // same one useObsState is behind.
+    // same one useObsStatus is behind.
     presence = { connected: ["out-1"], rev: 3 };
     const container = await draw(React.createElement(Probe, { enabled: false, onIds: () => {} }));
     assert.equal(container.textContent, "");
@@ -236,7 +236,7 @@ describe("useDisplayPresence", () => {
   });
 });
 
-describe("useDisplayPresence stays live after the first read", () => {
+describe("useDisplayPresenceStatus stays live after the first read", () => {
   // The half that ships broken and green: a hook that subscribes and never
   // applies what it is handed. Replacing the notification body with a no-op left
   // every other test in this file passing, because they only exercise the mount

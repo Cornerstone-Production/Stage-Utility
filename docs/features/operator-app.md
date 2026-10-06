@@ -27,8 +27,8 @@ done. Dismiss it and it stays dismissed.
 | Group | Pages |
 |---|---|
 | — | **Home** |
-| Content | **ScriptView**, **Patch** |
-| Screens | **Screens** |
+| Content | **ServiceCue**, **Patch** |
+| Screens | **Screens**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Branding**, **Advanced** |
@@ -78,7 +78,7 @@ the same band.
 44px band has no second line to print it on, so hovering the page's name shows
 it. Every page still has one.
 
-Pages you reach from inside another page — the layout editor, a ScriptView
+Pages you reach from inside another page — the layout editor, a ServiceCue
 rundown, the patch editor — draw their own heading instead, so the bar shows no
 name for them; on a phone the top bar names the section they belong to.
 
@@ -220,7 +220,7 @@ and in its own chrome.
 | | |
 |---|---|
 | **App name** | shown in the sidebar and the kiosk's top bar. Set it to your organization's name |
-| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name |
+| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name and used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded. Removing the logo restores the stock icon |
 | **Recolor to match theme** | for a single-color logo — recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
 | **Accent color** | the brand color for buttons, selection, links and focus, app-wide. Status colors (live / over / caution) are unaffected. Clear to use the built-in default |
 | **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray |

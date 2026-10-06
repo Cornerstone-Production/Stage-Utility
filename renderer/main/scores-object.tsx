@@ -190,13 +190,18 @@ export function emptyReason(scores: ScoresStatusDTO | null): string {
 export function ScoresObject({
   config,
   scores,
+  known,
 }: {
   config: Extract<LayoutObjectConfig, { type: "scores" }>;
   scores: ScoresStatusDTO | null;
+  /** Whether the scores channel has answered yet. Each of emptyReason's three
+   *  sentences is a claim about a `scores` that has landed; before one has,
+   *  the box says nothing more than the dash. */
+  known: boolean;
 }) {
   const game = pickGame(scores, config.game);
 
-  if (!game) return <Empty>{emptyReason(scores)}</Empty>;
+  if (!game) return <Empty>{known ? emptyReason(scores) : "—"}</Empty>;
 
   return (
     <ScoresFitted

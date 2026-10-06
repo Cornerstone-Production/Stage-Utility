@@ -17,7 +17,7 @@
 //           context bar draws, see page-title.tsx
 //
 // A child route renders its own heading (the layout editor puts the view's name
-// in an editable field, a ScriptView plan draws ScriptViewHeader), so the shell
+// in an editable field, a ServiceCue plan draws ServiceCueHeader), so the shell
 // adding the section's name above it would be a second, wronger title.
 
 import { screensListViews } from "@main/services/home-view";
@@ -101,7 +101,7 @@ export function isConsolePath(pathname: string, views: readonly View[] | undefin
  * The shell gutters its content — 20px each side, 16px under the strip — which is
  * air between the strip and a page. A route that paints its own ground to the
  * edges has no page for that air to sit around: it renders as a light frame
- * drawn around a dark slab, which is what was reported on ScriptView.
+ * drawn around a dark slab, which is what was reported on ServiceCue.
  *
  * A console was the first of these and cancelled the horizontal half itself with
  * negative margins. The TOP half cannot be cancelled that way — the box is
@@ -110,10 +110,10 @@ export function isConsolePath(pathname: string, views: readonly View[] | undefin
  * what it asks.
  */
 export function isFullBleedPath(pathname: string, views: readonly View[] | undefined): boolean {
-  // `/scriptview/<service type>/<layout>` — the rundown itself, which paints a
-  // kiosk surface. NOT `/scriptview` or `/scriptview/presets`, which are ordinary
+  // `/servicecue/<service type>/<layout>` — the rundown itself, which paints a
+  // kiosk surface. NOT `/servicecue` or `/servicecue/presets`, which are ordinary
   // pages and want the gutter.
-  if (/^\/scriptview\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/servicecue\/[^/]+\/[^/]+$/.test(pathname)) return true;
   return isConsolePath(pathname, views);
 }
 
@@ -161,12 +161,12 @@ export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]
 export function isSharedChromelessPath(pathname: string): boolean {
   const bare = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   if (SHARED_CHROMELESS_PATHS.has(bare)) return true;
-  // ScriptView's two VIEWER pages: the launcher and a rundown. Both are read on
+  // ServiceCue's two VIEWER pages: the launcher and a rundown. Both are read on
   // a stage iPad or a producer's second screen, where the rail and the context
-  // bar belong to the operator and not the reader. `/scriptview/presets` edits
+  // bar belong to the operator and not the reader. `/servicecue/presets` edits
   // layouts and stays an ordinary settings page, so only the exact launcher
   // path and the three-deep rundown path qualify.
-  return bare === "/scriptview" || /^\/scriptview\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
+  return bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
 }
 
 export function hidesChrome(pathname: string, views: readonly View[] | undefined): boolean {

@@ -1,7 +1,7 @@
-// view-detail-columns.test.tsx — a Script view's Columns picker, when the
+// view-detail-columns.test.tsx — a ServiceCue view's Columns picker, when the
 // column sets fail to load.
 //
-// The read used to `.catch(() => setScriptViewLayouts([]))`. The picker then
+// The read used to `.catch(() => setServiceCueLayouts([]))`. The picker then
 // offered only "All columns", and labelled the view's own saved set
 // "· not found", which says it was deleted. It was not; the read failed. The
 // failure path now shows the failure in the picker's place, so there is also
@@ -33,7 +33,7 @@ const VIEW = {
   name: "Booth script",
   kind: "script",
   createdAt: "2026-01-01T00:00:00.000Z",
-  scriptViewLayoutId: "svl-audio",
+  serviceCueLayoutId: "svl-audio",
 } as View;
 
 /** Only what the script branch reads; everything else is inert here. */
@@ -43,7 +43,6 @@ function props(kind: ViewKind = "script"): Parameters<typeof ViewDetail>[0] {
     canDelete: true,
     stageState: { views: [VIEW], outputs: [] },
     wirelessChannels: [],
-    teamPositions: [],
     localSlots: [],
     slotsDirty: false,
     isSavingSlots: false,
@@ -61,7 +60,7 @@ function props(kind: ViewKind = "script"): Parameters<typeof ViewDetail>[0] {
 
 function stubFetch(fail: boolean) {
   return stubFetchWithLog((url) => {
-    if (url.includes("/api/scriptview/layouts")) {
+    if (url.includes("/api/servicecue/layouts")) {
       if (fail) throw new TypeError("fetch failed");
       return ok([{ id: "svl-audio", name: "Audio", order: 0 }]);
     }
@@ -88,8 +87,8 @@ test("a failed column-set read says so in the picker's place, and reaches the lo
     );
     assert.equal(!!screen.queryByText(/not found/i), false, "the view's column set was not deleted — the read failed");
     assert.ok(
-      f.logs.some((l) => l.tag === "scriptview" && /column sets/i.test(l.message)),
-      `expected a [scriptview] line naming the column sets — got ${JSON.stringify(f.logs)}`,
+      f.logs.some((l) => l.tag === "servicecue" && /column sets/i.test(l.message)),
+      `expected a [servicecue] line naming the column sets — got ${JSON.stringify(f.logs)}`,
     );
   } finally {
     f.restore();
@@ -102,7 +101,7 @@ test("a slow failure from before a kind change does not replace the picker", asy
   let failFirst: (e: Error) => void = () => {};
   let reads = 0;
   const f = stubFetchWithLog((url) => {
-    if (!url.includes("/api/scriptview/layouts")) return ok({});
+    if (!url.includes("/api/servicecue/layouts")) return ok({});
     reads += 1;
     if (reads === 1) return new Promise((_, reject) => { failFirst = reject; });
     return ok([{ id: "svl-audio", name: "Audio", order: 0 }]);
@@ -130,7 +129,7 @@ test("a read that works after a failed one brings the picker back", async () => 
   // Script fails; Stage, then Script again, reads the column sets.
   let reads = 0;
   const f = stubFetchWithLog((url) => {
-    if (!url.includes("/api/scriptview/layouts")) return ok({});
+    if (!url.includes("/api/servicecue/layouts")) return ok({});
     reads += 1;
     if (reads === 1) throw new TypeError("fetch failed");
     return ok([{ id: "svl-audio", name: "Audio", order: 0 }]);

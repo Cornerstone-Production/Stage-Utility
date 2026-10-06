@@ -176,9 +176,9 @@ export function ExportPlanDialog({
                 />
               </Line>
               <Line
-                label="ScriptView layouts"
+                label="ServiceCue layouts"
                 sub="the column presets these views use"
-                tag={`${data.scriptviewLayouts}`}
+                tag={`${data.serviceCueLayouts}`}
               />
             </div>
           )}

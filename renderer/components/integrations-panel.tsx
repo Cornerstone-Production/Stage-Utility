@@ -1,6 +1,7 @@
 import { isMask } from "@main/services/mask";
 import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
+import { AppLink } from "../app/app-link";
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
@@ -87,11 +88,12 @@ export function integrationFlashId(id: string): string {
  * The order integrations are laid out in, by purpose.
  *
  * The headings these categories used to draw are gone: eight of them over
- * sixteen integrations meant most held ONE card, and a heading above a single
- * card in a four-column grid wastes three quarters of the row and rebuilds the
- * tall thin column the grid exists to remove. The ORDER is kept, so Planning
- * Center and ProdCom still sit next to each other and the Ross pair is still
- * adjacent — which is all the pair card and the headings were really doing.
+ * every integration this build ships meant most held ONE card, and a heading
+ * above a single card in a four-column grid wastes three quarters of the row
+ * and rebuilds the tall thin column the grid exists to remove. The ORDER is
+ * kept, so Planning Center and ProdCom still sit next to each other and the
+ * Ross pair is still adjacent — which is all the pair card and the headings
+ * were really doing.
  */
 const CATEGORY_ORDER = [
   ["planning-center", "prodcom"], // Service & plan
@@ -99,7 +101,7 @@ const CATEGORY_ORDER = [
   ["smaart"], // Audio
   ["sensource"], // People
   ["wireless"], // Wireless
-  ["resi", "youtube"], // Streaming
+  ["resi", "youtube", "video"], // Streaming
   ["companion", "obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
   ["scores"], // Information
 ] as const satisfies readonly (readonly IntegrationId[])[];
@@ -178,7 +180,7 @@ function firstString(config: Record<string, unknown>, keys: string[]): string {
  * The card's second line: what this integration is pointed at, or what it is.
  *
  * A row could get away with a name and a badge because it was 1176px wide and
- * about to be opened anyway. A 252px card in a grid of sixteen has to answer
+ * about to be opened anyway. A 252px card in a grid this size has to answer
  * "which one is this" on its own, and for a configured integration the useful
  * answer is the address — that is what an operator is checking when something is
  * down. Derived from the descriptor rather than a per-id table, so adding an
@@ -213,14 +215,20 @@ function fmtSynced(iso: string | null | undefined): string {
  * twice: record where every card is, because this is what moves one between the
  * two grids.
  */
-async function toggleIntegration(
+export async function toggleIntegration(
   id: string,
   enabled: boolean,
   {
+    label,
     onBeforeMove,
     setBusy,
     onStateChange,
   }: {
+    /** The integration's own display name — a
+     *  failed toggle used to read "Failed to enable: <error>", with no
+     *  saying WHICH integration; every caller has this on hand already
+     *  (the descriptor its own card or dialog is already showing). */
+    label: string;
     /** Called before the state comes back — the moment to record card positions. */
     onBeforeMove?: () => void;
     setBusy: (busy: boolean) => void;
@@ -233,7 +241,9 @@ async function toggleIntegration(
     onStateChange(await ipc<IntegrationState>("integrations:setEnabled", { id, enabled }));
   } catch (err) {
     console.error("[IntegrationsPanel:toggle]", id, enabled, err);
-    toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+    // errorMessage(), never String(err): on a real Error (every ipc() failure
+    // is one) String() adds an "Error: " prefix that reads as part of the reason.
+    toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${errorMessage(err)}`);
   } finally {
     setBusy(false);
   }
@@ -259,7 +269,21 @@ function bespokePanelFor(descriptor: IntegrationDescriptor): ReactNode | null {
   // multi-league team picker is not expressible as a ConfigField.
   if (descriptor.id === "scores") return <ScoresTeamsPanel />;
   if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
+  // Every feed and port lives on its own page, not in this dialog — see
+  // VIDEO_DESCRIPTOR's own comment in integration-manager.ts.
+  if (descriptor.id === "video") return <VideoFeedsLinkPanel />;
   return null;
+}
+
+function VideoFeedsLinkPanel() {
+  return (
+    <p className="px-1 py-2 text-callout text-fg-muted">
+      Feeds and the relay's status live on their own page; its ports are in Advanced.{" "}
+      <AppLink to="/video-feeds" className="text-accent hover:underline">
+        Open Video feeds
+      </AppLink>
+    </p>
+  );
 }
 
 /**
@@ -501,7 +525,7 @@ export function IntegrationDialog({
       return true;
     } catch (err) {
       console.error("[IntegrationsPanel:save] error", err);
-      toast.error(`Failed to save: ${String(err)}`);
+      toast.error(`Failed to save: ${errorMessage(err)}`);
       return false;
     } finally {
       setIsSaving(false);
@@ -510,6 +534,7 @@ export function IntegrationDialog({
 
   const toggleEnabled = (enabled: boolean) =>
     toggleIntegration(descriptor.id, enabled, {
+      label: descriptor.label,
       onBeforeMove,
       setBusy: setToggling,
       onStateChange,
@@ -521,7 +546,7 @@ export function IntegrationDialog({
       await ipc("stage:refresh");
       toast.success("Plan refreshed from PCO.");
     } catch (err) {
-      toast.error(`Refresh failed: ${String(err)}`);
+      toast.error(`Refresh failed: ${errorMessage(err)}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -562,7 +587,7 @@ export function IntegrationDialog({
       setTestResult(result);
     } catch (err) {
       console.error("[IntegrationsPanel:test] error", err);
-      setTestResult({ ok: false, message: String(err) });
+      setTestResult({ ok: false, message: errorMessage(err) });
     } finally {
       setIsTesting(false);
     }
@@ -737,7 +762,7 @@ export function IntegrationDialog({
                   {descriptor.description}{" "}
                   {/* Where the setup steps went. The descriptions used to walk an
                       operator through the OTHER application's preferences, which
-                      made every card a paragraph and a grid of sixteen a wall. The
+                      made every card a paragraph and a grid this size a wall. The
                       steps are in docs/integrations/, and this is the only thing
                       in the app that points at them. */}
                   <a
@@ -985,11 +1010,12 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   const handleToggle = useCallback(
     (id: string, enabled: boolean) =>
       toggleIntegration(id, enabled, {
+        label: data?.descriptors.find((d) => d.id === id)?.label ?? id,
         onBeforeMove: captureCardPositions,
         setBusy: (busy) => setTogglingId(busy ? id : null),
         onStateChange: handleStateChange,
       }),
-    [captureCardPositions, handleStateChange],
+    [captureCardPositions, handleStateChange, data],
   );
 
   if (isLoading) {
@@ -1043,7 +1069,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   return (
     <div className={cn("flex flex-col gap-2.5", className)} ref={setSlideHost}>
       {live.length === 0 ? (
-        // "0 of 16 connected" is a useless thing to lead a fresh install with,
+        // "0 of N connected" is a useless thing to lead a fresh install with,
         // so the sentence replaces the count rather than sitting under it.
         // "open any card" names the interaction, which is not obvious from a card
         // that no longer looks like a form.
@@ -1051,7 +1077,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
           Nothing is set up yet — open any card to connect it.
         </p>
       ) : (
-        // A denominator, because how many of the sixteen are up is the one fact
+        // A denominator, because how many of them are up is the one fact
         // no single card can tell you. The old "M to set up" is cut: those cards
         // are now on screen under a heading that names the state.
         <p className="text-caption1 text-fg-muted">

@@ -17,6 +17,16 @@ A widget whose integration is not set up draws a dash rather than disappearing, 
 a screen does not silently lose a tile when a device goes offline. The palette can
 hide those: **Hide widgets whose integration is not set up**.
 
+A status readout also draws that dash on a screen that has just loaded, until its
+source answers for the first time. Offline, No recorder, No teams followed,
+ProPresenter offline, No live service, No service plan, a cue button's Unbound, a
+baptism count of 0 and a screen tile's dark dot are each a claim, and none is
+drawn before the answer that makes it true. A plan that could not be read says
+**Couldn't load the plan** rather than that there is none.
+A widget watching more than one source — **Record status** on any recorder,
+**Streaming status** on every platform — waits for all of them, unless one is
+already recording or live.
+
 See also [Layout editor](layout-editor.md) for placement, sizing and styling, and
 [Integrations](../integrations/README.md) for setting up the sources below.
 
@@ -97,8 +107,8 @@ right. Expand it and the tiles inside the panel get their own controls back, so
 a multiview inside a multiview still drills down one level at a time; Escape
 closes one level per press.
 
-**Service order** is superseded by ScriptView — see
-[ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
+**Service order** is superseded by ServiceCue — see
+[ServiceCue and Baptisms](../features/servicecue-and-baptisms.md). It is kept so
 existing screens do not break.
 
 **Embedded view** offers every view kind and draws every one of them, **Calendar**
@@ -441,7 +451,7 @@ testimony pass has run — per-person mode never has a total), **Count**,
 own word rather than a running clock or a person number, on every field — the
 baptisms have begun but nobody has stepped up yet.
 
-See [ScriptView and Baptisms](../features/scriptview-and-baptisms.md).
+See [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
 
 ## Control
 
@@ -465,7 +475,7 @@ see the same text. See [OSC](../integrations/osc.md) and
 **Action button** picks an **Action** from the same registry the
 [automation rules editor](../automation.md) offers — every action in
 [Actions](../automation.md#actions), including advancing or stepping back
-through the [baptism timer](../features/scriptview-and-baptisms.md). Choosing
+through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
 one that takes parameters (a Companion button coordinate, a RossTalk command)
 shows the same fields the rule editor would show for it. **Label** is blank by
 default, which draws the action's own name; type one to override it. A button
@@ -519,8 +529,55 @@ once changes every screen. See [Layout editor](layout-editor.md) for containers.
 | Widget | What it shows | Source |
 |---|---|---|
 | **NDI video** | An NDI source from the network | NDI |
+| **Video** | A live camera or program feed, chosen by id | The Video feeds page |
 
 NDI needs the native client. The web build ignores this widget.
+
+**Video** points at a feed set up once on the [Video feeds](../integrations/video-feeds.md)
+page under Screens — renaming a feed there does not break a widget bound to it,
+since the binding is the feed's id, not its name. Always muted, with no
+controls, and it only opens a connection while it is actually on screen and the
+tab is visible. **Feed** picks which one it plays. **Fit** chooses between
+showing the whole picture (letterboxed) and filling the box (cropped). **Show
+feed name** draws the feed's name over the picture. **When the feed is
+offline** picks what shows in its place: a message, your Branding logo, or
+nothing at all.
+
+A YouTube or Resi feed plays in the platform's own player. A feed pointed at
+another WebRTC or HLS address plays over HLS when the address ends in `.m3u8`,
+or over WebRTC otherwise. Stage Utility cannot see whether either kind's
+source is live, so a failed attempt retries the same method rather than
+switching to the other, after a delay that starts at 1 second and doubles to
+30; playback that holds for 10 seconds starts the delay over. It never gives
+up on such a feed.
+
+| State | Shown as |
+|---|---|
+| No feed chosen | "Choose a feed" |
+| Connecting | A pulsing dot and "Connecting to \<feed name\>" |
+| Waiting | "Waiting for the source" and "Nothing is sending to this feed yet" — a push feed nothing has sent to yet, with the relay running |
+| Video off | "Video is off" and "Turn video on to play this feed" — a pull or push feed while video is switched off |
+| Waiting for the relay | "Waiting for the video relay" and "It is starting up" — a pull or push feed while the relay is starting, downloading, or failing and retrying |
+| Live | The picture |
+| Live, over HLS | The picture, with a badge counting how many seconds behind live it is |
+| Offline | Your **When the feed is offline** setting |
+| Can't play here | "This screen can't play video" and "\<feed name\> plays on the other screens" |
+
+A relay feed that falls back to HLS because WebRTC failed on this screen
+tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
+place, and moves over only once WebRTC is carrying frames — the picture never
+drops for the attempt.
+
+A pull feed reading standby is connected to all the same: the relay dials a
+pull feed's source only once something asks to watch it, so the widget's own
+request is what brings it up.
+
+**Offline** is what shows when a widget's feed has been deleted from the Video
+feeds page while a layout still points at it, and while a feed that dropped
+waits for its next attempt. **Can't play here** is this screen's browser
+lacking WebRTC or HLS support for the feed's address, or this screen's own
+**Use HLS on this screen** switch (Screens page) turned off for a feed that
+needs HLS to play at all.
 
 ---
 

@@ -13,6 +13,7 @@ import { useReportUnsavedWork } from "../../components/unsaved-work";
 import { SlotsTargetPill, confirmDiscardSlotEdits, useSlotsTarget } from "./slots-target-pill";
 import { registerTargetGuard } from "./editing-target";
 import { PlanSwitcher } from "./plan-switcher";
+import { errorMessage } from "@main/services/errors";
 
 function freshSlotId(): string {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -39,16 +40,10 @@ export function InlineSlotsEditor({
   const { state } = useStageState();
   const queryClient = useQueryClient();
   const serviceTypeId = state?.serviceTypeId ?? null;
-  const pcoConfigured = !!state?.pcoConfigured;
 
   const { data: wirelessChannels = [] } = useQuery({
     queryKey: ["wireless:listChannels"],
     queryFn: () => ipc<WirelessChannel[]>("wireless:listChannels"),
-  });
-  const { data: teamPositions = [] } = useQuery({
-    queryKey: ["stage:listTeamPositions", serviceTypeId],
-    queryFn: () => ipc<TeamPositionDTO[]>("stage:listTeamPositions"),
-    enabled: !!serviceTypeId && pcoConfigured,
   });
   const { data: slotPresets = [] } = useQuery({
     queryKey: ["presets:list"],
@@ -190,7 +185,7 @@ export function InlineSlotsEditor({
       slotsTarget.announceSaved();
       return true;
     } catch (err) {
-      toast.error(`Failed to save slots: ${String(err)}`);
+      toast.error(`Failed to save slots: ${errorMessage(err)}`);
       return false;
     } finally {
       setSaving(false);
@@ -236,7 +231,7 @@ export function InlineSlotsEditor({
         queryClient.setQueryData(["presets:list"], presets);
         toast.success(`Saved arrangement "${name}".`);
       } catch (err) {
-        toast.error(`Failed to save arrangement: ${String(err)}`);
+        toast.error(`Failed to save arrangement: ${errorMessage(err)}`);
       }
     },
     handleOverwritePreset: async (id: string) => {
@@ -245,14 +240,14 @@ export function InlineSlotsEditor({
         queryClient.setQueryData(["presets:list"], presets);
         toast.success("Arrangement overwritten with current slots.");
       } catch (err) {
-        toast.error(`Failed to overwrite arrangement: ${String(err)}`);
+        toast.error(`Failed to overwrite arrangement: ${errorMessage(err)}`);
       }
     },
     handleDeletePreset: async (id: string) => {
       try {
         queryClient.setQueryData(["presets:list"], await ipc<SlotPreset[]>("presets:delete", { id }));
       } catch (err) {
-        toast.error(`Failed to delete arrangement: ${String(err)}`);
+        toast.error(`Failed to delete arrangement: ${errorMessage(err)}`);
       }
     },
     handleImportPreset: async (name: string, slots: Slot[]) => {
@@ -260,21 +255,21 @@ export function InlineSlotsEditor({
         queryClient.setQueryData(["presets:list"], await ipc<SlotPreset[]>("presets:import", { name, slots }));
         toast.success(`Imported arrangement "${name}".`);
       } catch (err) {
-        toast.error(`Failed to import arrangement: ${String(err)}`);
+        toast.error(`Failed to import arrangement: ${errorMessage(err)}`);
       }
     },
     handleRenamePreset: async (id: string, name: string) => {
       try {
         queryClient.setQueryData(["presets:list"], await ipc<SlotPreset[]>("presets:rename", { id, name }));
       } catch (err) {
-        toast.error(`Failed to rename arrangement: ${String(err)}`);
+        toast.error(`Failed to rename arrangement: ${errorMessage(err)}`);
       }
     },
     handleReorderPresets: async (ids: string[]) => {
       try {
         queryClient.setQueryData(["presets:list"], await ipc<SlotPreset[]>("presets:reorder", { ids }));
       } catch (err) {
-        toast.error(`Failed to reorder arrangements: ${String(err)}`);
+        toast.error(`Failed to reorder arrangements: ${errorMessage(err)}`);
       }
     },
   };
@@ -338,7 +333,6 @@ export function InlineSlotsEditor({
                   slots={g.slots}
                   startIndex={g.start}
                   wirelessChannels={wirelessChannels}
-                  teamPositions={teamPositions}
                   sharesWith={sharesWith}
                   onChange={updateSlot}
                   onRemove={removeSlot}

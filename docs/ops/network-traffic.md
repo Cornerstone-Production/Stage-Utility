@@ -1,8 +1,11 @@
 # Network traffic
 
 During a service with every integration running and six screens connected, Stage
-Utility uses about **1.4 Mbit/s across the whole LAN** — roughly 0.25 Mbit/s per
-screen. Between services it is close to zero.
+Utility uses about **1.4 Mbit/s across the whole LAN** for its own state and
+control traffic — roughly 0.25 Mbit/s per screen. Video is separate and far
+larger (see below): a feed playing on one screen costs about 6 Mbit/s for that
+screen alone, on top of the figure above. Between services it is close to
+zero.
 
 Figures are calculated from measured payloads and the cadences in the code, not
 captured from a packet trace.
@@ -31,16 +34,28 @@ re-send the plan, slot configuration and layouts along with it.
 - **Volatile and static data are on separate channels**, both deduplicated against
   their own last value. A setter called with the value it already had sends nothing.
 - **Clients subscribe to what they render.** A screen showing mic slots is not sent
-  the transcript.
+  the transcript. A layout — Home, a custom view, a console — reads and subscribes
+  only to the sources its placed widgets draw, so a wall showing a clock asks for
+  nothing else. A hidden widget and one inside an embedded view still count. A
+  Home tile set to show only during a service, or only the rest of the week,
+  does not count until it shows. The layout editor is the exception: it
+  subscribes to everything, so every widget's preview has data.
 - **Nothing is produced for nobody.** An integration with no subscribers stops
   resolving and serialising.
-- **Images are content-addressed and immutable.** Logos, layout images and people's
-  photos are named by a hash of their bytes and cached for a year — a changed image
-  is a new URL. A slots DISPLAY also has its photos cropped to the column shape
-  they are drawn at, which is a tall sliver — that is the saving. An inline
-  mic-slots object on a custom layout is whatever size it was dragged to, so
-  nothing server-side knows its shape: it receives the whole image and the
-  browser crops it. Larger, for the slots on that layout only.
+- **Images are content-addressed and immutable.** Logos and layout images are
+  named by a hash of their bytes, and a person's photo by Planning Center's URL,
+  which changes when the photo does; all are cached for a year, except a
+  full-size photo standing in for a smaller copy Planning Center has not sent. A slots DISPLAY
+  has its photos cropped to the column shape they are drawn at, which is a tall
+  sliver — that is the saving. An inline mic-slots object on a custom layout is
+  whatever size it was dragged to, so nothing server-side knows its shape: it
+  receives the whole image and the browser crops it.
+- **Photos come at the size they are drawn.** Each slot asks for the device
+  pixels its photo covers, so a Screens-page preview, drawn at under half size,
+  downloads a fraction of what the screen itself does: for an 11-slot and a
+  9-slot mic board, 330 KB of photos on a 2x laptop screen and 100 KB at 1x,
+  against 837 KB on the full-size screens. See
+  [Photos](../integrations/planning-center.md#photos).
 
 Idle, the stream is silent: measured at 0 bytes over 12 seconds on a server with
 nothing happening.
@@ -56,7 +71,39 @@ Integrations back off toward a dormant ceiling (see [reliability](reliability.md
 and the Planning Center poll stretches from 4 seconds to 5 minutes. With nothing
 changing, nothing is pushed. A screen left on overnight costs a keepalive.
 
+## Video
+
+A pull or push feed's own picture never travels over the event stream above:
+each screen pulls its own copy straight from the relay, at about **6 Mbit/s
+per screen per feed** (typical 1080p30 H.264, over WebRTC or HLS). Two screens
+playing the same feed cost two copies of that traffic, not one shared between
+them.
+
+- **A pull feed's source is fetched only while something is watching it** — a
+  Video widget on screen, or the editor's own preview. With nobody watching,
+  there is no connection to the source at all, whatever the switch says.
+- **The relay's own status poll runs only while something watches**
+  `video:state` — the Video feeds page open, or a Video widget on screen
+  anywhere. With nobody watching, the server asks the relay nothing.
+- **Pulled cameras are checked only while the Video feeds page is open** — one
+  RTSP `DESCRIBE` or HLS playlist GET per pulled camera every 15 seconds, never
+  a stream. A client that names `video:probe` in its channel filter is what
+  starts it; a display connecting, another page, or a client with no filter
+  (curl, Home Assistant) does not. With the page closed the server sends the
+  cameras nothing. A camera that wants a login takes two connections per check
+  (the first is refused, the second carries the login), and a busy one
+  (`406`) is asked up to two more times a moment apart, so up to three asks
+  per check.
+
 ## Leaving your network
 
-Only Planning Center. Every other integration is LAN-only, and video never passes
-through the app — NDI is discovered and received peer-to-peer by the client.
+Planning Center, and whatever an embed or external feed points at — a YouTube
+or Resi player reaches its own platform, and an external feed reaches whatever
+address it names. Once, the first time video is switched on with a pull or
+push feed, the server downloads the pinned MediaMTX release from GitHub
+(about 27 MB), unless the archive was placed by hand; see
+[Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). Every other integration is LAN-only, and so is a pull or
+push feed: its picture passes through Stage Utility's own relay, but never any
+further than the network the encoders and screens are already on. NDI is the
+one path that skips the app entirely — discovered and received peer-to-peer by
+the client.

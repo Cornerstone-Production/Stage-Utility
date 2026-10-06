@@ -1,4 +1,4 @@
-// Color for a ScriptView note category, when a layout tints rows by category rather
+// Color for a ServiceCue note category, when a layout tints rows by category rather
 // than by PCO's item colors.
 //
 // A fixed keyword table with no configuration. PCO has no color for a note category —

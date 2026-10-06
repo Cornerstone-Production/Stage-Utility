@@ -100,6 +100,7 @@ export interface SectionHandlers {
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleSetOutputHideTopBar: (id: string, hideTopBar: boolean) => Promise<void>;
+  handleSetOutputAllowHls: (id: string, allowHls: boolean) => Promise<void>;
   handleSetOutputMode: (id: string, mode: "display" | "panel") => Promise<void>;
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
@@ -115,7 +116,6 @@ export interface SectionProps {
   serviceTypes: ServiceTypeDTO[];
   plans: PlanDTO[];
   wirelessChannels: WirelessChannel[];
-  teamPositions: TeamPositionDTO[];
   layoutTemplates: LayoutTemplate[];
   localSlots: Slot[];
   slotsDirty: boolean;

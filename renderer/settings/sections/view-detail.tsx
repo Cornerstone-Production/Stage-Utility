@@ -45,7 +45,7 @@ const PREVIEW_ASPECTS = [
   { id: "ultritouch-4", label: "Ultritouch-4 · 1366 x 485", ratio: 1366 / 485 },
 ];
 
-/** Sentinel for the ScriptView column picker's "all columns" choice. */
+/** Sentinel for the ServiceCue column picker's "all columns" choice. */
 const ALL_COLUMNS = "__all__";
 
 export function ViewDetail({
@@ -53,7 +53,6 @@ export function ViewDetail({
   startEditing,
   stageState,
   wirelessChannels,
-  teamPositions,
   localSlots,
   slotsDirty,
   isSavingSlots,
@@ -69,7 +68,7 @@ export function ViewDetail({
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotsPreview" | "slotsTargetTypeName" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
+  "stageState" | "wirelessChannels" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotsPreview" | "slotsTargetTypeName" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
 > & { view: View; canDelete: boolean; startEditing?: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -83,26 +82,26 @@ export function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
-  // The ScriptView column presets, for a "script" View's Columns picker. Fetched
+  // The ServiceCue column presets, for a "script" View's Columns picker. Fetched
   // here rather than threaded through SectionProps: only this branch needs them,
-  // and they change when someone edits a preset in the ScriptView section.
-  const [scriptViewLayouts, setScriptViewLayouts] = useState<ScriptViewLayout[]>([]);
+  // and they change when someone edits a preset in the ServiceCue section.
+  const [serviceCueLayouts, setServiceCueLayouts] = useState<ServiceCueLayout[]>([]);
   // A failed read is not "no column sets". Drawn as one, the picker offered only
   // All columns and labelled this view's own set "not found".
-  const { failed, fail, clear } = useFailedReads<"layouts">("scriptview");
+  const { failed, fail, clear } = useFailedReads<"layouts">("servicecue");
   useEffect(() => {
     if (view.kind !== "script") return;
     // Cancelled when the kind changes, so a slow failure from a read that no
     // longer applies cannot replace a picker a later read has filled.
     let cancelled = false;
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+    invoke<ServiceCueLayout[]>("servicecue:listLayouts")
       .then((l) => {
         if (cancelled) return;
-        setScriptViewLayouts([...l].sort((a, b) => a.order - b.order));
+        setServiceCueLayouts([...l].sort((a, b) => a.order - b.order));
         clear("layouts");
       })
       .catch((err: unknown) => {
-        if (!cancelled) fail("layouts", "the column sets for a Script view", err);
+        if (!cancelled) fail("layouts", "the column sets for a ServiceCue view", err);
       });
     return () => {
       cancelled = true;
@@ -334,7 +333,6 @@ export function ViewDetail({
           <SlotEditor
             view={view}
             wirelessChannels={wirelessChannels}
-            teamPositions={teamPositions}
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
@@ -353,7 +351,7 @@ export function ViewDetail({
             <div className="flex flex-col">
               <span className="text-caption1 text-fg">Columns</span>
               <span className="text-caption2 text-fg-muted">
-                The same saved column sets the ScriptView pages use, so a department's columns are
+                The same saved column sets the ServiceCue pages use, so a department's columns are
                 defined once and a display and a browser tab cannot disagree about them.
               </span>
             </div>
@@ -364,18 +362,18 @@ export function ViewDetail({
               <ErrorNote>Couldn't load the saved column sets, so this view's columns can't be changed right now.</ErrorNote>
             ) : (
               <Select
-                value={view.scriptViewLayoutId ?? ALL_COLUMNS}
+                value={view.serviceCueLayoutId ?? ALL_COLUMNS}
                 onValueChange={(v: string) =>
-                  void invoke("views:setScriptViewLayout", {
+                  void invoke("views:setServiceCueLayout", {
                     id: view.id,
-                    scriptViewLayoutId: v === ALL_COLUMNS ? null : v,
+                    serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
                   }).catch((e: unknown) => toast.error(`Could not change this view's columns: ${errorMessage(e)}`))
                 }
               >
                 <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
-                  {scriptViewLayouts.map((l) => (
+                  {serviceCueLayouts.map((l) => (
                     <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -383,7 +381,7 @@ export function ViewDetail({
             )}
           </div>
           <p className="text-caption2 text-fg-muted">
-            The Script view renders the active plan's rundown — the same table as the ScriptView
+            The ServiceCue view renders the active plan's rundown — the same table as the ServiceCue
             pages, following whichever plan the app is set to. Max SPL per item lives on the
             SPL rundown view.
           </p>

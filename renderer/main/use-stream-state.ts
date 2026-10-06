@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
-import { useStatusChannel } from "./use-status-channel";
+import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 /** The SSE channel carrying each platform's live frames. */
 const PUSH = { resi: "resi:status", youtube: "youtube:status" } as const;
@@ -40,16 +40,20 @@ export function useStreamState<P extends keyof StreamDTOs>(
   platform: P,
   read: () => Promise<StreamDTOs[P]>,
   enabled = true,
-): StreamDTOs[P] | null {
+): StatusChannelResult<StreamDTOs[P]> {
   return useStatusChannel<StreamDTOs[P]>(read, PUSH[platform], enabled);
 }
 
-export function useResiState(enabled = true) {
+/** Plus whether it has answered yet — Home's streaming card, the context bar
+ *  and the custom-layout streaming widgets judge "connected" from `value`, and
+ *  must not say "not connected" (or reuse OBS's own "connected" for the
+ *  streaming trio) before `known` is true. See useStatusChannel's own header. */
+export function useResiStatus(enabled = true): StatusChannelResult<StreamStatusDTO> {
   const read = useCallback(() => invoke<StreamDTOs["resi"]>("resi:getStatus"), []);
   return useStreamState("resi", read, enabled);
 }
 
-export function useYouTubeState(enabled = true) {
+export function useYouTubeStatus(enabled = true): StatusChannelResult<YouTubeStatusDTO> {
   const read = useCallback(() => invoke<StreamDTOs["youtube"]>("youtube:getStatus"), []);
   return useStreamState("youtube", read, enabled);
 }

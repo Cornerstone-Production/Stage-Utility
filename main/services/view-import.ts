@@ -17,7 +17,8 @@ import { patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
-import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
+import { adoptLegacyViewFields, bundledServiceCueLayouts } from "./servicecue-legacy-names.js";
+import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
@@ -158,7 +159,10 @@ export interface ImportOptions {
 
 export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): Promise<ImportReport> {
   assertBundle(raw);
-  const bundle = raw;
+  // A file exported before ServiceCue was renamed carries the old field on its
+  // views and the old sideData key for its presets (read below); the views are
+  // brought forward here, before anything is remapped or stored.
+  const bundle: ViewBundle = { ...raw, views: adoptLegacyViewFields(raw.views) };
 
   // Retyping. Only a plan export names a service type, so only a plan export can
   // be landed under a different one; for a view export the choice has no
@@ -266,8 +270,8 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     if (newId) await notesStore.set(newId, content as NotesContent);
   }
 
-  const svIncoming = bundle.sideData?.scriptviewLayouts ?? [];
-  const svAfter = await scriptViewLayoutsStore.load();
+  const svIncoming = bundledServiceCueLayouts(bundle.sideData);
+  const svAfter = await serviceCueLayoutsStore.load();
   const svHave = new Set(svAfter.map((l) => l.id));
   if (svIncoming.length) {
     // One pass, in the same shape as mergeTargets below: `svHave` has to grow as
@@ -279,19 +283,19 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     for (const l of svIncoming) {
       // A local preset of the same id wins, like a target does — but say so,
       // because the imported view then renders with the LOCAL columns.
-      if (svHave.has(l.id)) skipped.push(`ScriptView preset "${l.name ?? l.id}" — kept the one already here`);
+      if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name ?? l.id}" — kept the one already here`);
       else { svHave.add(l.id); add.push(l); }
     }
-    if (add.length) await scriptViewLayoutsStore.save([...svAfter, ...add]);
+    if (add.length) await serviceCueLayoutsStore.save([...svAfter, ...add]);
   }
 
   // A view can point at a preset that was already missing at the source: export
   // ships only presets it can find. An unknown id renders as ALL columns, which
   // looks like a working display showing the wrong thing — the same reason
-  // setViewScriptViewLayout refuses one.
+  // setViewServiceCueLayout refuses one.
   for (const v of named) {
-    if (v.scriptViewLayoutId && !svHave.has(v.scriptViewLayoutId)) {
-      skipped.push(`"${v.name}" points at a ScriptView preset that is not in the file or here`);
+    if (v.serviceCueLayoutId && !svHave.has(v.serviceCueLayoutId)) {
+      skipped.push(`"${v.name}" points at a ServiceCue preset that is not in the file or here`);
     }
   }
 

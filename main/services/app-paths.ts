@@ -80,3 +80,24 @@ export function getUserDataPath(): string {
   }
   return _userDataPath;
 }
+
+/**
+ * `text` with the data-directory path taken out, for anything a LAN client
+ * reads: a path inside it reads relative to it ("video-relay/downloads"),
+ * the directory itself as "Stage Utility's data folder". A filesystem path
+ * reaches only a loopback caller (port-holder.ts's buildVersionPayload) and
+ * the server's own log, which keeps the full one.
+ */
+export function withoutDataDir(text: string, dataDir: string = getUserDataPath()): string {
+  let real = dataDir;
+  try {
+    real = fs.realpathSync(dataDir);
+  } catch {
+    // Not created yet: nothing can have named its real path either.
+  }
+  let out = text;
+  for (const dir of new Set([dataDir, real])) {
+    out = out.split(dir + path.sep).join("").split(dir + "/").join("").split(dir).join("Stage Utility's data folder");
+  }
+  return out;
+}

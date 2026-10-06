@@ -21,7 +21,7 @@ import { APP_ROOT } from "./app-root.js";
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
-import { configFilenames, storesOfClass } from "./stores.js";
+import { configFilenames, renamedStores, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
@@ -401,7 +401,19 @@ class ConfigSnapshotService {
   /** The write half of `apply`, split out so the resume can wrap all of it. */
   private async writeSnapshot(bundle: ConfigSnapshot): Promise<string[]> {
     const applied: string[] = [];
-    for (const [name, contents] of Object.entries(bundle.files)) {
+    // A backup taken before a store was renamed lists it under the file it had
+    // then. Mapped to today's name rather than skipped, because the allowlist
+    // below would otherwise drop it without a word and the restore would report
+    // success having put none of that work back.
+    const renamedTo = new Map(renamedStores().map((s) => [s.renamedFrom.filename, s.filename]));
+    for (const [listed, contents] of Object.entries(bundle.files)) {
+      const name = renamedTo.get(listed) ?? listed;
+      if (name !== listed && Object.hasOwn(bundle.files, name)) {
+        // Both spellings in one file: only a hand-merged bundle can do this. The
+        // one under today's name is the one to trust.
+        console.warn(`[config-snapshot] this backup lists both ${scrub(listed)} and ${scrub(name)}; restored ${scrub(name)} and ignored ${scrub(listed)}`);
+        continue;
+      }
       if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
       const dest = path.join(getUserDataPath(), name);
@@ -464,7 +476,7 @@ class ConfigSnapshotService {
     const id = randomUUID();
     const bundle = await this.build(name.trim() || "Untitled");
     await fs.mkdir(this.snapshotsDir(), { recursive: true });
-    await fs.writeFile(path.join(this.snapshotsDir(), `${id}.json`), JSON.stringify(bundle, null, 2), "utf8");
+    await atomicWrite(path.join(this.snapshotsDir(), `${id}.json`), JSON.stringify(bundle, null, 2));
     return this.metaOf(id, bundle);
   }
 

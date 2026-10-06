@@ -20,6 +20,8 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     blackout: false,
     locked: false,
     hideTopBar: false,
+    allowHls: true,
+    textSize: null,
     ...over,
   };
 }
@@ -192,6 +194,21 @@ describe("output state", () => {
     assert.equal(screen.k === "view" && screen.hideTopBar, false, "a display took another screen's settings from a query param");
   });
 
+  test("a screen's kept text size reaches the display and the preview standing in for it, and nothing else", () => {
+    const state = stageState({ resolvedByOutput: { "display-1": resolvedOutput({ textSize: 200 }) } });
+    const display = resolveScreen(input({ state }));
+    assert.equal(display.k === "view" && display.textSize, 200);
+
+    const card = resolveScreen(input({ displayId: "preview-v1", previewViewId: "v1", previewOutputId: "display-1", state }));
+    assert.equal(card.k === "view" && card.textSize, 200, "the Screens card drew the rundown at a size the display does not");
+
+    const viewEditor = resolveScreen(input({ displayId: "preview-v1", previewViewId: "v1", state }));
+    assert.equal(viewEditor.k === "view" && viewEditor.textSize, null, "a View's own preview took a screen's size");
+
+    const unset = resolveScreen(input());
+    assert.equal(unset.k === "view" && unset.textSize, null);
+  });
+
   test("the lock reaches the unrouted and not-configured screens too", () => {
     const unrouted = resolveScreen(input({
       state: stageState({
@@ -326,11 +343,11 @@ describe("the view kind", () => {
 
     const script = resolveScreen(input({
       state: stageState({
-        views: [{ id: "v1", name: "Script", kind: "script", scriptViewLayoutId: "sl1" }] as unknown as View[],
+        views: [{ id: "v1", name: "Script", kind: "script", serviceCueLayoutId: "sl1" }] as unknown as View[],
         resolvedByOutput: { "display-1": resolvedOutput({ kind: "script" }) },
       }),
     }));
-    assert.equal(script.k === "view" && script.view?.scriptViewLayoutId, "sl1");
+    assert.equal(script.k === "view" && script.view?.serviceCueLayoutId, "sl1");
   });
 
   test("the preview's own View wins over the routed one", () => {
@@ -445,6 +462,8 @@ describe("the view kind", () => {
       hideTopBar: false,
       isPreview: false,
       outputMode: undefined,
+      allowHls: true,
+      textSize: null,
     });
   });
 
@@ -502,6 +521,29 @@ describe("the view kind", () => {
       }),
     }));
     assert.equal(preview.k === "view" && preview.outputMode, undefined);
+  });
+
+  test("carries the output's own allowHls, but a preview always reads allowed", () => {
+    // A settings-page card is not the real screen it stands in for: showing a
+    // B-frame feed as "can't play here" on the CARD would be wrong even while
+    // the real wall it previews has its own HLS switch off.
+    const off = resolveScreen(input({
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ allowHls: false }) } }),
+    }));
+    assert.equal(off.k === "view" && off.allowHls, false);
+
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({
+        outputs: [{ id: "preview-v1", name: "Not a screen", viewId: "v1" }] as unknown as Output[],
+        // Even a resolved descriptor that itself says HLS is off, keyed under
+        // the preview's own id, must not reach the preview: a preview has no
+        // `resolved` at all (see resolveScreen), so this must be ignored.
+        resolvedByOutput: { "preview-v1": resolvedOutput({ allowHls: false }) },
+      }),
+    }));
+    assert.equal(preview.k === "view" && preview.allowHls, true, "a preview must always read HLS as allowed");
   });
 
   test("a preview of a View that no longer exists says so, instead of drawing slots", () => {

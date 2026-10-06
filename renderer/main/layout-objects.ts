@@ -97,14 +97,14 @@ export interface LayoutObjectSpec {
     /**
      * Builds the replacement config from the retired object's own config, plus
      * whatever context the conversion needs but the type itself does not carry
-     * (right now, only which Script view to point an Embedded view at).
+     * (right now, only which ServiceCue view to point an Embedded view at).
      *
      * One function per retired type rather than one shared "convert to X"
      * button, because the five retirements do not share a shape: two pick a
      * recorder, two pick a platform, one points at a view by id. A single
      * generic conversion would have to special-case all three anyway.
      */
-    convert: (old: LayoutObjectConfig, ctx: { scriptViewId: string | null }) => LayoutObjectConfig;
+    convert: (old: LayoutObjectConfig, ctx: { serviceCueId: string | null }) => LayoutObjectConfig;
     /**
      * Extra caveat text shown under `why`, for a conversion that is not a
      * like-for-like swap. Only `service-order` has one today: the replacement
@@ -265,7 +265,7 @@ const BARE = (): LayoutStyle => ({});
 /**
  * The font size an embedded View starts at, as a fraction of layout height.
  *
- * Derived from the ScriptView page rather than picked: the page sets
+ * Derived from the ServiceCue page rather than picked: the page sets
  * `clamp(0.8rem, 1.6vmin, 1.1rem)`, which on a 1080-tall 16:9 screen resolves to
  * 1.6vmin = 17.28px, and 17.28 / 1080 = 0.016. Exported so the layout editor can
  * show the same number as the default instead of a second guess — the inspector
@@ -306,6 +306,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "brand-logo", useEmptySlotLogo: false }),
     style: BARE,
     homeSize: "s",
+  },
+  video: {
+    label: "Video",
+    blurb: "A live camera or program feed",
+    group: "Layout",
+    config: () => ({ type: "video", feedId: null, fit: "contain", showLabel: true, whenOffline: "message" }),
+    style: BARE,
+    homeSize: "l",
   },
 
   // Text & time
@@ -372,14 +380,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     group: null,
     retired: {
       replacedBy: "view-embed",
-      why: "Embedded view renders the full ScriptView rundown — the same table as the ScriptView pages, with your saved column presets.",
+      why: "Embedded view renders the full ServiceCue rundown — the same table as the ServiceCue pages, with your saved column presets.",
       caveat:
-        "It is not a like-for-like swap, so read this first: the replacement scrolls rather than shrinking to fit, and Fit to height, Scroll and the note-category picker do not carry over. Its columns come from the Script view's preset instead. Set the object's font size afterwards — nothing auto-fits it now.",
+        "It is not a like-for-like swap, so read this first: the replacement scrolls rather than shrinking to fit, and Fit to height, Scroll and the note-category picker do not carry over. Its columns come from the ServiceCue view's preset instead. Set the object's font size afterwards — nothing auto-fits it now.",
       convert: (_old, ctx) => ({
         type: "view-embed",
         // Only auto-pick when there is no ambiguity; otherwise leave it for the
         // picker rather than guessing which view was meant.
-        viewId: ctx.scriptViewId,
+        viewId: ctx.serviceCueId,
         showHeader: false,
       }),
     },
@@ -392,7 +400,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "Another view, shown inside this one",
     group: "PCO / service",
     config: () => ({ type: "view-embed", viewId: null }),
-    // The size the ScriptView PAGE actually renders at, expressed as a fraction
+    // The size the ServiceCue PAGE actually renders at, expressed as a fraction
     // of height: the page's `clamp(0.8rem, 1.6vmin, 1.1rem)` resolves to ~17.3px
     // on a 1080-tall 16:9 screen, and 17.3/1080 ≈ 0.016.
     //

@@ -1,8 +1,8 @@
-// Every one of the sixteen dialogs, opened.
+// Every one of this build's dialogs, opened.
 //
 // The page's whole shape now depends on the dialog: a card holds no form, so an
 // integration whose dialog throws or comes up empty has no settings at all. This
-// opens all sixteen against the real components and checks the things that
+// opens every one against the real components and checks the things that
 // differ between them — the wide variant, the footer actions, and the inbound
 // case that gets neither a switch nor a Save.
 
@@ -18,7 +18,7 @@ const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, assertAbsent, integrationCard, settleFor, actIdle } = await import(
+const { installFakeServer, withQueryClientAndRouter, assertAbsent, integrationCard, settleFor, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -45,7 +45,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 
 async function open(id: string) {
   server = installFakeServer();
-  const c = render(withQueryClient(<IntegrationsPanel />));
+  const c = render(withQueryClientAndRouter(<IntegrationsPanel />));
   await actIdle();
   fireEvent.click(await integrationCard(c.container, id));
   await settleFor(60);
@@ -57,7 +57,7 @@ async function open(id: string) {
 const labels = (root: HTMLElement) =>
   [...root.querySelectorAll("button")].map((b) => b.textContent?.trim()).filter(Boolean);
 
-describe("all sixteen dialogs", () => {
+describe("every dialog", () => {
   for (const d of INTEGRATION_DESCRIPTOR_FIXTURE) {
     test(`${d.id} opens with its name and its settings`, async () => {
       const content = await open(d.id);
@@ -82,7 +82,7 @@ describe("all sixteen dialogs", () => {
 
   test("only the five repeater integrations render a panel that cannot wrap", async () => {
     // The direction integration-dialog-size.test.tsx cannot check on its own: it
-    // renders the five panels, this renders all sixteen BODIES. Between them,
+    // renders the five panels, this renders every BODY. Between them,
     // neither a missing marker nor a stray one can pass.
     const marked: string[] = [];
     for (const d of INTEGRATION_DESCRIPTOR_FIXTURE) {
@@ -96,6 +96,19 @@ describe("all sixteen dialogs", () => {
 });
 
 describe("the dialog footer", () => {
+  // The video card's bespoke panel replaces the form with "Open Video
+  // feeds". An <a href> IS the navigation mechanism, so asserting the real,
+  // resolved href (not a stub prop, not a button with an onClick) proves a
+  // click actually goes to /video-feeds, the same way it would in a browser.
+  test("the video card's panel links to /video-feeds, a real anchor href — not a button, not a dead link", async () => {
+    const content = await open("video");
+    const link = [...content.querySelectorAll<HTMLAnchorElement>("a")].find(
+      (a) => a.textContent?.trim() === "Open Video feeds",
+    );
+    assert.ok(link, "no \"Open Video feeds\" anchor in the video card's panel");
+    assert.equal(link!.getAttribute("href"), "/video-feeds");
+  });
+
   test("an inbound integration gets no switch", async () => {
     const content = await open("companion");
     assertAbsent(

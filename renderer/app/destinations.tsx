@@ -22,12 +22,13 @@ import {
   PaletteIcon,
   PlugIcon,
   SlidersHorizontalIcon,
+  VideoIcon,
   ZapIcon,
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
-import { ScriptViewIndex } from "../main/scriptview-index-view";
-import { ScriptViewPlan } from "../main/scriptview-plan-view";
+import { ServiceCueIndex } from "../main/servicecue-index-view";
+import { ServiceCuePlan } from "../main/servicecue-plan-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { AutomationSection } from "../settings/sections/automation-section";
@@ -37,7 +38,8 @@ import { HomeRoute } from "./home/home-route";
 import { ScreensRoute } from "./screens/screens-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
-import { ScriptViewSection } from "../settings/sections/scriptview-section";
+import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
+import { ServiceCueSection } from "../settings/sections/servicecue-section";
 import {
   AdvancedRoute,
   BrandingRoute,
@@ -73,14 +75,21 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: ScreensRoute,
   },
   {
-    // The OPERATOR's launcher, in the shell. The same page at /scriptview is
+    path: "/video-feeds",
+    label: "Video feeds",
+    description: "Camera and program feeds for layouts and Home.",
+    icon: <VideoIcon className="size-4" />,
+    Component: VideoFeedsRoute,
+  },
+  {
+    // The OPERATOR's launcher, in the shell. The same page at /servicecue is
     // the one a stage tablet opens and renders with no chrome, the same split
     // /history and /history/manage make.
-    path: "/scriptview/manage",
-    label: "ScriptView",
+    path: "/servicecue/manage",
+    label: "ServiceCue",
     description: "Pick a service to open its rundown.",
     icon: <ListChecksIcon className="size-4" />,
-    Component: ScriptViewIndex,
+    Component: ServiceCueIndex,
   },
   {
     path: "/patch",
@@ -181,9 +190,9 @@ export const UNGROUPED_PATHS = ["/"];
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/scriptview/manage", "/patch"] },
+  { label: "Content", paths: ["/servicecue/manage", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/screens"] },
+  { label: "Screens", paths: ["/screens", "/video-feeds"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.
@@ -191,20 +200,20 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
 ];
 
 /**
- * ScriptViewPlan takes its service type and layout as props, because the kiosk
+ * ServiceCuePlan takes its service type and layout as props, because the kiosk
  * router read them out of `window.location` and passed them down. Under a real
  * router they are route params, so this adapter supplies them.
  *
  * `strict: false` because this component is declared away from its route
  * definition; the params are validated by the route's path pattern.
  */
-function ScriptViewPlanRoute() {
+function ServiceCuePlanRoute() {
   const params = useParams({ strict: false }) as {
     serviceType?: string;
     layout?: string;
   };
   return (
-    <ScriptViewPlan
+    <ServiceCuePlan
       serviceTypeParam={params.serviceType ?? ""}
       layoutParam={params.layout ?? ""}
     />
@@ -219,7 +228,7 @@ function ScriptViewPlanRoute() {
  * patch and edit it from there. Routing only the viewers is exactly how both
  * editors became unreachable when Settings dissolved — see reachable.test.ts.
  *
- * `/patch/edit` and `/scriptview/presets` are literal segments and cannot
+ * `/patch/edit` and `/servicecue/presets` are literal segments and cannot
  * collide with `$serviceType/$layout`, which is three deep.
  */
 /**
@@ -246,9 +255,9 @@ const HISTORY_SHARED_PAGE = {
  * ever say what it is — the same reason a console draws its own name in the
  * layout editor.
  */
-/** The tablet's ScriptView launcher: chromeless, so it draws its own heading. */
-function ScriptViewShared() {
-  return <ScriptViewIndex standalone />;
+/** The tablet's ServiceCue launcher: chromeless, so it draws its own heading. */
+function ServiceCueShared() {
+  return <ServiceCueIndex standalone />;
 }
 
 function ServiceHistoryShared() {
@@ -270,7 +279,7 @@ export interface NestedRoute {
    * Name for the shell's header and the mobile top bar.
    *
    * Omitted where the page draws its own heading — the layout editor puts the
-   * view's name in an editable field, a ScriptView plan draws ScriptViewHeader —
+   * view's name in an editable field, a ServiceCue plan draws ServiceCueHeader —
    * in which case the chrome falls back to the parent destination's name rather
    * than stacking a second title above the page's own.
    */
@@ -288,16 +297,16 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
     Component: ServiceHistoryShared,
     ...HISTORY_SHARED_PAGE,
   },
-  // Titled here for the same reason /history is: /scriptview/manage does not
-  // prefix-match /scriptview, so the tablet's page would have no name.
+  // Titled here for the same reason /history is: /servicecue/manage does not
+  // prefix-match /servicecue, so the tablet's page would have no name.
   {
-    path: "/scriptview",
-    Component: ScriptViewShared,
-    label: "ScriptView",
+    path: "/servicecue",
+    Component: ServiceCueShared,
+    label: "ServiceCue",
     description: "Pick a service and a layout to open its rundown.",
   },
-  { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
-  { path: "/scriptview/presets", Component: ScriptViewSection },
+  { path: "/servicecue/$serviceType/$layout", Component: ServiceCuePlanRoute },
+  { path: "/servicecue/presets", Component: ServiceCueSection },
   { path: "/patch/edit", Component: PatchSection },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },

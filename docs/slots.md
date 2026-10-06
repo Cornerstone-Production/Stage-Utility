@@ -31,6 +31,26 @@ an unmatched slot stays empty rather than showing the wrong face.
 Sub-variants group with their base: `Vocals (BGVs)` fills a slot asking for
 `Vocals`.
 
+**The picker.** Open the list to tick positions.
+
+- **Positions come from the service type being edited**, the one the plan
+  switcher points at, not whichever type is live. Editing another type's board
+  lists that type's teams and positions.
+- **Selected** is pinned at the top, in the order you ticked, with a count. Untick
+  from there to remove one. Removing a position removes its note filter with it.
+  A position the edited type does not have stays in Selected so it can still be
+  removed, tagged with the type that has it (`Kickoff only`) when that is known,
+  or `not in this service type` otherwise.
+- **Any position** follows Selected, then the edited type's teams, minus what is
+  already selected. Search filters every group, Selected included.
+- **Show positions from other service types**, under the search box and off by
+  default, adds every other type's positions not already listed, grouped by type
+  and tagged with it. It reads each type from Planning Center the first time it
+  is turned on.
+
+A position matches by name, not by type. A name ticked from another service type
+fills the slot on any type that has a position with that name.
+
 ### By person
 
 A slot linked by person always shows one individual, whether or not they are

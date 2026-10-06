@@ -5,7 +5,7 @@
 // resolves anyway, needs rebinding — so no caller has to re-derive them.
 
 import type { View } from "./views.js";
-import type { Slot, ScriptViewLayout, SlotPreset } from "./pco.js";
+import type { Slot, ServiceCueLayout, SlotPreset } from "./pco.js";
 import type { PatchVariant } from "./patch.js";
 import type { OscTargetConfig } from "./osc.js";
 import type { RossTalkTargetConfig } from "./rosstalk.js";
@@ -13,7 +13,7 @@ import type { RossTalkTargetConfig } from "./rosstalk.js";
 /** A binding that names something — hardware, or a screen — the destination will
  *  not have. */
 export interface UnresolvableRef {
-  kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter" | "output";
+  kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter" | "output" | "video-feed";
   /** The view whose layout holds it — without this the rebind list cannot link
    *  anywhere, since an object id alone does not say which editor to open. */
   viewId: string;
@@ -68,7 +68,7 @@ export interface ViewBundle {
     /** layout object id -> notes content. Left loose because NotesContent lives
      *  in a service module, and this type is imported by the renderer. */
     notes: Record<string, unknown>;
-    scriptviewLayouts: ScriptViewLayout[];
+    serviceCueLayouts: ServiceCueLayout[];
     /** The patch variant this service type is assigned to, per sheet that
      *  assigns one. The RIG — devices, endpoints, the default patch — is not
      *  exported: it is the building's, and a variant is an overlay of overrides

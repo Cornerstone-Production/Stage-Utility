@@ -51,12 +51,52 @@ all and moves on the configured interval exactly as before.
 
 The **Pre-service countdown** option picks what the countdown counts to: *Plan
 start* (matches PCO's green timer, service time minus pre-service items above a
-"service start" header) or *Service start time*. Avatars are upscaled and plan
-attachments (e.g. the stage plot) are proxied and cached so kiosk displays get a
-stable URL that always tracks the current plan.
+"service start" header) or *Service start time*. People's photos are proxied at
+the size each screen draws them (see [Photos](#photos)), and plan attachments
+(e.g. the stage plot) are proxied and cached so kiosk displays get a stable URL
+that always tracks the current plan.
 
 Testing the integration lists service types as a minimal auth check. The Secret
 is stored encrypted (secret key `secret`).
+
+## Photos
+
+A person's photo is served through `/photos?u=<avatar url>`, so a display never
+fetches from Planning Center itself. PCO resizes avatars on request through a
+`g=WxH` parameter on the avatar URL: `g=256x256` fits the image inside that box,
+and a trailing `#` (`%23`) crops to exactly that shape. Without it PCO sends the
+original upload, which is about 1000px and, for a PNG, often over 1 MB. The
+parameter is not in PCO's published API docs; the behaviour here was measured.
+
+Two sides choose the size:
+
+- **The server** picks the shape. A slots display gets a crop to its column; an
+  inline slots-grid, or a grid embedding another view, gets the whole image,
+  because only the browser knows the box it is drawn in.
+- **The browser** picks the size. Each slot measures the device pixels its photo
+  is actually drawn at, including the scale of a Screens-page preview, and adds
+  `&s=` with the longest side, rounded up to 128, 192, 256, 384, 512 or 768. The
+  proxy scales the geometry down to that and never up. A box that needs more than
+  768 sends no `s` and gets the server's geometry unchanged, which is what a
+  full-size display column usually is.
+
+A slot's size only grows. It is measured again when its box resizes, and a photo
+that loads stretched — a transform applied after the slot mounted, a landscape
+photo in a tall box — asks for a size that covers its box. A letterboxed custom
+layout draws no object until its canvas scale is known, so a photo on it measures
+at the size it is shown.
+
+Each size is its own cache entry, on disk and in the browser, and is served
+`immutable` for a year. PCO gets 1.5 s to deliver a small copy. After that the
+photo at its own geometry stands in, from disk at once or fetched alongside the
+small copy, whichever arrives first, and is served `no-cache` so the next load
+asks again; the small copy's fetch carries on behind it. A small copy PCO fails
+is logged once on a `[photo-cache]` line and not asked for again for five
+minutes.
+
+A response that is a web page, JSON or XML rather than an image (a captive
+portal, a proxy's error page) is refused on a `[photo-cache]` line and never
+cached, so the next request asks again.
 
 ## API version
 

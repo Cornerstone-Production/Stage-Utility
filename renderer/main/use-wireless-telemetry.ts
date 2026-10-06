@@ -47,6 +47,6 @@ export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
     return invoke<DeviceStatus[]>("wireless:channelStatuses");
   }, [connectionsRev]);
 
-  const channels = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
+  const { value: channels } = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
   return Array.isArray(channels) ? channels : NO_CHANNELS;
 }

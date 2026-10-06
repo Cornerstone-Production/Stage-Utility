@@ -4,6 +4,8 @@
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
+import { getUserDataPath } from "./app-paths.js";
+import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -23,13 +25,16 @@ import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
 import {
+  isDefaultRundownPlan,
   planWindow,
   sameIds,
   sortUpcoming,
   switcherTypes,
   toUpcoming,
   UPCOMING_CACHE_MS,
+  UPCOMING_PARTIAL_CACHE_MS,
 } from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
 import type {
@@ -40,26 +45,27 @@ import type {
 } from "../types/calendar.js";
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
-import { migrateInlineBrandingImages } from "./branding-image-store.js";
+import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
-import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
-import { scriptViewConfigStore } from "./scriptview-config-store.js";
+import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
+import { serviceCueConfigStore } from "./servicecue-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
-import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
-import type { CategoryRole } from "../types/scriptview-roles.js";
+import { serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
+import type { CategoryRole } from "../types/servicecue-roles.js";
+import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
@@ -67,7 +73,7 @@ const PRIMARY_DISPLAY_ID = "display-1";
  * The embedded-view font size that shipped as the palette default, and the one
  * that replaced it.
  *
- * `OLD` rendered at ~32px on a 1080-tall screen where the ScriptView page renders
+ * `OLD` rendered at ~32px on a 1080-tall screen where the ServiceCue page renders
  * at ~17px, so an embed came out at nearly double the page and showed a third of
  * the rundown. Changing the palette default fixed new objects and did nothing for
  * existing ones: the value is written into the object when it is placed, so
@@ -376,7 +382,17 @@ export class StageController {
    * edits three service types in a row, and when PCO goes down mid-edit the last
    * good list is a far better answer than an empty one.
    */
-  private upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null = null;
+  private upcomingCache: {
+    at: number;
+    days: number;
+    allowed: string[];
+    plans: UpcomingPlan[];
+    /** Some service type could not be read: reused for a shorter time. */
+    partial: boolean;
+  } | null = null;
+  /** Plan-list reads that keep failing, said once per outage. Keys:
+   *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
+  private readonly plansOutage = new OutageLog();
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -428,6 +444,20 @@ export class StageController {
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
+    // FIRST, before any store is read: a release that renames a store's file
+    // leaves the old one on disk, and it is moved into place here. It is also what
+    // keeps a config snapshot taken right after boot complete — a snapshot reads
+    // the data directory by the NEW names, so an unmoved file would be missing
+    // from the automatic backup. One failing move does not stop the rest; the old
+    // file is still there, so it is named loudly and the box keeps serving.
+    // Here rather than in server.ts so a test can run it: the call is part of
+    // init(), which is what slug-migration.test.ts and others already drive.
+    for (const f of (await adoptLegacyStoreFiles(getUserDataPath())).failures) {
+      console.error(
+        `[${scrub(f.logTag)}] could not move ${scrub(f.legacy)} to ${scrub(f.current)}: ${scrub(f.error)}. ` +
+          `The old file is untouched; what it holds will not load until it is moved by hand.`,
+      );
+    }
     await notesStore.init();
     // Beside notesStore, because `get` is synchronous and reads the module cache
     // directly: without this the first render after a restart answered from an
@@ -927,7 +957,7 @@ export class StageController {
       cached &&
       cached.days === days &&
       sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
-      now - cached.at < UPCOMING_CACHE_MS
+      now - cached.at < (cached.partial ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
       return { plans: cached.plans, cacheAgeMs: now - cached.at };
     }
@@ -944,13 +974,29 @@ export class StageController {
     const failures: string[] = [];
     const perType = await Promise.all(
       types.map(async (t) => {
+        const key = `upcoming:${t.id}`;
         try {
-          return toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const rows = toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const recovered = this.plansOutage.ok(key, now);
+          if (recovered.log) {
+            console.log(`[plans] upcoming list: ${scrub(t.name)} can be read again${scrub(recovered.note)}`);
+          }
+          return rows;
         } catch (err) {
           // Returned to the caller as a shortfall in the list, not swallowed: a
           // total failure below becomes `unavailable`, and a partial one is
           // logged so an operator with a missing type has something to read.
-          failures.push(`${t.name}: ${errorMessage(err)}`);
+          const reason = errorMessage(err);
+          failures.push(`${t.name}: ${reason}`);
+          // Once per outage per type, not once per refresh: a partial list is
+          // reused for only thirty seconds, so a type that stays down would
+          // otherwise repeat this line every thirty seconds until it came back.
+          const decision = this.plansOutage.fail(key, reason, now);
+          if (decision.log) {
+            console.warn(
+              `[plans] upcoming list incomplete: ${scrub(t.name)} could not be read — ${scrub(reason)}${scrub(decision.note)}`,
+            );
+          }
           return [] as UpcomingPlan[];
         }
       }),
@@ -960,22 +1006,28 @@ export class StageController {
       return this.upcomingUnavailable(failures[0]!, now);
     }
 
+    const back = this.plansOutage.ok("upcoming", now);
+    if (back.log) console.log(`[plans] upcoming list available again${scrub(back.note)}`);
     const plans = sortUpcoming(perType.flat());
-    this.upcomingCache = { at: now, days, allowed: [...this.state.allowedServiceTypeIds], plans };
+    this.upcomingCache = {
+      at: now,
+      days,
+      allowed: [...this.state.allowedServiceTypeIds],
+      plans,
+      partial: failures.length > 0,
+    };
     console.log(
       `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
     );
-    if (failures.length > 0) {
-      console.warn(
-        `[plans] upcoming list incomplete: ${scrub(failures.length)} of ${scrub(types.length)} types could not be read — ${scrub(failures.join("; "))}`,
-      );
-    }
     return { plans, cacheAgeMs: 0 };
   }
 
-  /** The unavailable answer: the last good list when there is one, else nothing. */
+  /** The unavailable answer: the last good list when there is one, else nothing.
+   *  Logged once per outage: nothing unavailable is cached, so while Planning
+   *  Center is down every request lands here. */
   private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
-    console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}`);
+    const decision = this.plansOutage.fail("upcoming", reason, now);
+    if (decision.log) console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}${scrub(decision.note)}`);
     const cached = this.upcomingCache;
     if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
     return { plans: [], cacheAgeMs: 0, unavailable: reason };
@@ -1013,10 +1065,43 @@ export class StageController {
     return this.state;
   }
 
-  async listTeamPositions(): Promise<TeamPositionDTO[]> {
+  /** Positions for one service type: the one asked for, or the service type
+   *  selected in the app (`state.serviceTypeId`) when none is. The slot editor
+   *  asks for the type it is EDITING, which is not always the selected one. */
+  async listTeamPositions(serviceTypeId?: string): Promise<TeamPositionDTO[]> {
     this.assertPco();
-    if (!this.state.serviceTypeId) return [];
-    return pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, this.state.serviceTypeId);
+    const id = serviceTypeId ?? this.state.serviceTypeId;
+    if (!id) return [];
+    return pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, id);
+  }
+
+  /**
+   * Positions for EVERY service type, each tagged with its type.
+   *
+   * One type at a time: Planning Center rate-limits, and each call is cached per
+   * type, so a second look costs nothing. A type that cannot be read is skipped
+   * and named in `failed` rather than failing the whole list. The `[pco]` line is
+   * one per call, not one per type, so an outage is one line.
+   */
+  async listAllTeamPositions(): Promise<AllTeamPositionsDTO> {
+    this.assertPco();
+    const types = await pcoService.listServiceTypes(this.pcoAppId!, this.pcoSecret!);
+    const positions: TypedTeamPositionDTO[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    for (const t of types) {
+      try {
+        const rows = await pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, t.id);
+        for (const r of rows) positions.push({ ...r, serviceTypeId: t.id, serviceTypeName: t.name });
+      } catch (err) {
+        failed.push(t.name);
+        reasons.push(`${t.name}: ${errorMessage(err)}`);
+      }
+    }
+    if (failed.length > 0) {
+      console.warn(`[pco] team positions read failed for ${scrub(String(failed.length))} of ${scrub(String(types.length))} service types (${scrub(reasons.join("; "))})`);
+    }
+    return { positions, failed };
   }
 
   /**
@@ -1088,7 +1173,7 @@ export class StageController {
 
   /**
    * The active plan's full rundown (items + note-category columns) for the
-   * ScriptViewer / SPL-rundown dashboards. Empty when unconfigured / no plan.
+   * ServiceCue / SPL-rundown dashboards. Empty when unconfigured / no plan.
    * `noteCategories` is the canonical column order, narrowed to those actually
    * used by at least one item.
    */
@@ -1302,7 +1387,7 @@ export class StageController {
    * Which calendars and tags a calendar View draws.
    *
    * Both lists are stored WHOLE — an id with the name it read as when it was
-   * chosen. Unlike setViewScriptViewLayout, an id PCO no longer offers is NOT
+   * chosen. Unlike setViewServiceCueLayout, an id PCO no longer offers is NOT
    * refused: a tag deleted in Planning Center would then either silently widen
    * the filter or fail every save the operator makes afterwards. It is kept, and
    * the picker shows it marked, so the choice is visible and theirs to remove.
@@ -1339,10 +1424,10 @@ export class StageController {
     return this.state;
   }
 
-  // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────
+  // ── ServiceCue ──────────────────────────────────────────────────────────
 
-  async listScriptViewLayouts(): Promise<ScriptViewLayout[]> {
-    return scriptViewLayoutsStore.load();
+  async listServiceCueLayouts(): Promise<ServiceCueLayout[]> {
+    return serviceCueLayoutsStore.load();
   }
 
   /**
@@ -1350,25 +1435,25 @@ export class StageController {
    *
    * Views referencing a preset that this save removes are cleared to "all
    * columns" rather than left pointing at nothing. A dangling id degrades in the
-   * worst way available: `resolveScriptViewSpec` treats an unresolved preset the
+   * worst way available: `resolveServiceCueSpec` treats an unresolved preset the
    * same as none and renders EVERY note category, so a display configured for
    * one department quietly starts showing every other department's notes — and
    * the settings picker shows a blank trigger, because the stored value matches
    * no option, so there is nothing on screen to explain it.
    */
-  async saveScriptViewLayouts(layouts: ScriptViewLayout[]): Promise<ScriptViewLayout[]> {
-    await scriptViewLayoutsStore.save(layouts);
+  async saveServiceCueLayouts(layouts: ServiceCueLayout[]): Promise<ServiceCueLayout[]> {
+    await serviceCueLayoutsStore.save(layouts);
     const live = new Set(layouts.map((l) => l.id));
     const orphaned = this.state.views.filter(
-      (v) => v.scriptViewLayoutId && !live.has(v.scriptViewLayoutId),
+      (v) => v.serviceCueLayoutId && !live.has(v.serviceCueLayoutId),
     );
     if (orphaned.length > 0) {
       console.log(
-        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ScriptView preset — ` +
+        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ServiceCue preset — ` +
           `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
       );
       const views = this.state.views.map((v) =>
-        v.scriptViewLayoutId && !live.has(v.scriptViewLayoutId) ? { ...v, scriptViewLayoutId: null } : v,
+        v.serviceCueLayoutId && !live.has(v.serviceCueLayoutId) ? { ...v, serviceCueLayoutId: null } : v,
       );
       this.state = { ...this.state, views };
       await viewsStore.save(views);
@@ -1378,24 +1463,24 @@ export class StageController {
     return layouts;
   }
 
-  async getScriptViewConfig(): Promise<ScriptViewConfig> {
-    return scriptViewConfigStore.load();
+  async getServiceCueConfig(): Promise<ServiceCueConfig> {
+    return serviceCueConfigStore.load();
   }
 
-  async setScriptViewConfig(serviceTypeIds: string[]): Promise<ScriptViewConfig> {
-    const config: ScriptViewConfig = { serviceTypeIds };
-    await scriptViewConfigStore.save(config);
+  async setServiceCueConfig(serviceTypeIds: string[]): Promise<ServiceCueConfig> {
+    const config: ServiceCueConfig = { serviceTypeIds };
+    await serviceCueConfigStore.save(config);
     return config;
   }
 
   /** All note-category names PCO knows for a service type (drives the column
    *  picker). Unlike the rundown's `noteCategories`, this is NOT pruned to
    *  categories currently in use, so authors can pre-add a column. */
-  async listScriptViewRoles(): Promise<CategoryRole[]> {
-    return scriptViewRolesStore.load();
+  async listServiceCueRoles(): Promise<CategoryRole[]> {
+    return serviceCueRolesStore.load();
   }
 
-  async saveScriptViewRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
+  async saveServiceCueRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
     const clean = (roles ?? [])
       .filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && r.name.trim())
       .map((r) => ({
@@ -1403,7 +1488,7 @@ export class StageController {
         name: r.name.trim(),
         members: [...new Set((r.members ?? []).map((m) => String(m).trim()).filter(Boolean))],
       }));
-    await scriptViewRolesStore.save(clean);
+    await serviceCueRolesStore.save(clean);
     this.broadcast();
     return clean;
   }
@@ -1414,30 +1499,30 @@ export class StageController {
    * Only ever ADDS. Never merges (that guess is the operator's to make) and never
    * removes (a role may cover a category from a different service type).
    */
-  async seedScriptViewRoles(serviceTypeId: string): Promise<CategoryRole[]> {
-    const cats = await this.listScriptViewNoteCategories(serviceTypeId);
-    const roles = await scriptViewRolesStore.load();
+  async seedServiceCueRoles(serviceTypeId: string): Promise<CategoryRole[]> {
+    const cats = await this.listServiceCueNoteCategories(serviceTypeId);
+    const roles = await serviceCueRolesStore.load();
     const covered = new Set(roles.flatMap((r) => r.members.map((m) => m.trim().toLowerCase())));
     const missing = cats.filter((c) => !covered.has(c.trim().toLowerCase()));
     if (missing.length === 0) return roles;
     const next = [...roles, ...seedRoles(missing)];
-    await scriptViewRolesStore.save(next);
+    await serviceCueRolesStore.save(next);
     this.broadcast();
     return next;
   }
 
-  async listScriptViewNoteCategories(serviceTypeId: string): Promise<string[]> {
+  async listServiceCueNoteCategories(serviceTypeId: string): Promise<string[]> {
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return [];
     return pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId);
   }
 
-  /** Resolve the rundown for a ScriptView page. planId picks a specific plan;
+  /** Resolve the rundown for a ServiceCue page. planId picks a specific plan;
    *  otherwise the live plan (when this IS the active type) or the nearest
    *  upcoming plan. `isLive` gates the live-item highlight in the renderer. */
-  async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
-    const empty: ScriptViewRundownDTO = {
+  async getServiceCueRundown(serviceTypeId: string, planId?: string | null): Promise<ServiceCueRundownDTO> {
+    const empty: ServiceCueRundownDTO = {
       serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
-      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false,
+      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false, isDefaultPlan: true,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
 
@@ -1461,10 +1546,36 @@ export class StageController {
       return recent.find((p) => p.id === id) ?? null;
     };
 
-    let plan: PlanDTO | null;
-    if (planId) plan = await resolve(planId);
-    else if (isActiveType && this.state.planId) plan = (await resolve(this.state.planId)) ?? plans[0] ?? null;
-    else plan = plans[0] ?? null;
+    // The plan this page follows when nothing is asked for: the app's own plan on
+    // the active type, if it still resolves. When it does not, the default falls
+    // to the nearest upcoming plan, and so must the flag below.
+    //
+    // It only LABELS the page when a planId was asked for (the plan itself is the
+    // one named), so a read that fails then must not fail the request: a browse
+    // step to a plan in the upcoming list answered without touching the recent
+    // list before the label followed the default, and has to keep answering. The
+    // label degrades to the comparison it made against the app's own plan, and the
+    // failure is said once on /log. With no planId the plan IS the followed one, so
+    // there the failure propagates to the caller as it always did.
+    let followed: PlanDTO | null = null;
+    let followedUnresolved = false;
+    if (isActiveType && this.state.planId) {
+      try {
+        followed = await resolve(this.state.planId);
+        const recovered = this.plansOutage.ok(`followed:${serviceTypeId}`, Date.now());
+        if (recovered.log) console.log(`[plans] the followed plan can be read again${scrub(recovered.note)}`);
+      } catch (err) {
+        if (!planId) throw err;
+        followedUnresolved = true;
+        const decision = this.plansOutage.fail(`followed:${serviceTypeId}`, errorMessage(err), Date.now());
+        if (decision.log) {
+          console.warn(
+            `[plans] could not resolve the followed plan to label a rundown; comparing against the app's own plan instead: ${scrub(errorMessage(err))}${scrub(decision.note)}`,
+          );
+        }
+      }
+    }
+    const plan = planId ? await resolve(planId) : (followed ?? plans[0] ?? null);
     if (!plan) return empty;
 
     // serviceTypes is cached for 15 minutes, so pulling the item row colors here
@@ -1493,6 +1604,12 @@ export class StageController {
       serviceTimes,
       timeZone,
       isActivePlan: isActiveType && plan.id === this.state.planId,
+      isDefaultPlan: isDefaultRundownPlan({
+        requestedPlanId: planId ?? null,
+        resolvedPlanId: plan.id,
+        activeTypePlanId: followedUnresolved ? this.state.planId : (followed?.id ?? null),
+        nextUpcomingPlanId: plans[0]?.id ?? null,
+      }),
     };
   }
 
@@ -2525,8 +2642,15 @@ export class StageController {
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
     if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
 
+    // Images arrive as base64 data URLs. settingsStore.patch stores them as files,
+    // but only for the copy it writes: merged into this.state as-is, the full data
+    // URL (up to ~1.5 MB each) rode in every stage:state broadcast until the next
+    // restart reloaded the reference from disk. Store them here, before the merge,
+    // so memory and disk hold the same `/branding-images/` URL.
+    const stored = await externalizeBrandingImages(stateNext);
+
     // Settings-only fields (originals + crops), never broadcast.
-    const settingsNext: Record<string, unknown> = { ...stateNext };
+    const settingsNext: Record<string, unknown> = { ...stored };
     if (partial.logoOriginal !== undefined) settingsNext.appLogoOriginal = partial.logoOriginal;
     if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
     if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
@@ -2546,6 +2670,11 @@ export class StageController {
       settingsNext.defaultAvatarOriginal = null;
       settingsNext.defaultAvatarCrop = null;
     }
+    // The pre-crop originals are images too, and settingsStore.patch would store
+    // them only after this.state had moved: a malformed one then left the new logo
+    // and name live in memory with nothing on disk. Stored here, so a bad image of
+    // either kind throws before this.state is touched and reaches the caller.
+    const settingsStored = await externalizeBrandingImages(settingsNext);
 
     console.log(
       `[stage-controller] setBranding`,
@@ -2558,8 +2687,8 @@ export class StageController {
         avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
       }),
     );
-    this.state = { ...this.state, ...stateNext };
-    await settingsStore.patch(settingsNext);
+    this.state = { ...this.state, ...stored };
+    await settingsStore.patch(settingsStored);
     this.broadcast();
     return this.state;
   }
@@ -2912,22 +3041,22 @@ export class StageController {
     return this.state;
   }
 
-  /** Pick which saved ScriptView column preset a "script" View renders. */
-  async setViewScriptViewLayout(id: string, scriptViewLayoutId: string | null): Promise<StageState> {
+  /** Pick which saved ServiceCue column preset a "script" View renders. */
+  async setViewServiceCueLayout(id: string, serviceCueLayoutId: string | null): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setScriptViewLayout — view ${id} not found`);
+      throw new Error(`views:setServiceCueLayout — view ${id} not found`);
     }
     // Refused rather than stored: an unknown id renders as ALL columns, which
     // looks like a working display showing the wrong thing. Failing the write is
     // the only outcome the operator can act on.
-    if (scriptViewLayoutId) {
-      const known = await scriptViewLayoutsStore.load();
-      if (!known.some((l) => l.id === scriptViewLayoutId)) {
-        throw new Error(`views:setScriptViewLayout — no ScriptView layout ${scriptViewLayoutId}`);
+    if (serviceCueLayoutId) {
+      const known = await serviceCueLayoutsStore.load();
+      if (!known.some((l) => l.id === serviceCueLayoutId)) {
+        throw new Error(`views:setServiceCueLayout — no ServiceCue layout ${serviceCueLayoutId}`);
       }
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, scriptViewLayoutId } : v));
-    console.log(`[stage-controller] setViewScriptViewLayout id=${scrub(id)} → ${scrub(scriptViewLayoutId)}`);
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, serviceCueLayoutId } : v));
+    console.log(`[stage-controller] setViewServiceCueLayout id=${scrub(id)} → ${scrub(serviceCueLayoutId)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -3001,7 +3130,7 @@ export class StageController {
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
     // SPREAD the source, then override only what must differ. Listing the
     // fields to keep is how this silently dropped `surface`, `slotsLayout` and
-    // `scriptViewLayoutId` — a duplicated console became a display, its buttons
+    // `serviceCueLayoutId` — a duplicated console became a display, its buttons
     // rendering and doing nothing. A list of what to keep goes stale every time
     // View grows a field; a list of what to change does not.
     const copy: View = {
@@ -3458,6 +3587,42 @@ export class StageController {
       id,
       { hideTopBar },
       `[stage-controller] setOutputHideTopBar output=${scrub(id)} → ${scrub(hideTopBar ? "HIDDEN" : "shown")}`,
+    );
+  }
+
+  /** Allow or refuse HLS playback on this output's Video widgets. Off keeps a
+   *  struggling Pi on WebRTC only, at the cost of any feed that needs HLS
+   *  (B-frames) refusing to play here at all. */
+  async setOutputAllowHls(id: string, allowHls: boolean): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setAllowHls — output ${id} not found`);
+    }
+    return this.commitOutputPatch(
+      id,
+      { allowHls },
+      `[stage-controller] setOutputAllowHls output=${scrub(id)} → ${scrub(allowHls ? "allowed" : "WebRTC only")}`,
+    );
+  }
+
+  /** Keep the ServiceCue text size this output's display shows. Refuses anything
+   *  that is not a number from MIN_TEXT_SIZE to MAX_TEXT_SIZE (the caller turns
+   *  that into a 400), and writes nothing when the size is already the one kept —
+   *  a display opened with `?text=` on every boot would otherwise rewrite the
+   *  settings file and log a line each time. */
+  async setOutputTextSize(id: string, textSize: unknown): Promise<StageState> {
+    const current = this.state.outputs.find((o) => o.id === id);
+    if (!current) {
+      throw new Error(`outputs:setTextSize — output ${id} not found`);
+    }
+    if (!isStorableTextSize(textSize)) {
+      throw new Error(`outputs:setTextSize — textSize must be a number from ${MIN_TEXT_SIZE} to ${MAX_TEXT_SIZE}`);
+    }
+    const size = clampTextSize(textSize);
+    if (current.textSize === size) return this.state;
+    return this.commitOutputPatch(
+      id,
+      { textSize: size },
+      `[stage-controller] setOutputTextSize output=${scrub(id)} → ${scrub(size)}%`,
     );
   }
 
@@ -4080,6 +4245,8 @@ export class StageController {
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
         hideTopBar: output.hideTopBar ?? false,
+        allowHls: output.allowHls ?? true,
+        textSize: output.textSize ?? null,
       };
     }
     this.state = {

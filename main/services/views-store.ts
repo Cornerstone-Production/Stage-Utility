@@ -8,6 +8,7 @@
 
 import type { View } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { adoptLegacyViewFields } from "./servicecue-legacy-names.js";
 
 /**
  * This IS the DataStore — there is no wrapper.
@@ -16,4 +17,8 @@ import { DataStore } from "./data-store.js";
  * added nothing else, in seven files. It had to be edited every time the store's
  * own API grew, and it hid update() and reload() from callers for no reason.
  */
-export const viewsStore = new DataStore<View[]>("views.json", [], "config");
+export const viewsStore = new DataStore<View[]>("views.json", [], "config", {
+  // A view saved before ServiceCue was renamed names its column preset with the old
+  // field; it is read as the new one and written as the new one on the next save.
+  normalize: adoptLegacyViewFields,
+});

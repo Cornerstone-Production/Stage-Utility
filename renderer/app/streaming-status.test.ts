@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { elapsedSince, streamIndicator, streamers, streamingStat, type Streamer } from "./recording-status.js";
+import { elapsedSince, streamIndicator, streamers, streamingStat, type Streamer, type StreamerName } from "./recording-status.js";
 
 // The streaming twin of the recording judgement. What matters here is the same
 // thing that mattered there: that "connected but NOT live" is its own answer.
@@ -11,8 +11,10 @@ import { elapsedSince, streamIndicator, streamers, streamingStat, type Streamer 
 const NOW = Date.parse("2026-08-20T15:30:00.000Z");
 const at = (min: number) => new Date(NOW - min * 60_000).toISOString();
 
+// "X" is deliberately no platform: a test that does not name one gets a streamer
+// no filter or label can match.
 const s = (over: Partial<Streamer>): Streamer =>
-  ({ name: "X", connected: true, live: false, startedAt: null, ...over });
+  ({ name: "X" as StreamerName, connected: true, live: false, startedAt: null, ...over });
 
 describe("elapsed since a start", () => {
   test("under an hour reads MM:SS", () => {

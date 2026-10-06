@@ -43,7 +43,7 @@ const PREVIEW = {
   rows: 14,
   patchVariants: [{ sheetName: "Analog", variantName: "Sunday rig" }],
   presets: 4,
-  scriptviewLayouts: 1,
+  serviceCueLayouts: 1,
 };
 
 /** Every URL the dialog asked for, as STRINGS — see the note at the top. */

@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, error, json, readBody } from "./context.js";
+import { type RouteCtx, error, json, readBody, pcoReadFailed } from "./context.js";
 import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
@@ -42,7 +42,13 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "GET" && pathname === "/api/pco/live") {
-      json(res, await stageController.fetchLive());
+      // PCO-only, like the eleven in pco-outage-status.test.ts: an outage is a
+      // 502 with a [pco] line, not the dispatcher's 500 blaming this app.
+      try {
+        json(res, await stageController.fetchLive());
+      } catch (err) {
+        pcoReadFailed(res, "live service", err);
+      }
       return;
     }
     if (method === "GET" && pathname === "/api/spl/metrics") {

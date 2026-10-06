@@ -50,6 +50,7 @@ export {
   FieldContent,
   FieldLabel,
   FieldDescription,
+  StackedField,
 } from "./field";
 export { Status } from "./status";
 export { TooltipProvider } from "./tooltip-provider";

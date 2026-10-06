@@ -5,11 +5,11 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error } from "./context.js";
-import { errorMessage } from "../errors.js";
+import { type RouteCtx, json, error, pcoReadFailed, queryFlag } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { SERVER_VERSION } from "../server-version.js";
 import { UPCOMING_DEFAULT_DAYS, UPCOMING_MAX_DAYS } from "../upcoming-plans.js";
+import { isPcoId } from "../pco-path.js";
 
 export async function stateRoutes(c: RouteCtx): Promise<void> {
   const { res, pathname, url, method } = c;
@@ -42,16 +42,39 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       // the other way round: a 400 would blame the caller. Without a try this
       // reached the dispatcher's generic arm, which is 500 by design because a
       // status is opt-in.
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "service types", err);
       }
       return;
     }
 
     if (method === "GET" && pathname === "/api/team-positions") {
+      // `?all=1` (or `true`): every service type's positions, each tagged with its
+      // type. A type that cannot be read comes back in `failed`, so this is a 200
+      // unless the type list itself is unreachable. A value that is not a flag is
+      // a 400: `all=yes` used to fall back to one type's positions and look right.
+      const wantsAll = queryFlag(url, "all", false);
+      if (wantsAll === null) {
+        error(res, "all must be 1 or true");
+        return;
+      }
+      const requested = url.searchParams.get("serviceTypeId");
+      // The id is spliced into a Planning Center URL path, so it is checked
+      // here rather than trusted. Absent is fine (the service type selected in
+      // the app, `state.serviceTypeId`); present and not shaped like an id is the
+      // caller's mistake.
+      if (!wantsAll && requested !== null && !isPcoId(requested)) {
+        error(res, "serviceTypeId is not a Planning Center id");
+        return;
+      }
       try {
-        json(res, await stageController.listTeamPositions());
+        json(
+          res,
+          wantsAll
+            ? await stageController.listAllTeamPositions()
+            : await stageController.listTeamPositions(requested ?? undefined),
+        );
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "team positions", err);
       }
       return;
     }
@@ -85,7 +108,7 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.listPlans(serviceTypeId));
       } catch (err) {
-        error(res, errorMessage(err), 502);
+        pcoReadFailed(res, "plans", err);
       }
       return;
     }

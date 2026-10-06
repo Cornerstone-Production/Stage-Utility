@@ -10,10 +10,11 @@ export const OPERATOR_PATHS = [
   "/history",
   "/baptism",
   "/patch",
-  "/scriptview",
+  "/servicecue",
   "/automation",
   "/plan",
   "/screens",
+  "/video-feeds",
   // A console, in the shell. Without this the server serves the KIOSK bundle for
   // a direct load of /consoles/…, which only shows up on a reload or a pasted
   // link — client-side navigation from the rail works either way, so it hides.
@@ -21,6 +22,10 @@ export const OPERATOR_PATHS = [
   // Kept so the paths they replaced still redirect rather than 404.
   "/views",
   "/displays",
+  // Renamed to /servicecue. Answered with a redirect before it is ever served
+  // (see legacyPageRedirect); claimed here so a build that lost the redirect
+  // still lands in the operator app, whose router redirects it too.
+  "/scriptview",
   // The settings panel is no longer its own document; /settings and everything
   // under it are routes in the operator app.
   "/settings",
@@ -42,4 +47,50 @@ export function isOperatorPath(pathname: string): boolean {
   return OPERATOR_PATHS.some(
     (p) => clean === p || clean === `${p}/` || clean.startsWith(`${p}/`),
   );
+}
+
+/**
+ * Page prefixes that moved, old to new. Displays and bookmarks point at the old
+ * ones, so they are answered forever.
+ *
+ * /api/servicecue is NOT here: those are API paths, and they moved with the
+ * server and the renderer together.
+ */
+export const MOVED_PAGE_PREFIXES: readonly (readonly [from: string, to: string])[] = [
+  ["/scriptview", "/servicecue"],
+];
+
+/**
+ * Where a request for a moved page should go, or null when it did not move.
+ *
+ * `pathname` and `search` are kept verbatim — the rest of the path and the whole
+ * query string, including the leading "?" — because a display's address carries
+ * state in them (`?plan=`, `?text=`, `?transport=poll`) that must survive the
+ * hop. The fragment never reaches a server; a browser carries it across a 301
+ * itself. One function, so the server, the dev server and the client router
+ * cannot disagree about which URLs moved.
+ *
+ * Like isOperatorPath, matches the exact path, a trailing slash or a nested
+ * route, never a bare prefix: "/scriptviewer" is not "/scriptview".
+ */
+export function legacyPageRedirect(pathname: string, search = ""): string | null {
+  return movedPath(MOVED_PAGE_PREFIXES, pathname, search);
+}
+
+/**
+ * `pathname` under the prefix that replaced its own, or null when no prefix in
+ * `moved` is its. The boundary is the end of the path or a "/", never a bare
+ * prefix. Shared by the page and the API redirects, which differ only in table.
+ */
+export function movedPath(
+  moved: readonly (readonly [from: string, to: string])[],
+  pathname: string,
+  search = "",
+): string | null {
+  for (const [from, to] of moved) {
+    if (pathname === from || pathname.startsWith(`${from}/`)) {
+      return `${to}${pathname.slice(from.length)}${search}`;
+    }
+  }
+  return null;
 }

@@ -134,7 +134,7 @@ describe("every kind reaches its own component", () => {
     stage: /Remaining slides/,           // the stage display's, and only its
     transcription: /Waiting for transcript/,
     custom: /CUSTOM BODY/,               // the embedded layout's own object
-    script: /No service type is selected, so this display has no plan to follow/, // ScriptView's own
+    script: /No service type is selected, so this display has no plan to follow/, // ServiceCue's own
     "spl-rundown": /Max SPL per item/,
   };
 
@@ -213,7 +213,7 @@ describe("the OUTERMOST view is on the chain too", () => {
   // stopped it. Seen in a browser, invisible to every unit test.
   test("a tile pointing at its own view draws the notice, not a second copy", async () => {
     await draw(React.createElement(LayoutRenderer, {
-      layout: SELF_VIEW.layout, viewId: "v-self", ndiSource: null, interactive: false,
+      layout: SELF_VIEW.layout, viewId: "v-self", ndiSource: null, interactive: false, allowHls: true,
     } as never));
 
     assert.ok(screen.getByText(/cannot contain itself/i), "the view embedded itself without a notice");

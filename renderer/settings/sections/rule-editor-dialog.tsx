@@ -1651,11 +1651,33 @@ export function RuleEditorDialog({
     }
   }
 
+  // Test and the row's Run are ONE server path (POST /api/automation/rules/:id/run).
+  // The server is the authority on a confirm rule: it answers 428 and the dialog
+  // asks, then sends the second call with `confirmed`. A disarmed engine answers
+  // 409 and the reason is the toast.
   async function testFire() {
+    const run = (confirmed: boolean) =>
+      invoke<{ outcome: "fired" | "simulated" | "failed"; detail: string }>("automation:runRule", {
+        id: selected.id,
+        confirmed,
+      });
     try {
-      const r = await invoke<{ ok: boolean; detail: string }>("automation:testRule", { id: selected.id });
-      if (r.ok) toast.success(`Test fire: ${r.detail}`);
-      else toast.error(`Test fire failed: ${r.detail}`);
+      let r;
+      try {
+        r = await run(false);
+      } catch (e) {
+        if ((e as { status?: number }).status !== 428) throw e;
+        const ok = await confirm({
+          title: `Run ${selected.name}?`,
+          message: "This rule is marked confirm before running.",
+          confirmLabel: "Run it",
+        });
+        if (!ok) return;
+        r = await run(true);
+      }
+      if (r.outcome === "failed") toast.error(`Test fire failed: ${r.detail}`);
+      else if (r.outcome === "simulated") toast.success(`Test fire (simulated, nothing was sent): ${r.detail}`);
+      else toast.success(`Test fire: ${r.detail}`);
     } catch (e) {
       toast.error(errorMessage(e));
     }

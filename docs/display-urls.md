@@ -30,8 +30,9 @@ with `preview-`, collide with another display's id or slug, or contain anything
 outside `a-z`, `0-9` and `-`.
 
 Reserved: the empty path, `settings`, `log`, `logs`, `photos`, `enroll`, and every
-operator page below — `history`, `baptism`, `patch`, `scriptview`, `automation`,
-`plan`, `screens`, `consoles`, `views`, `displays` — plus the `preview-` prefix.
+operator page below — `history`, `baptism`, `patch`, `servicecue`, `scriptview`, `automation`,
+`plan`, `screens`, `video-feeds`, `consoles`, `views`, `displays` — plus the
+`preview-` prefix.
 These are pages in their own right: a display slugged `history` would render the
 History page rather than the display.
 
@@ -60,6 +61,18 @@ one-off address handed to someone outside Production, so opening it can't lead
 to Settings or another display. Soft by design, like the toggle it matches —
 editing the URL undoes it — a guardrail, not access control.
 
+## Text size on a ServiceCue view
+
+Append `?text=<percent>` to the address of a display showing a ServiceCue view —
+`/display-1?text=150` — and its rundown renders at that size, 50 to 300; a value
+outside the range is held to the nearest end and one that is not a number is
+ignored. The server keeps the size for that display, so it need only be opened
+with the parameter once, it survives replacing the device, and the display's
+preview on the Screens page draws the same size. It has no on-screen control, since a wall display has no keyboard;
+on the `/servicecue/<service type>/<layout>` page the same size is set with the
+A− and A+ buttons in its header. See
+[Text size](features/servicecue-and-baptisms.md#text-size).
+
 ## Operator pages
 
 These render in the operator app: one page with a sidebar and the live service
@@ -70,7 +83,8 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | --- | --- |
 | `/` | Home |
 | `/screens` | Screens and the views they show |
-| `/scriptview/manage` | Rundown launcher |
+| `/video-feeds` | Video feeds: every feed, and the editor for each |
+| `/servicecue/manage` | Rundown launcher |
 | `/patch` | This week's stage patch, for volunteers |
 | `/automation` | Automation rules |
 | `/plan` | Which service and plan this machine follows |
@@ -82,7 +96,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 
 Plus the pages reached from those: `/screens/<view id>/edit` (the layout
 editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
-`/scriptview/presets`, `/scriptview/<service type>/<layout>`, and
+`/servicecue/presets`, `/servicecue/<service type>/<layout>`, and
 `/history/manage`.
 
 Moving between them does not reload the page, so the event stream and cached
@@ -97,7 +111,9 @@ is canonical — it is what the app links to and what these docs quote.
 
 `/settings` on its own lands on Integrations. `/views` and `/displays` redirect
 to `/screens`, and the old `#hash` deep links into the settings window resolve
-to their new routes — bookmarks and printed links keep working.
+to their new routes — bookmarks and printed links keep working. Links to
+`/scriptview…` redirect permanently to `/servicecue…`, keeping the rest of the path
+and the whole query string (`?plan=`, `?text=`, `?transport=poll`).
 
 `/history` is **read-only**: it is a link handed to people outside Production, so
 it shows the record without the controls that change it. It also renders without
@@ -111,12 +127,14 @@ into a specific recording, rather than the day list. A reload or a copied link
 lands on that same service, and an unknown or missing key falls back to the
 list instead of an empty page.
 
-`/scriptview` works the same way: the rundown launcher with its own "ScriptView"
+`/servicecue` works the same way: the rundown launcher with its own "ServiceCue"
 heading and no sidebar or header, for a stage tablet or a producer's second
-screen, and each rundown under it, `/scriptview/<service type>/<layout>`, is the
-whole window. The operator's copy of the launcher is `/scriptview/manage`, in the
-sidebar under Content, with the app's usual chrome; `/scriptview/presets`, which
-edits layouts, keeps the chrome too.
+screen, and each rundown under it, `/servicecue/<service type>/<layout>`, is the
+whole window. The operator's copy of the launcher is `/servicecue/manage`, in the
+sidebar under Content, with the app's usual chrome; `/servicecue/presets`, which
+edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
+of that type without changing the one the app follows; see
+[Plan switcher](features/servicecue-and-baptisms.md#plan-switcher).
 
 ## Polling transport
 

@@ -19,7 +19,7 @@ import { HOST_FRAMED_TYPES, LAYOUT_OBJECTS, defaultStyle, defaultStyleFor } from
 /** Content whose box is drawn for it, or that is deliberately full-bleed. */
 const BARE = [
   // Media — the picture IS the object.
-  "image", "brand-logo", "slide-thumbnail", "ndi-video",
+  "image", "brand-logo", "slide-thumbnail", "ndi-video", "video",
   // Full-bleed text on a stage display. A frame around every line is chrome
   // nobody asked for, and the operator's own layouts leave all of these bare.
   "text", "current-service-item", "next-service-item",

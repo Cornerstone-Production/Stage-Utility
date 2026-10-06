@@ -63,7 +63,7 @@ export interface IntegrationDescriptor {
   /** ONE OR TWO SENTENCES, saying what this integration does — never how to set
    *  it up in the other application. Setup steps belong in `docs/integrations/`,
    *  which `docs` below points the operator at: they were paragraphs here, and a
-   *  card grid of sixteen of them is a wall nobody reads. */
+   *  card grid of them is a wall nobody reads. */
   description?: string;
   /**
    * The integration's page under `docs/integrations/`, WITHOUT the extension.

@@ -5,7 +5,7 @@ export function RootView() {
   // through the Outlet.
   //
   // It used to branch on window.location for the operator surfaces (/history,
-  // /patch, /baptism, /scriptview) and for the display picker at "/". All of
+  // /patch, /baptism, /servicecue) and for the display picker at "/". All of
   // those belong to the operator app (app.html), which the server routes them
   // to — see main/services/routes/operator-paths.ts. The picker's job is now
   // "Use this screen as a display" on Home.

@@ -43,6 +43,19 @@ export function computePcoTimer(pcoLive: PcoLiveDTO | null, serverNow: number): 
   };
 }
 
+/**
+ * The countdown to a plan's own start, for a plan the live feed does not cover.
+ *
+ * The same shape as the pre-service timer, so the header draws it the same way
+ * ("Starts in 3d 23h"). Null once the start has passed: a finished or running
+ * plan that is not the app's has nothing honest to count down.
+ */
+export function startsInTimer(serviceTimes: readonly string[] | undefined, serverNow: number): PcoTimer | null {
+  const start = Date.parse(serviceTimes?.[0] ?? "");
+  if (!Number.isFinite(start) || start <= serverNow) return null;
+  return { mode: "preservice", label: "Service starts", seconds: (start - serverNow) / 1000, over: false, countUp: false };
+}
+
 // Format a duration. Days for long pre-service waits ("6d 2h"), h:mm:ss past an
 // hour, else mm:ss. Negative → leading "−" (e.g. an item run over).
 export function fmtDuration(totalSec: number): string {
@@ -91,7 +104,7 @@ export function fmtDuration(totalSec: number): string {
  *    known either. Adding up the remaining items alone would quietly report the
  *    end of a service whose clock has not started.
  *
- * A LATER item with no length contributes 0, matching ScriptView's projected
+ * A LATER item with no length contributes 0, matching ServiceCue's projected
  * clock column — a half-filled-in plan reads early rather than blank.
  *
  * Items PCO marks `service_position: "post"` are left out. The question is when

@@ -157,6 +157,7 @@ describe("the digits a display draws are the server's", () => {
             ],
           },
           viewId: "view-1",
+          allowHls: true,
         } as never),
       );
       await settle();

@@ -17,6 +17,7 @@ import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
 import { feedId, sameRows, withDefaults } from "./integration-panel-helpers";
 import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
+import { errorMessage } from "@main/services/errors";
 
 // ---- Ross TSL feeds editor --------------------------------------------------
 
@@ -77,7 +78,7 @@ export function RossTslFeedsPanel({
       return true;
     } catch (err) {
       console.error("[RossTslFeedsPanel:save]", err);
-      toast.error(`Could not save feeds: ${String(err)}`);
+      toast.error(`Could not save feeds: ${errorMessage(err)}`);
       return false;
     } finally {
       setSaving(false);

@@ -26,6 +26,7 @@ countdown, so the app needs it.
 | [RossTalk (Carbonite / Ultrix)](rosstalk.md) | Commands to Ross gear — custom controls, switching, routing, salvos |
 | [Ross Ultritouch](ultritouch.md) | A console on a Ross touch panel, through DashBoard's Browser component |
 | [Live scores](scores.md) | Followed teams' live scores (ESPN public scoreboard) |
+| [Video feeds](video-feeds.md) | Live camera and program video in layouts and on Home |
 
 ## Closing a settings dialog with unsaved edits
 
@@ -95,12 +96,15 @@ the URL, so a link opens straight onto one and Back closes it. `CATEGORY_ORDER`
 sets the order cards are laid out in; it draws no headings.
 
 Most integrations describe their settings as `ConfigField`s and the dialog renders
-them. Four do not: Live scores' only setting is WHICH TEAMS, and a two-step
+them. Five do not: Live scores' only setting is WHICH TEAMS, and a two-step
 sport-then-team picker over ~2,000 clubs is not a config field, so its descriptor
 carries an empty schema and `integrations-panel.tsx` renders a panel of its own
-for it — as it does for Wireless Gear, OSC and RossTalk. Reach for that
-only when the setting genuinely cannot be a field: a bespoke panel is a second
-place for a settings page to drift.
+for it — as it does for Wireless Gear, OSC and RossTalk. Video feeds is a fifth,
+its own way: everything it would configure — feeds, ports, the relay's status —
+already has a home elsewhere, so its panel is a line of text and a link to the
+Video feeds page rather than any setting at all. Reach for a bespoke panel only
+when the setting genuinely cannot be a field: it is a second place for a
+settings page to drift.
 
 Companion is different again: its host/port are ordinary `ConfigField`s, and
 `integrations-panel.tsx` renders a separate panel *above* that form for the

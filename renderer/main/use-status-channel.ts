@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { onNotification } from "../lib/api";
+import { useResyncOn } from "../lib/use-resync-on";
 
 /**
  * Hydrate a change-driven status channel and keep it live, without the older
@@ -66,6 +67,19 @@ import { onNotification } from "../lib/api";
  *   old set across an `enabled` false→true flip reports screens as Connected on
  *   the strength of a read that just failed. Empty is the honest reading of "we
  *   do not know" there, and it fails toward "go and look at the screen".
+ *
+ * @returns `value`, exactly as before, plus `known` — whether ANY answer, a
+ *   read (success or failure) or a push (replayed or live), has landed yet for
+ *   THIS mount. `value === null` is not that fact: it is also the settled
+ *   answer for "not configured" and for a channel whose DTO is legitimately
+ *   falsy, so a caller cannot tell "nothing yet" from "nothing, ever" by value
+ *   alone — exactly the ambiguity `pcoLiveKnown` was written for on the
+ *   dashboard's own channel. A caller that renders a negative claim from
+ *   `value` (recorders() calling a `null` OBS "not connected", `null` display
+ *   presence "no screens online") must gate on `known` first: unknown is its
+ *   own state, not a false claim of the state's absence. While `enabled` is
+ *   false it is `{ value: null, known: false }`, including after an enabled
+ *   window that had answered.
  */
 /**
  * The frame's `rev`, or null when it carries none.
@@ -81,23 +95,40 @@ function revOf(frame: unknown): number | null {
   return typeof rev === "number" ? rev : null;
 }
 
+export interface StatusChannelResult<T> {
+  value: T | null;
+  /** Whether any answer — a read (success or failure) or a push (replayed or
+   *  live) — has landed yet for this mount. See the header above. */
+  known: boolean;
+}
+
 export function useStatusChannel<T extends object>(
   read: () => Promise<T | null | undefined>,
   pushChannel: string,
   enabled = true,
   options: { clearOnReadFailure?: boolean } = {},
-): T | null {
+): StatusChannelResult<T> {
   // Destructured, not carried as an object: an options literal is a new object
   // every render, and as an effect dependency that re-subscribes and re-hydrates
   // on every one.
   const clearOnReadFailure = options.clearOnReadFailure ?? false;
   const [value, setValue] = useState<T | null>(null);
+  const [known, setKnown] = useState(false);
 
   // Highest rev applied from a push during THIS hydration window.
   const pushedRev = useRef<number | null>(null);
   // Whether a LIVE frame (not a replayed cache snapshot) landed in this window.
   // The rev-less stand-in for `pushedRev` — see the header.
   const pushedLive = useRef(false);
+
+  // A new window forgets what the last one knew, in the render that opens it.
+  // `known` used to be cleared by a microtask after the effect, so the first
+  // render of a re-enabled hook (or one pointed at another channel) reported the
+  // previous window's answer as known until that microtask ran: a frame of a
+  // claim made on a read that had not happened. The two refs below are reset in
+  // the effect because only the effect reads them. Every caller memoises `read`,
+  // so this does not resync on every render.
+  useResyncOn([enabled, pushChannel, read, clearOnReadFailure], () => setKnown(false));
 
   useEffect(() => {
     if (!enabled) return;
@@ -106,7 +137,6 @@ export function useStatusChannel<T extends object>(
     pushedRev.current = null;
     pushedLive.current = false;
     let cancelled = false;
-
     // Subscribe FIRST, so a push that lands while the read is in flight is seen
     // rather than silently lost between the two.
     const off = onNotification(pushChannel, (p, replayed) => {
@@ -115,11 +145,18 @@ export function useStatusChannel<T extends object>(
       if (rev !== null) pushedRev.current = Math.max(pushedRev.current ?? rev, rev);
       if (!replayed) pushedLive.current = true;
       setValue(frame);
+      setKnown(true);
     });
 
     read()
       .then((s) => {
-        if (cancelled || !s) return;
+        // Answered even when the read is empty — `known` is about whether the
+        // window has settled, not about what it settled to. Falling through the
+        // `!s` guard below without setting it is how a hook whose read genuinely
+        // resolves `null` (nothing configured) stayed "unknown" forever.
+        if (cancelled) return;
+        setKnown(true);
+        if (!s) return;
         const seen = pushedRev.current;
         const mine = revOf(s);
         // Revs on both sides: the counter decides, and only STRICTLY older loses.
@@ -158,6 +195,11 @@ export function useStatusChannel<T extends object>(
         // shape as a wrapper — not to add a tenth hand-rolled hydrate.
         if (cancelled) return;
         console.warn(`[status-channel] hydrate failed for ${pushChannel}`, err);
+        // A failed read still SETTLES the window: an operator staring at a
+        // placeholder because the server is unreachable is worse than the best
+        // available answer, which is whatever `value` already holds (or the
+        // false-leaning null clearOnReadFailure asks for below).
+        setKnown(true);
         if (clearOnReadFailure) setValue(null);
       });
 
@@ -171,5 +213,9 @@ export function useStatusChannel<T extends object>(
     // fresh window resets the counter above.
   }, [enabled, pushChannel, read, clearOnReadFailure]);
 
-  return value;
+  // A disabled hook neither reads nor subscribes, so what it holds from an
+  // earlier enabled window is a snapshot nothing is keeping current. Reporting
+  // it would be a claim about the present: unknown is the honest answer.
+  if (!enabled) return { value: null, known: false };
+  return { value, known };
 }

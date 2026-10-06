@@ -12,7 +12,7 @@
 //
 // `enabled` is how a wall display avoids subscribing to something it does not
 // draw, which was the objection that kept the fake in place. Same shape as every
-// other gated channel in useLayoutData: `useObsState(want([...]))`.
+// other gated channel in useLayoutData: `useObsStatus(want([...]))`.
 //
 // THE REV-ORDERING RULE IS NOT WRITTEN HERE. It was — the appliedRev ref, the
 // fresh-window reset, the drop-strictly-older guard and push-always-wins, a
@@ -38,12 +38,19 @@ interface PresenceDTO {
   rev?: number;
 }
 
+export interface DisplayPresenceResult {
+  onlineOutputIds: readonly string[];
+  /** Whether ANY answer has landed yet — see useStatusChannel's own header.
+   *  Empty ids while this is false is "we do not know", not "none online":
+   *  Home's readiness list and screens count must say so rather than reading
+   *  every screen as offline for the width of one slow read. */
+  known: boolean;
+}
+
 /**
- * Output ids with a live heartbeat. Empty means "none, or we do not know" — the
- * safe direction: a dot that is dark invites a look at the screen, a dot that is
- * lit says there is nothing to look at.
+ * Output ids with a live heartbeat, plus whether presence has answered yet.
  *
- * Hydrated as well as subscribed, exactly like useObsState. The SSE hello burst
+ * Hydrated as well as subscribed, exactly like useObsStatus. The SSE hello burst
  * does carry a presence snapshot and api.ts caches it for a late subscriber —
  * but only the CONNECT-time value. Between the burst and this hook mounting, the
  * server filters "displays:presence" out for a client with nothing subscribed to
@@ -56,11 +63,18 @@ interface PresenceDTO {
  * PRESENT: on an `enabled` false→true flip the previous set would otherwise
  * persist and render as lit, reporting screens as Connected on the strength of a
  * read that just failed — the exact class of lie this hook exists to remove.
+ * `known` still goes true on that failed read: it settled the window, even
+ * though the honest reading of "we do not know" it lands on is the same empty
+ * set unknown itself renders — the caller judges the two apart by `known`,
+ * never by whether the id list happens to be empty.
  */
-export function useDisplayPresence(enabled = true): readonly string[] {
+export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult {
   const read = useCallback(() => invoke<PresenceDTO>("displays:getPresence"), []);
-  const presence = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
+  const { value: presence, known } = useStatusChannel<PresenceDTO>(read, "displays:presence", enabled, {
     clearOnReadFailure: true,
   });
-  return enabled ? (presence?.connected ?? EMPTY) : EMPTY;
+  return {
+    onlineOutputIds: presence?.connected ?? EMPTY,
+    known,
+  };
 }

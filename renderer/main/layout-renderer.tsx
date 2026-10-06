@@ -15,20 +15,20 @@ import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
-import { useDashboardState, usePropInstances } from "./use-dashboard-state";
+import { useDashboardState, useProPresenterStatus, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
-import { useDisplayPresence } from "./use-display-presence";
-import { useObsState } from "./use-obs-state";
-import { useResiState, useYouTubeState } from "./use-stream-state";
+import { useDisplayPresenceStatus } from "./use-display-presence";
+import { useObsStatus } from "./use-obs-state";
+import { useResiStatus, useYouTubeStatus } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
-import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
+import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../app/recording-status";
 import { usePvpState } from "./use-pvp-state";
-import { useReaperState } from "./use-reaper-state";
-import { useScoresState } from "./use-scores-state";
+import { useReaperStatus } from "./use-reaper-state";
+import { useScoresStatus } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
-import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
+import { useBaptismStatus, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
@@ -36,11 +36,11 @@ import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { ActionButton } from "./action-button";
 import { CueButton } from "./cue-button";
-import { useCueLive, type CuesLive } from "./use-cue-live";
+import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
-import { usePlanItems } from "./use-plan-items";
+import { usePlanItemsStatus } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration, projectedServiceEndMs } from "./pco-timer";
 import { servicePacing } from "./service-pacing";
@@ -54,6 +54,7 @@ import { LiveControls } from "./live-controls";
 import { Loader2Icon, ZapIcon } from "lucide-react";
 import { displayHourCycle, formatClock } from "../lib/clock-format";
 import { externKeyed } from "@main/types/extern-keyed";
+import { VideoObject } from "./video/video-object";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -65,18 +66,44 @@ export interface LayoutRenderCtx {
   propInstances: PropInstancesDTO | null;
   /** Current PCO plan rundown (items + note categories) — for the service-order object. */
   planItems: PlanItemsDTO | null;
+  /** Whether the rundown read has answered, and whether the last one failed —
+   *  see usePlanItemsStatus. "No service plan" is for a plan known to be empty,
+   *  never for one not read yet or one whose read went wrong. */
+  planItemsKnown: boolean;
+  planItemsFailed: boolean;
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
+  /**
+   * Whether each status channel below has answered yet — any read, success or
+   * failure, or any push. See useStatusChannel's own header.
+   *
+   * `null` is two things: nothing has answered, and "nothing is connected". A
+   * widget that draws a negative claim off a `null` value (OFFLINE, NO RECORDER,
+   * "No teams followed", "0 baptized") must check its flag first and draw its
+   * quiet state instead — a wall that has just loaded does not know yet, and the
+   * room it faces reads the claim as a fault.
+   *
+   * Required, like `onlineKnown`, so a surface cannot leave one out and have
+   * every widget read as settled.
+   */
+  obsKnown: boolean;
+  reaperKnown: boolean;
   /** Live ProVideoPlayer layer state — for the pvp-layers object. null until loaded. */
   pvp: PvpStatusDTO | null;
   scores: ScoresStatusDTO | null;
+  scoresKnown: boolean;
   resi: StreamStatusDTO | null;
+  resiKnown: boolean;
   youtube: YouTubeStatusDTO | null;
+  youtubeKnown: boolean;
   osc: OscFeedbackDTO | null;
   /** Live cue manifest and states — for the cue-button object. null until loaded. */
   cues: CuesLive | null;
+  /** Whether the cue manifest has answered — see useCueLiveStatus. A button
+   *  reads "Unbound" only once it is known to be. */
+  cuesKnown: boolean;
   /** Global RossTalk simulate mode, so a button can show it is not really sending.
    *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
   rosstalkSimulate?: boolean;
@@ -93,12 +120,14 @@ export interface LayoutRenderCtx {
   servicePeakAttendance: number | null;
   /** Live baptism-timer state — for the baptism-timer object. */
   baptism: BaptismState | null;
+  baptismKnown: boolean;
   /** In-progress service timeline (planned vs actual item timing) — for the
    *  service-pacing object's whole-service scope. null when not recording. */
   serviceTimeline: ServiceTimeline | null;
   /** Live integration connection states + friendly labels — for the integration-status object. */
   integrations: IntegrationState[];
   integrationLabels: Record<string, string>;
+  integrationsKnown: boolean;
   /** Flat wireless channel list — for the wireless-summary object. */
   wireless: DeviceStatus[];
   /** The SERVER's clock, ticking once a second. Every reading below it — the
@@ -107,6 +136,11 @@ export interface LayoutRenderCtx {
    *  answer from its own. See renderer/lib/server-clock.ts. */
   now: number;
   ndiSource: string | null;
+  /** Whether a Video widget here may attempt HLS — the real display's own "Use
+   *  HLS on this screen" switch. Only a live kiosk route can be gated off; Home,
+   *  a Screens-card preview and the layout editor's own canvas are never the
+   *  real screen a B-frame feed would be refused on, so each sets this true. */
+  allowHls: boolean;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
@@ -173,6 +207,10 @@ export interface LayoutRenderCtx {
    * pass it" must not be indistinguishable from it.
    */
   onlineOutputIds: readonly string[];
+  /** Whether presence has answered yet — see useDisplayPresenceStatus. Home's
+   *  screens count, its readiness list and the screen tile's status dot read
+   *  it: empty ids before the first answer are "we do not know", not "none". */
+  onlineKnown: boolean;
 
   /**
    * The id of the Home card whose own right-click menu is open right now, or
@@ -312,6 +350,64 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
   if (s.uppercase) css.textTransform = "uppercase";
   if (s.letterSpacing != null) css.letterSpacing = `${s.letterSpacing}em`;
   return css;
+}
+
+/**
+ * What a record-status widget reads for the recorder(s) it watches.
+ *
+ * "Connected" for `any` means at least one recorder is reachable — otherwise a
+ * dim badge would claim "not recording" when nothing can actually report. `any`
+ * also waits for BOTH to have answered: OBS alone answering "not connected" is
+ * not "no recorder" while REAPER's own read is still in flight. Home's recording
+ * card makes the same rule.
+ *
+ * The recorder being watched becomes the caption and the state the value; "any"
+ * has no single source to name, so it says what it is.
+ */
+function recordStatusReading(
+  source: "any" | "obs" | "reaper",
+  ctx: Pick<LayoutRenderCtx, "obs" | "reaper" | "obsKnown" | "reaperKnown">,
+): { active: boolean; connected: boolean; known: boolean; caption: string } {
+  const obs = { active: ctx.obs?.recording ?? false, connected: ctx.obs?.connected ?? false };
+  const reaper = { active: ctx.reaper?.recording ?? false, connected: ctx.reaper?.connected ?? false };
+  switch (source) {
+    case "obs":
+      return { ...obs, known: ctx.obsKnown, caption: "OBS" };
+    case "reaper":
+      return { ...reaper, known: ctx.reaperKnown, caption: "REAPER" };
+    case "any":
+      return {
+        active: obs.active || reaper.active,
+        connected: obs.connected || reaper.connected,
+        known: ctx.obsKnown && ctx.reaperKnown,
+        caption: "Recorder",
+      };
+  }
+}
+
+/** The word a status widget shows: what it is doing, else a dash while nothing has
+ *  answered, else idle or offline. */
+function statusWord(s: { active: boolean; known: boolean; connected: boolean; activeText: string; idleText: string; offlineText: string }): string {
+  if (s.active) return s.activeText;
+  if (!s.known) return "—";
+  return s.connected ? s.idleText : s.offlineText;
+}
+
+/** A streaming widget's colours: green while live, amber when late, none
+ *  otherwise. Filled it paints the box; unfilled it colours the value. */
+function streamTally(live: boolean, late: boolean, filled: boolean): { fill: string | null; valueColor: string | null } {
+  if (live) return filled ? { fill: "var(--green-9)", valueColor: null } : { fill: null, valueColor: "var(--green-10)" };
+  if (late) return filled ? { fill: "var(--color-warn-9)", valueColor: null } : { fill: null, valueColor: "var(--color-warn-11)" };
+  return { fill: null, valueColor: null };
+}
+
+/** What an empty service-order says. The server answers an unconfigured Planning
+ *  Center with an empty rundown, so only a plan KNOWN to be empty is "No service
+ *  plan"; one not read yet is the dash, and a failed read says so. */
+function noPlanWord(ctx: Pick<LayoutRenderCtx, "planItemsKnown" | "planItemsFailed">): string {
+  if (!ctx.planItemsKnown) return "—";
+  if (ctx.planItemsFailed) return "Couldn't load the plan";
+  return "No service plan";
 }
 
 function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", showMeridiem: boolean): string {
@@ -699,6 +795,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     caption: string;
     active: boolean;
     connected: boolean;
+    /** Whether every recorder this widget speaks for has answered. Unknown is
+     *  the dash, not the offline word: `connected` is false before the first
+     *  read for exactly the reason it is false with nothing plugged in. A
+     *  recorder already reporting ACTIVE is a true claim and does not wait. */
+    known: boolean;
     filled: boolean;
     activeText: string;
     idleText: string;
@@ -714,7 +815,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // the caption row's end slot, which costs no height.
       caption={s.caption}
       captionEnd={s.active ? (s.sub ?? null) : null}
-      value={s.active ? s.activeText : s.connected ? s.idleText : s.offlineText}
+      value={statusWord(s)}
       upper
       fill={s.active && s.filled ? "var(--red-9)" : null}
       valueColor={s.active && !s.filled ? "var(--red-10)" : null}
@@ -745,16 +846,25 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   ) => {
     const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
     const chosen = only ? all.filter((x) => x.name === only) : all;
+    // Whether every platform this widget speaks for has answered, keyed by the
+    // names streamers() gives them. "Streaming" folds all three into one word,
+    // so it waits for all three: Offline or Off air on two answers is a claim
+    // about a third that may be live. Live itself is true on one answer.
+    const answered: Record<StreamerName, boolean> = { Resi: ctx.resiKnown, YouTube: ctx.youtubeKnown, OBS: ctx.obsKnown };
+    const known = chosen.every((x) => answered[x.name]);
     const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
     const live = ind.state === "live";
     // A scheduled broadcast the clock has passed with nothing going out. Off
     // air, but the one off-air moment worth a colour — see streamIndicator.
-    const late = ind.state === "late";
+    // Off air is a claim about every platform, so late waits for `known` too.
+    const late = known && ind.state === "late";
     // Tally-light mode: nothing on screen unless something is going out. LATE is
     // the exception: a tally light that hides exactly when the stream failed to
     // start is a light that has switched itself off for the one event it exists
     // to report.
     if (!live && !late && (opts.hideWhenIdle ?? false)) return null;
+    // Not answered yet: the dash, at the strength every quiet state wears.
+    if (!live && !known) return readout("—", { caption: only ?? "Streaming", upper: true, dim: true });
 
     // FILLED BY DEFAULT, the same as obs-status and reaper-status.
     //
@@ -795,8 +905,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // token rather than a raw scale step, because "this needs attention" is
       // what is meant and a re-themed app should carry it.
       dim: !live && !late,
-      fill: live && filled ? "var(--green-9)" : late && filled ? "var(--color-warn-9)" : null,
-      valueColor: live && !filled ? "var(--green-10)" : late && !filled ? "var(--color-warn-11)" : null,
+      ...streamTally(live, late, filled),
     });
   };
 
@@ -867,6 +976,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           pcoLive={ctx.pcoLive}
           now={ctx.now}
           onlineOutputIds={ctx.onlineOutputIds}
+          onlineKnown={ctx.onlineKnown}
           secondsToStart={homeSecondsToStart(ctx)}
           hoverSuppressed={ctx.activeCardMenuId === o.id}
         />
@@ -926,7 +1036,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         // The zone the app REASONS in when the operator has set one — a display
         // driven from a UTC box must read the venue's clock, not the box's. Unset
         // falls back to the viewer's own zone rather than the server's host zone,
-        // which is what fmtClock does for ScriptView's projected times: an
+        // which is what fmtClock does for ServiceCue's projected times: an
         // unconfigured UTC server would otherwise put every screen an hour(s) out.
         // hourCycle is deliberately not passed — formatClock reads the app-wide
         // 12h/24h setting, the same as every other clock in the app.
@@ -1151,6 +1261,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           <span style={{ fontSize: `${0.022 * ctx.H}px` }}>{ctx.ndiSource || "no source"}</span>
         </div>
       );
+    case "video":
+      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} />;
     case "slots-grid": {
       // Resolved BY OBJECT wherever the server could do it -- inline grids, and
       // grids embedding a view. Both are free-dragged boxes on a custom layout,
@@ -1212,25 +1324,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
-      return <BaptismTimer state={ctx.baptism} config={c} now={ctx.now} align={o.style?.textAlign} />;
+      return <BaptismTimer state={ctx.baptism} known={ctx.baptismKnown} config={c} now={ctx.now} align={o.style?.textAlign} />;
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
-      const src = c.source ?? "any";
-      const obsRec = ctx.obs?.recording ?? false;
-      const reaRec = ctx.reaper?.recording ?? false;
-      const obsUp = ctx.obs?.connected ?? false;
-      const reaUp = ctx.reaper?.connected ?? false;
-      const active = src === "obs" ? obsRec : src === "reaper" ? reaRec : obsRec || reaRec;
-      // "Connected" for `any` means at least one recorder is reachable — otherwise a
-      // dim badge would claim "not recording" when nothing can actually report.
-      const connected = src === "obs" ? obsUp : src === "reaper" ? reaUp : obsUp || reaUp;
+      const { active, connected, known, caption } = recordStatusReading(c.source ?? "any", ctx);
 
       if (!active && (c.hideWhenIdle ?? false)) return null;
 
-      // Which recorder this is watching becomes the caption; the state becomes
-      // the value. "any" has no single source to name, so it says what it is.
-      const caption = src === "obs" ? "OBS" : src === "reaper" ? "REAPER" : "Recorder";
       // The fill stays -- it is a see-it-across-the-room signal and it works.
       // What changed is that it carries the same composition as every other
       // widget, so a filled widget is the same widget wearing a state rather
@@ -1239,6 +1340,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         caption,
         active,
         connected,
+        known,
         filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
         activeText: c.recordingText ?? "RECORDING",
         idleText: c.idleText ?? "STANDBY",
@@ -1267,6 +1369,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         caption: "OBS",
         active,
         connected,
+        known: ctx.obsKnown,
         filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
         activeText: c.recordingText ?? activeDefault,
         idleText: c.idleText ?? idleDefault,
@@ -1299,6 +1402,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         caption: "REAPER",
         active: recording,
         connected,
+        known: ctx.reaperKnown,
         filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
         activeText: c.recordingText ?? STATUS_TEXT.reaper.recording,
         idleText: c.idleText ?? STATUS_TEXT.reaper.idle,
@@ -1357,7 +1461,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "action-button":
       return <ActionButton config={c} interactive={ctx.interactive} editing={ctx.editing === true} ts={ts} />;
     case "cue-button":
-      return <CueButton config={c} cues={ctx.cues} interactive={ctx.interactive} ts={ts} />;
+      return <CueButton config={c} cues={ctx.cues} known={ctx.cuesKnown} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":
       return (
         <OscButton
@@ -1379,8 +1483,12 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // WHICH integration is the caption; whether it is up is the value. The old
       // shape was a coloured dot beside a name, which said what it was watching
       // but never what it found — you had to know the colour code to read it.
+      // Before the list has answered there is no `st`, so `conn` falls to
+      // "disconnected" and would read OFFLINE for an integration that may be up.
+      // The dash instead; the dim and the missing colour already follow `conn`.
       const word =
-        conn === "connected" ? "Online"
+        !ctx.integrationsKnown ? "—"
+        : conn === "connected" ? "Online"
         : conn === "error" ? "Error"
         : conn === "connecting" ? "Connecting"
         : "Offline";
@@ -1510,7 +1618,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     }
     case "scores":
-      return <ScoresObject config={c} scores={ctx.scores} />;
+      return <ScoresObject config={c} scores={ctx.scores} known={ctx.scoresKnown} />;
 
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
@@ -2037,11 +2145,14 @@ function PeoplePanel({
 // shared 1s `now`); the rest are session stats. Optional sub-label.
 function BaptismTimer({
   state,
+  known,
   config,
   now,
   align,
 }: {
   state: BaptismState | null;
+  /** Whether the baptism channel has answered yet. See the note at the end. */
+  known: boolean;
   config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
   now: number;
   align: LayoutHAlign | undefined;
@@ -2138,6 +2249,15 @@ function BaptismTimer({
       value = `${state.baptismIndex + 1} of ${state.people.length}`;
     }
     fallback = "person";
+  }
+  // Not answered yet. Every field above reads a `null` state as a session with
+  // nothing in it — "0:00 ready", "0 baptized" — which on a wall that has just
+  // reloaded mid-baptism is a claim about a session that is running. The dash;
+  // the other fields' labels only name the box, but `live`'s "ready" is itself
+  // the claim, so it goes too.
+  if (!known) {
+    value = "—";
+    if (field === "live") fallback = "";
   }
   // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
   // measured sweep, because the label rode on the end of the value and the pair
@@ -2742,10 +2862,19 @@ function ScreenEmbedObject({
             // them apart: the BODY names what the screen is or is not showing
             // ("Blackout", "…is not showing anything"), and the dot answers the
             // one question the body cannot — is anybody there.
-            <span
-              className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-live-9" : "bg-fg-faint"}`}
-              aria-label={connected ? "Connected" : "Not connected"}
-            />
+            //
+            // Before presence has answered, `connected` is false for every
+            // screen on the wall, which is the dim dot's claim made about all
+            // of them at once. The dot keeps its place, so the name does not
+            // shift when it appears, and says nothing until it knows.
+            ctx.onlineKnown ? (
+              <span
+                className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-live-9" : "bg-fg-faint"}`}
+                aria-label={connected ? "Connected" : "Not connected"}
+              />
+            ) : (
+              <span className="invisible size-1.5 shrink-0 rounded-full" aria-hidden />
+            )
           )}
           <span className="truncate text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
             {output.name}
@@ -2836,7 +2965,8 @@ function ServiceOrderObject({
   const color = s.color ?? "#ffffff";
 
   if (items.length === 0) {
-    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>No service plan</span>;
+    // Three different nothings; see noPlanWord.
+    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>{noPlanWord(ctx)}</span>;
   }
 
   return (
@@ -3014,7 +3144,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // The state comes FIRST, before the gates that used to be computed above it:
   // an embedded view's objects live in `state.views`, and a gate that cannot see
   // them leaves every widget inside a tile without a channel.
-  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const { state, isLoading, error, pcoLive } = useDashboardState();
   const views = state?.views;
   const outputs = state?.outputs;
   // `views`/`outputs` are fresh array identities on every state broadcast, so
@@ -3047,8 +3177,8 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // Named in neither gate, a layout whose only recorder widget was that one
   // subscribed to nothing and said NO RECORDER through the whole service.
   // gate-render-parity.test.ts is what now holds every arm to its channels.
-  const obs = useObsState(want(["obs-status", "record-status"]) || streamWanted);
-  const reaper = useReaperState(want(["reaper-status", "record-status"]));
+  const obsStatus = useObsStatus(want(["obs-status", "record-status"]) || streamWanted);
+  const reaperStatus = useReaperStatus(want(["reaper-status", "record-status"]));
   // Gated harder than most: the channel's DEMAND is what decides the poll cadence
   // at the server, so an ungated hook would hold PVP at 1 Hz for a wall screen
   // showing a clock.
@@ -3059,16 +3189,16 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const pvp = usePvpState(want(["pvp-layers", "pvp-now"]));
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
-  const scores = useScoresState(want(["scores", "home-scores"]));
+  const scoresStatus = useScoresStatus(want(["scores", "home-scores"]));
   // Both gated on the streaming objects (`streamWanted`, declared above the
   // recorder gates): a clock-only wall screen must not hold a poll open against
   // two cloud APIs, one of which has a daily quota.
-  const resi = useResiState(streamWanted);
-  const youtube = useYouTubeState(streamWanted);
+  const resiStatus = useResiStatus(streamWanted);
+  const youtubeStatus = useYouTubeStatus(streamWanted);
   const osc = useOscState(want(["osc-button"]));
   // Gated like the rest: a wall of clocks must not open the cues:all channel,
   // whose subscriber is what starts the server's five-second Companion read.
-  const cues = useCueLive(want(["cue-button"]));
+  const cuesStatus = useCueLiveStatus(want(["cue-button"]));
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
@@ -3083,18 +3213,84 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // gate and its dot never lit. collectLayoutTypes now walks into embedded
   // layouts, so that tile reports "screen-embed" on its own and the stand-in is
   // gone — a view-embed of a clock no longer opens the presence channel.
-  const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
-  const propInstances = usePropInstances();
-  const baptism = useBaptismState();
-  const planItems = usePlanItems();
-  const serviceTimeline = useServiceTimeline();
-  const integrationsSnap = useIntegrations();
+  const onlinePresence = useDisplayPresenceStatus(want(["screen-embed", "home-screens", "home-readiness"]));
+  // Every object that reads ProPresenter, through its own instance or the
+  // default one — the types layout-objects.ts marks `propInstance: true`. A
+  // literal rather than derived from that flag, because gate-render-parity
+  // reads gates as literals; layout-data-reads holds this list to the flag.
+  // The status channel is the costly one: while anything subscribes to it the
+  // server holds its ProPresenter fallback poll at full rate, so a Home of
+  // status cards must not. The two service-item objects are here although they
+  // follow PCO first — they fall back to ProPresenter's playlist when PCO has no
+  // current item.
+  const proWanted = want([
+    "current-service-item",
+    "current-slide-notes",
+    "current-slide-text",
+    "next-service-item",
+    "next-slide-text",
+    "pp-timer",
+    "section-chip",
+    "slide-progress",
+    "slide-thumbnail",
+  ]);
+  const propresenterStatus = useProPresenterStatus(proWanted);
+  const propInstances = usePropInstances(proWanted);
+  const baptismStatus = useBaptismStatus(want(["baptism-timer"]));
+  // service-pacing reads the rundown only for its projected-end mode, and is
+  // named whatever its config says: a gate that followed config would open the
+  // read one render after the operator flipped the switch, and the projection
+  // would sit on a dash until it landed.
+  const planItemsStatus = usePlanItemsStatus(want(["service-order", "service-pacing"]));
+  const serviceTimeline = useServiceTimeline(want(["service-pacing", "people-graph"]));
+  const integrationsSnap = useIntegrations(want(["integration-status"]));
 
   // One clock for the whole canvas, and it is the SERVER's — a wall Pi's own is
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now };
+  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+}
+
+type LayoutData = ReturnType<typeof useLayoutData>;
+
+/**
+ * Every status channel's value and its `known` flag, unpacked off useLayoutData
+ * for a surface that assembles its own context — Home's grid and the editor's
+ * preview.
+ *
+ * One mapping rather than one per surface. Each pair must come off the SAME
+ * hook, and a flag copied from its neighbour compiles, then draws a false claim
+ * or a dash for ever. LayoutRenderer's own literal stays spelled out, because
+ * gate-render-parity.test.ts reads it to map each ctx field to its gate.
+ */
+export function statusCtx(
+  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
+) {
+  return {
+    obs: d.obsStatus.value,
+    obsKnown: d.obsStatus.known,
+    reaper: d.reaperStatus.value,
+    reaperKnown: d.reaperStatus.known,
+    resi: d.resiStatus.value,
+    resiKnown: d.resiStatus.known,
+    youtube: d.youtubeStatus.value,
+    youtubeKnown: d.youtubeStatus.known,
+    scores: d.scoresStatus.value,
+    scoresKnown: d.scoresStatus.known,
+    baptism: d.baptismStatus.value,
+    baptismKnown: d.baptismStatus.known,
+    cues: d.cuesStatus.value,
+    cuesKnown: d.cuesStatus.known,
+    planItems: d.planItemsStatus.value,
+    planItemsKnown: d.planItemsStatus.known,
+    planItemsFailed: d.planItemsStatus.failed,
+    integrations: d.integrationsSnap.states,
+    integrationLabels: d.integrationsSnap.labels,
+    integrationsKnown: d.integrationsSnap.known,
+    onlineOutputIds: d.onlinePresence.onlineOutputIds,
+    onlineKnown: d.onlinePresence.known,
+  } satisfies Partial<LayoutRenderCtx>;
 }
 
 /**
@@ -3105,12 +3301,18 @@ export function LayoutRenderer({
   layout,
   ndiSource,
   interactive = false,
+  allowHls,
   surface,
   viewId,
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
   interactive?: boolean;
+  /** The real display's own "Use HLS on this screen" switch. Required, like
+   *  `viewId`: a kiosk route that forgot to pass the switch through would
+   *  otherwise play HLS on a screen set to refuse it. Every caller that is not
+   *  a real display passes true. */
+  allowHls: boolean;
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -3128,14 +3330,22 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
+  //
+  // Measured in a LAYOUT effect, and no object is drawn until it has run. Drawn
+  // straight away, every object mounted inside a canvas still at scale(1), so
+  // anything that measures itself on mount saw the unscaled size: a slot photo
+  // asked for pixels for the design canvas rather than the screen, and a size
+  // that only grows never came back down. `measured` rather than a non-zero
+  // size, so a box with no layout yet (hidden, or jsdom) still draws.
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  useEffect(() => {
+  const [measured, setMeasured] = useState(false);
+  useLayoutEffect(() => {
     if (!box) return;
     const measure = () => {
       const cw = box.clientWidth;
@@ -3144,6 +3354,7 @@ export function LayoutRenderer({
         setScale(Math.min(cw / layout.canvas.width, ch / layout.canvas.height));
         setDims({ w: cw, h: ch });
       }
+      setMeasured(true);
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -3201,7 +3412,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, cues, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
@@ -3251,7 +3462,7 @@ export function LayoutRenderer({
               }
         }
       >
-        {objects.map((o) => (
+        {measured && objects.map((o) => (
           <RenderObject key={o.id} o={o} ctx={ctx} />
         ))}
       </div>

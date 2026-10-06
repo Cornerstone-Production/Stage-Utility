@@ -4,7 +4,7 @@
 // They did not. Every description walked the operator through the other
 // application's preferences — "Turn it on under ProVideoPlayer → Preferences →
 // Network → Network API, note the port shown there" — which ran to 88 words for
-// PVP and 83 for YouTube. Sixteen of those in a card grid is a wall nobody
+// PVP and 83 for YouTube. That many of those in a card grid is a wall nobody
 // reads, and the same steps were already written, better, in docs/.
 //
 // Both halves are checked here, because cutting the descriptions without the
@@ -51,6 +51,7 @@ describe("an integration's blurb is a blurb", () => {
         "scores",
         "sensource",
         "smaart",
+        "video",
         "wireless",
         "youtube",
       ],
@@ -70,7 +71,7 @@ describe("an integration's blurb is a blurb", () => {
       );
       assert.ok(
         text.length <= MAX_CHARS,
-        `${d.id} is ${text.length} characters; a card grid of sixteen of these is a wall nobody reads: ${text}`,
+        `${d.id} is ${text.length} characters; a card grid of these is a wall nobody reads: ${text}`,
       );
 
       // The tell of a setup step: it names a menu path in the other application.

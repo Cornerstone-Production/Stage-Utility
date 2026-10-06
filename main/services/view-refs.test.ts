@@ -124,6 +124,28 @@ describe("what a view points at", () => {
     assert.deepEqual(collectRefs([v], "view-1").unresolvable, []);
   });
 
+  test("a video widget inside a container yields one video-feed ref", () => {
+    // Same shape as the screen tile above, and the same reason: feedId is not a
+    // view id (so it must not leak into embeddedViewIds), but a bundle carries
+    // no feeds either (so it must not be silently dropped). Nested inside a
+    // container, so the walk's recursion is what is actually under test — a
+    // top-level object alone would not catch a push that only ran at depth 0.
+    const child = obj("deep", { type: "video", feedId: "program", fit: "contain" });
+    const parent = { ...obj("box", { type: "container" }), children: [child] } as LayoutObject;
+    const r = collectRefs([view("view-1", [parent])], "view-1");
+    assert.deepEqual(r.embeddedViewIds, [], "a feed id was chased as a view");
+    assert.deepEqual(
+      r.unresolvable.map((u) => ({ kind: u.kind, objectId: u.objectId, value: u.value })),
+      [{ kind: "video-feed", objectId: "deep", value: "program" }],
+      "the video widget is missing from the import work list",
+    );
+  });
+
+  test("a video widget with no feed chosen yet is not work", () => {
+    const v = view("view-1", [obj("o1", { type: "video", feedId: null })]);
+    assert.deepEqual(collectRefs([v], "view-1").unresolvable, []);
+  });
+
   test("integration status and the primary ProPresenter are NOT rebind work", () => {
     // Their ids are fixed constants and "default" — they resolve on any install
     // that has the integration configured, so listing them would be noise.

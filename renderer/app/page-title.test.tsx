@@ -68,7 +68,7 @@ describe("the floor the page name shortens to", () => {
   test("the label list really is the shell's, and it is not empty", () => {
     // If this reads empty, every assertion below passes vacuously.
     assert.ok(SHELL_LABELS.length >= 11, `only ${SHELL_LABELS.length} shell labels`);
-    for (const expected of ["Home", "Integrations", "ScriptView", "History"]) {
+    for (const expected of ["Home", "Integrations", "ServiceCue", "History"]) {
       assert.ok(SHELL_LABELS.includes(expected), `${expected} is not in the shell's label tables`);
     }
   });

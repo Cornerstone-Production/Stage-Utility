@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon, CheckIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -29,23 +29,96 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
+import { classifyWindow } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useSortableRow } from "../../lib/use-sortable-row";
+import { useVideoState } from "../../main/video/use-video-state";
 
 
 const UNROUTED = "__none__";
 // A sentinel, never a stored value: picking it opens the new-view dialog.
 const NEW_VIEW = "__new__";
 
-interface OutputRowProps {
+/** ScreenVideoHealth.episode reduced to what the card's warning box needs to
+ *  say — computed once in OutputsSection from video:state's `screens` and
+ *  `feeds`, never read off VideoState directly in OutputRow, so a test can
+ *  hand the row a plain object with no server behind it at all. Sourced
+ *  from the pair's EPISODE (the worst window since it started struggling),
+ *  never the live window fields on ScreenVideoHealth itself — the live
+ *  ones dilute as an old bad sample ages out from under a sticky flag that
+ *  is still holding the pair struggling, which used to leave the box
+ *  describing a cause (stalls, say) already gone from what it showed. */
+interface ScreenStruggle {
+  feedId: string;
+  feedName: string;
+  droppedInWindow: number;
+  decodedInWindow: number;
+  stallsInWindow: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The warning box's sentences after its bold lead, chosen by which threshold
+ * the EPISODE itself crossed — classifyWindow(), the same rule
+ * playback-health.ts struggles a pair on, applied to the episode's frozen
+ * numbers, since an episode can be a mixed one (both crossed):
+ *
+ * - Dropped fraction crossed: the dropped-frames sentence, plus the
+ *   resolution sentence once the feed is taller than 720p (a Pi 4's own
+ *   ceiling — see the mockup's "a Pi 4 plays 1280 × 720 smoothly").
+ * - Stalls alone crossed (dropped fraction did not): a different lead
+ *   sentence naming the stall count and pointing at the network, with
+ *   NEITHER the dropped-frames nor the resolution sentence — those are
+ *   decode advice, and stalls alone say nothing about decode load.
+ * - Both crossed: the dropped/resolution sentences as above, with a
+ *   trailing stall sentence appended.
+ */
+export function struggleSentences(struggle: Omit<ScreenStruggle, "feedId" | "feedName">): string[] {
+  const { droppedBad, stallsBad } = classifyWindow({
+    decoded: struggle.decodedInWindow,
+    dropped: struggle.droppedInWindow,
+    stalls: struggle.stallsInWindow,
+  });
+  if (!droppedBad && stallsBad) {
+    return [`This screen stalled ${struggle.stallsInWindow} times in the last minute; check its network.`];
+  }
+  const sentences = [`This screen dropped ${struggle.droppedInWindow} frames in the last minute.`];
+  if (struggle.height > 720) {
+    sentences.push(`The feed is ${struggle.width} × ${struggle.height}; a Pi 4 plays 1280 × 720 smoothly. Lower the encoder's output to 720p.`);
+  }
+  if (stallsBad) sentences.push(`It stalled ${struggle.stallsInWindow} times; check this screen's network.`);
+  return sentences;
+}
+
+/**
+ * The mockup's Home/Screens `.struggle` box, in the app's own warn callout
+ * classes — the exact ones the feed editor's own delay warning uses
+ * (feed-editor.tsx), so the two surfaces read as one design rather than two
+ * shades of amber. Its sentences are struggleSentences()'s.
+ */
+function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
+  return (
+    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+      <span className="font-semibold">Struggling with {struggle.feedName}.</span> {struggleSentences(struggle).join(" ")}
+    </p>
+  );
+}
+
+export interface OutputRowProps {
   output: Output;
   views: View[];
   /** Base origin for this display's URL — the configured public URL or the current origin. */
   baseUrl: string;
   /** Whether a live kiosk page is currently connected for this output. */
   online: boolean;
+  /** This screen's own currently-struggling feeds — usually zero or one,
+   *  more than one only for a layout with several Video widgets at once.
+   *  Empty, never undefined, so the card never needs an extra branch for
+   *  "no video state yet". */
+  struggles: ScreenStruggle[];
   canRemove: boolean;
   onRename: (name: string) => void;
   /** This display's icon tint, or undefined for the theme default. */
@@ -64,6 +137,9 @@ interface OutputRowProps {
   onSetLocked: (locked: boolean) => void;
   /** Show or hide THIS display's kiosk top bar (brand, plan context, QR). */
   onSetHideTopBar: (hideTopBar: boolean) => void;
+  /** Allow or refuse HLS playback for a Video widget on THIS screen. Off keeps
+   *  a struggling Pi on WebRTC only. */
+  onSetAllowHls: (allowHls: boolean) => void;
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
@@ -114,7 +190,7 @@ export function resolveIconEntry(
   return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
 }
 
-export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   // Both bar items below are about a strip that only some kinds draw. Offering
@@ -345,6 +421,33 @@ export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor
                   {output.hideTopBar ? "Show top bar" : "Hide top bar"}
                 </DropdownMenu.Item>
               )}
+              {/* Per display, not per view kind: a Video widget can land on
+                  any custom layout this screen might be routed to next, so the
+                  switch stays offered whatever it currently shows. */}
+              <DropdownMenu.CheckboxItem
+                checked={output.allowHls !== false}
+                onCheckedChange={onSetAllowHls}
+                className={MENU_ITEM}
+              >
+                <span className="flex size-3.5 shrink-0 items-center justify-center">
+                  <DropdownMenu.ItemIndicator>
+                    <CheckIcon className="size-3.5 text-accent" />
+                  </DropdownMenu.ItemIndicator>
+                </span>
+                Use HLS on this screen
+              </DropdownMenu.CheckboxItem>
+              {output.allowHls === false && (
+                // w-0 min-w-full: the caption adds nothing to the menu's own
+                // width and fills whatever the other items make it, so the
+                // menu is the same width checked or not, and the sentence
+                // wraps instead of stretching the menu over the card.
+                // pl-[1.875rem] is the row's own px-2 (8px) plus the
+                // indicator column's width and gap (14px + 8px), so the
+                // caption starts under the LABEL text, not the checkmark.
+                <p className="w-0 min-w-full whitespace-normal pl-[1.875rem] pr-2 pb-1.5 text-caption1 text-fg-subtle">
+                  Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here.
+                </p>
+              )}
               <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
                 // Radix closes and returns focus to the trigger, which discards
@@ -420,6 +523,14 @@ export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor
           </div>
         )}
       </div>
+
+      {/* A screen currently struggling with a feed, and what to change — see
+          ScreenStruggleBox's own comment. Under the preview, as the
+          approved mockup's Home/Screens tab has it. Usually zero or one; a
+          layout with several Video widgets can show more than one box. */}
+      {struggles.map((s) => (
+        <ScreenStruggleBox key={s.feedId} struggle={s} />
+      ))}
 
       {/* What it shows, and the way into its layout. The two controls an
           operator actually reaches for. */}
@@ -684,6 +795,31 @@ export function OutputsSection({
     [],
   );
 
+  // Every screen's own struggling feeds, keyed by outputId — the same
+  // change-driven video:state channel the Video feeds page and every Video
+  // widget already subscribe to (use-video-state.ts), never a second fetch
+  // path. Only the STRUGGLING entries with an episode to show: a screen
+  // playing every feed cleanly gets no box at all, and `episode` is null
+  // exactly then (see ScreenVideoHealth's own comment) — never read off the
+  // live window fields, which dilute out from under a still-struggling pair.
+  const video = useVideoState();
+  const strugglesByOutput = new Map<string, ScreenStruggle[]>();
+  for (const health of video?.screens ?? []) {
+    if (!health.struggling || !health.episode) continue;
+    const feed = video?.feeds.find((f) => f.id === health.feedId);
+    const list = strugglesByOutput.get(health.outputId) ?? [];
+    list.push({
+      feedId: health.feedId,
+      feedName: feed?.name ?? health.feedId,
+      droppedInWindow: health.episode.droppedInWindow,
+      decodedInWindow: health.episode.decodedInWindow,
+      stallsInWindow: health.episode.stallsInWindow,
+      width: health.episode.width,
+      height: health.episode.height,
+    });
+    strugglesByOutput.set(health.outputId, list);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -721,6 +857,7 @@ export function OutputsSection({
                 views={views}
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
+                struggles={strugglesByOutput.get(output.id) ?? []}
                 canRemove={outputs.length > 1}
                 iconColor={icon.value}
                 iconKey={icon.key}
@@ -731,6 +868,7 @@ export function OutputsSection({
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
+                onSetAllowHls={(allowHls) => handlers.handleSetOutputAllowHls(output.id, allowHls)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
@@ -740,7 +878,7 @@ export function OutputsSection({
                   // used to say the built-in kinds "would open an editor with
                   // nothing to edit" — which was simply wrong: a slots view's
                   // editor is where its slot set and column positions live, and
-                  // a script view's is where its column preset is chosen.
+                  // a ServiceCue view's is where its column preset is chosen.
                   // Greying this out left no way to edit a mic board at all.
                   onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
                 }

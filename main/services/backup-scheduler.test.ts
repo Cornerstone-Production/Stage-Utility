@@ -136,3 +136,32 @@ test("the prune pattern matches the stamp its own writer produces", () => {
   assert.ok(!ownBackupPattern("config-", ".json").test("config-2024.json"));
   assert.ok(!ownBackupPattern("config-", ".json").test(`config-${at}.zip`), "extension must matter");
 });
+
+// ── A write that dies halfway ──────────────────────────────────────────────
+
+test("a backup that fails halfway leaves no short file named like a good one", async (t) => {
+  // A torn stage-utility-config-<stamp>.json would count as one of the N kept
+  // copies and push a good one out at the next prune, and a restore of it fails.
+  const { backupScheduler } = await import("./backup-scheduler.js");
+  const { syncBuiltinESMExports } = await import("node:module");
+  t.mock.method(console, "error", () => {});
+  const dir = await backupScheduler.destinationDir();
+  const before = await fs.readdir(dir).catch(() => [] as string[]);
+  const fsp = (await import("node:fs/promises")).default;
+  const real = fsp.writeFile;
+  fsp.writeFile = (async (file: Parameters<typeof real>[0], data: Buffer | string) => {
+    // Only the backup's own files: the settings write that records the failure goes
+    // through the same seam and has to succeed.
+    if (!String(file).startsWith(dir)) return real(file, data);
+    await real(file, String(data).slice(0, 3));
+    throw new Error("ENOSPC: no space left on device");
+  }) as unknown as typeof real;
+  syncBuiltinESMExports();
+  try {
+    await backupScheduler.runNow();
+  } finally {
+    fsp.writeFile = real;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(await fs.readdir(dir).catch(() => [] as string[]), before, "a torn file or its scratch was left");
+});

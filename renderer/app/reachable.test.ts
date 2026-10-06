@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 // file. It renders nowhere and nothing says so.
 //
 // That is not hypothetical. Dissolving Settings orphaned TWO editors: the patch
-// editor and the ScriptView column presets. Both had been correctly identified
+// editor and the ServiceCue column presets. Both had been correctly identified
 // as surfaces distinct from their viewers, and then only the viewers were
 // routed. The parity inventory missed it because it was built from the settings
 // TAB list, where each pair looked like one entry.

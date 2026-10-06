@@ -69,7 +69,7 @@ describe("roster refresh inside a service window", () => {
     roster = [{ id: "tm-1", name: "A. Person" }];
 
     // No service-type or plan id from any real organisation: made-up strings.
-    ctl.state = { ...ctl.state, pcoConfigured: true, serviceTypeId: "st-test", planId: "plan-test" };
+    ctl.state = { ...ctl.state, pcoConfigured: true, serviceTypeId: "1001", planId: "2001" };
     ctl.pcoAppId = "app-id";
     ctl.pcoSecret = "secret";
     ctl.teamMembers = [];
@@ -232,7 +232,7 @@ describe("roster refresh inside a service window", () => {
     // stage display.
     inWindow(true);
     ctl.teamMembers = [{ id: "tm-11am", name: "Current Plan Person" }];
-    ctl.teamMembersKey = "st-test:plan-later";
+    ctl.teamMembersKey = "1001:2002";
 
     let release: () => void = () => {};
     const held = new Promise<void>((r) => {
@@ -257,7 +257,7 @@ describe("roster refresh inside a service window", () => {
 
     const tick = ctl.rosterRefreshTick();
     // The plan rolls over while the request is out.
-    ctl.state = { ...ctl.state, planId: "plan-later" };
+    ctl.state = { ...ctl.state, planId: "2002" };
     release();
     await tick;
 
@@ -266,7 +266,7 @@ describe("roster refresh inside a service window", () => {
       ["tm-11am"],
       "a roster for a plan that is no longer selected must be discarded, not applied",
     );
-    assert.equal(ctl.teamMembersKey, "st-test:plan-later");
+    assert.equal(ctl.teamMembersKey, "1001:2002");
   });
 
   test("a slow tick does not overlap the next one", async () => {

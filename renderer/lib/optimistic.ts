@@ -42,7 +42,7 @@ export async function writeOptimistic<T>(
     return next;
   } catch (err) {
     if (prev) queryClient.setQueryData(key, prev);
-    toast.error(fail ? `${fail}: ${String(err)}` : errorMessage(err));
+    toast.error(fail ? `${fail}: ${errorMessage(err)}` : errorMessage(err));
     return null;
   }
 }

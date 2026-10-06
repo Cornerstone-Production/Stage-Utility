@@ -280,6 +280,45 @@ export function RowToggle<T extends string>({
   );
 }
 
+/**
+ * A two-or-three-way choice drawn as one control: a filled track, the chosen
+ * segment raised on it. Full width, so it sits under a stacked label rather
+ * than beside one. The layout editor's Video section uses it for Fit, as the
+ * approved design draws it; RowToggle stays the inspector's usual toggle.
+ */
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  /** Names the group for assistive tech; the visible label is the caller's. */
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap gap-0.5 rounded-lg bg-fill p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "flex-1 whitespace-nowrap rounded-md px-2 py-1 text-caption1 font-medium transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+            value === o.value ? "bg-surface-raised text-fg shadow-[var(--su-shadow-1)]" : "text-fg-muted hover:text-fg",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** A labeled dropdown row (for when there are more options than fit a toggle). */
 export function RowSelect({ label, hint, value, options, onChange }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
   return (

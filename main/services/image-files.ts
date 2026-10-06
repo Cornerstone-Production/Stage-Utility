@@ -15,6 +15,7 @@ import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { externKeyed } from "../types/extern-keyed.js";
+import { atomicWrite } from "./write-queue.js";
 
 // NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
 // is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
@@ -95,7 +96,7 @@ export async function saveImage(dirName: string, dataUrl: string): Promise<strin
   const file = `${hash}.${ext}`;
   const d = imageDir(dirName);
   await fs.mkdir(d, { recursive: true });
-  await fs.writeFile(path.join(d, file), bytes);
+  await atomicWrite(path.join(d, file), bytes);
   return `/${dirName}/${file}`;
 }
 
@@ -119,7 +120,8 @@ export async function readImage(
 /** Every stored file in a directory, for backup or pruning. */
 export async function listImages(dirName: string): Promise<string[]> {
   try {
-    return await fs.readdir(imageDir(dirName));
+    // Not a write in flight: atomicWrite's scratch file is a dotfile beside the image.
+    return (await fs.readdir(imageDir(dirName))).filter((f) => !f.startsWith("."));
   } catch {
     return []; // nothing stored yet
   }
@@ -133,6 +135,6 @@ export async function restoreImage(dirName: string, file: string, data: Buffer):
   if (!MIME_BY_EXT[ext]) return false;
   const d = imageDir(dirName);
   await fs.mkdir(d, { recursive: true });
-  await fs.writeFile(path.join(d, file), data);
+  await atomicWrite(path.join(d, file), data);
   return true;
 }

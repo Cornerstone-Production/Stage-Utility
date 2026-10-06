@@ -37,13 +37,87 @@ concurrency:
 
 permissions:
   contents: write
-  # To mark the version-bump commit with the `build` status the gate below
+  # To mark the version-bump commit with the `build` status the verify jobs
   # earned, so the release PR whose head it is shows a verified commit without
   # a second run of the suite.
   statuses: write
 
 jobs:
+  # Every push, releasable or not. This is the only gate a push to beta or main
+  # gets (ci.yml runs on pull requests only), and it is the merged tree that
+  # matters: two PRs each green on their own branch have never been tested
+  # together until they meet here. A chore-only push that skipped this would
+  # leave the merge unverified until the next releasable one.
+  #
+  # Split the way ci.yml is: lint, type-check and build in one job, the suite in
+  # four shards beside it, so the gate takes as long as its slowest part rather
+  # than the sum. The release job below waits for all of them.
+  verify-checks:
+    name: verify lint, type-check, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Lint, type-check, build
+        run: |
+          set -euo pipefail
+          npm ci --include=dev && npm run lint && npm run type-check && npm run build
+
+  verify-tests:
+    name: verify tests (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The suite asks git questions about history; see ci.yml.
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Test
+        run: |
+          set -euo pipefail
+          npm ci --include=dev && npm test -- --test-shard=${{ matrix.shard }}/4
+
+  # A red gate is a red checkmark, not a missing one. ci.yml does not run on the
+  # push, so without this a merged tree that fails here would carry no `build`
+  # status at all, and the release PR whose head it is skips ci.yml, so it would
+  # read as green. It runs only when a verify job failed; the release job, which
+  # needs them, does not run at all then.
+  verify-failed:
+    needs: [verify-checks, verify-tests]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark the verified commit as failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+              -f state=failure -f context=build \
+              -f description="lint, type-check, tests or build failed in the release run" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo "::error::the gate failed AND its failure status could not be written to ${GITHUB_SHA:0:7}"
+          exit 1
+
   release:
+    needs: [verify-checks, verify-tests]
     runs-on: ubuntu-latest
     outputs:
       # Consumed by the artifacts job below. `published` is only true when the tag
@@ -58,11 +132,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Node for `node -p` and `npm version` only; this job installs nothing, so
+      # no npm cache.
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          cache: npm
+
+      # The verify jobs above passed, or this job would not be running, and the
+      # commit they checked out is this run's own, so that is the SHA marked.
+      #
+      # First, ahead of the version decision, so a failure in the release tooling
+      # after it cannot leave a verified tree with no checkmark: the release PR
+      # reads a missing `build` as green, and a red one would be untrue.
+      #
+      # Fatal, and before anything is pushed: if the status API is not answering,
+      # this run stops here with nothing half-done, and the re-run finds the same
+      # tree and does it all again. A green tree with no checkmark is a merge made
+      # blind, which is worse than a late release.
+      - name: Mark the verified commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+              -f state=success -f context=build \
+              -f description="lint, type-check, tests and build passed in the release run" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
+              exit 0
+            fi
+            echo "status write failed (attempt $attempt of 3)"
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo "::error::could not write the build status to ${SHA}; stopping before the bump so nothing is half-released"
+          exit 1
 
       - name: Decide the version
         id: version
@@ -197,69 +302,6 @@ jobs:
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
           echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
 
-      # Every push, releasable or not. This is the only gate a push to beta or
-      # main gets (ci.yml runs on pull requests only), and it is the merged tree
-      # that matters: two PRs each green on their own branch have never been
-      # tested together until they meet here. A chore-only push that skipped
-      # this would leave the merge unverified until the next releasable one.
-      - name: Verify the merged tree
-        id: verify
-        run: |
-          set -euo pipefail
-          npm ci --include=dev && npm run lint && npm run type-check && npm test && npm run build
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      # The commit that was verified carries a `build` status saying so. A
-      # GITHUB_TOKEN push triggers no workflows, so the version-bump commit
-      # pushed below would otherwise show only CodeQL on the release PR whose
-      # head it is; it differs from this verified tree by one version string.
-      #
-      # Fatal, and deliberately before anything is pushed: if the status API is
-      # not answering, this run stops here with nothing half-done, and the
-      # re-run finds the same tree and does it all again. A green tree with no
-      # checkmark is a merge made blind, which is worse than a late release.
-      # A red gate is a red checkmark, not a missing one. ci.yml no longer runs
-      # on the push, so without this a merged tree that fails here would carry
-      # no `build` at all — and the release PR whose head it is skips ci.yml,
-      # so it would read as green. github.sha, not the verify step's output,
-      # which is unset when verify fails.
-      - name: Mark the verified commit as failed
-        if: ${{ failure() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -uo pipefail
-          for attempt in 1 2 3; do
-            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-              -f state=failure -f context=build \
-              -f description="lint, type-check, tests or build failed in the release run" \
-              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then sleep 10; fi
-          done
-          echo "::error::the gate failed AND its failure status could not be written to ${GITHUB_SHA:0:7}"
-          exit 1
-
-      - name: Mark the verified commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.verify.outputs.sha }}
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
-              -f state=success -f context=build \
-              -f description="lint, type-check, tests and build passed in the release run" \
-              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
-              exit 0
-            fi
-            echo "status write failed (attempt $attempt of 3)"
-            if [ "$attempt" -lt 3 ]; then sleep 10; fi
-          done
-          echo "::error::could not write the build status to ${SHA}; stopping before the bump so nothing is half-released"
-          exit 1
-
       - name: Bump, tag and push
         id: push
         if: steps.version.outputs.skip == 'false'
@@ -330,7 +372,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           V: ${{ steps.version.outputs.version }}
           BUMP: ${{ steps.push.outputs.bump }}
-          VERIFIED: ${{ steps.verify.outputs.sha }}
+          VERIFIED: ${{ github.sha }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do

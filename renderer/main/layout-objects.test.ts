@@ -254,7 +254,7 @@ const RESTYLED: Record<string, Record<string, unknown>> = {
   "notes": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
   "checklist": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
 
-  // ── The readouts stop shipping an alignment (Phase 7 Task 9) ───────────────
+  // ── The readouts stop shipping an alignment ───────────────────────────────
   //
   // Every preset above spreads TEXT(), which writes `textAlign: "center"`. So
   // every readout ever created stored a centre alignment as a side effect of
@@ -345,7 +345,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
   // The other two things Home draws. They existed as bespoke panels; making them
   // objects is what lets the Home tab's own editor govern the whole page with
-  // one mechanism (Phase 7, Task 6).
+  // one mechanism.
   // Renamed when it was split: it drew recording and SPL too, and does not any
   // more. The type id stays so no stored layout has to move.
   { type: "home-live-status", label: "Service timer", group: "PCO / service", after: "home-next-service" },
@@ -388,6 +388,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // `notes` already claims to sit directly after `action-button`, and that claim
   // is a pinned fact about what shipped.
   { type: "cue-button", label: "Cue button", group: "Control", after: "checklist" },
+  // The Video feeds page's own widget: a live camera or program feed, named by
+  // id. Sits after the logo, the last of the plain Layout media types.
+  { type: "video", label: "Video", group: "Layout", after: "brand-logo" },
 ];
 
 /**
@@ -618,12 +621,12 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
 describe("embedded view default font size", () => {
   // The requirement for this object is that nothing looks different between the
-  // embed and the ScriptView page it came out of. It shipped at 0.03 — chosen so
+  // embed and the ServiceCue page it came out of. It shipped at 0.03 — chosen so
   // it would be "readable from a stage" untouched — which renders at 32px on a
   // 1080-tall screen against the page's 17px, showing about half the rundown and
   // pushing the last columns off the right edge. Anyone re-raising this default
   // is re-breaking the one thing the object exists to do.
-  test("matches what the ScriptView page actually renders at", () => {
+  test("matches what the ServiceCue page actually renders at", () => {
     // The page sets `clamp(0.8rem, 1.6vmin, 1.1rem)`; on a 1080-tall 16:9 screen
     // that resolves to 1.6vmin = 17.28px, so the equivalent fraction is 0.016.
     const PAGE_PX_AT_1080 = 1.6 * (1080 / 100);
@@ -637,5 +640,20 @@ describe("embedded view default font size", () => {
   test("is what a placed embedded view is actually given", () => {
     // Pinning the constant alone would pass while the registry used something else.
     assert.equal(defaultStyle("view-embed" as LayoutObjectType).fontSize, EMBED_FONT_FRACTION);
+  });
+});
+
+describe("the Video object's defaults", () => {
+  test("a new one points at no feed, fits the whole picture, shows its name and says when it is offline", () => {
+    assert.deepEqual(LAYOUT_OBJECTS.video.config(), {
+      type: "video",
+      feedId: null,
+      fit: "contain",
+      showLabel: true,
+      whenOffline: "message",
+    });
+  });
+  test("it takes a large Home card", () => {
+    assert.equal(LAYOUT_OBJECTS.video.homeSize, "l");
   });
 });

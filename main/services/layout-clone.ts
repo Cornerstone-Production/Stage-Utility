@@ -97,7 +97,7 @@ export function forEachViewSourcedSlotsGrid(
  * The name a View gets when the operator does not type one.
  *
  * A record rather than a switch with a `default`, because the default was
- * answering for kinds it had never heard of: a new Script view and a new SPL
+ * answering for kinds it had never heard of: a new ServiceCue view and a new SPL
  * Rundown view were both created called "Slots". Every kind now has to be named
  * here, or the build fails.
  */
@@ -107,7 +107,7 @@ const DEFAULT_VIEW_NAMES: Record<ViewKind, string> = externKeyed({
   stage: "Stage",
   transcription: "Transcription",
   custom: "Custom",
-  script: "Script",
+  script: "ServiceCue",
   "spl-rundown": "SPL Rundown",
   calendar: "Calendar",
 });

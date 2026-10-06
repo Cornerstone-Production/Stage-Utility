@@ -102,9 +102,14 @@ export function recordIndicator(
  * third is one entry in `streamers()` rather than a new argument threaded
  * through every surface that asks.
  */
+/** How each platform is named to the operator. A union rather than a string so a
+ *  table keyed by it (the layout renderer's "has it answered yet") fails to
+ *  compile when a platform is renamed or added, instead of reading as unanswered
+ *  for ever. */
+export type StreamerName = "Resi" | "YouTube" | "OBS";
+
 export interface Streamer {
-  /** How it is named to the operator: "Resi", "YouTube", "OBS". */
-  name: string;
+  name: StreamerName;
   /** The link to the platform. Not the same as being live. */
   connected: boolean;
   live: boolean;
@@ -168,7 +173,7 @@ export function lateBySec(s: Pick<Streamer, "live" | "scheduledStartAt">, now: n
  * rendered as YouTube — a card labelled YouTube reporting something else.
  * A lookup that returns undefined for an unknown value cannot do that.
  */
-export const STREAMER_FOR: Readonly<Record<string, string | null>> = externKeyed({
+export const STREAMER_FOR: Readonly<Record<string, StreamerName | null>> = externKeyed({
   any: null,
   resi: "Resi",
   youtube: "YouTube",

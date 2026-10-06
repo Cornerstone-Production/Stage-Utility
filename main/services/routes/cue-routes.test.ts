@@ -1894,7 +1894,7 @@ describe("reconciling a cue's Companion button", () => {
     assert.deepEqual(presses, [], "a cue whose button is gone must not press a coordinate");
   });
 
-  test("and the engine refuses it from any other path too — the test-fire button", async () => {
+  test("and the engine refuses it from any other path too — the Run and Test button", async () => {
     // The 409 lives in the call route's engine path. A rule can also fire from a
     // trigger and from the editor's Test, and a guard on one path is a guard the
     // other two walk around.
@@ -1907,9 +1907,10 @@ describe("reconciling a cue's Companion button", () => {
     const rule = automationEngine
       .cueRules()
       .find((x) => automationEngine.cueNameOf(x) === "room_a_screens_projectors_on")!;
-    const fired = await automationEngine.testFire(rule.id);
-    assert.equal(fired.ok, false);
-    assert.match(fired.detail, /no longer on Companion page 1/);
+    const fired = await automationEngine.runNow(rule.id, { caller: "console", confirmed: true });
+    assert.equal(fired.status, 200);
+    assert.equal((fired.body as { outcome: string }).outcome, "failed");
+    assert.match((fired.body as { detail: string }).detail, /no longer on Companion page 1/);
     assert.deepEqual(presses, []);
   });
 

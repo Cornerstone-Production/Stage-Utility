@@ -4,12 +4,13 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { isOperatorPath } from "./main/services/routes/operator-paths";
+import { cleanUrlsMiddleware } from "./main/services/routes/dev-clean-urls";
 import { serverPort } from "./main/services/server-port";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
 //   /settings, /history, /patch → app.html (operator app; see operator-paths.ts)
+//   /scriptview/…    → 301 to /servicecue/…, query kept (legacyPageRedirect)
 //   /display-1, …    → index.html (kiosk; the slug is read client-side)
 //   /preview-<view>  → index.html (settings live preview of a View)
 //
@@ -19,15 +20,9 @@ function cleanUrls(): PluginOption {
   return {
     name: "clean-urls",
     configureServer(server) {
-      server.middlewares.use((req, _res, next) => {
-        const pathname = (req.url ?? "").split("?")[0];
-        if (isOperatorPath(pathname)) {
-          req.url = "/app.html";
-        } else if (/^\/(display|preview)-[^/]+\/?$/.test(pathname)) {
-          req.url = "/index.html";
-        }
-        next();
-      });
+      // The middleware lives in main/ so a test can drive it: vite.config.ts cannot
+      // be imported outside Vite (it reads __dirname).
+      server.middlewares.use(cleanUrlsMiddleware);
     },
   };
 }

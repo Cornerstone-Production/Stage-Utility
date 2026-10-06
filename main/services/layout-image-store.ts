@@ -14,6 +14,7 @@ import { viewsStore } from "./views-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
 import { externKeyed } from "../types/extern-keyed.js";
+import { atomicWrite } from "./write-queue.js";
 
 // NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
 // is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
@@ -56,7 +57,7 @@ export async function saveLayoutImage(dataUrl: string): Promise<string> {
   const file = `${hash}.${ext}`;
   const d = dir();
   await fs.mkdir(d, { recursive: true });
-  await fs.writeFile(path.join(d, file), bytes);
+  await atomicWrite(path.join(d, file), bytes);
   return `/layout-images/${file}`;
 }
 
@@ -82,15 +83,18 @@ export async function saveLayoutImageBytes(file: string, bytes: Buffer): Promise
   const d = dir();
   await fs.mkdir(d, { recursive: true });
   const full = path.join(d, file);
+  // Same hash means same bytes, so a file that is already here is left alone. It is
+  // only ever there whole: it is written aside and renamed into place, because a
+  // truncated one under the final name would be taken for the image by this check
+  // and served as it was.
   try {
-    // wx: fail if it exists. Same hash means same bytes, so there is nothing to
-    // write and nothing to overwrite.
-    await fs.writeFile(full, bytes, { flag: "wx" });
-    return true;
+    await fs.access(full);
+    return false;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
+  await atomicWrite(full, bytes);
+  return true;
 }
 
 // Don't reap a file newer than this — an image can be uploaded and referenced only

@@ -414,6 +414,14 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
     ]
   },
   {
+    "id": "video",
+    "kind": "control",
+    "label": "Video feeds",
+    "description": "Runs the relay that turns encoder and camera streams into video for layouts and Home.",
+    "docs": "video-feeds",
+    "configSchema": []
+  },
+  {
     "id": "osc",
     "kind": "control",
     "label": "OSC",

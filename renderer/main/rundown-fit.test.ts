@@ -30,7 +30,7 @@ function converge(availW: number, naturalW: number, maxSteps = 50) {
 
 describe("nextFitScale", () => {
   it("leaves a table that already fits completely alone", () => {
-    // The whole point: the standalone ScriptView page must render as it always
+    // The whole point: the standalone ServiceCue page must render as it always
     // has. Any drift here is a silent restyle of a live stage display.
     assert.equal(nextFitScale({ availW: 1920, scrollW: 1920, scale: 1 }), 1);
     assert.equal(nextFitScale({ availW: 1920, scrollW: 1200, scale: 1 }), 1);

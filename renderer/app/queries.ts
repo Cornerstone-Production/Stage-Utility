@@ -22,6 +22,7 @@ export const QUERY_KEYS = {
    *  with no id clears every variant by prefix — which handlers rely on. */
   plans: (serviceTypeId?: string | null) => ["stage:listPlans", serviceTypeId] as const,
   teamPositions: (serviceTypeId?: string | null) => ["stage:listTeamPositions", serviceTypeId] as const,
+  allTeamPositions: ["stage:listAllTeamPositions"] as const,
   wirelessChannels: ["wireless:listChannels"] as const,
   layoutTemplates: ["layoutTemplates:list"] as const,
   slotPresets: ["presets:list"] as const,
@@ -63,12 +64,27 @@ export function usePlans(stageState: StageState | undefined) {
   });
 }
 
-/** Team positions for the position dropdown. */
-export function useTeamPositions(stageState: StageState | undefined) {
+/**
+ * Team positions for one service type: the one the slot editor is EDITING, which
+ * is not the live type once the plan switcher has moved it. The id is in the
+ * request as well as the key, so the server answers for the type in the key.
+ */
+export function useTeamPositions(serviceTypeId: string | null | undefined, pcoConfigured: boolean) {
   return useQuery({
-    queryKey: QUERY_KEYS.teamPositions(stageState?.serviceTypeId),
-    queryFn: () => ipc<TeamPositionDTO[]>("stage:listTeamPositions"),
-    enabled: !!stageState?.serviceTypeId && !!stageState?.pcoConfigured,
+    queryKey: QUERY_KEYS.teamPositions(serviceTypeId),
+    queryFn: () =>
+      ipc<TeamPositionDTO[]>("stage:listTeamPositions", serviceTypeId ? { serviceTypeId } : undefined),
+    enabled: !!serviceTypeId && pcoConfigured,
+  });
+}
+
+/** Every service type's positions, tagged. Only runs while `enabled`: it is one
+ *  Planning Center read per service type, so it waits until asked for. */
+export function useAllTeamPositions(enabled: boolean) {
+  return useQuery({
+    queryKey: QUERY_KEYS.allTeamPositions,
+    queryFn: () => ipc<AllTeamPositionsDTO>("stage:listAllTeamPositions"),
+    enabled,
   });
 }
 

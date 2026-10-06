@@ -49,7 +49,7 @@ describe("a plan's notes", () => {
 
   it("reads content and category off the note's own attributes", async () => {
     stub([noteNode("n1", "Production", "- Batteries fresh", { id: "t-prod", type: "Team" })]);
-    const notes = await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    const notes = await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.equal(notes.length, 1);
     assert.equal(notes[0].categoryName, "Production");
     assert.equal(notes[0].content, "- Batteries fresh");
@@ -57,7 +57,7 @@ describe("a plan's notes", () => {
 
   it("resolves team names from the included nodes", async () => {
     stub([noteNode("n1", "Production", "x", { id: "t-prod", type: "Team" })]);
-    const [note] = await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    const [note] = await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.deepEqual(note.teamNames, ["Production"]);
   });
 
@@ -70,44 +70,44 @@ describe("a plan's notes", () => {
         { id: "t-band", type: "Team" },
       ]),
     ]);
-    const [note] = await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    const [note] = await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.deepEqual(note.teamNames, ["Production", "Band"]);
   });
 
   it("survives a note assigned to no team", async () => {
     stub([noteNode("n1", "General", "x", null)]);
-    const [note] = await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    const [note] = await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.deepEqual(note.teamNames, []);
   });
 
   it("drops an empty note rather than making a blank row", async () => {
     stub([noteNode("n1", "Production", "   \n ", null), noteNode("n2", "Production", "- Real", null)]);
-    const notes = await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    const notes = await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.deepEqual(notes.map((n) => n.id), ["n2"]);
   });
 
   it("asks for the teams it needs, in one request", async () => {
     stub([]);
-    await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.equal(urls.length, 1);
     assert.ok(urls[0].includes("include=teams"), `no team include: ${urls[0]}`);
-    assert.ok(urls[0].includes("/plans/p1/notes"), `wrong endpoint: ${urls[0]}`);
+    assert.ok(urls[0].includes("/plans/21/notes"), `wrong endpoint: ${urls[0]}`);
   });
 
   it("keys the cache by credentials as well as plan", async () => {
     // Two orgs must not share an entry: the plan id alone is not unique across
     // installs, and a shared cache would serve one church another's notes.
     stub([noteNode("n1", "Production", "- One", null)]);
-    await pcoService.listPlanNotes("appA", "secret", "st1", "p1");
+    await pcoService.listPlanNotes("appA", "secret", "11", "21");
     stub([noteNode("n2", "Production", "- Two", null)]);
-    const second = await pcoService.listPlanNotes("appB", "secret", "st1", "p1");
+    const second = await pcoService.listPlanNotes("appB", "secret", "11", "21");
     assert.deepEqual(second.map((n) => n.id), ["n2"], "the second org was served the first org's notes");
   });
 
   it("serves a repeat reader from cache rather than PCO", async () => {
     stub([noteNode("n1", "Production", "- One", null)]);
-    await pcoService.listPlanNotes("app", "secret", "st1", "p1");
-    await pcoService.listPlanNotes("app", "secret", "st1", "p1");
+    await pcoService.listPlanNotes("app", "secret", "11", "21");
+    await pcoService.listPlanNotes("app", "secret", "11", "21");
     assert.equal(urls.length, 1, `notes were fetched ${urls.length} times`);
   });
 });

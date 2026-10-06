@@ -1,6 +1,6 @@
 {
   "name": "stage-utility",
-  "version": "1.24.1",
+  "version": "1.25.0-beta.13",
   "description": "Display band lineup and wireless device status pulled from Planning Center Online and Shure wireless systems.",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -21,7 +21,8 @@
     "server": "tsx server.ts",
     "start": "node --import tsx server.ts",
     "lint": "eslint .",
-    "test": "node --import tsx --test \"main/**/*.test.ts\" \"renderer/**/*.test.ts\" \"renderer/**/*.test.tsx\" \"scripts/**/*.test.ts\"",
+    "icons": "node scripts/build-icons.mjs",
+    "test": "node scripts/run-tests.mjs",
     "type-check": "tsc --noEmit",
     "format": "oxfmt ."
   },
@@ -36,6 +37,7 @@
     "@tanstack/react-router": "^1.170.38",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
+    "hls.js": "1.7.3",
     "lucide-react": "^1.47.0",
     "pdfjs-dist": "^6.3.289",
     "postcss": "^8.5.28",

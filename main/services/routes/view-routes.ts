@@ -28,7 +28,7 @@ import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-b
 import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
-import { zonedDateKey } from "../app-timezone.js";
+import { datedExportFilename } from "../export-filename.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -51,25 +51,9 @@ function isSelectionList(v: unknown): v is CalendarSelection[] {
   );
 }
 
-/**
- * Operator-supplied text, safe to put in a quoted Content-Disposition value.
- *
- * Keeps only [a-z0-9-]: a quote or a path separator surviving here would be a
- * header injection, not a cosmetic problem. Bounded because some filesystems cap
- * a path component at 255 bytes. Exported so the plan export names its file the
- * same way rather than growing a fifth copy of this line.
- */
-export function filenameSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-}
-
 /** `stage-utility-view-left-mic-display-2026-08-17.json`. */
 export function exportFilename(name: string, now: Date): string {
-  const slug = filenameSlug(name);
-  // The app's zone, not the server's clock: a UTC box dates a file exported at
-  // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
-  // this and the config and archive exports are the other three copies.
-  return `stage-utility-view-${slug ? `${slug}-` : ""}${zonedDateKey(now.getTime())}.json`;
+  return datedExportFilename("stage-utility-view", name, now);
 }
 
 /**
@@ -445,8 +429,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       const hasSlotsLayout = "slotsLayout" in body
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
-      const hasScriptViewLayout = "scriptViewLayoutId" in body
-        && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
+      // `scriptViewLayoutId` is what this field was called before ServiceCue was
+      // renamed, and what the API reference told a script to send; it is still
+      // read, with the current name winning when both are present.
+      const serviceCueLayoutId = "serviceCueLayoutId" in body ? body.serviceCueLayoutId : body.scriptViewLayoutId;
+      const hasServiceCueLayout = serviceCueLayoutId === null || typeof serviceCueLayoutId === "string";
       const hasHideChrome = typeof body.hideChrome === "boolean";
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
@@ -464,8 +451,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface && !hasHideChrome && !calendarFilters) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.scriptViewLayoutId (string|null), body.hideChrome (boolean), or body.calendarSources + body.calendarTags (arrays) required");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !calendarFilters) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
       let state = stageController.getState();
@@ -499,7 +486,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         }
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
-      if (hasScriptViewLayout) state = await stageController.setViewScriptViewLayout(id, body.scriptViewLayoutId as string | null);
+      if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
@@ -621,7 +608,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
     // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
-    // (boolean = draw no kiosk top bar), and/or { slug? } (string; "" clears the
+    // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
+    // widget here may play over HLS), { textSize? } (number 50-300 = the ServiceCue
+    // text size this display shows), and/or { slug? } (string; "" clears the
     // friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
@@ -633,47 +622,39 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
       const hasHideTopBar = typeof body.hideTopBar === "boolean";
+      const hasAllowHls = typeof body.allowHls === "boolean";
+      // Present at all counts: setOutputTextSize refuses a value that is not a
+      // number from 50 to 300, so junk is a 400 with the reason rather than an
+      // ignored field.
+      const hasTextSize = "textSize" in body;
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasTextSize && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
-      if (hasName) state = await stageController.renameOutput(id, body.name as string);
-      // Mode BEFORE viewId, so a single request can turn a screen into a panel
-      // and point it at a console. The other order refuses its own second half.
-      if (hasMode) {
-        try {
-          state = await stageController.setOutputMode(id, mode);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      // A refused binding is a 400 with the reason, not a 500 stack trace: the
-      // operator has to see WHY a console will not go on a wall screen.
-      if (hasViewId) {
-        try {
-          state = await stageController.setOutputView(id, body.viewId as string | null);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
-      if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
-      if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
-      // A rejected slug is a 400 with the reason, not a silent no-op — the operator
-      // has to see WHY "/history" cannot be used.
-      if (hasSlug) {
-        try {
-          state = await stageController.setOutputSlug(id, body.slug as string);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
+      // One try for every field: each setter refuses by throwing (an id that names
+      // no output, a console bound to a wall screen, a slug that is reserved), and
+      // the answer is a 400 with the reason, not a 500 an operator would read as
+      // the server itself being broken. Fields applied before the refusal stay
+      // applied, as they always did.
+      try {
+        if (hasName) state = await stageController.renameOutput(id, body.name as string);
+        // Mode BEFORE viewId, so a single request can turn a screen into a panel
+        // and point it at a console. The other order refuses its own second half.
+        if (hasMode) state = await stageController.setOutputMode(id, mode);
+        if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+        if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
+        if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
+        if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
+        if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        if (hasTextSize) state = await stageController.setOutputTextSize(id, body.textSize);
+        if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
+      } catch (err) {
+        error(res, errorMessage(err));
+        return;
       }
       json(res, state);
       return;

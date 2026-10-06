@@ -8,7 +8,6 @@ import * as fs from "fs/promises";
 import { scrub } from "./scrub.js";
 import * as http from "http";
 import * as net from "net";
-import * as os from "os";
 import * as path from "path";
 import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
@@ -17,6 +16,7 @@ import { fileURLToPath } from "url";
 
 import {
   addBroadcastListener,
+  setNamedSubscriberCheck,
   setSubscriberCheck,
   setSubscriberCount,
   subscriptionsChanged,
@@ -25,12 +25,16 @@ import { EventPollHub, serializePollResponse, type PollFrame } from "./event-pol
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
+import type { VideoPlaybackReport } from "../types/video.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { serverPort } from "./server-port.js";
 import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
 import { getUserDataPath } from "./app-paths.js";
+import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
+import { legacyApiRoutes } from "./routes/legacy-api-routes.js";
+import { legacyPageRoutes } from "./routes/legacy-page-routes.js";
 import { logRoutes } from "./routes/log-routes.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
@@ -53,6 +57,8 @@ import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { overlaidTimeline } from "./history-item-times.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
+import { videoService } from "./video/video-service.js";
+import { parseVideoReports } from "./video/playback-health.js";
 import { stageController } from "./stage-controller.js";
 import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
@@ -65,7 +71,7 @@ import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
 import { proxyRoutes } from "./routes/proxy-routes.js";
 import { stateRoutes } from "./routes/state-routes.js";
-import { scriptviewRoutes } from "./routes/scriptview-routes.js";
+import { serviceCueRoutes } from "./routes/servicecue-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
 import { planRoutes } from "./routes/plan-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
@@ -82,6 +88,8 @@ import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
+import { videoRoutes } from "./routes/video-routes.js";
+import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
@@ -102,7 +110,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   archiveRoutes,
   proxyRoutes,
   stateRoutes,
-  scriptviewRoutes,
+  serviceCueRoutes,
   viewRoutes,
   planRoutes,
   integrationRoutes,
@@ -115,6 +123,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   brandingRoutes,
   presetRoutes,
   calendarRoutes,
+  videoRoutes,
 ] as const;
 
 /**
@@ -129,8 +138,16 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * is: dispatch.test.ts walks routes/ and requires every module it finds to be in
  * one of these two lists, and a module dispatched by a bespoke line would have to
  * be excused by name — which is how a coverage scan stops covering anything.
+ *
+ * videoProxyRoutes belongs here for the same reason logRoutes does: none of
+ * `/video/<feedId>/whep|whip|<file>` starts with /api/, so the static-build
+ * arm below would serve the SPA shell for every one of them.
+ *
+ * legacyPageRoutes and legacyApiRoutes are first: a moved page or API path
+ * (/scriptview…, /api/scriptview…) is redirected before anything else looks at
+ * it, so no later module is asked about the old path.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, legacyApiRoutes, logRoutes, videoProxyRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -152,19 +169,6 @@ const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function getLanIp(): string {
-  const interfaces = os.networkInterfaces();
-  for (const ifaces of Object.values(interfaces)) {
-    if (!ifaces) continue;
-    for (const iface of ifaces) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return "127.0.0.1";
-}
 
 function cors(res: http.ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -227,6 +231,42 @@ export function handlerErrorCode(err: unknown, status: number): string | undefin
   if (status === 500) return undefined;
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : undefined;
+}
+
+/**
+ * `POST /api/displays/presence`'s own heartbeat body — extracted so its
+ * shape is provable without a live server: the display heartbeat itself
+ * lands FIRST and unconditionally, a screen-size read that fails is logged
+ * and discarded (nothing downstream reads it to decide anything), and a
+ * `video` field refused whole by parseVideoReports (or simply absent) never
+ * blocks either of those — it reads exactly like an empty one.
+ *
+ * `deps` defaults to the real side effects; a test hands in spies to prove
+ * each of the three happens, and that a malformed `video` still counts the
+ * heartbeat rather than skipping the whole call.
+ */
+export function handlePresenceHeartbeat(
+  outputId: string,
+  body: Record<string, unknown>,
+  deps: {
+    heartbeat: (outputId: string) => void;
+    recordScreen: (outputId: string, deviceId: unknown, screen: unknown) => Promise<Error | null>;
+    recordVideo: (outputId: string, reports: VideoPlaybackReport[]) => void;
+  } = {
+    heartbeat: displayHeartbeat,
+    recordScreen: recordDisplayScreen,
+    recordVideo: (id, reports) => videoService.recordPlaybackReports(id, reports),
+  },
+): void {
+  deps.heartbeat(outputId);
+  // Deliberately discarded, with a log: the heartbeat itself succeeded and a
+  // display that could not record its size is still a display showing the
+  // right thing. Nothing reads the size to decide anything.
+  void deps.recordScreen(outputId, body.deviceId, body.screen).then((failed) => {
+    if (failed) console.warn("[displays] could not record screen size:", failed);
+  });
+  const reports = parseVideoReports(body.video);
+  if (reports && reports.length > 0) deps.recordVideo(outputId, reports);
 }
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
@@ -301,6 +341,23 @@ function countSubscribers(channel: string): number {
   }
   return n;
 }
+
+/** Whether any connected client (stream or poll) has EXPLICITLY named this
+ *  channel in its reported filter. A client with no filter yet is not counted:
+ *  see broadcaster.ts's channelNamedByClient for who needs the difference. */
+export function hasNamedSubscriber(channel: string): boolean {
+  for (const client of sseClients) {
+    const cid = resCid.get(client);
+    if (cid && clientChannels.get(cid)?.has(channel)) return true;
+  }
+  for (const cid of eventPoll.clientIds()) {
+    if (clientChannels.get(cid)?.has(channel)) return true;
+  }
+  return false;
+}
+// At load, not in start(): nothing about it needs a listening socket, and a
+// test of the wiring can then drive handleRequest() without binding a port.
+setNamedSubscriberCheck(hasNamedSubscriber);
 
 /**
  * Where a hello-burst frame goes.
@@ -404,6 +461,15 @@ export function writeHelloBurst(res: EventSink): void {
   // rather than silently leaving this burst writing to a dead channel.
   sseWrite(res, "calendar:grid" satisfies typeof CALENDAR_CHANNEL, calendarBroadcaster.getLatest());
   sseWrite(res, "displays:presence", presenceSnapshot());
+  // Feeds rarely change mid-service, so a display or the Video feeds page
+  // opened after the burst would otherwise show nothing until an operator
+  // happened to edit a feed. videoService.current() is SYNCHRONOUS — this
+  // function cannot await — and returns the last snapshot init() or publish()
+  // computed (see video-service.ts).
+  sseWrite(res, "video:state", videoService.current());
+  // The camera checks' results: empty until the Video feeds page has been
+  // open for a moment, and cleared again when the last one closes.
+  sseWrite(res, "video:probe", videoService.probeState());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */
@@ -484,7 +550,7 @@ export class RemoteServer {
       urlPath = "/index.html";
     } else if (isOperatorPath(pathname)) {
       // Checked before the generic fall-through so a nested route like
-      // /scriptview/sunday/full reaches app.html rather than the kiosk SPA
+      // /servicecue/sunday/full reaches app.html rather than the kiosk SPA
       // fallback. The dev server applies the same test (vite.config.ts).
       urlPath = "/app.html";
     } else {
@@ -1055,15 +1121,7 @@ export class RemoteServer {
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);
-        else {
-          displayHeartbeat(outputId);
-          // Deliberately discarded, with a log: the heartbeat itself succeeded
-          // and a display that could not record its size is still a display
-          // showing the right thing. Nothing reads the size to decide anything.
-          void recordDisplayScreen(outputId, body.deviceId, body.screen).then((failed) => {
-            if (failed) console.warn("[displays] could not record screen size:", failed);
-          });
-        }
+        else handlePresenceHeartbeat(outputId, body);
       }
       json(res, { ok: outputId != null });
       return;

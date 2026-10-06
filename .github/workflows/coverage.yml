@@ -1,0 +1,69 @@
+name: Coverage
+
+# Informational, never a gate, and off the pull-request path: it runs the whole
+# suite a second time with instrumentation, which cost every PR about four and a
+# half minutes while gating nothing. Weekly against beta, where work lands, and on
+# demand. GitHub runs a schedule from the default branch (main), so the weekly run
+# checks beta out explicitly; "Run workflow" appears once this file reaches main.
+#
+# A percentage threshold rewards tests written to touch lines rather than to
+# catch bugs, which is the opposite of what the suite does today. What this is
+# for is visibility: the HTTP route handlers are the least-covered code in the
+# project and the only LAN-facing surface, which is where the
+# prototype-pollution bug lived.
+
+on:
+  schedule:
+    # Mondays 11:00 UTC: early morning in Iowa, after the weekend's merges.
+    - cron: "0 11 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'beta' || github.ref }}
+          # The suite asks git questions about history; see ci.yml.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Coverage (routes and services)
+        run: |
+          set -uo pipefail
+          # The same file set as npm test (scripts/run-tests.mjs), not a copy of it.
+          # A failing test does not stop the report; no report at all does.
+          node scripts/run-tests.mjs --experimental-test-coverage > /tmp/cov.txt 2>&1 || true
+          if ! grep -q "all files" /tmp/cov.txt; then
+            echo "::error::the suite produced no coverage report"
+            tail -50 /tmp/cov.txt
+            exit 1
+          fi
+
+          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep "all files" /tmp/cov.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Least-covered server modules — the LAN-facing surface:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          awk '/start of coverage report/,/end of coverage report/' /tmp/cov.txt \
+            | grep -oE "[a-z0-9-]+\.tsx? +\| +[0-9.]+" \
+            | awk '{gsub(/\|/,""); print $2, $1}' | sort -n | head -10 \
+            >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          grep "all files" /tmp/cov.txt || true

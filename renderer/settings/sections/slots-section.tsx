@@ -40,6 +40,7 @@ import { useStageState } from "../../main/use-stage-state";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { SlotsTargetPill } from "./slots-target-pill";
 import { PlanSwitcher } from "./plan-switcher";
+import { errorMessage } from "@main/services/errors";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -81,7 +82,6 @@ interface SlotRowProps {
    *  rule separating it from the slot above inside the shared container. */
   stackDivider?: boolean;
   wirelessChannels: WirelessChannel[];
-  teamPositions: TeamPositionDTO[];
   /** How many OTHER slots share this slot's exact positions set. Those slots
    *  compete for distinct people, which is otherwise invisible in the editor. */
   sharesWith: number;
@@ -117,7 +117,7 @@ function PersonIdField({ value, onChange }: { value: string; onChange: (personId
   );
 }
 
-function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, sharesWith, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
+function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
   const isPco = slot.link.kind === "pco";
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
@@ -361,7 +361,6 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, s
             {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" ? (
               <PositionRangeEditor
                 positions={(slot.link as { kind: "pco"; matchBy: "position"; positions: SlotPositionMatch[] }).positions}
-                teamPositions={teamPositions}
                 onChange={(positions) =>
                   onChange({ ...slot, link: { kind: "pco", matchBy: "position", positions } })
                 }
@@ -588,7 +587,6 @@ export function SortableSlotGroup({
   slots,
   startIndex,
   wirelessChannels,
-  teamPositions,
   sharesWith,
   onChange,
   onRemove,
@@ -596,7 +594,6 @@ export function SortableSlotGroup({
   slots: Slot[];
   startIndex: number;
   wirelessChannels: WirelessChannel[];
-  teamPositions: TeamPositionDTO[];
   /** How many OTHER slots on the board share this slot's exact positions set. */
   sharesWith: (slot: Slot) => number;
   onChange: (index: number, updated: Slot) => void;
@@ -616,7 +613,6 @@ export function SortableSlotGroup({
         // separate slots inside one column rather than one long run of fields.
         stackDivider={stacked && i > 0}
         wirelessChannels={wirelessChannels}
-        teamPositions={teamPositions}
         sharesWith={sharesWith(slot)}
         onChange={(updated) => onChange(index, updated)}
         onRemove={() => onRemove(index)}
@@ -661,7 +657,6 @@ export function SortableSlotGroup({
 interface SlotEditorProps {
   view: View;
   wirelessChannels: WirelessChannel[];
-  teamPositions: TeamPositionDTO[];
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;
@@ -698,7 +693,6 @@ interface SlotEditorProps {
 export function SlotEditor({
   view,
   wirelessChannels,
-  teamPositions,
   localSlots,
   slotsDirty,
   isSavingSlots,
@@ -777,7 +771,6 @@ export function SlotEditor({
                   slots={g.slots}
                   startIndex={g.start}
                   wirelessChannels={wirelessChannels}
-                  teamPositions={teamPositions}
                   sharesWith={sharesWith}
                   onChange={handlers.updateSlot}
                   onRemove={handlers.removeSlot}
@@ -957,7 +950,7 @@ export function PresetsPanel({
         (!Array.isArray(parsed) && parsed.name) || file.name.replace(/\.slots\.json$|\.json$/i, "") || "Imported";
       await handlers.handleImportPreset(importedName, slots);
     } catch (err) {
-      toast.error(`Couldn't read that file: ${String(err)}`);
+      toast.error(`Couldn't read that file: ${errorMessage(err)}`);
     }
   }
 

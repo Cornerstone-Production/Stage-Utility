@@ -16,7 +16,7 @@ View kinds:
 | **Dashboard** | clock, service countdown, ProPresenter now/next |
 | **Stage** | confidence view — slide text, section, chords, thumbnail, timers |
 | **Captions** | full-screen auto-scrolling transcription |
-| **Script** | the full rundown with note columns, headers, lengths, live countdown |
+| **ServiceCue** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
 | **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
 | **Custom** | a layout you design in the visual editor |
@@ -181,15 +181,24 @@ set on Screens) draws no top bar at all — no brand, plan context or QR — and
 content fills the strip instead; the two are independent, since a lock keeps the
 bar and only removes its links.
 
+A display's **Use HLS on this screen** switch (also set on Screens,
+`Output.allowHls`, on by default) is independent of both: it decides whether a
+Video widget here may fall back to HLS at all. Off, a feed that needs HLS
+(its device sends B-frames, or an unsupported codec) shows **This screen
+can't play video** instead of falling back, while every other screen with the
+switch on keeps playing it. See
+[Video feeds](../integrations/video-feeds.md#the-device-pushes-to-stage-utility).
+
 A **preview** — the live thumbnail on a Screens card, at `/preview-<viewId>` —
 renders the previewed view directly, regardless of what is actually routed to
-that output, and answers the three per-screen settings differently:
+that output, and answers the four per-screen settings differently:
 
 | Setting | In a preview | Why |
 | --- | --- | --- |
 | Blackout | Ignored | The Screens page would be a grid of black rectangles. |
 | Lock | Ignored | The preview lives inside the console, whose navigation must keep working. |
 | Hidden top bar | **Honoured** | Purely visual, and showing what the screen will look like is what the card is for. |
+| Use HLS on this screen | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
 
 The hidden top bar is honoured only when the preview knows which screen it
 stands in for. The route names a *view*, and two screens can show one view with

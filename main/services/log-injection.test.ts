@@ -108,6 +108,11 @@ const REQUEST_FACING = [
   "integration-manager.ts",
   "pco-service.ts",
   "person-directory.ts",
+  // GET /photos?u= hands the caller's string to every one of its log lines: the
+  // refusal, the redirect, the status, the size cap and the failed attempt each
+  // name the URL, and the URL parser drops a newline before it checks the host,
+  // so one with a newline in it is still fetched and still logged.
+  "photo-cache.ts",
   "plan-export.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
@@ -118,10 +123,20 @@ const REQUEST_FACING = [
   "routes/client-log-routes.ts",
   "routes/context.ts",
   "routes/cue-routes.ts",
+  // Logs nothing: it answers a path with a redirect or hands the request on.
+  "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
+  // Logs nothing: it redirects an API path and echoes the path and query into a
+  // Location header, which Node refuses to write if either carries a control
+  // character.
+  "routes/legacy-api-routes.ts",
+  // Logs nothing: it reads the request path and query and echoes them into a
+  // Location header, which Node refuses to write if either carries a control
+  // character.
+  "routes/legacy-page-routes.ts",
   "routes/log-paths.ts",
   "routes/log-routes.ts",
   "routes/operator-paths.ts",
@@ -130,10 +145,18 @@ const REQUEST_FACING = [
   "routes/proxy-routes.ts",
   "routes/rosstalk-routes.ts",
   "routes/route-harness.ts",
-  "routes/scriptview-routes.ts",
+  "routes/servicecue-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
+  // Its one outage line names the feed id off the proxied URL (validated
+  // against the feed list first, so it is never an attacker's raw string)
+  // and whatever the relay's own error said back.
+  "routes/video-proxy-routes.ts",
+  // Logs nothing today — every routes/ file is walked, so a new one forces this
+  // decision rather than being found the day it first logs a feed name or a URL
+  // typed into a POST /api/video/feeds body.
+  "routes/video-routes.ts",
   "routes/view-routes.ts",
   // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
   // carry-over lines. A title is typed into Planning Center and arrives here in
@@ -142,6 +165,9 @@ const REQUEST_FACING = [
   "service-timeline-recorder.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
+  // file's own "is live"/"went offline"/B-frames log lines on a transition.
+  "video/video-service.ts",
   "view-import.ts",
   // The channel title on a successful Connect comes back from Google, not the
   // operator, but it is still external data reaching a log line.
@@ -236,7 +262,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["osc-manager.ts", DEVICE],
   ["pco-attachment-cache.ts", UNAUDITED],
   ["pco-calendar-service.ts", ELSEWHERE],
-  ["photo-cache.ts", UNAUDITED],
   ["prodcom-service.ts", DEVICE],
   ["propresenter-service.ts", DEVICE],
   ["pvp-service.ts", DEVICE],
@@ -246,7 +271,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["resi-service.ts", DEVICE],
   ["rosstalk-manager.ts", DEVICE],
   ["scores-service.ts", DEVICE],
-  ["scriptview-layouts-store.ts", UNAUDITED],
   ["secrets.ts", UNAUDITED],
   ["sensource-service.ts", DEVICE],
   ["service-recorder.ts", UNAUDITED],
@@ -255,12 +279,47 @@ const NOT_SCANNED = new Map<string, string>([
     "logs two fixed sentences when the schedule becomes unknown or known again, and " +
       "interpolates nothing. Audited, not just excused.",
   ],
+  ["servicecue-layouts-store.ts", UNAUDITED],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
+  [
+    "store-file-adoption.ts",
+    "logs two fixed sentences about file names that are literals in the store " +
+      "declarations, never anything an HTTP request carries, plus an OS error message " +
+      "returned to boot. Audited, not just excused.",
+  ],
   ["stream-start-store.ts", UNAUDITED],
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
+  // acquire.ts logs nothing about a download or a checksum — relay-lifecycle.ts
+  // (below) owns that, once per outage. It logs only when it clears an earlier
+  // pin's files, once per removal, which happens once and not on every retry.
+  [
+    "video/acquire.ts",
+    "logs the names of files and folders it found in the relay's own data directory " +
+      "(the version folders and archives of earlier pins it removes) and the filesystem " +
+      "error that stopped a removal — never HTTP data, since no route names a path here. " +
+      "Every interpolated value still goes through scrub(): a hand-placed file's name is " +
+      "the operator's, and a newline in it must not forge a log entry. Audited.",
+  ],
+  [
+    "video/relay-lifecycle.ts",
+    "logs the relay's own version (MediaMTX's startup banner, the same not-HTTP-data as " +
+      "supervisor.ts below) and its bound ports, which ARE saved through PATCH " +
+      "/api/video/ports — but ports.ts's own parsePorts() accepts only an integer 1024-" +
+      "65535 for each, so nothing that reaches the log line can carry a newline. The one " +
+      "free-text value, a busy port's holder, is port-holder.ts's own OS process " +
+      "lookup — the DEVICE threat model below, not an HTTP body. Audited, not just excused.",
+  ],
+  [
+    "video/supervisor.ts",
+    "logs the leftover-relay pid it cleans up (its own bookkeeping file, never HTTP data) and " +
+      "the relay CHILD PROCESS's own exit reason — MediaMTX's stdout/stderr, parsed by " +
+      "RelayLogWatcher and never from an HTTP request the module itself handles (it owns no " +
+      "route). The same shape as a device or provider talking back, since a LAN publisher's " +
+      "stream key could in principle reach MediaMTX's own log — not audited line by line.",
+  ],
   ["wireless-manager.ts", DEVICE],
   ["youtube-service.ts", DEVICE],
 ]);
@@ -347,6 +406,9 @@ function requestFacingFiles(): string[] {
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.
     path.join(HERE, "person-directory.ts"),
+    // The URL in `GET /photos?u=` is the caller's own string and is named by each
+    // of this file's failure lines. Was excused as UNAUDITED until it was audited.
+    path.join(HERE, "photo-cache.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
@@ -364,6 +426,9 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "service-timeline-recorder.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
+    // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
+    // file's own "is live"/"went offline"/B-frames log lines on a transition.
+    path.join(HERE, "video/video-service.ts"),
     // Every value on its three log lines comes out of an UPLOADED FILE — the
     // service type name and id, a patch sheet's name, a variant's name. It
     // logged nothing at all before the plan import, which is when it acquired

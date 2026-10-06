@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { previewOutputId, previewSrc, previewViewIdFromSlug } from "./preview-url.js";
+import { isPreviewSlug, previewOutputId, previewSrc, previewViewIdFromSlug } from "./preview-url.js";
 import { RESERVED_SLUG_PREFIX } from "../../main/services/reserved-slugs.js";
 
 /**
@@ -91,5 +91,14 @@ describe("the preview URL carries the screen a card stands in for", () => {
     // preview. A wall screen's address is its identity; a query param must not
     // be able to point it at another screen's settings.
     assert.equal(previewOutputId("?output=display-2", null), null);
+  });
+});
+
+describe("isPreviewSlug", () => {
+  test("is true for the slug a preview's own src carries, and false for a display's", () => {
+    const slug = new URL(previewSrc("view-1"), "http://stage.invalid").pathname.slice(1);
+    assert.equal(isPreviewSlug(slug), true);
+    assert.equal(isPreviewSlug("display-2"), false);
+    assert.equal(isPreviewSlug("settings"), false);
   });
 });

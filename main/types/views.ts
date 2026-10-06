@@ -240,12 +240,12 @@ export interface View {
    */
   showLiveControls?: boolean;
   /**
-   * Which saved ScriptView column preset a "script" View renders; null/absent =
-   * all columns. The same presets the /scriptview pages use, so a department's
+   * Which saved ServiceCue column preset a "script" View renders; null/absent =
+   * all columns. The same presets the /servicecue pages use, so a department's
    * column set is defined once and a display and a browser tab cannot disagree
    * about it.
    */
-  scriptViewLayoutId?: string | null;
+  serviceCueLayoutId?: string | null;
   /**
    * Which of the org's calendars a "calendar" View draws. ABSENT OR EMPTY MEANS
    * EVERY CALENDAR.
@@ -935,7 +935,7 @@ export type LayoutObjectConfig =
   // (background/border/radius/padding) — same fields as any other object.
   // Render another View's content inside this layout, natively — the same
   // components the View renders on its own display, not an iframe of it. Built
-  // for the ScriptView rundown, which is a whole page's worth of table nobody
+  // for the ServiceCue rundown, which is a whole page's worth of table nobody
   // wants to rebuild as objects; other kinds opt in as they stop assuming they
   // own the screen. `viewId` null = nothing chosen yet.
   | {
@@ -976,6 +976,16 @@ export type LayoutObjectConfig =
       /** A dot beside that name: lit while the screen is showing its view, dark
        *  while it is unrouted or blacked out. Absent = on. */
       showStatus?: boolean;
+    }
+  // A live video feed from the Video feeds page, by id. Always muted, no
+  // controls. Absent fit = "contain", absent showLabel = on, absent whenOffline
+  // = "message".
+  | {
+      type: "video";
+      feedId: string | null;
+      fit?: "contain" | "cover";
+      showLabel?: boolean;
+      whenOffline?: "message" | "logo" | "nothing";
     }
   | { type: "container" };
 
@@ -1155,6 +1165,18 @@ export interface Output {
    *  Only a "panel" may be bound to a console View, enforced server-side in
    *  stage-controller's setOutputView. */
   mode?: OutputMode;
+  /** When false, a Video widget on this screen never plays over HLS — only
+   *  WebRTC. A B-frame feed that needs HLS to play at all says it cannot play
+   *  here instead. Absent means allowed, which is what every screen did before
+   *  this existed: a Pi 4 can freeze decoding HLS, and this is the per-screen
+   *  escape hatch rather than turning HLS off everywhere. */
+  allowHls?: boolean;
+  /** The ServiceCue text size this screen shows its rundown at, 50 to 300 percent
+   *  (see main/types/text-size.ts). Absent means 100. Kept here, not in the
+   *  browser, so a Screens preview of the display draws the same size and a
+   *  replacement device inherits it. Set from the display's own `?text=` link, or
+   *  adopted once from the size that device remembered. */
+  textSize?: number;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -1169,6 +1191,15 @@ export interface ResolvedOutput {
    *  because this descriptor is what the kiosk reads — leaving it off would make
    *  every display do the outputs lookup this type exists to prevent. */
   hideTopBar: boolean;
+  /** Resolved {@link Output.allowHls}, true when absent. Rides here for the same
+   *  reason `hideTopBar` does: the kiosk reads this descriptor, never the Output
+   *  list, to decide what a Video widget on it may attempt. */
+  allowHls: boolean;
+  /** {@link Output.textSize}, or null while none has been set. Null rather than
+   *  100 because a display with no saved size may still hold one of its own to
+   *  hand over (see use-servicecue-text-size.ts), and "never set" has to be told
+   *  apart from "set to 100". Whoever draws it treats null as 100. */
+  textSize: number | null;
 }
 
 /**

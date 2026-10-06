@@ -42,7 +42,7 @@ describe("operator destinations", () => {
     // /plan is NOT among them any more. It folded into Home in Phase 2 and came
     // back out when Home became a grid — a fixed block of PCO controls is
     // furniture on a page whose whole point is that the operator arranges it.
-    const retired = new Set(["/views", "/displays"]);
+    const retired = new Set(["/views", "/displays", "/scriptview"]);
     // /consoles has no STATIC destination: its rail entries are one per console
     // the operator built, derived from state in rail.tsx. The server must still
     // claim the path or a direct load serves the kiosk bundle — which is exactly
@@ -123,7 +123,7 @@ describe("operator destinations", () => {
 describe("the kiosk no longer serves operator surfaces", () => {
   test("root-view renders only the display picker and the kiosk outlet", async () => {
     // root-view.tsx used to switch on window.location.pathname for /history,
-    // /patch, /baptism and /scriptview. Those belong to the operator app now,
+    // /patch, /baptism and /servicecue. Those belong to the operator app now,
     // and a branch left behind means two components can answer one URL
     // depending on which document the server happened to serve.
     //
@@ -137,7 +137,7 @@ describe("the kiosk no longer serves operator surfaces", () => {
       .split("\n")
       .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"))
       .join("\n");
-    for (const gone of ["HistoryView", "BaptismOperatorView", "PatchView", "ScriptViewIndex", "ScriptViewPlan"]) {
+    for (const gone of ["HistoryView", "BaptismOperatorView", "PatchView", "ServiceCueIndex", "ServiceCuePlan"]) {
       assert.equal(
         code.includes(gone),
         false,
@@ -149,7 +149,7 @@ describe("the kiosk no longer serves operator surfaces", () => {
   test("the two duplicate wrappers are gone from the tree", async () => {
     // history-view.tsx and baptism-operator-view.tsx wrapped the very
     // components their settings tabs render. Leaving one behind is a second
-    // copy that drifts. patch-view.tsx and scriptview-index-view.tsx are NOT
+    // copy that drifts. patch-view.tsx and servicecue-index-view.tsx are NOT
     // duplicates and must survive - they are the volunteer patch view and the
     // rundown viewer.
     const fs = await import("node:fs/promises");
@@ -164,7 +164,7 @@ describe("the kiosk no longer serves operator surfaces", () => {
     assert.equal(await exists("../main/history-view.tsx"), false, "history-view.tsx must be deleted");
     assert.equal(await exists("../main/baptism-operator-view.tsx"), false, "baptism-operator-view.tsx must be deleted");
     assert.equal(await exists("../main/patch-view.tsx"), true, "patch-view.tsx is a distinct surface and must stay");
-    assert.equal(await exists("../main/scriptview-index-view.tsx"), true, "scriptview-index-view.tsx is a distinct surface and must stay");
+    assert.equal(await exists("../main/servicecue-index-view.tsx"), true, "servicecue-index-view.tsx is a distinct surface and must stay");
   });
 });
 

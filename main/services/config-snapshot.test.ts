@@ -117,11 +117,12 @@ const EXPECTED_CONFIG = [
   "saved-colors.json",
   // The operator's followed teams. Losing them to a reinstall is losing setup.
   "scores-favourites.json",
-  "scriptview-config.json",
-  "scriptview-layouts.json",
-  "scriptview-roles.json",
+  "servicecue-config.json",
+  "servicecue-layouts.json",
+  "servicecue-roles.json",
   "settings.json",
   "slots.json",
+  "video-feeds.json",
   "views.json",
   "wireless-connections.json",
 ];
@@ -136,6 +137,7 @@ const EXPECTED_RUNTIME = [
   "spl-history.json",
   "stream-starts.json",
   "update-notices.json",
+  "video-seen.json",
 ];
 
 describe("store classification", () => {

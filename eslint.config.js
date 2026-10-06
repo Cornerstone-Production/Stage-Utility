@@ -60,6 +60,19 @@ export default [
             "[alternate.callee.name='String']",
           message: "Use errorMessage(err) from @main/services/errors instead of re-writing the ternary.",
         },
+        {
+          // A toast is read by the operator. String(err) on a real Error gives
+          // "Error: <message>" (and on a rejected IPC call, a wrapped prefix), so
+          // 47 toasts were changed to errorMessage() in one sweep and nothing
+          // stopped the 48th. Matches String(<identifier>) anywhere inside a
+          // toast call's arguments (directly or inside a template literal) and
+          // nothing outside one: `new Error(String(err))` is a different
+          // statement and stays legal.
+          selector:
+            ":matches(CallExpression[callee.name='toast'], CallExpression[callee.object.name='toast'])" +
+            " CallExpression[callee.name='String'][arguments.length=1][arguments.0.type='Identifier']",
+          message: "Use errorMessage(err) from @main/services/errors in a toast, not String(err): it keeps the \"Error: \" prefix.",
+        },
       ],
     },
   },

@@ -17,7 +17,7 @@ import { RenderObject } from "./layout-renderer";
 import type { LayoutObject, View } from "@main/types/views";
 import { EMBED_FONT_FRACTION } from "./layout-objects";
 import { childChain, embedRefusal } from "./embed-chain";
-import { ScriptView } from "./script-view";
+import { ServiceCue } from "./servicecue-view";
 import { DashboardView } from "./dashboard-view";
 import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
@@ -98,8 +98,8 @@ export function EmbeddedView({
   switch (view.kind) {
     case "script":
       return (
-        <ScriptView
-          scriptViewLayoutId={view.scriptViewLayoutId ?? null}
+        <ServiceCue
+          serviceCueLayoutId={view.serviceCueLayoutId ?? null}
           showHeader={showHeader}
           textSizeClass=""
           autoScroll={autoScroll}

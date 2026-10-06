@@ -16,7 +16,9 @@ for a body or query the caller got wrong, `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
-`/api/team-positions` and the two `/api/scriptview` reads. A `500` means this app
+`/api/team-positions` and the two `/api/servicecue` reads. A `serviceTypeId` or
+`planId` that is not a Planning Center id (digits only) is a `400` naming the
+parameter on any of them; Planning Center is not asked. A `500` means this app
 broke, and only that.
 
 ## What is protected, and what is not
@@ -45,7 +47,7 @@ Request bodies are capped and a body over the limit is refused with `413` rather
 than being read into memory. The cap depends on what the route carries: 8 MB for
 ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 `/api/layout-images`), 64 MB for a bundle (`/api/config/import`,
-`/api/views/import`), and 128 MB for an archive upload (`/api/archive/inspect`,
+`/api/views/import`, `/api/video/import`, `/api/video/import/preview`), and 128 MB for an archive upload (`/api/archive/inspect`,
 `/api/archive/import`).
 
 **Stage & plan**
@@ -55,9 +57,9 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET  | `/api/version` | The running code version, uncached. A request from loopback also gets `dataDir` and `pid` — never a LAN caller, since those are a filesystem path and a process id |
 | GET  | `/api/state` | Current `StageState` |
 | GET  | `/api/service-types` | PCO service types |
-| GET  | `/api/team-positions` | Team positions for the active plan |
+| GET  | `/api/team-positions` | Team positions, `{teamId, teamName, positionName}[]`, for the service type selected in the app. `?serviceTypeId=…` answers for that type instead (`400` unless the value is a Planning Center id: 1-20 digits). `?all=1` (or `all=true`) answers for every service type as `{positions, failed}`: each position also carries `serviceTypeId` and `serviceTypeName`, and `failed` names the types that could not be read, which are skipped rather than failing the call. `all=0` and `all=false` mean the default; any other `all` value is `400`. Types are read one at a time and each read is cached |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
-| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes; `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
+| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes, or thirty seconds when a service type could not be read (it is left out and logged, and asked for again at the next refresh); `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
 | GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
 | GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
 | POST | `/api/service-type` | Set active service type |
@@ -78,7 +80,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 |--------|------|---------|
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
@@ -95,7 +97,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display — `201` |
-| PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400` |
+| PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `allowHls` (whether a Video widget here may play over HLS; `false` keeps it on WebRTC only), `textSize` (the ServiceCue text size this display shows, a number from 50 to 300, kept per display and carried to every client as `resolvedByOutput[<id>].textSize`, `null` while none is kept; another value is `400`), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400`. An id naming no display is also `400` with the reason, for every field |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |
@@ -129,6 +131,20 @@ screens (`{id?}`; omit it for all of them). `GET /api/displays/presence` returns
 display page reports by heartbeat to `POST /api/displays/presence`. The same set
 rides the `displays:presence` SSE channel; `rev` is what lets a client tell a
 stale read from a fresh one.
+
+The heartbeat body may also carry `video`: an array of up to 32 reports, one
+per Video widget instance on that screen currently showing a relay or
+external feed's picture — `{feedId, via: "webrtc"|"hls", decoded, dropped,
+stalls, width, height}`, `decoded`/`dropped`/`stalls` as deltas since that
+instance's last report, not running totals. A malformed array — not an
+array, over 32 entries, or any entry with a non-string/empty `feedId`, a
+`via` other than `webrtc`/`hls`, a `decoded`/`dropped`/`stalls` that is not
+a whole number from 0 to 100000, or a `width`/`height` that is not a whole
+number from 0 to 16384 — is refused whole and
+read the same as no `video` field at all; the rest of the heartbeat (the
+Connected dot, the screen-size read) still lands. A report naming a feed id
+this build no longer holds is dropped on its own, without refusing the
+others. See [Health from the screens](../integrations/video-feeds.md#health-from-the-screens).
 
 **Presets** — `GET /api/presets`, `POST /api/presets` (snapshot the current
 slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
@@ -191,7 +207,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned: `{items, unreachable}`. Empty, never an error, when one is unreachable, and `unreachable` names the instances that did not answer. A name only some instances have is labelled `DOORS (MA only)` — but only while every instance answered, since "only" is a claim about the machines that did |
 | GET / POST | `/api/automation/rules` | List (`{rules, settings}`, each rule carrying its own `issues` — see below) / create a rule |
 | PATCH / DELETE | `/api/automation/rules/:id` | Update / delete |
-| POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
+| POST | `/api/automation/rules/:id/run` | Run the action once, now: [Run by hand](../automation.md#run-by-hand). Body `{confirmed?: boolean}`. Bypasses the trigger, conditions, cooldown, once-per-service and the rule's own switch; honours simulate and the disarm switch. `200 {outcome: "fired" \| "simulated" \| "failed", detail}` (an action that fails is still `200`, outcome `failed`), `404` unknown rule, `409` disarmed, `428` a confirm-before-running rule without `confirmed: true`, `401` with no same-origin Origin and no bearer token. Built-in cues can be run by their id |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
 | POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. A button carrying `stateVariable` is a [toggle](../integrations/companion.md#toggle-buttons) and makes a PAIR instead — two cues pressing that one button, bound on the `_on` half. `stateVariable` on a pair binds its `_on` half the same way; a pair sent without one whose connections have no verified row has its source [learned](../integrations/companion.md#learning-a-state-source) instead. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
@@ -256,7 +272,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
 | GET / POST | `/api/spl/trend` | Whether History's attendance trend also draws the SPL trend line, and which metric it plots (`{shown, metric}`) |
-| GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
+| GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
 | GET | `/api/pco/calendar?viewId=…[&month=YYYY-MM]` | A month as a six-week grid of days, bucketed in the app time zone and filtered by the view's calendars and tags. Omit `month` for the current one. 400 if `month` is malformed or more than 36 months away; 502 if Planning Center cannot be reached |
@@ -355,15 +371,19 @@ Two things to know:
   derived from; removing it is a separate, irreversible decision. A merge does
   move the raw samples, because otherwise a later rebuild would undo the merge.
 
-**ScriptView**
+**ServiceCue**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone) |
-| GET / POST | `/api/scriptview/layouts` | List / save global layouts |
-| GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
-| GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |
-| GET / POST | `/api/scriptview/roles` | List / save [category roles](../features/scriptview-and-baptisms.md#category-roles) |
-| POST | `/api/scriptview/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
+| GET | `/api/servicecue/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone). With no `planId`: the app's plan for the active service type, else the nearest upcoming one. `isDefaultPlan` says whether the plan returned is that one |
+| GET / POST | `/api/servicecue/layouts` | List / save global layouts |
+| GET / POST | `/api/servicecue/config` | Get / set which service types show on the landing |
+| GET | `/api/servicecue/note-categories?serviceTypeId=…` | Note categories for the column picker |
+| GET / POST | `/api/servicecue/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |
+| POST | `/api/servicecue/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
+
+Requests to `/api/scriptview/…` answer `308` with the same path and query under
+`/api/servicecue/…`, keeping the method and body, so a script written against the
+old paths still works once its client follows redirects.
 
 **Patch sheet** — see [Patch sheet](../patch-sheet/README.md).
 
@@ -468,6 +488,38 @@ and team names, not ids. Either may be omitted and is then left as it stands; a
 present one must be a `string[]`, and `[]` clears that list. A body naming
 neither is a 400.
 
+**Video feeds** — see [Video feeds](../integrations/video-feeds.md)
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/video/state` | `{rev, relay, kinds, ports, binaryPresent, archivePresent, feeds, screens}` — the same snapshot `video:state` pushes. `relay` is the switch/relay status the page's own line reads: `{state: "off"}`, `{state: "downloading", receivedBytes, totalBytes}`, `{state: "starting", version}`, `{state: "running", version, ports}`, or `{state: "failing", reason, kind, retryAt, placeArchiveAt?, assetName?}` — see [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). `kinds` is the source kinds this build offers, matching the editor's **Source** dropdown. `ports` is the SAVED set (what the next start uses); a running relay's own ports are under `relay.ports` and can differ for the moment between a ports save and the restart it triggers. `binaryPresent` is whether the pinned MediaMTX binary is already extracted on this machine and runnable, checked fresh on every read — it is what tells the Video feeds page's "off" status line apart: the download-size sentence only ever shows before the FIRST download, never again once it has one. `archivePresent` is whether the pinned archive is already in `video-relay/downloads` (placed by hand, say), extracted or not; with it, the "off" line says the relay sets up from it instead of naming a download. `feeds` is each feed's wire view — id, name, kind, source, how it plays, and its live status — never a password; see [Feed states](../integrations/video-feeds.md#feed-states). `screens` is every (screen, feed) pair a presence heartbeat has reported playback for in the last rolling minute — `{outputId, feedId, via, struggling, droppedInWindow, decodedInWindow, stallsInWindow, width, height, reportedAt, episode}`, struggling or not. It is change-driven, the same as every other field this route and `video:state` share: `screens` is re-read only when a pair appears, leaves or flips `struggling`, a struggling pair's `episode` moves, or a feed is removed. Between those, every other field of a pair — `via`, `width`, `height`, `droppedInWindow`, `decodedInWindow`, `stallsInWindow` and `reportedAt` — is as of the last re-read, not a live meter, struggling or not: a screen playing cleanly for minutes can read a `reportedAt` several minutes old though it still heartbeats every 10 seconds, and a WebRTC-to-HLS fallback with no struggle publishes nothing, so `via` can still read `webrtc` on a screen now playing HLS. `episode` is the worst window since `struggling` last turned true — `{droppedInWindow, decodedInWindow, stallsInWindow, width, height}`, frozen at whichever report made the window worst, not the live one; `null` while not struggling. See [Health from the screens](../integrations/video-feeds.md#health-from-the-screens) |
+| GET | `/api/video/probe` | `{feeds: {[feedId]: {state, codec?, width?, height?, reason?, checkedAt, since?, busy?}}, at}` — the same snapshot `video:probe` pushes: what asking each pulled camera to describe its stream found. `state` is `checking` (no answer yet since a page began watching), `ready` (with `codec` and `width`/`height` when the camera's description gives them), `failed` (with `reason`, an operator-readable sentence naming the camera's host, and `since`, when the current run of failed answers began) or `unchecked` (an SRT address, which cannot be asked without streaming it). `checkedAt` is when the camera was last asked, in ms since the epoch. Only pulled feeds appear, and none of them while the Video feeds switch is off. The server asks only while a client has NAMED `video:probe` in its reported channel filter (`POST /api/events/subscribe`) — a client with no filter, such as curl or a display that has not reported one yet, does not count, though it receives every channel — every 15 seconds, and once at once on the first one, and drops everything when the last leaves, so this reads `{feeds: {}}` with nobody watching. `at` is the server's clock when the snapshot was made, ms since the epoch; `at - checkedAt` is an answer's age without the viewer's clock. A `checking` entry carries `busy: true` once the camera was reached but was busy answering another request. Never carries a password. See [Checking pulled feeds](../integrations/video-feeds.md#checking-pulled-feeds) |
+| GET | `/api/video/feeds` | `{feeds}` |
+| PATCH | `/api/video/ports` | Saves the relay's six ports and restarts it if it is running. Body: `{rtmp, srt, webrtcUdp, webrtcHttp, hls, api}`, every value a whole number from 1024 to 65535 and all six different — `400` naming the rule otherwise. `200` with `{ports}` |
+| POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |
+| PATCH | `/api/video/feeds/:id` | Update a feed. Any field omitted from the body keeps its current value; a field present is validated as on POST |
+| DELETE | `/api/video/feeds/:id` | Remove a feed. A layout still pointed at it keeps the binding and renders it as offline |
+| GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
+| GET | `/api/video/feeds/:id/push?protocol=srt\|rtmp\|whip` | A push feed's paste-ready address: `{protocol, address, password}`. `?protocol` previews another protocol with the SAME stored password, without saving anything; omitted or invalid falls back to the feed's own saved protocol. `404` for an unknown id or a feed that is not `push`; `403` for a cross-origin browser request (unlike every other GET here, this one answers a live secret) |
+| POST | `/api/video/feeds/:id/push/new-password` | Replaces the feed's publish password, reconciles the relay, and kicks whoever is currently publishing so the old password stops working at once. `{protocol, address, password, applied, kicked}` — `applied` is false only if a running relay's reconcile itself failed; `kicked` is `"dropped"` once a connected publisher actually was, `"none"` if nobody was publishing or no relay was running to ask, and `"failed"` only if a publisher was there and dropping it did not work |
+| GET | `/api/video/export?feeds=a,b&ports=1&passwords=1` | The feeds as a download, `stage-utility-video-feeds-<date>.json`: `{kind: "stage-utility-video-feeds", version, appVersion, createdAt, source, feeds: [{id, name, source, password?}], ports?}`. Feeds keep their ids. `feeds` is a comma-separated list of ids (omitted: every feed); `ports=1` adds the relay ports; `passwords=1` adds each pull feed's camera password and push feed's publish password, as stored (none is made for the file). `400` naming the reason for an unknown id or a flag that is not `1`, `0`, `true` or `false`; `403` for a cross-origin browser request with `passwords=1`. See [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
+| POST | `/api/video/import/preview` | Body is the file. Compares each feed in it with this server's without writing anything: `{server, createdAt, hasPasswords, feeds: [{id, name, kind, status, differences, error?, filePassword?, here}], absent, ports?}`. `status` is `new`, `same`, `differs` or `invalid` (a feed this build cannot take; `error` says why). `differences` is `[{field, here, file}]` for `name`, `kind`, `url`, `username`, `protocol`, `player` or `ref`, and `{field: "password"}` with no values. `filePassword` is true when the file carries a password for that feed (the password itself is never returned). `absent` names this server's feeds the file lacks; `ports` is `{file, here, same}` and present only when the file carries ports. `400` for a file of the wrong kind or version, with `feeds` not a list, a bad or repeated id, or unusable ports. Accepts up to 64 MB |
+| POST | `/api/video/import` | `{bundle, choices?, expect?, ports?}`: lands the file's feeds under their own ids. `choices` maps a feed id to `replace` (the default) or `keep` for a feed that differs; `expect` maps a feed id to the `here` fingerprint the preview gave it (this server's feed under that id as the review saw it, `""` for none, keyed per server process and never a hash of a password); a feed edited, added, deleted or given a new password here since, is skipped with "Changed on this server since the review. Review the file again." rather than written, and a caller that sends no `expect` still gets that check against what was there when the import started. `ports: true` also saves the file's relay ports. Never removes a feed and never changes the Video feeds switch. Passwords go to the secrets store, never to the feed file. `200` with `{added, addedIds, replaced, kept, same, skipped: [{name, reason}], newPushPasswords, passwordsWritten, portsApplied, portsError?}` (feed names); `newPushPasswords` names push feeds that got a new publish password because the file had none. `400` as for the preview or for a malformed `choices`, `expect` or `ports`. A secret that cannot be written undoes the whole import and answers `500`. Accepts up to 64 MB |
+
+Playback is proxied on Stage Utility's own origin, not under `/api`, because
+the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
+`PATCH`/`DELETE /video/<feedId>/whep/<session>`, `POST /video/<feedId>/whip`
+(OBS's Authorization Bearer token forwarded through),
+`PATCH`/`DELETE /video/<feedId>/whip/<session>`, and
+`GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. `404` for an unknown feed id, a
+kind the feed's own source cannot serve (embed/external have no relay path;
+WHIP needs a push feed whose own protocol is WHIP), or a file name outside
+the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `502` if the relay
+refuses the connection or the exchange times out (15 s for WHEP/WHIP, past the
+relay's own 10-second dial of a pull feed's device so its reason comes
+through, 30 s for HLS — an LL-HLS blocking playlist reload can legitimately hold that
+long); `503` while the relay is not running, or in the moment after it
+starts, before it has been given the feed.
+
 **Branding & events**
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -561,7 +613,8 @@ something to change:
 `service-timeline:history` · `baptism:state` · `obs:status` · `reaper:status` ·
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
-`wireless:channels` · `calendar:grid` · `displays:presence`
+`wireless:channels` · `calendar:grid` · `displays:presence` · `video:state` ·
+`video:probe`
 
 **Pushed only when something happens:**
 
@@ -604,7 +657,7 @@ Either channel having a subscriber starts the five-second read.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |
+| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos) |
 | GET | `/log` | The server's recent output, as a page, with a health strip and level/source filters. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
 | GET | `/logs` | Redirects to `/log`, query string intact. Same gate, checked before the redirect — an unauthorised request is a 401, never a 302 into one |
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |

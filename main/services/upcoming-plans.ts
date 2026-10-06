@@ -22,6 +22,11 @@ export const UPCOMING_LOOKBACK_DAYS = 7;
  *  request per open would spend the PCO quota on a list that never changes. */
 export const UPCOMING_CACHE_MS = 5 * 60 * 1000;
 
+/** How long a list that is missing a service type is reused. Short, so a type
+ *  that failed on a blip is asked for again within the half minute rather than
+ *  being absent from the switcher for the whole of UPCOMING_CACHE_MS. */
+export const UPCOMING_PARTIAL_CACHE_MS = 30 * 1000;
+
 /** Default and maximum lookahead, in days. */
 export const UPCOMING_DEFAULT_DAYS = 60;
 export const UPCOMING_MAX_DAYS = 365;
@@ -121,4 +126,25 @@ export function sameIds(a: readonly string[], b: readonly string[]): boolean {
  *  the same rule every other reader of `allowedServiceTypeIds` follows. */
 export function switcherTypes(types: ServiceTypeDTO[], allowed: string[]): ServiceTypeDTO[] {
   return allowed.length === 0 ? types : types.filter((t) => allowed.includes(t.id));
+}
+
+/**
+ * Is the rundown just resolved the plan a ServiceCue would get with no `planId`?
+ *
+ * With no `planId` it always is. With one, it is only when that plan IS the
+ * default: the app's own plan when this is the active service type, else the
+ * nearest upcoming plan. A page showing a plan the operator browsed to says
+ * "Following" or "Browsing" from this, so a step that lands back on the
+ * followed plan reads as following without the page re-deriving the rule.
+ */
+export function isDefaultRundownPlan(p: {
+  requestedPlanId: string | null;
+  resolvedPlanId: string;
+  /** The app's plan, when this service type is the active one and the plan still
+   *  resolves; else null. */
+  activeTypePlanId: string | null;
+  nextUpcomingPlanId: string | null;
+}): boolean {
+  if (!p.requestedPlanId) return true;
+  return p.resolvedPlanId === (p.activeTypePlanId ?? p.nextUpcomingPlanId);
 }

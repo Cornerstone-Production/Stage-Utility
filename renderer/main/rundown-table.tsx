@@ -5,10 +5,10 @@ import type { PcoItemTypeColor } from "../../main/types/stage.js";
 import { resolveItemColor, mapPcoColor, washFor, stripeFor } from "./item-color";
 import { categoryColor } from "./category-color";
 import { resolveRole } from "./role-resolve";
-import type { CategoryRole } from "../../main/types/scriptview-roles.js";
+import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
-// Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
-// display) and the standalone ScriptView pages render through this so column
+// Shared PCO plan rundown table. Both the "script" View-kind (ServiceCue on a
+// display) and the standalone ServiceCue pages render through this so column
 // behavior, section-header rows, live-item highlight, and auto-scroll live in
 // one place. Callers supply the column spec; this owns the row structure.
 
@@ -93,7 +93,7 @@ export function nextFitScale(
  * Back-derives the natural width from the live scroll width, the same approach as
  * FitText and ServiceOrderObject's auto-fit.
  */
-function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: number, deps: unknown[]): number {
+function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: number, deps: unknown[], enabled = true): number {
   const [scale, setScale] = useState(1);
 
   // Start every fit from unscaled. A `w-full` table always fills its box, so once
@@ -115,13 +115,13 @@ function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: num
   // floor.
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
-    if (!wrap) return;
+    if (!wrap || !enabled) return;
     const next = nextFitScale({ availW: wrap.clientWidth, scrollW: wrap.scrollWidth, scale });
     if (next !== scale) setScale(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wrapRef, scale, width, ...deps]);
+  }, [wrapRef, scale, width, enabled, ...deps]);
 
-  return scale;
+  return enabled ? scale : 1;
 }
 
 /** The nearest ancestor that actually scrolls vertically, or null. */
@@ -166,7 +166,22 @@ export interface RundownColumn {
   width?: string;
   headerClassName?: string;
   cellClassName?: string;
-  render: (item: PlanItemDTO, ctx: { isCurrent: boolean }) => ReactNode;
+  /** The column's ink, split from `cellClassName` because both shapes draw it: the
+   *  table puts it on the cell, the stacked shape on the value beside the column's
+   *  label. Absent = the stacked shape's default, `text-fg-muted`. */
+  textClassName?: string;
+  render: (item: PlanItemDTO, ctx: RundownCellContext) => ReactNode;
+}
+
+/** The three shapes the rundown takes, by the width of its box. */
+export type RundownShape = "stacked" | "compact" | "full";
+
+export interface RundownCellContext {
+  isCurrent: boolean;
+  /** Which shape this cell is drawn in. The stacked shape sets every column's value
+   *  in `text-caption2`, so a cell that must read at the same size as the other
+   *  columns' values (the item's notes) has to know. */
+  shape: RundownShape;
 }
 
 export function RundownTable({
@@ -180,6 +195,7 @@ export function RundownTable({
   footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
+  textScale = 1,
 }: {
   items: PlanItemDTO[];
   columns: RundownColumn[];
@@ -197,6 +213,17 @@ export function RundownTable({
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
   textSizeClass?: string;
+  /**
+   * The operator's text size as a multiplier (1.5 = 150%), on top of
+   * `textSizeClass`. 1 changes nothing at all.
+   *
+   * Above 1 the width fit stands down. The fit shrinks the type until the
+   * columns fit, which would hand back exactly what the operator just asked
+   * for: with it running, A+ on a wide layout would do nothing. A size past
+   * 100% is a choice to read bigger text, and a layout too wide for it scrolls
+   * sideways. At or below 1 the fit still applies, to the already-reduced size.
+   */
+  textScale?: number;
 }) {
   const currentRef = useRef<HTMLTableRowElement | null>(null);
 
@@ -214,10 +241,21 @@ export function RundownTable({
   }, []);
   // No page max-width anywhere: a centerd column leaves dead margins on a stage panel
   // and shrinks the text relative to the viewport. The SHAPE changes instead.
-  const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
+  // From the width the table actually has: inside a zoomed element the wrapper's
+  // own width is `textScale` times what the table can use, so 150% on a 1100px
+  // screen is laid out as 733px and must pick the shape for 733.
+  const usable = width / textScale;
+  const shape: RundownShape = usable < 640 ? "stacked" : usable < 1024 ? "compact" : "full";
   // Re-fit whenever the column set or the row content changes: both move the
   // natural width, and neither is a resize the observer would see.
-  const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass]);
+  const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass, textScale], textScale <= 1);
+  // Applied by CSS `zoom` on an element inside the measured wrapper, not by a
+  // font-size: the rundown's chrome (section headers, the key/BPM line, item
+  // notes, the footer) is sized in fixed px tokens that a font-size multiplier
+  // never reaches, and the operator asked for every column, the clock and the
+  // item details to grow together. Zoom also scales the cell padding with the
+  // text, as browser zoom does. No style at all at 1.
+  const zoomStyle = textScale === 1 ? undefined : { zoom: textScale };
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
@@ -255,11 +293,14 @@ export function RundownTable({
     const row = currentRef.current;
     if (!row) return;
     scrollRowIntoView(row);
-  }, [currentItemId, autoScroll, items]);
+    // `textScale`: a size change moves every row, and the live one should not be
+    // left off the screen by it.
+  }, [currentItemId, autoScroll, items, textScale]);
 
   if (shape === "stacked") {
     return (
-      <div ref={wrapRef} className={`flex flex-col ${textSizeClass}`}>
+      <div ref={wrapRef} className={textSizeClass}>
+      <div className="flex flex-col" style={zoomStyle}>
         {items.map((it) => {
           const isCurrent = currentItemId != null && currentItemId === it.id;
           if (it.itemType === "header") {
@@ -285,15 +326,15 @@ export function RundownTable({
               } : undefined}
             >
               {shownColumns.map((c) => {
-                const body = c.render(it, { isCurrent });
+                const body = c.render(it, { isCurrent, shape });
                 if (body == null || body === "") return null;
                 // Every column keeps its header as a label, since the columns are gone.
                 return c.key === "title" ? (
-                  <div key={c.key} className="font-medium">{body}</div>
+                  <div key={c.key}>{body}</div>
                 ) : (
                   <div key={c.key} className="flex gap-1.5 text-caption2">
                     <span className="shrink-0 text-fg-subtle">{c.header}</span>
-                    <span className="min-w-0 whitespace-pre-line text-fg-muted">{body}</span>
+                    <span className={`min-w-0 whitespace-pre-line ${c.textClassName ?? "text-fg-muted"}`}>{body}</span>
                   </div>
                 );
               })}
@@ -301,6 +342,7 @@ export function RundownTable({
           );
         })}
         {footer && <div className="px-3 py-2 text-caption1 text-fg-muted">{footer}</div>}
+      </div>
       </div>
     );
   }
@@ -312,6 +354,7 @@ export function RundownTable({
     // resize; a percentage resolves against the inherited size by itself, and is
     // exactly a no-op at scale 1.
     <div ref={wrapRef} className={textSizeClass}>
+    <div style={zoomStyle}>
     <table className="w-full border-collapse" style={{ fontSize: `${fitScale * 100}%` }}>
       <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
@@ -364,9 +407,9 @@ export function RundownTable({
               {shownColumns.map((c) => (
                 <td
                   key={c.key}
-                  className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.cellClassName ?? ""}`}
+                  className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.cellClassName ?? ""} ${c.textClassName ?? ""}`}
                 >
-                  {c.render(it, { isCurrent })}
+                  {c.render(it, { isCurrent, shape })}
                 </td>
               ))}
             </tr>
@@ -383,6 +426,7 @@ export function RundownTable({
         </tfoot>
       )}
     </table>
+    </div>
     </div>
   );
 }

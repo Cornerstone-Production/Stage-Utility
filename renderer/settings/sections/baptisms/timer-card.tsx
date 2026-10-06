@@ -25,6 +25,7 @@ import { useServerNow } from "../../../lib/server-clock";
 import { BaptismTriggersPanel } from "../../../main/baptism-triggers-panel";
 import { useServiceLive } from "./use-service-live";
 import { baptismRebuildDisabledReason, rebuildTargetLabel, runBaptismRebuild } from "./rebuild";
+import { errorMessage } from "@main/services/errors";
 
 /**
  * Invoke a channel, tracking a busy flag around it and surfacing a failure as
@@ -49,7 +50,7 @@ async function act(
     await invoke(channel, payload);
     after?.();
   } catch (err) {
-    toast.error(`Action failed: ${String(err)}`);
+    toast.error(`Action failed: ${errorMessage(err)}`);
   } finally {
     setBusy(false);
   }

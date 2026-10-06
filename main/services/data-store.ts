@@ -4,7 +4,8 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
-import { registerStore, type StoreClass } from "./store-registry.js";
+import { adoptLegacyStoreFile } from "./store-file-adoption.js";
+import { registerStore, type RenamedFrom, type StoreClass } from "./store-registry.js";
 import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 export class DataStore<T> {
@@ -25,13 +26,22 @@ export class DataStore<T> {
    *   on purpose: it used to be a separate hand-maintained list, and a store
    *   omitted from it was silently missing from every backup until an operator
    *   restored one and found their work gone. Now it cannot be forgotten.
+   * @param options.renamedFrom The file this store read before a release renamed
+   *   it. Before the first read or write, an old file with no new one beside it is
+   *   moved into place (store-file-adoption.ts), so an upgrade does not start the
+   *   store empty. Also what config-snapshot maps when an old backup is restored.
+   * @param options.normalize Applied to what a load parses from disk, so a shape an
+   *   older build wrote is read as today's. The file keeps the old shape until the
+   *   next save, which writes the new one. It must be total: it runs on whatever
+   *   the file held.
    */
   constructor(
     private readonly filename: string,
     private readonly defaultValue: T,
     classification: StoreClass,
+    private readonly options: { renamedFrom?: RenamedFrom; normalize?: (parsed: T) => T } = {},
   ) {
-    registerStore({ filename, classification, kind: "file" });
+    registerStore({ filename, classification, kind: "file", renamedFrom: options.renamedFrom });
   }
 
   /** Run `fn` after all prior queued writes settle (success or failure). */
@@ -71,6 +81,9 @@ export class DataStore<T> {
     if (!this.filePath) {
       const userDataPath = getUserDataPath();
       await fs.mkdir(userDataPath, { recursive: true });
+      if (this.options.renamedFrom) {
+        await adoptLegacyStoreFile(userDataPath, this.filename, this.options.renamedFrom);
+      }
       this.filePath = path.join(userDataPath, this.filename);
     }
     return this.filePath;
@@ -95,9 +108,9 @@ export class DataStore<T> {
       this.cache = this.defaultValue;
       return this.cache;
     }
+    let parsed: T;
     try {
-      this.cache = JSON.parse(raw) as T;
-      return this.cache;
+      parsed = JSON.parse(raw) as T;
     } catch (err) {
       // The file EXISTS but won't parse — corruption (e.g. a truncated write from a
       // crash). Do NOT silently fall back to defaults and then overwrite it, which
@@ -140,6 +153,10 @@ export class DataStore<T> {
       // rename. What this load found is still the defaults, not nothing.
       return this.cache ?? this.defaultValue;
     }
+    // Outside the try on purpose: a normalizer that threw would otherwise be
+    // read as a corrupt file and the operator's data quarantined for a bug of ours.
+    this.cache = this.options.normalize ? this.options.normalize(parsed) : parsed;
+    return this.cache;
   }
 
   async save(data: T): Promise<void> {
