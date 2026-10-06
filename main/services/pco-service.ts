@@ -1410,8 +1410,8 @@ class PcoService {
 
         // Index included ItemNote nodes by id (carry content + category_name).
         const notesById = new Map<string, { category: string; content: string }>();
-        // Index included Arrangement nodes by id (carry bpm + arrangement name).
-        const arrById = new Map<string, { bpm: number | null; name: string | null }>();
+        // Index included Arrangement nodes by id (carry bpm, meter + arrangement name).
+        const arrById = new Map<string, { bpm: number | null; meter: string | null; name: string | null }>();
         for (const n of json.included ?? []) {
           if (n.type === "ItemNote") {
             const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
@@ -1420,6 +1420,7 @@ class PcoService {
           } else if (n.type === "Arrangement") {
             arrById.set(n.id, {
               bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
+              meter: typeof n.attributes.meter === "string" && n.attributes.meter ? n.attributes.meter : null,
               name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
             });
           }
@@ -1447,6 +1448,7 @@ class PcoService {
             description: typeof a.description === "string" && a.description ? a.description : null,
             songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
             bpm: arr?.bpm ?? null,
+            meter: arr?.meter ?? null,
             arrangementName: arr?.name ?? null,
             servicePosition: typeof a.service_position === "string" ? a.service_position : null,
           });
