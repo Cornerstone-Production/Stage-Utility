@@ -25,6 +25,7 @@ const FIELDS: [name: string, body: Record<string, unknown>][] = [
   ["locked", { locked: true }],
   ["hideTopBar", { hideTopBar: true }],
   ["allowHls", { allowHls: false }],
+  ["textSize", { textSize: 150 }],
 ];
 
 describe("PATCH /api/outputs/:id — an unknown id, for every boolean flag and for name", () => {

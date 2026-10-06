@@ -1,9 +1,11 @@
-// The kiosk's script display takes its text size from `?text=`.
+// The kiosk's script display takes its text size from the server, and keeps `?text=` there.
 //
-// servicecue-view-text-size.test.tsx drives ServiceCue with a key handed to it. This
-// is the other half: that StageView, the thing a Pi actually opens at /display-1,
-// hands the script display its OWN key. Without it the display view would
-// quietly ignore `?text=` — the display has no control to notice that on.
+// servicecue-view-text-size.test.tsx drives the display component with a size
+// handed to it. This is the other half: that StageView, the thing a Pi opens at
+// /display-1 and the Screens page opens at /preview-<view>?output=<display>, hands
+// it the right one — the display's own kept size for both, and `?text=` kept
+// only by a real display. Without it the preview would draw 100% beside a
+// display at 200%, and nothing on the page would say so.
 //
 // Driven through the real StageView, routed by `/api/state`, at a real path in
 // window.location. NOT asserted: that the rundown is visibly larger (jsdom has no
@@ -79,10 +81,16 @@ const RUNDOWN = {
   isDefaultPlan: true,
 };
 
-test("the kiosk's script display reads ?text= and remembers it under its own display id", async () => {
-  window.history.replaceState({}, "", "/display-1?text=150");
-  const f = stubFetchWithLog((url) => {
-    if (url.includes("/api/state")) return ok(STATE);
+/** StageView at the current address, the server answering with `state` — and every
+ *  PATCH it sends recorded as [path, body]. Returns the zoom the rundown drew. */
+async function driveStageView(state: unknown): Promise<{ zoom: string; patches: [string, unknown][] }> {
+  const patches: [string, unknown][] = [];
+  const f = stubFetchWithLog((url, init) => {
+    if (init?.method === "PATCH") {
+      patches.push([url, JSON.parse(String(init.body))]);
+      return ok({});
+    }
+    if (url.includes("/api/state")) return ok(state);
     if (url.includes("/api/servicecue/layouts")) return ok([]);
     if (url.includes("/api/servicecue/roles")) return ok([]);
     if (url.includes("/api/servicecue/rundown")) return ok(RUNDOWN);
@@ -101,9 +109,43 @@ test("the kiosk's script display reads ?text= and remembers it under its own dis
     for (let i = 0; i < 5; i++) await settle();
     const table = document.querySelector("table");
     assert.ok(table, "the script display never drew its rundown");
-    assert.equal((table!.parentElement as HTMLElement).style.zoom, "1.5");
-    assert.equal(readStoredSize(displayTextSizeKey("display-1")), 150, "stored under the display's own id");
+    return { zoom: (table!.parentElement as HTMLElement).style.zoom, patches };
   } finally {
     f.restore();
   }
+}
+
+/** STATE with display-1's resolved descriptor carrying `textSize`. */
+function stateWithSize(textSize: number | null) {
+  return { ...STATE, resolvedByOutput: { "display-1": { ...STATE.resolvedByOutput["display-1"], textSize } } };
+}
+
+test("the kiosk's script display reads ?text= and keeps it on the server under its own display id", async () => {
+  window.history.replaceState({}, "", "/display-1?text=150");
+  const { zoom, patches } = await driveStageView(stateWithSize(null));
+  assert.equal(zoom, "1.5");
+  assert.deepEqual(patches, [["/api/outputs/display-1", { textSize: 150 }]]);
+  assert.equal(readStoredSize(displayTextSizeKey("display-1")), null, "the device must not be where a display's size lives");
+});
+
+test("the kiosk's script display draws the size the server keeps, with no ?text=", async () => {
+  window.history.replaceState({}, "", "/display-1");
+  const { zoom, patches } = await driveStageView(stateWithSize(130));
+  assert.equal(zoom, "1.3");
+  assert.deepEqual(patches, []);
+});
+
+test("a Screens preview of that display draws the display's size, and never changes it", async () => {
+  // The Screens card: /preview-<view id>?output=<display id>, in the operator's
+  // browser, which remembers nothing for the display and has no ?text=.
+  window.history.replaceState({}, "", "/preview-v1?output=display-1");
+  const { zoom, patches } = await driveStageView(stateWithSize(200));
+  assert.equal(zoom, "2", "the preview drew the rundown at 100% beside a display showing it at 200%");
+  assert.deepEqual(patches, []);
+});
+
+test("a preview of a View that is not a screen draws at 100%", async () => {
+  window.history.replaceState({}, "", "/preview-v1");
+  const { zoom } = await driveStageView(stateWithSize(200));
+  assert.equal(zoom, "", "a View's own preview took another screen's size");
 });

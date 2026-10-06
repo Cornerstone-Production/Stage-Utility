@@ -66,8 +66,9 @@ editing the URL undoes it — a guardrail, not access control.
 Append `?text=<percent>` to the address of a display showing a ServiceCue view —
 `/display-1?text=150` — and its rundown renders at that size, 50 to 300; a value
 outside the range is held to the nearest end and one that is not a number is
-ignored. The display keeps the size afterwards, so it need only be opened with the
-parameter once. It has no on-screen control, since a wall display has no keyboard;
+ignored. The server keeps the size for that display, so it need only be opened
+with the parameter once, it survives replacing the device, and the display's
+preview on the Screens page draws the same size. It has no on-screen control, since a wall display has no keyboard;
 on the `/servicecue/<service type>/<layout>` page the same size is set with the
 A− and A+ buttons in its header. See
 [Text size](features/servicecue-and-baptisms.md#text-size).

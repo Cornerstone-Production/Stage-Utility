@@ -458,6 +458,7 @@ export type IpcChannel =
   | "outputs:setLocked"
   | "outputs:setMode"
   | "outputs:setSlug"
+  | "outputs:setTextSize"
   | "outputs:setView"
   | "patch:get"
   | "patch:parseXlsx"
@@ -1327,6 +1328,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "outputs:setHideTopBar": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { hideTopBar: p.hideTopBar });
+    }
+
+    case "outputs:setTextSize": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { textSize: p.textSize });
     }
 
     case "outputs:setAllowHls": {

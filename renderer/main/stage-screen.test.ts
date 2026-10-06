@@ -21,6 +21,7 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     locked: false,
     hideTopBar: false,
     allowHls: true,
+    textSize: null,
     ...over,
   };
 }
@@ -191,6 +192,21 @@ describe("output state", () => {
       } as Partial<StageState>),
     }));
     assert.equal(screen.k === "view" && screen.hideTopBar, false, "a display took another screen's settings from a query param");
+  });
+
+  test("a screen's kept text size reaches the display and the preview standing in for it, and nothing else", () => {
+    const state = stageState({ resolvedByOutput: { "display-1": resolvedOutput({ textSize: 200 }) } });
+    const display = resolveScreen(input({ state }));
+    assert.equal(display.k === "view" && display.textSize, 200);
+
+    const card = resolveScreen(input({ displayId: "preview-v1", previewViewId: "v1", previewOutputId: "display-1", state }));
+    assert.equal(card.k === "view" && card.textSize, 200, "the Screens card drew the rundown at a size the display does not");
+
+    const viewEditor = resolveScreen(input({ displayId: "preview-v1", previewViewId: "v1", state }));
+    assert.equal(viewEditor.k === "view" && viewEditor.textSize, null, "a View's own preview took a screen's size");
+
+    const unset = resolveScreen(input());
+    assert.equal(unset.k === "view" && unset.textSize, null);
   });
 
   test("the lock reaches the unrouted and not-configured screens too", () => {
@@ -447,6 +463,7 @@ describe("the view kind", () => {
       isPreview: false,
       outputMode: undefined,
       allowHls: true,
+      textSize: null,
     });
   });
 

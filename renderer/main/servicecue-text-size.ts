@@ -7,15 +7,12 @@
 // The size is a percentage of the rundown's normal size. It scales the rundown
 // only, never the header; see RundownTable's `textScale`.
 
-export const MIN_TEXT_SIZE = 50;
-export const MAX_TEXT_SIZE = 300;
-export const DEFAULT_TEXT_SIZE = 100;
-export const TEXT_SIZE_STEP = 10;
+// The range and the clamp are the server's too (a display's size is kept there),
+// so they live in main/types/text-size.ts and are re-exported here.
+import { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "@main/types/text-size";
+export { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE };
 
-/** Round to a whole percent and hold it inside [MIN, MAX]. */
-export function clampTextSize(n: number): number {
-  return Math.min(MAX_TEXT_SIZE, Math.max(MIN_TEXT_SIZE, Math.round(n)));
-}
+export const TEXT_SIZE_STEP = 10;
 
 /**
  * One A+ or A- press.
@@ -55,8 +52,40 @@ export function textSizeFromSearch(search: string): number | null {
   return parseTextSize(new URLSearchParams(search).get("text"));
 }
 
-/** The one key a screen's size is kept under. The page and each display have
- *  their own, so a size set at the booth does not resize a display. */
+export interface DisplayTextSizeInput {
+  /** A settings preview of a screen (or of a View): it draws the screen's kept
+   *  size and never changes it. */
+  isPreview: boolean;
+  /** The display's `?text=`, parsed, or null — null also once it has been kept. */
+  fromAddress: number | null;
+  /** The size the server keeps for this display, null when none is. */
+  server: number | null;
+  /** A size this device remembered for the display before the server kept one. */
+  remembered: number | null;
+}
+
+/**
+ * What a display draws, and what it should ask the server to keep.
+ *
+ * A size in the address is the operator's latest word and wins. With none, the
+ * server's rules, so every device showing the display — and every preview of it
+ * — agrees. A display the server holds nothing for hands over what this device
+ * remembered, once: after that the server has a size and `remembered` is never
+ * consulted again. `save` is null when the server already holds what is wanted,
+ * so a display opened with the same `?text=` every boot writes nothing.
+ */
+export function displayTextSize(i: DisplayTextSizeInput): { show: number; save: number | null } {
+  if (i.isPreview) return { show: clampTextSize(i.server ?? DEFAULT_TEXT_SIZE), save: null };
+  const wanted = i.fromAddress ?? (i.server === null ? i.remembered : null);
+  return {
+    show: clampTextSize(wanted ?? i.server ?? DEFAULT_TEXT_SIZE),
+    save: wanted !== null && wanted !== i.server ? wanted : null,
+  };
+}
+
+/** The one key a screen's size is kept under. The page has its own, so a size
+ *  set at the booth does not resize a display. A display's is only read now, to
+ *  hand a size this device remembered to the server (see displayTextSize). */
 const KEY_PREFIX = "servicecue-text-size:";
 export const PAGE_TEXT_SIZE_KEY = `${KEY_PREFIX}page`;
 export function displayTextSizeKey(displayId: string): string {

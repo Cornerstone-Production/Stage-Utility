@@ -9,6 +9,7 @@ import { describe, test } from "node:test";
 import {
   adoptLegacyStoredSize,
   clampTextSize,
+  displayTextSize,
   displayTextSizeKey,
   PAGE_TEXT_SIZE_KEY,
   parseTextSize,
@@ -166,5 +167,40 @@ describe("a size remembered before ServiceCue was renamed", () => {
   test("a hand-edited old value is clamped like any other", () => {
     const { storage } = memory({ [OLD_PAGE]: "9999" });
     assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY, storage), 300);
+  });
+});
+
+describe("displayTextSize: what a display draws and what it asks the server to keep", () => {
+  const base = { isPreview: false, fromAddress: null, server: null, remembered: null };
+
+  test("the address wins over the server, and is kept when the server holds something else", () => {
+    assert.deepEqual(displayTextSize({ ...base, fromAddress: 150, server: 80, remembered: 120 }), { show: 150, save: 150 });
+    assert.deepEqual(displayTextSize({ ...base, fromAddress: 150 }), { show: 150, save: 150 });
+  });
+
+  test("the address the server already holds is not written again", () => {
+    assert.deepEqual(displayTextSize({ ...base, fromAddress: 150, server: 150 }), { show: 150, save: null });
+  });
+
+  test("with no address, the server's size is drawn and nothing is written", () => {
+    assert.deepEqual(displayTextSize({ ...base, server: 80, remembered: 120 }), { show: 80, save: null });
+  });
+
+  test("a device's remembered size is handed to a server that holds none, and only then", () => {
+    assert.deepEqual(displayTextSize({ ...base, remembered: 120 }), { show: 120, save: 120 });
+    assert.deepEqual(displayTextSize({ ...base, server: 100, remembered: 120 }), { show: 100, save: null }, "a server size of 100 is a size");
+  });
+
+  test("with nothing anywhere it is 100 and writes nothing", () => {
+    assert.deepEqual(displayTextSize(base), { show: 100, save: null });
+  });
+
+  test("a size the server holds outside the range (a hand-edited file) is drawn clamped", () => {
+    assert.deepEqual(displayTextSize({ ...base, server: 900 }), { show: 300, save: null });
+  });
+
+  test("a preview draws the server's size and never reads the address or the device, or writes", () => {
+    assert.deepEqual(displayTextSize({ isPreview: true, fromAddress: 150, server: 200, remembered: 80 }), { show: 200, save: null });
+    assert.deepEqual(displayTextSize({ isPreview: true, fromAddress: 150, server: null, remembered: 80 }), { show: 100, save: null });
   });
 });

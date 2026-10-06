@@ -204,12 +204,19 @@ fit a wide column set, since that would undo the size chosen; use fewer columns 
 a smaller size for a dense layout. Browsers without CSS `zoom` (Firefox before 126)
 ignore the setting.
 
-Each screen remembers its own size in that browser: the page, and each display by
-its id, so a booth laptop at 100% does not resize a display across the room.
+The page remembers its own size in that browser. A display's size is kept by the
+server, per display, so a booth laptop at 100% does not resize a display across
+the room, the display's preview on the Screens page draws the same size the
+display does, and a replacement device shows the size without being set up again.
 
 A display has no control for it. Set its size from its link with `?text=<percent>`
 (`/display-1?text=150`, held to the same 50–300 range): the size applies at once
-and is remembered, so the link only has to be opened with it once. `?text=` also
+and the server keeps it, so the link only has to be opened with it once, and a
+link opened with the size the server already holds changes nothing. A display the
+server holds no size for, whose device remembered one before the server did, hands
+it over the first time it loads. If the server cannot save the size the display
+still shows it until the next load, and the failure is on [`/log`](../ops/updates-and-logs.md)
+as a `[servicecue]` line. `?text=` also
 works on a ServiceCue page, and wins over what that page remembered; a size
 then set with **A−** or **A+** is written back into the address's `?text=`
 (replacing it, with no history entry, and leaving every other parameter alone),

@@ -11,7 +11,7 @@ import { useResyncOn } from "../lib/use-resync-on";
 import { ServiceCueBody, ServiceCueHeader, useServiceCueRender } from "./servicecue-body";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
-import { useTextSize } from "./use-servicecue-text-size";
+import { DEFAULT_TEXT_SIZE } from "./servicecue-text-size";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 interface ServiceCueProps {
@@ -25,12 +25,11 @@ interface ServiceCueProps {
   /** Row text sizing — see ServiceCueBody. A layout object passes "" so the
    *  rows scale with the object's own font size instead of the viewport. */
   textSizeClass?: string;
-  /** Where this screen keeps its own text size (see servicecue-text-size.ts),
-   *  and the key whose presence turns `?text=<percent>` on. A display passes
-   *  one; a layout object embedding this does not, so a size on the display's
-   *  link cannot resize an object inside its layout. A display has no control
-   *  for it: the size is set from the address. */
-  textSizeKey?: string;
+  /** The rundown's text size in percent, from DisplayServiceCue (which owns
+   *  where a display's size comes from: the server). Absent means 100 — which is
+   *  what a layout object embedding this gets, so a size on a display cannot
+   *  resize an object inside its layout. */
+  textSize?: number;
 }
 
 /**
@@ -51,8 +50,7 @@ interface ServiceCueProps {
  * route wraps it in the full screen and the safe-area insets, a layout object
  * wraps it in the object. That is the whole reason it can be embedded.
  */
-export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClass, textSizeKey, autoScroll }: ServiceCueProps) {
-  const [textSize] = useTextSize(textSizeKey ?? null);
+export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClass, textSize = DEFAULT_TEXT_SIZE, autoScroll }: ServiceCueProps) {
   const { state, isLoading, error: stateError, pcoLive } = useDashboardState();
   const [rundown, setRundown] = useState<ServiceCueRundownDTO | null>(null);
   // Null until the first read lands. "The last good list" only exists once one

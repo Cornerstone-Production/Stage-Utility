@@ -1,12 +1,10 @@
-// The ServiceCue text size a screen is showing, and how it is changed.
+// The ServiceCue PAGE's text size, and how its control changes it. (A display's
+// is kept by the server: see use-display-text-size.ts.)
 //
-// Start order: a valid `?text=` in the address, then what this screen remembered,
-// then 100. A `?text=` is also remembered, so it is how a display with no
-// keyboard is set: open its link once with the size on the end and it keeps it.
-// `key` is per screen (see servicecue-text-size.ts), and null means "this caller
-// has no user text size" — a rundown embedded in a layout object — which gets
-// 100 and ignores the address, so a `?text=` on a display cannot resize an
-// object inside its layout.
+// Start order: a valid `?text=` in the address, then what this browser remembered
+// for the page, then 100. A `?text=` is also remembered. `key` is the page's (see
+// servicecue-text-size.ts), and null means "this caller has no user text size",
+// which gets 100 and ignores the address.
 //
 // `syncAddress` is for the page, which has a control: a size set there is
 // written back to the address's `?text=` when it carries one, so a refresh
