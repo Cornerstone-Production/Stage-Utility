@@ -2585,8 +2585,7 @@ export class StageController {
     // but only for the copy it writes: merged into this.state as-is, the full data
     // URL (up to ~1.5 MB each) rode in every stage:state broadcast until the next
     // restart reloaded the reference from disk. Store them here, before the merge,
-    // so memory and disk hold the same `/branding-images/` URL. A failure throws
-    // before this.state is touched, and reaches the caller as it always did.
+    // so memory and disk hold the same `/branding-images/` URL.
     const stored = await externalizeBrandingImages(stateNext);
 
     // Settings-only fields (originals + crops), never broadcast.
@@ -2610,6 +2609,11 @@ export class StageController {
       settingsNext.defaultAvatarOriginal = null;
       settingsNext.defaultAvatarCrop = null;
     }
+    // The pre-crop originals are images too, and settingsStore.patch would store
+    // them only after this.state had moved: a malformed one then left the new logo
+    // and name live in memory with nothing on disk. Stored here, so a bad image of
+    // either kind throws before this.state is touched and reaches the caller.
+    const settingsStored = await externalizeBrandingImages(settingsNext);
 
     console.log(
       `[stage-controller] setBranding`,
@@ -2623,7 +2627,7 @@ export class StageController {
       }),
     );
     this.state = { ...this.state, ...stored };
-    await settingsStore.patch(settingsNext);
+    await settingsStore.patch(settingsStored);
     this.broadcast();
     return this.state;
   }
