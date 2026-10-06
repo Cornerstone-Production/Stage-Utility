@@ -5,6 +5,10 @@
 //   <data>/video-relay/downloads/<asset>      — the verified archive
 //   <data>/video-relay/<version>/mediamtx[.exe] — the extracted binary
 //
+// Once the pinned version is in place, the version directories and archives
+// of earlier pins are removed (pruneOldRelayFiles): this is the app's own
+// download cache, so a pin bump does not leave ~80 MB behind for good.
+//
 // Nothing here runs the binary; that is a later task's supervisor. This is
 // only "is a runnable file on disk, and how did it get there."
 
@@ -17,6 +21,7 @@ import { promisify } from "node:util";
 
 import { getUserDataPath } from "../app-paths.js";
 import { errorMessage } from "../errors.js";
+import { scrub } from "../scrub.js";
 import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
 
 const execFileAsync = promisify(execFile);
@@ -210,6 +215,69 @@ async function streamToPart(
   }
 }
 
+/** What a version directory under the relay dir is named — the shape of
+ *  MEDIAMTX_VERSION. Anything else beside it (config, pid file, logs, a
+ *  staging directory) is not a version and is never touched. */
+export const VERSION_DIR_SHAPE = /^v\d+\.\d+\.\d+$/;
+const ARCHIVE_SHAPE = /\.(tar\.gz|zip)$/;
+
+/** Bytes under a path (a file's own size, a directory's contents); 0 for
+ *  anything unreadable — it is only the figure on the log line. */
+async function bytesUnder(p: string): Promise<number> {
+  try {
+    const st = await fsp.lstat(p);
+    if (!st.isDirectory()) return st.size;
+    let total = 0;
+    for (const entry of await fsp.readdir(p)) total += await bytesUnder(path.join(p, entry));
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Removes what earlier pins left behind: every version directory other than
+ * the pinned one, and every archive in `downloads/` that is not one of the
+ * pin's own assets. Nothing else in the relay dir is touched.
+ *
+ * Runs only after the pinned binary is in place, so a failed acquire never
+ * costs the operator the previous version. It never fails the caller: a
+ * removal that errors is logged, and the rest are still attempted.
+ */
+async function pruneOldRelayFiles(assets: ReadonlyMap<string, MediaMtxAsset>, remove: (p: string) => Promise<void>): Promise<void> {
+  const root = relayDir();
+  const downloads = path.join(root, "downloads");
+  const keepArchives = new Set([...assets.values()].map((a) => a.name));
+  const stale: string[] = [];
+  try {
+    for (const entry of await fsp.readdir(root, { withFileTypes: true })) {
+      if (entry.isDirectory() && VERSION_DIR_SHAPE.test(entry.name) && entry.name !== MEDIAMTX_VERSION) stale.push(path.join(root, entry.name));
+    }
+    for (const entry of await fsp.readdir(downloads, { withFileTypes: true }).catch(() => [])) {
+      if (entry.isFile() && ARCHIVE_SHAPE.test(entry.name) && !keepArchives.has(entry.name)) stale.push(path.join(downloads, entry.name));
+    }
+  } catch (err) {
+    console.warn(`[video] could not look for old relay versions to remove: ${scrub(errorMessage(err))}`);
+    return;
+  }
+
+  const removed: string[] = [];
+  let freed = 0;
+  for (const p of stale) {
+    const size = await bytesUnder(p);
+    try {
+      await remove(p);
+      removed.push(path.relative(root, p));
+      freed += size;
+    } catch (err) {
+      console.warn(`[video] could not remove old relay file ${scrub(path.relative(root, p))}: ${scrub(errorMessage(err))}`);
+    }
+  }
+  if (removed.length > 0) {
+    console.log(`[video] removed old relay files (${removed.map((r) => scrub(r)).join(", ")}), freeing ${freed >= 1_000_000 ? `${(freed / 1_000_000).toFixed(1)} MB` : `${Math.round(freed / 1000)} kB`}`);
+  }
+}
+
 export interface EnsureBinaryOptions {
   fetchImpl?: typeof fetch;
   onProgress?: (received: number, total: number) => void;
@@ -230,6 +298,9 @@ export interface EnsureBinaryOptions {
   extract?: ExtractFn;
   /** Test seam: small timeouts, so a test need not wait real seconds. */
   downloadTimeouts?: DownloadTimeouts;
+  /** Test seam for removing an old version directory or archive. Defaults to
+   *  a recursive `fs.rm`. */
+  remove?: (p: string) => Promise<void>;
 }
 
 /**
@@ -325,7 +396,11 @@ export async function ensureBinary(opts: EnsureBinaryOptions = {}): Promise<Ensu
   // Every failure is returned, whatever step it came from — the relay's
   // status is built from what this answers, and a throw would bypass it.
   try {
-    return await ensureAsset(asset, downloadsDir, opts);
+    const result = await ensureAsset(asset, downloadsDir, opts);
+    // Only once the pinned binary is in place and verified — never on a
+    // failure, which may leave the operator's last working version in sight.
+    if (result.ok) await pruneOldRelayFiles(assets, opts.remove ?? ((p) => fsp.rm(p, { recursive: true, force: true })));
+    return result;
   } catch (err) {
     return {
       ok: false,

@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-relay-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { ensureBinary, relayArchivePresent, relayDir } = await import("./acquire.js");
+const { ensureBinary, relayArchivePresent, relayDir, VERSION_DIR_SHAPE } = await import("./acquire.js");
 const { assetFor, MEDIAMTX_VERSION } = await import("./mediamtx-pin.js");
 
 // No test here ever hits the network: every ensureBinary() call below passes
@@ -534,4 +534,113 @@ test("relayArchivePresent: the pinned archive in video-relay/downloads, whether 
   await fs.mkdir(path.join(relayDir(), "downloads"), { recursive: true });
   await fs.writeFile(path.join(relayDir(), "downloads", pinned.name), "placed by hand");
   assert.equal(await relayArchivePresent(), true);
+});
+
+// A pin bump leaves the earlier version's directory and archive behind. Once
+// the pinned binary is in place they are removed, and nothing else is.
+
+async function seedOldRelay(): Promise<{ oldVersionDir: string; oldArchive: string; keep: string[] }> {
+  const root = relayDir();
+  const oldVersionDir = path.join(root, "v0.0.1");
+  await fs.mkdir(oldVersionDir, { recursive: true });
+  await fs.writeFile(path.join(oldVersionDir, EXE), "x".repeat(2048));
+  const downloads = path.join(root, "downloads");
+  await fs.mkdir(downloads, { recursive: true });
+  const oldArchive = path.join(downloads, "mediamtx_v0.0.1_linux_amd64.tar.gz");
+  await fs.writeFile(oldArchive, "y".repeat(4096));
+  const keep = [
+    path.join(root, "mediamtx.yml"),
+    path.join(root, "relay.pid"),
+    path.join(root, "notes.txt"),
+    path.join(downloads, "README.txt"),
+    path.join(root, "v0.0.2.partial", "stray"),
+    path.join(root, "logs", "relay.log"),
+  ];
+  for (const f of keep) {
+    await fs.mkdir(path.dirname(f), { recursive: true });
+    await fs.writeFile(f, "operator");
+  }
+  return { oldVersionDir, oldArchive, keep };
+}
+
+test("the pin's version string has the shape the old-version sweep matches", () => {
+  assert.match(MEDIAMTX_VERSION, VERSION_DIR_SHAPE, "a pin the sweep cannot recognise would leave every old version in place");
+});
+
+test("once the pinned binary is in place, an old version directory and archive are removed and nothing else", async (t: TestContext) => {
+  await resetRelayDir();
+  const { oldVersionDir, oldArchive, keep } = await seedOldRelay();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  const { sha256 } = await buildArchive(downloadsDir, "mediamtx-current.tar.gz");
+  const assets = new Map([[KEY, asset("mediamtx-current.tar.gz", sha256)]]);
+  const logs = captureConsole(t, "log", "warn");
+
+  const result = await ensureBinary({ assets, fetchImpl: throwIfCalled() });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  await assert.rejects(fs.access(oldVersionDir), "the old version directory is removed");
+  await assert.rejects(fs.access(oldArchive), "the old archive is removed");
+  await fs.access(path.join(relayDir(), MEDIAMTX_VERSION, EXE));
+  await fs.access(path.join(downloadsDir, "mediamtx-current.tar.gz")); // the current pin's own archive stays
+  for (const f of keep) await fs.access(f); // config, pid, logs, a staging dir, an unrelated file
+  assert.equal(logs.length, 1, JSON.stringify(logs));
+  assert.match(logs[0] ?? "", /^\[video\] removed old relay files \(v0\.0\.1, downloads[\\/]mediamtx_v0\.0\.1_linux_amd64\.tar\.gz\), freeing 6 kB$/);
+});
+
+test("the sweep also runs when the pinned binary was already extracted, and says nothing when there is nothing to remove", async (t: TestContext) => {
+  await resetRelayDir();
+  const versionDir = path.join(relayDir(), MEDIAMTX_VERSION);
+  await fs.mkdir(versionDir, { recursive: true });
+  const exePath = path.join(versionDir, EXE);
+  await fs.writeFile(exePath, "#!/bin/sh\necho already-here\n");
+  await fs.chmod(exePath, 0o755);
+  const assets = new Map([[KEY, asset("never-fetched.tar.gz", "a".repeat(64))]]);
+  const logs = captureConsole(t, "log", "warn");
+
+  assert.equal((await ensureBinary({ assets, fetchImpl: throwIfCalled() })).ok, true);
+  assert.deepEqual(logs, [], "nothing old to remove: no log line");
+
+  const { oldVersionDir } = await seedOldRelay();
+  assert.equal((await ensureBinary({ assets, fetchImpl: throwIfCalled() })).ok, true);
+  await assert.rejects(fs.access(oldVersionDir));
+  assert.equal(logs.length, 1, JSON.stringify(logs));
+});
+
+test("a failed acquire removes nothing", async () => {
+  await resetRelayDir();
+  const { oldVersionDir, oldArchive } = await seedOldRelay();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  await buildArchive(downloadsDir, "mediamtx-wrong-sum.tar.gz");
+  const assets = new Map([[KEY, asset("mediamtx-wrong-sum.tar.gz", "0".repeat(64))]]);
+
+  const result = await ensureBinary({ assets, fetchImpl: throwIfCalled() });
+
+  assert.equal(result.ok, false);
+  await fs.access(oldVersionDir);
+  await fs.access(oldArchive);
+});
+
+test("a removal that fails is logged, the rest are still removed, and ensureBinary still succeeds", async (t: TestContext) => {
+  await resetRelayDir();
+  const { oldVersionDir, oldArchive } = await seedOldRelay();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  const { sha256 } = await buildArchive(downloadsDir, "mediamtx-current.tar.gz");
+  const assets = new Map([[KEY, asset("mediamtx-current.tar.gz", sha256)]]);
+  const logs = captureConsole(t, "log", "warn");
+
+  const result = await ensureBinary({
+    assets,
+    fetchImpl: throwIfCalled(),
+    remove: async (p) => {
+      if (p === oldVersionDir) throw new Error("EBUSY: in use");
+      await fs.rm(p, { recursive: true, force: true });
+    },
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  await fs.access(oldVersionDir); // could not be removed
+  await assert.rejects(fs.access(oldArchive)); // was
+  assert.equal(logs.length, 2, JSON.stringify(logs));
+  assert.match(logs[0] ?? "", /^\[video\] could not remove old relay file v0\.0\.1: EBUSY: in use$/);
+  assert.match(logs[1] ?? "", /^\[video\] removed old relay files \(downloads[\\/]mediamtx_v0\.0\.1_linux_amd64\.tar\.gz\)/);
 });

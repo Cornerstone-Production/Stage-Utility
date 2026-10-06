@@ -37,7 +37,12 @@ is backed up; it is runtime data, rebuilt the same way on a fresh machine:
 | `relay.pid` | The running relay's process id, so the next start can find a relay left behind by a server that was killed |
 
 Once extracted it is reused on every later start, with no re-download and no
-re-check. A machine with no internet access can skip the download entirely:
+re-check. When the pinned version is in place, the version folders and
+archives of earlier releases are removed from `video-relay` — every folder
+named like a version other than the pinned one, and every `.tar.gz` or `.zip`
+in `downloads` that is not one of the pinned release's assets. Nothing else
+there is touched, and a removal that fails is logged and does not stop the
+relay. A machine with no internet access can skip the download entirely:
 place the exact archive the failing status line names in
 `video-relay/downloads` in the data folder by hand, and it is checked against
 the same checksum before it is ever run — a wrong or corrupted file is
@@ -480,6 +485,9 @@ from the server:
 - Downloading the pinned MediaMTX release, and a checksum that does not
   match — from a fresh download or a hand-placed archive — refused rather
   than run, with where to place the archive by hand.
+- `removed old relay files (...), freeing N MB` when a release bump leaves
+  earlier versions behind and they are cleared, only when something was
+  removed; `could not remove old relay file <name>` when one cannot be.
 - A busy port, naming the program holding it and its process id.
 - `stopped a relay left over from the last run (pid N)`, or that it would
   not stop, which also stops this start.

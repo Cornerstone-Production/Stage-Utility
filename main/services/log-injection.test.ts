@@ -292,11 +292,17 @@ const NOT_SCANNED = new Map<string, string>([
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
   ["updater.ts", UNAUDITED],
-  // video/acquire.ts is NOT here: it logs nothing — the caller
-  // (relay-lifecycle.ts, already in this map below) owns all logging for a
-  // checksum mismatch now, so acquire.ts itself no longer logs anything at
-  // all, and an exclusion for a file that has stopped logging is exactly
-  // the stale entry this guard's own second half catches.
+  // acquire.ts logs nothing about a download or a checksum — relay-lifecycle.ts
+  // (below) owns that, once per outage. It logs only when it clears an earlier
+  // pin's files, once per removal, which happens once and not on every retry.
+  [
+    "video/acquire.ts",
+    "logs the names of files and folders it found in the relay's own data directory " +
+      "(the version folders and archives of earlier pins it removes) and the filesystem " +
+      "error that stopped a removal — never HTTP data, since no route names a path here. " +
+      "Every interpolated value still goes through scrub(): a hand-placed file's name is " +
+      "the operator's, and a newline in it must not forge a log entry. Audited.",
+  ],
   [
     "video/relay-lifecycle.ts",
     "logs the relay's own version (MediaMTX's startup banner, the same not-HTTP-data as " +
