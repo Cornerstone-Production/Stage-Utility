@@ -28,10 +28,26 @@ export class PcoUrlRefused extends Error {
   }
 }
 
-/** A value that may be written into a `pcoUrl` path. Made only by pcoId and pcoSegment. */
+/** Held only by this module, so nothing outside it can make a PcoPathPart. */
+const CHECKED = Symbol("checked by pcoId or pcoSegment");
+
+/** A value that may be written into a `pcoUrl` path. Made only by pcoId and
+ *  pcoSegment: the constructor wants a token no other module holds, and the
+ *  private field makes the type nominal, so a plain `{ value }` object does not
+ *  pass for one either. */
 export class PcoPathPart {
-  /** @internal */
-  constructor(readonly value: string) {}
+  readonly #value: string;
+  constructor(token: typeof CHECKED, value: string) {
+    if (token !== CHECKED) throw new PcoUrlRefused("a PCO path part is made by pcoId or pcoSegment");
+    this.#value = value;
+  }
+  get value(): string {
+    return this.#value;
+  }
+  /** Was `part` made here? A cast can get past the type; this is checked at run time. */
+  static made(part: unknown): part is PcoPathPart {
+    return typeof part === "object" && part !== null && #value in part;
+  }
 }
 
 /** The shape of every id Planning Center issues: a run of digits. */
@@ -50,13 +66,13 @@ export function pcoId(name: string, value: unknown): PcoPathPart {
   if (!isPcoId(value)) {
     throw new PcoUrlRefused(`${name} is not a Planning Center id`);
   }
-  return new PcoPathPart(value);
+  return new PcoPathPart(CHECKED, value);
 }
 
 /** A fixed word the code chose, for the one path part that is not an id (a collection name). */
 export function pcoSegment(name: string, value: string): PcoPathPart {
   if (!/^[a-z_]+$/.test(value)) throw new PcoUrlRefused(`${name} is not a path word`);
-  return new PcoPathPart(value);
+  return new PcoPathPart(CHECKED, value);
 }
 
 /**
@@ -66,7 +82,11 @@ export function pcoSegment(name: string, value: string): PcoPathPart {
 export function pcoUrl(strings: TemplateStringsArray, ...parts: PcoPathPart[]): string {
   let out = PCO_BASE;
   strings.forEach((s, i) => {
-    out += s + (parts[i]?.value ?? "");
+    const part = parts[i];
+    if (part !== undefined && !PcoPathPart.made(part)) {
+      throw new PcoUrlRefused("a PCO path part was not checked by pcoId or pcoSegment");
+    }
+    out += s + (part?.value ?? "");
   });
   return out;
 }
