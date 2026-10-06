@@ -476,7 +476,7 @@ class ConfigSnapshotService {
     const id = randomUUID();
     const bundle = await this.build(name.trim() || "Untitled");
     await fs.mkdir(this.snapshotsDir(), { recursive: true });
-    await fs.writeFile(path.join(this.snapshotsDir(), `${id}.json`), JSON.stringify(bundle, null, 2), "utf8");
+    await atomicWrite(path.join(this.snapshotsDir(), `${id}.json`), JSON.stringify(bundle, null, 2));
     return this.metaOf(id, bundle);
   }
 
