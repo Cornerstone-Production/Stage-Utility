@@ -545,7 +545,7 @@ export class RelaySupervisor extends EventEmitter {
     this.restartTimer = null;
     const rewrite = this.beforeRespawn;
     if (!rewrite) {
-      this.spawnChild();
+      this.spawnOrFail();
       return;
     }
     const run = this.run;
@@ -555,6 +555,18 @@ export class RelaySupervisor extends EventEmitter {
       if (run === this.run) this.onExit(null, `could not rewrite its config: ${errorMessage(err)}`);
       return;
     }
-    if (run === this.run) this.spawnChild();
+    if (run === this.run) this.spawnOrFail();
+  }
+
+  /** spawnChild() for a respawn, which no caller awaits: a spawn() that throws
+   *  (ENOMEM, ENOEXEC) is a failed attempt like any other, backed off and
+   *  retried. Left to escape, it would be an unhandled rejection that ends
+   *  the retry loop with the status stuck on "failing" and no timer behind it. */
+  private spawnOrFail(): void {
+    try {
+      this.spawnChild();
+    } catch (err) {
+      this.onExit(null, `could not start: ${errorMessage(err)}`);
+    }
   }
 }
