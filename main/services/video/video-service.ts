@@ -64,6 +64,7 @@ import {
   type VideoProbeState,
   type VideoPlaybackReport,
   type VideoPorts,
+  type VideoSource,
   type VideoSourceKind,
   type VideoState,
 } from "../../types/video.js";
@@ -484,7 +485,7 @@ class VideoService {
     inDemand: () => videoProbeDeps.inDemand(),
     isEnabled: () => this.videoEnabled,
     loadFeeds: async () => (await loadFeedsFile()).feeds,
-    getPassword: async (id) => (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined,
+    getPassword: (id) => this.storedPassword(id),
     isReady: (id) => this.lastPaths.get(id)?.ready === true,
     isDialling: (id) => {
       const last = this.requestedAt.get(id);
@@ -649,13 +650,19 @@ class VideoService {
    *  or embed reference — "Pulled from a device · rtsp://…". */
   private sourceLine(feed: VideoFeed): string {
     const s = feed.source;
-    const detail =
-      s.kind === "pull" || s.kind === "external"
-        ? s.url
-        : s.kind === "push"
-          ? PUSH_PROTOCOL_LABEL[s.protocol]
-          : s.ref;
-    return `${SOURCE_LINE_KIND[s.kind]} · ${detail}`;
+    return `${SOURCE_LINE_KIND[s.kind]} · ${this.sourceDetail(s)}`;
+  }
+
+  private sourceDetail(s: VideoSource): string {
+    switch (s.kind) {
+      case "pull":
+      case "external":
+        return s.url;
+      case "push":
+        return PUSH_PROTOCOL_LABEL[s.protocol];
+      case "embed":
+        return s.ref;
+    }
   }
 
   /** `hasPassword` only for a pull feed — whether a password
@@ -669,8 +676,7 @@ class VideoService {
       sourceLine: this.sourceLine(feed), play: this.play(feed), status: this.feedStatus(feed),
     };
     if (feed.source.kind === "pull") {
-      const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
-      out.hasPassword = !!secrets.password;
+      out.hasPassword = (await this.storedPassword(feed.id)) !== undefined;
     }
     return out;
   }
@@ -1075,7 +1081,7 @@ class VideoService {
         } else if (path?.ready) {
           this.pendingBFrames.delete(feed.id);
           this.pendingBFramesAt.delete(feed.id);
-          await this.bindBFramesMark(feed, path.readyTime);
+          this.bindBFramesMark(feed, path.readyTime);
         }
       }
 
@@ -1318,7 +1324,7 @@ class VideoService {
     if (!feed) return;
     const path = this.lastPaths.get(feedId);
     if (path?.ready) {
-      await this.bindBFramesMark(feed, path.readyTime);
+      this.bindBFramesMark(feed, path.readyTime);
       // Binding just changed this feed's status to "delayed" — the wire
       // must not wait for the next poll tick (up to STATUS_POLL_MS away)
       // to find out.
@@ -1329,7 +1335,7 @@ class VideoService {
     }
   }
 
-  private async bindBFramesMark(feed: VideoFeed, readyTime: string | null): Promise<void> {
+  private bindBFramesMark(feed: VideoFeed, readyTime: string | null): void {
     this.bframesMarks.set(feed.id, { readyTime });
     if (this.bframesAnnouncedAt.get(feed.id) === readyTime) return; // already said, for this same session
     this.bframesAnnouncedAt.set(feed.id, readyTime);
@@ -1459,8 +1465,7 @@ class VideoService {
     for (const feed of feeds) {
       const s = feed.source;
       if (s.kind === "pull") {
-        const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
-        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, secrets.password) });
+        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, await this.storedPassword(feed.id)) });
       } else if (s.kind === "push") {
         out.push({ id: feed.id, kind: "push", password: await this.pushPassword(feed) });
       }
@@ -1940,9 +1945,9 @@ class VideoService {
       return { ok: false, error: errorMessage(err) };
     }
     const here = await loadFeedsFile();
-    const plans = await planImport(bundle, feedsOf(here), (id) => this.storedPassword(id), this.allowedKinds());
+    const plans = await planImport(bundle, here.feeds, (id) => this.storedPassword(id), this.allowedKinds());
     const preview = buildPreview(bundle, plans, here);
-    const local = new Map(feedsOf(here).map((f) => [f.id, f]));
+    const local = new Map(here.feeds.map((f) => [f.id, f]));
     for (const f of preview.feeds) f.here = reviewFingerprint(local.get(f.id), this.secretRevision.get(f.id) ?? 0);
     return { ok: true, preview };
   }
@@ -1991,8 +1996,8 @@ class VideoService {
     }
 
     const before = await loadFeedsFile();
-    const seen = new Map(feedsOf(before).map((f) => [f.id, f]));
-    const plans = await planImport(bundle, feedsOf(before), (id) => this.storedPassword(id), this.allowedKinds());
+    const seen = new Map(before.feeds.map((f) => [f.id, f]));
+    const plans = await planImport(bundle, before.feeds, (id) => this.storedPassword(id), this.allowedKinds());
     // Each reviewed feed's fingerprint now, against the one its review showed.
     const movedOn = new Set<string>();
     for (const [id, reviewed] of expect) {
