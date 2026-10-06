@@ -268,7 +268,9 @@ server asks each pulled camera to describe its stream, without streaming it:
   delayed** win: a feed the relay already has playing is not checked.
 - An RTSP or RTSPS address gets a `DESCRIBE`; an HTTP or HTTPS (HLS) address gets
   a GET of its playlist. Neither starts a stream. Each has 5 seconds to answer.
-  An RTSPS camera's self-signed certificate is accepted.
+  An RTSPS or HTTPS camera's certificate must be one this machine trusts, as
+  the relay requires: a self-signed one reads as not trusted, and nothing,
+  login included, is sent to it.
 - The feed's **Username** and **Password** are used when the camera asks for a
   login (Basic or Digest). A camera that wants one with none saved says so; one
   that refuses the saved one says that.

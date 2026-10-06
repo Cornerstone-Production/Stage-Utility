@@ -233,8 +233,14 @@ test(
 
     const result = await ensureBinary({ assets, fetchImpl: throwIfCalled() });
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal((await fs.stat(exePath)).mode & 0o777, 0o755);
-    assert.equal(await fs.readFile(exePath, "utf8"), "#!/bin/sh\necho fake-mediamtx\n");
+    // One handle for both reads, so the mode and the contents are of the same file.
+    const exe = await fs.open(exePath);
+    try {
+      assert.equal((await exe.stat()).mode & 0o777, 0o755);
+      assert.equal(await exe.readFile("utf8"), "#!/bin/sh\necho fake-mediamtx\n");
+    } finally {
+      await exe.close();
+    }
   },
 );
 
