@@ -74,7 +74,20 @@ export const MOVED_PAGE_PREFIXES: readonly (readonly [from: string, to: string])
  * route, never a bare prefix: "/scriptviewer" is not "/scriptview".
  */
 export function legacyPageRedirect(pathname: string, search = ""): string | null {
-  for (const [from, to] of MOVED_PAGE_PREFIXES) {
+  return movedPath(MOVED_PAGE_PREFIXES, pathname, search);
+}
+
+/**
+ * `pathname` under the prefix that replaced its own, or null when no prefix in
+ * `moved` is its. The boundary is the end of the path or a "/", never a bare
+ * prefix. Shared by the page and the API redirects, which differ only in table.
+ */
+export function movedPath(
+  moved: readonly (readonly [from: string, to: string])[],
+  pathname: string,
+  search = "",
+): string | null {
+  for (const [from, to] of moved) {
     if (pathname === from || pathname.startsWith(`${from}/`)) {
       return `${to}${pathname.slice(from.length)}${search}`;
     }

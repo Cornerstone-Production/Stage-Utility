@@ -14,21 +14,14 @@
 
 import type { RouteCtx } from "./context.js";
 import { movedPageHeaders } from "./legacy-page-routes.js";
+import { movedPath } from "./operator-paths.js";
 
 /** Old API prefix to new. */
 const MOVED_API_PREFIXES: readonly (readonly [from: string, to: string])[] = [["/api/scriptview", "/api/servicecue"]];
 
-/**
- * Where a request for a moved API path should go, or null. Like isOperatorPath,
- * the boundary is the end of the path or a "/", never a bare prefix.
- */
+/** Where a request for a moved API path should go, or null. */
 export function legacyApiRedirect(pathname: string, search = ""): string | null {
-  for (const [from, to] of MOVED_API_PREFIXES) {
-    if (pathname === from || pathname.startsWith(`${from}/`)) {
-      return `${to}${pathname.slice(from.length)}${search}`;
-    }
-  }
-  return null;
+  return movedPath(MOVED_API_PREFIXES, pathname, search);
 }
 
 export async function legacyApiRoutes({ res, pathname, url, method }: RouteCtx): Promise<void> {
