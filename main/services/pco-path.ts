@@ -9,8 +9,19 @@
 // of five routes, so the check is made where the string is built instead: a path
 // is written with the `pcoUrl` tag, and the tag takes nothing that has not been
 // through `pcoId` (a value that must look like a PCO id) or `pcoSegment` (a fixed
-// word of the code's own). A raw string in an interpolation does not type-check, so
-// a new endpoint cannot be written without the check.
+// word of the code's own).
+//
+// What the compiler enforces: `pcoUrl` returns a `PcoUrl`, a branded string, and
+// every credentialed request entry point in pco-service.ts takes a `PcoUrl`. A
+// plain string, including PCO_BASE + "/service_types/" + id, does not type-check
+// there. A `PcoUrl` is made in two places: the `pcoUrl` tag, and `pcoUrlOf` (a URL
+// object rebuilt on PCO's own origin, which pcoUrlFrom, pinnedToPco and
+// withOffset use for strings that came from a response or a caller).
+//
+// What it does not enforce: a cast (`as PcoUrl`) gets past any brand, and
+// `pcoUrlOf` checks the origin, not the ids in the path. pco-link-safety.test.ts
+// scans the source for a cast and for PCO_BASE written into a string by hand, as
+// a backstop to the type and not a substitute for it.
 
 export const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 
@@ -75,11 +86,36 @@ export function pcoSegment(name: string, value: string): PcoPathPart {
   return new PcoPathPart(CHECKED, value);
 }
 
+declare const PCO_URL: unique symbol;
+
+/** A URL the credentialed fetch will send. Not a string a caller can write: the
+ *  brand is made only by `pcoUrl` and `pcoUrlOf`. */
+export type PcoUrl = string & { readonly [PCO_URL]: true };
+
+/**
+ * `parsed`'s path and query on PCO's own origin.
+ *
+ * Built by ASSIGNMENT, never by `new URL(path, origin)`. The two-argument
+ * constructor re-parses its first argument, and a pathname beginning `//` is read
+ * as a protocol-relative authority, so a candidate of
+ * `https://api.planningcenteronline.com//attacker.example/x` (whose origin really
+ * is PCO's) would rebuild as https://attacker.example/x with the operator's App ID
+ * and secret attached. A backslash reaches the same place, because WHATWG folds it
+ * to a slash for a special scheme. The setters write one component each and cannot
+ * touch the origin.
+ */
+export function pcoUrlOf(parsed: URL): PcoUrl {
+  const rebuilt = new URL(PCO_BASE);
+  rebuilt.pathname = parsed.pathname;
+  rebuilt.search = parsed.search;
+  return rebuilt.toString() as PcoUrl;
+}
+
 /**
  * A Services API URL: `pcoUrl\`/service_types/${pcoId("serviceTypeId", id)}/plans\``.
  * The literal parts are the code's own; every interpolation has been checked.
  */
-export function pcoUrl(strings: TemplateStringsArray, ...parts: PcoPathPart[]): string {
+export function pcoUrl(strings: TemplateStringsArray, ...parts: PcoPathPart[]): PcoUrl {
   let out = PCO_BASE;
   strings.forEach((s, i) => {
     const part = parts[i];
@@ -88,5 +124,5 @@ export function pcoUrl(strings: TemplateStringsArray, ...parts: PcoPathPart[]): 
     }
     out += s + (part?.value ?? "");
   });
-  return out;
+  return out as PcoUrl;
 }

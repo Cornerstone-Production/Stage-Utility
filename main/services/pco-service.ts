@@ -35,7 +35,7 @@ export class PcoAuthError extends Error {
   }
 }
 import { scrub } from "./scrub.js";
-import { PCO_BASE, PcoUrlRefused, isPcoId, pcoId, pcoSegment, pcoUrl } from "./pco-path.js";
+import { PCO_BASE, PcoUrlRefused, isPcoId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
 
 /**
  * Every version Planning Center SERVICES publishes, newest first.
@@ -174,10 +174,10 @@ export function nextOffset(candidate: unknown): number | null {
 }
 
 /** The same URL with `offset` set. Built from OUR url, never from the response. */
-export function withOffset(url: string, offset: number): string {
+export function withOffset(url: PcoUrl, offset: number): PcoUrl {
   const u = new URL(url);
   u.searchParams.set("offset", String(offset));
-  return u.toString();
+  return pcoUrlOf(u);
 }
 
 /** A PCO collection response, carrying the pagination link PCO puts beside it. */
@@ -211,16 +211,16 @@ export type PcoPage<T extends PcoNode = PcoNode> = PcoResponse<T> & { links?: { 
  * /log can tell which collection came back short.
  */
 export async function readPcoPages<T extends PcoNode = PcoNode>(
-  firstUrl: string,
+  firstUrl: PcoUrl,
   maxPages: number,
   label: string,
-  request: (url: string) => Promise<PcoPage<T>>,
+  request: (url: PcoUrl) => Promise<PcoPage<T>>,
   onPage: (page: PcoPage<T>) => void,
 ): Promise<void> {
   // Highest offset already asked for, so a next-link that does not move forward
   // ends the loop instead of fetching one page for ever.
   let seenOffset = -1;
-  let url: string | null = firstUrl;
+  let url: PcoUrl | null = firstUrl;
   let rows = 0;
 
   for (let page = 0; url && page < maxPages; page++) {
@@ -281,41 +281,15 @@ export async function readPcoPages<T extends PcoNode = PcoNode>(
  *
  * @returns the rebuilt URL, or null when the candidate is not PCO's.
  */
-export function pcoUrlFrom(candidate: unknown, base: string): string | null {
-  if (!sameOrigin(candidate, base)) return null;
+export function pcoUrlFrom(candidate: unknown): PcoUrl | null {
+  if (!sameOrigin(candidate, PCO_BASE)) return null;
   try {
-    return rebuildOn(base, new URL(candidate));
+    return pcoUrlOf(new URL(candidate));
   } catch {
     return null;
   }
 }
 
-/**
- * `base`'s origin, `parsed`'s path and query. The one rebuild, for both callers.
- *
- * Built by ASSIGNMENT, never by `new URL(path, origin)`.
- *
- * The two-argument constructor RE-PARSES its first argument, and a pathname
- * beginning with `//` is read as a protocol-relative AUTHORITY, not a path. So a
- * candidate of
- *     https://api.planningcenteronline.com//attacker.example/steal
- * passes sameOrigin (its origin really is PCO's), yields a pathname of
- * `//attacker.example/steal`, and rebuilds as https://attacker.example/steal --
- * off-origin, with pcoFetch about to attach the app id and secret to it.
- * `\\attacker.example` reaches the same place, because WHATWG folds a backslash
- * to a slash for a special scheme.
- *
- * The setters write one component each and cannot touch the origin. This is the
- * whole of the fix for that bug, and it is written once: pcoUrlFrom and
- * pinnedToPco each had a copy, differing only in whether a bad candidate is
- * rejected or forced, which is not the part that is easy to get wrong.
- */
-function rebuildOn(base: string, parsed: URL): string {
-  const rebuilt = new URL(base);
-  rebuilt.pathname = parsed.pathname;
-  rebuilt.search = parsed.search;
-  return rebuilt.toString();
-}
 /**
  * The one URL that reaches `fetch`, forced onto PCO's own origin.
  *
@@ -330,7 +304,7 @@ function rebuildOn(base: string, parsed: URL): string {
  * wrong, and a request that quietly went somewhere else with the operator's app
  * id and secret on it is not a failure to swallow.
  */
-export function pinnedToPco(url: string): string {
+export function pinnedToPco(url: string): PcoUrl {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -350,7 +324,7 @@ export function pinnedToPco(url: string): string {
   // The same rebuild pcoUrlFrom uses. The two differ only in what they do with a
   // candidate that is not PCO's — reject, or force — never in how the URL is put
   // back together, which is where the protocol-relative bug lived.
-  return rebuildOn(PCO_BASE, parsed);
+  return pcoUrlOf(parsed);
 }
 
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
@@ -729,7 +703,7 @@ class PcoService {
    * an authority, which is the exact bug fixed one commit ago.
    */
   private async pcoFetch(
-    url: string,
+    url: PcoUrl,
     appId: string,
     secret: string,
     init: RequestInit = {},
@@ -811,7 +785,7 @@ class PcoService {
   }
 
   private async request<T extends PcoNode = PcoNode>(
-    url: string,
+    url: PcoUrl,
     appId: string,
     secret: string,
     apiVersion?: string,
@@ -866,7 +840,7 @@ class PcoService {
     // The origin is the CONSTANT's; only the path and query come from the
     // caller. There is no string it can pass that sends the credentials
     // elsewhere, including through a parser disagreement.
-    const safe = pcoUrlFrom(url, PCO_BASE);
+    const safe = pcoUrlFrom(url);
     if (!safe) throw new Error(`[pco] refusing to send credentials to ${scrub(url)}`);
     return this.request<T>(safe, appId, secret, apiVersion);
   }
@@ -916,7 +890,7 @@ class PcoService {
   }
 
   private async requestInner<T extends PcoNode = PcoNode>(
-    url: string,
+    url: PcoUrl,
     appId: string,
     secret: string,
     apiVersion?: string,
@@ -966,7 +940,7 @@ class PcoService {
 
   // POST a Services Live controller action (no JSON body; PCO returns the updated
   // live object or 204). Surfaces PCO's error text so the UI can toast it.
-  private async postAction(url: string, appId: string, secret: string): Promise<void> {
+  private async postAction(url: PcoUrl, appId: string, secret: string): Promise<void> {
     console.log(`[pco] POST ${scrub(url)}`);
     const response = await this.pcoFetch(url, appId, secret, { method: "POST" });
     if (response.status === 401) {
@@ -998,8 +972,11 @@ class PcoService {
     planId: string,
     direction: "next" | "previous",
   ): Promise<void> {
-    const base = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}`;
-    const json = await this.request(`${base}/live`, appId, secret);
+    const json = await this.request(
+      pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/live`,
+      appId,
+      secret,
+    );
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     if (!live) throw new Error("No PCO live session for this plan");
     const action = direction === "next" ? "go_to_next_item" : "go_to_previous_item";
@@ -1031,8 +1008,8 @@ class PcoService {
     // If PCO ever moves the endpoint, this says so rather than silently posting
     // to the wrong place -- the one case where the old code would have differed.
     const linkUrl = links[action];
-    const url = `${base}/live/${action}`;
-    const offered = pcoUrlFrom(linkUrl, PCO_BASE);
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/live/${pcoSegment("action", action)}`;
+    const offered = pcoUrlFrom(linkUrl);
     if (offered && new URL(offered).pathname !== new URL(url).pathname) {
       console.warn(
         `[pco] live "${scrub(action)}" link points somewhere unexpected; using the documented endpoint`,
@@ -1044,7 +1021,7 @@ class PcoService {
   // POST that parses + returns the JSON body (the Live controls' postAction
   // discards it). Used by attachment `open`, which returns a temporary link.
   private async postJson<T extends PcoNode = PcoNode>(
-    url: string,
+    url: PcoUrl,
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
@@ -1507,7 +1484,7 @@ class PcoService {
     const cached = this.cacheGet<string>(cacheKey);
     if (cached) return cached;
 
-    const json = await this.request(PCO_BASE, appId, secret).catch(() => null);
+    const json = await this.request(pcoUrl``, appId, secret).catch(() => null);
     const data = json && !Array.isArray(json.data) ? json.data : null;
     const tz = data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
     if (tz) this.cacheSet(cacheKey, tz, TTL_LONG_MS);
@@ -1706,8 +1683,11 @@ class PcoService {
     countdownTarget: "plan-start" | "service-time" = "plan-start",
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
-    const base = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}`;
-    const json = await this.request(`${base}/live?include=current_item_time`, appId, secret);
+    const json = await this.request(
+      pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/live?include=current_item_time`,
+      appId,
+      secret,
+    );
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
 

@@ -17,7 +17,8 @@ import type {
 } from "../types/calendar.js";
 import { CALENDAR_REFRESH_MS } from "../types/calendar.js";
 import type { PcoNode, PcoResponse } from "./pco-service.js";
-import { pcoService, readPcoPages } from "./pco-service.js";
+import { pcoService, pcoUrlFrom, readPcoPages } from "./pco-service.js";
+import { PcoUrlRefused, type PcoUrl } from "./pco-path.js";
 import { scrub } from "./scrub.js";
 
 const CALENDAR_BASE = "https://api.planningcenteronline.com/calendar/v2";
@@ -257,7 +258,7 @@ class PcoCalendarService {
    * pco-plan-notes.test.ts uses on the other client.
    */
   private request<T extends PcoNode = PcoNode>(
-    url: string,
+    url: PcoUrl,
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
@@ -283,8 +284,13 @@ class PcoCalendarService {
     const included: PcoNode[] = [];
     const seenIds = new Set<string>();
 
+    // Calendar is another PCO product, so its URLs are built here from the
+    // calendar base; they join the one origin-pinned type before they page.
+    const first = pcoUrlFrom(firstUrl);
+    if (!first) throw new PcoUrlRefused("the calendar URL is not on Planning Center's origin");
+
     await readPcoPages(
-      firstUrl,
+      first,
       MAX_PAGES,
       "pco-calendar",
       (url) => this.request(url, appId, secret),
