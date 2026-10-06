@@ -3171,6 +3171,7 @@ export class ProdComService extends ConnectionLifecycle {
       return {};
     }
 
+    const before = this.sensitiveSignature();
     this.globalSensitive = sensitivePatterns(globalRows);
     const next = new Map<string, RegExp[]>();
     let scopedSensitive = 0;
@@ -3181,6 +3182,14 @@ export class ProdComService extends ConnectionLifecycle {
       scopedSensitive += patterns.length;
     }
     this.channelSensitive = next;
+
+    // Redaction is applied as the transcript is read out, so a line already on a
+    // display was redacted with whatever was loaded when it went out. A
+    // connection's first keyword read lands after its stream is up, and a line
+    // spoken in between went out with nothing hidden. Re-send the transcript
+    // when what is hidden changed, so the displays redact it now rather than at
+    // the next line, which in a quiet room may be minutes away.
+    if (this.sensitiveSignature() !== before && this.getRawBuffer().length > 0) this.flushTranscript();
 
     // Counts only. The words themselves are what has to stay on this machine.
     const summary =
@@ -3197,6 +3206,14 @@ export class ProdComService extends ConnectionLifecycle {
       );
     }
     return {};
+  }
+
+  /** Which sensitive patterns are loaded, as one comparable string. */
+  private sensitiveSignature(): string {
+    const scoped = [...this.channelSensitive.entries()]
+      .map(([id, patterns]) => `${id}:${patterns.map((p) => p.source).join("|")}`)
+      .sort();
+    return [this.globalSensitive.map((p) => p.source).join("|"), ...scoped].join("\n");
   }
 
   /** The one operator-facing line for a keyword-read failure. Says what the

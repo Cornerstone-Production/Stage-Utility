@@ -299,8 +299,12 @@ describe("the rest of a replaced connection's REST chain does not run either", (
     svc.configure("127.0.0.1", stubB.port, null);
     await eventually(() => svc.sseUpNow, "box B's SSE stream to come up");
     stubB.sseSend(spoken("before-a-lands-secret"));
-    await eventually(() => svc.texts().length > 0, "box B's line to land");
-    assert.equal(svc.texts()[0], "before-a-lands-******", "precondition: box B's keyword is loaded");
+    // Box B's keyword read is its own request and can land after the stream is
+    // up and the line has arrived; on a loaded runner it did. Wait for it.
+    await eventually(
+      () => svc.texts()[0] === "before-a-lands-******",
+      "precondition: box B's keyword list to load and redact the line",
+    );
 
     await sleep(900); // past box A's held channel answer
     assert.equal(svc.texts()[0], "before-a-lands-******", "box A's empty keyword list un-redacted box B's sensitive word");
