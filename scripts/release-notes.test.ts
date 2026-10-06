@@ -142,6 +142,36 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
   return { dir, sha };
 }
 
+describe("a scope that names a renamed feature", () => {
+  it("is shown under the feature's current name", () => {
+    // Commits on beta are never rewritten, so `feat(scriptview): ...` stays in the
+    // log for good. The generated notes are where ServiceCue has to say ServiceCue.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-rename-"));
+    try {
+      const git = (...args: string[]) =>
+        execFileSync("git", args, {
+          cwd: dir,
+          encoding: "utf8",
+          env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+        });
+      git("init", "-q", "-b", "main");
+      fs.writeFileSync(path.join(dir, "f"), "1");
+      git("add", "-A");
+      git("commit", "-q", "-m", "feat(patch): the patch sheet");
+      git("tag", "v1.0.0");
+      fs.appendFileSync(path.join(dir, "f"), "2");
+      git("add", "-A");
+      git("commit", "-q", "-m", "feat(scriptview): text size on the page");
+      git("tag", "v1.1.0");
+      const out = notesFor("1.1.0", "v1.0.0", dir);
+      assert.match(out, /- \*\*ServiceCue\*\* — text size on the page/);
+      assert.doesNotMatch(out, /\*\*scriptview\*\*/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("release notes", () => {
   it("prepends the notice for a version that has one, above everything generated", () => {
     const version = "9.9.9-notice-test";
