@@ -15,6 +15,11 @@ const SECRET_QUERY = /([?&](?:passphrase|pass|pwd)=)[^&\s'"]+/gi;
  *  or `read:...`, with its colons literal or percent-encoded. */
 const SECRET_STREAMID = /(streamid=(?:publish|read)(?::|%3A)[^:&\s'"%]*(?::|%3A)[^:&\s'"%]*(?::|%3A))[^&\s'"]+/gi;
 
+/** `://` through the LAST `@` of the authority, which ends at the first `/`,
+ *  `?`, `#` or space. A password may hold a raw `@`; stopping at the first
+ *  would leave the rest of it in the text. */
+const USERINFO = /:\/\/[^\s/?#]*@/g;
+
 /** Strips every credential a relay URL can carry out of `text`: a
  *  `://user:pass@` userinfo segment is removed outright, and a passphrase,
  *  pass or pwd query value, or a streamid's password, becomes `<redacted>`.
@@ -22,7 +27,7 @@ const SECRET_STREAMID = /(streamid=(?:publish|read)(?::|%3A)[^:&\s'"%]*(?::|%3A)
  *  to carry a URL. */
 export function withoutCredentials(text: string): string {
   return text
-    .replace(/:\/\/[^\s/@]+@/g, "://")
+    .replace(USERINFO, "://")
     .replace(SECRET_QUERY, "$1<redacted>")
     .replace(SECRET_STREAMID, "$1<redacted>");
 }

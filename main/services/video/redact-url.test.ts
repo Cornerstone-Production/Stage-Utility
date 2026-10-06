@@ -16,6 +16,18 @@ const cases: { name: string; text: string; secret: string; expected: string }[] 
     expected: "'rtsp://192.0.2.1/s' is not a valid URL",
   },
   {
+    name: "userinfo whose password holds a raw @, split from the host on the last one",
+    text: "'rtsp://admin:p@ss@192.0.2.1/s' is not a valid URL",
+    secret: "ss@",
+    expected: "'rtsp://192.0.2.1/s' is not a valid URL",
+  },
+  {
+    name: "nothing, for an @ in the query after a bare host",
+    text: "http://192.0.2.7?contact=a@b.example failed",
+    secret: "never-present",
+    expected: "http://192.0.2.7?contact=a@b.example failed",
+  },
+  {
     name: "an SRT pull's passphrase, in the shape the relay reported a malformed host",
     text: "'srt://ho%zzst:9000?passphrase=SECRETPASS123' is not a valid URL",
     secret: "SECRETPASS123",
