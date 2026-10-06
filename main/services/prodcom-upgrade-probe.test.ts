@@ -38,10 +38,11 @@ class TestProdCom extends ProdComService {
   protected override get wsRetryIntervalMs(): number {
     return 60_000;
   }
-  /** The six-second wall-clock ceiling, in milliseconds, so the trickle case
-   *  takes one. */
+  /** The six-second wall-clock ceiling, cut so the trickle case takes 400 ms.
+   *  A test that must tell its own teardown from the deadline sets it longer. */
+  public probeDeadline = 400;
   protected override get probeDeadlineMs(): number {
-    return 400;
+    return this.probeDeadline;
   }
   protected override noteWebSocketDown(reason: string, detail: string | null = null, stillOnFallback = false): void {
     this.downs.push({ reason, detail });
@@ -284,6 +285,11 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     // goes with it) about a probe from a connection it has already let go of.
     const server = await serverAnswering("trickle");
     const svc = new TestProdCom();
+    // The deadline would destroy this socket on its own, so it is set well past
+    // the window below: within that window only stop() can have closed it. A
+    // window cut short of a 400 ms deadline instead failed under a loaded
+    // full-suite run.
+    svc.probeDeadline = 4000;
     t.after(async () => {
       svc.stop();
       await server.close();
@@ -293,14 +299,10 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     assert.equal(svc.downs.length, 0, "a down event was reported before the probe ever answered");
 
     svc.stop();
-    // Within a fraction of the probe's own deadline, which is 400 ms here: the
-    // deadline would eventually destroy this socket on its own, so a generous
-    // window would pass whether or not teardown() does anything. What is under
-    // test is that STOPPING takes the socket with it.
-    await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 150);
+    // What is under test is that STOPPING takes the socket with it.
+    await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 2000);
 
-    // Comfortably past the probe's 400 ms deadline: a stale answer, unguarded,
-    // has had time to arrive and act.
+    // The destroyed socket's answer, unguarded, has had time to arrive and act.
     await new Promise((r) => setTimeout(r, 500));
     assert.equal(
       svc.downs.length,
