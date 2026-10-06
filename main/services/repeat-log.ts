@@ -199,11 +199,13 @@ export class OutageLog {
     return this.runs.has(key);
   }
 
-  /** Drop every run. For a reconfigure: nothing learned about the old
-   *  credentials or the old scope is true of the new ones, and carrying a run
-   *  across would suppress the first line of the next outage. */
-  forget(): void {
-    this.runs.clear();
+  /** Drop every run, or just `key`'s. For a reconfigure: nothing learned about
+   *  the old credentials or the old scope is true of the new ones, and carrying
+   *  a run across would suppress the first line of the next outage. A keyed
+   *  caller whose subject is deleted forgets that key alone. */
+  forget(key?: string): void {
+    if (key === undefined) this.runs.clear();
+    else this.runs.delete(key);
   }
 }
 

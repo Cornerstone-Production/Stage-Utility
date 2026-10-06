@@ -861,6 +861,46 @@ test("a pull feed whose device never answers is one warning per outage, naming t
   }
 });
 
+test("a pull feed removed mid-outage and added again under the same name logs its first failure afresh", async (t) => {
+  const body = { name: "Rerun cam", source: { kind: "pull", url: "rtsp://192.0.2.57/s", username: "" } };
+  const first = await videoService.addFeed(body);
+  assert.ok(first.ok);
+  const id = (first as { feed: { id: string } }).feed.id;
+  let current = id;
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: current })] });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const lines = captureConsole(t, "warn", "log");
+  const dial = () => lines.filter((l) => l.includes("Rerun cam:"));
+  const dialOnce = async (): Promise<void> => {
+    await pollOnce();
+    videoService.markRequested(current);
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS);
+    await pollOnce();
+  };
+  try {
+    await dialOnce();
+    assert.equal(dial().length, 1, "sanity: the first feed's dial failure is logged");
+
+    await videoService.removeFeed(id);
+    const second = await videoService.addFeed(body);
+    assert.ok(second.ok);
+    current = (second as { feed: { id: string } }).feed.id;
+    assert.equal(current, id, "sanity: the same name mints the same id");
+    // The add reconciled the relay, which starts a poll of its own; one still in
+    // flight would swallow the poll below.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+
+    t.mock.timers.tick(RECENT_REQUEST_MS);
+    await dialOnce();
+    assert.equal(dial().length, 2, "the re-added feed's first failure was swallowed as a repeat of the deleted feed's");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(current);
+  }
+});
+
 // Driven on the real binary: after a respawn the first poll finds no paths,
 // and a pull feed read offline (so a screen did not ask for it) until the
 // poll after the reconcile, up to STATUS_POLL_MS later.

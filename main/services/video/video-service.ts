@@ -1838,6 +1838,9 @@ class VideoService {
     this.requestedAt.delete(id);
     this.unansweredSince.delete(id);
     this.lastLoggedState.delete(id);
+    // A dial outage still open for it would swallow the new feed's first
+    // failure as a repeat, and its recovery line would count the old one's.
+    this.dialOutage.forget(id);
     // Same reasoning, every output: a re-added feed under the same name
     // must not read struggling for up to a minute on a build that has never
     // actually measured the new feed's playback.
