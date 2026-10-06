@@ -3,7 +3,7 @@
 // The one owner of `video:state`. Every change goes through here and ends in
 // publish(), so the page, every widget and the hello burst see one snapshot.
 
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { isDeepStrictEqual } from "node:util";
 
@@ -116,15 +116,16 @@ const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
 /** A push feed's publish password: 16 base62 characters from
- *  crypto.randomBytes, never anything predictable — it is what stands
+ *  crypto.randomInt, never anything predictable — it is what stands
  *  between "video" (the one publish username every push feed shares, see
- *  reconcile-plan.ts's publishUsers) and an open publish endpoint. */
+ *  reconcile-plan.ts's publishUsers) and an open publish endpoint. randomInt
+ *  rather than a byte modulo 62, which would favour the first eight
+ *  characters. */
 const PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const PASSWORD_LENGTH = 16;
 function generatePushPassword(): string {
-  const bytes = randomBytes(PASSWORD_LENGTH);
   let out = "";
-  for (let i = 0; i < bytes.length; i++) out += PASSWORD_ALPHABET[bytes[i]! % PASSWORD_ALPHABET.length];
+  for (let i = 0; i < PASSWORD_LENGTH; i++) out += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
   return out;
 }
 
