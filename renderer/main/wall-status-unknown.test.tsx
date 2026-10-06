@@ -218,6 +218,14 @@ describe("a wall widget with no answer yet makes no negative claim", () => {
     await quietThenClaims({ type: "record-status", source: "any" }, /NO RECORDER/i, [OBS, REAPER]);
   });
 
+  test("record-status (OBS only) waits for OBS alone", async () => {
+    await quietThenClaims({ type: "record-status", source: "obs" }, /NO RECORDER/i, [OBS]);
+  });
+
+  test("record-status (REAPER only) waits for REAPER alone", async () => {
+    await quietThenClaims({ type: "record-status", source: "reaper" }, /NO RECORDER/i, [REAPER]);
+  });
+
   test("obs-status", async () => {
     await quietThenClaims({ type: "obs-status" }, /Offline/i, [OBS]);
   });
