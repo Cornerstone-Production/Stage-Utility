@@ -124,7 +124,7 @@ export function switcherTypes(types: ServiceTypeDTO[], allowed: string[]): Servi
 }
 
 /**
- * Is the rundown just resolved the plan a ScriptView would get with no `planId`?
+ * Is the rundown just resolved the plan a ServiceCue would get with no `planId`?
  *
  * With no `planId` it always is. With one, it is only when that plan IS the
  * default: the app's own plan when this is the active service type, else the

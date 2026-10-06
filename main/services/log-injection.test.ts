@@ -122,6 +122,10 @@ const REQUEST_FACING = [
   "routes/history-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
+  // Logs nothing: it reads the request path and query and echoes them into a
+  // Location header, which Node refuses to write if either carries a control
+  // character.
+  "routes/legacy-page-routes.ts",
   "routes/log-paths.ts",
   "routes/log-routes.ts",
   "routes/operator-paths.ts",

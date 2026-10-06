@@ -8,7 +8,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { Shell } from "./shell";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
 import { SettingsIndexRoute } from "./settings-index";
-import { MOVED_ROUTES, makeRedirect } from "./redirects";
+import { MOVED_PAGE_ROUTE_PATTERNS, MOVED_ROUTES, makeRedirect, redirectMovedPage } from "./redirects";
 import { ErrorBoundaryView } from "../components/ui/error-boundary-view";
 import { PAGE_SCROLLER_SELECTOR } from "./route-reset";
 
@@ -64,7 +64,20 @@ const routes = [
   ),
 ];
 
-const routeTree = rootRoute.addChildren(routes);
+// Pages that moved to a new prefix, with the rest of the path and the query kept
+// — see MOVED_PAGE_ROUTE_PATTERNS. Their component never renders: beforeLoad has
+// already thrown.
+const movedPageRoutes = MOVED_PAGE_ROUTE_PATTERNS.map((path) =>
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    beforeLoad: ({ location }) => redirectMovedPage(location),
+    component: () => null,
+    errorComponent: ErrorBoundaryView,
+  }),
+);
+
+const routeTree = rootRoute.addChildren([...routes, ...movedPageRoutes]);
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },

@@ -249,14 +249,14 @@ describe("duplicating a view", () => {
     assert.equal(viewSurface(copy), "console", "a duplicated control surface became a display");
   });
 
-  it("carries the ScriptView layout the source was using", async () => {
+  it("carries the ServiceCue layout the source was using", async () => {
     ctl.state.views = [
       ...ctl.state.views,
       { id: "vs", name: "Script", kind: "script", createdAt: "", scriptViewLayoutId: "svl-1" },
     ] as View[];
     await stageController.duplicateView("vs");
     const copy = ctl.state.views.find((v) => v.id !== "vs" && v.name.includes("Script"));
-    assert.equal(copy?.scriptViewLayoutId, "svl-1", "the copy lost its ScriptView layout");
+    assert.equal(copy?.scriptViewLayoutId, "svl-1", "the copy lost its ServiceCue layout");
   });
 
   it("does NOT carry layoutRev", async () => {

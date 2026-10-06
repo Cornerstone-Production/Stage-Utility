@@ -1,6 +1,6 @@
-// scriptview-routes.ts — ScriptView
+// scriptview-routes.ts — ServiceCue
 //
-// The in-app ScriptViewer replacement: per-service-type rundown layouts.
+// ServiceCue: the rundown pages and their per-service-type column layouts.
 //
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
@@ -18,7 +18,7 @@ import { broadcast } from "../broadcaster.js";
 
 export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
-    // ── ScriptView (in-app ScriptViewer replacement) ─────────────────────────
+    // ── ServiceCue ───────────────────────────────────────────────────────────────
     if (method === "GET" && pathname === "/api/scriptview/layouts") {
       json(res, await stageController.listScriptViewLayouts());
       return;
@@ -199,7 +199,7 @@ export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.getScriptViewRundown(serviceTypeId, planId));
       } catch (err) {
-        pcoReadFailed(res, "ScriptView rundown", err);
+        pcoReadFailed(res, "ServiceCue rundown", err);
       }
       return;
     }

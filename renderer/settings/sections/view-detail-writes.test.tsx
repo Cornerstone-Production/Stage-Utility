@@ -1,6 +1,6 @@
 // view-detail-writes.test.tsx — the two fire-and-forget writes ViewDetail
 // issues directly (not through handlers): the console chrome toggle
-// (views:setHideChrome) and the Script view Columns picker
+// (views:setHideChrome) and the ServiceCue view Columns picker
 // (views:setScriptViewLayout). Both used to be `void invoke(...)` with no
 // `.catch` — a rejected POST reached neither the screen nor /log, and the
 // control just silently did nothing (its value comes from the `view` prop,

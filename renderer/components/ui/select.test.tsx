@@ -94,7 +94,7 @@ describe("Select placeholder", () => {
 // the HTML "ask for a reset" algorithm specify, so a browser does the same:
 //
 //   stale value, list is EMPTY     → selectedIndex -1, value ""
-//                                    the blank trigger the ScriptView and plan
+//                                    the blank trigger the ServiceCue and plan
 //                                    pickers are commented about
 //   stale value, list is NOT empty → selectedIndex 0 (first NON-DISABLED option),
 //                                    value "preset-a"
@@ -106,7 +106,7 @@ describe("Select placeholder", () => {
 //
 // Roughly fifteen call sites in this app feed a Select from a list fetched at
 // runtime, so every one of them can reach this: a plan the list has not loaded,
-// a ScriptView preset that was deleted, an OSC target that was removed. Several
+// a ServiceCue preset that was deleted, an OSC target that was removed. Several
 // had grown their own copy of the same workaround, and the ones that had not were
 // safe only because some delete path happened to clean the reference up. The
 // behaviour lives in the primitive now, so a call site does not have to remember.

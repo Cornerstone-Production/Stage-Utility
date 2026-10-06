@@ -20,8 +20,8 @@ import { useResyncOn } from "../lib/use-resync-on";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, scriptViewUrl } from "./scriptview-index-view";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
-// A standalone ScriptView rundown page: /scriptview/{type}/{layout}. Both path
-// parts are name slugs (e.g. /scriptview/weekend/audio) resolved to ids here, with
+// A standalone ServiceCue rundown page: /servicecue/{type}/{layout}. Both path
+// parts are name slugs (e.g. /servicecue/weekend/audio) resolved to ids here, with
 // raw ids still accepted for backward-compatible bookmarks. Follows the type's
 // live-or-next plan; highlights the live item when this type is running.
 //
@@ -193,7 +193,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const typeNameForUrl = serviceType?.name ?? serviceTypeParam;
 
   useEffect(() => {
-    const t = rundown?.planTitle ?? rundown?.planSeriesTitle ?? "ScriptView";
+    const t = rundown?.planTitle ?? rundown?.planSeriesTitle ?? "ServiceCue";
     document.title = `${t} · ${layoutName}`;
   }, [rundown?.planTitle, rundown?.planSeriesTitle, layoutName]);
 
@@ -222,7 +222,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     // Chromeless since isSharedChromelessPath named this route: no rail and no
     // context bar, so h-full is the whole window.
     <div className="flex flex-col h-full overflow-hidden kiosk-surface -mx-5 max-sm:-mx-3 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      {/* The bar and the rundown are shared with the script View-kind and the
+      {/* The bar and the rundown are shared with the ServiceCue view-kind and the
           layout object; only the two navigation slots are this page's own. */}
       <ScriptViewHeader
         rundown={rundown}
@@ -251,7 +251,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         }
         nav={
           <Tooltip label="All services">
-            <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
+            <a href="/servicecue" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
               <ArrowLeftIcon className="size-4 text-fg-muted" />
             </a>
           </Tooltip>

@@ -396,7 +396,7 @@ describe("StageView renders each view kind", () => {
 
   test("script draws the rundown", async () => {
     const c = await showScreen("/display-1", ofKind("script", { scriptViewLayoutId: "sl1" }));
-    assert.ok(says(c, "ScriptView"), c.textContent ?? "");
+    assert.ok(says(c, "ServiceCue"), c.textContent ?? "");
   });
 
   test("spl-rundown draws the SPL rundown", async () => {

@@ -4,12 +4,13 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { isOperatorPath } from "./main/services/routes/operator-paths";
+import { isOperatorPath, legacyPageRedirect } from "./main/services/routes/operator-paths";
 import { serverPort } from "./main/services/server-port";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
 //   /settings, /history, /patch → app.html (operator app; see operator-paths.ts)
+//   /scriptview/…    → 301 to /servicecue/…, query kept (legacyPageRedirect)
 //   /display-1, …    → index.html (kiosk; the slug is read client-side)
 //   /preview-<view>  → index.html (settings live preview of a View)
 //
@@ -19,8 +20,16 @@ function cleanUrls(): PluginOption {
   return {
     name: "clean-urls",
     configureServer(server) {
-      server.middlewares.use((req, _res, next) => {
-        const pathname = (req.url ?? "").split("?")[0];
+      server.middlewares.use((req, res, next) => {
+        const raw = req.url ?? "";
+        const q = raw.indexOf("?");
+        const pathname = q === -1 ? raw : raw.slice(0, q);
+        const moved = req.method === "GET" || req.method === "HEAD" ? legacyPageRedirect(pathname, q === -1 ? "" : raw.slice(q)) : null;
+        if (moved !== null) {
+          res.writeHead(301, { Location: moved });
+          res.end();
+          return;
+        }
         if (isOperatorPath(pathname)) {
           req.url = "/app.html";
         } else if (/^\/(display|preview)-[^/]+\/?$/.test(pathname)) {

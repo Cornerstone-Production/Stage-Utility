@@ -36,7 +36,7 @@ Pick the type and tick what travels:
 | Mic slots | *This type only*, or *every type on those views* — the second is for a destination that runs other types on the same layouts |
 | Patch sheet variant | The variant this type is assigned to, per sheet. Off when no sheet assigns one |
 | Slot presets | Off by default. They are global, not this type's |
-| ScriptView layouts | Always. The column presets those views use |
+| ServiceCue layouts | Always. The column presets those views use |
 
 The counts beside each row come from the export itself, so what the dialog says
 and what the file holds cannot disagree. A service type with no board anywhere

@@ -1,4 +1,4 @@
-// The ScriptView rundown fills its page instead of sitting in a white frame.
+// The ServiceCue rundown fills its page instead of sitting in a white frame.
 //
 // It paints a kiosk surface — a dark ground, edge to edge — but it is routed
 // INSIDE the operator shell, which gutters its content: 20px each side and 16px
@@ -30,8 +30,8 @@ const VIEWS = [
 
 describe("which routes paint their own surface", () => {
   it("the rundown does", () => {
-    assert.equal(isFullBleedPath("/scriptview/weekend/audio", VIEWS), true);
-    assert.equal(isFullBleedPath("/scriptview/cornerstone-youth/full", VIEWS), true);
+    assert.equal(isFullBleedPath("/servicecue/weekend/audio", VIEWS), true);
+    assert.equal(isFullBleedPath("/servicecue/cornerstone-youth/full", VIEWS), true);
   });
 
   it("and so does a console — the rule generalises rather than replacing it", () => {
@@ -39,16 +39,16 @@ describe("which routes paint their own surface", () => {
     assert.equal(isConsolePath("/consoles/view-1", VIEWS), true);
   });
 
-  it("but NOT ScriptView's own ordinary pages", () => {
-    // `/scriptview` is a list and `/scriptview/presets` is a settings page. Both
+  it("but NOT ServiceCue's own ordinary pages", () => {
+    // `/servicecue` is a list and `/servicecue/presets` is a settings page. Both
     // are pages in the ordinary sense and want the gutter; taking it away would
     // press them against the strip and the window edge.
-    assert.equal(isFullBleedPath("/scriptview", VIEWS), false);
-    assert.equal(isFullBleedPath("/scriptview/presets", VIEWS), false);
+    assert.equal(isFullBleedPath("/servicecue", VIEWS), false);
+    assert.equal(isFullBleedPath("/servicecue/presets", VIEWS), false);
   });
 
   it("and not a deeper path that happens to start the same way", () => {
-    assert.equal(isFullBleedPath("/scriptview/weekend/audio/extra", VIEWS), false);
+    assert.equal(isFullBleedPath("/servicecue/weekend/audio/extra", VIEWS), false);
   });
 
   it("and not an ordinary page", () => {

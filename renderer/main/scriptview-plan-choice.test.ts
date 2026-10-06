@@ -1,4 +1,4 @@
-// What the ScriptView page's plan switcher decides, as plain data: which plans an
+// What the ServiceCue page's plan switcher decides, as plain data: which plans an
 // arrow walks, what a pasted link names, where that plan lives, and the
 // countdown a plan that is not the app's shows. The page driving all of it is
 // scriptview-plan-switcher.test.tsx.

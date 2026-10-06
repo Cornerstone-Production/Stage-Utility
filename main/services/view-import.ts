@@ -279,7 +279,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     for (const l of svIncoming) {
       // A local preset of the same id wins, like a target does — but say so,
       // because the imported view then renders with the LOCAL columns.
-      if (svHave.has(l.id)) skipped.push(`ScriptView preset "${l.name ?? l.id}" — kept the one already here`);
+      if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name ?? l.id}" — kept the one already here`);
       else { svHave.add(l.id); add.push(l); }
     }
     if (add.length) await scriptViewLayoutsStore.save([...svAfter, ...add]);
@@ -291,7 +291,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // setViewScriptViewLayout refuses one.
   for (const v of named) {
     if (v.scriptViewLayoutId && !svHave.has(v.scriptViewLayoutId)) {
-      skipped.push(`"${v.name}" points at a ScriptView preset that is not in the file or here`);
+      skipped.push(`"${v.name}" points at a ServiceCue preset that is not in the file or here`);
     }
   }
 

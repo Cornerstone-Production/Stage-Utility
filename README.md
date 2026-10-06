@@ -32,7 +32,7 @@ screens, the settings UI and a phone remote from one port.
 | [Slots](docs/slots.md) | matching people and devices to positions |
 | [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |
-| [ScriptView and Baptisms](docs/features/scriptview-and-baptisms.md) | two operator surfaces on the plan |
+| [ServiceCue and Baptisms](docs/features/servicecue-and-baptisms.md) | two operator surfaces on the plan |
 | [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |
 | [Automation](docs/automation.md) | rules that fire on live events |
 | [Data archive](docs/data-archive.md) | raw sample retention, export and import |

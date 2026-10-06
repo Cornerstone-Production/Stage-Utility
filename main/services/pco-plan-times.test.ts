@@ -1,7 +1,7 @@
 // A plan's times are fetched once, for everyone who needs them.
 //
 // Three copies of the same request lived in pco-service, under three cache keys:
-// the ScriptView projected clock, the reconnect scheduler, and the internal
+// the ServiceCue projected clock, the reconnect scheduler, and the internal
 // countdown/rollover path each pulled `plan_times` separately. That is three
 // round trips to PCO for one static list, on an integration where request volume
 // is the thing that gets an install rate-limited.
@@ -9,7 +9,7 @@
 // Worse, they disagreed on page size. The internal one asks for per_page=100 and
 // carries a comment explaining why: a plan routinely holds rehearsal, call,
 // review and several service times, and a short page quietly clips the tail. The
-// other two asked for 50 — so on a busy plan the ScriptView clock and the
+// other two asked for 50 — so on a busy plan the ServiceCue clock and the
 // reconnect scheduler were reading a truncated list, silently.
 
 import assert from "node:assert/strict";

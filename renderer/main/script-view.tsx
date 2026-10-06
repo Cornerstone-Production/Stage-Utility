@@ -15,7 +15,7 @@ import { useTextSize } from "./use-scriptview-text-size";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
 interface ScriptViewProps {
-  /** Which saved ScriptView column preset to render; null = all columns. */
+  /** Which saved ServiceCue column preset to render; null = all columns. */
   scriptViewLayoutId?: string | null;
   /** The header bar (plan title, countdown, clock). On for a display of its own;
    *  a layout embedding this usually has its own header and clock already. */
@@ -34,9 +34,9 @@ interface ScriptViewProps {
 }
 
 /**
- * The ScriptView rundown on a display.
+ * The ServiceCue rundown on a display.
  *
- * This IS the /scriptview page — same body, same header, same columns from the
+ * This IS the /servicecue page — same body, same header, same columns from the
  * same saved presets — pointed at the app's ACTIVE plan rather than at a service
  * type chosen in the URL. Before, it was a third rundown with hardcoded columns
  * of its own, which meant the thing an operator configured on the page and the
@@ -117,14 +117,14 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
           setLayouts(l);
           clear("layouts");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts for a Script view", err); });
+        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts for a ServiceCue view", err); });
       invoke<CategoryRole[]>("scriptview:listRoles")
         .then((r) => {
           if (cancelled) return;
           setRoles(r);
           clear("roles");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles for a Script view", err); });
+        .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles for a ServiceCue view", err); });
       // The last good rundown stays on screen through a failure (see
       // ScriptViewBody), so the log is the only place a failing one shows.
       invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId })
@@ -137,7 +137,7 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
         .catch((e: unknown) => {
           if (cancelled) return;
           setError(errorMessage(e));
-          fail("rundown", "the rundown for a Script view", e);
+          fail("rundown", "the rundown for a ServiceCue view", e);
         });
     };
     load();
@@ -168,7 +168,7 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
   if (stateError || !state) {
     return (
       <div className="flex items-center justify-center h-full kiosk-surface text-fg-subtle">
-        Could not load script
+        Could not load ServiceCue
       </div>
     );
   }

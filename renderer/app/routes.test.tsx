@@ -42,7 +42,7 @@ describe("operator destinations", () => {
     // /plan is NOT among them any more. It folded into Home in Phase 2 and came
     // back out when Home became a grid — a fixed block of PCO controls is
     // furniture on a page whose whole point is that the operator arranges it.
-    const retired = new Set(["/views", "/displays"]);
+    const retired = new Set(["/views", "/displays", "/scriptview"]);
     // /consoles has no STATIC destination: its rail entries are one per console
     // the operator built, derived from state in rail.tsx. The server must still
     // claim the path or a direct load serves the kiosk bundle — which is exactly
@@ -123,7 +123,7 @@ describe("operator destinations", () => {
 describe("the kiosk no longer serves operator surfaces", () => {
   test("root-view renders only the display picker and the kiosk outlet", async () => {
     // root-view.tsx used to switch on window.location.pathname for /history,
-    // /patch, /baptism and /scriptview. Those belong to the operator app now,
+    // /patch, /baptism and /servicecue. Those belong to the operator app now,
     // and a branch left behind means two components can answer one URL
     // depending on which document the server happened to serve.
     //

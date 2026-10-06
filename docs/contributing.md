@@ -15,8 +15,8 @@ type(scope): subject
 
 - **type** — required, from the table below.
 - **scope** — optional, lower-case, the area touched. Two areas can be joined with
-  `+` (`feat(history+scriptview):`), as this repo already does. Scopes in use:
-  `design`, `patch`, `history`, `scriptview`, `attendance`, `integrations`, `sse`,
+  `+` (`feat(history+servicecue):`), as this repo already does. Scopes in use:
+  `design`, `patch`, `history`, `servicecue`, `attendance`, `integrations`, `sse`,
   `recorders`, `layout`, `layout-editor`, `advanced`, `server`, `pco`, `updater`,
   `types`, `rosstalk`.
 - **scope, when it names the machinery** — `release`, `ci`, `dx` and `test` name

@@ -107,8 +107,8 @@ right. Expand it and the tiles inside the panel get their own controls back, so
 a multiview inside a multiview still drills down one level at a time; Escape
 closes one level per press.
 
-**Service order** is superseded by ScriptView — see
-[ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
+**Service order** is superseded by ServiceCue — see
+[ServiceCue and Baptisms](../features/servicecue-and-baptisms.md). It is kept so
 existing screens do not break.
 
 **Embedded view** offers every view kind and draws every one of them, **Calendar**
@@ -451,7 +451,7 @@ testimony pass has run — per-person mode never has a total), **Count**,
 own word rather than a running clock or a person number, on every field — the
 baptisms have begun but nobody has stepped up yet.
 
-See [ScriptView and Baptisms](../features/scriptview-and-baptisms.md).
+See [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
 
 ## Control
 
@@ -475,7 +475,7 @@ see the same text. See [OSC](../integrations/osc.md) and
 **Action button** picks an **Action** from the same registry the
 [automation rules editor](../automation.md) offers — every action in
 [Actions](../automation.md#actions), including advancing or stepping back
-through the [baptism timer](../features/scriptview-and-baptisms.md). Choosing
+through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
 one that takes parameters (a Companion button coordinate, a RossTalk command)
 shows the same fields the rule editor would show for it. **Label** is blank by
 default, which draws the action's own name; type one to override it. A button

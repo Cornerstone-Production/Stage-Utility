@@ -703,7 +703,7 @@ name rather than being folded into either list.
 Rebuilding here also clears a save-failure line on the **Baptisms** tab, and
 the Timer card's own note beside it, for any session the merge just added or
 updated — the same clearing a rebuild started from either of those two places
-already does. See [Recovery](scriptview-and-baptisms.md#recovery) for what
+already does. See [Recovery](servicecue-and-baptisms.md#recovery) for what
 that note shows and exactly when a line clears.
 
 While a service is recording, **Reset pacing** (in the live service's detail

@@ -1,4 +1,4 @@
-// The ScriptView text size: the numbers, and where one screen remembers its own.
+// The ServiceCue text size: the numbers, and where one screen remembers its own.
 //
 // No React and no DOM globals beyond what `readStoredSize`/`writeStoredSize` are
 // handed, so the stepping and the typed-value rules can be driven directly. The

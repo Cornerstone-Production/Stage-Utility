@@ -240,8 +240,8 @@ export interface View {
    */
   showLiveControls?: boolean;
   /**
-   * Which saved ScriptView column preset a "script" View renders; null/absent =
-   * all columns. The same presets the /scriptview pages use, so a department's
+   * Which saved ServiceCue column preset a "script" View renders; null/absent =
+   * all columns. The same presets the /servicecue pages use, so a department's
    * column set is defined once and a display and a browser tab cannot disagree
    * about it.
    */
@@ -935,7 +935,7 @@ export type LayoutObjectConfig =
   // (background/border/radius/padding) — same fields as any other object.
   // Render another View's content inside this layout, natively — the same
   // components the View renders on its own display, not an iframe of it. Built
-  // for the ScriptView rundown, which is a whole page's worth of table nobody
+  // for the ServiceCue rundown, which is a whole page's worth of table nobody
   // wants to rebuild as objects; other kinds opt in as they stop assuming they
   // own the screen. `viewId` null = nothing chosen yet.
   | {

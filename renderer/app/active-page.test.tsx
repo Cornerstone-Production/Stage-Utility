@@ -22,7 +22,7 @@ const teardown = installDom();
 
 const { render, cleanup } = await import("@testing-library/react");
 const { router } = await import("./router.js");
-const { MOVED_ROUTES } = await import("./redirects.js");
+const { MOVED_PAGE_ROUTE_PATTERNS, MOVED_ROUTES } = await import("./redirects.js");
 const { consoleHidesChrome, consolePageFor, consolePages, hidesChrome, resolvePage } =
   await import("./active-page.js");
 const { PageTitle } = await import("./page-title.js");
@@ -64,7 +64,7 @@ function fill(pattern: string): string {
 
 /** Every path the router actually registers, from the route tree itself. */
 const REGISTERED: string[] = (
-  (router.routeTree.children ?? []) as { fullPath?: string }[]
+  (router.routeTree.children ?? []) as unknown as { fullPath?: string }[]
 ).map((r) => r.fullPath ?? "").filter(Boolean).map((p) => (p.length > 1 ? p.replace(/\/$/, "") : p));
 
 /**
@@ -74,7 +74,7 @@ const REGISTERED: string[] = (
  * Derived from MOVED_ROUTES rather than restated, then asserted as an exact set
  * — a new route cannot join this exemption by accident.
  */
-const REDIRECTS = new Set(["/settings", ...Object.keys(MOVED_ROUTES)]);
+const REDIRECTS = new Set(["/settings", ...Object.keys(MOVED_ROUTES), ...MOVED_PAGE_ROUTE_PATTERNS]);
 
 describe("the route table", () => {
   test("the tree really is the router's, and it has every path", () => {
@@ -85,18 +85,21 @@ describe("the route table", () => {
     }
   });
 
-  test("the redirect exemption is exactly the three paths that redirect", () => {
-    assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/settings", "/views"]);
+  test("the redirect exemption is exactly the five paths that redirect", () => {
+    // /scriptview and /scriptview/$ moved to /servicecue; the splat redirects the
+    // rest of the path and the query with it.
+    assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
   test("there are exactly three dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
-    const dynamic = REGISTERED.filter((p) => p.includes("$")).sort();
+    // A redirect's splat is not a page and has no title to resolve.
+    const dynamic = REGISTERED.filter((p) => p.includes("$") && !REDIRECTS.has(p)).sort();
     assert.deepEqual(dynamic, [
       "/consoles/$viewId",
       "/screens/$viewId/edit",
-      "/scriptview/$serviceType/$layout",
+      "/servicecue/$serviceType/$layout",
     ]);
   });
 });
@@ -121,8 +124,9 @@ describe("every registered route resolves a title", () => {
     // these went untitled with the suite green, and a bare count cannot tell
     // an added route plus a removed one from no change at all — a sorted list
     // also merges cleanly when two branches each add a different route.
-    // 22 since /scriptview split into the tablet's page and /scriptview/manage,
-    // plus /video-feeds, the Screens-adjacent page for camera and program feeds.
+    // 24 since /servicecue split into the tablet's page and /servicecue/manage,
+    // plus /video-feeds, the Screens-adjacent page for camera and program feeds,
+    // plus the two routes that redirect the old /scriptview prefix.
     assert.deepEqual(
       [...REGISTERED].sort(),
       [
@@ -139,9 +143,11 @@ describe("every registered route resolves a title", () => {
         "/screens",
         "/screens/$viewId/edit",
         "/scriptview",
-        "/scriptview/$serviceType/$layout",
-        "/scriptview/manage",
-        "/scriptview/presets",
+        "/scriptview/$",
+        "/servicecue",
+        "/servicecue/$serviceType/$layout",
+        "/servicecue/manage",
+        "/servicecue/presets",
         "/settings",
         "/settings/advanced",
         "/settings/branding",
@@ -153,9 +159,9 @@ describe("every registered route resolves a title", () => {
     );
   });
 
-  test("nineteen of the twenty-two registered routes are titled", () => {
-    // The three untitled: /settings (redirects), /displays and /views (also
-    // redirects). Everything else must resolve a label.
+  test("nineteen of the twenty-four registered routes are titled", () => {
+    // The five untitled: /settings, /displays, /views, /scriptview and
+    // /scriptview/$, every one a redirect. Everything else must resolve a label.
     const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
     assert.deepEqual(
       [...titled].sort(),
@@ -171,10 +177,10 @@ describe("every registered route resolves a title", () => {
         "/plan",
         "/screens",
         "/screens/$viewId/edit",
-        "/scriptview",
-        "/scriptview/$serviceType/$layout",
-        "/scriptview/manage",
-        "/scriptview/presets",
+        "/servicecue",
+        "/servicecue/$serviceType/$layout",
+        "/servicecue/manage",
+        "/servicecue/presets",
         "/settings/advanced",
         "/settings/branding",
         "/settings/integrations",
@@ -212,12 +218,12 @@ describe("a console is named after its View", () => {
 
 describe("exact versus prefix", () => {
   test("a child route takes the section's name but not its heading", () => {
-    // The layout editor and a ScriptView plan each draw their own heading, so
+    // The layout editor and a ServiceCue plan each draw their own heading, so
     // the shell names the section on the phone and stays out of the way on the
     // desktop.
     for (const [pattern, section] of [
       ["/screens/$viewId/edit", "Screens"],
-      ["/scriptview/$serviceType/$layout", "ScriptView"],
+      ["/servicecue/$serviceType/$layout", "ServiceCue"],
       ["/patch/edit", "Patch"],
     ] as const) {
       const active = resolvePage(fill(pattern), CONSOLES);
@@ -234,11 +240,11 @@ describe("exact versus prefix", () => {
     assert.equal(resolvePage("/history/manage", CONSOLES)?.page.path, "/history/manage");
   });
 
-  test("the tablet's ScriptView is its own page, not a child of the operator's", () => {
-    const active = resolvePage("/scriptview", CONSOLES);
-    assert.equal(active?.page.label, "ScriptView");
+  test("the tablet's ServiceCue is its own page, not a child of the operator's", () => {
+    const active = resolvePage("/servicecue", CONSOLES);
+    assert.equal(active?.page.label, "ServiceCue");
     assert.equal(active?.exact, true);
-    assert.equal(resolvePage("/scriptview/manage", CONSOLES)?.page.path, "/scriptview/manage");
+    assert.equal(resolvePage("/servicecue/manage", CONSOLES)?.page.path, "/servicecue/manage");
   });
 
   test("an unrouted URL claims nothing, so Home does not swallow a 404", () => {
@@ -365,16 +371,16 @@ describe("hidesChrome adds the shared read-only pages beside a console's own fla
     assert.equal(hidesChrome("/history", VIEWS), true);
   });
 
-  test("ScriptView's viewer pages are chromeless, the presets editor is not", () => {
+  test("ServiceCue's viewer pages are chromeless, the presets editor is not", () => {
     // A rundown is read on a stage iPad or a producer's second screen; the
     // rail and the context bar are the operator's, not the reader's. The
     // presets page edits layouts and stays an ordinary settings page.
-    assert.equal(hidesChrome("/scriptview", undefined), true);
-    assert.equal(hidesChrome("/scriptview/", VIEWS), true);
-    assert.equal(hidesChrome("/scriptview/61695/lyrics", VIEWS), true);
-    assert.equal(hidesChrome("/scriptview/61695/all", undefined), true);
-    assert.equal(hidesChrome("/scriptview/presets", VIEWS), false);
-    assert.equal(hidesChrome("/scriptview/manage", VIEWS), false);
+    assert.equal(hidesChrome("/servicecue", undefined), true);
+    assert.equal(hidesChrome("/servicecue/", VIEWS), true);
+    assert.equal(hidesChrome("/servicecue/61695/lyrics", VIEWS), true);
+    assert.equal(hidesChrome("/servicecue/61695/all", undefined), true);
+    assert.equal(hidesChrome("/servicecue/presets", VIEWS), false);
+    assert.equal(hidesChrome("/servicecue/manage", VIEWS), false);
     assert.equal(hidesChrome("/scriptviewx", VIEWS), false);
   });
 

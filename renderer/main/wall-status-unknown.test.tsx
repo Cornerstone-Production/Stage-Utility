@@ -381,7 +381,7 @@ describe("a plan change never shows the old plan's rundown as the new one's", ()
   // The service order and the SPL rundown share usePlanItemsStatus. Holding on
   // to plan A's items across a switch to plan B drew A's rundown as B's, with no
   // sign anything was wrong — script-view-plan-switch.test.tsx is the same rule
-  // for ScriptView, where it was worse than showing nothing too.
+  // for ServiceCue, where it was worse than showing nothing too.
   const item = (title: string) => ({ id: title, title, itemType: "item", lengthSec: 60, sequence: 1, notesByCategory: {}, description: null });
   const onPlan = (planId: string) =>
     act(async () => {

@@ -4,7 +4,7 @@
 // written INTO the object when it is placed, so `style.fontSize ?? DEFAULT` never
 // falls through for anything already saved. The first attempt at this fix changed
 // the default alone and was reported as done, while every existing embed on every
-// existing display carried on rendering at nearly double the ScriptView page.
+// existing display carried on rendering at nearly double the ServiceCue page.
 //
 // The risk on the other side is worse than the bug: this edits an operator's
 // saved layouts on load. So it may only ever touch an EXACT match on the old
@@ -74,7 +74,7 @@ describe("retuneEmbedFontSize", () => {
   });
 
   it("survives views with no layout at all", () => {
-    // Slots and script views have no `layout`; so does a custom view never edited.
+    // Slots and ServiceCue views have no `layout`; so does a custom view never edited.
     const bare = { id: "s1", name: "Slots", kind: "slots", ndiSource: null, createdAt: "x" } as View;
     const { views, changed } = retuneEmbedFontSize([bare, view([], "empty")]);
     assert.equal(changed, 0);

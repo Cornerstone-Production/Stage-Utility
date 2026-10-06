@@ -1,4 +1,4 @@
-// Whether a ScriptView rundown says it is the followed plan.
+// Whether a ServiceCue rundown says it is the followed plan.
 //
 // `isDefaultPlan` is what lets the page tell Following from Browsing when it was
 // handed a `planId`. upcoming-plans.test.ts pins the rule as a function; this

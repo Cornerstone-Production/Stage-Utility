@@ -3,7 +3,7 @@
 // Why the options are read live and why a stored name PCO no longer offers is
 // kept and marked: see pco-options.ts, which both live pickers share. Here the
 // cost of dropping one is a checklist that goes silently empty — the same
-// failure the ScriptView preset code documents from the other direction.
+// failure the ServiceCue preset code documents from the other direction.
 //
 // NOTHING CHOSEN MEANS THE CHECKLIST IS OFF, the opposite of the calendar
 // picker's rule: a list that filled itself with every note on the plan is noise.

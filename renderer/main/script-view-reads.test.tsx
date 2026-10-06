@@ -137,7 +137,7 @@ test("a rundown that cannot be read reaches the log", async () => {
   const f = stubFetch(["rundown"]);
   try {
     await mount();
-    assert.ok(logged(f.logs, /could not read the rundown for a Script view/i), `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`);
+    assert.ok(logged(f.logs, /could not read the rundown for a ServiceCue view/i), `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`);
   } finally {
     f.restore();
   }

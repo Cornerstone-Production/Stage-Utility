@@ -27,7 +27,7 @@ done. Dismiss it and it stays dismissed.
 | Group | Pages |
 |---|---|
 | — | **Home** |
-| Content | **ScriptView**, **Patch** |
+| Content | **ServiceCue**, **Patch** |
 | Screens | **Screens**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
@@ -78,7 +78,7 @@ the same band.
 44px band has no second line to print it on, so hovering the page's name shows
 it. Every page still has one.
 
-Pages you reach from inside another page — the layout editor, a ScriptView
+Pages you reach from inside another page — the layout editor, a ServiceCue
 rundown, the patch editor — draw their own heading instead, so the bar shows no
 name for them; on a phone the top bar names the section they belong to.
 

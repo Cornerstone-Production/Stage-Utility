@@ -82,7 +82,7 @@ test("no service open — no serviceKey at all — says so and draws nothing", a
 // recorded yet -- the chart draws once the timer starts", which is false
 // while a clock is visibly running -- rendered to confirm. This is the
 // failure case the `raw: no service open, session not archived` log line
-// exists for; see docs/features/scriptview-and-baptisms.md's own matching
+// exists for; see docs/features/servicecue-and-baptisms.md's own matching
 // paragraph.
 test("with no service open and the timer running, it says so plainly instead of the idle message", async () => {
   await mount({

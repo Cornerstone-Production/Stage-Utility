@@ -134,7 +134,7 @@ describe("every kind reaches its own component", () => {
     stage: /Remaining slides/,           // the stage display's, and only its
     transcription: /Waiting for transcript/,
     custom: /CUSTOM BODY/,               // the embedded layout's own object
-    script: /No service type is selected, so this display has no plan to follow/, // ScriptView's own
+    script: /No service type is selected, so this display has no plan to follow/, // ServiceCue's own
     "spl-rundown": /Max SPL per item/,
   };
 

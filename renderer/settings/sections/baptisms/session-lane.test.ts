@@ -378,7 +378,7 @@ describe("timerHoverFigures", () => {
 
   // Started and Ended used to share formatClock's default (minute) precision,
   // so a sub-minute segment — common for a baptism, see
-  // docs/features/scriptview-and-baptisms.md — could show the identical
+  // docs/features/servicecue-and-baptisms.md — could show the identical
   // string for both, e.g. both "4:51", beside a duration figure that
   // correctly read "0:03".
   test("a sub-minute segment's Started and Ended differ, because both now carry seconds", () => {

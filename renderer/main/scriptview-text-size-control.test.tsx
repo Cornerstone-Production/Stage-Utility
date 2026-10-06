@@ -1,4 +1,4 @@
-// The A- [ 100% ] A+ control in the ScriptView page's header, driven through the
+// The A- [ 100% ] A+ control in the ServiceCue page's header, driven through the
 // real component: the buttons step, the percentage is a field, and what is
 // typed in it commits, clamps or reverts. The arithmetic itself is pinned in
 // scriptview-text-size.test.ts; this proves the control is wired to it.

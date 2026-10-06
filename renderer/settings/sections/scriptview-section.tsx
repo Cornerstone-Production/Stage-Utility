@@ -18,7 +18,7 @@ function uid(): string {
   return `svl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** ScriptView layouts editor: per-service-type named column presets, with a live
+/** ServiceCue layouts editor: per-service-type named column presets, with a live
  *  preview against that type's live/next plan. */
 /** The per-layout element toggles, as one list so the picker and the patch stay in
  *  step. `show*` is opt-OUT by default: undefined means shown, only `false` hides.
@@ -86,7 +86,7 @@ export function ScriptViewSection() {
         setTypeId((cur) => cur ?? (c.serviceTypeIds ?? [])[0] ?? null);
         setSettingsRead(true);
       })
-      .catch((err: unknown) => fail("settings", "the ScriptView layouts and settings", err));
+      .catch((err: unknown) => fail("settings", "the ServiceCue layouts and settings", err));
   }, [fail]);
 
   // After the settings, so the landing page's own first type stays the
@@ -248,7 +248,7 @@ export function ScriptViewSection() {
 
   return (
     <div className="pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {/* ScriptView is its own rail destination now, so there is no "open it"
+      {/* ServiceCue is its own rail destination now, so there is no "open it"
           link here: the viewer is one click away in the sidebar. */}
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
 
@@ -264,7 +264,7 @@ export function ScriptViewSection() {
           placeholder={types.length > 0 ? "Select service types…" : typesPending}
           disabled={types.length === 0}
         />
-        <span className="text-caption2 text-gray-9 basis-full sm:basis-auto">Only these appear on the ScriptView landing page.</span>
+        <span className="text-caption2 text-gray-9 basis-full sm:basis-auto">Only these appear on the ServiceCue landing page.</span>
       </div>
 
       <div className="flex items-center gap-2 mb-4">
@@ -290,7 +290,7 @@ export function ScriptViewSection() {
       )}
 
       {failed.has("settings") ? (
-        <ErrorNote>Couldn't load the ScriptView layouts. Nothing has been changed; reload the page to try again.</ErrorNote>
+        <ErrorNote>Couldn't load the ServiceCue layouts. Nothing has been changed; reload the page to try again.</ErrorNote>
       ) : !settingsRead ? (
         // Drawn in place of the empty state below, whose Add layout button would
         // otherwise post a one-layout list over every saved layout the read has

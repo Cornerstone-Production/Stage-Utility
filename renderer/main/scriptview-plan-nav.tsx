@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { cn } from "../lib/cn";
 import { dropdownPlans, parsePlanLink, placePastedPlan, planWhen, plansOfType, stepPlan } from "./scriptview-plan-choice";
 
-// ‹ plan ▾ › and its Following / Browsing badge, in the ScriptView page's header.
+// ‹ plan ▾ › and its Following / Browsing badge, in the ServiceCue page's header.
 //
 // It moves THIS PAGE. It never writes the app's plan: every handler below ends in
 // `onSelect`, which the page turns into a search param and nothing else. Which

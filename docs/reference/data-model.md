@@ -16,7 +16,7 @@ View kinds:
 | **Dashboard** | clock, service countdown, ProPresenter now/next |
 | **Stage** | confidence view — slide text, section, chords, thumbnail, timers |
 | **Captions** | full-screen auto-scrolling transcription |
-| **Script** | the full rundown with note columns, headers, lengths, live countdown |
+| **ServiceCue** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
 | **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
 | **Custom** | a layout you design in the visual editor |

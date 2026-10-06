@@ -1,4 +1,4 @@
-// scriptview-section-reads.test.tsx — the ScriptView settings page, when a read
+// scriptview-section-reads.test.tsx — the ServiceCue settings page, when a read
 // fails, and when Planning Center is simply not connected.
 //
 // Reads here rendered a failure as something else:
@@ -136,7 +136,7 @@ test("a failed settings read says so, and offers no empty list to Add a layout t
   const f = stubFetch({ failing: "layouts" });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the ScriptView layouts/i);
+    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i);
     assert.equal(!!screen.queryByText(/No layouts yet/i), false, "a failed read is not an empty layout list");
     assert.equal(
       !!screen.queryByRole("button", { name: /Add layout/i }),
@@ -174,7 +174,7 @@ test("a failed service-type read costs the previews, never the layouts editor", 
   try {
     await mount();
     assert.match(alerts(), /Couldn't load the service types/i);
-    assert.equal(/ScriptView layouts/i.test(alerts()), false, "the layouts themselves loaded");
+    assert.equal(/ServiceCue layouts/i.test(alerts()), false, "the layouts themselves loaded");
     assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layout is there to edit");
     assert.ok(logged(f.logs, /the service types/i), `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`);
   } finally {

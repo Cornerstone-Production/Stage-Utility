@@ -43,7 +43,7 @@ export function Shell() {
   const consoles = useMemo(() => consolePages(liveState?.views), [liveState?.views]);
   const active = useMemo(() => resolvePage(pathname, consoles), [pathname, consoles]);
   // A route that paints its own surface edge to edge has no page to give air to,
-  // so it does not get the gutter under the strip. A console, and the ScriptView
+  // so it does not get the gutter under the strip. A console, and the ServiceCue
   // rundown, which paints a kiosk surface.
   const fullBleed = useMemo(() => isFullBleedPath(pathname, liveState?.views), [pathname, liveState?.views]);
   // A console the operator has asked to run without the app's chrome. BOTH bands

@@ -7,8 +7,8 @@ import { categoryColor } from "./category-color";
 import { resolveRole } from "./role-resolve";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
-// Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
-// display) and the standalone ScriptView pages render through this so column
+// Shared PCO plan rundown table. Both the "script" View-kind (ServiceCue on a
+// display) and the standalone ServiceCue pages render through this so column
 // behavior, section-header rows, live-item highlight, and auto-scroll live in
 // one place. Callers supply the column spec; this owns the row structure.
 

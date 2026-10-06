@@ -621,12 +621,12 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
 describe("embedded view default font size", () => {
   // The requirement for this object is that nothing looks different between the
-  // embed and the ScriptView page it came out of. It shipped at 0.03 — chosen so
+  // embed and the ServiceCue page it came out of. It shipped at 0.03 — chosen so
   // it would be "readable from a stage" untouched — which renders at 32px on a
   // 1080-tall screen against the page's 17px, showing about half the rundown and
   // pushing the last columns off the right edge. Anyone re-raising this default
   // is re-breaking the one thing the object exists to do.
-  test("matches what the ScriptView page actually renders at", () => {
+  test("matches what the ServiceCue page actually renders at", () => {
     // The page sets `clamp(0.8rem, 1.6vmin, 1.1rem)`; on a 1080-tall 16:9 screen
     // that resolves to 1.6vmin = 17.28px, so the equivalent fraction is 0.016.
     const PAGE_PX_AT_1080 = 1.6 * (1080 / 100);

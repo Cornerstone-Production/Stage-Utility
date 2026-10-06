@@ -1,6 +1,6 @@
 // The kiosk's script display takes its text size from `?text=`.
 //
-// script-view-text-size.test.tsx drives ScriptView with a key handed to it. This
+// script-view-text-size.test.tsx drives ServiceCue with a key handed to it. This
 // is the other half: that StageView, the thing a Pi actually opens at /display-1,
 // hands the script display its OWN key. Without it the display view would
 // quietly ignore `?text=` — the display has no control to notice that on.

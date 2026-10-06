@@ -2,7 +2,7 @@
 // on one time axis, timer over plan, so the planning conversation can answer
 // "how much of the song set did the baptisms take" — which no single lane can,
 // because the dunks spread across several songs. See "The Session chart" in
-// docs/features/scriptview-and-baptisms.md for what an operator sees.
+// docs/features/servicecue-and-baptisms.md for what an operator sees.
 //
 // NOT HistoryChart: that component needs a series[] and a yScale, and this
 // chart has no y axis — a baptism session is a sequence, not a measurement over

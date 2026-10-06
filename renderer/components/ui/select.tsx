@@ -175,7 +175,7 @@ export function Select({
   // React's `updateOptions` and the HTML "ask for a reset" algorithm specify:
   //
   //   list is EMPTY     → selectedIndex -1, and the trigger is BLANK. This is the
-  //                       one the plan switcher and ScriptView comments describe,
+  //                       one the plan switcher and ServiceCue comments describe,
   //                       and every settings page passes through it on mount
   //                       while its options are still in flight.
   //   list is NOT empty → the FIRST non-disabled option is selected, so the

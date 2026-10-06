@@ -1,4 +1,4 @@
-// The ScriptView text size's arithmetic: the steps, the typed-value rules and the
+// The ServiceCue text size's arithmetic: the steps, the typed-value rules and the
 // per-screen storage. Pure functions, no DOM. The control and the screens that
 // use them are driven in scriptview-text-size-control.test.tsx and
 // script-view-text-size.test.tsx.

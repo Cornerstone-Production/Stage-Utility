@@ -1,5 +1,4 @@
-// Persists ScriptView layouts — named column presets for the in-app ScriptViewer
-// replacement. A flat list shared across every service type; columns reference category
+// Persists ServiceCue layouts — named column presets for the rundown pages. A flat list shared across every service type; columns reference category
 // ROLES so one layout resolves correctly whatever a given service type calls a
 // department (see scriptview-roles-store.ts).
 

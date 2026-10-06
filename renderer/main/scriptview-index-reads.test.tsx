@@ -1,4 +1,4 @@
-// scriptview-index-reads.test.tsx — the ScriptView launcher at /scriptview.
+// scriptview-index-reads.test.tsx — the ServiceCue launcher at /servicecue.
 //
 // Its one read listed Planning Center's service types beside this app's
 // layouts, and printed whatever came back when that failed. Planning Center not
@@ -74,7 +74,7 @@ test("Planning Center not connected says to connect it — no alert, no log, not
   const f = stubFetch({ pcoConfigured: false });
   try {
     await mount();
-    assert.equal(!!screen.queryByText(/Connect Planning Center to use ScriptView/i), true);
+    assert.equal(!!screen.queryByText(/Connect Planning Center to use ServiceCue/i), true);
     assert.equal(!!screen.queryByText(/PCO not configured/i), false, "not an error printed from the server");
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
@@ -88,7 +88,7 @@ test("a failed read on a connected server says so, and reaches the log", async (
   const f = stubFetch({ failing: "load" });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load ScriptView's service types and layouts/i);
+    assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/i);
     assert.ok(
       f.logs.some((l) => l.tag === "scriptview" && /service types and layouts/.test(l.message)),
       `expected a [scriptview] line — got ${JSON.stringify(f.logs)}`,
@@ -115,7 +115,7 @@ test("a failure a later read answers is taken away", async () => {
   const f = stubFetch({ live });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load ScriptView's service types and layouts/i);
+    assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/i);
     live.loadFails = false;
     await act(async () => FakeEventSource.last?.push("stage:state-changed", { pcoConfigured: false }));
     await settle();

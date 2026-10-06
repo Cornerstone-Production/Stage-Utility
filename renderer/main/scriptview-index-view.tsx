@@ -18,19 +18,19 @@ export function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
 }
 
-/** Build a pretty ScriptView URL from names (falls back to ids when unnamed). */
+/** Build a pretty ServiceCue URL from names (falls back to ids when unnamed). */
 export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: string): string {
   const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slugify(layoutName ?? layoutId);
-  return `/scriptview/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}`;
+  return `/servicecue/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}`;
 }
 
-// ScriptView landing at "/scriptview". Lists PCO service types, each with a layout
-// dropdown + open arrow, deep-linking to /scriptview/{serviceTypeId}/{layoutId}.
-// Our own take on ScriptViewer's "Plans" page, in the kiosk design language.
+// ServiceCue landing at "/servicecue". Lists PCO service types, each with a layout
+// dropdown + open arrow, deep-linking to /servicecue/{serviceTypeId}/{layoutId}.
+// Drawn in the kiosk design language.
 /**
- * `standalone` is the chromeless `/scriptview` the tablet opens: no rail and no
+ * `standalone` is the chromeless `/servicecue` the tablet opens: no rail and no
  * context bar, so the page draws its own heading, as `/history` does. The
- * operator's `/scriptview/manage` renders inside the shell, which titles it.
+ * operator's `/servicecue/manage` renders inside the shell, which titles it.
  */
 export function ScriptViewIndex({ standalone = false }: { standalone?: boolean } = {}) {
   const stage = useStageState();
@@ -49,7 +49,7 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
     if (pcoConfigured === false) clear("load");
   });
 
-  useEffect(() => { document.title = "ScriptView"; }, []);
+  useEffect(() => { document.title = "ServiceCue"; }, []);
 
   useEffect(() => {
     if (!pcoConfigured) return;
@@ -66,7 +66,7 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
         setShownIds(c.serviceTypeIds ?? []);
         clear("load");
       })
-      .catch((err: unknown) => { if (!cancelled) fail("load", "the ScriptView service types and layouts", err); });
+      .catch((err: unknown) => { if (!cancelled) fail("load", "the ServiceCue service types and layouts", err); });
     return () => { cancelled = true; };
   }, [pcoConfigured, fail, clear]);
 
@@ -74,7 +74,7 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
   const globalLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
 
   // The curated set is authoritative: show exactly the enabled service types, in
-  // the configured order. Nothing enabled → empty (guide the operator to the ScriptView page).
+  // the configured order. Nothing enabled → empty (guide the operator to the ServiceCue page).
   const rows = useMemo(() => {
     if (!types) return [];
     return shownIds
@@ -90,14 +90,14 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
 
 
   return (
-    // Two URLs, one page. /scriptview is chromeless (isSharedChromelessPath),
+    // Two URLs, one page. /servicecue is chromeless (isSharedChromelessPath),
     // like /history, and draws its own heading because nothing else on the
-    // screen says what it is; /scriptview/manage sits in the shell, which
+    // screen says what it is; /servicecue/manage sits in the shell, which
     // titles it, so the heading would be a second one there.
     <div className="flex flex-col h-full overscroll-none pt-[env(safe-area-inset-top)]">
       {standalone && (
         <div className="pt-5">
-          <h1 className="text-subheadline font-semibold text-fg">ScriptView</h1>
+          <h1 className="text-subheadline font-semibold text-fg">ServiceCue</h1>
           <p className="text-footnote text-fg-muted">Pick a service and a layout to open its rundown.</p>
         </div>
       )}
@@ -117,13 +117,13 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
         <div className="m-auto flex flex-col gap-2 w-full max-w-md">
 
           {pcoConfigured === false ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ScriptView.</p>
+            <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ServiceCue.</p>
           ) : failed.has("load") ? (
-            <ErrorNote>Couldn't load ScriptView's service types and layouts.</ErrorNote>
+            <ErrorNote>Couldn't load ServiceCue's service types and layouts.</ErrorNote>
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ScriptView page, under Shown on the landing page.</p>
+            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ServiceCue page, under Shown on the landing page.</p>
           ) : (
             rows.map((type) => {
               const cur = selectedFor(type.id);
@@ -155,7 +155,7 @@ export function ScriptViewIndex({ standalone = false }: { standalone?: boolean }
             })
           )}
           <a
-            href="/scriptview/presets"
+            href="/servicecue/presets"
             className="mt-2 self-start text-caption1 text-accent hover:underline"
           >
             Edit column presets

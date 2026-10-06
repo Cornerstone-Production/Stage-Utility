@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { MAX_TEXT_SIZE, MIN_TEXT_SIZE, parseTextSize, stepTextSize } from "./scriptview-text-size";
 
-// A-  [ 100% ]  A+ in the ScriptView page's header.
+// A-  [ 100% ]  A+ in the ServiceCue page's header.
 //
 // The steps and the typed-value rules are scriptview-text-size.ts; this is the
 // control around them. Clicking the percentage turns it into a field holding the
