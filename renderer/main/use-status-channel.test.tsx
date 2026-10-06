@@ -248,3 +248,44 @@ describe("useStatusChannel publish ordering", () => {
     assert.equal(seen.value, null, "and the null itself must still be exactly that — no value was ever set");
   });
 });
+
+describe("useStatusChannel while disabled", () => {
+  /** Render the hook with `enabled` under the test's control. */
+  function mountGated(read: () => Promise<Dto | null>, channel: string, enabled: boolean) {
+    const seen: { value: Dto | null; known: boolean } = { value: null, known: false };
+    function Probe({ on }: { on: boolean }): React.ReactElement {
+      const { value: v, known } = useStatusChannel<Dto>(read, channel, on);
+      seen.value = v;
+      seen.known = known;
+      return React.createElement("output", null, v ? String(v.recording) : "none");
+    }
+    const view = render(React.createElement(Probe, { on: enabled }));
+    return { seen, setEnabled: (on: boolean) => view.rerender(React.createElement(Probe, { on })) };
+  }
+
+  test("an answered hook that is then disabled reports unknown, not its old answer", async () => {
+    const read = async (): Promise<Dto | null> => ({ connected: true, recording: true, rev: 1 });
+    const { seen, setEnabled } = mountGated(read, "obs:status", true);
+    await settle();
+    assert.equal(seen.known, true, "answered while enabled");
+    assert.equal(seen.value?.recording, true);
+
+    setEnabled(false);
+    await settle();
+    assert.equal(seen.known, false, "nothing is keeping the snapshot current, so it is not known");
+    assert.equal(seen.value, null, "and its value is not reported as the present");
+  });
+
+  test("a hook disabled from the start is unknown, and enabling it later answers", async () => {
+    const read = async (): Promise<Dto | null> => ({ connected: true, recording: false, rev: 1 });
+    const { seen, setEnabled } = mountGated(read, "reaper:status", false);
+    await settle();
+    assert.equal(seen.known, false);
+    assert.equal(seen.value, null);
+
+    setEnabled(true);
+    await settle();
+    assert.equal(seen.known, true);
+    assert.equal((seen.value as Dto | null)?.connected, true);
+  });
+});

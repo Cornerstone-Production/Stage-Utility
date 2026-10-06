@@ -76,7 +76,9 @@ import { onNotification } from "../lib/api";
  *   dashboard's own channel. A caller that renders a negative claim from
  *   `value` (recorders() calling a `null` OBS "not connected", `null` display
  *   presence "no screens online") must gate on `known` first: unknown is its
- *   own state, not a false claim of the state's absence.
+ *   own state, not a false claim of the state's absence. While `enabled` is
+ *   false it is `{ value: null, known: false }`, including after an enabled
+ *   window that had answered.
  */
 /**
  * The frame's `rev`, or null when it carries none.
@@ -211,5 +213,9 @@ export function useStatusChannel<T extends object>(
     // fresh window resets the counter above.
   }, [enabled, pushChannel, read, clearOnReadFailure]);
 
+  // A disabled hook neither reads nor subscribes, so what it holds from an
+  // earlier enabled window is a snapshot nothing is keeping current. Reporting
+  // it would be a claim about the present: unknown is the honest answer.
+  if (!enabled) return { value: null, known: false };
   return { value, known };
 }
