@@ -470,6 +470,10 @@ class VideoService {
    *  keyed by feed id, so a screen retrying through the run writes one line,
    *  not one per attempt. */
   private readonly dialOutage = new OutageLog();
+  /** The playback proxy's relay failures, keyed by feed id — see
+   *  video-proxy-routes.ts. Held here rather than there so removeFeed() can
+   *  drop a deleted feed's run beside dialOutage's. */
+  readonly proxyOutage = new OutageLog();
   /** A probe round that could not run at all (the feed list would not load). */
   private readonly probeRoundOutage = new OutageLog();
   /** Whether the Video feeds switch is on — told by integration-manager. */
@@ -1838,9 +1842,10 @@ class VideoService {
     this.requestedAt.delete(id);
     this.unansweredSince.delete(id);
     this.lastLoggedState.delete(id);
-    // A dial outage still open for it would swallow the new feed's first
-    // failure as a repeat, and its recovery line would count the old one's.
+    // An outage still open for it would swallow the new feed's first failure
+    // as a repeat, and its recovery line would count the old one's.
     this.dialOutage.forget(id);
+    this.proxyOutage.forget(id);
     // Same reasoning, every output: a re-added feed under the same name
     // must not read struggling for up to a minute on a build that has never
     // actually measured the new feed's playback.
