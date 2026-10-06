@@ -32,7 +32,7 @@ import {
   totalLengthSec,
 } from "./servicecue-columns";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
-import { formatClock } from "../lib/clock-format";
+import { clockParts, formatClock } from "../lib/clock-format";
 
 export function fmtSvcTime(iso: string, timeZone?: string | null): string {
   return formatClock(iso, { timeZone });
@@ -193,6 +193,7 @@ export function ServiceCueHeader({
   appLogo,
   appLogoMonochrome,
   now,
+  timeZone,
   nav,
   afterIdentity,
   trailing,
@@ -205,17 +206,15 @@ export function ServiceCueHeader({
    *  Defaults true so a caller that does not know about it looks unchanged. */
   appLogoMonochrome?: boolean;
   now: number;
+  /** The zone the clock reads in: the app's own, unset = the viewer's. */
+  timeZone?: string | null;
   nav?: ReactNode;
   /** Right after the plan's title block: the page's plan switcher. */
   afterIdentity?: ReactNode;
   trailing?: ReactNode;
 }) {
   const { liveNow, timer, over, svcTimes } = render;
-  const clock = new Date(now);
-  const h12 = String(((clock.getHours() + 11) % 12) + 1).padStart(2, "0");
-  const mm = String(clock.getMinutes()).padStart(2, "0");
-  const ss = String(clock.getSeconds()).padStart(2, "0");
-  const ampm = clock.getHours() < 12 ? "AM" : "PM";
+  const clock = clockParts(now, { timeZone });
 
   // The page's header carries a plan switcher and a text-size control on top of
   // what a display's does, which stops fitting below ~1100px with a real plan
@@ -253,7 +252,7 @@ export function ServiceCueHeader({
         )}
         <div className={`flex flex-col items-end leading-none ${crowded}`}>
           <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
-          <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
+          <span className="text-title3 font-medium text-fg">{clock.head}<span className="text-fg-subtle text-[0.7em]">{clock.seconds}{clock.tail}</span></span>
         </div>
         {trailing}
       </div>

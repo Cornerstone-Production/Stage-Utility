@@ -230,6 +230,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         appLogo={state?.appLogo}
         appLogoMonochrome={state?.appLogoMonochrome}
         now={now}
+        timeZone={state?.timezone}
         afterIdentity={
           resolvedTypeId && pcoConfigured ? (
             <ServiceCuePlanNav

@@ -113,10 +113,9 @@ const LOCK_CHANNELS: readonly (readonly [string, (payload: unknown) => boolean])
   ["service-timeline:history", isRecordOpen],
 ];
 
+/** An hour of the day, in the app's clock format. A fixed date: only the hour is read. */
 function formatHour(h: number): string {
-  const am = h < 12;
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:00 ${am ? "AM" : "PM"}`;
+  return formatClock(new Date(2000, 0, 1, h));
 }
 
 // Maps each update sub-phase to a label + a (monotonic, approximate) percentage.
