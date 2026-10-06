@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 
 import { getUserDataPath } from "../app-paths.js";
 import { errorMessage } from "../errors.js";
+import { cleared } from "../timers.js";
 import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
 
 const execFileAsync = promisify(execFile);
@@ -26,7 +27,40 @@ const execFileAsync = promisify(execFile);
 // actually received, never the (spoofable, sometimes absent) declared
 // Content-Length, which is a progress hint only.
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 300_000;
+
+/** A download is abandoned when no bytes arrive for this long (the connect and
+ *  the response headers count too), so a slow but steady link still finishes. */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+/** The outright ceiling, for a host that trickles just fast enough never to
+ *  idle: MAX_DOWNLOAD_BYTES bounds the size, this bounds the time. */
+const DOWNLOAD_TOTAL_TIMEOUT_MS = 60 * 60 * 1000;
+
+interface DownloadTimeouts {
+  idleMs: number;
+  totalMs: number;
+}
+
+const DEFAULT_DOWNLOAD_TIMEOUTS: DownloadTimeouts = { idleMs: DOWNLOAD_IDLE_TIMEOUT_MS, totalMs: DOWNLOAD_TOTAL_TIMEOUT_MS };
+
+/** An abort signal that fires after `idleMs` without a `touch()`, or after
+ *  `totalMs` outright, carrying the reason as its Error. `stop()` clears both
+ *  timers. */
+function downloadWatchdog({ idleMs, totalMs }: DownloadTimeouts): { signal: AbortSignal; touch: () => void; stop: () => void } {
+  const controller = new AbortController();
+  const abort = (why: string): void => controller.abort(new Error(why));
+  const totalTimer = setTimeout(() => abort(`still going after ${totalMs / 1000} s`), totalMs);
+  let idleTimer: NodeJS.Timeout | null = null;
+  const touch = (): void => {
+    idleTimer = cleared(idleTimer);
+    idleTimer = setTimeout(() => abort(`no data for ${idleMs / 1000} s`), idleMs);
+  };
+  const stop = (): void => {
+    clearTimeout(totalTimer);
+    idleTimer = cleared(idleTimer);
+  };
+  touch();
+  return { signal: controller.signal, touch, stop };
+}
 
 export function relayDir(): string {
   return path.join(getUserDataPath(), "video-relay");
@@ -103,10 +137,27 @@ async function downloadToPart(
   fetchImpl: typeof fetch,
   onProgress: ((received: number, total: number) => void) | undefined,
   totalHint: number,
+  timeouts: DownloadTimeouts,
+): Promise<DownloadResult> {
+  const watchdog = downloadWatchdog(timeouts);
+  try {
+    return await streamToPart(url, partPath, fetchImpl, onProgress, totalHint, watchdog);
+  } finally {
+    watchdog.stop();
+  }
+}
+
+async function streamToPart(
+  url: string,
+  partPath: string,
+  fetchImpl: typeof fetch,
+  onProgress: ((received: number, total: number) => void) | undefined,
+  totalHint: number,
+  watchdog: { signal: AbortSignal; touch: () => void },
 ): Promise<DownloadResult> {
   let response: Response;
   try {
-    response = await fetchImpl(url, { redirect: "follow", signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    response = await fetchImpl(url, { redirect: "follow", signal: watchdog.signal });
   } catch (err) {
     return { ok: false, reason: `could not reach ${url}: ${errorMessage(err)}` };
   }
@@ -131,6 +182,7 @@ async function downloadToPart(
         return { ok: false, reason: `download of ${url} exceeded ${MAX_DOWNLOAD_BYTES} bytes; refused` };
       }
       await file.write(value);
+      watchdog.touch();
       onProgress?.(received, total);
     }
     return { ok: true };
@@ -160,6 +212,8 @@ export interface EnsureBinaryOptions {
    *  extractor; a test replaces it with a spy to prove a failed verification
    *  never reaches extraction. */
   extract?: ExtractFn;
+  /** Test seam: small timeouts, so a test need not wait real seconds. */
+  downloadTimeouts?: DownloadTimeouts;
 }
 
 /**
@@ -304,6 +358,7 @@ async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: Ens
     opts.fetchImpl ?? fetch,
     opts.onProgress,
     MEDIAMTX_DOWNLOAD_BYTES,
+    opts.downloadTimeouts ?? DEFAULT_DOWNLOAD_TIMEOUTS,
   );
   if (!downloaded.ok) {
     await fsp.unlink(partPath).catch(() => {});
