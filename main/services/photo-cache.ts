@@ -333,6 +333,15 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
         if (response.status >= 400 && response.status < 500) return null; // don't retry client errors
         continue;
       }
+      // What is cached is served immutable for a year, so a 200 that is a web page
+      // (a captive portal, a proxy's error page) must not be kept as the photo.
+      // A denylist, not "must be image/*": a CDN that serves avatars as
+      // binary/octet-stream is still serving avatars.
+      const contentType = response.headers.get("content-type") ?? "";
+      if (/^(text\/|application\/(json|xml))/i.test(contentType)) {
+        console.error(`[photo-cache] refused a ${scrub(contentType)} body from ${scrub(photoUrl)}: not an image`);
+        return null;
+      }
       // The 250 MB cache cap is only enforced by a once-daily prune, so without a
       // per-photo ceiling a stream of large responses can fill a Pi's card between
       // runs. An avatar that trips this is not an avatar.
