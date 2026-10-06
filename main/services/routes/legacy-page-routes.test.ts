@@ -29,7 +29,7 @@ before(async () => {
       }
       // What production does next is serve the page. Here, a marker that no
       // early module claimed the request.
-      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.writeHead(200, { "Content-Type": "text/plain", "X-Seen": `${req.method} ${req.url}` });
       res.end("fell through");
     })();
   });
@@ -115,7 +115,7 @@ describe("a /scriptview address redirects permanently to /servicecue", () => {
 
 describe("nothing else is redirected", () => {
   test("the new address, a lookalike and the API are left alone", async () => {
-    for (const p of ["/servicecue/weekend/audio", "/scriptviewer", "/scriptviewx/a", "/api/servicecue/layouts", "/api/scriptview/layouts", "/history"]) {
+    for (const p of ["/servicecue/weekend/audio", "/scriptviewer", "/scriptviewx/a", "/api/servicecue/layouts", "/api/scriptviewer", "/history"]) {
       const r = await request("GET", p);
       assert.equal(r.status, 200, `${p} must not be redirected`);
       assert.equal(r.body, "fell through", `${p} must reach the rest of the server`);
@@ -125,6 +125,40 @@ describe("nothing else is redirected", () => {
   test("a POST to the old address is not turned into a GET", async () => {
     const r = await request("POST", "/scriptview/weekend/audio");
     assert.equal(r.body, "fell through");
+  });
+});
+
+// The ServiceCue API was documented as /api/scriptview/*. A 308 keeps the method
+// and the body, where a 301 would turn a POST into a GET and drop what it carried.
+describe("an /api/scriptview address redirects to /api/servicecue with the method kept", () => {
+  test("a GET keeps its query and answers 308, never cached", async () => {
+    const r = await request("GET", "/api/scriptview/rundown?serviceTypeId=st-1&planId=77");
+    assert.equal(r.status, 308);
+    assert.equal(r.location, "/api/servicecue/rundown?serviceTypeId=st-1&planId=77");
+    assert.equal(r.cacheControl, "no-store");
+  });
+
+  test("every verb is redirected, not just the reads", async () => {
+    for (const method of ["POST", "PATCH", "DELETE", "PUT"]) {
+      const r = await request(method, "/api/scriptview/roles/seed");
+      assert.equal(r.status, 308, `${method} was not redirected`);
+      assert.equal(r.location, "/api/servicecue/roles/seed");
+    }
+  });
+
+  test("a client that follows it re-sends the same method to the new path", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/scriptview/layouts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layouts: [] }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("x-seen"), "POST /api/servicecue/layouts", "the POST became something else on the way");
+  });
+
+  test("a preflight is left to the routes beneath, a lookalike is not touched", async () => {
+    assert.equal((await request("OPTIONS", "/api/scriptview/layouts")).body, "fell through");
+    assert.equal((await request("GET", "/api/scriptviewer")).body, "fell through");
   });
 });
 

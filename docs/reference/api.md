@@ -379,6 +379,10 @@ Two things to know:
 | GET / POST | `/api/servicecue/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | POST | `/api/servicecue/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
 
+Requests to `/api/scriptview/…` answer `308` with the same path and query under
+`/api/servicecue/…`, keeping the method and body, so a script written against the
+old paths still works once its client follows redirects.
+
 **Patch sheet** — see [Patch sheet](../patch-sheet/README.md).
 
 | Method | Path | Purpose |
