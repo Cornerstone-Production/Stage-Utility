@@ -50,7 +50,7 @@ URL" feeling:
      duplicate.
    - **Patch** — `patch-view.tsx` (272 lines) is a volunteer-facing read view
      built on `resolvePatch`. The settings tab is the editor. Different surfaces.
-   - **ServiceCue** — `scriptview-index-view.tsx` (158 lines) is the rundown
+   - **ServiceCue** — `servicecue-index-view.tsx` (158 lines) is the rundown
      viewer. The settings tab is the column-preset editor. Different surfaces.
 
    Whichever door has navigation is the one that gets used, and today that is

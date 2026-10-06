@@ -82,7 +82,7 @@ describe("the gutter is decided in one place", () => {
   test("the shell withholds the padding on a console", () => {
     // The predicate generalised when ServiceCue's rundown turned out to have the
     // same problem — it is `isFullBleedPath` now, of which a console is one case.
-    // See scriptview-full-bleed.test.ts, which pins the membership.
+    // See servicecue-full-bleed.test.ts, which pins the membership.
     //
     // `fullBleed` alone, with no `!chromeless` alongside it any more: every
     // console is full-bleed whether or not its `hideChrome` flag is set, so a

@@ -80,9 +80,9 @@ declare global {
   type YouTubeStatusDTO = Stage.YouTubeStatusDTO;
   type ReconnectSchedule = Stage.ReconnectSchedule;
   type ResolvedOutput = Stage.ResolvedOutput;
-  type ScriptViewConfig = Stage.ScriptViewConfig;
-  type ScriptViewLayout = Stage.ScriptViewLayout;
-  type ScriptViewRundownDTO = Stage.ScriptViewRundownDTO;
+  type ServiceCueConfig = Stage.ServiceCueConfig;
+  type ServiceCueLayout = Stage.ServiceCueLayout;
+  type ServiceCueRundownDTO = Stage.ServiceCueRundownDTO;
   type ServiceAttendance = Stage.ServiceAttendance;
   type ServiceAttendanceSummary = Stage.ServiceAttendanceSummary;
   type ServiceSplHistory = Stage.ServiceSplHistory;

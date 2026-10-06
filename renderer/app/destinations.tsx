@@ -27,8 +27,8 @@ import {
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
-import { ScriptViewIndex } from "../main/scriptview-index-view";
-import { ScriptViewPlan } from "../main/scriptview-plan-view";
+import { ServiceCueIndex } from "../main/servicecue-index-view";
+import { ServiceCuePlan } from "../main/servicecue-plan-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { AutomationSection } from "../settings/sections/automation-section";
@@ -39,7 +39,7 @@ import { ScreensRoute } from "./screens/screens-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
-import { ScriptViewSection } from "../settings/sections/scriptview-section";
+import { ServiceCueSection } from "../settings/sections/servicecue-section";
 import {
   AdvancedRoute,
   BrandingRoute,
@@ -89,7 +89,7 @@ export const DESTINATIONS: readonly Destination[] = [
     label: "ServiceCue",
     description: "Pick a service to open its rundown.",
     icon: <ListChecksIcon className="size-4" />,
-    Component: ScriptViewIndex,
+    Component: ServiceCueIndex,
   },
   {
     path: "/patch",
@@ -200,20 +200,20 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
 ];
 
 /**
- * ScriptViewPlan takes its service type and layout as props, because the kiosk
+ * ServiceCuePlan takes its service type and layout as props, because the kiosk
  * router read them out of `window.location` and passed them down. Under a real
  * router they are route params, so this adapter supplies them.
  *
  * `strict: false` because this component is declared away from its route
  * definition; the params are validated by the route's path pattern.
  */
-function ScriptViewPlanRoute() {
+function ServiceCuePlanRoute() {
   const params = useParams({ strict: false }) as {
     serviceType?: string;
     layout?: string;
   };
   return (
-    <ScriptViewPlan
+    <ServiceCuePlan
       serviceTypeParam={params.serviceType ?? ""}
       layoutParam={params.layout ?? ""}
     />
@@ -256,8 +256,8 @@ const HISTORY_SHARED_PAGE = {
  * layout editor.
  */
 /** The tablet's ServiceCue launcher: chromeless, so it draws its own heading. */
-function ScriptViewShared() {
-  return <ScriptViewIndex standalone />;
+function ServiceCueShared() {
+  return <ServiceCueIndex standalone />;
 }
 
 function ServiceHistoryShared() {
@@ -279,7 +279,7 @@ export interface NestedRoute {
    * Name for the shell's header and the mobile top bar.
    *
    * Omitted where the page draws its own heading — the layout editor puts the
-   * view's name in an editable field, a ServiceCue plan draws ScriptViewHeader —
+   * view's name in an editable field, a ServiceCue plan draws ServiceCueHeader —
    * in which case the chrome falls back to the parent destination's name rather
    * than stacking a second title above the page's own.
    */
@@ -301,12 +301,12 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // prefix-match /servicecue, so the tablet's page would have no name.
   {
     path: "/servicecue",
-    Component: ScriptViewShared,
+    Component: ServiceCueShared,
     label: "ServiceCue",
     description: "Pick a service and a layout to open its rundown.",
   },
-  { path: "/servicecue/$serviceType/$layout", Component: ScriptViewPlanRoute },
-  { path: "/servicecue/presets", Component: ScriptViewSection },
+  { path: "/servicecue/$serviceType/$layout", Component: ServiceCuePlanRoute },
+  { path: "/servicecue/presets", Component: ServiceCueSection },
   { path: "/patch/edit", Component: PatchSection },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },

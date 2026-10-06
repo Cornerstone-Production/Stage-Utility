@@ -2,7 +2,7 @@
 //
 // `isDefaultPlan` is what lets the page tell Following from Browsing when it was
 // handed a `planId`. upcoming-plans.test.ts pins the rule as a function; this
-// pins that getScriptViewRundown actually USES it with the right inputs: the
+// pins that getServiceCueRundown actually USES it with the right inputs: the
 // controller's own plan on the active type, the nearest upcoming plan on any
 // other, and the request's planId. A page that was always told "default" would
 // never say Browsing for a real plan, and the page's own tests answer with a
@@ -57,9 +57,9 @@ after(async () => {
   await fs.rm(TMP, { recursive: true, force: true });
 });
 
-const flag = async (typeId: string, planId?: string) => (await stageController.getScriptViewRundown(typeId, planId)).isDefaultPlan;
+const flag = async (typeId: string, planId?: string) => (await stageController.getServiceCueRundown(typeId, planId)).isDefaultPlan;
 
-describe("getScriptViewRundown's isDefaultPlan", () => {
+describe("getServiceCueRundown's isDefaultPlan", () => {
   it("is true with no planId, on the active type and on another", async () => {
     assert.equal(await flag(ACTIVE), true);
     assert.equal(await flag(OTHER), true);
@@ -77,7 +77,7 @@ describe("getScriptViewRundown's isDefaultPlan", () => {
   });
 
   it("an unknown plan comes back empty and still says it is the default, so the page reads planId null", async () => {
-    const r = await stageController.getScriptViewRundown(OTHER, "nope");
+    const r = await stageController.getServiceCueRundown(OTHER, "nope");
     assert.equal(r.planId, null);
     assert.equal(r.isDefaultPlan, true);
   });

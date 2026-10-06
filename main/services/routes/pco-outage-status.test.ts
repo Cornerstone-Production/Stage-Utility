@@ -25,7 +25,7 @@ process.env.STAGE_UTILITY_DATA = DIR;
 
 const { historyRoutes } = await import("./history-routes.js");
 const { stateRoutes } = await import("./state-routes.js");
-const { scriptviewRoutes } = await import("./scriptview-routes.js");
+const { serviceCueRoutes } = await import("./servicecue-routes.js");
 const { calendarRoutes } = await import("./calendar-routes.js");
 const { statusRoutes } = await import("./status-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -48,14 +48,14 @@ const PCO_READS: { path: string; route: Parameters<typeof callRoute>[0]; method:
   { path: "/api/team-positions", route: stateRoutes, method: "listTeamPositions" },
   { path: "/api/plans?serviceTypeId=st-1", route: stateRoutes, method: "listPlans" },
   {
-    path: "/api/scriptview/note-categories?serviceTypeId=st-1",
-    route: scriptviewRoutes,
-    method: "listScriptViewNoteCategories",
+    path: "/api/servicecue/note-categories?serviceTypeId=st-1",
+    route: serviceCueRoutes,
+    method: "listServiceCueNoteCategories",
   },
   {
-    path: "/api/scriptview/rundown?serviceTypeId=st-1",
-    route: scriptviewRoutes,
-    method: "getScriptViewRundown",
+    path: "/api/servicecue/rundown?serviceTypeId=st-1",
+    route: serviceCueRoutes,
+    method: "getServiceCueRundown",
   },
   { path: "/api/pco/calendar?viewId=view-1", route: calendarRoutes, method: "getCalendarGrid" },
   { path: "/api/pco/calendar-sources", route: calendarRoutes, method: "listCalendarSources" },
@@ -76,9 +76,9 @@ describe("a PCO read that fails answers 502, not 500", () => {
       "/api/pco/live",
       "/api/pco/plan-items",
       "/api/plans?serviceTypeId=st-1",
-      "/api/scriptview/note-categories?serviceTypeId=st-1",
-      "/api/scriptview/rundown?serviceTypeId=st-1",
       "/api/service-types",
+      "/api/servicecue/note-categories?serviceTypeId=st-1",
+      "/api/servicecue/rundown?serviceTypeId=st-1",
       "/api/team-positions",
     ];
     assert.deepEqual(

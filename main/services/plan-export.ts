@@ -42,7 +42,7 @@ export interface PlanExportPreview {
   rows: number;
   patchVariants: { sheetName: string; variantName: string }[];
   presets: number;
-  scriptviewLayouts: number;
+  serviceCueLayouts: number;
 }
 
 /**
@@ -139,7 +139,7 @@ async function buildPlan(
     sideData: {
       slots,
       notes: parts.notes,
-      scriptviewLayouts: parts.scriptviewLayouts,
+      serviceCueLayouts: parts.serviceCueLayouts,
       ...(patchVariants.length ? { patchVariants } : {}),
       ...(presets.length ? { presets } : {}),
     },
@@ -195,6 +195,6 @@ export async function planExportPreview(
       variantName: p.variant.name,
     })),
     presets: bundle.sideData.presets?.length ?? 0,
-    scriptviewLayouts: bundle.sideData.scriptviewLayouts.length,
+    serviceCueLayouts: bundle.sideData.serviceCueLayouts.length,
   };
 }

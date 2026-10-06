@@ -70,7 +70,7 @@ import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
 import { proxyRoutes } from "./routes/proxy-routes.js";
 import { stateRoutes } from "./routes/state-routes.js";
-import { scriptviewRoutes } from "./routes/scriptview-routes.js";
+import { serviceCueRoutes } from "./routes/servicecue-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
 import { planRoutes } from "./routes/plan-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
@@ -109,7 +109,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   archiveRoutes,
   proxyRoutes,
   stateRoutes,
-  scriptviewRoutes,
+  serviceCueRoutes,
   viewRoutes,
   planRoutes,
   integrationRoutes,

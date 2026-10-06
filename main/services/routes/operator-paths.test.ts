@@ -63,7 +63,7 @@ describe("legacyPageRedirect", () => {
   });
 
   it("answers null for a path that did not move, including a lookalike", () => {
-    for (const p of ["/servicecue", "/servicecue/weekend/audio", "/scriptviewer", "/api/scriptview/layouts", "/history", "/"]) {
+    for (const p of ["/servicecue", "/servicecue/weekend/audio", "/scriptviewer", "/api/servicecue/layouts", "/history", "/"]) {
       assert.equal(legacyPageRedirect(p, "?x=1"), null, `${p} must not be redirected`);
     }
   });

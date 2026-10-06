@@ -17,7 +17,7 @@ import { patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
-import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
+import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
@@ -266,8 +266,8 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     if (newId) await notesStore.set(newId, content as NotesContent);
   }
 
-  const svIncoming = bundle.sideData?.scriptviewLayouts ?? [];
-  const svAfter = await scriptViewLayoutsStore.load();
+  const svIncoming = bundle.sideData?.serviceCueLayouts ?? [];
+  const svAfter = await serviceCueLayoutsStore.load();
   const svHave = new Set(svAfter.map((l) => l.id));
   if (svIncoming.length) {
     // One pass, in the same shape as mergeTargets below: `svHave` has to grow as
@@ -282,15 +282,15 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name ?? l.id}" — kept the one already here`);
       else { svHave.add(l.id); add.push(l); }
     }
-    if (add.length) await scriptViewLayoutsStore.save([...svAfter, ...add]);
+    if (add.length) await serviceCueLayoutsStore.save([...svAfter, ...add]);
   }
 
   // A view can point at a preset that was already missing at the source: export
   // ships only presets it can find. An unknown id renders as ALL columns, which
   // looks like a working display showing the wrong thing — the same reason
-  // setViewScriptViewLayout refuses one.
+  // setViewServiceCueLayout refuses one.
   for (const v of named) {
-    if (v.scriptViewLayoutId && !svHave.has(v.scriptViewLayoutId)) {
+    if (v.serviceCueLayoutId && !svHave.has(v.serviceCueLayoutId)) {
       skipped.push(`"${v.name}" points at a ServiceCue preset that is not in the file or here`);
     }
   }

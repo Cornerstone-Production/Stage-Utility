@@ -1,6 +1,6 @@
 // The kiosk's script display takes its text size from `?text=`.
 //
-// script-view-text-size.test.tsx drives ServiceCue with a key handed to it. This
+// servicecue-view-text-size.test.tsx drives ServiceCue with a key handed to it. This
 // is the other half: that StageView, the thing a Pi actually opens at /display-1,
 // hands the script display its OWN key. Without it the display view would
 // quietly ignore `?text=` — the display has no control to notice that on.
@@ -25,7 +25,7 @@ const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { StageView } = await import("./stage-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
-const { displayTextSizeKey, readStoredSize } = await import("./scriptview-text-size.js");
+const { displayTextSizeKey, readStoredSize } = await import("./servicecue-text-size.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
@@ -83,9 +83,9 @@ test("the kiosk's script display reads ?text= and remembers it under its own dis
   window.history.replaceState({}, "", "/display-1?text=150");
   const f = stubFetchWithLog((url) => {
     if (url.includes("/api/state")) return ok(STATE);
-    if (url.includes("/api/scriptview/layouts")) return ok([]);
-    if (url.includes("/api/scriptview/roles")) return ok([]);
-    if (url.includes("/api/scriptview/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/servicecue/layouts")) return ok([]);
+    if (url.includes("/api/servicecue/roles")) return ok([]);
+    if (url.includes("/api/servicecue/rundown")) return ok(RUNDOWN);
     if (url.includes("/api/pco/live")) return ok(null);
     return ok({});
   });

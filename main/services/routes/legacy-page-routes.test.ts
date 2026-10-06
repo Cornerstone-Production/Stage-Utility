@@ -115,7 +115,7 @@ describe("a /scriptview address redirects permanently to /servicecue", () => {
 
 describe("nothing else is redirected", () => {
   test("the new address, a lookalike and the API are left alone", async () => {
-    for (const p of ["/servicecue/weekend/audio", "/scriptviewer", "/scriptviewx/a", "/api/scriptview/layouts", "/history"]) {
+    for (const p of ["/servicecue/weekend/audio", "/scriptviewer", "/scriptviewx/a", "/api/servicecue/layouts", "/api/scriptview/layouts", "/history"]) {
       const r = await request("GET", p);
       assert.equal(r.status, 200, `${p} must not be redirected`);
       assert.equal(r.body, "fell through", `${p} must reach the rest of the server`);

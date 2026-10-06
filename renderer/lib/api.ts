@@ -498,14 +498,14 @@ export type IpcChannel =
   | "scores:getStatus"
   | "scores:listTeams"
   | "scores:setFavourites"
-  | "scriptview:getConfig"
-  | "scriptview:listLayouts"
-  | "scriptview:listRoles"
-  | "scriptview:noteCategories"
-  | "scriptview:rundown"
-  | "scriptview:saveLayouts"
-  | "scriptview:saveRoles"
-  | "scriptview:setConfig"
+  | "servicecue:getConfig"
+  | "servicecue:listLayouts"
+  | "servicecue:listRoles"
+  | "servicecue:noteCategories"
+  | "servicecue:rundown"
+  | "servicecue:saveLayouts"
+  | "servicecue:saveRoles"
+  | "servicecue:setConfig"
   | "sensource:listLocations"
   | "sensource:listZones"
   | "serviceTimeline:delete"
@@ -585,7 +585,7 @@ export type IpcChannel =
   | "views:setHideChrome"
   | "views:setKind"
   | "views:setLayout"
-  | "views:setScriptViewLayout"
+  | "views:setServiceCueLayout"
   | "views:setSlots"
   | "views:setSlotsLayout"
   | "views:setSurface"
@@ -639,29 +639,29 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/team-positions?all=1");
 
     // ── ServiceCue ──────────────────────────────────────────────────────
-    case "scriptview:listLayouts":
-      return apiFetch<T>("/api/scriptview/layouts");
+    case "servicecue:listLayouts":
+      return apiFetch<T>("/api/servicecue/layouts");
 
-    case "scriptview:saveLayouts":
-      return post<T>("/api/scriptview/layouts", { layouts: p.layouts });
+    case "servicecue:saveLayouts":
+      return post<T>("/api/servicecue/layouts", { layouts: p.layouts });
 
-    case "scriptview:getConfig":
-      return apiFetch<T>("/api/scriptview/config");
+    case "servicecue:getConfig":
+      return apiFetch<T>("/api/servicecue/config");
 
-    case "scriptview:setConfig":
-      return post<T>("/api/scriptview/config", { serviceTypeIds: p.serviceTypeIds });
+    case "servicecue:setConfig":
+      return post<T>("/api/servicecue/config", { serviceTypeIds: p.serviceTypeIds });
 
-    case "scriptview:listRoles":
-      return apiFetch<T>("/api/scriptview/roles");
+    case "servicecue:listRoles":
+      return apiFetch<T>("/api/servicecue/roles");
 
-    case "scriptview:saveRoles":
-      return post<T>("/api/scriptview/roles", { roles: p.roles });
+    case "servicecue:saveRoles":
+      return post<T>("/api/servicecue/roles", { roles: p.roles });
 
     // Adds a role for any category this service type defines that no role covers.
     // Only ever adds — never merges, never removes.
-    case "scriptview:noteCategories": {
+    case "servicecue:noteCategories": {
       const id = p.serviceTypeId as string;
-      return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
+      return apiFetch<T>(`/api/servicecue/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
     }
 
     // ── Stage patch sheet ───────────────────────────────────────────────
@@ -674,10 +674,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "patch:parseXlsx":
       return post<T>("/api/patch/parse-xlsx", { xlsx: p.xlsx });
 
-    case "scriptview:rundown": {
+    case "servicecue:rundown": {
       const id = p.serviceTypeId as string;
       const qs = p.planId ? `&planId=${encodeURIComponent(p.planId as string)}` : "";
-      return apiFetch<T>(`/api/scriptview/rundown?serviceTypeId=${encodeURIComponent(id)}${qs}`);
+      return apiFetch<T>(`/api/servicecue/rundown?serviceTypeId=${encodeURIComponent(id)}${qs}`);
     }
 
     case "stage:setServiceType":
@@ -1136,9 +1136,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { slotsLayout: p.slotsLayout });
     }
 
-    case "views:setScriptViewLayout": {
+    case "views:setServiceCueLayout": {
       const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { serviceCueLayoutId: p.serviceCueLayoutId });
     }
 
     case "views:setHideChrome": {

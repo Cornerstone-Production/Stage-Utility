@@ -88,7 +88,7 @@ nothing to show yet, and a later failure keeps the last plan on screen — as
 long as it is still the plan being asked for. Switching service type or plan
 drops the previous one immediately, so a failed read for the new one shows the
 failure rather than the old plan under a title that no longer matches it. Each
-failure is on a `[scriptview]` line on the server log.
+failure is on a `[servicecue]` line on the server log.
 
 ## Category roles
 
@@ -180,7 +180,7 @@ its type and always resolves.
 The choice is kept in the address as `?plan=<id>`, so a refresh or a copied link
 stays on the plan, and so does changing the layout; no `?plan=` means following. A plan the page cannot find
 says so in place of the rundown, with Back to live in reach, and a
-[scriptview] line on [`/log`](../ops/updates-and-logs.md) names it. A plan list that
+[servicecue] line on [`/log`](../ops/updates-and-logs.md) names it. A plan list that
 could not be read says so under the header and leaves the arrows off; the page
 keeps following its own plan. With Planning Center not connected the switcher is
 absent.

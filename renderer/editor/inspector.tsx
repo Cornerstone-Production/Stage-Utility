@@ -941,8 +941,8 @@ export function Inspector({
         // and silently changing what is on a stage monitor is not an upgrade.
         const retired = objectRetired(c.type);
         if (!retired) return null;
-        const scriptViews = (embedViews ?? []).filter((v) => v.kind === "script");
-        const scriptViewId = scriptViews.length === 1 ? scriptViews[0].id : null;
+        const serviceCueViews = (embedViews ?? []).filter((v) => v.kind === "script");
+        const serviceCueId = serviceCueViews.length === 1 ? serviceCueViews[0].id : null;
         return (
           <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
             <span className="text-caption1 text-fg">This object has been replaced</span>
@@ -952,11 +952,11 @@ export function Inspector({
               variant="filled"
               size="small"
               className="self-start"
-              onClick={() => onConfig(retired.convert(c, { scriptViewId }))}
+              onClick={() => onConfig(retired.convert(c, { serviceCueId }))}
             >
               Convert to {typeLabel(retired.replacedBy)}
             </Button>
-            {retired.replacedBy === "view-embed" && scriptViews.length === 0 && (
+            {retired.replacedBy === "view-embed" && serviceCueViews.length === 0 && (
               <span className="text-caption2 text-fg-subtle">
                 Make a ServiceCue view first and this will have something to point at.
               </span>

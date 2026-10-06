@@ -395,7 +395,7 @@ describe("StageView renders each view kind", () => {
   });
 
   test("script draws the rundown", async () => {
-    const c = await showScreen("/display-1", ofKind("script", { scriptViewLayoutId: "sl1" }));
+    const c = await showScreen("/display-1", ofKind("script", { serviceCueLayoutId: "sl1" }));
     assert.ok(says(c, "ServiceCue"), c.textContent ?? "");
   });
 
@@ -604,7 +604,7 @@ describe("StageView honours a display's hidden top bar", () => {
     { name: "dashboard", bar: true, state: () => ofKind("dashboard") },
     { name: "stage", bar: false, state: () => ofKind("stage") },
     { name: "transcription", bar: false, state: () => ofKind("transcription") },
-    { name: "script", bar: false, state: () => ofKind("script", { scriptViewLayoutId: "sl1" }) },
+    { name: "script", bar: false, state: () => ofKind("script", { serviceCueLayoutId: "sl1" }) },
     { name: "spl-rundown", bar: false, state: () => ofKind("spl-rundown") },
     { name: "calendar", bar: false, state: () => ofKind("calendar") },
     { name: "a blacked-out display", bar: false, state: () => stageState({ resolvedByOutput: { "display-1": resolved({ blackout: true }) } }) },
@@ -790,7 +790,7 @@ describe("KIND_DRAWS_TOP_BAR is what the arms actually render", () => {
   /** What each kind needs on its View before its arm will draw anything. */
   const EXTRAS: Partial<Record<ViewKind, Record<string, unknown>>> = {
     custom: { layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [] } },
-    script: { scriptViewLayoutId: "sl1" },
+    script: { serviceCueLayoutId: "sl1" },
   };
 
   for (const [kind, draws] of Object.entries(KIND_DRAWS_TOP_BAR) as [ViewKind, boolean][]) {

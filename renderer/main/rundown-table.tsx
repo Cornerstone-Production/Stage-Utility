@@ -5,7 +5,7 @@ import type { PcoItemTypeColor } from "../../main/types/stage.js";
 import { resolveItemColor, mapPcoColor, washFor, stripeFor } from "./item-color";
 import { categoryColor } from "./category-color";
 import { resolveRole } from "./role-resolve";
-import type { CategoryRole } from "../../main/types/scriptview-roles.js";
+import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ServiceCue on a
 // display) and the standalone ServiceCue pages render through this so column

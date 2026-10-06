@@ -58,7 +58,7 @@ function planFile(over: Record<string, unknown> = {}, sideOver: Record<string, u
     views: [{ id: "v1", name: "Mic Board", kind: "slots", createdAt: 0, layout: null }],
     sideData: {
       slots: { v1: { "st-here": [{ id: "r1" }, { id: "r2" }] } },
-      notes: {}, scriptviewLayouts: [],
+      notes: {}, serviceCueLayouts: [],
       ...sideOver,
     },
     targets: { osc: [], rosstalk: [] },

@@ -137,7 +137,7 @@ describe("the kiosk no longer serves operator surfaces", () => {
       .split("\n")
       .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"))
       .join("\n");
-    for (const gone of ["HistoryView", "BaptismOperatorView", "PatchView", "ScriptViewIndex", "ScriptViewPlan"]) {
+    for (const gone of ["HistoryView", "BaptismOperatorView", "PatchView", "ServiceCueIndex", "ServiceCuePlan"]) {
       assert.equal(
         code.includes(gone),
         false,
@@ -149,7 +149,7 @@ describe("the kiosk no longer serves operator surfaces", () => {
   test("the two duplicate wrappers are gone from the tree", async () => {
     // history-view.tsx and baptism-operator-view.tsx wrapped the very
     // components their settings tabs render. Leaving one behind is a second
-    // copy that drifts. patch-view.tsx and scriptview-index-view.tsx are NOT
+    // copy that drifts. patch-view.tsx and servicecue-index-view.tsx are NOT
     // duplicates and must survive - they are the volunteer patch view and the
     // rundown viewer.
     const fs = await import("node:fs/promises");
@@ -164,7 +164,7 @@ describe("the kiosk no longer serves operator surfaces", () => {
     assert.equal(await exists("../main/history-view.tsx"), false, "history-view.tsx must be deleted");
     assert.equal(await exists("../main/baptism-operator-view.tsx"), false, "baptism-operator-view.tsx must be deleted");
     assert.equal(await exists("../main/patch-view.tsx"), true, "patch-view.tsx is a distinct surface and must stay");
-    assert.equal(await exists("../main/scriptview-index-view.tsx"), true, "scriptview-index-view.tsx is a distinct surface and must stay");
+    assert.equal(await exists("../main/servicecue-index-view.tsx"), true, "servicecue-index-view.tsx is a distinct surface and must stay");
   });
 });
 

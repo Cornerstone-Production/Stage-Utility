@@ -195,7 +195,7 @@ describe("POST /api/views/import takes both body shapes", () => {
     plan: { serviceTypeId: "st-1", serviceTypeName: "Sunday AM", slotsScope: "type" },
     roots: ["v-in"],
     views: [{ id: "v-in", name: "Incoming", kind: "slots", createdAt: 0, layout: null }],
-    sideData: { slots: { "v-in": { "st-1": [row("z")] } }, notes: {}, scriptviewLayouts: [] },
+    sideData: { slots: { "v-in": { "st-1": [row("z")] } }, notes: {}, serviceCueLayouts: [] },
     targets: { osc: [], rosstalk: [] },
     images: {},
   });
