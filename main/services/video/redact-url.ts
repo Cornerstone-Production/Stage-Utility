@@ -15,10 +15,14 @@ const SECRET_QUERY = /([?&](?:passphrase|pass|pwd)=)[^&\s'"]+/gi;
  *  or `read:...`, with its colons literal or percent-encoded. */
 const SECRET_STREAMID = /(streamid=(?:publish|read)(?::|%3A)[^:&\s'"%]*(?::|%3A)[^:&\s'"%]*(?::|%3A))[^&\s'"]+/gi;
 
-/** `://` through the LAST `@` of the authority, which ends at the first `/`,
- *  `?`, `#` or space. A password may hold a raw `@`; stopping at the first
- *  would leave the rest of it in the text. */
-const USERINFO = /:\/\/[^\s/?#]*@/g;
+/** `://` through the LAST `@` before the first `/` or whitespace. A password may
+ *  hold a raw `@`, `?` or `#` (an earlier pattern stopped at the first `?` or
+ *  `#` and left the rest of such a password in the text), so none of them ends
+ *  the userinfo: a redactor errs toward taking too much. The cost is a URL with
+ *  no userinfo whose query holds an `@`, `http://host?contact=a@b`, losing the
+ *  text from `://` to that `@`. A log line missing a few characters is the right
+ *  price against a password left in it. */
+const USERINFO = /:\/\/[^\s/]*@/g;
 
 /** Strips every credential a relay URL can carry out of `text`: a
  *  `://user:pass@` userinfo segment is removed outright, and a passphrase,
