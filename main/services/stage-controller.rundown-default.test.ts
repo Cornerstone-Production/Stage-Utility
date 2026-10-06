@@ -76,6 +76,21 @@ describe("getServiceCueRundown's isDefaultPlan", () => {
     assert.equal(await flag(OTHER, "p2"), false, "the app's plan id means nothing on a type the app is not on");
   });
 
+  it("when the app's own plan no longer resolves, the nearest upcoming plan is what the default falls to", async () => {
+    // With no planId the rundown answers with plans[0] here, so a page browsing
+    // plans[0] is looking at the followed plan, and one browsing the vanished
+    // plan's neighbour is not.
+    const kept = ctl.state;
+    ctl.state = { ...kept, planId: "gone" };
+    try {
+      assert.equal((await stageController.getServiceCueRundown(ACTIVE)).planId, "p1");
+      assert.equal(await flag(ACTIVE, "p1"), true, "the plan the default resolves to was labelled Browsing");
+      assert.equal(await flag(ACTIVE, "p2"), false);
+    } finally {
+      ctl.state = kept;
+    }
+  });
+
   it("an unknown plan comes back empty and still says it is the default, so the page reads planId null", async () => {
     const r = await stageController.getServiceCueRundown(OTHER, "nope");
     assert.equal(r.planId, null);

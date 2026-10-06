@@ -1525,10 +1525,11 @@ export class StageController {
       return recent.find((p) => p.id === id) ?? null;
     };
 
-    let plan: PlanDTO | null;
-    if (planId) plan = await resolve(planId);
-    else if (isActiveType && this.state.planId) plan = (await resolve(this.state.planId)) ?? plans[0] ?? null;
-    else plan = plans[0] ?? null;
+    // The plan this page follows when nothing is asked for: the app's own plan on
+    // the active type, if it still resolves. When it does not, the default falls
+    // to the nearest upcoming plan, and so must the flag below.
+    const followed = isActiveType && this.state.planId ? await resolve(this.state.planId) : null;
+    const plan = planId ? await resolve(planId) : (followed ?? plans[0] ?? null);
     if (!plan) return empty;
 
     // serviceTypes is cached for 15 minutes, so pulling the item row colors here
@@ -1560,7 +1561,7 @@ export class StageController {
       isDefaultPlan: isDefaultRundownPlan({
         requestedPlanId: planId ?? null,
         resolvedPlanId: plan.id,
-        activeTypePlanId: isActiveType ? this.state.planId : null,
+        activeTypePlanId: followed?.id ?? null,
         nextUpcomingPlanId: plans[0]?.id ?? null,
       }),
     };

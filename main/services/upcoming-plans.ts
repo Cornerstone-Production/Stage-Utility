@@ -140,7 +140,8 @@ export function switcherTypes(types: ServiceTypeDTO[], allowed: string[]): Servi
 export function isDefaultRundownPlan(p: {
   requestedPlanId: string | null;
   resolvedPlanId: string;
-  /** The app's plan, when this service type is the active one; else null. */
+  /** The app's plan, when this service type is the active one and the plan still
+   *  resolves; else null. */
   activeTypePlanId: string | null;
   nextUpcomingPlanId: string | null;
 }): boolean {
