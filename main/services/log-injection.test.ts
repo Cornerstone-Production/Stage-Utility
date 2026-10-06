@@ -118,6 +118,8 @@ const REQUEST_FACING = [
   "routes/client-log-routes.ts",
   "routes/context.ts",
   "routes/cue-routes.ts",
+  // Logs nothing: it answers a path with a redirect or hands the request on.
+  "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
   "routes/integration-routes.ts",

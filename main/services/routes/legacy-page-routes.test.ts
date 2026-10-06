@@ -14,6 +14,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 
 import { EARLY_ROUTE_MODULES } from "../remote-server.js";
+import { cleanUrlsMiddleware } from "./dev-clean-urls.js";
 
 let server: http.Server;
 let port = 0;
@@ -37,14 +38,26 @@ before(async () => {
 });
 after(() => new Promise<void>((r) => server.close(() => r())));
 
+interface Reply {
+  status: number;
+  location: string | undefined;
+  cacheControl: string | undefined;
+  body: string;
+}
+
 /** The request line goes out exactly as given, and a redirect is read, not followed. */
-function request(method: string, rawPath: string): Promise<{ status: number; location: string | undefined; body: string }> {
+function request(method: string, rawPath: string, atPort: number = port): Promise<Reply> {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port, path: rawPath, method }, (res) => {
+    const req = http.request({ host: "127.0.0.1", port: atPort, path: rawPath, method }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () =>
-        resolve({ status: res.statusCode ?? 0, location: res.headers.location, body: Buffer.concat(chunks).toString("utf8") }),
+        resolve({
+          status: res.statusCode ?? 0,
+          location: res.headers.location,
+          cacheControl: res.headers["cache-control"],
+          body: Buffer.concat(chunks).toString("utf8"),
+        }),
       );
     });
     req.on("error", reject);
@@ -79,8 +92,18 @@ describe("a /scriptview address redirects permanently to /servicecue", () => {
   });
 
   test("a percent-encoded path segment is passed through untouched", async () => {
-    const r = await request("GET", "/scriptview/cornerstone%20youth/full?plan=77");
-    assert.equal(r.location, "/servicecue/cornerstone%20youth/full?plan=77");
+    const r = await request("GET", "/scriptview/youth%20night/full?plan=77");
+    assert.equal(r.location, "/servicecue/youth%20night/full?plan=77");
+  });
+
+  test("is never cached: a browser that followed it must ask again next time", async () => {
+    // A bare 301 is cached indefinitely. A kiosk that followed one and is later
+    // pointed at a build with no /servicecue would be sent to a page that is gone.
+    for (const [method, p] of [["GET", "/scriptview/weekend/audio?text=150"], ["HEAD", "/scriptview"]] as const) {
+      const r = await request(method, p);
+      assert.equal(r.status, 301);
+      assert.equal(r.cacheControl, "no-store", `${method} ${p} is cacheable`);
+    }
   });
 
   test("HEAD is redirected too", async () => {
@@ -102,5 +125,41 @@ describe("nothing else is redirected", () => {
   test("a POST to the old address is not turned into a GET", async () => {
     const r = await request("POST", "/scriptview/weekend/audio");
     assert.equal(r.body, "fell through");
+  });
+});
+
+// The Vite dev server answers the same addresses through cleanUrlsMiddleware. The
+// config file itself cannot be loaded outside Vite (it reads __dirname), so what
+// is driven here is the middleware it installs, on a real HTTP server; the one
+// line in vite.config.ts that installs it is not covered by a test.
+describe("the dev server's middleware gives the same answer", () => {
+  let dev: http.Server;
+  let devPort = 0;
+  before(async () => {
+    dev = http.createServer((req, res) => {
+      cleanUrlsMiddleware(req, res, () => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end(`next:${req.url}`);
+      });
+    });
+    await new Promise<void>((r) => dev.listen(0, "127.0.0.1", r));
+    devPort = (dev.address() as AddressInfo).port;
+  });
+  after(() => new Promise<void>((r) => dev.close(() => r())));
+
+  test("a /scriptview address is a 301 to /servicecue, query kept, and never cached", async () => {
+    const r = await request("GET", "/scriptview/weekend/audio?text=150&plan=1", devPort);
+    assert.equal(r.status, 301);
+    assert.equal(r.location, "/servicecue/weekend/audio?text=150&plan=1");
+    assert.equal(r.cacheControl, "no-store");
+  });
+
+  test("the new address and the displays are routed to their documents, not redirected", async () => {
+    assert.equal((await request("GET", "/servicecue/weekend/audio?text=150", devPort)).body, "next:/app.html");
+    assert.equal((await request("GET", "/display-1", devPort)).body, "next:/index.html");
+  });
+
+  test("a POST to the old address is not redirected", async () => {
+    assert.equal((await request("POST", "/scriptview", devPort)).status, 200);
   });
 });

@@ -4,7 +4,7 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { isOperatorPath, legacyPageRedirect } from "./main/services/routes/operator-paths";
+import { cleanUrlsMiddleware } from "./main/services/routes/dev-clean-urls";
 import { serverPort } from "./main/services/server-port";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
@@ -20,23 +20,9 @@ function cleanUrls(): PluginOption {
   return {
     name: "clean-urls",
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const raw = req.url ?? "";
-        const q = raw.indexOf("?");
-        const pathname = q === -1 ? raw : raw.slice(0, q);
-        const moved = req.method === "GET" || req.method === "HEAD" ? legacyPageRedirect(pathname, q === -1 ? "" : raw.slice(q)) : null;
-        if (moved !== null) {
-          res.writeHead(301, { Location: moved });
-          res.end();
-          return;
-        }
-        if (isOperatorPath(pathname)) {
-          req.url = "/app.html";
-        } else if (/^\/(display|preview)-[^/]+\/?$/.test(pathname)) {
-          req.url = "/index.html";
-        }
-        next();
-      });
+      // The middleware lives in main/ so a test can drive it: vite.config.ts cannot
+      // be imported outside Vite (it reads __dirname).
+      server.middlewares.use(cleanUrlsMiddleware);
     },
   };
 }
