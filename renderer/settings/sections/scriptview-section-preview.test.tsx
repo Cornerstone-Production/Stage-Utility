@@ -52,6 +52,7 @@ const RUNDOWN: ScriptViewRundownDTO = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 function stubFetch() {
