@@ -37,17 +37,23 @@ const UPCOMING_DAYS = 60;
  * while an operator moves between editors does not re-ask for a list the server
  * would answer from memory anyway.
  */
-export function useUpcomingPlans() {
-  const { data } = useQuery({
+export function useUpcomingPlans({ enabled = true }: { enabled?: boolean } = {}) {
+  const { data, error } = useQuery({
     queryKey: ["plans:upcoming", UPCOMING_DAYS],
     queryFn: () => ipc<UpcomingPlansDTO>("plans:upcoming", { days: UPCOMING_DAYS }),
     staleTime: 5 * 60 * 1000,
+    // Off while Planning Center is not connected: the list would only come back
+    // empty or unavailable, which is a state, not something to ask for.
+    enabled,
   });
   return {
     plans: data?.plans ?? [],
     unavailable: data?.unavailable ?? null,
     /** Undefined until the first answer lands; the arrows stay inert until then. */
     loaded: data !== undefined,
+    /** The read itself failed (as opposed to `unavailable`, which is a 200 saying
+     *  Planning Center could not be reached). Null while it has not failed. */
+    error: error ?? null,
   };
 }
 

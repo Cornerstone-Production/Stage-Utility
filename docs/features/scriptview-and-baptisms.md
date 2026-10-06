@@ -29,7 +29,7 @@ you define once looks identical wherever it shows up:
 
 | | Follows | Columns from |
 |---|---|---|
-| **The `/scriptview` pages** | the service type in the URL | the layout in the URL |
+| **The `/scriptview` pages** | the service type in the URL, on the plan the app follows unless `?plan=` says otherwise | the layout in the URL |
 | **A Script view** on a display | the app's active plan | its **Columns** setting |
 | **An Embedded view object** inside a custom layout | the app's active plan | the Script view it points at |
 
@@ -133,6 +133,44 @@ fifteen minutes, including new custom item types.
 this layout shows — "Lighting has a cue here" is useful to a stage manager without
 showing the cue text. Colours are assigned from the category name and are not
 configurable, since Planning Center has no colour for a note category.
+
+## Plan switcher
+
+A ScriptView page opens on the plan the app follows for its service type: the
+app's own plan when the page is for the type the app is on, otherwise the
+nearest upcoming one. The header carries **‹ plan ▾ ›** after the plan's title to
+look at another plan of the same type. The arrows step through that type's plans
+in date order and stop at the ends; the menu lists them with their dates and
+times, the one on screen selected and the followed one marked. It is the same
+list, and the same stepping, as the plan switcher in the slots editor, so it
+covers the next two months and the last week.
+
+It moves **this page only**. The Plan page, and so every display, stays on the
+plan the app follows; nothing here changes it.
+
+A badge says which you are looking at. **Following** (green) is the plan the page
+would open on with no choice made. **Browsing** (amber) is any other plan, with a
+**Back to live** button beside it. The live highlight, the Live badge and the
+Remaining and Over timer belong to the followed plan alone; a plan you are
+browsing shows its own **Starts in** countdown instead, and none once it has
+started. Planning Center's live position never moves a page that is browsing.
+
+The top of the menu takes a pasted Planning Center plan link
+(`…/plans/<id>`, with or without a trailing `/live` or `/edit`): Enter opens that
+plan. A link to a plan of another service type opens that type's page on it.
+Planning Center's plan address names no service type, so which type owns a plan is
+found in the plan list above; a plan of another type that is older than a week, or
+further out than the list reaches, is not found there and is reported as not being
+one of this type's plans. The long form, `…/service_types/<id>/plans/<id>`, names
+its type and always resolves.
+
+The choice is kept in the address as `?plan=<id>`, so a refresh or a copied link
+stays on the plan, and so does changing the layout; no `?plan=` means following. A plan the page cannot find
+says so in place of the rundown, with Back to live in reach, and a
+[scriptview] line on [`/log`](../ops/updates-and-logs.md) names it. A plan list that
+could not be read says so under the header and leaves the arrows off; the page
+keeps following its own plan. With Planning Center not connected the switcher is
+absent.
 
 ## Text size
 

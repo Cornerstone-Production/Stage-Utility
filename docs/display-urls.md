@@ -129,7 +129,9 @@ heading and no sidebar or header, for a stage tablet or a producer's second
 screen, and each rundown under it, `/scriptview/<service type>/<layout>`, is the
 whole window. The operator's copy of the launcher is `/scriptview/manage`, in the
 sidebar under Content, with the app's usual chrome; `/scriptview/presets`, which
-edits layouts, keeps the chrome too.
+edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
+of that type without changing the one the app follows; see
+[Plan switcher](features/scriptview-and-baptisms.md#plan-switcher).
 
 ## Polling transport
 
