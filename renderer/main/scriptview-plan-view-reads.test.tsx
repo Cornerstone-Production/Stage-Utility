@@ -53,6 +53,7 @@ const RUNDOWN: ScriptViewRundownDTO = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 type Failing = "types" | "layouts" | "roles" | "state" | null;

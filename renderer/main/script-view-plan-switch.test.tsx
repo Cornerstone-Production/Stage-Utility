@@ -55,6 +55,7 @@ const RUNDOWN_P1 = {
   serviceTimes: [],
   timeZone: null,
   isActivePlan: false,
+  isDefaultPlan: true,
 };
 
 const STATE_P1 = { serviceTypeId: "st1", planId: "p1", pcoConfigured: true };

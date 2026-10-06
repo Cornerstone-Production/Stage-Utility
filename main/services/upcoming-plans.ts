@@ -122,3 +122,23 @@ export function sameIds(a: readonly string[], b: readonly string[]): boolean {
 export function switcherTypes(types: ServiceTypeDTO[], allowed: string[]): ServiceTypeDTO[] {
   return allowed.length === 0 ? types : types.filter((t) => allowed.includes(t.id));
 }
+
+/**
+ * Is the rundown just resolved the plan a ScriptView would get with no `planId`?
+ *
+ * With no `planId` it always is. With one, it is only when that plan IS the
+ * default: the app's own plan when this is the active service type, else the
+ * nearest upcoming plan. A page showing a plan the operator browsed to says
+ * "Following" or "Browsing" from this, so a step that lands back on the
+ * followed plan reads as following without the page re-deriving the rule.
+ */
+export function isDefaultRundownPlan(p: {
+  requestedPlanId: string | null;
+  resolvedPlanId: string;
+  /** The app's plan, when this service type is the active one; else null. */
+  activeTypePlanId: string | null;
+  nextUpcomingPlanId: string | null;
+}): boolean {
+  if (!p.requestedPlanId) return true;
+  return p.resolvedPlanId === (p.activeTypePlanId ?? p.nextUpcomingPlanId);
+}
