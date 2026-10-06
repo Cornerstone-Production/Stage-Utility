@@ -47,45 +47,45 @@ describe("retired layout objects convert to their own replacement", () => {
       const spec = LAYOUT_OBJECTS[t];
       const retired = spec.retired;
       assert.ok(retired, `${t} must declare retired`);
-      const converted = retired!.convert(spec.config(), { scriptViewId: "v1" });
+      const converted = retired!.convert(spec.config(), { serviceCueId: "v1" });
       assert.equal(converted.type, retired!.replacedBy, `${t} must convert to ${retired!.replacedBy}`);
     });
   }
 
   test("service-order picks the given ServiceCue view id", () => {
     const retired = LAYOUT_OBJECTS["service-order"].retired!;
-    const converted = retired.convert(LAYOUT_OBJECTS["service-order"].config(), { scriptViewId: "v1" });
+    const converted = retired.convert(LAYOUT_OBJECTS["service-order"].config(), { serviceCueId: "v1" });
     assert.equal(converted.type, "view-embed");
     assert.equal((converted as { viewId: string | null }).viewId, "v1");
   });
 
   test("service-order leaves viewId null when ambiguous", () => {
     const retired = LAYOUT_OBJECTS["service-order"].retired!;
-    const converted = retired.convert(LAYOUT_OBJECTS["service-order"].config(), { scriptViewId: null });
+    const converted = retired.convert(LAYOUT_OBJECTS["service-order"].config(), { serviceCueId: null });
     assert.equal((converted as { viewId: string | null }).viewId, null);
   });
 
   test("home-recording-obs converts with recorder 'obs'", () => {
     const retired = LAYOUT_OBJECTS["home-recording-obs"].retired!;
-    const converted = retired.convert(LAYOUT_OBJECTS["home-recording-obs"].config(), { scriptViewId: null });
+    const converted = retired.convert(LAYOUT_OBJECTS["home-recording-obs"].config(), { serviceCueId: null });
     assert.equal((converted as { recorder?: string }).recorder, "obs");
   });
 
   test("home-recording-reaper converts with recorder 'reaper'", () => {
     const retired = LAYOUT_OBJECTS["home-recording-reaper"].retired!;
-    const converted = retired.convert(LAYOUT_OBJECTS["home-recording-reaper"].config(), { scriptViewId: null });
+    const converted = retired.convert(LAYOUT_OBJECTS["home-recording-reaper"].config(), { serviceCueId: null });
     assert.equal((converted as { recorder?: string }).recorder, "reaper");
   });
 
   test("home-streaming-resi converts with platform 'resi'", () => {
     const retired = LAYOUT_OBJECTS["home-streaming-resi"].retired!;
-    const converted = retired.convert(LAYOUT_OBJECTS["home-streaming-resi"].config(), { scriptViewId: null });
+    const converted = retired.convert(LAYOUT_OBJECTS["home-streaming-resi"].config(), { serviceCueId: null });
     assert.equal((converted as { platform?: string }).platform, "resi");
   });
 
   test("home-streaming-youtube converts with platform 'youtube'", () => {
     const retired = LAYOUT_OBJECTS["home-streaming-youtube"].retired!;
-    const converted = retired.convert(LAYOUT_OBJECTS["home-streaming-youtube"].config(), { scriptViewId: null });
+    const converted = retired.convert(LAYOUT_OBJECTS["home-streaming-youtube"].config(), { serviceCueId: null });
     assert.equal((converted as { platform?: string }).platform, "youtube");
   });
 });

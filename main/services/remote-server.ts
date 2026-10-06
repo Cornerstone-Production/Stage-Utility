@@ -33,6 +33,7 @@ import { getUserDataPath } from "./app-paths.js";
 import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
+import { legacyApiRoutes } from "./routes/legacy-api-routes.js";
 import { legacyPageRoutes } from "./routes/legacy-page-routes.js";
 import { logRoutes } from "./routes/log-routes.js";
 
@@ -70,7 +71,7 @@ import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
 import { proxyRoutes } from "./routes/proxy-routes.js";
 import { stateRoutes } from "./routes/state-routes.js";
-import { scriptviewRoutes } from "./routes/scriptview-routes.js";
+import { serviceCueRoutes } from "./routes/servicecue-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
 import { planRoutes } from "./routes/plan-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
@@ -109,7 +110,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   archiveRoutes,
   proxyRoutes,
   stateRoutes,
-  scriptviewRoutes,
+  serviceCueRoutes,
   viewRoutes,
   planRoutes,
   integrationRoutes,
@@ -142,10 +143,11 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * `/video/<feedId>/whep|whip|<file>` starts with /api/, so the static-build
  * arm below would serve the SPA shell for every one of them.
  *
- * legacyPageRoutes is first: a moved page (/scriptview…) is redirected before
- * anything else looks at it, so no later module is asked about the old path.
+ * legacyPageRoutes and legacyApiRoutes are first: a moved page or API path
+ * (/scriptview…, /api/scriptview…) is redirected before anything else looks at
+ * it, so no later module is asked about the old path.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, logRoutes, videoProxyRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, legacyApiRoutes, logRoutes, videoProxyRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged

@@ -16,7 +16,7 @@ for a body or query the caller got wrong, `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
-`/api/team-positions` and the two `/api/scriptview` reads. A `500` means this app
+`/api/team-positions` and the two `/api/servicecue` reads. A `500` means this app
 broke, and only that.
 
 ## What is protected, and what is not
@@ -78,7 +78,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 |--------|------|---------|
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
@@ -372,12 +372,16 @@ Two things to know:
 **ServiceCue**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone). With no `planId`: the app's plan for the active service type, else the nearest upcoming one. `isDefaultPlan` says whether the plan returned is that one |
-| GET / POST | `/api/scriptview/layouts` | List / save global layouts |
-| GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
-| GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |
-| GET / POST | `/api/scriptview/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |
-| POST | `/api/scriptview/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
+| GET | `/api/servicecue/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone). With no `planId`: the app's plan for the active service type, else the nearest upcoming one. `isDefaultPlan` says whether the plan returned is that one |
+| GET / POST | `/api/servicecue/layouts` | List / save global layouts |
+| GET / POST | `/api/servicecue/config` | Get / set which service types show on the landing |
+| GET | `/api/servicecue/note-categories?serviceTypeId=…` | Note categories for the column picker |
+| GET / POST | `/api/servicecue/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |
+| POST | `/api/servicecue/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
+
+Requests to `/api/scriptview/…` answer `308` with the same path and query under
+`/api/servicecue/…`, keeping the method and body, so a script written against the
+old paths still works once its client follows redirects.
 
 **Patch sheet** — see [Patch sheet](../patch-sheet/README.md).
 

@@ -41,7 +41,7 @@ test("the export dialog opens on the type the machine is on now, not the one the
       statusText: "OK",
       json: async () => ({
         serviceTypeName: "Youth",
-        views: 1, boards: 1, rows: 3, patchVariants: [], presets: 0, scriptviewLayouts: 0,
+        views: 1, boards: 1, rows: 3, patchVariants: [], presets: 0, serviceCueLayouts: 0,
       }),
     };
   }) as unknown as typeof fetch;

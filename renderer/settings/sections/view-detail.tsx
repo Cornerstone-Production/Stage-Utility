@@ -85,19 +85,19 @@ export function ViewDetail({
   // The ServiceCue column presets, for a "script" View's Columns picker. Fetched
   // here rather than threaded through SectionProps: only this branch needs them,
   // and they change when someone edits a preset in the ServiceCue section.
-  const [scriptViewLayouts, setScriptViewLayouts] = useState<ScriptViewLayout[]>([]);
+  const [serviceCueLayouts, setServiceCueLayouts] = useState<ServiceCueLayout[]>([]);
   // A failed read is not "no column sets". Drawn as one, the picker offered only
   // All columns and labelled this view's own set "not found".
-  const { failed, fail, clear } = useFailedReads<"layouts">("scriptview");
+  const { failed, fail, clear } = useFailedReads<"layouts">("servicecue");
   useEffect(() => {
     if (view.kind !== "script") return;
     // Cancelled when the kind changes, so a slow failure from a read that no
     // longer applies cannot replace a picker a later read has filled.
     let cancelled = false;
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+    invoke<ServiceCueLayout[]>("servicecue:listLayouts")
       .then((l) => {
         if (cancelled) return;
-        setScriptViewLayouts([...l].sort((a, b) => a.order - b.order));
+        setServiceCueLayouts([...l].sort((a, b) => a.order - b.order));
         clear("layouts");
       })
       .catch((err: unknown) => {
@@ -362,18 +362,18 @@ export function ViewDetail({
               <ErrorNote>Couldn't load the saved column sets, so this view's columns can't be changed right now.</ErrorNote>
             ) : (
               <Select
-                value={view.scriptViewLayoutId ?? ALL_COLUMNS}
+                value={view.serviceCueLayoutId ?? ALL_COLUMNS}
                 onValueChange={(v: string) =>
-                  void invoke("views:setScriptViewLayout", {
+                  void invoke("views:setServiceCueLayout", {
                     id: view.id,
-                    scriptViewLayoutId: v === ALL_COLUMNS ? null : v,
+                    serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
                   }).catch((e: unknown) => toast.error(`Could not change this view's columns: ${errorMessage(e)}`))
                 }
               >
                 <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
-                  {scriptViewLayouts.map((l) => (
+                  {serviceCueLayouts.map((l) => (
                     <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
                   ))}
                 </SelectContent>

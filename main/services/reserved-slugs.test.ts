@@ -42,7 +42,7 @@ describe("the reserved list covers every path the router handles", () => {
     // root-view.tsx now handles only the display picker and the kiosk outlet,
     // but if a page is ever added back there it must be reserved too.
     const src = readFileSync(ROOT_VIEW, "utf8");
-    // Matches `slug === "history"` and `parts[0] === "scriptview"`.
+    // Matches `slug === "history"` and `parts[0] === "servicecue"`.
     const compared = [...src.matchAll(/(?:slug|parts\[0\])\s*===\s*"([^"]*)"/g)].map((m) => m[1]);
     for (const slug of compared) {
       assert.ok(

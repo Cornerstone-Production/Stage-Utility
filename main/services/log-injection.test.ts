@@ -124,6 +124,10 @@ const REQUEST_FACING = [
   "routes/history-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
+  // Logs nothing: it redirects an API path and echoes the path and query into a
+  // Location header, which Node refuses to write if either carries a control
+  // character.
+  "routes/legacy-api-routes.ts",
   // Logs nothing: it reads the request path and query and echoes them into a
   // Location header, which Node refuses to write if either carries a control
   // character.
@@ -136,7 +140,7 @@ const REQUEST_FACING = [
   "routes/proxy-routes.ts",
   "routes/rosstalk-routes.ts",
   "routes/route-harness.ts",
-  "routes/scriptview-routes.ts",
+  "routes/servicecue-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
@@ -263,7 +267,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["resi-service.ts", DEVICE],
   ["rosstalk-manager.ts", DEVICE],
   ["scores-service.ts", DEVICE],
-  ["scriptview-layouts-store.ts", UNAUDITED],
   ["secrets.ts", UNAUDITED],
   ["sensource-service.ts", DEVICE],
   ["service-recorder.ts", UNAUDITED],
@@ -272,8 +275,15 @@ const NOT_SCANNED = new Map<string, string>([
     "logs two fixed sentences when the schedule becomes unknown or known again, and " +
       "interpolates nothing. Audited, not just excused.",
   ],
+  ["servicecue-layouts-store.ts", UNAUDITED],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
+  [
+    "store-file-adoption.ts",
+    "logs two fixed sentences about file names that are literals in the store " +
+      "declarations, never anything an HTTP request carries, plus an OS error message " +
+      "returned to boot. Audited, not just excused.",
+  ],
   ["stream-start-store.ts", UNAUDITED],
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],

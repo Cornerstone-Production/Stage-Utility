@@ -104,7 +104,7 @@ export interface LayoutObjectSpec {
      * recorder, two pick a platform, one points at a view by id. A single
      * generic conversion would have to special-case all three anyway.
      */
-    convert: (old: LayoutObjectConfig, ctx: { scriptViewId: string | null }) => LayoutObjectConfig;
+    convert: (old: LayoutObjectConfig, ctx: { serviceCueId: string | null }) => LayoutObjectConfig;
     /**
      * Extra caveat text shown under `why`, for a conversion that is not a
      * like-for-like swap. Only `service-order` has one today: the replacement
@@ -387,7 +387,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
         type: "view-embed",
         // Only auto-pick when there is no ambiguity; otherwise leave it for the
         // picker rather than guessing which view was meant.
-        viewId: ctx.scriptViewId,
+        viewId: ctx.serviceCueId,
         showHeader: false,
       }),
     },

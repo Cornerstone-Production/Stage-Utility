@@ -327,11 +327,11 @@ describe("the view kind", () => {
 
     const script = resolveScreen(input({
       state: stageState({
-        views: [{ id: "v1", name: "Script", kind: "script", scriptViewLayoutId: "sl1" }] as unknown as View[],
+        views: [{ id: "v1", name: "Script", kind: "script", serviceCueLayoutId: "sl1" }] as unknown as View[],
         resolvedByOutput: { "display-1": resolvedOutput({ kind: "script" }) },
       }),
     }));
-    assert.equal(script.k === "view" && script.view?.scriptViewLayoutId, "sl1");
+    assert.equal(script.k === "view" && script.view?.serviceCueLayoutId, "sl1");
   });
 
   test("the preview's own View wins over the routed one", () => {

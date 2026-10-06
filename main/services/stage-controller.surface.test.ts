@@ -252,11 +252,11 @@ describe("duplicating a view", () => {
   it("carries the ServiceCue layout the source was using", async () => {
     ctl.state.views = [
       ...ctl.state.views,
-      { id: "vs", name: "Script", kind: "script", createdAt: "", scriptViewLayoutId: "svl-1" },
+      { id: "vs", name: "Script", kind: "script", createdAt: "", serviceCueLayoutId: "svl-1" },
     ] as View[];
     await stageController.duplicateView("vs");
     const copy = ctl.state.views.find((v) => v.id !== "vs" && v.name.includes("Script"));
-    assert.equal(copy?.scriptViewLayoutId, "svl-1", "the copy lost its ServiceCue layout");
+    assert.equal(copy?.serviceCueLayoutId, "svl-1", "the copy lost its ServiceCue layout");
   });
 
   it("does NOT carry layoutRev", async () => {

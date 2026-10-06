@@ -109,7 +109,7 @@ export interface PlanItemsDTO {
  *  vary between them, so a name-based column rendered empty wherever that service type
  *  used a different word for the same thing. A role whose members are all absent is
  *  hidden instead. */
-export interface ScriptViewLayout {
+export interface ServiceCueLayout {
   id: string;
   name: string;
   order: number;
@@ -144,13 +144,13 @@ export interface ScriptViewLayout {
 
 /** ServiceCue-wide config: which PCO service types appear on the landing page
  *  (ordered). Empty = fall back to types that have layouts. */
-export interface ScriptViewConfig {
+export interface ServiceCueConfig {
   serviceTypeIds: string[];
 }
 
 /** The resolved rundown for a ServiceCue page: the chosen plan's items + columns,
  *  plus whether this service type is the one currently running live. */
-export interface ScriptViewRundownDTO {
+export interface ServiceCueRundownDTO {
   serviceTypeId: string;
   planId: string | null;
   planTitle: string | null;

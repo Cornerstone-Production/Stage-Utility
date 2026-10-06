@@ -53,7 +53,7 @@ export function isOperatorPath(pathname: string): boolean {
  * Page prefixes that moved, old to new. Displays and bookmarks point at the old
  * ones, so they are answered forever.
  *
- * /api/scriptview is NOT here: those are API paths, and they moved with the
+ * /api/servicecue is NOT here: those are API paths, and they moved with the
  * server and the renderer together.
  */
 export const MOVED_PAGE_PREFIXES: readonly (readonly [from: string, to: string])[] = [

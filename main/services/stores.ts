@@ -32,9 +32,9 @@ import "./saved-colors-store.js";
 import "./scores-store.js";
 import "./stream-start-store.js";
 import "./notes-store.js";
-import "./scriptview-config-store.js";
-import "./scriptview-layouts-store.js";
-import "./scriptview-roles-store.js";
+import "./servicecue-config-store.js";
+import "./servicecue-layouts-store.js";
+import "./servicecue-roles-store.js";
 import "./service-timeline-store.js";
 import "./kiosk-devices-store.js";
 import "./settings-store.js";
@@ -47,4 +47,4 @@ import "./video/seen-store.js";
 import "./views-store.js";
 import "./wireless-store.js";
 
-export { allStores, configFilenames, storesOfClass } from "./store-registry.js";
+export { allStores, configFilenames, renamedStores, storesOfClass } from "./store-registry.js";

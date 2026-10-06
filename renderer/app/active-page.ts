@@ -17,7 +17,7 @@
 //           context bar draws, see page-title.tsx
 //
 // A child route renders its own heading (the layout editor puts the view's name
-// in an editable field, a ServiceCue plan draws ScriptViewHeader), so the shell
+// in an editable field, a ServiceCue plan draws ServiceCueHeader), so the shell
 // adding the section's name above it would be a second, wronger title.
 
 import { screensListViews } from "@main/services/home-view";

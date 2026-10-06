@@ -245,7 +245,7 @@ export interface View {
    * column set is defined once and a display and a browser tab cannot disagree
    * about it.
    */
-  scriptViewLayoutId?: string | null;
+  serviceCueLayoutId?: string | null;
   /**
    * Which of the org's calendars a "calendar" View draws. ABSENT OR EMPTY MEANS
    * EVERY CALENDAR.

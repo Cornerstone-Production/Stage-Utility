@@ -15,7 +15,7 @@ import { collectRefsFrom } from "./view-refs.js";
 import { viewsStore } from "./views-store.js";
 import { slotsStore } from "./slots-store.js";
 import { notesStore } from "./notes-store.js";
-import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
+import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { settingsStore } from "./settings-store.js";
@@ -39,7 +39,7 @@ export interface ViewBundleParts {
   views: View[];
   refs: ViewRefs;
   notes: Record<string, unknown>;
-  scriptviewLayouts: ViewBundle["sideData"]["scriptviewLayouts"];
+  serviceCueLayouts: ViewBundle["sideData"]["serviceCueLayouts"];
   targets: ViewBundle["targets"];
   images: Record<string, string>;
   missingImages: string[];
@@ -70,9 +70,9 @@ export async function collectBundleParts(
     if (n && Object.keys(n).length) notes[id] = n;
   }
 
-  const wanted = new Set(views.map((v) => v.scriptViewLayoutId).filter((id) => !!id));
-  const scriptviewLayouts = wanted.size
-    ? (await scriptViewLayoutsStore.load()).filter((l) => wanted.has(l.id))
+  const wanted = new Set(views.map((v) => v.serviceCueLayoutId).filter((id) => !!id));
+  const serviceCueLayouts = wanted.size
+    ? (await serviceCueLayoutsStore.load()).filter((l) => wanted.has(l.id))
     : [];
 
   const osc = (await oscStore.load()).filter((t) => refs.oscTargetIds.includes(t.id));
@@ -89,7 +89,7 @@ export async function collectBundleParts(
     else missingImages.push(ref);
   }
 
-  return { views, refs, notes, scriptviewLayouts, targets: { osc, rosstalk }, images, missingImages };
+  return { views, refs, notes, serviceCueLayouts, targets: { osc, rosstalk }, images, missingImages };
 }
 
 /**
@@ -149,7 +149,7 @@ export async function buildViewBundle(rootId: string): Promise<ViewBundle> {
   return {
     ...(await bundleEnvelope()),
     views: parts.views,
-    sideData: { slots, notes: parts.notes, scriptviewLayouts: parts.scriptviewLayouts },
+    sideData: { slots, notes: parts.notes, serviceCueLayouts: parts.serviceCueLayouts },
     targets: parts.targets,
     images: parts.images,
     ...(parts.missingImages.length ? { missingImages: parts.missingImages } : {}),
