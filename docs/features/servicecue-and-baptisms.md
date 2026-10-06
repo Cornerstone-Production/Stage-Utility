@@ -210,7 +210,10 @@ its id, so a booth laptop at 100% does not resize a display across the room.
 A display has no control for it. Set its size from its link with `?text=<percent>`
 (`/display-1?text=150`, held to the same 50–300 range): the size applies at once
 and is remembered, so the link only has to be opened with it once. `?text=` also
-works on a ServiceCue page, and wins over what that page remembered. An Embedded
+works on a ServiceCue page, and wins over what that page remembered; a size
+then set with **A−** or **A+** is written back into the address's `?text=`
+(replacing it, with no history entry, and leaving every other parameter alone),
+so a refresh keeps it. An address with no `?text=` is left without one. An Embedded
 view object inside a layout takes neither; it keeps its own font size.
 
 ## On different screens

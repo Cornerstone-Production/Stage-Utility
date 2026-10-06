@@ -200,3 +200,41 @@ test("the page also starts from ?text=, and its control moves on from there", as
     f.restore();
   }
 });
+
+test("a size set from the page's control is written back to ?text=, so a refresh keeps it", async () => {
+  window.history.replaceState({ keep: "me" }, "", "/servicecue/weekend/all-columns?plan=p9&text=150#top");
+  const entries = window.history.length;
+  const f = stubFetch();
+  try {
+    await mountPage();
+    assert.equal(zoom(), "1.5");
+    await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
+    assert.equal(zoom(), "1.6");
+    assert.equal(
+      window.location.search + window.location.hash,
+      "?plan=p9&text=160#top",
+      "the address still says 150, so a refresh would start from it",
+    );
+    assert.equal(window.history.length, entries, "a press added a history entry");
+    assert.deepEqual(window.history.state, { keep: "me" }, "the history state was replaced");
+    // A refresh: the page mounts again on the same address.
+    cleanup();
+    await mountPage();
+    assert.equal(zoom(), "1.6");
+  } finally {
+    f.restore();
+  }
+});
+
+test("the page's control does not add ?text= to an address that had none", async () => {
+  window.history.replaceState({}, "", "/servicecue/weekend/all-columns?plan=p9");
+  const f = stubFetch();
+  try {
+    await mountPage();
+    await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
+    assert.equal(zoom(), "1.1");
+    assert.equal(window.location.search, "?plan=p9");
+  } finally {
+    f.restore();
+  }
+});

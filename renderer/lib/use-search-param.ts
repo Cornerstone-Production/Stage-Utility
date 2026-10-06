@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 
 interface RouterHandle {
   state: { location: { pathname: string; search: Record<string, unknown> } };
-  navigate: (opts: { to: string; search: Record<string, unknown>; replace?: boolean }) => unknown;
+  navigate: (opts: { to: string; search: Record<string, unknown>; replace?: boolean; hash?: true }) => unknown;
   subscribe: (event: "onResolved", fn: () => void) => () => void;
 }
 
@@ -70,6 +70,35 @@ export function useSearchParam(name: string): [string | null, (value: string | n
   );
 
   return [value, set];
+}
+
+/**
+ * Rewrites one param of the address in place — only when the address already
+ * carries it — as a replace, so Back does not step through the old value. Every
+ * other param and the hash stay as they are.
+ *
+ * Through the router when there is one: a write behind its back would leave
+ * `router.state.location.search` holding the old value, and the next
+ * `navigate` that copies it (see `useSearchParam`'s setter) would put the old
+ * value straight back. With no router above, the address is rewritten directly.
+ */
+export function useRewriteSearchParam(): (name: string, value: string) => void {
+  const router = useRouterHandle();
+  return useCallback(
+    (name, value) => {
+      if (router) {
+        if (!(name in router.state.location.search)) return;
+        const search = { ...router.state.location.search, [name]: forSearch(value) };
+        void router.navigate({ to: router.state.location.pathname, search, replace: true, hash: true });
+        return;
+      }
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has(name)) return;
+      url.searchParams.set(name, value);
+      window.history.replaceState(window.history.state, "", url);
+    },
+    [router],
+  );
 }
 
 /** Go to another path, keeping the router's own state (no reload). With no
