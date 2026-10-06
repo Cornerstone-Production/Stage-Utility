@@ -27,6 +27,7 @@ const ctl = stageController as unknown as {
   listPlans: (serviceTypeId: string) => Promise<unknown[]>;
   state: Record<string, unknown>;
   upcomingCache: unknown;
+  plansOutage: { forget: () => void };
 };
 
 const NOW = Date.parse("2026-10-06T15:00:00Z");
@@ -39,6 +40,7 @@ beforeEach(() => {
   reads = [];
   failing = new Set();
   ctl.upcomingCache = null;
+  ctl.plansOutage.forget();
   ctl.state = { ...ctl.state, allowedServiceTypeIds: [], planId: null };
   ctl.listServiceTypes = async () => [
     { id: "1", name: "Sunday" },
@@ -81,6 +83,31 @@ describe("getUpcomingPlanList caching", () => {
     failing.clear();
     const later = await listAt(t, UPCOMING_PARTIAL_CACHE_MS + 1);
     assert.deepEqual(later.plans.map((p) => p.serviceTypeId).sort(), ["1", "2"], "the blipped type did not come back");
+  });
+
+  it("says a type that stays down once per outage, and says when it is back", async (t) => {
+    // A partial list is reused for thirty seconds, so a type that is down for ten
+    // minutes is read on about twenty refreshes. The line used to come out on each.
+    const lines = captureConsole(t, "log", "warn");
+    const incomplete = () => lines.filter((l) => l.includes("[plans] upcoming list incomplete"));
+    failing.add("2");
+    for (let i = 0; i < 4; i++) await listAt(t, i * (UPCOMING_PARTIAL_CACHE_MS + 1));
+    assert.equal(reads.filter((id) => id === "2").length, 4, "the list was reused instead of read each time, so this proves nothing");
+    assert.equal(incomplete().length, 1, `one outage, one line: ${JSON.stringify(incomplete())}`);
+    assert.match(incomplete()[0]!, /Wednesday could not be read — Planning Center returned 503/);
+
+    failing.clear();
+    const lastFail = 3 * (UPCOMING_PARTIAL_CACHE_MS + 1);
+    await listAt(t, lastFail + UPCOMING_PARTIAL_CACHE_MS + 1);
+    const back = () => lines.filter((l) => l.includes("Wednesday can be read again"));
+    assert.equal(back().length, 0, "recovery was announced inside the settle window, where a flapping type would repeat it");
+    await listAt(t, lastFail + UPCOMING_PARTIAL_CACHE_MS + 1 + UPCOMING_CACHE_MS + 1);
+    assert.equal(back().length, 1, `the recovery line: ${JSON.stringify(lines)}`);
+
+    // And the next outage is news again.
+    failing.add("2");
+    await listAt(t, lastFail + 10 * UPCOMING_CACHE_MS);
+    assert.equal(incomplete().length, 2, "a second outage after a recovery must be logged");
   });
 
   it("still labels a plan from the partial list", async (t) => {

@@ -973,13 +973,29 @@ export class StageController {
     const failures: string[] = [];
     const perType = await Promise.all(
       types.map(async (t) => {
+        const key = `upcoming:${t.id}`;
         try {
-          return toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const rows = toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const recovered = this.plansOutage.ok(key, now);
+          if (recovered.log) {
+            console.log(`[plans] upcoming list: ${scrub(t.name)} can be read again${scrub(recovered.note)}`);
+          }
+          return rows;
         } catch (err) {
           // Returned to the caller as a shortfall in the list, not swallowed: a
           // total failure below becomes `unavailable`, and a partial one is
           // logged so an operator with a missing type has something to read.
-          failures.push(`${t.name}: ${errorMessage(err)}`);
+          const reason = errorMessage(err);
+          failures.push(`${t.name}: ${reason}`);
+          // Once per outage per type, not once per refresh: a partial list is
+          // reused for only thirty seconds, so a type that stays down would
+          // otherwise repeat this line every thirty seconds until it came back.
+          const decision = this.plansOutage.fail(key, reason, now);
+          if (decision.log) {
+            console.warn(
+              `[plans] upcoming list incomplete: ${scrub(t.name)} could not be read — ${scrub(reason)}${scrub(decision.note)}`,
+            );
+          }
           return [] as UpcomingPlan[];
         }
       }),
@@ -1000,11 +1016,6 @@ export class StageController {
     console.log(
       `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
     );
-    if (failures.length > 0) {
-      console.warn(
-        `[plans] upcoming list incomplete: ${scrub(failures.length)} of ${scrub(types.length)} types could not be read — ${scrub(failures.join("; "))}`,
-      );
-    }
     return { plans, cacheAgeMs: 0 };
   }
 
