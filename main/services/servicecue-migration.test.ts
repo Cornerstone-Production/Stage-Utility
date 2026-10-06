@@ -256,22 +256,31 @@ describe("restoring a backup taken before the rename", () => {
     }
   });
 
-  test("a backup listing both spellings restores the new one", async () => {
-    const log = captureLog();
-    try {
-      await configSnapshot.apply(
-        oldBackup({
-          "scriptview-layouts.json": [{ id: "stale", name: "Stale", columns: [] }],
-          "servicecue-layouts.json": LAYOUTS,
-        }),
+  // Both key orders, because the restore walks the bundle's keys in the order the
+  // file lists them: with the old key first the new one is written last and wins by
+  // accident, and only the new key first exposes a restore that lets the old one
+  // overwrite it.
+  for (const order of ["old key first", "new key first"] as const) {
+    test(`a backup listing both spellings restores the new one (${order})`, async () => {
+      const stale = [{ id: "stale", name: "Stale", columns: [] }];
+      const files =
+        order === "old key first"
+          ? { "scriptview-layouts.json": stale, "servicecue-layouts.json": LAYOUTS }
+          : { "servicecue-layouts.json": LAYOUTS, "scriptview-layouts.json": stale };
+      const log = captureLog();
+      try {
+        await configSnapshot.apply(oldBackup(files));
+      } finally {
+        log.done();
+      }
+      assert.deepEqual(JSON.parse(await read("servicecue-layouts.json")), LAYOUTS);
+      assert.equal(await has("scriptview-layouts.json"), false);
+      assert.ok(
+        log.lines.some((l) => l.includes("lists both scriptview-layouts.json and servicecue-layouts.json")),
+        JSON.stringify(log.lines),
       );
-    } finally {
-      log.done();
-    }
-    assert.deepEqual(JSON.parse(await read("servicecue-layouts.json")), LAYOUTS);
-    assert.equal(await has("scriptview-layouts.json"), false);
-    assert.ok(log.lines.some((l) => l.includes("lists both scriptview-layouts.json and servicecue-layouts.json")), JSON.stringify(log.lines));
-  });
+    });
+  }
 
   test("a backup taken after the rename round trips: build carries the new names", async () => {
     await put("servicecue-layouts.json", LAYOUTS);
