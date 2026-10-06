@@ -21,7 +21,7 @@ import { useDisplayPresenceStatus } from "./use-display-presence";
 import { useObsStatus } from "./use-obs-state";
 import { useResiStatus, useYouTubeStatus } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
-import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
+import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../app/recording-status";
 import { usePvpState } from "./use-pvp-state";
 import { useReaperStatus } from "./use-reaper-state";
 import { useScoresStatus } from "./use-scores-state";
@@ -792,8 +792,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // names streamers() gives them. "Streaming" folds all three into one word,
     // so it waits for all three: Offline or Off air on two answers is a claim
     // about a third that may be live. Live itself is true on one answer.
-    const answered: Record<string, boolean> = { Resi: ctx.resiKnown, YouTube: ctx.youtubeKnown, OBS: ctx.obsKnown };
-    const known = chosen.every((x) => answered[x.name] ?? false);
+    const answered: Record<StreamerName, boolean> = { Resi: ctx.resiKnown, YouTube: ctx.youtubeKnown, OBS: ctx.obsKnown };
+    const known = chosen.every((x) => answered[x.name]);
     const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
     const live = ind.state === "live";
     // A scheduled broadcast the clock has passed with nothing going out. Off
