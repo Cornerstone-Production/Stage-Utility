@@ -407,6 +407,53 @@ test("a slow but steady download finishes: only a stall counts, not the total ti
   assert.equal(result.ok, true, result.ok ? "" : result.reason);
 });
 
+test("a download that returns leaves neither watchdog timer running, on success or failure", async () => {
+  // The ceiling timer is an hour long. If stop() is skipped it is the only thing
+  // holding the process open, which showed up as the suite HANGING rather than
+  // failing. Counting the live timers turns that into an assertion.
+  const live = new Set<NodeJS.Timeout>();
+  const timers = {
+    setTimeout: (fn: () => void, ms: number): NodeJS.Timeout => {
+      const handle: NodeJS.Timeout = setTimeout(() => {
+        live.delete(handle);
+        fn();
+      }, ms);
+      live.add(handle);
+      return handle;
+    },
+    clearTimeout: (handle: NodeJS.Timeout): void => {
+      live.delete(handle);
+      clearTimeout(handle);
+    },
+  };
+
+  await resetRelayDir();
+  const { archivePath, sha256 } = await buildArchive(path.join(TMP, "src-timers"), "mediamtx-timers.tar.gz");
+  const bytes = await fs.readFile(archivePath);
+  const assets = new Map([[KEY, asset("mediamtx-timers.tar.gz", sha256)]]);
+
+  try {
+    const ok = await ensureBinary({
+      assets,
+      fetchImpl: slowFetch(bytes, { pieces: 3, gapMs: 5 }),
+      downloadTimeouts: { idleMs: 5_000, totalMs: 3_600_000, timers },
+    });
+    assert.equal(ok.ok, true, ok.ok ? "" : ok.reason);
+    assert.equal(live.size, 0, `a finished download left ${live.size} watchdog timer(s) running`);
+
+    await resetRelayDir();
+    const failed = await ensureBinary({
+      assets: new Map([[KEY, asset("mediamtx-timers-stall.tar.gz", "d".repeat(64))]]),
+      fetchImpl: slowFetch(bytes, { pieces: 3, gapMs: 5, stallAfter: 1 }),
+      downloadTimeouts: { idleMs: 100, totalMs: 3_600_000, timers },
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(live.size, 0, `an abandoned download left ${live.size} watchdog timer(s) running`);
+  } finally {
+    for (const handle of live) clearTimeout(handle); // a failing run must not hold the process either
+  }
+});
+
 test("a download that goes quiet is abandoned, and no .part is left", { timeout: 5000 }, async () => {
   await resetRelayDir();
   const downloadsDir = path.join(relayDir(), "downloads");

@@ -17,7 +17,6 @@ import { promisify } from "node:util";
 
 import { getUserDataPath } from "../app-paths.js";
 import { errorMessage } from "../errors.js";
-import { cleared } from "../timers.js";
 import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
 
 const execFileAsync = promisify(execFile);
@@ -35,28 +34,45 @@ const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
  *  idle: MAX_DOWNLOAD_BYTES bounds the size, this bounds the time. */
 const DOWNLOAD_TOTAL_TIMEOUT_MS = 60 * 60 * 1000;
 
+/** The timer functions the watchdog uses, injectable so a test can see which
+ *  timers are live. */
+interface WatchdogTimers {
+  setTimeout: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeout: (timer: NodeJS.Timeout) => void;
+}
+
 interface DownloadTimeouts {
   idleMs: number;
   totalMs: number;
+  /** Replaces the global timer functions; for tests. */
+  timers?: WatchdogTimers;
 }
 
 const DEFAULT_DOWNLOAD_TIMEOUTS: DownloadTimeouts = { idleMs: DOWNLOAD_IDLE_TIMEOUT_MS, totalMs: DOWNLOAD_TOTAL_TIMEOUT_MS };
 
 /** An abort signal that fires after `idleMs` without a `touch()`, or after
  *  `totalMs` outright, carrying the reason as its Error. `stop()` clears both
- *  timers. */
-function downloadWatchdog({ idleMs, totalMs }: DownloadTimeouts): { signal: AbortSignal; touch: () => void; stop: () => void } {
+ *  timers. Both are unref'd as well, so a `stop()` that was missed can never
+ *  hold the process open for the length of the ceiling (an hour). */
+function downloadWatchdog({ idleMs, totalMs, timers }: DownloadTimeouts): { signal: AbortSignal; touch: () => void; stop: () => void } {
+  const t = timers ?? { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer) };
   const controller = new AbortController();
   const abort = (why: string): void => controller.abort(new Error(why));
-  const totalTimer = setTimeout(() => abort(`still going after ${totalMs / 1000} s`), totalMs);
+  const totalTimer = t.setTimeout(() => abort(`still going after ${totalMs / 1000} s`), totalMs);
+  totalTimer.unref();
   let idleTimer: NodeJS.Timeout | null = null;
+  const clearIdle = (): void => {
+    if (idleTimer) t.clearTimeout(idleTimer);
+    idleTimer = null;
+  };
   const touch = (): void => {
-    idleTimer = cleared(idleTimer);
-    idleTimer = setTimeout(() => abort(`no data for ${idleMs / 1000} s`), idleMs);
+    clearIdle();
+    idleTimer = t.setTimeout(() => abort(`no data for ${idleMs / 1000} s`), idleMs);
+    idleTimer.unref();
   };
   const stop = (): void => {
-    clearTimeout(totalTimer);
-    idleTimer = cleared(idleTimer);
+    t.clearTimeout(totalTimer);
+    clearIdle();
   };
   touch();
   return { signal: controller.signal, touch, stop };
