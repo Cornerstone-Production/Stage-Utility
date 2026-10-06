@@ -112,6 +112,16 @@ function sameFeed(a: VideoFeed | undefined, b: VideoFeed | undefined): boolean {
   return isDeepStrictEqual({ name: a.name, source: a.source }, { name: b.name, source: b.source });
 }
 
+/** Where a feed's picture comes from, as far as what the service remembers
+ *  about it goes: its kind and its address. A pull login, a push protocol or
+ *  a name is not part of it, so editing one leaves a feed's history alone. */
+function sourceMoved(a: VideoSource, b: VideoSource): boolean {
+  if (a.kind !== b.kind) return true;
+  if ((a.kind === "pull" || a.kind === "external") && (b.kind === "pull" || b.kind === "external")) return a.url !== b.url;
+  if (a.kind === "embed" && b.kind === "embed") return a.player !== b.player || a.ref !== b.ref;
+  return false;
+}
+
 const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
@@ -1787,6 +1797,9 @@ class VideoService {
       feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
     }));
     await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
+    // What was remembered describes the old source: a feed changed to another
+    // kind and back must not log "went offline" against a state of the first.
+    if (sourceMoved(existing.source, feed.source)) await this.forgetFeedRuntime(id);
     await this.publish();
     await this.notifyFeedsChanged(id);
     return { ok: true, feed: await this.view(feed) };
@@ -1836,18 +1849,14 @@ class VideoService {
     if (oldKind === "pull" || oldKind === "push") await this.clearFeedSecret(id);
   }
 
-  async removeFeed(id: string): Promise<boolean> {
-    // Same check as updateFeed, and the same reason: an id this shape never
-    // mints, so it can only ever equal a feed that got into the store some
-    // other way (a hand-edited or restored file). Refusing it here keeps the
-    // two mutating routes agreeing on what a feed id is, instead of DELETE
-    // quietly accepting what PATCH would refuse.
-    if (!FEED_ID_PATTERN.test(id)) return false;
-    const { feeds } = await loadFeedsFile();
-    if (!feeds.some((f) => f.id === id)) return false;
-
-    await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
-    await this.clearFeedSecret(id);
+  /**
+   * Drops everything this process remembers about one feed's runtime: its
+   * poll data, requests, log bookkeeping, outages, playback health and
+   * last-seen time. removeFeed() calls it for a feed that is gone;
+   * updateFeed() calls it when a feed's kind or address changed, since what
+   * was remembered describes the old source, not the new one.
+   */
+  private async forgetFeedRuntime(id: string): Promise<void> {
     // A future feed CAN mint this same id again (feedIdFor() is deterministic
     // from the name), but that is a new feed with a new relay path — nothing
     // about this one's old poll data, request or log history describes it.
@@ -1893,6 +1902,21 @@ class VideoService {
     // minting the same deterministic id) reads "offline, last seen <old>"
     // instead of "waiting" — the old feed's history, not its own.
     await this.forgetSeenSafely(id);
+  }
+
+  async removeFeed(id: string): Promise<boolean> {
+    // Same check as updateFeed, and the same reason: an id this shape never
+    // mints, so it can only ever equal a feed that got into the store some
+    // other way (a hand-edited or restored file). Refusing it here keeps the
+    // two mutating routes agreeing on what a feed id is, instead of DELETE
+    // quietly accepting what PATCH would refuse.
+    if (!FEED_ID_PATTERN.test(id)) return false;
+    const { feeds } = await loadFeedsFile();
+    if (!feeds.some((f) => f.id === id)) return false;
+
+    await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
+    await this.clearFeedSecret(id);
+    await this.forgetFeedRuntime(id);
     await this.publish();
     await this.notifyFeedsChanged(id);
     return true;
@@ -2130,6 +2154,10 @@ class VideoService {
     };
 
     if (report.added.length + report.replaced.length > 0) {
+      // A replaced feed that now points somewhere else is a new source, as in updateFeed().
+      for (const { plan, outcome, prior } of landed) {
+        if (outcome === "replaced" && sourceMoved(prior!.source, plan.parsed!.source)) await this.forgetFeedRuntime(plan.preview.id);
+      }
       await this.publish();
       await this.notifyFeedsChanged();
     }
