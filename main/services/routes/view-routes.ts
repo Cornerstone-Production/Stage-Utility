@@ -609,7 +609,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
     // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
     // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
-    // widget here may play over HLS), and/or { slug? } (string; "" clears the
+    // widget here may play over HLS), { textSize? } (number 50-300 = the ServiceCue
+    // text size this display shows), and/or { slug? } (string; "" clears the
     // friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
@@ -622,11 +623,15 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasLocked = typeof body.locked === "boolean";
       const hasHideTopBar = typeof body.hideTopBar === "boolean";
       const hasAllowHls = typeof body.allowHls === "boolean";
+      // Present at all counts: setOutputTextSize refuses a value that is not a
+      // number from 50 to 300, so junk is a 400 with the reason rather than an
+      // ignored field.
+      const hasTextSize = "textSize" in body;
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasTextSize && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
@@ -645,6 +650,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
         if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
         if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        if (hasTextSize) state = await stageController.setOutputTextSize(id, body.textSize);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {
         error(res, errorMessage(err));

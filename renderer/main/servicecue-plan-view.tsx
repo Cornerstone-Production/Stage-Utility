@@ -41,7 +41,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // The plan this page browses to, kept in the address so a refresh stays put.
   // Null = follow whatever the server resolves for the type.
   const [planParam, setPlanParam] = useSearchParam("plan");
-  const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY);
+  const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY, { syncAddress: true });
   const navigateTo = useNavigateTo();
 
   // The service types and the plan come from Planning Center, so they are asked

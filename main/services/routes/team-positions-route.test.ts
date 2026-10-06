@@ -2,9 +2,9 @@
 // controller, with Planning Center replaced at the one seam below it: the
 // `pcoService` singleton's two reads.
 //
-// The slot editor edits ONE service type's board, which is not always the live
+// The slot editor edits ONE service type's board, which is not always the selected
 // type. The route used to take no type at all, so editing another type's board
-// listed the live type's positions and a saved position missing from that list
+// listed the selected type's positions and a saved position missing from that list
 // had no row to untick.
 
 import assert from "node:assert/strict";
@@ -79,14 +79,14 @@ after(() => {
 });
 
 describe("GET /api/team-positions", () => {
-  test("with no parameter it answers for the live service type", async () => {
+  test("with no parameter it answers for the service type selected in the app", async () => {
     const out = await callRoute(stateRoutes, "/api/team-positions");
     assert.equal(out.status, 200);
     assert.deepEqual(asked, ["101"]);
     assert.deepEqual(out.json, POSITIONS["101"]);
   });
 
-  test("?serviceTypeId= answers for THAT type, not the live one", async () => {
+  test("?serviceTypeId= answers for THAT type, not the selected one", async () => {
     const out = await callRoute(stateRoutes, "/api/team-positions?serviceTypeId=102");
     assert.equal(out.status, 200);
     assert.deepEqual(asked, ["102"]);
@@ -115,6 +115,36 @@ describe("GET /api/team-positions", () => {
       failed: [],
     });
     assert.deepEqual(asked, ["101", "102", "103"], "read one type at a time, in order");
+  });
+
+  test("?all=true is the same as ?all=1", async () => {
+    const one = await callRoute(stateRoutes, "/api/team-positions?all=1");
+    asked = [];
+    const out = await callRoute(stateRoutes, "/api/team-positions?all=true");
+    assert.equal(out.status, 200);
+    assert.deepEqual(out.json, one.json, "all=true fell back to one type's positions");
+    assert.deepEqual(asked, ["101", "102", "103"]);
+  });
+
+  test("an all= that is not a flag is a 400 and reaches Planning Center nowhere", async () => {
+    for (const bad of ["yes", "2", "TRUE", "", "all"]) {
+      const out = await callRoute(stateRoutes, `/api/team-positions?all=${encodeURIComponent(bad)}`);
+      assert.equal(out.status, 400, `all=${JSON.stringify(bad)} was accepted`);
+      assert.match((out.json as { error?: string }).error ?? "", /all must be 1 or true/);
+    }
+    assert.deepEqual(asked, []);
+  });
+
+  test("?all=0 and ?all=false mean the default: the selected service type's positions", async () => {
+    // queryFlag's contract, shared with the plan and video routes: a flag may be
+    // spelled off as well as on.
+    for (const off of ["0", "false"]) {
+      asked = [];
+      const out = await callRoute(stateRoutes, `/api/team-positions?all=${off}`);
+      assert.equal(out.status, 200);
+      assert.deepEqual(out.json, POSITIONS["101"]);
+      assert.deepEqual(asked, ["101"]);
+    }
   });
 
   test("?all=1 with one type failing reports it, keeps the rest, and logs one [pco] line", async () => {

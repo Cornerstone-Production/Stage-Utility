@@ -71,6 +71,11 @@ export type StageScreen =
        *  on a preview: a settings-page card is not the real screen and must
        *  not refuse to play a feed the wall it stands in for cannot. */
       allowHls: boolean;
+      /** The ServiceCue text size kept for the screen this one IS or is a picture
+       *  of — `standingIn`'s, so a Screens preview draws what the display draws.
+       *  Null when none is kept (and on a preview that is not a screen): whoever
+       *  draws it uses 100, and a real display may offer one of its own to keep. */
+      textSize: number | null;
     } & ScreenChrome);
 
 export interface ScreenInput {
@@ -145,6 +150,9 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   //                               on `resolved` the operator hides the bar, the
   //                               card they are looking at does not change, and
   //                               the control reads as broken.
+  //   textSize   -> `standingIn`. Purely visual, for the same reason: a card that
+  //                               drew the rundown at 100% beside a display
+  //                               showing it at 200% is not showing the display.
   //
   // A new per-output flag picks a side here. "Would the Screens page still be
   // usable if every card did this at once" is the question that decides it.
@@ -200,6 +208,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     isPreview: !!previewViewId,
     outputMode: currentDisplay?.mode,
     allowHls: resolved?.allowHls ?? true,
+    textSize: standingIn?.textSize ?? null,
     ...chrome,
   });
 

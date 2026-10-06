@@ -10,7 +10,7 @@ import { useStageState } from "./use-stage-state";
 import { DashboardView } from "./dashboard-view";
 import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
-import { ServiceCue } from "./servicecue-view";
+import { DisplayServiceCue } from "./servicecue-display";
 import { SplRundownView } from "./spl-rundown-view";
 import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
@@ -18,7 +18,6 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
-import { displayTextSizeKey } from "./servicecue-text-size";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
 import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
@@ -690,7 +689,12 @@ function renderView(
     case "script":
       return (
         <KioskFrame state={state} screen={screen} kind={kind}>
-          <ServiceCue serviceCueLayoutId={activeView?.serviceCueLayoutId ?? null} textSizeKey={displayTextSizeKey(displayId)} />
+          <DisplayServiceCue
+            displayId={displayId}
+            serviceCueLayoutId={activeView?.serviceCueLayoutId ?? null}
+            serverTextSize={screen.textSize}
+            isPreview={isPreview}
+          />
         </KioskFrame>
       );
     case "spl-rundown":

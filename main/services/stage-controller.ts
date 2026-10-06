@@ -65,6 +65,7 @@ import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
 import { serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
+import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
@@ -1064,9 +1065,9 @@ export class StageController {
     return this.state;
   }
 
-  /** Positions for one service type: the one asked for, or the live one when
-   *  none is. The slot editor asks for the type it is EDITING, which is not
-   *  always the live one. */
+  /** Positions for one service type: the one asked for, or the service type
+   *  selected in the app (`state.serviceTypeId`) when none is. The slot editor
+   *  asks for the type it is EDITING, which is not always the selected one. */
   async listTeamPositions(serviceTypeId?: string): Promise<TeamPositionDTO[]> {
     this.assertPco();
     const id = serviceTypeId ?? this.state.serviceTypeId;
@@ -3603,6 +3604,28 @@ export class StageController {
     );
   }
 
+  /** Keep the ServiceCue text size this output's display shows. Refuses anything
+   *  that is not a number from MIN_TEXT_SIZE to MAX_TEXT_SIZE (the caller turns
+   *  that into a 400), and writes nothing when the size is already the one kept —
+   *  a display opened with `?text=` on every boot would otherwise rewrite the
+   *  settings file and log a line each time. */
+  async setOutputTextSize(id: string, textSize: unknown): Promise<StageState> {
+    const current = this.state.outputs.find((o) => o.id === id);
+    if (!current) {
+      throw new Error(`outputs:setTextSize — output ${id} not found`);
+    }
+    if (!isStorableTextSize(textSize)) {
+      throw new Error(`outputs:setTextSize — textSize must be a number from ${MIN_TEXT_SIZE} to ${MAX_TEXT_SIZE}`);
+    }
+    const size = clampTextSize(textSize);
+    if (current.textSize === size) return this.state;
+    return this.commitOutputPatch(
+      id,
+      { textSize: size },
+      `[stage-controller] setOutputTextSize output=${scrub(id)} → ${scrub(size)}%`,
+    );
+  }
+
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
     await this.outputWrites.enqueue(async () => {
@@ -4223,6 +4246,7 @@ export class StageController {
         locked: output.locked ?? false,
         hideTopBar: output.hideTopBar ?? false,
         allowHls: output.allowHls ?? true,
+        textSize: output.textSize ?? null,
       };
     }
     this.state = {

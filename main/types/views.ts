@@ -1171,6 +1171,12 @@ export interface Output {
    *  this existed: a Pi 4 can freeze decoding HLS, and this is the per-screen
    *  escape hatch rather than turning HLS off everywhere. */
   allowHls?: boolean;
+  /** The ServiceCue text size this screen shows its rundown at, 50 to 300 percent
+   *  (see main/types/text-size.ts). Absent means 100. Kept here, not in the
+   *  browser, so a Screens preview of the display draws the same size and a
+   *  replacement device inherits it. Set from the display's own `?text=` link, or
+   *  adopted once from the size that device remembered. */
+  textSize?: number;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -1189,6 +1195,11 @@ export interface ResolvedOutput {
    *  reason `hideTopBar` does: the kiosk reads this descriptor, never the Output
    *  list, to decide what a Video widget on it may attempt. */
   allowHls: boolean;
+  /** {@link Output.textSize}, or null while none has been set. Null rather than
+   *  100 because a display with no saved size may still hold one of its own to
+   *  hand over (see use-servicecue-text-size.ts), and "never set" has to be told
+   *  apart from "set to 100". Whoever draws it treats null as 100. */
+  textSize: number | null;
 }
 
 /**
