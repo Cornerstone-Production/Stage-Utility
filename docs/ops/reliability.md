@@ -59,7 +59,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `views.json`, `slots.json` | view definitions and slot sets |
 | `presets.json`, `layout-templates.json`, `layout-groups.json` | saved slot presets and layout libraries |
 | `notes.json` | what an operator typed into a notes object |
-| `servicecue-config.json`, `servicecue-layouts.json`, `servicecue-roles.json` | ServiceCue columns and category roles |
+| `servicecue-config.json`, `servicecue-layouts.json`, `servicecue-roles.json` | ServiceCue columns and category roles. An install that has them as `scriptview-*.json` has them renamed on the next start; a backup taken before that restores into the new names |
 | `patch.json` | the stage patch sheet |
 | `automation-rules.json`, `automation-settings.json` | rules, and simulate/disarm |
 | `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |

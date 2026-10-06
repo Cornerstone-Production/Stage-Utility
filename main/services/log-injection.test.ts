@@ -274,6 +274,12 @@ const NOT_SCANNED = new Map<string, string>([
   ["servicecue-layouts-store.ts", UNAUDITED],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
+  [
+    "store-file-adoption.ts",
+    "logs two fixed sentences about file names that are literals in the store " +
+      "declarations, never anything an HTTP request carries, plus an OS error message " +
+      "returned to boot. Audited, not just excused.",
+  ],
   ["stream-start-store.ts", UNAUDITED],
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  adoptLegacyStoredSize,
   clampTextSize,
   DEFAULT_TEXT_SIZE,
   readStoredSize,
@@ -31,6 +32,9 @@ export function useTextSize(key: string | null): [number, (size: number) => void
     // A refusal from storage means the size lasts until a reload, not longer.
     // The size on screen is right either way, so there is nothing to undo.
     if (fromAddress != null) writeStoredSize(key, fromAddress);
+    // No size in the address: a size kept under the pre-rename key moves to the
+    // current one, so the next load does not depend on the old key.
+    else adoptLegacyStoredSize(key);
   }, [key]);
 
   const setSize = useCallback(

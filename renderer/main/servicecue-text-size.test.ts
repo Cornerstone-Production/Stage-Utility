@@ -7,6 +7,7 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import {
+  adoptLegacyStoredSize,
   clampTextSize,
   displayTextSizeKey,
   PAGE_TEXT_SIZE_KEY,
@@ -120,5 +121,50 @@ describe("remembering a size", () => {
     };
     assert.equal(readStoredSize("k", broken), null);
     assert.equal(writeStoredSize("k", 150, broken), false);
+  });
+});
+
+describe("a size remembered before ServiceCue was renamed", () => {
+  const memory = (seed: Record<string, string> = {}) => {
+    const m = new Map(Object.entries(seed));
+    return { storage: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }, m };
+  };
+  const OLD_PAGE = "scriptview-text-size:page";
+
+  test("is read when the current key has nothing", () => {
+    const { storage } = memory({ [OLD_PAGE]: "130" });
+    assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY, storage), 130);
+  });
+
+  test("never wins over the current key", () => {
+    const { storage } = memory({ [OLD_PAGE]: "130", [PAGE_TEXT_SIZE_KEY]: "90" });
+    assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY, storage), 90);
+  });
+
+  test("applies to a display's key as well as the page's", () => {
+    const { storage } = memory({ "scriptview-text-size:display:display-3": "70" });
+    assert.equal(readStoredSize(displayTextSizeKey("display-3"), storage), 70);
+  });
+
+  test("reading writes nothing; adopting copies it once and leaves the old key", () => {
+    const { storage, m } = memory({ [OLD_PAGE]: "130" });
+    readStoredSize(PAGE_TEXT_SIZE_KEY, storage);
+    assert.equal(m.has(PAGE_TEXT_SIZE_KEY), false, "a read wrote");
+    assert.equal(adoptLegacyStoredSize(PAGE_TEXT_SIZE_KEY, storage), true);
+    assert.equal(m.get(PAGE_TEXT_SIZE_KEY), "130");
+    assert.equal(m.get(OLD_PAGE), "130", "the old key was removed");
+    assert.equal(adoptLegacyStoredSize(PAGE_TEXT_SIZE_KEY, storage), false, "it copied twice");
+  });
+
+  test("adopting does not overwrite a current size, and does nothing with no old one", () => {
+    const { storage, m } = memory({ [OLD_PAGE]: "130", [PAGE_TEXT_SIZE_KEY]: "90" });
+    assert.equal(adoptLegacyStoredSize(PAGE_TEXT_SIZE_KEY, storage), false);
+    assert.equal(m.get(PAGE_TEXT_SIZE_KEY), "90");
+    assert.equal(adoptLegacyStoredSize(PAGE_TEXT_SIZE_KEY, memory().storage), false);
+  });
+
+  test("a hand-edited old value is clamped like any other", () => {
+    const { storage } = memory({ [OLD_PAGE]: "9999" });
+    assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY, storage), 300);
   });
 });

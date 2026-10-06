@@ -3,6 +3,7 @@
 
 import type { ServiceCueConfig } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 
 /**
  * This IS the DataStore — there is no wrapper.
@@ -11,4 +12,9 @@ import { DataStore } from "./data-store.js";
  * added nothing else, in seven files. It had to be edited every time the store's
  * own API grew, and it hid update() and reload() from callers for no reason.
  */
-export const serviceCueConfigStore = new DataStore<ServiceCueConfig>("servicecue-config.json", { serviceTypeIds: [] }, "config");
+export const serviceCueConfigStore = new DataStore<ServiceCueConfig>(
+  "servicecue-config.json",
+  { serviceTypeIds: [] },
+  "config",
+  { renamedFrom: { filename: "scriptview-config.json", logTag: SERVICECUE_LOG_TAG } },
+);

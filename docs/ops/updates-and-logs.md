@@ -186,7 +186,7 @@ as such rather than given a doc link it doesn't need.
 | `[checklist]` | A pre-service checklist tick failing to save: [Plan notes as a checklist](../integrations/planning-center.md#plan-notes-as-a-checklist) |
 | `[clock]` | Browser-side: the on-screen clock's own drift correction reporting a failure |
 | `[companion]` | A Companion button press or export fetch, and its result: [Companion](../integrations/companion.md) |
-| `[config-snapshot]` | Building or restoring a config snapshot: unreadable settings, id floors that could not carry forward, stores that could not be quieted: [Backups](reliability.md#backups) |
+| `[config-snapshot]` | Building or restoring a config snapshot: unreadable settings, id floors that could not carry forward, stores that could not be quieted, a backup listing one store under both its old and its current file name: [Backups](reliability.md#backups) |
 | `[cues]` | Cue-to-Companion-button pairing and state-source inference, and built-in cues: [Cues](../automation.md#cues) |
 | `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh, and rewriting a save that landed while it did: [Under load](reliability.md#under-load) |
 | `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
@@ -223,8 +223,6 @@ as such rather than given a doc link it doesn't need.
 | `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
 | `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
 | `[screens]` | Browser-side: the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
-| `[servicecue]` | Browser-side: ServiceCue's settings, types, note categories, rundown or plan list failing to load, or a `?plan=` the service type does not have |
-| `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
 | `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller: [SenSource](../integrations/sensource.md) |
@@ -232,6 +230,8 @@ as such rather than given a doc link it doesn't need.
 | `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why, and an item already on air before a record opened not taken as its opening item: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
 | `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
 | `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist |
+| `[servicecue]` | A saved ServiceCue file moved in from its old name on upgrade (`scriptview-*.json` to `servicecue-*.json`), or both names found and the new one kept with the old left untouched; a move that failed; browser-side, ServiceCue's settings, types, note categories, rundown or plan list failing to load, or a `?plan=` the service type does not have |
+| `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[slots-store]` | Slot-set migration, and copying or removing a display's slots: [Mic slots](../slots.md) |

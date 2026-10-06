@@ -47,4 +47,4 @@ import "./video/seen-store.js";
 import "./views-store.js";
 import "./wireless-store.js";
 
-export { allStores, configFilenames, storesOfClass } from "./store-registry.js";
+export { allStores, configFilenames, renamedStores, storesOfClass } from "./store-registry.js";

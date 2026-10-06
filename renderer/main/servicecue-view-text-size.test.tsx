@@ -143,6 +143,23 @@ test("with no ?text= the display shows what it remembered, and with neither it i
   }
 });
 
+test("a display that remembered a size before the rename keeps it, and carries it to the new key", async () => {
+  // The key began "scriptview-text-size:" until ServiceCue was renamed. A display
+  // updated in place must not snap back to 100% on the first load after.
+  const legacyKey = DISPLAY_KEY.replace("servicecue-text-size:", "scriptview-text-size:");
+  assert.notEqual(legacyKey, DISPLAY_KEY, "the test's own key is not shaped as expected");
+  localStorage.setItem(legacyKey, "80");
+  const f = stubFetch();
+  try {
+    await mountDisplay();
+    assert.equal(zoom(), "0.8", "the size remembered under the old key was ignored");
+    assert.equal(localStorage.getItem(DISPLAY_KEY), "80", "it was not carried to the new key");
+    assert.equal(localStorage.getItem(legacyKey), "80", "the old key is the operator's; it is left alone");
+  } finally {
+    f.restore();
+  }
+});
+
 test("a rundown embedded in a layout object ignores ?text= and anything remembered", async () => {
   localStorage.setItem(DISPLAY_KEY, "200");
   window.history.replaceState({}, "", "/display-1?text=150");

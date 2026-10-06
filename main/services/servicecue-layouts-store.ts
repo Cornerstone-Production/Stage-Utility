@@ -1,9 +1,11 @@
-// Persists ServiceCue layouts — named column presets for the rundown pages. A flat list shared across every service type; columns reference category
-// ROLES so one layout resolves correctly whatever a given service type calls a
-// department (see servicecue-roles-store.ts).
+// Persists ServiceCue layouts — named column presets for the rundown pages. A flat
+// list shared across every service type; columns reference category ROLES so one
+// layout resolves correctly whatever a given service type calls a department (see
+// servicecue-roles-store.ts).
 
 import type { ServiceCueLayout } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 import { serviceCueRolesStore } from "./servicecue-roles-store.js";
 import { migrateLayouts } from "./servicecue-layout-migration.js";
 
@@ -11,7 +13,9 @@ import { migrateLayouts } from "./servicecue-layout-migration.js";
 // "MD + Playback Tech" — which only exist in some churches, and in this org only in some
 // service types, so a fresh install got layouts whose columns rendered empty. A layout
 // is cheap to add; a wrong one that looks broken is not.
-const store = new DataStore<ServiceCueLayout[]>("servicecue-layouts.json", [], "config");
+const store = new DataStore<ServiceCueLayout[]>("servicecue-layouts.json", [], "config", {
+  renamedFrom: { filename: "scriptview-layouts.json", logTag: SERVICECUE_LOG_TAG },
+});
 
 export const serviceCueLayoutsStore = {
   async load(): Promise<ServiceCueLayout[]> {

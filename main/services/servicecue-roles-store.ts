@@ -3,8 +3,11 @@
 
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { DataStore } from "./data-store.js";
+import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 
-const store = new DataStore<CategoryRole[]>("servicecue-roles.json", [], "config");
+const store = new DataStore<CategoryRole[]>("servicecue-roles.json", [], "config", {
+  renamedFrom: { filename: "scriptview-roles.json", logTag: SERVICECUE_LOG_TAG },
+});
 
 /** Stable id from a category name, so re-seeding does not churn ids. */
 function idFor(name: string): string {

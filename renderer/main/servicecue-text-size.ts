@@ -57,9 +57,17 @@ export function textSizeFromSearch(search: string): number | null {
 
 /** The one key a screen's size is kept under. The page and each display have
  *  their own, so a size set at the booth does not resize a display. */
-export const PAGE_TEXT_SIZE_KEY = "servicecue-text-size:page";
+const KEY_PREFIX = "servicecue-text-size:";
+export const PAGE_TEXT_SIZE_KEY = `${KEY_PREFIX}page`;
 export function displayTextSizeKey(displayId: string): string {
-  return `servicecue-text-size:display:${displayId}`;
+  return `${KEY_PREFIX}display:${displayId}`;
+}
+
+/** What these keys began with before ServiceCue was renamed. A display that
+ *  had a size under the old key keeps it across the update. */
+const LEGACY_KEY_PREFIX = "scriptview-text-size:";
+function legacyKeyFor(key: string): string | null {
+  return key.startsWith(KEY_PREFIX) ? `${LEGACY_KEY_PREFIX}${key.slice(KEY_PREFIX.length)}` : null;
 }
 
 export interface SizeStorage {
@@ -73,11 +81,38 @@ export interface SizeStorage {
 export function readStoredSize(key: string, storage: SizeStorage | null = browserStorage()): number | null {
   if (!storage) return null;
   try {
-    return parseTextSize(storage.getItem(key));
+    const legacy = legacyKeyFor(key);
+    // The old key only answers when the new one has nothing usable. Nothing is
+    // written here; adoptLegacyStoredSize does that, from an effect.
+    return parseTextSize(storage.getItem(key)) ?? (legacy ? parseTextSize(storage.getItem(legacy)) : null);
   } catch {
     // Storage that throws (blocked cookies, a locked-down kiosk profile) is the
     // same answer as storage with nothing in it: no remembered size.
     return null;
+  }
+}
+
+/**
+ * Copy a size remembered under the pre-rename key to the current one, when the
+ * current one has none. The old key is left where it is: it is the operator's
+ * setting, and it costs nothing to keep. Returns whether it copied.
+ *
+ * Separate from readStoredSize because a render must not write; the hook calls
+ * this from an effect.
+ */
+export function adoptLegacyStoredSize(key: string, storage: SizeStorage | null = browserStorage()): boolean {
+  if (!storage) return false;
+  const legacy = legacyKeyFor(key);
+  if (!legacy) return false;
+  try {
+    if (parseTextSize(storage.getItem(key)) != null) return false;
+    const size = parseTextSize(storage.getItem(legacy));
+    if (size == null) return false;
+    storage.setItem(key, String(size));
+    return true;
+  } catch {
+    // Blocked storage: the size is still read from the old key until a reload.
+    return false;
   }
 }
 

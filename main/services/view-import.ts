@@ -17,6 +17,7 @@ import { patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
+import { adoptLegacyViewFields, bundledServiceCueLayouts } from "./servicecue-legacy-names.js";
 import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
@@ -158,7 +159,10 @@ export interface ImportOptions {
 
 export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): Promise<ImportReport> {
   assertBundle(raw);
-  const bundle = raw;
+  // A file exported before ServiceCue was renamed carries the old field on its
+  // views and the old sideData key for its presets (read below); the views are
+  // brought forward here, before anything is remapped or stored.
+  const bundle: ViewBundle = { ...raw, views: adoptLegacyViewFields(raw.views) };
 
   // Retyping. Only a plan export names a service type, so only a plan export can
   // be landed under a different one; for a view export the choice has no
@@ -266,7 +270,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     if (newId) await notesStore.set(newId, content as NotesContent);
   }
 
-  const svIncoming = bundle.sideData?.serviceCueLayouts ?? [];
+  const svIncoming = bundledServiceCueLayouts(bundle.sideData);
   const svAfter = await serviceCueLayoutsStore.load();
   const svHave = new Set(svAfter.map((l) => l.id));
   if (svIncoming.length) {
