@@ -46,11 +46,11 @@ const REQUEST_TIMEOUT_MS = 5000;
 /** `source.type` on a runtime path, mapped to the plural the kick endpoint
  *  takes. The only three a push feed of this app can ever be (srt, rtmp,
  *  whip — PUSH_PROTOCOLS in types/video.ts). */
-const KICK_ENDPOINT: Record<string, string> = {
-  rtmpConn: "rtmpconns",
-  srtConn: "srtconns",
-  webRTCSession: "webrtcsessions",
-};
+const KICK_ENDPOINT: ReadonlyMap<string, string> = new Map([
+  ["rtmpConn", "rtmpconns"],
+  ["srtConn", "srtconns"],
+  ["webRTCSession", "webrtcsessions"],
+]);
 
 interface ConfigPathsListResponse {
   items?: ({ name: string } & Record<string, unknown>)[];
@@ -219,7 +219,7 @@ export class MediaMtxRelay implements VideoRelay {
     const list = (await this.request("GET", "/v3/paths/list")) as RuntimePathsListResponse;
     const item = list.items?.find((path) => path.name === feedId);
     if (!item?.source) return false; // Nobody is publishing to this feed right now.
-    const endpoint = KICK_ENDPOINT[item.source.type];
+    const endpoint = KICK_ENDPOINT.get(item.source.type);
     if (!endpoint) {
       throw new Error(`Cannot kick a publisher of type "${item.source.type}"`);
     }

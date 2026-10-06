@@ -503,6 +503,13 @@ describe("MediaMtxRelay.kickPublisher", () => {
     );
     assert.equal(calls.filter((c) => c.method === "POST").length, 0);
   });
+
+  it("a source type that is an Object.prototype key is as unknown as any other", async () => {
+    runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "constructor", id: "conn-9" } }];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    await assert.rejects(() => relay.kickPublisher("cam1"), { message: 'Cannot kick a publisher of type "constructor"' });
+    assert.equal(calls.filter((c) => c.method === "POST").length, 0);
+  });
 });
 
 describe("MediaMtxRelay.playback", () => {
