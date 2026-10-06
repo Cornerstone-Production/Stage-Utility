@@ -363,8 +363,8 @@ on this server, each tagged:
   only reads "password differs", never the values), with a choice per feed:
   **Use the file's** (the default) or **Keep this server's**.
 - **Can't import**: this build cannot take the feed (a source kind it does not
-  offer, an address with a login inside it); the reason is shown and the feed is
-  skipped.
+  offer, an address with a login inside it, an SRT address whose kept password
+  is not a valid passphrase); the reason is shown and the feed is skipped.
 
 An import never removes a feed: the ones the file does not have are named and
 left alone. It never touches the **Video feeds** on/off switch, and it works

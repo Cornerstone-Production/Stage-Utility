@@ -23,8 +23,14 @@ function hasUserinfo(u: URL): boolean {
  *  "characters" the same count as MediaMTX's bytes. */
 const PLAIN_ASCII = /^[\x20-\x7E]*$/;
 
+/** `problem` (from passphraseProblem), said for a stored password that an SRT
+ *  address would take over — the one place the operator did not just type it. */
+export function keptPassphraseError(problem: string): string {
+  return `${problem} The password saved for this feed would be used; enter a new one.`;
+}
+
 /** Why `passphrase` is not one MediaMTX accepts for an SRT pull, or null. */
-function passphraseProblem(passphrase: string): string | null {
+export function passphraseProblem(passphrase: string): string | null {
   if (!PLAIN_ASCII.test(passphrase)) return "An SRT passphrase can use only plain letters, digits, spaces and punctuation.";
   if (passphrase.length < 10 || passphrase.length > 80) return "An SRT passphrase must be 10 to 80 characters long.";
   return null;
@@ -148,7 +154,7 @@ export function parseFeedInput(
       const passphrase = password ?? keptPassword;
       const problem = passphrase ? passphraseProblem(passphrase) : null;
       if (problem) {
-        return { ok: false, error: password === undefined ? `${problem} The password saved for this feed would be used; enter a new one.` : problem };
+        return { ok: false, error: password === undefined ? keptPassphraseError(problem) : problem };
       }
     }
 
