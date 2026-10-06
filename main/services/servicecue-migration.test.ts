@@ -219,6 +219,24 @@ describe("the three ServiceCue data files, on an install that has the old names"
       await assert.rejects(() => store.load(), /EACCES/);
       assert.equal(await has("rd-old.json"), true);
     });
+
+    test("is not remembered: the next read tries again and the move lands", async () => {
+      // A failure cached as the answer would leave the store failing, or reading a
+      // file that was never put in place, for the life of the process even after the
+      // cause (a permission, a full disk) was fixed.
+      await put("retry-old.json", { keep: "me" });
+      const store = new DataStore<{ keep: string }>("retry-new.json", { keep: "default" }, "runtime", {
+        renamedFrom: { filename: "retry-old.json", logTag: "servicecue" },
+      });
+      refuseRenames();
+      await assert.rejects(() => store.load(), /EACCES/);
+
+      fsp.rename = realRename;
+      syncBuiltinESMExports();
+      assert.deepEqual(await store.load(), { keep: "me" }, "the retry did not move the file");
+      assert.equal(await has("retry-old.json"), false);
+      assert.equal(await has("retry-new.json"), true);
+    });
   });
 });
 
