@@ -370,8 +370,13 @@ export function HistoryChart({
   const pointerT = hoverX != null && Number.isFinite(domainStart)
     ? domainStart + ((hoverX - plotX0) / (plotX1 - plotX0)) * span
     : null;
+  // A peak under the pointer wins; focus answers only while the pointer is off
+  // the plot. A click on a triangle leaves it focused, and it must not hold the
+  // readout once the pointer is somewhere else.
+  const activePeakKey = hoverX != null ? hoverPeak : focusPeak;
+  const activePeak = peakPoints.find((p) => peakKey(p.item) === activePeakKey) ?? null;
   /**
-   * The instant the readout is ABOUT.
+   * The instant the pointer's readout is ABOUT.
    *
    * On a DATE axis it is snapped to the nearest drawn node, because the label
    * there is a calendar day and the pointer lands wherever it lands: hovering
@@ -383,31 +388,31 @@ export function HistoryChart({
    * so the pointer is already on one, and snapping a crosshair that follows the
    * cursor across an hour would make it stutter for no gain.
    */
-  const activePeak = peakPoints.find((p) => peakKey(p.item) === (hoverPeak ?? focusPeak)) ?? null;
-  const hoverT = activePeak
-    ? activePeak.t
-    : pointerT == null || xAxis !== "date" ? pointerT : nearestNodeT(shown, pointerT) ?? pointerT;
-  /** Where the crosshair stands. One expression with `hoverT`, so the line, the
-   *  date and the figures cannot come apart. */
-  const crosshairX = activePeak
-    ? null
-    : hoverT != null && Number.isFinite(hoverT) ? xOf(hoverT) : hoverX;
+  const snappedT = pointerT != null && xAxis === "date" ? nearestNodeT(shown, pointerT) ?? pointerT : pointerT;
+  /** The instant the readout is about: a peak's own, or the pointer's. */
+  const hoverT = activePeak ? activePeak.t : snappedT;
+  /** Where the crosshair stands. One expression with `snappedT`, so the line, the
+   *  date and the figures cannot come apart. A peak draws its own line instead. */
+  const pointerCrosshairX = snappedT != null && Number.isFinite(snappedT) ? xOf(snappedT) : hoverX;
+  const crosshairX = activePeak ? null : pointerCrosshairX;
   const hoveredSegment: LaneSegment | null =
     hoverX != null && hoverRow && hoverRow !== "plot" ? segmentAt(segments, hoverX, hoverRow) : null;
-  /** The peak whose line is drawn: the one under the pointer or focus, or the
-   *  one belonging to the item block the pointer is on. */
-  const litPeakKey = activePeak ? peakKey(activePeak.item) : hoveredSegment ? peakKey(hoveredSegment.item) : null;
-  const stripItem = (it: LaneItem) => ({
-    number: it.sequence + 1,
-    title: it.title || "Untitled",
-    ran: fmtDur(it.actualSec),
-    planned: fmtDur(it.plannedSec),
-    peak: it.peakLabel ?? null,
-    when: (() => {
-      const p = peakPoints.find((q) => peakKey(q.item) === peakKey(it));
-      return p ? formatClock(p.t, { seconds: true }) : null;
-    })(),
-  });
+  /** The item the readout describes: the peak under the pointer or focus, or
+   *  the item block the pointer is on. */
+  const litItem = activePeak?.item ?? hoveredSegment?.item ?? null;
+  /** The peak whose line is drawn: that item's. */
+  const litPeakKey = litItem ? peakKey(litItem) : null;
+  const stripItem = (it: LaneItem) => {
+    const peak = peakPoints.find((p) => peakKey(p.item) === peakKey(it));
+    return {
+      number: it.sequence + 1,
+      title: it.title || "Untitled",
+      ran: fmtDur(it.actualSec),
+      planned: fmtDur(it.plannedSec),
+      peak: it.peakLabel ?? null,
+      when: peak ? formatClock(peak.t, { seconds: true }) : null,
+    };
+  };
   const hoverValues = hoverT == null
     ? []
     : shown.flatMap((s) => {
@@ -424,7 +429,7 @@ export function HistoryChart({
       // answered "2:32 pm", a reading of a scale this chart does not have.
       time: axisText(hoverT),
       values: hoverValues,
-      item: activePeak ? stripItem(activePeak.item) : hoveredSegment ? stripItem(hoveredSegment.item) : null,
+      item: litItem ? stripItem(litItem) : null,
     };
   const liveStrip = live && all.length
     ? {
@@ -1173,15 +1178,15 @@ function seriesLineWidth(s: ChartSeries): number {
   return s.width ?? (s.role === "primary" ? 1.8 : 1.2);
 }
 
-/** The primary series' colour, or the accent token when there is none — what a
- *  mark that belongs to no particular series (the lane's peak tick, its legend
- *  swatch) draws in. */
 /** One key per item run: a record can reopen an item, so `itemId` alone is not
  *  unique. */
 function peakKey(it: LaneItem): string {
   return `${it.itemId}:${it.sequence}`;
 }
 
+/** The primary series' colour, or the accent token when there is none — what a
+ *  mark that belongs to no particular series (the item peak triangle, its
+ *  legend swatch) draws in. */
 function primarySeriesColor(shown: readonly ChartSeries[]): string {
   return shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)";
 }
