@@ -330,6 +330,25 @@ test("pasting a link to another service type's plan opens that type's page on it
   }
 });
 
+test("opening another service type's plan keeps the rest of the address: ?text= and ?transport=", async () => {
+  const f = stubServer();
+  try {
+    const router = await mountAt("/servicecue/weekend/audio?plan=303&text=150&transport=poll");
+    await click(button("Choose a plan"));
+    const field = screen.getByLabelText("Paste a Planning Center plan link");
+    await act(async () => void fireEvent.change(field, { target: { value: "https://services.planningcenteronline.com/plans/901" } }));
+    await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
+    for (let i = 0; i < 6; i++) await settle();
+    const search = router.state.location.search as Record<string, unknown>;
+    assert.equal(router.state.location.pathname, "/servicecue/youth/audio");
+    assert.equal(String(search.plan), "901", "the pasted plan replaces the one being browsed");
+    assert.equal(String(search.text), "150", "a panel's text size survives the move");
+    assert.equal(search.transport, "poll", "and so does how it hears the server, which a refresh would lose");
+  } finally {
+    f.restore();
+  }
+});
+
 test("text that is not a plan link says so in the menu and goes nowhere", async () => {
   const f = stubServer();
   try {

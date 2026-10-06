@@ -244,7 +244,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               timeZone={rundown?.timeZone ?? state?.timezone ?? null}
               onSelect={(id) => setPlanParam(id)}
               onOpenElsewhere={(typeId, typeName, planId) =>
-                navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout?.name), { plan: planId })
+                navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout?.name), { plan: planId }, { keepSearch: true })
               }
             />
           ) : null
