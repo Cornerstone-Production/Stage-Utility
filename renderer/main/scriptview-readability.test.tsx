@@ -1,5 +1,6 @@
-// What the ScriptView rundown puts on a screen: how bright its text is, and how
-// the item's notes and its key/BPM line are drawn.
+// What the ScriptView rundown puts on a screen: how bright its text is, how the
+// item's notes and its key/BPM/meter line are drawn, and where the time signature
+// lands.
 //
 // Driven through the REAL column renderers and the real RundownTable, never the
 // source text: a scan of scriptview-columns.tsx would be satisfied by a comment
@@ -46,6 +47,7 @@ const SONG: PlanItemDTO = {
   description: "Hosting note under the title",
   songKey: "E",
   bpm: 128,
+  meter: "4/4",
   arrangementName: "Elevation Rhythm",
   servicePosition: "during",
 };
@@ -79,7 +81,41 @@ function tableDom(items: PlanItemDTO[], l: ScriptViewLayout | null = null, curre
   return host;
 }
 
-describe("the key and BPM line", () => {
+describe("the key, BPM and meter line", () => {
+  test("puts the meter right after the BPM and before the arrangement", () => {
+    const meta = metaLine(titleCell(SONG));
+    assert.equal(meta?.textContent, "Key E  ·  128 BPM  ·  4/4  ·  Elevation Rhythm");
+  });
+
+  test("leaves the meter out when the arrangement has none", () => {
+    const meta = metaLine(titleCell({ ...SONG, meter: null }));
+    assert.equal(meta?.textContent, "Key E  ·  128 BPM  ·  Elevation Rhythm");
+    const absent = { ...SONG } as Partial<PlanItemDTO>;
+    delete absent.meter;
+    assert.equal(metaLine(titleCell(absent as PlanItemDTO))?.textContent, "Key E  ·  128 BPM  ·  Elevation Rhythm");
+  });
+
+  test("leaves the meter out when the layout turns it off, and keeps the rest", () => {
+    const meta = metaLine(titleCell(SONG, layout({ showMeter: false })));
+    assert.equal(meta?.textContent, "Key E  ·  128 BPM  ·  Elevation Rhythm");
+  });
+
+  test("a layout saved before the switch existed still shows it", () => {
+    // `layout()` has no showMeter at all, which is every layout on disk today.
+    assert.equal("showMeter" in layout(), false);
+    assert.equal(spec(layout()).showMeter, true);
+    assert.equal(metaLine(titleCell(SONG, layout()))?.textContent, "Key E  ·  128 BPM  ·  4/4  ·  Elevation Rhythm");
+    // And the implicit "All columns" layout (null) too.
+    assert.equal(spec(null).showMeter, true);
+  });
+
+  test("a meter alone still draws a line, and no line when nothing is set", () => {
+    const only = layout({ showKey: false, showBpm: false, showArrangement: false });
+    assert.equal(metaLine(titleCell(SONG, only))?.textContent, "4/4");
+    const none = layout({ showKey: false, showBpm: false, showArrangement: false, showMeter: false });
+    assert.equal(metaLine(titleCell(SONG, none)), null);
+  });
+
   test("stays small and italic, and takes the lightened accent token", () => {
     const meta = metaLine(titleCell(SONG))!;
     const cls = meta.className.split(/\s+/);

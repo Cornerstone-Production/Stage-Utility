@@ -14,6 +14,7 @@ export interface ScriptViewSpec {
   showLength: boolean;
   showKey: boolean;
   showBpm: boolean;
+  showMeter: boolean;
   showArrangement: boolean;
   showItemNotes: boolean;
   showTotalTime: boolean;
@@ -43,6 +44,7 @@ export function resolveScriptViewSpec(
     showLength: layout ? on(layout.showLength) : true,
     showKey: layout ? on(layout.showKey) : true,
     showBpm: layout ? on(layout.showBpm) : true,
+    showMeter: layout ? on(layout.showMeter) : true,
     showArrangement: layout ? on(layout.showArrangement) : true,
     showItemNotes: layout ? on(layout.showItemNotes) : true,
     showTotalTime: layout ? on(layout.showTotalTime) : true,
@@ -130,6 +132,7 @@ export function buildScriptViewColumns(
       const parts: string[] = [];
       if (spec.showKey && it.songKey) parts.push(`Key ${it.songKey}`);
       if (spec.showBpm && it.bpm) parts.push(`${it.bpm} BPM`);
+      if (spec.showMeter && it.meter) parts.push(it.meter);
       if (spec.showArrangement && it.arrangementName) parts.push(it.arrangementName);
       const meta = parts.join("  ·  ");
       return (

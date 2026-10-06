@@ -86,9 +86,11 @@ export interface PlanItemDTO {
   /** Per-note-category content (e.g. {"Audio": "...", "Vocals": "..."}). */
   notesByCategory: Record<string, string>;
   description: string | null;
-  /** Song meta (present on "song" items): selected key, arrangement BPM + name. */
+  /** Song meta (present on "song" items): selected key, arrangement BPM, meter + name. */
   songKey?: string | null;
   bpm?: number | null;
+  /** Time signature off the arrangement ("4/4", "6/8"), as PCO writes it. */
+  meter?: string | null;
   arrangementName?: string | null;
   /** PCO service_position: "pre" | "during" | "post" (drives pre-service styling). */
   servicePosition?: string | null;
@@ -123,6 +125,7 @@ export interface ScriptViewLayout {
   showLength?: boolean;       // length / "Time" column
   showKey?: boolean;          // song key in the title meta line
   showBpm?: boolean;          // BPM in the title meta line
+  showMeter?: boolean;        // time signature in the title meta line
   showArrangement?: boolean;  // arrangement name in the title meta line
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer

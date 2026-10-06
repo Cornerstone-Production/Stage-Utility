@@ -30,6 +30,7 @@ const ELEMENTS = [
   { key: "showLength", label: "Time" },
   { key: "showKey", label: "Song key" },
   { key: "showBpm", label: "BPM" },
+  { key: "showMeter", label: "Time signature" },
   { key: "showArrangement", label: "Arrangement" },
   { key: "showItemNotes", label: "Item notes" },
   { key: "showTotalTime", label: "Total time" },
