@@ -130,7 +130,7 @@ describe("the live DTO keeps its title and length without include=items", () => 
   });
 
   test("THE GUARD: the DTO carries the live item's title", async () => {
-    const live = await pcoService.getLive("app", "sec", "st", "plan");
+    const live = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(live.mode, "item");
     assert.equal(
       live.label,
@@ -142,7 +142,7 @@ describe("the live DTO keeps its title and length without include=items", () => 
   });
 
   test("THE GUARD: the DTO carries the live item's length", async () => {
-    const live = await pcoService.getLive("app", "sec", "st", "plan");
+    const live = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(
       live.lengthSec,
       itemLengthSec + 60,
@@ -153,7 +153,7 @@ describe("the live DTO keeps its title and length without include=items", () => 
   });
 
   test("the live request does not ask for the items include", async () => {
-    await pcoService.getLive("app", "sec", "st", "plan");
+    await pcoService.getLive("app", "sec", "11", "21");
     const liveUrl = urls.find((u) => u.includes("/live"));
     assert.ok(liveUrl, "no /live request was made");
     assert.ok(
@@ -167,14 +167,14 @@ describe("the live DTO keeps its title and length without include=items", () => 
   });
 
   test("label and currentItemTitle agree, because they share one source", async () => {
-    const live = await pcoService.getLive("app", "sec", "st", "plan");
+    const live = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(live.label, live.currentItemTitle);
     assert.equal(live.currentItemTitle, "Opener");
     assert.equal(live.nextItemTitle, "Message");
   });
 
   test("a rename moves BOTH fields together", async () => {
-    const first = await pcoService.getLive("app", "sec", "st", "plan");
+    const first = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(first.label, "Opener");
 
     // The rename, and a cache clear standing in for the TTL turning over. With
@@ -183,14 +183,14 @@ describe("the live DTO keeps its title and length without include=items", () => 
     itemTitle = "Opener (reprise)";
     pcoService.clearCache();
 
-    const second = await pcoService.getLive("app", "sec", "st", "plan");
+    const second = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(second.label, "Opener (reprise)");
     assert.equal(second.currentItemTitle, "Opener (reprise)");
     assert.equal(second.label, second.currentItemTitle);
   });
 
   test("itemType comes from the rundown too", async () => {
-    const live = await pcoService.getLive("app", "sec", "st", "plan");
+    const live = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(live.itemType, "song");
   });
 
@@ -198,16 +198,16 @@ describe("the live DTO keeps its title and length without include=items", () => 
     // What `include=items` used to prove by the item's presence in the payload.
     // Checking the id against the cached rundown is the same check.
     liveItemId = "item-from-another-plan";
-    const live = await pcoService.getLive("app", "sec", "st", "plan");
+    const live = await pcoService.getLive("app", "sec", "11", "21");
     assert.equal(live.mode, "preservice", "a live session on an item this plan does not have is not ours");
     assert.equal(live.label, "Service starts");
   });
 
   test("the rundown is cached, so a second tick costs one request", async () => {
-    await pcoService.getLive("app", "sec", "st", "plan");
+    await pcoService.getLive("app", "sec", "11", "21");
     const firstCount = urls.length;
     urls = [];
-    await pcoService.getLive("app", "sec", "st", "plan");
+    await pcoService.getLive("app", "sec", "11", "21");
     assert.ok(firstCount >= 3, `cold tick should read live + items + plan_times, saw ${firstCount}`);
     assert.equal(
       urls.length,

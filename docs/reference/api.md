@@ -16,7 +16,9 @@ for a body or query the caller got wrong, `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
-`/api/team-positions` and the two `/api/servicecue` reads. A `500` means this app
+`/api/team-positions` and the two `/api/servicecue` reads. A `serviceTypeId` or
+`planId` that is not a Planning Center id (digits only) is a `400` naming the
+parameter on any of them; Planning Center is not asked. A `500` means this app
 broke, and only that.
 
 ## What is protected, and what is not

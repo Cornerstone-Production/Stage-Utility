@@ -152,7 +152,7 @@ describe("the URL actually handed to fetch()", () => {
     });
     await assert.rejects(
       pcoService.listTeamPositions("app", "secret", "7/../../../people/v2/people?x="),
-      /climbs out/,
+      /serviceTypeId is not a Planning Center id/,
     );
     assert.deepEqual(sent, [], "a request left for another endpoint");
   });
@@ -212,6 +212,24 @@ const isComment = (l: string) => /^\s*(\/\/|\*|\/\*)/.test(l);
 function linesOf(file: string): string[] {
   return fs.readFileSync(path.join(HERE, file), "utf8").split("\n");
 }
+
+describe("a Services URL is written with pcoUrl", () => {
+  // The tag takes only what pcoId or pcoSegment has checked, and a raw string in an
+  // interpolation does not type-check. What the type system cannot stop is a URL
+  // written without the tag, so this reads the source for that: a template literal
+  // that opens with the base, or reaches for a service_types path.
+  const code = linesOf("pco-service.ts").filter((l) => !isComment(l));
+
+  it("no URL is built on the base by hand", () => {
+    const byHand = code.filter((l) => /`\$\{PCO_BASE\}/.test(l) || /(?<!pcoUrl)`[^`]*\/service_types\/\$\{/.test(l));
+    assert.deepEqual(byHand, [], "build the URL with pcoUrl and pcoId");
+  });
+
+  it("every id in a pcoUrl path went through pcoId", () => {
+    const raw = code.filter((l) => /pcoUrl`[^`]*\$\{(?!pcoId\(|pcoSegment\()/.test(l));
+    assert.deepEqual(raw, []);
+  });
+});
 
 describe("scrub coverage in every PCO client", () => {
   // The scan is console-scan.ts, shared with log-injection.test.ts. This file

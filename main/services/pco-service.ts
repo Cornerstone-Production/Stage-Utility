@@ -35,17 +35,7 @@ export class PcoAuthError extends Error {
   }
 }
 import { scrub } from "./scrub.js";
-
-/** A URL handed to the credentialed fetch that it will not send. Deterministic,
- *  so requestInner never retries it. */
-class PcoUrlRefused extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PcoUrlRefused";
-  }
-}
-
-const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
+import { PCO_BASE, PcoUrlRefused, isPcoId, pcoId, pcoSegment, pcoUrl } from "./pco-path.js";
 
 /**
  * Every version Planning Center SERVICES publishes, newest first.
@@ -1008,7 +998,7 @@ class PcoService {
     planId: string,
     direction: "next" | "previous",
   ): Promise<void> {
-    const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
+    const base = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}`;
     const json = await this.request(`${base}/live`, appId, secret);
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     if (!live) throw new Error("No PCO live session for this plan");
@@ -1127,7 +1117,7 @@ class PcoService {
     // Follow pagination (bounded) so big plans don't truncate, without runaway
     // loops. The offset rules live in readPcoPages, once, for all three readers.
     await readPcoPages(
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`,
+      pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/all_attachments?per_page=100`,
       MAX_PAGES,
       "pco",
       (url) => this.request(url, appId, secret),
@@ -1170,7 +1160,7 @@ class PcoService {
 
     // `all_attachments/{id}/open` is the uniform open action for every attachable
     // type (plan file, service-type file, item/arrangement chart).
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments/${attachmentId}/open`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/all_attachments/${pcoId("attachmentId", attachmentId)}/open`;
     const json = await this.postJson(url, appId, secret);
     const node = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const a = node?.attributes ?? {};
@@ -1189,7 +1179,7 @@ class PcoService {
     const cached = this.cacheGet<ServiceTypeDTO[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types?per_page=100`;
+    const url = pcoUrl`/service_types?per_page=100`;
     const json = await this.request(url, appId, secret);
     const items = Array.isArray(json.data) ? json.data : [json.data];
 
@@ -1217,7 +1207,7 @@ class PcoService {
     const cached = this.cacheGet<PlanDTO[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans?filter=future&order=sort_date&per_page=25`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans?filter=future&order=sort_date&per_page=25`;
     const json = await this.request(url, appId, secret);
     const items = Array.isArray(json.data) ? json.data : [json.data];
 
@@ -1246,7 +1236,7 @@ class PcoService {
 
     // PCO orders `past` oldest-first, so ask in reverse to get the most recent
     // page rather than the oldest plans this service type ever had.
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans?filter=past&order=-sort_date&per_page=25`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans?filter=past&order=-sort_date&per_page=25`;
     const json = await this.request(url, appId, secret);
     const items = Array.isArray(json.data) ? json.data : [json.data];
 
@@ -1290,7 +1280,7 @@ class PcoService {
     const cached = this.cacheGet<string[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/${collection}?per_page=100`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/${pcoSegment("collection", collection)}?per_page=100`;
     const json = await this.request(url, appId, secret).catch(() => null);
     const items = json && Array.isArray(json.data) ? json.data : [];
     const result = items
@@ -1326,7 +1316,7 @@ class PcoService {
     const cached = this.cacheGet<string[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/teams?per_page=100`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/teams?per_page=100`;
     const json = await this.request(url, appId, secret).catch(() => null);
     const items = json && Array.isArray(json.data) ? json.data : [];
     const result = [
@@ -1362,7 +1352,7 @@ class PcoService {
     const cached = this.cacheGet<PlanNoteDTO[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/notes?include=teams&per_page=100`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/notes?include=teams&per_page=100`;
     const json = await this.request(url, appId, secret);
     const nodes = Array.isArray(json.data) ? json.data : [json.data];
 
@@ -1421,7 +1411,7 @@ class PcoService {
     const out: PlanItemDTO[] = [];
 
     await readPcoPages(
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`,
+      pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/items?include=item_notes,arrangement&per_page=100`,
       MAX_PAGES,
       "pco",
       (url) => this.request(url, appId, secret),
@@ -1530,12 +1520,15 @@ class PcoService {
    * failure throws. Cached long: a name and photo rarely change.
    */
   async getPerson(appId: string, secret: string, personId: string): Promise<PersonCardDTO | null> {
+    // Typed into the slot editor, so it can be anything. A value that is not a PCO id
+    // is nobody, which is what the 404 it used to cost a request said.
+    if (!isPcoId(personId)) return null;
     const cacheKey = `person:${appId}:${personId}`;
     const cached = this.cacheGet<PersonCardDTO>(cacheKey);
     if (cached) return cached;
     let json: PcoResponse;
     try {
-      json = await this.request(`${PCO_BASE}/people/${encodeURIComponent(personId)}`, appId, secret);
+      json = await this.request(pcoUrl`/people/${pcoId("personId", personId)}`, appId, secret);
     } catch (err) {
       if (err instanceof PcoNotFoundError) return null;
       throw err;
@@ -1563,7 +1556,7 @@ class PcoService {
     if (cached) return cached;
 
     const url =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/team_members?include=person,team&per_page=100`;
+      pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/team_members?include=person,team&per_page=100`;
     const json = await this.request(url, appId, secret);
     const items = Array.isArray(json.data) ? json.data : [json.data];
 
@@ -1637,7 +1630,7 @@ class PcoService {
     // One compound request: teams + their positions via `include=team_positions`
     // (was 1 + N: a teams call, then a positions call PER team). Falls back to the
     // per-team loop if this PCO endpoint doesn't honor the include.
-    const teamsUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams?include=team_positions&per_page=100`;
+    const teamsUrl = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/teams?include=team_positions&per_page=100`;
     const teamsJson = await this.request(teamsUrl, appId, secret);
     const teams = Array.isArray(teamsJson.data) ? teamsJson.data : [teamsJson.data];
 
@@ -1663,7 +1656,7 @@ class PcoService {
       // Fallback: include not honored — fetch positions per team in parallel.
       await Promise.all(
         teams.map(async (team) => {
-          const posUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams/${team.id}/team_positions?per_page=100`;
+          const posUrl = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/teams/${pcoId("teamId", team.id)}/team_positions?per_page=100`;
           const posJson = await this.request(posUrl, appId, secret);
           const positions = Array.isArray(posJson.data) ? posJson.data : [posJson.data];
           for (const pos of positions) {
@@ -1713,7 +1706,7 @@ class PcoService {
     countdownTarget: "plan-start" | "service-time" = "plan-start",
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
-    const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
+    const base = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}`;
     const json = await this.request(`${base}/live?include=current_item_time`, appId, secret);
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
@@ -1901,7 +1894,7 @@ class PcoService {
     const cached = this.cacheGet<PlanTime[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=100`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/plan_times?per_page=100`;
     const json = await this.request(url, appId, secret).catch(() => null);
     const raw = json && Array.isArray(json.data) ? json.data : [];
     const times = raw
