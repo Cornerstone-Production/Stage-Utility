@@ -10,6 +10,7 @@
 // box obvious while it is still a click away.
 
 import { errorMessage } from "@main/services/errors";
+import { plural } from "@main/services/plural";
 import { DownloadIcon, UploadIcon } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 
@@ -41,7 +42,6 @@ interface ImportPlan {
   newBaptismSessions: number;
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 const CHOICES: { id: Choice; label: string; hint: string }[] = [
   {

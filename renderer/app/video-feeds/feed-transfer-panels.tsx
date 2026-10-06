@@ -11,6 +11,7 @@ import { useRef, useState } from "react";
 import { DownloadIcon } from "lucide-react";
 import { hostTimeZone, zonedDateKey } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
+import { plural } from "@main/services/plural";
 import {
   PUSH_PROTOCOL_LABEL,
   type FeedDifference,
@@ -36,7 +37,6 @@ const BUNDLE_KIND = "stage-utility-video-feeds";
 const LABEL = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
 const MONO = "font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]";
 
-const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
 /** The short line under a feed's name: the address, or the kind and protocol. */
 function briefSource(s: VideoSource): string {

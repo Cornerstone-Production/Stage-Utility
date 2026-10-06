@@ -39,6 +39,8 @@
 // upstream varying its message text cannot mint an unlimited supply of "new"
 // kinds and talk once per report through the floor.
 
+import { plural } from "./plural.js";
+
 /** Milliseconds between "still failing" reminders while a run continues. */
 const REMIND_EVERY_MS = 15 * 60 * 1000;
 /**
@@ -253,13 +255,6 @@ export class RepeatLog {
     const d = this.outage.ok("", now);
     return { line: d.log ? `${this.prefix} recovered${d.note}` : null, level: "info" };
   }
-}
-
-/** `1 attempt` / `2 attempts`. A recovery after a single failure read
- *  "recovered after 1 failed attempts", which is the sort of thing an operator
- *  reads as a bug in the thing that wrote it. */
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function minutes(ms: number): string {

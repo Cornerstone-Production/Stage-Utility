@@ -10,6 +10,7 @@ import { isDeepStrictEqual } from "node:util";
 import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
+import { plural } from "../plural.js";
 import { getLanIp } from "../lan-ip.js";
 import { relayArchivePresent, relayBinaryPresent } from "./acquire.js";
 import { OutageLog } from "../repeat-log.js";
@@ -121,8 +122,6 @@ function sourceMoved(a: VideoSource, b: VideoSource): boolean {
   if (a.kind === "embed" && b.kind === "embed") return a.player !== b.player || a.ref !== b.ref;
   return false;
 }
-
-const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
