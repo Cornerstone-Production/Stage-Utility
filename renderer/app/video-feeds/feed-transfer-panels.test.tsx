@@ -17,7 +17,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
-const { exportHref } = await import("./feed-transfer-panels.js");
+const { exportHref, groupLabel } = await import("./feed-transfer-panels.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { createMemoryHistory, createRootRoute, createRouter, RouterProvider } = await import("@tanstack/react-router");
 
@@ -133,6 +133,13 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 const link = () => screen.getByRole("link", { name: /Download/ }) as HTMLAnchorElement;
+
+test("the group checkbox label never says \"All 1 feeds\"", () => {
+  assert.equal(groupLabel(3, 3), "All 3 feeds");
+  assert.equal(groupLabel(2, 3), "2 of 3 feeds");
+  assert.equal(groupLabel(0, 3), "0 of 3 feeds");
+  assert.equal(groupLabel(1, 1), "1 feed");
+});
 
 test("exportHref sends no feeds= for every feed, so a later feed is not left out", () => {
   const all = ["a", "b"];

@@ -95,6 +95,12 @@ function groupState(ticked: number, total: number): boolean | "indeterminate" {
   return ticked === 0 ? false : "indeterminate";
 }
 
+/** The group checkbox's label: "All 3 feeds", "2 of 3 feeds", and "1 feed" for a single one. */
+export function groupLabel(ticked: number, total: number): string {
+  if (ticked !== total) return `${ticked} of ${total} feeds`;
+  return total === 1 ? "1 feed" : `All ${total} feeds`;
+}
+
 /** A push feed always has a publish password; a pull feed has one only when it was saved. */
 function passwordKind(f: VideoFeedView): "publish" | "camera" | null {
   if (f.source.kind === "push") return "publish";
@@ -114,7 +120,6 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
   const [withPasswords, setWithPasswords] = useState(false);
 
   const chosen = feeds.filter((f) => !unticked.has(f.id));
-  const allTicked = chosen.length === feeds.length;
   const holders = chosen.flatMap((f) => {
     const kind = passwordKind(f);
     return kind ? [{ name: f.name, kind }] : [];
@@ -147,7 +152,7 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
               aria-label="All feeds"
             />
             <span className="font-semibold">
-              {allTicked ? `All ${feeds.length} feeds` : `${chosen.length} of ${feeds.length} feeds`}
+              {groupLabel(chosen.length, feeds.length)}
             </span>
           </label>
           {feeds.map((f) => (
