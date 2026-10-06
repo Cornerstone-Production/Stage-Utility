@@ -10,6 +10,7 @@ import { isDeepStrictEqual } from "node:util";
 import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
+import { plural } from "../plural.js";
 import { getLanIp } from "../lan-ip.js";
 import { relayArchivePresent, relayBinaryPresent } from "./acquire.js";
 import { OutageLog } from "../repeat-log.js";
@@ -41,7 +42,7 @@ import { ProbeScheduler } from "./probe-scheduler.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import { RelayLogWatcher } from "./relay-log.js";
-import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
+import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
 import { flushSeen, forgetSeen, lastSeenAt, loadSeen, noteSeen } from "./seen-store.js";
 import type { SupervisorStatus } from "./supervisor.js";
 import {
@@ -64,6 +65,7 @@ import {
   type VideoProbeState,
   type VideoPlaybackReport,
   type VideoPorts,
+  type VideoSource,
   type VideoSourceKind,
   type VideoState,
 } from "../../types/video.js";
@@ -111,7 +113,15 @@ function sameFeed(a: VideoFeed | undefined, b: VideoFeed | undefined): boolean {
   return isDeepStrictEqual({ name: a.name, source: a.source }, { name: b.name, source: b.source });
 }
 
-const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
+/** Where a feed's picture comes from, as far as what the service remembers
+ *  about it goes: its kind and its address. A pull login, a push protocol or
+ *  a name is not part of it, so editing one leaves a feed's history alone. */
+function sourceMoved(a: VideoSource, b: VideoSource): boolean {
+  if (a.kind !== b.kind) return true;
+  if ((a.kind === "pull" || a.kind === "external") && (b.kind === "pull" || b.kind === "external")) return a.url !== b.url;
+  if (a.kind === "embed" && b.kind === "embed") return a.player !== b.player || a.ref !== b.ref;
+  return false;
+}
 
 export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
@@ -470,6 +480,10 @@ class VideoService {
    *  keyed by feed id, so a screen retrying through the run writes one line,
    *  not one per attempt. */
   private readonly dialOutage = new OutageLog();
+  /** The playback proxy's relay failures, keyed by feed id — see
+   *  video-proxy-routes.ts. Held here rather than there so removeFeed() can
+   *  drop a deleted feed's run beside dialOutage's. */
+  readonly proxyOutage = new OutageLog();
   /** A probe round that could not run at all (the feed list would not load). */
   private readonly probeRoundOutage = new OutageLog();
   /** Whether the Video feeds switch is on — told by integration-manager. */
@@ -480,7 +494,7 @@ class VideoService {
     inDemand: () => videoProbeDeps.inDemand(),
     isEnabled: () => this.videoEnabled,
     loadFeeds: async () => (await loadFeedsFile()).feeds,
-    getPassword: async (id) => (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined,
+    getPassword: (id) => this.storedPassword(id),
     isReady: (id) => this.lastPaths.get(id)?.ready === true,
     isDialling: (id) => {
       const last = this.requestedAt.get(id);
@@ -645,13 +659,19 @@ class VideoService {
    *  or embed reference — "Pulled from a device · rtsp://…". */
   private sourceLine(feed: VideoFeed): string {
     const s = feed.source;
-    const detail =
-      s.kind === "pull" || s.kind === "external"
-        ? s.url
-        : s.kind === "push"
-          ? PUSH_PROTOCOL_LABEL[s.protocol]
-          : s.ref;
-    return `${SOURCE_LINE_KIND[s.kind]} · ${detail}`;
+    return `${SOURCE_LINE_KIND[s.kind]} · ${this.sourceDetail(s)}`;
+  }
+
+  private sourceDetail(s: VideoSource): string {
+    switch (s.kind) {
+      case "pull":
+      case "external":
+        return s.url;
+      case "push":
+        return PUSH_PROTOCOL_LABEL[s.protocol];
+      case "embed":
+        return s.ref;
+    }
   }
 
   /** `hasPassword` only for a pull feed — whether a password
@@ -665,8 +685,7 @@ class VideoService {
       sourceLine: this.sourceLine(feed), play: this.play(feed), status: this.feedStatus(feed),
     };
     if (feed.source.kind === "pull") {
-      const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
-      out.hasPassword = !!secrets.password;
+      out.hasPassword = (await this.storedPassword(feed.id)) !== undefined;
     }
     return out;
   }
@@ -1071,7 +1090,7 @@ class VideoService {
         } else if (path?.ready) {
           this.pendingBFrames.delete(feed.id);
           this.pendingBFramesAt.delete(feed.id);
-          await this.bindBFramesMark(feed, path.readyTime);
+          this.bindBFramesMark(feed, path.readyTime);
         }
       }
 
@@ -1314,7 +1333,7 @@ class VideoService {
     if (!feed) return;
     const path = this.lastPaths.get(feedId);
     if (path?.ready) {
-      await this.bindBFramesMark(feed, path.readyTime);
+      this.bindBFramesMark(feed, path.readyTime);
       // Binding just changed this feed's status to "delayed" — the wire
       // must not wait for the next poll tick (up to STATUS_POLL_MS away)
       // to find out.
@@ -1325,7 +1344,7 @@ class VideoService {
     }
   }
 
-  private async bindBFramesMark(feed: VideoFeed, readyTime: string | null): Promise<void> {
+  private bindBFramesMark(feed: VideoFeed, readyTime: string | null): void {
     this.bframesMarks.set(feed.id, { readyTime });
     if (this.bframesAnnouncedAt.get(feed.id) === readyTime) return; // already said, for this same session
     this.bframesAnnouncedAt.set(feed.id, readyTime);
@@ -1455,8 +1474,7 @@ class VideoService {
     for (const feed of feeds) {
       const s = feed.source;
       if (s.kind === "pull") {
-        const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
-        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, secrets.password) });
+        out.push({ id: feed.id, kind: "pull", source: pullSource(s.url, s.username, await this.storedPassword(feed.id)) });
       } else if (s.kind === "push") {
         out.push({ id: feed.id, kind: "push", password: await this.pushPassword(feed) });
       }
@@ -1550,8 +1568,9 @@ class VideoService {
   private async reconcileOnce(): Promise<boolean> {
     if (!this.relay || this.supervisor?.status().state !== "running") return true;
     const generation = this.relayGeneration;
+    let feeds: RelayFeed[] = [];
     try {
-      const feeds = await this.relayFeeds();
+      feeds = await this.relayFeeds();
       await this.relay.reconcile(feeds);
       // Both are facts about the process that was current when this
       // started; a respawn in between gets its own reconcile from the
@@ -1571,6 +1590,15 @@ class VideoService {
       void this.pollOnce();
       return true;
     } catch (err) {
+      // A relay that rejected some paths still answered, and took every other
+      // one: those feeds are given to it, and only the named ones stay 503.
+      // The failure is still returned below, so the readiness poll retries.
+      if (err instanceof RelayReconcileError && generation === this.relayGeneration) {
+        const failed = new Set(err.failedPaths);
+        this.reconciledFeedIds = new Set(feeds.filter((f) => !failed.has(f.id)).map((f) => f.id));
+        this.relayAnswered = true;
+        void this.pollOnce();
+      }
       // Returned either way: the caller (the readiness poll) retries.
       if (!this.reconcileFailureIsNews()) return false;
       const message = errorMessage(err);
@@ -1745,7 +1773,10 @@ class VideoService {
     // Re-running parseFeedInput is what makes a name-only PATCH ({ name }) valid
     // without a second copy of the name rules: it is this same call with the
     // existing source (and, now, the body's own password) handed back through.
-    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds());
+    // A pull feed's stored password stays when the body carries none (see
+    // updateFeedSecret); any other kind's is cleared, so there is none to keep.
+    const kept = existing.source.kind === "pull" ? await this.storedPassword(id) : undefined;
+    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds(), kept);
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
     // The id never changes on update — it is the layout binding's permanent
@@ -1765,6 +1796,9 @@ class VideoService {
       feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
     }));
     await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
+    // What was remembered describes the old source: a feed changed to another
+    // kind and back must not log "went offline" against a state of the first.
+    if (sourceMoved(existing.source, feed.source)) await this.forgetFeedRuntime(id);
     await this.publish();
     await this.notifyFeedsChanged(id);
     return { ok: true, feed: await this.view(feed) };
@@ -1814,18 +1848,14 @@ class VideoService {
     if (oldKind === "pull" || oldKind === "push") await this.clearFeedSecret(id);
   }
 
-  async removeFeed(id: string): Promise<boolean> {
-    // Same check as updateFeed, and the same reason: an id this shape never
-    // mints, so it can only ever equal a feed that got into the store some
-    // other way (a hand-edited or restored file). Refusing it here keeps the
-    // two mutating routes agreeing on what a feed id is, instead of DELETE
-    // quietly accepting what PATCH would refuse.
-    if (!FEED_ID_PATTERN.test(id)) return false;
-    const { feeds } = await loadFeedsFile();
-    if (!feeds.some((f) => f.id === id)) return false;
-
-    await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
-    await this.clearFeedSecret(id);
+  /**
+   * Drops everything this process remembers about one feed's runtime: its
+   * poll data, requests, log bookkeeping, outages, playback health and
+   * last-seen time. removeFeed() calls it for a feed that is gone;
+   * updateFeed() calls it when a feed's kind or address changed, since what
+   * was remembered describes the old source, not the new one.
+   */
+  private async forgetFeedRuntime(id: string): Promise<void> {
     // A future feed CAN mint this same id again (feedIdFor() is deterministic
     // from the name), but that is a new feed with a new relay path — nothing
     // about this one's old poll data, request or log history describes it.
@@ -1838,6 +1868,10 @@ class VideoService {
     this.requestedAt.delete(id);
     this.unansweredSince.delete(id);
     this.lastLoggedState.delete(id);
+    // An outage still open for it would swallow the new feed's first failure
+    // as a repeat, and its recovery line would count the old one's.
+    this.dialOutage.forget(id);
+    this.proxyOutage.forget(id);
     // Same reasoning, every output: a re-added feed under the same name
     // must not read struggling for up to a minute on a build that has never
     // actually measured the new feed's playback.
@@ -1867,6 +1901,21 @@ class VideoService {
     // minting the same deterministic id) reads "offline, last seen <old>"
     // instead of "waiting" — the old feed's history, not its own.
     await this.forgetSeenSafely(id);
+  }
+
+  async removeFeed(id: string): Promise<boolean> {
+    // Same check as updateFeed, and the same reason: an id this shape never
+    // mints, so it can only ever equal a feed that got into the store some
+    // other way (a hand-edited or restored file). Refusing it here keeps the
+    // two mutating routes agreeing on what a feed id is, instead of DELETE
+    // quietly accepting what PATCH would refuse.
+    if (!FEED_ID_PATTERN.test(id)) return false;
+    const { feeds } = await loadFeedsFile();
+    if (!feeds.some((f) => f.id === id)) return false;
+
+    await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
+    await this.clearFeedSecret(id);
+    await this.forgetFeedRuntime(id);
     await this.publish();
     await this.notifyFeedsChanged(id);
     return true;
@@ -1932,9 +1981,9 @@ class VideoService {
       return { ok: false, error: errorMessage(err) };
     }
     const here = await loadFeedsFile();
-    const plans = await planImport(bundle, feedsOf(here), (id) => this.storedPassword(id), this.allowedKinds());
+    const plans = await planImport(bundle, here.feeds, (id) => this.storedPassword(id), this.allowedKinds());
     const preview = buildPreview(bundle, plans, here);
-    const local = new Map(feedsOf(here).map((f) => [f.id, f]));
+    const local = new Map(here.feeds.map((f) => [f.id, f]));
     for (const f of preview.feeds) f.here = reviewFingerprint(local.get(f.id), this.secretRevision.get(f.id) ?? 0);
     return { ok: true, preview };
   }
@@ -1983,8 +2032,8 @@ class VideoService {
     }
 
     const before = await loadFeedsFile();
-    const seen = new Map(feedsOf(before).map((f) => [f.id, f]));
-    const plans = await planImport(bundle, feedsOf(before), (id) => this.storedPassword(id), this.allowedKinds());
+    const seen = new Map(before.feeds.map((f) => [f.id, f]));
+    const plans = await planImport(bundle, before.feeds, (id) => this.storedPassword(id), this.allowedKinds());
     // Each reviewed feed's fingerprint now, against the one its review showed.
     const movedOn = new Set<string>();
     for (const [id, reviewed] of expect) {
@@ -2104,17 +2153,26 @@ class VideoService {
     };
 
     if (report.added.length + report.replaced.length > 0) {
+      // A replaced feed that now points somewhere else is a new source, as in updateFeed().
+      for (const { plan, outcome, prior } of landed) {
+        if (outcome === "replaced" && sourceMoved(prior!.source, plan.parsed!.source)) await this.forgetFeedRuntime(plan.preview.id);
+      }
       await this.publish();
       await this.notifyFeedsChanged();
     }
 
     // Last: a ports change restarts a running relay, and it should come back up
     // on feeds that are already saved. The feeds are in either way, so a ports
-    // failure is reported, not thrown.
+    // failure is reported, not thrown: a save that fails (a full disk) as much
+    // as a refusal.
     if (req.ports === true && bundle.ports && !samePorts(bundle.ports, (await loadFeedsFile()).ports)) {
-      const r = await this.setPorts(bundle.ports);
-      if (r.ok) report.portsApplied = true;
-      else report.portsError = r.error;
+      try {
+        const r = await this.setPorts(bundle.ports);
+        if (r.ok) report.portsApplied = true;
+        else report.portsError = r.error;
+      } catch (err) {
+        report.portsError = errorMessage(err);
+      }
     }
 
     const skippedText = report.skipped.length

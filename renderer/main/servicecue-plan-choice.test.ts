@@ -19,11 +19,11 @@ const LIST = [plan("w", "1", "Weekend"), plan("y", "2", "Youth"), plan("w", "3",
 describe("the plans an arrow walks", () => {
   test("are this type's, in the list's own order", () => {
     assert.deepEqual(plansOfType(LIST, "w").map((p) => p.planId), ["1", "3", "4"]);
-    assert.deepEqual(dropdownPlans(plansOfType(LIST, "w"), "w").map((e) => e.planId), ["1", "3", "4"]);
+    assert.deepEqual(dropdownPlans(plansOfType(LIST, "w")).map((e) => e.planId), ["1", "3", "4"]);
   });
 
   test("never include a Default stop, which is a slots board and not a rundown", () => {
-    assert.equal(dropdownPlans(plansOfType(LIST, "w"), "w").some((e) => e.planId === null), false);
+    assert.equal(dropdownPlans(plansOfType(LIST, "w")).some((e) => e.planId === null), false);
   });
 
   test("step to the neighbour, skip another type's plan, and stop at the ends", () => {

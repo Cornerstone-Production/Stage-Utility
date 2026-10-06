@@ -10,6 +10,7 @@ import * as zlib from "node:zlib";
 
 import type { ViewKind } from "../../types/stage.js";
 import { errorMessage } from "../errors.js";
+import { PcoUrlRefused } from "../pco-path.js";
 import { scrub } from "../scrub.js";
 
 /** Everything a route handler needs about the request in flight. */
@@ -117,6 +118,13 @@ export function error(res: http.ServerResponse, message: string, status = 400, c
  */
 export function pcoReadFailed(res: http.ServerResponse, what: string, err: unknown): void {
   const message = errorMessage(err);
+  // The caller named something that is not a Planning Center id: its mistake, not
+  // an outage, and PCO was never asked. 400, and the message names the parameter.
+  if (err instanceof PcoUrlRefused) {
+    console.warn(`[pco] ${scrub(what)} read refused: ${scrub(message)}`);
+    error(res, message, 400);
+    return;
+  }
   console.warn(`[pco] ${scrub(what)} read failed: ${scrub(message)}`);
   error(res, message, 502);
 }

@@ -36,14 +36,14 @@ const pco = pcoService as unknown as {
 };
 
 const TYPES: ServiceTypeDTO[] = [
-  { id: "st-sun", name: "Sunday" },
-  { id: "st-wed", name: "Wednesday" },
-  { id: "st-kick", name: "Kickoff" },
+  { id: "101", name: "Sunday" },
+  { id: "102", name: "Wednesday" },
+  { id: "103", name: "Kickoff" },
 ];
 const POSITIONS: Record<string, TeamPositionDTO[]> = {
-  "st-sun": [{ teamId: "t1", teamName: "Band", positionName: "Drums" }],
-  "st-wed": [{ teamId: "t2", teamName: "Vocals", positionName: "Host" }],
-  "st-kick": [{ teamId: "t3", teamName: "Tech", positionName: "Click" }],
+  "101": [{ teamId: "t1", teamName: "Band", positionName: "Drums" }],
+  "102": [{ teamId: "t2", teamName: "Vocals", positionName: "Host" }],
+  "103": [{ teamId: "t3", teamName: "Tech", positionName: "Click" }],
 };
 
 let asked: string[] = [];
@@ -60,7 +60,7 @@ beforeEach(() => {
   warned = [];
   ctl.pcoAppId = "app";
   ctl.pcoSecret = "secret";
-  ctl.state = { ...ctl.state, serviceTypeId: "st-sun" };
+  ctl.state = { ...ctl.state, serviceTypeId: "101" };
   pco.listServiceTypes = async () => TYPES;
   pco.listTeamPositions = async (_a, _s, id) => {
     asked.push(id);
@@ -82,19 +82,21 @@ describe("GET /api/team-positions", () => {
   test("with no parameter it answers for the live service type", async () => {
     const out = await callRoute(stateRoutes, "/api/team-positions");
     assert.equal(out.status, 200);
-    assert.deepEqual(asked, ["st-sun"]);
-    assert.deepEqual(out.json, POSITIONS["st-sun"]);
+    assert.deepEqual(asked, ["101"]);
+    assert.deepEqual(out.json, POSITIONS["101"]);
   });
 
   test("?serviceTypeId= answers for THAT type, not the live one", async () => {
-    const out = await callRoute(stateRoutes, "/api/team-positions?serviceTypeId=st-wed");
+    const out = await callRoute(stateRoutes, "/api/team-positions?serviceTypeId=102");
     assert.equal(out.status, 200);
-    assert.deepEqual(asked, ["st-wed"]);
-    assert.deepEqual(out.json, POSITIONS["st-wed"]);
+    assert.deepEqual(asked, ["102"]);
+    assert.deepEqual(out.json, POSITIONS["102"]);
   });
 
   test("an id that is not shaped like one is a 400 and reaches Planning Center nowhere", async () => {
-    for (const bad of ["", "../plans", "a b", "x".repeat(65), "st/1"]) {
+    // "st-wed" matched the route's own looser pattern before it was replaced by
+    // isPcoId; "12a" and "1_2" are the shapes that pattern allowed and an id never is.
+    for (const bad of ["", "../plans", "a b", "x".repeat(65), "st/1", "st-wed", "12a", "1_2", "1".repeat(21)]) {
       const out = await callRoute(stateRoutes, `/api/team-positions?serviceTypeId=${encodeURIComponent(bad)}`);
       assert.equal(out.status, 400, `serviceTypeId=${JSON.stringify(bad)}`);
     }
@@ -106,18 +108,18 @@ describe("GET /api/team-positions", () => {
     assert.equal(out.status, 200);
     assert.deepEqual(out.json, {
       positions: [
-        { serviceTypeId: "st-sun", serviceTypeName: "Sunday", teamId: "t1", teamName: "Band", positionName: "Drums" },
-        { serviceTypeId: "st-wed", serviceTypeName: "Wednesday", teamId: "t2", teamName: "Vocals", positionName: "Host" },
-        { serviceTypeId: "st-kick", serviceTypeName: "Kickoff", teamId: "t3", teamName: "Tech", positionName: "Click" },
+        { serviceTypeId: "101", serviceTypeName: "Sunday", teamId: "t1", teamName: "Band", positionName: "Drums" },
+        { serviceTypeId: "102", serviceTypeName: "Wednesday", teamId: "t2", teamName: "Vocals", positionName: "Host" },
+        { serviceTypeId: "103", serviceTypeName: "Kickoff", teamId: "t3", teamName: "Tech", positionName: "Click" },
       ],
       failed: [],
     });
-    assert.deepEqual(asked, ["st-sun", "st-wed", "st-kick"], "read one type at a time, in order");
+    assert.deepEqual(asked, ["101", "102", "103"], "read one type at a time, in order");
   });
 
   test("?all=1 with one type failing reports it, keeps the rest, and logs one [pco] line", async () => {
-    failing.add("st-wed");
-    failing.add("st-kick");
+    failing.add("102");
+    failing.add("103");
     const out = await callRoute(stateRoutes, "/api/team-positions?all=1");
     assert.equal(out.status, 200);
     const body = out.json as { positions: { serviceTypeName: string }[]; failed: string[] };

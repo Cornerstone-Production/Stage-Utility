@@ -17,7 +17,6 @@
 import * as http from "node:http";
 
 import { errorMessage } from "../errors.js";
-import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { PULL_START_TIMEOUT_MS } from "../video/reconcile-plan.js";
 import { videoService } from "../video/video-service.js";
@@ -163,12 +162,10 @@ function rewriteLocation(location: string, feedId: string, kind: "whep" | "whip"
  *  independent facts (a viewer of feed A gets no news about feed B), and a
  *  flapping relay for one feed still collapses to one line per outage rather
  *  than one per request — the same shape video-service.ts's own pollOutage
- *  uses for the relay-status poll. Exported so a test can shrink its settle
- *  window (settleAfter()) and clear it between cases (forget()), the same
- *  way video-service.test.ts reaches its own OutageLog through a cast —
- *  this one needs no cast, being a plain module binding rather than a
- *  private class field. */
-export const proxyOutage = new OutageLog();
+ *  uses for the relay-status poll. Owned by videoService so removeFeed() can
+ *  drop a deleted feed's run; exported here so a test can shrink its settle
+ *  window (settleAfter()) and clear it between cases (forget()). */
+export const proxyOutage = videoService.proxyOutage;
 
 function reportProxyFailure(feedId: string, err: unknown): void {
   const message = errorMessage(err);

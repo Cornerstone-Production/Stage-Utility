@@ -79,17 +79,17 @@ describe("MEDIUM cache TTL inside a service window", () => {
 
   test("inside a window a MEDIUM entry is still held at 30s", async () => {
     inWindow(true);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     now += 30 * SEC;
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(fetches, 1, "30s is inside the 45s in-window TTL — should be a cache hit");
   });
 
   test("inside a window a MEDIUM entry expires by 60s", async () => {
     inWindow(true);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     now += 60 * SEC;
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(
       fetches,
       2,
@@ -102,9 +102,9 @@ describe("MEDIUM cache TTL inside a service window", () => {
 
   test("outside every window the MEDIUM tier is unchanged at 3 minutes", async () => {
     inWindow(false);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     now += 60 * SEC;
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(
       fetches,
       1,
@@ -113,7 +113,7 @@ describe("MEDIUM cache TTL inside a service window", () => {
     );
 
     now += 2.5 * MIN; // 3.5 min total
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(fetches, 2, "past 3 minutes it should re-pull, as it always did");
   });
 
@@ -123,9 +123,9 @@ describe("MEDIUM cache TTL inside a service window", () => {
     // before. Failing towards MORE requests here would hit every install that has
     // never had a window computed.
     serviceWindow.setWindows([]);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     now += 60 * SEC;
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(fetches, 1);
   });
 
@@ -133,7 +133,7 @@ describe("MEDIUM cache TTL inside a service window", () => {
 
   test("a window opening AFTER the write shortens an entry already cached", async () => {
     inWindow(false);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(fetches, 1);
 
     // 60s later a service window opens. Under a write-time TTL this entry was
@@ -141,7 +141,7 @@ describe("MEDIUM cache TTL inside a service window", () => {
     // would not bite until it had expired on its own.
     now += 60 * SEC;
     inWindow(true);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(
       fetches,
       2,
@@ -152,14 +152,14 @@ describe("MEDIUM cache TTL inside a service window", () => {
 
   test("a window closing after the write relaxes the entry back to 3 minutes", async () => {
     inWindow(true);
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
 
     // The window closes 30s in. The entry is 30s old and, off-window, has a
     // 3-minute life — so it stays valid rather than being dropped at 45s.
     now += 30 * SEC;
     inWindow(false);
     now += 30 * SEC; // 60s old
-    await pcoService.listTeamMembers("app", "sec", "st", "plan");
+    await pcoService.listTeamMembers("app", "sec", "11", "21");
     assert.equal(fetches, 1);
   });
 

@@ -16,6 +16,40 @@ const cases: { name: string; text: string; secret: string; expected: string }[] 
     expected: "'rtsp://192.0.2.1/s' is not a valid URL",
   },
   {
+    name: "userinfo whose password holds a raw @, split from the host on the last one",
+    text: "'rtsp://admin:p@ss@192.0.2.1/s' is not a valid URL",
+    secret: "ss@",
+    expected: "'rtsp://192.0.2.1/s' is not a valid URL",
+  },
+  {
+    name: "userinfo whose password holds a ?",
+    text: "rtsp://admin:pa?ss@192.0.2.5/s",
+    secret: "pa?ss",
+    expected: "rtsp://192.0.2.5/s",
+  },
+  {
+    name: "userinfo whose password holds a ?, inside an error line",
+    text: "Invalid URL: rtsp://admin:se?cret@cam/stream",
+    secret: "se?cret",
+    expected: "Invalid URL: rtsp://cam/stream",
+  },
+  {
+    name: "userinfo whose password holds a hash",
+    text: "'rtsp://admin:pa#ss@192.0.2.5/s' is not a valid URL",
+    secret: "pa#ss",
+    expected: "'rtsp://192.0.2.5/s' is not a valid URL",
+  },
+  {
+    // Accepted over-redaction, not a requirement: with no userinfo at all, an @
+    // in the query is indistinguishable from the end of a password containing a
+    // ?, and a redactor must resolve that toward taking too much. This case
+    // used to pin the opposite, which is what let the ? and hash passwords through.
+    name: "(accepted over-redaction) the text up to an @ in the query after a bare host",
+    text: "http://192.0.2.7?contact=a@b.example failed",
+    secret: "contact=a",
+    expected: "http://b.example failed",
+  },
+  {
     name: "an SRT pull's passphrase, in the shape the relay reported a malformed host",
     text: "'srt://ho%zzst:9000?passphrase=SECRETPASS123' is not a valid URL",
     secret: "SECRETPASS123",

@@ -359,6 +359,133 @@ test("a fresh download that matches the pin is verified, extracted, and made exe
   assert.equal(downloadStarts, 1, "onDownloadStart must fire exactly once for a real download");
 });
 
+/** A fetch whose body arrives in `pieces` slices, one every `gapMs`, erroring
+ *  when the request's signal aborts, as a real one does. With `stallAfter`
+ *  the body goes quiet after that many slices and never ends; with `forever`
+ *  it keeps handing out the first slice's size without end. */
+function slowFetch(
+  bytes: Buffer,
+  { pieces, gapMs, stallAfter, forever }: { pieces: number; gapMs: number; stallAfter?: number; forever?: boolean },
+): typeof fetch {
+  return (async (_url: string, init?: RequestInit) => {
+    const signal = init?.signal;
+    const size = Math.ceil(bytes.byteLength / pieces);
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener("abort", () => controller.error(signal.reason));
+      },
+      async pull(controller) {
+        if (sent === stallAfter) return new Promise<void>(() => {});
+        await new Promise((resolve) => setTimeout(resolve, gapMs));
+        if (signal?.aborted) return;
+        if (!forever && sent * size >= bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(forever ? new Uint8Array(size) : bytes.subarray(sent * size, (sent + 1) * size));
+        sent++;
+      },
+    });
+    return new Response(stream);
+  }) as unknown as typeof fetch;
+}
+
+test("a slow but steady download finishes: only a stall counts, not the total time", async () => {
+  await resetRelayDir();
+  const { archivePath, sha256 } = await buildArchive(path.join(TMP, "src-slow"), "mediamtx-slow.tar.gz");
+  const bytes = await fs.readFile(archivePath);
+  const assets = new Map([[KEY, asset("mediamtx-slow.tar.gz", sha256)]]);
+
+  // 8 slices 60 ms apart is ~480 ms in all, far past the 200 ms idle limit,
+  // yet never quiet for as long as it.
+  const result = await ensureBinary({
+    assets,
+    fetchImpl: slowFetch(bytes, { pieces: 8, gapMs: 60 }),
+    downloadTimeouts: { idleMs: 200, totalMs: 10_000 },
+  });
+  assert.equal(result.ok, true, result.ok ? "" : result.reason);
+});
+
+test("a download that returns leaves neither watchdog timer running, on success or failure", async () => {
+  // The ceiling timer is an hour long. If stop() is skipped it is the only thing
+  // holding the process open, which showed up as the suite HANGING rather than
+  // failing. Counting the live timers turns that into an assertion.
+  const live = new Set<NodeJS.Timeout>();
+  const timers = {
+    setTimeout: (fn: () => void, ms: number): NodeJS.Timeout => {
+      const handle: NodeJS.Timeout = setTimeout(() => {
+        live.delete(handle);
+        fn();
+      }, ms);
+      live.add(handle);
+      return handle;
+    },
+    clearTimeout: (handle: NodeJS.Timeout): void => {
+      live.delete(handle);
+      clearTimeout(handle);
+    },
+  };
+
+  await resetRelayDir();
+  const { archivePath, sha256 } = await buildArchive(path.join(TMP, "src-timers"), "mediamtx-timers.tar.gz");
+  const bytes = await fs.readFile(archivePath);
+  const assets = new Map([[KEY, asset("mediamtx-timers.tar.gz", sha256)]]);
+
+  try {
+    const ok = await ensureBinary({
+      assets,
+      fetchImpl: slowFetch(bytes, { pieces: 3, gapMs: 5 }),
+      downloadTimeouts: { idleMs: 5_000, totalMs: 3_600_000, timers },
+    });
+    assert.equal(ok.ok, true, ok.ok ? "" : ok.reason);
+    assert.equal(live.size, 0, `a finished download left ${live.size} watchdog timer(s) running`);
+
+    await resetRelayDir();
+    const failed = await ensureBinary({
+      assets: new Map([[KEY, asset("mediamtx-timers-stall.tar.gz", "d".repeat(64))]]),
+      fetchImpl: slowFetch(bytes, { pieces: 3, gapMs: 5, stallAfter: 1 }),
+      downloadTimeouts: { idleMs: 100, totalMs: 3_600_000, timers },
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(live.size, 0, `an abandoned download left ${live.size} watchdog timer(s) running`);
+  } finally {
+    for (const handle of live) clearTimeout(handle); // a failing run must not hold the process either
+  }
+});
+
+test("a download that goes quiet is abandoned, and no .part is left", { timeout: 5000 }, async () => {
+  await resetRelayDir();
+  const downloadsDir = path.join(relayDir(), "downloads");
+  const { archivePath, sha256 } = await buildArchive(path.join(TMP, "src-stall"), "mediamtx-stall.tar.gz");
+  const bytes = await fs.readFile(archivePath);
+  const assets = new Map([[KEY, asset("mediamtx-stall.tar.gz", sha256)]]);
+
+  const result = await ensureBinary({
+    assets,
+    fetchImpl: slowFetch(bytes, { pieces: 8, gapMs: 10, stallAfter: 3 }),
+    downloadTimeouts: { idleMs: 150, totalMs: 10_000 },
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.reason, /no data for 0\.15 s/);
+  await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-stall.tar.gz.part")));
+});
+
+test("a download that never idles still ends at the overall ceiling", { timeout: 5000 }, async () => {
+  await resetRelayDir();
+  const assets = new Map([[KEY, asset("mediamtx-endless.tar.gz", "c".repeat(64))]]);
+
+  const result = await ensureBinary({
+    assets,
+    fetchImpl: slowFetch(Buffer.alloc(1024), { pieces: 1, gapMs: 20, forever: true }),
+    downloadTimeouts: { idleMs: 1000, totalMs: 300 },
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.reason, /still going after 0\.3 s/);
+});
+
 test("a download over 64 MB is refused by actual bytes received, not a spoofed Content-Length", async () => {
   await resetRelayDir();
   const downloadsDir = path.join(relayDir(), "downloads");

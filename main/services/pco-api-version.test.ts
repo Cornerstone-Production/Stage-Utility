@@ -59,7 +59,7 @@ describe("X-PCO-API-Version", () => {
 
   test("a GET carries the pinned version", async () => {
     stubFetch({ data: [], included: [] });
-    await pcoService.listTeamMembers("app-id", "secret", "st", "plan");
+    await pcoService.listTeamMembers("app-id", "secret", "11", "21");
 
     assert.equal(seen.length, 1, "expected exactly one request");
     assert.equal(seen[0].headers["X-PCO-API-Version"], EXPECTED_VERSION);
@@ -67,7 +67,7 @@ describe("X-PCO-API-Version", () => {
 
   test("the Live control POST carries the pinned version", async () => {
     stubFetch({ data: { id: "live-1", type: "Live", attributes: {}, links: {} } });
-    await pcoService.controlLive("app-id", "secret", "st", "plan", "next");
+    await pcoService.controlLive("app-id", "secret", "11", "21", "next");
 
     // A GET to resolve the Live session, then the POST that drives it.
     assert.equal(seen.length, 2, `expected a GET then a POST, got ${seen.length}`);
@@ -85,7 +85,7 @@ describe("X-PCO-API-Version", () => {
     stubFetch({
       data: { id: "a1", type: "Attachment", attributes: { attachment_url: "https://example.invalid/f.pdf" } },
     });
-    await pcoService.openAttachment("app-id", "secret", "st", "plan", "a1");
+    await pcoService.openAttachment("app-id", "secret", "11", "21", "31");
 
     assert.equal(seen.length, 1);
     assert.equal(seen[0].method, "POST");
@@ -144,7 +144,7 @@ describe("X-PCO-API-Version", () => {
     stubFetch({
       data: { id: "a1", type: "Attachment", attributes: { attachment_url: "https://example.invalid/f.pdf" } },
     });
-    await pcoService.openAttachment("app-id", "secret", "st", "plan", "a1");
+    await pcoService.openAttachment("app-id", "secret", "11", "21", "31");
     assert.equal(seen[0].method, "POST", "pcoFetch spreads init before headers; a swap would drop the method");
   });
 });

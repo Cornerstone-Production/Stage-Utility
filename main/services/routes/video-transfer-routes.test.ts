@@ -350,6 +350,25 @@ test("apply changes the ports only when asked", async () => {
   assert.equal(again.portsApplied, false, "the same ports are not applied twice");
 });
 
+test("a ports save that fails is reported with the feeds already in, not thrown", async () => {
+  const realUpdate = videoFeedsStore.update.bind(videoFeedsStore);
+  videoFeedsStore.update = async (mutate: Parameters<typeof realUpdate>[0]) => {
+    const probe = mutate({ feeds: [], ports: DEFAULT_PORTS });
+    if (JSON.stringify(probe.ports) === JSON.stringify(OTHER_PORTS)) throw new Error("disk full");
+    return realUpdate(mutate);
+  };
+  let r: Json;
+  try {
+    r = (await apply({ bundle: bundleOf([{ id: "resi", name: "Resi", source: EMBED.source }], { ports: OTHER_PORTS }), ports: true })).json as Json;
+  } finally {
+    videoFeedsStore.update = realUpdate;
+  }
+  assert.deepEqual(r.added, ["Resi"], "the feeds must land whatever the ports do");
+  assert.equal(r.portsApplied, false);
+  assert.match(r.portsError, /disk full/);
+  assert.deepEqual((await state()).ports, DEFAULT_PORTS);
+});
+
 test("apply refuses a body whose choices or ports are malformed", async () => {
   const bundle = bundleOf([]);
   assert.equal((await apply({ bundle, ports: "yes" })).status, 400);

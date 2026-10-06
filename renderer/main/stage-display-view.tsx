@@ -10,6 +10,7 @@ import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 import { useServerClock } from "@renderer/lib/server-clock";
+import { clockParts } from "../lib/clock-format";
 
 interface StageDisplayViewProps {
   displayId: string;
@@ -105,18 +106,15 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const display = state.outputs?.find((o) => o.id === displayId) ?? null;
   const displayName = display?.name ?? null;
 
-  const clock = new Date(now);
-  const hh = clock.getHours();
-  const h12 = String(((hh + 11) % 12) + 1).padStart(2, "0");
-  const cmm = String(clock.getMinutes()).padStart(2, "0");
-  const css = String(clock.getSeconds()).padStart(2, "0");
-  const ampm = hh < 12 ? "AM" : "PM";
+  const clock = clockParts(now, { timeZone: state.timezone });
 
   const timer = computePcoTimer(pcoLive, now);
   const over = !!timer?.over;
 
   const pro = propresenter;
   const connected = !!pro?.connected;
+  // "Offline" is a claim, so it waits for ProPresenter's first answer.
+  const unconnectedText = propresenterKnown ? "ProPresenter offline" : "—";
   const splVal = resolveSplValue(spl);
   const previewSrc =
     connected && pro?.slidePreviewKey
@@ -180,7 +178,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           </Cell>
           <Cell label="Clock">
             <span className="text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums">
-              {h12}:{cmm}<span className="text-fg-subtle text-[0.6em]">:{css} {ampm}</span>
+              {clock.head}<span className="text-fg-subtle text-[0.6em]">{clock.seconds}{clock.tail}</span>
             </span>
           </Cell>
           <Cell
@@ -233,7 +231,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
             <div className="flex flex-1 items-center min-h-0">
               <span className="text-[clamp(1.3rem,5vmin,3rem)] font-medium leading-tight line-clamp-4">
-                {connected ? (pro?.currentSlideText ?? "—") : propresenterKnown ? "ProPresenter offline" : "—"}
+                {connected ? (pro?.currentSlideText ?? "—") : unconnectedText}
               </span>
             </div>
           </div>

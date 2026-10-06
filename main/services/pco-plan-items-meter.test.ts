@@ -56,7 +56,7 @@ describe("a plan item's meter", () => {
         arrangement("arr-2", { bpm: 72, meter: "6/8", name: "Elevation Worship" }),
       ],
     );
-    const items = await pcoService.listPlanItems("app", "secret", "st1", "p1");
+    const items = await pcoService.listPlanItems("app", "secret", "11", "21");
     assert.deepEqual(
       items.map((i) => [i.id, i.bpm, i.meter, i.arrangementName]),
       [["a", 128, "4/4", "Elevation Rhythm"], ["b", 72, "6/8", "Elevation Worship"]],
@@ -75,14 +75,14 @@ describe("a plan item's meter", () => {
         arrangement("arr-3", { bpm: 100, meter: 4, name: "Wrong type" }),
       ],
     );
-    const items = await pcoService.listPlanItems("app", "secret", "st1", "p1");
+    const items = await pcoService.listPlanItems("app", "secret", "11", "21");
     assert.deepEqual(items.map((i) => i.meter), [null, null, null]);
     assert.deepEqual(items.map((i) => i.bpm), [100, 100, 100], "bpm must not depend on meter");
   });
 
   it("is null for an item with no arrangement", async () => {
     stub([itemNode("a", 0, null)], []);
-    const [item] = await pcoService.listPlanItems("app", "secret", "st1", "p1");
+    const [item] = await pcoService.listPlanItems("app", "secret", "11", "21");
     assert.equal(item!.meter, null);
     assert.equal(item!.bpm, null);
   });

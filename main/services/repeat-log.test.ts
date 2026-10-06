@@ -135,4 +135,16 @@ describe("OutageLog", () => {
     assert.equal(o.fail("k", "HTTP 401", T0 + 1000).log, false, "the same status repeated is not news");
     assert.equal(o.fail("k", "HTTP 503", T0 + 2000).log, true, "a different status was hidden behind the first");
   });
+
+  it("forgets one key's run without touching another's", () => {
+    const o = new OutageLog();
+    o.fail("gone", "refused", T0);
+    o.fail("kept", "refused", T0);
+
+    o.forget("gone");
+
+    assert.equal(o.failing("gone"), false, "the forgotten key still reads as failing");
+    assert.equal(o.failing("kept"), true, "forgetting one key dropped another's run");
+    assert.equal(o.fail("gone", "refused", T0 + 1000).log, true, "a new run for the forgotten key was swallowed as a repeat");
+  });
 });

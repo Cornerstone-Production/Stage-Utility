@@ -35,9 +35,10 @@
 
 import { isDeepStrictEqual } from "node:util";
 
+import { errorMessage } from "../errors.js";
 import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
-import type { RelayFeed, RelayPath, VideoRelay } from "./relay.js";
+import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
 import { apiUser, type RelayUser } from "./mediamtx-config.js";
 
 const REQUEST_TIMEOUT_MS = 5000;
@@ -45,11 +46,11 @@ const REQUEST_TIMEOUT_MS = 5000;
 /** `source.type` on a runtime path, mapped to the plural the kick endpoint
  *  takes. The only three a push feed of this app can ever be (srt, rtmp,
  *  whip — PUSH_PROTOCOLS in types/video.ts). */
-const KICK_ENDPOINT: Record<string, string> = {
-  rtmpConn: "rtmpconns",
-  srtConn: "srtconns",
-  webRTCSession: "webrtcsessions",
-};
+const KICK_ENDPOINT: ReadonlyMap<string, string> = new Map([
+  ["rtmpConn", "rtmpconns"],
+  ["srtConn", "srtconns"],
+  ["webRTCSession", "webrtcsessions"],
+]);
 
 interface ConfigPathsListResponse {
   items?: ({ name: string } & Record<string, unknown>)[];
@@ -57,6 +58,16 @@ interface ConfigPathsListResponse {
 
 interface GlobalConfig {
   authInternalUsers?: RelayUser[];
+}
+
+/** MediaMTX's names for the video codecs it can carry (v1.21.1 spells them AV1,
+ *  VP9, VP8, H265, H264, M-JPEG, MPEG-4 Video and MPEG-1/2 Video), compared with
+ *  everything but letters and digits dropped so a spelling change such as MJPEG
+ *  for M-JPEG still counts. Anything else it lists is audio or data. */
+const VIDEO_CODECS = new Set(["AV1", "VP9", "VP8", "H265", "H264", "MJPEG", "MPEG4VIDEO", "MPEG12VIDEO"]);
+
+function isVideoCodec(codec: string): boolean {
+  return VIDEO_CODECS.has(codec.toUpperCase().replace(/[^A-Z0-9]/g, ""));
 }
 
 interface RuntimePathItem {
@@ -151,22 +162,58 @@ export class MediaMtxRelay implements VideoRelay {
       await this.request("PATCH", "/v3/config/global/patch", { authInternalUsers: desiredUsers });
     }
 
+    // Every path is attempted whatever an earlier one did: a path the relay
+    // rejects must not keep the others from being added, replaced or removed.
+    // The failures are rethrown together, so the caller still sees a failed
+    // reconcile and retries.
     const plan = planReconcile(feeds, current);
-    for (const [name, conf] of plan.add) {
-      await this.request("POST", `/v3/config/paths/add/${encodeURIComponent(name)}`, conf);
+    const writes: [string, () => Promise<unknown>][] = [
+      ...plan.add.map(([name, conf]): [string, () => Promise<unknown>] => [
+        name,
+        () => this.request("POST", `/v3/config/paths/add/${encodeURIComponent(name)}`, conf),
+      ]),
+      ...plan.replace.map(([name, conf]): [string, () => Promise<unknown>] => [
+        name,
+        () => this.request("POST", `/v3/config/paths/replace/${encodeURIComponent(name)}`, conf),
+      ]),
+      ...plan.remove.map((name): [string, () => Promise<unknown>] => [
+        name,
+        () => this.request("DELETE", `/v3/config/paths/delete/${encodeURIComponent(name)}`),
+      ]),
+    ];
+    const failures: { name: string; reason: string }[] = [];
+    for (const [name, write] of writes) {
+      try {
+        await write();
+      } catch (err) {
+        failures.push({ name, reason: errorMessage(err) });
+      }
     }
-    for (const [name, conf] of plan.replace) {
-      await this.request("POST", `/v3/config/paths/replace/${encodeURIComponent(name)}`, conf);
-    }
-    for (const name of plan.remove) {
-      await this.request("DELETE", `/v3/config/paths/delete/${encodeURIComponent(name)}`);
+    if (failures.length > 0) {
+      // Names the paths and the reasons, never how many were attempted: a retry
+      // only attempts what is still pending, so a count ("1 of 3", then "1 of 1")
+      // would make one outage read as a new one to the caller's OutageLog, which
+      // keys on the message.
+      throw new RelayReconcileError(
+        `could not set up relay paths (${failures.map((f) => `${f.name}: ${f.reason}`).join("; ")})`,
+        failures.map((f) => f.name),
+      );
     }
   }
 
   async status(): Promise<RelayPath[]> {
     const list = (await this.request("GET", "/v3/paths/list")) as RuntimePathsListResponse;
     return (list.items ?? []).map((item) => {
-      const track = item.tracks2?.[0];
+      // The picture's track, not just the first: a publisher may list its
+      // audio first, and an audio track has no size. A track whose size is
+      // not known yet (an H.264 stream still waiting for its first frame)
+      // falls back to the first VIDEO track, so an audio-first publisher does
+      // not report Opus as its picture; only a path with no video track at all
+      // falls through to whatever is listed first.
+      const track =
+        item.tracks2?.find((t) => t.codecProps?.width !== undefined) ??
+        item.tracks2?.find((t) => isVideoCodec(t.codec)) ??
+        item.tracks2?.[0];
       return {
         name: item.name,
         ready: item.ready,
@@ -194,7 +241,7 @@ export class MediaMtxRelay implements VideoRelay {
     const list = (await this.request("GET", "/v3/paths/list")) as RuntimePathsListResponse;
     const item = list.items?.find((path) => path.name === feedId);
     if (!item?.source) return false; // Nobody is publishing to this feed right now.
-    const endpoint = KICK_ENDPOINT[item.source.type];
+    const endpoint = KICK_ENDPOINT.get(item.source.type);
     if (!endpoint) {
       throw new Error(`Cannot kick a publisher of type "${item.source.type}"`);
     }

@@ -74,7 +74,7 @@ export function useDisplayPresenceStatus(enabled = true): DisplayPresenceResult 
     clearOnReadFailure: true,
   });
   return {
-    onlineOutputIds: enabled ? (presence?.connected ?? EMPTY) : EMPTY,
-    known: enabled ? known : false,
+    onlineOutputIds: presence?.connected ?? EMPTY,
+    known,
   };
 }

@@ -20,6 +20,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { consoleCalls, describeOffender, logOffenders } from "./console-scan.js";
+import type { PcoUrl } from "./pco-path.js";
 import { sameOrigin, pcoUrlFrom, nextOffset, pcoService, withOffset, pinnedToPco } from "./pco-service.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -64,7 +65,7 @@ describe("the URL actually handed to fetch()", () => {
   // host is never taken from the response at all.
 
   it("keeps the path and query", () => {
-    const out = pcoUrlFrom(`${PCO}/service_types/1/plans?offset=25&per_page=25`, PCO);
+    const out = pcoUrlFrom(`${PCO}/service_types/1/plans?offset=25&per_page=25`);
     assert.equal(out, "https://api.planningcenteronline.com/services/v2/service_types/1/plans?offset=25&per_page=25");
   });
 
@@ -72,7 +73,7 @@ describe("the URL actually handed to fetch()", () => {
     // The whole point. Even a candidate that PASSES the origin check contributes
     // only its path — there is no string an upstream can return that changes the
     // host, including through a parser disagreement.
-    const out = pcoUrlFrom(`${PCO}/x`, PCO);
+    const out = pcoUrlFrom(`${PCO}/x`);
     assert.ok(out);
     assert.equal(new URL(out).origin, new URL(PCO).origin);
   });
@@ -123,6 +124,40 @@ describe("the URL actually handed to fetch()", () => {
     assert.throws(() => pinnedToPco("not a url at all"), /cannot parse/);
   });
 
+  it("refuses a path that climbs out of the endpoint it was built for", () => {
+    // `?serviceTypeId=` is spliced into the path, and fetch resolves `..`: without
+    // this the app's credentials fetched /people/v2/people for any LAN caller.
+    for (const climbing of [
+      `${PCO}/service_types/1/../../../people/v2/people?x=/plans`,
+      `${PCO}/service_types/1/%2e%2e/%2E%2e/people/v2/people`,
+      `${PCO}/service_types/1/..\\..\\people/v2/people`,
+      `${PCO}/service_types/..`,
+    ]) {
+      assert.throws(() => pinnedToPco(climbing), /climbs out/, climbing);
+    }
+  });
+
+  it("still passes a real path, and a `..` that is only part of the query", () => {
+    const real = `${PCO}/service_types/123/plans/456/items?include=item_notes&per_page=100`;
+    assert.equal(pinnedToPco(real), real);
+    const inQuery = `${PCO}/service_types/123/plans?filter=../x`;
+    assert.equal(pinnedToPco(inQuery), inQuery);
+  });
+
+  it("is what stops a service type id from reading another product, end to end", async (t) => {
+    // Through the real read, with fetch recording what leaves the process.
+    const sent: string[] = [];
+    t.mock.method(globalThis, "fetch", async (url: string) => {
+      sent.push(String(url));
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+    await assert.rejects(
+      pcoService.listTeamPositions("app", "secret", "7/../../../people/v2/people?x="),
+      /serviceTypeId is not a Planning Center id/,
+    );
+    assert.deepEqual(sent, [], "a request left for another endpoint");
+  });
+
   it("cannot be walked off-origin by a pathname that starts //", () => {
     const origin = new URL(PCO).origin;
     for (const hostile of [
@@ -130,7 +165,7 @@ describe("the URL actually handed to fetch()", () => {
       `${origin}//attacker.example/steal?x=1`,
       `${origin}///attacker.example/steal`,
     ]) {
-      const out = pcoUrlFrom(hostile, PCO);
+      const out = pcoUrlFrom(hostile);
       if (out === null) continue; // rejected outright is also safe
       assert.equal(
         new URL(out).origin,
@@ -151,7 +186,7 @@ describe("the URL actually handed to fetch()", () => {
       undefined,
       42,
     ]) {
-      assert.equal(pcoUrlFrom(bad, PCO), null, `must reject ${String(bad)}`);
+      assert.equal(pcoUrlFrom(bad), null, `must reject ${String(bad)}`);
     }
   });
 
@@ -178,6 +213,44 @@ const isComment = (l: string) => /^\s*(\/\/|\*|\/\*)/.test(l);
 function linesOf(file: string): string[] {
   return fs.readFileSync(path.join(HERE, file), "utf8").split("\n");
 }
+
+describe("a Services URL is written with pcoUrl", () => {
+  // The tag takes only what pcoId or pcoSegment has checked, and a raw string in an
+  // interpolation does not type-check. What the type system cannot stop is a URL
+  // written without the tag, so this reads the source for that: a template literal
+  // that opens with the base, or reaches for a service_types path.
+  const code = linesOf("pco-service.ts").filter((l) => !isComment(l));
+
+  it("no URL is built on the base by hand", () => {
+    const byHand = code.filter((l) => /`\$\{PCO_BASE\}/.test(l) || /(?<!pcoUrl)`[^`]*\/service_types\/\$\{/.test(l));
+    assert.deepEqual(byHand, [], "build the URL with pcoUrl and pcoId");
+  });
+
+  it("PCO_BASE is not written into a string, and PcoUrl is not cast into being", () => {
+    // The brand on PcoUrl is what stops PCO_BASE + "/service_types/" + id from
+    // reaching a credentialed request (tsc refuses it); this is the backstop for
+    // the two ways round the type. Over the whole services tree, not one client.
+    // pco-path.ts is where the brand is made, so it is the one file allowed to
+    // cast. A bare PCO_BASE argument is not matched: it is not a concatenation, and
+    // the type refuses it anyway.
+    const offenders: string[] = [];
+    for (const file of serviceSources()) {
+      if (file === "pco-path.ts") continue;
+      linesOf(file).forEach((line, i) => {
+        if (isComment(line)) return;
+        if (/PCO_BASE\s*\+|\+\s*PCO_BASE|\$\{\s*PCO_BASE\s*\}|PCO_BASE\s*\.\s*concat|\bas\s+PcoUrl\b|<PcoUrl>/.test(line)) {
+          offenders.push(`${file}:${i + 1}: ${line.trim()}`);
+        }
+      });
+    }
+    assert.deepEqual(offenders, [], "build the URL with pcoUrl and pcoId");
+  });
+
+  it("every id in a pcoUrl path went through pcoId", () => {
+    const raw = code.filter((l) => /pcoUrl`[^`]*\$\{(?!pcoId\(|pcoSegment\()/.test(l));
+    assert.deepEqual(raw, []);
+  });
+});
 
 describe("scrub coverage in every PCO client", () => {
   // The scan is console-scan.ts, shared with log-injection.test.ts. This file
@@ -351,7 +424,7 @@ const PATH_THAT_WANTS_TO_BE_A_HOST = [
 describe("a path that tries to be a host", () => {
   it("never leaves PCO's origin, whatever the path looks like", () => {
     for (const path of PATH_THAT_WANTS_TO_BE_A_HOST) {
-      const out = pcoUrlFrom(`https://api.planningcenteronline.com${path}`, PCO);
+      const out = pcoUrlFrom(`https://api.planningcenteronline.com${path}`);
       assert.ok(out, `pcoUrlFrom returned null for ${path}`);
       assert.equal(
         new URL(out).origin,
@@ -487,6 +560,13 @@ describe("the calendar client owns no transport of its own", () => {
 describe("the pagination cursor", () => {
   const PAGE = "https://api.planningcenteronline.com/services/v2/service_types/1/plans?per_page=25";
 
+  /** A page URL as the client holds it: through the one function that mints one. */
+  function held(url: string): PcoUrl {
+    const out = pcoUrlFrom(url);
+    assert.ok(out, `not a PCO URL: ${url}`);
+    return out;
+  }
+
   it("takes the offset out of a next link", () => {
     assert.equal(nextOffset(`${PAGE}&offset=50`), 50);
     assert.equal(nextOffset(`${PAGE}&offset=0`), 0);
@@ -510,7 +590,7 @@ describe("the pagination cursor", () => {
   });
 
   it("builds the next URL from OUR url, keeping its other parameters", () => {
-    const out = withOffset(`${PAGE}&include=items`, 75);
+    const out = withOffset(held(`${PAGE}&include=items`), 75);
     const u = new URL(out);
     assert.equal(u.origin, "https://api.planningcenteronline.com");
     assert.equal(u.searchParams.get("offset"), "75");
@@ -519,7 +599,7 @@ describe("the pagination cursor", () => {
   });
 
   it("replaces an existing offset rather than appending a second", () => {
-    const u = new URL(withOffset(`${PAGE}&offset=25`, 50));
+    const u = new URL(withOffset(held(`${PAGE}&offset=25`), 50));
     assert.deepEqual(u.searchParams.getAll("offset"), ["50"]);
   });
 });

@@ -1520,6 +1520,44 @@ test("a probe that never sees a frame closes its session within PROBE_TIMEOUT_MS
   }
 });
 
+test("a probe whose stats cannot be read fails at once, closing its session, and HLS plays on", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed"));
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const realGetStats = FakePeerConnection.prototype.getStats;
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { result } = renderRelaySession(video, logs);
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame());
+    await act(async () => {
+      mock.timers.tick(WEBRTC_RETRY_AFTER_MS);
+      await flush();
+    });
+    FakePeerConnection.prototype.getStats = async () => {
+      throw new Error("getStats on a closed connection");
+    };
+    await act(async () => {
+      mock.timers.tick(PROBE_POLL_MS);
+      await flush();
+      await flush();
+    });
+    assert.equal(g.calls.filter((c) => c.method === "DELETE").length, 1, "expected the unreadable probe's session DELETEd at once");
+    assert.equal(video.src, "/video/f/index.m3u8");
+    assert.equal(video.srcSets, 1, "HLS must not be restarted by a failed probe");
+    assert.equal(result.current.phase, "delayed");
+  } finally {
+    FakePeerConnection.prototype.getStats = realGetStats;
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
 // ── HLS: its failures, its delayed phase, and a superseded attempt ──────────
 
 test("a fatal hls.js error drops the attempt (retried), never a webrtc verdict", async () => {

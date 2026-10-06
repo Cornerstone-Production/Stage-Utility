@@ -16,7 +16,9 @@ for a body or query the caller got wrong, `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
-`/api/team-positions` and the two `/api/servicecue` reads. A `500` means this app
+`/api/team-positions` and the two `/api/servicecue` reads. A `serviceTypeId` or
+`planId` that is not a Planning Center id (digits only) is a `400` naming the
+parameter on any of them; Planning Center is not asked. A `500` means this app
 broke, and only that.
 
 ## What is protected, and what is not
@@ -55,9 +57,9 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET  | `/api/version` | The running code version, uncached. A request from loopback also gets `dataDir` and `pid` — never a LAN caller, since those are a filesystem path and a process id |
 | GET  | `/api/state` | Current `StageState` |
 | GET  | `/api/service-types` | PCO service types |
-| GET  | `/api/team-positions` | Team positions, `{teamId, teamName, positionName}[]`, for the live service type. `?serviceTypeId=…` answers for that type instead (`400` unless the value is 1-64 letters, digits, `_` or `-`). `?all=1` answers for every service type as `{positions, failed}`: each position also carries `serviceTypeId` and `serviceTypeName`, and `failed` names the types that could not be read, which are skipped rather than failing the call. Types are read one at a time and each read is cached |
+| GET  | `/api/team-positions` | Team positions, `{teamId, teamName, positionName}[]`, for the live service type. `?serviceTypeId=…` answers for that type instead (`400` unless the value is a Planning Center id: 1-20 digits). `?all=1` answers for every service type as `{positions, failed}`: each position also carries `serviceTypeId` and `serviceTypeName`, and `failed` names the types that could not be read, which are skipped rather than failing the call. Types are read one at a time and each read is cached |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
-| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes; `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
+| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes, or thirty seconds when a service type could not be read (it is left out and logged, and asked for again at the next refresh); `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
 | GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
 | GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
 | POST | `/api/service-type` | Set active service type |
@@ -78,7 +80,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 |--------|------|---------|
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |

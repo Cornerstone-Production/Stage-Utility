@@ -91,4 +91,21 @@ describe("setBranding keeps image bytes out of stage state", () => {
     assert.equal(after.appLogo, before.appLogo, "state took the rejected image");
     assert.equal(after.appName, before.appName, "state took half of a rejected update");
   });
+
+  it("a malformed pre-crop original rejects the whole update too, not after state has moved", async () => {
+    // The original is stored by settingsStore.patch, which runs after state is
+    // merged. Rejected there, the new logo and name sat in memory (and went out on
+    // the next broadcast) with nothing on disk to survive a restart.
+    const before = stageController.getState();
+    await assert.rejects(
+      stageController.setBranding({
+        logo: DATA_URL,
+        logoOriginal: "data:image/png;base64,!!!not-base64!!!",
+        name: "Should Not Land Either",
+      }),
+    );
+    const after = stageController.getState();
+    assert.equal(after.appLogo, before.appLogo, "state took a logo whose original was rejected");
+    assert.equal(after.appName, before.appName, "state took half of a rejected update");
+  });
 });

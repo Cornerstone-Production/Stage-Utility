@@ -23,6 +23,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
 const { pcoService } = await import("./pco-service.js");
+const { captureConsole } = await import("./fixtures/capture-console.js");
 
 type Mutable = {
   state: Record<string, unknown>;
@@ -74,6 +75,52 @@ describe("getServiceCueRundown's isDefaultPlan", () => {
   it("on another type, true for the nearest upcoming plan and false for any other", async () => {
     assert.equal(await flag(OTHER, "p1"), true);
     assert.equal(await flag(OTHER, "p2"), false, "the app's plan id means nothing on a type the app is not on");
+  });
+
+  it("when the app's own plan no longer resolves, the nearest upcoming plan is what the default falls to", async () => {
+    // With no planId the rundown answers with plans[0] here, so a page browsing
+    // plans[0] is looking at the followed plan, and one browsing the vanished
+    // plan's neighbour is not.
+    const kept = ctl.state;
+    ctl.state = { ...kept, planId: "gone" };
+    try {
+      assert.equal((await stageController.getServiceCueRundown(ACTIVE)).planId, "p1");
+      assert.equal(await flag(ACTIVE, "p1"), true, "the plan the default resolves to was labelled Browsing");
+      assert.equal(await flag(ACTIVE, "p2"), false);
+    } finally {
+      ctl.state = kept;
+    }
+  });
+
+  it("a browse request still answers when the followed plan's own read fails, and says so once", async (t) => {
+    // Resolving the followed plan to label the page reaches the recent-plans list
+    // when the app's plan is not in the upcoming one. That read is not what the
+    // request asked for: a plan named in the request that IS in the upcoming list
+    // answered before the label followed the default, and must not start to 502.
+    const lines = captureConsole(t, "warn");
+    const kept = ctl.state;
+    const keptRecent = svc.listRecentPlans;
+    ctl.state = { ...kept, planId: "gone" };
+    svc.listRecentPlans = async () => {
+      throw new Error("Planning Center returned 503");
+    };
+    try {
+      const first = await stageController.getServiceCueRundown(ACTIVE, "p1");
+      assert.equal(first.planId, "p1", "the request named a plan in the upcoming list and must be answered");
+      assert.equal(first.isDefaultPlan, false, "compared against the app's own plan when the default could not be resolved");
+      const again = await stageController.getServiceCueRundown(ACTIVE, "p3");
+      assert.equal(again.planId, "p3");
+      assert.equal(
+        lines.filter((l) => l.includes("[plans] could not resolve the followed plan")).length,
+        1,
+        `one outage, one line: ${JSON.stringify(lines)}`,
+      );
+      // With no planId the followed plan IS the answer, so its failure still propagates.
+      await assert.rejects(() => stageController.getServiceCueRundown(ACTIVE), /503/);
+    } finally {
+      ctl.state = kept;
+      svc.listRecentPlans = keptRecent;
+    }
   });
 
   it("an unknown plan comes back empty and still says it is the default, so the page reads planId null", async () => {

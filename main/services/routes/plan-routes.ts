@@ -8,6 +8,7 @@ import { buildPlanBundle, planExportPreview } from "../plan-export.js";
 import { errorMessage } from "../errors.js";
 import { zonedDateKey } from "../app-timezone.js";
 import { filenameSlug } from "../export-filename.js";
+import { PcoUrlRefused } from "../pco-path.js";
 import { type RouteCtx, json, error, queryFlag } from "./context.js";
 
 /** `sunday-am-2026-09-08.stage-plan.json`. Dated in the APP's zone, never the
@@ -37,7 +38,8 @@ function slotsScope(url: URL): "type" | "all" | null {
  */
 function refuse(res: RouteCtx["res"], err: unknown): void {
   const msg = errorMessage(err);
-  error(res, msg, /unknown service type|nothing to export|not configured/.test(msg) ? 400 : 500);
+  const refused = err instanceof PcoUrlRefused || /unknown service type|nothing to export|not configured/.test(msg);
+  error(res, msg, refused ? 400 : 500);
 }
 
 export async function planRoutes(c: RouteCtx): Promise<void> {

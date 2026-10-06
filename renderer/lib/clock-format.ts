@@ -16,8 +16,10 @@
 
 export type HourCycle = "12h" | "24h";
 
-/** What the app renders when nobody has chosen. 24h, because that is what every
- *  fixed clock in the app did before the setting existed. */
+/** What the app renders when nobody has chosen: 24h. Not every clock showed 24h
+ *  before the setting existed: the Dashboard, the stage display, the SPL rundown,
+ *  the ServiceCue header and the Updates hour picker showed 12h, and now follow
+ *  this default (and the operator's choice) like the rest. */
 export const DEFAULT_HOUR_CYCLE: HourCycle = "24h";
 
 let cycle: HourCycle = DEFAULT_HOUR_CYCLE;

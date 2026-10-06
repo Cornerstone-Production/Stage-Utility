@@ -25,6 +25,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
 import {
   isDefaultRundownPlan,
   planWindow,
@@ -33,6 +34,7 @@ import {
   switcherTypes,
   toUpcoming,
   UPCOMING_CACHE_MS,
+  UPCOMING_PARTIAL_CACHE_MS,
 } from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
 import type {
@@ -379,7 +381,17 @@ export class StageController {
    * edits three service types in a row, and when PCO goes down mid-edit the last
    * good list is a far better answer than an empty one.
    */
-  private upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null = null;
+  private upcomingCache: {
+    at: number;
+    days: number;
+    allowed: string[];
+    plans: UpcomingPlan[];
+    /** Some service type could not be read: reused for a shorter time. */
+    partial: boolean;
+  } | null = null;
+  /** Plan-list reads that keep failing, said once per outage. Keys:
+   *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
+  private readonly plansOutage = new OutageLog();
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -944,7 +956,7 @@ export class StageController {
       cached &&
       cached.days === days &&
       sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
-      now - cached.at < UPCOMING_CACHE_MS
+      now - cached.at < (cached.partial ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
       return { plans: cached.plans, cacheAgeMs: now - cached.at };
     }
@@ -961,13 +973,29 @@ export class StageController {
     const failures: string[] = [];
     const perType = await Promise.all(
       types.map(async (t) => {
+        const key = `upcoming:${t.id}`;
         try {
-          return toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const rows = toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const recovered = this.plansOutage.ok(key, now);
+          if (recovered.log) {
+            console.log(`[plans] upcoming list: ${scrub(t.name)} can be read again${scrub(recovered.note)}`);
+          }
+          return rows;
         } catch (err) {
           // Returned to the caller as a shortfall in the list, not swallowed: a
           // total failure below becomes `unavailable`, and a partial one is
           // logged so an operator with a missing type has something to read.
-          failures.push(`${t.name}: ${errorMessage(err)}`);
+          const reason = errorMessage(err);
+          failures.push(`${t.name}: ${reason}`);
+          // Once per outage per type, not once per refresh: a partial list is
+          // reused for only thirty seconds, so a type that stays down would
+          // otherwise repeat this line every thirty seconds until it came back.
+          const decision = this.plansOutage.fail(key, reason, now);
+          if (decision.log) {
+            console.warn(
+              `[plans] upcoming list incomplete: ${scrub(t.name)} could not be read — ${scrub(reason)}${scrub(decision.note)}`,
+            );
+          }
           return [] as UpcomingPlan[];
         }
       }),
@@ -977,22 +1005,28 @@ export class StageController {
       return this.upcomingUnavailable(failures[0]!, now);
     }
 
+    const back = this.plansOutage.ok("upcoming", now);
+    if (back.log) console.log(`[plans] upcoming list available again${scrub(back.note)}`);
     const plans = sortUpcoming(perType.flat());
-    this.upcomingCache = { at: now, days, allowed: [...this.state.allowedServiceTypeIds], plans };
+    this.upcomingCache = {
+      at: now,
+      days,
+      allowed: [...this.state.allowedServiceTypeIds],
+      plans,
+      partial: failures.length > 0,
+    };
     console.log(
       `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
     );
-    if (failures.length > 0) {
-      console.warn(
-        `[plans] upcoming list incomplete: ${scrub(failures.length)} of ${scrub(types.length)} types could not be read — ${scrub(failures.join("; "))}`,
-      );
-    }
     return { plans, cacheAgeMs: 0 };
   }
 
-  /** The unavailable answer: the last good list when there is one, else nothing. */
+  /** The unavailable answer: the last good list when there is one, else nothing.
+   *  Logged once per outage: nothing unavailable is cached, so while Planning
+   *  Center is down every request lands here. */
   private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
-    console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}`);
+    const decision = this.plansOutage.fail("upcoming", reason, now);
+    if (decision.log) console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}${scrub(decision.note)}`);
     const cached = this.upcomingCache;
     if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
     return { plans: [], cacheAgeMs: 0, unavailable: reason };
@@ -1511,10 +1545,36 @@ export class StageController {
       return recent.find((p) => p.id === id) ?? null;
     };
 
-    let plan: PlanDTO | null;
-    if (planId) plan = await resolve(planId);
-    else if (isActiveType && this.state.planId) plan = (await resolve(this.state.planId)) ?? plans[0] ?? null;
-    else plan = plans[0] ?? null;
+    // The plan this page follows when nothing is asked for: the app's own plan on
+    // the active type, if it still resolves. When it does not, the default falls
+    // to the nearest upcoming plan, and so must the flag below.
+    //
+    // It only LABELS the page when a planId was asked for (the plan itself is the
+    // one named), so a read that fails then must not fail the request: a browse
+    // step to a plan in the upcoming list answered without touching the recent
+    // list before the label followed the default, and has to keep answering. The
+    // label degrades to the comparison it made against the app's own plan, and the
+    // failure is said once on /log. With no planId the plan IS the followed one, so
+    // there the failure propagates to the caller as it always did.
+    let followed: PlanDTO | null = null;
+    let followedUnresolved = false;
+    if (isActiveType && this.state.planId) {
+      try {
+        followed = await resolve(this.state.planId);
+        const recovered = this.plansOutage.ok(`followed:${serviceTypeId}`, Date.now());
+        if (recovered.log) console.log(`[plans] the followed plan can be read again${scrub(recovered.note)}`);
+      } catch (err) {
+        if (!planId) throw err;
+        followedUnresolved = true;
+        const decision = this.plansOutage.fail(`followed:${serviceTypeId}`, errorMessage(err), Date.now());
+        if (decision.log) {
+          console.warn(
+            `[plans] could not resolve the followed plan to label a rundown; comparing against the app's own plan instead: ${scrub(errorMessage(err))}${scrub(decision.note)}`,
+          );
+        }
+      }
+    }
+    const plan = planId ? await resolve(planId) : (followed ?? plans[0] ?? null);
     if (!plan) return empty;
 
     // serviceTypes is cached for 15 minutes, so pulling the item row colors here
@@ -1546,7 +1606,7 @@ export class StageController {
       isDefaultPlan: isDefaultRundownPlan({
         requestedPlanId: planId ?? null,
         resolvedPlanId: plan.id,
-        activeTypePlanId: isActiveType ? this.state.planId : null,
+        activeTypePlanId: followedUnresolved ? this.state.planId : (followed?.id ?? null),
         nextUpcomingPlanId: plans[0]?.id ?? null,
       }),
     };
@@ -2585,8 +2645,7 @@ export class StageController {
     // but only for the copy it writes: merged into this.state as-is, the full data
     // URL (up to ~1.5 MB each) rode in every stage:state broadcast until the next
     // restart reloaded the reference from disk. Store them here, before the merge,
-    // so memory and disk hold the same `/branding-images/` URL. A failure throws
-    // before this.state is touched, and reaches the caller as it always did.
+    // so memory and disk hold the same `/branding-images/` URL.
     const stored = await externalizeBrandingImages(stateNext);
 
     // Settings-only fields (originals + crops), never broadcast.
@@ -2610,6 +2669,11 @@ export class StageController {
       settingsNext.defaultAvatarOriginal = null;
       settingsNext.defaultAvatarCrop = null;
     }
+    // The pre-crop originals are images too, and settingsStore.patch would store
+    // them only after this.state had moved: a malformed one then left the new logo
+    // and name live in memory with nothing on disk. Stored here, so a bad image of
+    // either kind throws before this.state is touched and reaches the caller.
+    const settingsStored = await externalizeBrandingImages(settingsNext);
 
     console.log(
       `[stage-controller] setBranding`,
@@ -2623,7 +2687,7 @@ export class StageController {
       }),
     );
     this.state = { ...this.state, ...stored };
-    await settingsStore.patch(settingsNext);
+    await settingsStore.patch(settingsStored);
     this.broadcast();
     return this.state;
   }

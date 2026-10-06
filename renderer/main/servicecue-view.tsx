@@ -182,6 +182,7 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
         appLogo={state.appLogo}
         appLogoMonochrome={state.appLogoMonochrome}
         now={now}
+        timeZone={state.timezone}
         trailing={
           state.showQr && state.remoteUrl ? (
             <a href="/settings" target="_blank" rel="noopener noreferrer" className="rounded hover:opacity-70 transition-opacity">

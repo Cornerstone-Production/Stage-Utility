@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Loader2Icon } from "lucide-react";
 import { useServerClock } from "@renderer/lib/server-clock";
+import { formatClock } from "../lib/clock-format";
 
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -77,9 +78,6 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
   }
 
   const display = state.outputs?.find((o) => o.id === displayId) ?? null;
-  const clock = new Date(now);
-  const h12 = String(((clock.getHours() + 11) % 12) + 1).padStart(2, "0");
-  const mm = String(clock.getMinutes()).padStart(2, "0");
   const live = resolveSplValue(spl);
 
   const items = plan?.items ?? [];
@@ -103,7 +101,7 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
           )}
           <div className="flex flex-col items-end leading-none">
             <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
-            <span className="text-title3 font-mono font-medium text-fg">{h12}:{mm}</span>
+            <span className="text-title3 font-mono font-medium text-fg">{formatClock(now, { timeZone: state.timezone })}</span>
           </div>
         </div>
       </div>

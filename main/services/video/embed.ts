@@ -5,7 +5,7 @@
 
 import type { EmbedPlayer } from "../../types/video.js";
 
-const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
+const CHANNEL_ID = /UC[A-Za-z0-9_-]{22}/;
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const PLAYER_FLAGS = "autoplay=1&mute=1&controls=0&playsinline=1";
 
@@ -14,8 +14,8 @@ type Ref = { ok: true; ref: string } | { ok: false; error: string };
 export function normalizeEmbedRef(player: EmbedPlayer, raw: string): Ref {
   const text = raw.trim();
   if (player === "youtube-channel") {
-    const id = text.match(/(UC[A-Za-z0-9_-]{22})/)?.[1];
-    if (id && CHANNEL_ID.test(id)) return { ok: true, ref: id };
+    const id = CHANNEL_ID.exec(text)?.[0];
+    if (id) return { ok: true, ref: id };
     return {
       ok: false,
       error: "Use the channel ID, which starts with UC. It is in YouTube Studio under Settings, Channel, Advanced settings.",

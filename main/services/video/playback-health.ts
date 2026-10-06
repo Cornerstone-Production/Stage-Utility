@@ -417,9 +417,9 @@ export class PlaybackHealth {
     return this.pairs.get(outputId)?.get(feedId)?.episodeId ?? null;
   }
 
-  /** Every currently-live pair's health, freshest first play order not
-   *  guaranteed — video-service.ts and the Screens page both filter/group
-   *  by outputId or feedId themselves. A pair whose last report is
+  /** Every currently-live pair's health, in no particular order —
+   *  video-service.ts and the Screens page both filter/group by outputId or
+   *  feedId themselves. A pair whose last report is
    *  WINDOW_MS old or older is left out even if record() has not run since
    *  (and so never swept it out of the underlying map) — this is the
    *  correctness backstop sweep() does not have to be relied on for. */

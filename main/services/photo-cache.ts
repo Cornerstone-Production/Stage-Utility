@@ -8,6 +8,7 @@ import * as path from "path";
 import { getUserDataPath } from "./app-paths.js";
 import { downscaleAvatarUrl } from "./avatar-geometry.js";
 import { pruneCacheDir } from "./cache-prune.js";
+import { scrub, scrubError } from "./scrub.js";
 
 // Photos are small; keep ~90 days of them, capped at 250 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -92,7 +93,7 @@ export function getPhotoPath(photoUrl: string): Promise<string | null> {
 
 async function loadPhoto(photoUrl: string): Promise<string | null> {
   if (!isAllowedPhotoUrl(photoUrl)) {
-    console.warn(`[photo-cache] refused to fetch a photo from outside PCO: ${photoUrl}`);
+    console.warn(`[photo-cache] refused to fetch a photo from outside PCO: ${scrub(photoUrl)}`);
     return null;
   }
   try {
@@ -117,7 +118,7 @@ async function loadPhoto(photoUrl: string): Promise<string | null> {
     }
     return filePath;
   } catch (err) {
-    console.error("[photo-cache] Error caching photo:", err);
+    console.error("[photo-cache] Error caching photo:", scrubError(err));
     return null;
   }
 }
@@ -191,7 +192,7 @@ async function fetchSized(photoUrl: string, sizedUrl: string, size: number): Pro
   const got = await getPhotoPath(sizedUrl);
   if (!got && recordSizedFailure(sizedUrl)) {
     console.warn(
-      `[photo-cache] PCO did not give a ${size}px copy of ${photoUrl}; serving it at its own geometry where it can be, retrying in ${SIZED_RETRY_MS / 60000} min`,
+      `[photo-cache] PCO did not give a ${scrub(size)}px copy of ${scrub(photoUrl)}; serving it at its own geometry where it can be, retrying in ${scrub(SIZED_RETRY_MS / 60000)} min`,
     );
   }
   return got;
@@ -270,7 +271,7 @@ export async function prunePhotoCache(): Promise<void> {
   const dir = await getCacheDir();
   const r = await pruneCacheDir(dir, { maxAgeMs: MAX_AGE_MS, maxBytes: MAX_BYTES });
   if (r.removed > 0) {
-    console.log(`[photo-cache] pruned ${r.removed} file(s), freed ${(r.freedBytes / 1e6).toFixed(1)} MB`);
+    console.log(`[photo-cache] pruned ${scrub(r.removed)} file(s), freed ${scrub((r.freedBytes / 1e6).toFixed(1))} MB`);
   }
 }
 
@@ -323,14 +324,23 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
       });
       if (response.status >= 300 && response.status < 400) {
         console.warn(
-          `[photo-cache] refused a redirect from ${photoUrl} to ${response.headers.get("location") ?? "?"}`,
+          `[photo-cache] refused a redirect from ${scrub(photoUrl)} to ${scrub(response.headers.get("location") ?? "?")}`,
         );
         return null;
       }
       if (!response.ok) {
-        console.error(`[photo-cache] Failed to fetch ${photoUrl}: ${response.status}`);
+        console.error(`[photo-cache] Failed to fetch ${scrub(photoUrl)}: ${scrub(response.status)}`);
         if (response.status >= 400 && response.status < 500) return null; // don't retry client errors
         continue;
+      }
+      // What is cached is served immutable for a year, so a 200 that is a web page
+      // (a captive portal, a proxy's error page) must not be kept as the photo.
+      // A denylist, not "must be image/*": a CDN that serves avatars as
+      // binary/octet-stream is still serving avatars.
+      const contentType = response.headers.get("content-type") ?? "";
+      if (/^(text\/|application\/(json|xml))/i.test(contentType)) {
+        console.error(`[photo-cache] refused a ${scrub(contentType)} body from ${scrub(photoUrl)}: not an image`);
+        return null;
       }
       // The 250 MB cache cap is only enforced by a once-daily prune, so without a
       // per-photo ceiling a stream of large responses can fill a Pi's card between
@@ -344,24 +354,20 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
       // over, which is what the guarantee needs to be.
       const declared = Number(response.headers.get("content-length"));
       if (Number.isFinite(declared) && declared > MAX_PHOTO_BYTES) {
-        console.error(`[photo-cache] refused ${declared} declared bytes from ${photoUrl} (over cap)`);
+        console.error(`[photo-cache] refused ${scrub(declared)} declared bytes from ${scrub(photoUrl)} (over cap)`);
         return null;
       }
       const buf = await readCapped(response, MAX_PHOTO_BYTES);
       if (!buf) {
-        console.error(`[photo-cache] refused an over-cap body from ${photoUrl}`);
+        console.error(`[photo-cache] refused an over-cap body from ${scrub(photoUrl)}`);
         return null;
       }
       return buf;
     } catch (err) {
-      // photoUrl comes out of a PCO response, so it stays out of the format
-      // string — a `%s` in it would eat the error and report only the attempt.
-      console.error(
-        "[photo-cache] fetch attempt failed:",
-        attempt + 1,
-        photoUrl,
-        err instanceof Error ? err.message : err,
-      );
+      // The URL is a caller's string (/photos?u=), so it goes through scrub() like
+      // every other value here. One template, no trailing arguments: a `%s` in the
+      // URL then has nothing to eat.
+      console.error(`[photo-cache] fetch attempt ${scrub(attempt + 1)} failed for ${scrub(photoUrl)}: ${scrub(err)}`);
     }
   }
   return null;

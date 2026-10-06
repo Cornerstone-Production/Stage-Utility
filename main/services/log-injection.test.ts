@@ -108,6 +108,11 @@ const REQUEST_FACING = [
   "integration-manager.ts",
   "pco-service.ts",
   "person-directory.ts",
+  // GET /photos?u= hands the caller's string to every one of its log lines: the
+  // refusal, the redirect, the status, the size cap and the failed attempt each
+  // name the URL, and the URL parser drops a newline before it checks the host,
+  // so one with a newline in it is still fetched and still logged.
+  "photo-cache.ts",
   "plan-export.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
@@ -257,7 +262,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["osc-manager.ts", DEVICE],
   ["pco-attachment-cache.ts", UNAUDITED],
   ["pco-calendar-service.ts", ELSEWHERE],
-  ["photo-cache.ts", UNAUDITED],
   ["prodcom-service.ts", DEVICE],
   ["propresenter-service.ts", DEVICE],
   ["pvp-service.ts", DEVICE],
@@ -396,6 +400,9 @@ function requestFacingFiles(): string[] {
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.
     path.join(HERE, "person-directory.ts"),
+    // The URL in `GET /photos?u=` is the caller's own string and is named by each
+    // of this file's failure lines. Was excused as UNAUDITED until it was audited.
+    path.join(HERE, "photo-cache.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),

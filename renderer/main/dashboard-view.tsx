@@ -9,6 +9,7 @@ import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 import { useServerClock } from "@renderer/lib/server-clock";
+import { clockParts } from "../lib/clock-format";
 
 interface DashboardViewProps {
   displayId: string;
@@ -67,12 +68,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const displayName = display?.name ?? null;
 
   // Wall clock.
-  const clock = new Date(now);
-  const hh = clock.getHours();
-  const h12 = String(((hh + 11) % 12) + 1).padStart(2, "0");
-  const mm = String(clock.getMinutes()).padStart(2, "0");
-  const ss = String(clock.getSeconds()).padStart(2, "0");
-  const ampm = hh < 12 ? "AM" : "PM";
+  const clock = clockParts(now, { timeZone: state.timezone });
 
   // PCO live timer: counts down on fixed-length items, up otherwise.
   const timer = computePcoTimer(pcoLive, now);
@@ -147,10 +143,10 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         <Tile label="Current time">
           <div className="flex items-baseline gap-2 font-mono tabular-nums">
             <span className="text-[clamp(2rem,9vmin,5rem)] font-medium text-fg leading-none">
-              {h12}:{mm}
+              {clock.head}
             </span>
-            <span className="text-[clamp(1rem,4vmin,2rem)] text-fg-subtle leading-none">{ss}</span>
-            <span className="text-[clamp(0.8rem,2.5vmin,1.25rem)] text-fg-subtle leading-none">{ampm}</span>
+            <span className="text-[clamp(1rem,4vmin,2rem)] text-fg-subtle leading-none">{clock.seconds}</span>
+            <span className="text-[clamp(0.8rem,2.5vmin,1.25rem)] text-fg-subtle leading-none">{clock.tail.trim()}</span>
           </div>
         </Tile>
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/cn";
+import type { SwitcherEntry } from "../settings/sections/plan-switcher-step";
 import { dropdownPlans, parsePlanLink, placePastedPlan, planWhen, plansOfType, stepPlan } from "./servicecue-plan-choice";
 
 // ‹ plan ▾ › and its Following / Browsing badge, in the ServiceCue page's header.
@@ -47,7 +48,7 @@ export interface ServiceCuePlanNavProps {
 export function ServiceCuePlanNav(props: ServiceCuePlanNavProps) {
   const { serviceTypeId, serviceTypeName, plans, plansLoaded, currentPlanId, followedPlanId, following, fallbackLabel, timeZone, onSelect, onOpenElsewhere } = props;
   const typePlans = plansOfType(plans, serviceTypeId);
-  const stops = dropdownPlans(typePlans, serviceTypeId);
+  const stops = dropdownPlans(typePlans);
   // Inert until both the list and the current plan are known: with the plan
   // still loading, `stepTarget` would read "no plan" as "before the first one"
   // and send the forward arrow to the earliest plan in the list.
@@ -193,7 +194,7 @@ function PlanList({
   timeZone,
   onChoose,
 }: {
-  stops: ReturnType<typeof dropdownPlans>;
+  stops: SwitcherEntry[];
   loaded: boolean;
   groupLabel: string | null;
   currentPlanId: string | null;

@@ -26,6 +26,15 @@ test("pull allows rtsp, rtsps, srt, http(s) and refuses userinfo in the address"
   assert.match((r as { error: string }).error, /own fields/);
   assert.equal(parseFeedInput({ name: "P", source: { kind: "pull", url: "udp://h:1", username: "" } }, ALL).ok, false);
 });
+test("an SRT address that carries a passphrase is refused, and says where it goes", () => {
+  for (const url of ["srt://h:9000?passphrase=correct-horse-battery", "srt://h:9000?streamid=x&Passphrase=correct-horse-battery", "srt://h:9000?passphrase="]) {
+    const r = parseFeedInput({ name: "P", source: { kind: "pull", url, username: "" } }, ALL);
+    assert.equal(r.ok, false, url);
+    assert.match((r as { error: string }).error, /passphrase in the Password field, not the address/, url);
+  }
+  // streamid is not a secret: it stays accepted.
+  assert.equal(parseFeedInput({ name: "P", source: { kind: "pull", url: "srt://h:9000?streamid=read:cam", username: "" } }, ALL).ok, true);
+});
 test("push needs a known protocol", () => {
   assert.equal(parseFeedInput({ name: "P", source: { kind: "push", protocol: "rtsp" } }, ALL).ok, false);
   assert.equal(parseFeedInput({ name: "P", source: { kind: "push", protocol: "whip" } }, ALL).ok, true);
@@ -99,6 +108,25 @@ test("an SRT passphrase that is not plain ASCII is refused with its own reason, 
     assert.equal(r.ok, false, JSON.stringify(bad));
     assert.equal((r as { error: string }).error, "An SRT passphrase can use only plain letters, digits, spaces and punctuation.");
   }
+});
+
+test("a stored password an SRT address would keep is held to the passphrase rules", () => {
+  const edit = (password: unknown, kept: string | undefined) =>
+    parseFeedInput(
+      { name: "P", source: { kind: "pull", url: "srt://10.0.0.1:9000", username: "" }, ...(password === undefined ? {} : { password }) },
+      ALL,
+      kept,
+    );
+  const refused = edit(undefined, "admin123");
+  assert.equal(refused.ok, false, "an 8-character RTSP password became an SRT passphrase");
+  assert.match((refused as { error: string }).error, /^An SRT passphrase must be 10 to 80 characters long\. The password saved for this feed/);
+  assert.equal(edit(undefined, "a-long-passphrase").ok, true);
+  assert.equal(edit(undefined, undefined).ok, true, "no stored password, nothing to refuse");
+  assert.equal(edit("a-new-long-passphrase", "admin123").ok, true, "a passphrase typed now replaces the stored one");
+  assert.equal(edit("", "admin123").ok, true, "an empty password clears the stored one");
+  const typed = edit("short", "a-long-passphrase");
+  assert.equal(typed.ok, false);
+  assert.equal((typed as { error: string }).error, "An SRT passphrase must be 10 to 80 characters long.");
 });
 
 test("the SRT rules are SRT's alone: an RTSP pull keeps its username and any password", () => {

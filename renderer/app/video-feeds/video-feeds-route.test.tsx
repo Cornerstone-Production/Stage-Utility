@@ -1498,6 +1498,71 @@ test("the secure-clipboard Copy path flips the button to \"Copied\" and reverts 
   }
 });
 
+test("a second Copy restarts the \"Copied\" label's timer instead of letting the first one cut it short", async () => {
+  Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  const wait = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
+  try {
+    mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await settle();
+    await wait(COPIED_LABEL_MS / 2);
+    fireEvent.click(screen.getByRole("button", { name: "Copied" }));
+    await settle();
+    // Past the first click's deadline, inside the second's.
+    await wait(COPIED_LABEL_MS / 2 + 200);
+    assert.ok(screen.getByRole("button", { name: "Copied" }), "the first click's timer reverted a label the second click had just set");
+    await wait(COPIED_LABEL_MS);
+    assert.ok(screen.getByRole("button", { name: "Copy" }), "expected the label to revert after the second click's own delay");
+  } finally {
+    g.restore();
+    delete (window as { isSecureContext?: unknown }).isSecureContext;
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+});
+
+test("leaving the editor cancels the \"Copied\" label's timer", async () => {
+  Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
+  const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
+  // This component's own timer is the only one set with exactly this delay.
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  const live = new Set<unknown>();
+  globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    const handle = realSet(fn, ms, ...rest);
+    if (ms === COPIED_LABEL_MS) live.add(handle);
+    return handle;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((handle: Parameters<typeof clearTimeout>[0]) => {
+    live.delete(handle);
+    realClear(handle);
+  }) as typeof clearTimeout;
+  try {
+    const view = mount();
+    await settle();
+    await settle();
+    await screen.findByLabelText("Paste this into the device");
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await settle();
+    await settle();
+    assert.equal(live.size, 1, "the copy should have a label timer running");
+    view.unmount();
+    assert.equal(live.size, 0, "the label timer was left running after the editor went away");
+  } finally {
+    globalThis.setTimeout = realSet;
+    globalThis.clearTimeout = realClear;
+    g.restore();
+    delete (window as { isSecureContext?: unknown }).isSecureContext;
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+});
+
 test("blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" hint", async () => {
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {

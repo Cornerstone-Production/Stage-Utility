@@ -241,13 +241,8 @@ export async function toggleIntegration(
     onStateChange(await ipc<IntegrationState>("integrations:setEnabled", { id, enabled }));
   } catch (err) {
     console.error("[IntegrationsPanel:toggle]", id, enabled, err);
-    // errorMessage(), never String(err) — on a real Error (every ipc()
-    // failure is one; see api.ts's apiFetch()) String() produces
-    // "Error: <message>", a stray prefix an operator reads as part of the
-    // reason rather than what it is. Three more call sites in this same
-    // file had the identical bug (Failed to save, Refresh failed, the Test
-    // connection result) — grepped for every `String(err)` here and fixed
-    // all four together, not just the toggle's.
+    // errorMessage(), never String(err): on a real Error (every ipc() failure
+    // is one) String() adds an "Error: " prefix that reads as part of the reason.
     toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${errorMessage(err)}`);
   } finally {
     setBusy(false);

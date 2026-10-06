@@ -413,6 +413,9 @@ type HistoryLoad = "timeline" | "attendance" | "spl" | "baptisms";
  *  level down: a read that failed is not a record that says nothing happened. */
 type DetailRead = "record" | "attendance" | "spl";
 
+/** No read of the open service has answered yet. */
+const NO_READS_ANSWERED: Readonly<Record<DetailRead, string | null>> = { record: null, attendance: null, spl: null };
+
 interface HistoryRow {
   serviceKey: string;
   serviceDate: string;
@@ -546,11 +549,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * state, and on a slow connection the Attendance card said "No attendance
    * recorded" until the chart arrived and replaced it.
    */
-  const [readFor, setReadFor] = useState<Readonly<Record<DetailRead, string | null>>>({
-    record: null,
-    attendance: null,
-    spl: null,
-  });
+  const [readFor, setReadFor] = useState<Readonly<Record<DetailRead, string | null>>>(NO_READS_ANSWERED);
   // Baptism sessions (cross-linked to a service by time overlap). `null`
   // until the first fetch resolves — a failure resets it to `[]`, same as a
   // genuinely baptism-free month, but `loadFailed.has("baptisms")` is what
@@ -960,11 +959,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // Synchronous, so the panel clears in the same render the selection does —
   // it never shows the previous service's numbers under an empty selection, nor
   // under the next service while that one's reads are still in flight (a merge
-  // moves straight from one service to another).
+  // moves straight from one service to another). The answers go with the
+  // records: opening the same service again is a new read, not the last one's.
   useResyncOn([selectedKey], () => {
     setDetail(null);
     setAttendance(null);
     setSpl(null);
+    setReadFor(NO_READS_ANSWERED);
   });
 
   useEffect(() => {

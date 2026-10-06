@@ -424,12 +424,16 @@ export function probeWebrtc(
     controller.abort();
     return true;
   };
-  const fail = (reason: string) => {
-    if (!settle()) return;
+  /** Closes the probe's own session; a handed-over one is the caller's. */
+  const release = () => {
     const s = session;
     session = null;
     sink.srcObject = null;
     if (s) void s.stop();
+  };
+  const fail = (reason: string) => {
+    if (!settle()) return;
+    release();
     cb.onUnusable(reason);
   };
   deadline = setTimeout(() => fail("no frame arrived"), PROBE_TIMEOUT_MS);
@@ -449,26 +453,28 @@ export function probeWebrtc(
         { signal: controller.signal },
       );
       poll = setInterval(() => {
-        void whep.pc.getStats().then((report) => {
-          let frames = 0;
-          report.forEach((r: { type?: string; kind?: string; framesReceived?: number; framesDecoded?: number }) => {
-            if (r.type === "inbound-rtp" && r.kind === "video") frames = Math.max(frames, r.framesReceived ?? 0, r.framesDecoded ?? 0);
-          });
-          const stream = sink.srcObject;
-          if (frames === 0 || !(stream && typeof stream === "object") || !settle()) return;
-          sink.srcObject = null;
-          cb.onUsable({ url, session: whep, stream: stream as MediaStream });
-        });
+        whep.pc
+          .getStats()
+          .then((report) => {
+            let frames = 0;
+            report.forEach((r: { type?: string; kind?: string; framesReceived?: number; framesDecoded?: number }) => {
+              if (r.type === "inbound-rtp" && r.kind === "video") frames = Math.max(frames, r.framesReceived ?? 0, r.framesDecoded ?? 0);
+            });
+            const stream = sink.srcObject;
+            if (frames === 0 || !(stream && typeof stream === "object") || !settle()) return;
+            sink.srcObject = null;
+            cb.onUsable({ url, session: whep, stream: stream as MediaStream });
+          })
+          // A peer connection whose stats cannot be read can never show it has
+          // frames, so waiting out PROBE_TIMEOUT_MS would only hold its relay
+          // session open; a read landing after the probe settled is a no-op.
+          .catch((err: unknown) => fail(errorMessage(err)));
       }, PROBE_POLL_MS);
     })
     .catch((err: unknown) => fail(errorMessage(err)));
   return {
     stop: () => {
-      if (!settle()) return;
-      const s = session;
-      session = null;
-      sink.srcObject = null;
-      if (s) void s.stop();
+      if (settle()) release();
     },
   };
 }
@@ -530,6 +536,26 @@ function computeVerdict(
   if (choice.method === "none") return { kind: "cant-play", reason: choice.reason };
   if (choice.method === "webrtc") return { kind: "attempt", choice: { method: "webrtc", url: choice.url, relayManaged: isRelay } };
   return { kind: "attempt", choice };
+}
+
+/** What the widget shows for a verdict: the attempt's own phase only while an
+ *  attempt is what the verdict calls for. */
+function phaseOf(verdict: Verdict, attemptPhase: SessionPhase): SessionPhase {
+  switch (verdict.kind) {
+    case "deleted":
+    case "known-offline":
+      return "offline";
+    case "waiting":
+      return "waiting";
+    case "cant-play":
+      return "cant-play";
+    case "embed":
+      return "live";
+    case "no-feed":
+      return "connecting";
+    case "attempt":
+      return attemptPhase;
+  }
 }
 
 export interface VideoSessionInput {
@@ -725,18 +751,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
 
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
 
-  const phase: SessionPhase =
-    verdict.kind === "deleted" || verdict.kind === "known-offline"
-      ? "offline"
-      : verdict.kind === "waiting"
-        ? "waiting"
-        : verdict.kind === "cant-play"
-          ? "cant-play"
-          : verdict.kind === "embed"
-            ? "live"
-            : verdict.kind === "no-feed"
-              ? "connecting"
-              : attemptPhase;
+  const phase = phaseOf(verdict, attemptPhase);
 
   useEffect(() => {
     if (!active || !video || !attemptChoice) return undefined;

@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import { redirect, useRouter } from "@tanstack/react-router";
-import { MOVED_PAGE_PREFIXES, legacyPageRedirect } from "../../main/services/routes/operator-paths";
+import { MOVED_PAGE_PREFIXES, legacyPageRedirect } from "@main/services/routes/operator-paths";
 
 /** Where each retired path now points. */
 export const MOVED_ROUTES: Record<string, string> = {

@@ -10,8 +10,9 @@ import * as http from "node:http";
 import { afterEach, before, after, describe, it } from "node:test";
 
 import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { OutageLog } from "../repeat-log.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
-import type { RelayFeed } from "./relay.js";
+import { RelayReconcileError, type RelayFeed } from "./relay.js";
 
 /** Keys `GET /v3/config/paths/list` reports beyond what this app ever sets
  *  — recording, run-on-demand, every other protocol's own timeouts — so a
@@ -52,6 +53,9 @@ let failPathsListWith: string | null = null;
 /** When set, `GET /v3/config/paths/list` answers 500 with this raw text,
  *  which is not JSON. */
 let rawPathsListBody: string | null = null;
+/** When set, an add or replace of this path answers 400, as the relay does
+ *  for a config it will not accept. */
+let rejectWritesTo: string | null = null;
 
 function bootState(): void {
   configPaths = new Map();
@@ -60,6 +64,7 @@ function bootState(): void {
   failPathsList = false;
   failPathsListWith = null;
   rawPathsListBody = null;
+  rejectWritesTo = null;
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
@@ -110,6 +115,7 @@ function handle(method: string, url: string, body: unknown, res: http.ServerResp
   const addMatch = /^\/v3\/config\/paths\/add\/([^/]+)$/.exec(url);
   if (method === "POST" && addMatch) {
     const name = decodeURIComponent(addMatch[1]);
+    if (name === rejectWritesTo) return send(res, 400, { error: "invalid source" });
     if (configPaths.has(name)) return send(res, 400, { error: "path already exists" });
     configPaths.set(name, { ...PATH_EXTRAS, ...(body as Record<string, unknown>) });
     return send(res, 200, {});
@@ -234,6 +240,45 @@ describe("MediaMtxRelay.reconcile", () => {
     const relay = new MediaMtxRelay(port, API_PASSWORD);
     await relay.reconcile([srtPull]);
     assert.equal(configPaths.get("cam2")?.source, "srt://h:9000?streamid=x&passphrase=p%40ss");
+  });
+
+  it("a path the relay rejects does not keep the others from being added or removed, and reconcile still rejects naming it", async () => {
+    configPaths.set("orphan", { ...PATH_EXTRAS, source: "publisher" });
+    rejectWritesTo = "cam1";
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    await assert.rejects(
+      () => relay.reconcile([PULL, PUSH]),
+      (err: Error) => {
+        assert.ok(err instanceof RelayReconcileError, "a partial failure carries which paths failed");
+        assert.deepEqual((err as RelayReconcileError).failedPaths, ["cam1"]);
+        assert.match(err.message, /could not set up relay paths/);
+        assert.match(err.message, /cam1: invalid source/);
+        assert.equal(err.message.includes("obs1"), false, "only the failed path is named");
+        return true;
+      },
+    );
+    assert.deepEqual([...configPaths.keys()], ["obs1"], "obs1 added and orphan removed despite cam1 failing");
+  });
+
+  it("the same failing path reads as the same failure on a retry, so it is one outage", async () => {
+    // The first reconcile has three writes, one rejected; the retry has only the
+    // rejected one left (the other two are in place). The message used to carry
+    // "1 of 3" and then "1 of 1", and the caller's OutageLog keys on the message,
+    // so one outage was logged twice.
+    configPaths.set("orphan", { ...PATH_EXTRAS, source: "publisher" });
+    rejectWritesTo = "cam1";
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const messages: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await relay.reconcile([PULL, PUSH]).then(
+        () => assert.fail("the reconcile must reject while cam1 is refused"),
+        (err: Error) => messages.push(err.message),
+      );
+    }
+    assert.equal(messages[0], messages[1]);
+    const outage = new OutageLog();
+    const logged = messages.map((m) => outage.fail("reconcile", m, Date.now()).log);
+    assert.deepEqual(logged, [true, false], "the second failure of the same path is not a new outage");
   });
 
   it("a second reconcile with no changes makes no writes", async () => {
@@ -412,6 +457,55 @@ describe("MediaMtxRelay.status", () => {
   });
 });
 
+describe("MediaMtxRelay.status picks the picture track", () => {
+  it("reports the video track when the path lists its audio track first", async () => {
+    runtimePaths = [
+      {
+        name: "cam1",
+        ready: true,
+        readyTime: "2026-09-28T00:00:00Z",
+        source: { type: "webRTCSession", id: "sess-1" },
+        tracks2: [
+          { codec: "Opus", codecProps: { sampleRate: 48000, channelCount: 2 } },
+          { codec: "H265", codecProps: { width: 1920, height: 1080, profile: "Main" } },
+        ],
+      },
+    ];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const [path] = await relay.status();
+    assert.deepEqual(path!.video, { codec: "H265", width: 1920, height: 1080, profile: "Main" });
+  });
+
+  it("an audio-first publisher with no picture size yet still reports its video track, not the audio", async () => {
+    // Before the first keyframe no track has a width, and the fallback was the
+    // first one listed: Opus.
+    for (const video of ["H264", "H265", "VP8", "VP9", "AV1", "M-JPEG", "MJPEG", "MPEG-4 Video", "MPEG-1/2 Video"]) {
+      runtimePaths = [
+        { name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "Opus", codecProps: {} }, { codec: video }] },
+      ];
+      const relay = new MediaMtxRelay(port, API_PASSWORD);
+      const [path] = await relay.status();
+      assert.equal(path!.video?.codec, video, `${video} listed after Opus`);
+    }
+  });
+
+  it("a path with no video track at all still reports the first one listed", async () => {
+    runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "Opus", codecProps: {} }] }];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const [path] = await relay.status();
+    assert.equal(path!.video?.codec, "Opus");
+  });
+
+  it("falls back to the first track when none has a picture size yet", async () => {
+    runtimePaths = [
+      { name: "cam1", ready: true, readyTime: null, source: null, tracks2: [{ codec: "H264" }, { codec: "Opus", codecProps: {} }] },
+    ];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    const [path] = await relay.status();
+    assert.deepEqual(path!.video, { codec: "H264", width: undefined, height: undefined, profile: undefined });
+  });
+});
+
 describe("MediaMtxRelay.kickPublisher", () => {
   it("an rtmpConn publisher is kicked at /v3/rtmpconns/kick/<id>, and reports true", async () => {
     runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "rtmpConn", id: "conn-1" } }];
@@ -451,6 +545,13 @@ describe("MediaMtxRelay.kickPublisher", () => {
         return true;
       },
     );
+    assert.equal(calls.filter((c) => c.method === "POST").length, 0);
+  });
+
+  it("a source type that is an Object.prototype key is as unknown as any other", async () => {
+    runtimePaths = [{ name: "cam1", ready: true, readyTime: null, source: { type: "constructor", id: "conn-9" } }];
+    const relay = new MediaMtxRelay(port, API_PASSWORD);
+    await assert.rejects(() => relay.kickPublisher("cam1"), { message: 'Cannot kick a publisher of type "constructor"' });
     assert.equal(calls.filter((c) => c.method === "POST").length, 0);
   });
 });

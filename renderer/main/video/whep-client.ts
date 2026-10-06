@@ -74,41 +74,33 @@ export async function startWhep(url: string, video: HTMLVideoElement, opts?: { s
   // on, and the browser can fire `track` for this session before the SRD
   // promise it belongs to ever settles.
   let stopped = false;
-  pc.addTransceiver("video", { direction: "recvonly" });
   pc.ontrack = (e) => {
     if (stopped || opts?.signal?.aborted) return;
     video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
   };
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await iceGatheringComplete(pc, 2000);
-
-  let res: Response;
+  // Null until the relay answers 201: only then is there a session on its side
+  // to DELETE. Every failure before and after that point closes the peer
+  // connection here, so no exit leaves one open.
+  let location: string | null = null;
   try {
-    res = await fetch(endpoint, {
+    pc.addTransceiver("video", { direction: "recvonly" });
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await iceGatheringComplete(pc, 2000);
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/sdp" },
       body: pc.localDescription!.sdp,
       signal: opts?.signal,
     });
-  } catch (err) {
-    stopped = true;
-    pc.close();
-    throw err;
-  }
-  if (res.status !== 201) {
-    stopped = true;
-    pc.close();
-    throw new WhepError(res.status);
-  }
-  const location = res.headers.get("Location");
-
-  try {
+    if (res.status !== 201) throw new WhepError(res.status);
+    location = res.headers.get("Location");
     await pc.setRemoteDescription({ type: "answer", sdp: await res.text() });
   } catch (err) {
-    // The relay already created a session for the 201 above — leaving it
-    // dangling because reading OUR half of the answer failed would leak it
-    // on the relay until its own timeout, one more than every other exit.
+    // A 201 means the relay already created a session: leaving it dangling
+    // because reading OUR half of the answer failed would leak it on the relay
+    // until its own timeout, one more than every other exit.
     stopped = true;
     await endSession(pc, endpoint, location);
     throw err;

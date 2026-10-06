@@ -11,6 +11,7 @@ import { useRef, useState } from "react";
 import { DownloadIcon } from "lucide-react";
 import { hostTimeZone, zonedDateKey } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
+import { plural } from "@main/services/plural";
 import {
   PUSH_PROTOCOL_LABEL,
   type FeedDifference,
@@ -27,20 +28,15 @@ import {
 import { Button, Checkbox, ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
+import { joinWithAnd } from "../../lib/join-with-and";
 import { useStageState } from "../../main/use-stage-state";
+import { SIDE_PANE } from "./side-pane";
 
 const BUNDLE_KIND = "stage-utility-video-feeds";
 
-const ASIDE =
-  "flex min-w-0 flex-col gap-3.5 border-t border-line bg-surface-raised p-4 min-[900px]:border-l min-[900px]:border-t-0";
 const LABEL = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
 const MONO = "font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]";
 
-function listOf(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
 /** The short line under a feed's name: the address, or the kind and protocol. */
 function briefSource(s: VideoSource): string {
@@ -93,6 +89,18 @@ function portsLine(p: VideoPorts): string {
   return `RTMP ${p.rtmp} · SRT ${p.srt} · UDP ${p.webrtcUdp} · and three loopback ports`;
 }
 
+/** A group checkbox's state: all ticked, none, or some. */
+function groupState(ticked: number, total: number): boolean | "indeterminate" {
+  if (ticked === total) return true;
+  return ticked === 0 ? false : "indeterminate";
+}
+
+/** The group checkbox's label: "All 3 feeds", "2 of 3 feeds", and "1 feed" for a single one. */
+export function groupLabel(ticked: number, total: number): string {
+  if (ticked !== total) return `${ticked} of ${total} feeds`;
+  return total === 1 ? "1 feed" : `All ${total} feeds`;
+}
+
 /** A push feed always has a publish password; a pull feed has one only when it was saved. */
 function passwordKind(f: VideoFeedView): "publish" | "camera" | null {
   if (f.source.kind === "push") return "publish";
@@ -112,7 +120,6 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
   const [withPasswords, setWithPasswords] = useState(false);
 
   const chosen = feeds.filter((f) => !unticked.has(f.id));
-  const allTicked = chosen.length === feeds.length;
   const holders = chosen.flatMap((f) => {
     const kind = passwordKind(f);
     return kind ? [{ name: f.name, kind }] : [];
@@ -130,7 +137,7 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
   };
 
   return (
-    <aside aria-label="Export video feeds" className={ASIDE}>
+    <aside aria-label="Export video feeds" className={SIDE_PANE}>
       <h2 className="text-subheadline font-semibold text-fg">Export video feeds</h2>
 
       <div className="flex flex-col gap-1.5">
@@ -140,12 +147,12 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
             <Checkbox
               // A partly-ticked group paints as `mixed`, which the base look does not cover.
               className="mt-0.5 aria-[checked=mixed]:border-accent aria-[checked=mixed]:bg-accent"
-              checked={allTicked ? true : none ? false : "indeterminate"}
+              checked={groupState(chosen.length, feeds.length)}
               onCheckedChange={(v) => setUnticked(v === true ? new Set() : new Set(feeds.map((f) => f.id)))}
               aria-label="All feeds"
             />
             <span className="font-semibold">
-              {allTicked ? `All ${feeds.length} feeds` : `${chosen.length} of ${feeds.length} feeds`}
+              {groupLabel(chosen.length, feeds.length)}
             </span>
           </label>
           {feeds.map((f) => (
@@ -195,9 +202,9 @@ export function ExportPanel({ feeds, ports }: { feeds: VideoFeedView[]; ports: V
           <Note tone="warn">
             The file will hold these passwords in plain text. Anyone with the file can{" "}
             {[
-              publishNames.length ? `publish to ${listOf(publishNames)}` : "",
+              publishNames.length ? `publish to ${joinWithAnd(publishNames)}` : "",
               cameraNames.length
-                ? `log in to the ${listOf(cameraNames)} ${cameraNames.length === 1 ? "camera" : "cameras"}`
+                ? `log in to the ${joinWithAnd(cameraNames)} ${cameraNames.length === 1 ? "camera" : "cameras"}`
                 : "",
             ].filter(Boolean).join(" and ")}
             . Keep it off shared drives.
@@ -283,6 +290,9 @@ export function ImportPanel() {
   const [dragging, setDragging] = useState(false);
 
   async function take(file: File): Promise<void> {
+    // A drop while a file is already being reviewed would race it: whichever
+    // preview answered last would win, not the file chosen last.
+    if (busy) return;
     setError(null);
     setReport(null);
     setBusy(true);
@@ -310,6 +320,9 @@ export function ImportPanel() {
     }
   }
 
+  // The file's own source for each feed, found by id: the review's rows are
+  // the server's order, which nothing here may assume matches the file's.
+  const fileSources = new Map((picked?.bundle.feeds ?? []).map((f) => [f.id, f.source]));
   const choiceFor = (id: string): ImportChoice => choices.get(id) ?? "replace";
   const toImport = picked
     ? picked.preview.feeds.filter((f) => f.status === "new" || (f.status === "differs" && choiceFor(f.id) === "replace")).length
@@ -346,7 +359,7 @@ export function ImportPanel() {
   };
 
   return (
-    <aside aria-label="Import video feeds" className={ASIDE}>
+    <aside aria-label="Import video feeds" className={SIDE_PANE}>
       <h2 className="text-subheadline font-semibold text-fg">Import video feeds</h2>
       <input
         ref={fileRef}
@@ -392,11 +405,11 @@ export function ImportPanel() {
             {picked.preview.hasPasswords ? "with passwords" : "no passwords"}
           </div>
           <div className="flex flex-col">
-            {picked.preview.feeds.map((f, i) => (
+            {picked.preview.feeds.map((f) => (
               <FeedRow
                 key={f.id}
                 feed={f}
-                source={picked.bundle.feeds[i]?.source}
+                source={fileSources.get(f.id)}
                 choice={choiceFor(f.id)}
                 onChoice={(c) => setChoices(new Map(choices).set(f.id, c))}
               />
@@ -404,7 +417,7 @@ export function ImportPanel() {
           </div>
           {picked.preview.absent.length > 0 && (
             <p className="text-caption1 text-fg-muted">
-              {listOf(picked.preview.absent)} {picked.preview.absent.length === 1 ? "is" : "are"} not in the file. They stay as they
+              {joinWithAnd(picked.preview.absent)} {picked.preview.absent.length === 1 ? "is" : "are"} not in the file. They stay as they
               are; an import never removes a feed.
             </p>
           )}
@@ -496,12 +509,12 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
     <div className="flex flex-col gap-2 text-footnote text-fg">
       <div className="font-semibold">Imported {plural(landed, "feed")}</div>
       <ul className="flex list-disc flex-col gap-1 pl-4">
-        {report.added.length > 0 && <li>Added {listOf(report.added)}</li>}
-        {report.replaced.length > 0 && <li>Replaced {listOf(report.replaced)} with the file&apos;s</li>}
-        {report.kept.length > 0 && <li>Kept this server&apos;s {listOf(report.kept)}</li>}
+        {report.added.length > 0 && <li>Added {joinWithAnd(report.added)}</li>}
+        {report.replaced.length > 0 && <li>Replaced {joinWithAnd(report.replaced)} with the file&apos;s</li>}
+        {report.kept.length > 0 && <li>Kept this server&apos;s {joinWithAnd(report.kept)}</li>}
         {report.same.length > 0 && (
           <li>
-            {listOf(report.same)} {report.same.length === 1 ? "was" : "were"} already the same
+            {joinWithAnd(report.same)} {report.same.length === 1 ? "was" : "were"} already the same
           </li>
         )}
         {report.skipped.map((k, i) => (
@@ -515,13 +528,13 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
       {report.portsError && <Note tone="warn">The relay ports were not changed: {report.portsError}</Note>}
       {report.newPushPasswords.length > 0 && (
         <Note tone="warn">
-          {listOf(report.newPushPasswords)} {report.newPushPasswords.length === 1 ? "has" : "have"} a new publish password on this
+          {joinWithAnd(report.newPushPasswords)} {report.newPushPasswords.length === 1 ? "has" : "have"} a new publish password on this
           server: paste the new publish password into each device.
         </Note>
       )}
       {newPull.length > 0 && (
         <Note tone="info">
-          {listOf(newPull)} {newPull.length === 1 ? "is" : "are"} pulled from {newPull.length === 1 ? "a device" : "devices"} on the
+          {joinWithAnd(newPull)} {newPull.length === 1 ? "is" : "are"} pulled from {newPull.length === 1 ? "a device" : "devices"} on the
           network the file came from. {newPull.length === 1 ? "It plays" : "They play"} here only if this server can reach{" "}
           {newPull.length === 1 ? "its" : "their"} device address{newPull.length === 1 ? "" : "es"}.
         </Note>

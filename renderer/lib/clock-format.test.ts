@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe("the app's clock format", () => {
-  test("defaults to 24-hour, which is what every fixed clock did before", () => {
+  test("defaults to 24-hour", () => {
     assert.equal(DEFAULT_HOUR_CYCLE, "24h");
     assert.equal(displayHourCycle(), "24h");
   });

@@ -94,6 +94,10 @@ asks again; the small copy's fetch carries on behind it. A small copy PCO fails
 is logged once on a `[photo-cache]` line and not asked for again for five
 minutes.
 
+A response that is a web page, JSON or XML rather than an image (a captive
+portal, a proxy's error page) is refused on a `[photo-cache]` line and never
+cached, so the next request asks again.
+
 ## API version
 
 PCO versions each product by date. A request selects one with an

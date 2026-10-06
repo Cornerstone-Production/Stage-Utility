@@ -21,7 +21,7 @@ import { useDisplayPresenceStatus } from "./use-display-presence";
 import { useObsStatus } from "./use-obs-state";
 import { useResiStatus, useYouTubeStatus } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
-import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
+import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../app/recording-status";
 import { usePvpState } from "./use-pvp-state";
 import { useReaperStatus } from "./use-reaper-state";
 import { useScoresStatus } from "./use-scores-state";
@@ -350,6 +350,64 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
   if (s.uppercase) css.textTransform = "uppercase";
   if (s.letterSpacing != null) css.letterSpacing = `${s.letterSpacing}em`;
   return css;
+}
+
+/**
+ * What a record-status widget reads for the recorder(s) it watches.
+ *
+ * "Connected" for `any` means at least one recorder is reachable — otherwise a
+ * dim badge would claim "not recording" when nothing can actually report. `any`
+ * also waits for BOTH to have answered: OBS alone answering "not connected" is
+ * not "no recorder" while REAPER's own read is still in flight. Home's recording
+ * card makes the same rule.
+ *
+ * The recorder being watched becomes the caption and the state the value; "any"
+ * has no single source to name, so it says what it is.
+ */
+function recordStatusReading(
+  source: "any" | "obs" | "reaper",
+  ctx: Pick<LayoutRenderCtx, "obs" | "reaper" | "obsKnown" | "reaperKnown">,
+): { active: boolean; connected: boolean; known: boolean; caption: string } {
+  const obs = { active: ctx.obs?.recording ?? false, connected: ctx.obs?.connected ?? false };
+  const reaper = { active: ctx.reaper?.recording ?? false, connected: ctx.reaper?.connected ?? false };
+  switch (source) {
+    case "obs":
+      return { ...obs, known: ctx.obsKnown, caption: "OBS" };
+    case "reaper":
+      return { ...reaper, known: ctx.reaperKnown, caption: "REAPER" };
+    case "any":
+      return {
+        active: obs.active || reaper.active,
+        connected: obs.connected || reaper.connected,
+        known: ctx.obsKnown && ctx.reaperKnown,
+        caption: "Recorder",
+      };
+  }
+}
+
+/** The word a status widget shows: what it is doing, else a dash while nothing has
+ *  answered, else idle or offline. */
+function statusWord(s: { active: boolean; known: boolean; connected: boolean; activeText: string; idleText: string; offlineText: string }): string {
+  if (s.active) return s.activeText;
+  if (!s.known) return "—";
+  return s.connected ? s.idleText : s.offlineText;
+}
+
+/** A streaming widget's colours: green while live, amber when late, none
+ *  otherwise. Filled it paints the box; unfilled it colours the value. */
+function streamTally(live: boolean, late: boolean, filled: boolean): { fill: string | null; valueColor: string | null } {
+  if (live) return filled ? { fill: "var(--green-9)", valueColor: null } : { fill: null, valueColor: "var(--green-10)" };
+  if (late) return filled ? { fill: "var(--color-warn-9)", valueColor: null } : { fill: null, valueColor: "var(--color-warn-11)" };
+  return { fill: null, valueColor: null };
+}
+
+/** What an empty service-order says. The server answers an unconfigured Planning
+ *  Center with an empty rundown, so only a plan KNOWN to be empty is "No service
+ *  plan"; one not read yet is the dash, and a failed read says so. */
+function noPlanWord(ctx: Pick<LayoutRenderCtx, "planItemsKnown" | "planItemsFailed">): string {
+  if (!ctx.planItemsKnown) return "—";
+  if (ctx.planItemsFailed) return "Couldn't load the plan";
+  return "No service plan";
 }
 
 function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", showMeridiem: boolean): string {
@@ -757,7 +815,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // the caption row's end slot, which costs no height.
       caption={s.caption}
       captionEnd={s.active ? (s.sub ?? null) : null}
-      value={s.active ? s.activeText : !s.known ? "—" : s.connected ? s.idleText : s.offlineText}
+      value={statusWord(s)}
       upper
       fill={s.active && s.filled ? "var(--red-9)" : null}
       valueColor={s.active && !s.filled ? "var(--red-10)" : null}
@@ -792,8 +850,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // names streamers() gives them. "Streaming" folds all three into one word,
     // so it waits for all three: Offline or Off air on two answers is a claim
     // about a third that may be live. Live itself is true on one answer.
-    const answered: Record<string, boolean> = { Resi: ctx.resiKnown, YouTube: ctx.youtubeKnown, OBS: ctx.obsKnown };
-    const known = chosen.every((x) => answered[x.name] ?? false);
+    const answered: Record<StreamerName, boolean> = { Resi: ctx.resiKnown, YouTube: ctx.youtubeKnown, OBS: ctx.obsKnown };
+    const known = chosen.every((x) => answered[x.name]);
     const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
     const live = ind.state === "live";
     // A scheduled broadcast the clock has passed with nothing going out. Off
@@ -847,8 +905,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // token rather than a raw scale step, because "this needs attention" is
       // what is meant and a re-themed app should carry it.
       dim: !live && !late,
-      fill: live && filled ? "var(--green-9)" : late && filled ? "var(--color-warn-9)" : null,
-      valueColor: live && !filled ? "var(--green-10)" : late && !filled ? "var(--color-warn-11)" : null,
+      ...streamTally(live, late, filled),
     });
   };
 
@@ -1271,25 +1328,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
-      const src = c.source ?? "any";
-      const obsRec = ctx.obs?.recording ?? false;
-      const reaRec = ctx.reaper?.recording ?? false;
-      const obsUp = ctx.obs?.connected ?? false;
-      const reaUp = ctx.reaper?.connected ?? false;
-      const active = src === "obs" ? obsRec : src === "reaper" ? reaRec : obsRec || reaRec;
-      // "Connected" for `any` means at least one recorder is reachable — otherwise a
-      // dim badge would claim "not recording" when nothing can actually report.
-      const connected = src === "obs" ? obsUp : src === "reaper" ? reaUp : obsUp || reaUp;
-      // `any` waits for BOTH: OBS alone answering "not connected" is not "no
-      // recorder" while REAPER's own read is still in flight. Home's recording
-      // card makes the same rule.
-      const known = src === "obs" ? ctx.obsKnown : src === "reaper" ? ctx.reaperKnown : ctx.obsKnown && ctx.reaperKnown;
+      const { active, connected, known, caption } = recordStatusReading(c.source ?? "any", ctx);
 
       if (!active && (c.hideWhenIdle ?? false)) return null;
 
-      // Which recorder this is watching becomes the caption; the state becomes
-      // the value. "any" has no single source to name, so it says what it is.
-      const caption = src === "obs" ? "OBS" : src === "reaper" ? "REAPER" : "Recorder";
       // The fill stays -- it is a see-it-across-the-room signal and it works.
       // What changed is that it carries the same composition as every other
       // widget, so a filled widget is the same widget wearing a state rather
@@ -2923,11 +2965,8 @@ function ServiceOrderObject({
   const color = s.color ?? "#ffffff";
 
   if (items.length === 0) {
-    // Three different nothings. The server answers an unconfigured Planning
-    // Center with an empty rundown, so only a plan KNOWN to be empty is "No
-    // service plan"; one not read yet is the dash, and a failed read says so.
-    const why = !ctx.planItemsKnown ? "—" : ctx.planItemsFailed ? "Couldn't load the plan" : "No service plan";
-    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>{why}</span>;
+    // Three different nothings; see noPlanWord.
+    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>{noPlanWord(ctx)}</span>;
   }
 
   return (

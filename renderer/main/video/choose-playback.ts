@@ -25,9 +25,11 @@ export type PlaybackChoice =
 export function choosePlayback(i: PlaybackInput): PlaybackChoice {
   const p = i.play;
   if (p.via === "embed") return { method: "embed", url: p.src };
-  const canHls = i.caps.nativeHls || i.caps.mse;
-  const hls = (url: string): PlaybackChoice =>
-    !i.allowHls ? { method: "none", reason: "hls-off-here" } : canHls ? { method: "hls", url } : { method: "none", reason: "no-player" };
+  const hls = (url: string): PlaybackChoice => {
+    if (!i.allowHls) return { method: "none", reason: "hls-off-here" };
+    if (!i.caps.nativeHls && !i.caps.mse) return { method: "none", reason: "no-player" };
+    return { method: "hls", url };
+  };
 
   if (p.via === "external") {
     if (p.protocol === "hls") return hls(p.url);

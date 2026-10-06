@@ -22,6 +22,11 @@ export const UPCOMING_LOOKBACK_DAYS = 7;
  *  request per open would spend the PCO quota on a list that never changes. */
 export const UPCOMING_CACHE_MS = 5 * 60 * 1000;
 
+/** How long a list that is missing a service type is reused. Short, so a type
+ *  that failed on a blip is asked for again within the half minute rather than
+ *  being absent from the switcher for the whole of UPCOMING_CACHE_MS. */
+export const UPCOMING_PARTIAL_CACHE_MS = 30 * 1000;
+
 /** Default and maximum lookahead, in days. */
 export const UPCOMING_DEFAULT_DAYS = 60;
 export const UPCOMING_MAX_DAYS = 365;
@@ -135,7 +140,8 @@ export function switcherTypes(types: ServiceTypeDTO[], allowed: string[]): Servi
 export function isDefaultRundownPlan(p: {
   requestedPlanId: string | null;
   resolvedPlanId: string;
-  /** The app's plan, when this service type is the active one; else null. */
+  /** The app's plan, when this service type is the active one and the plan still
+   *  resolves; else null. */
   activeTypePlanId: string | null;
   nextUpcomingPlanId: string | null;
 }): boolean {

@@ -22,6 +22,7 @@ import { buildArchive } from "./archive/archive-bundle.js";
 import { getUserDataPath } from "./app-paths.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { settingsStore } from "./settings-store.js";
+import { atomicWrite } from "./write-queue.js";
 
 export interface BackupSchedule {
   enabled: boolean;
@@ -128,10 +129,10 @@ class BackupScheduler {
       const at = stamp(new Date());
 
       const bundle = await configSnapshot.build(`Automatic ${at}`);
-      await fs.writeFile(path.join(dir, `${CONFIG_PREFIX}${at}.json`), JSON.stringify(bundle, null, 2), "utf8");
+      await atomicWrite(path.join(dir, `${CONFIG_PREFIX}${at}.json`), JSON.stringify(bundle, null, 2));
 
       if (sched.includeArchive) {
-        await fs.writeFile(path.join(dir, `${ARCHIVE_PREFIX}${at}.zip`), Buffer.from(await buildArchive()));
+        await atomicWrite(path.join(dir, `${ARCHIVE_PREFIX}${at}.zip`), Buffer.from(await buildArchive()));
       }
 
       // Only after a successful write — a failed run must not delete the copies

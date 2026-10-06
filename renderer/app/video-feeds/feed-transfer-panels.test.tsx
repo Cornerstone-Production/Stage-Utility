@@ -17,7 +17,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
-const { exportHref } = await import("./feed-transfer-panels.js");
+const { exportHref, groupLabel } = await import("./feed-transfer-panels.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { createMemoryHistory, createRootRoute, createRouter, RouterProvider } = await import("@tanstack/react-router");
 
@@ -85,7 +85,13 @@ const EXPECT = { box: "a".repeat(32), gym: "", resi: "b".repeat(32), odd: "" };
 
 interface Call { method: string; url: string; body?: unknown }
 
-function stub(report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsWritten: 0, portsApplied: false }) {
+function stub(
+  report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsWritten: 0, portsApplied: false },
+  /** Holds the review's answer until it settles, for a test that needs it in flight. */
+  previewGate?: Promise<void>,
+  /** What the review answers; the server's own order, whatever the file's is. */
+  preview: unknown = PREVIEW,
+) {
   const calls: Call[] = [];
   const real = globalThis.fetch;
   const realIo = (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
@@ -99,7 +105,10 @@ function stub(report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: [
     if (url.endsWith("/api/integrations")) return ok({ descriptors: [], states: [] });
     if (url.endsWith("/usage")) return ok({ layouts: [] });
     if (/\/push(\?.*)?$/.test(url)) return ok({ protocol: "srt", address: "srt://192.0.2.1:8890", password: "x" });
-    if (url.endsWith("/api/video/import/preview")) return ok(PREVIEW);
+    if (url.endsWith("/api/video/import/preview")) {
+      await previewGate;
+      return ok(preview);
+    }
     if (url.endsWith("/api/video/import")) return ok(report);
     return ok({});
   }) as typeof fetch;
@@ -126,6 +135,13 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 const link = () => screen.getByRole("link", { name: /Download/ }) as HTMLAnchorElement;
+
+test("the group checkbox label never says \"All 1 feeds\"", () => {
+  assert.equal(groupLabel(3, 3), "All 3 feeds");
+  assert.equal(groupLabel(2, 3), "2 of 3 feeds");
+  assert.equal(groupLabel(0, 3), "0 of 3 feeds");
+  assert.equal(groupLabel(1, 1), "1 feed");
+});
 
 test("exportHref sends no feeds= for every feed, so a later feed is not left out", () => {
   const all = ["a", "b"];
@@ -240,6 +256,24 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
   }
 });
 
+test("Import shows each new feed's own address when the review lists the feeds in another order than the file", async () => {
+  const g = stub(undefined, undefined, { ...PREVIEW, feeds: [...PREVIEW.feeds].reverse() });
+  try {
+    const { container } = mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /Import/ }));
+    await settle();
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([JSON.stringify(FILE)], "feeds.json", { type: "application/json" })] } });
+    await settle();
+    await settle();
+    assert.ok(screen.getByText("rtsp://192.0.2.50:554/gym"), "the new feed showed another feed's address");
+  } finally {
+    g.restore();
+  }
+});
+
 test("Import with this server's feed kept and the ports left alone says exactly that", async () => {
   const g = stub();
   try {
@@ -279,6 +313,38 @@ test("Import refuses a file of the wrong kind by name, without sending it", asyn
     assert.ok(screen.getByText(/That is a "stage-utility-view" file, not a video feeds export\./));
     assert.equal(g.calls.some((c) => c.url.includes("/import")), false);
   } finally {
+    g.restore();
+  }
+});
+
+test("a second file dropped while the first is being reviewed is ignored, so the review shown is the one in flight", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const g = stub(undefined, gate);
+  try {
+    mount();
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /Import/ }));
+    await settle();
+
+    const zone = screen.getByText(/Drop a video feeds file here/);
+    const drop = (name: string) =>
+      fireEvent.drop(zone, { dataTransfer: { files: [new File([JSON.stringify(FILE)], name, { type: "application/json" })] } });
+    drop("first.json");
+    await settle();
+    drop("second.json");
+    await settle();
+    release();
+    await settle();
+    await settle();
+
+    assert.equal(g.calls.filter((c) => c.url.endsWith("/api/video/import/preview")).length, 1, "the second drop was sent for review as well");
+    assert.ok(screen.getByText(/first\.json · from Prod/));
+  } finally {
+    release();
     g.restore();
   }
 });

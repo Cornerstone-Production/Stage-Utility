@@ -334,6 +334,47 @@ test("a service whose attendance is still in flight says so, not 'No attendance 
   }
 });
 
+test("a service opened a second time is loading again, not 'No attendance recorded'", async () => {
+  // The first open's reads answered, so the page knows Evening was read once.
+  // Going back clears its records; the second open must wait on its own reads
+  // rather than take the first open's answers as its own.
+  let attendanceReads = 0;
+  let splReads = 0;
+  const attendance = held<unknown>();
+  const sound = held<unknown>();
+  const f = stubFetch({
+    attendanceFor: (key) => {
+      if (key !== A.key) return ok(B.attendance);
+      attendanceReads += 1;
+      return attendanceReads === 1 ? ok(A.attendance) : attendance.promise.then(ok);
+    },
+    splFor: (key) => {
+      if (key !== A.key) return ok(B.spl);
+      splReads += 1;
+      // The row's read and the first open's read; the second open's is held.
+      return splReads <= 2 ? ok(A.spl) : sound.promise.then(ok);
+    },
+  });
+  try {
+    const container = await openA();
+    assert.deepEqual(loadingCards(), []);
+    fireEvent.click(screen.getByRole("button", { name: /All services/ }));
+    await settle();
+    await open(container, "Evening");
+    assert.ok(attendanceReads >= 2, "the second open made its own attendance read");
+    assert.equal(!!screen.queryByText(/No attendance recorded/i), false, "the first open's answer is not the second's");
+    assert.ok(loadingCards().includes("attendance"), `got ${JSON.stringify(loadingCards())}`);
+    await act(async () => {
+      attendance.answer(A.attendance);
+      sound.answer(A.spl);
+    });
+    await settle();
+    assert.deepEqual(loadingCards(), []);
+  } finally {
+    f.restore();
+  }
+});
+
 test("a failed attendance read says so on the Attendance card, not 'No attendance recorded'", async () => {
   const f = stubFetch({ failing: "attendance" });
   try {

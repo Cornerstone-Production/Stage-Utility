@@ -23,9 +23,30 @@ function hasUserinfo(u: URL): boolean {
  *  "characters" the same count as MediaMTX's bytes. */
 const PLAIN_ASCII = /^[\x20-\x7E]*$/;
 
+/** `problem` (from passphraseProblem), said for a stored password that an SRT
+ *  address would take over — the one place the operator did not just type it. */
+export function keptPassphraseError(problem: string): string {
+  return `${problem} The password saved for this feed would be used; enter a new one.`;
+}
+
+/** Why `passphrase` is not one MediaMTX accepts for an SRT pull, or null. */
+export function passphraseProblem(passphrase: string): string | null {
+  if (!PLAIN_ASCII.test(passphrase)) return "An SRT passphrase can use only plain letters, digits, spaces and punctuation.";
+  if (passphrase.length < 10 || passphrase.length > 80) return "An SRT passphrase must be 10 to 80 characters long.";
+  return null;
+}
+
+/**
+ * `keptPassword` is the password already stored for the feed being edited,
+ * which an input that carries none leaves in place. An SRT address takes the
+ * stored one as its passphrase, so it is held to the same rules as one typed
+ * now: an RTSP password changed over to an SRT address would otherwise save,
+ * and then be refused by the relay on every dial.
+ */
 export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
+  keptPassword?: string,
 ): { ok: true; name: string; source: VideoSource; password?: string } | { ok: false; error: string } {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid input." };
@@ -103,6 +124,13 @@ export function parseFeedInput(
       return { ok: false, error: "Put the username and password in their own fields, not the address." };
     }
 
+    // The address is stored in video-feeds.json and broadcast on video:state
+    // and /api/video/feeds; the Password field is kept in the secrets store
+    // and never sent anywhere. The key is matched without regard to case.
+    if (url.protocol === "srt:" && [...url.searchParams.keys()].some((key) => key.toLowerCase() === "passphrase")) {
+      return { ok: false, error: "Put the SRT passphrase in the Password field, not the address." };
+    }
+
     const username = typeof source.username === "string" ? source.username : "";
     if (username.length > 100) {
       return { ok: false, error: "Username must be at most 100 characters." };
@@ -123,11 +151,10 @@ export function parseFeedInput(
     // byte and the length sentence is exact.
     if (url.protocol === "srt:") {
       if (username !== "") return { ok: false, error: "SRT uses a passphrase only, no username: leave Username empty." };
-      if (password && !PLAIN_ASCII.test(password)) {
-        return { ok: false, error: "An SRT passphrase can use only plain letters, digits, spaces and punctuation." };
-      }
-      if (password && (password.length < 10 || password.length > 80)) {
-        return { ok: false, error: "An SRT passphrase must be 10 to 80 characters long." };
+      const passphrase = password ?? keptPassword;
+      const problem = passphrase ? passphraseProblem(passphrase) : null;
+      if (problem) {
+        return { ok: false, error: password === undefined ? keptPassphraseError(problem) : problem };
       }
     }
 

@@ -67,7 +67,7 @@ function rate(count: number, limit = 100, periodSec = 20): Record<string, string
 /** N concurrent reads through the real client, each a distinct cache key. */
 async function burst(n: number): Promise<void> {
   await Promise.all(
-    Array.from({ length: n }, (_, i) => pcoService.listTeamNames("app", "sec", `st-${i}`)),
+    Array.from({ length: n }, (_, i) => pcoService.listTeamNames("app", "sec", `${i}`)),
   );
 }
 

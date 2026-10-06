@@ -176,6 +176,10 @@ passphrase in Password. It is 10 to 80 characters of plain ASCII — letters,
 digits, spaces and punctuation, as an encoder's own settings page takes. A
 username, or a passphrase that breaks either rule, is refused when the feed
 is saved; the relay itself refuses one outside that length on every attempt.
+That includes the stored password: changing a feed's address to an SRT one,
+with the old password left in place, is refused until a passphrase that fits
+is entered. An SRT address with a `passphrase=` value in it is refused too,
+since the address is stored and shown to every screen and the password is not.
 The relay only dials the address while something is actually showing the feed
 (a Video widget on screen, or the editor's own preview); nothing else keeps
 it connected. Once a password is stored, the field says "A password is
@@ -359,8 +363,8 @@ on this server, each tagged:
   only reads "password differs", never the values), with a choice per feed:
   **Use the file's** (the default) or **Keep this server's**.
 - **Can't import**: this build cannot take the feed (a source kind it does not
-  offer, an address with a login inside it); the reason is shown and the feed is
-  skipped.
+  offer, an address with a login inside it, an SRT address whose kept password
+  is not a valid passphrase); the reason is shown and the feed is skipped.
 
 An import never removes a feed: the ones the file does not have are named and
 left alone. It never touches the **Video feeds** on/off switch, and it works
@@ -490,7 +494,9 @@ from the server:
 - `could not reconcile the relay`: its paths or publish users could not be
   set, once the relay's API had answered at least once (never for the first
   moment of a start, before it has opened), and `reconciling the relay is
-  working again` on the next success.
+  working again` on the next success. When the relay rejects only some paths
+  the line names them, every other feed still plays, and the named ones read
+  offline until a retry sets them up.
 - `proxy to relay failed for <feed>`: a screen's or OBS's request the relay
   did not answer, once per outage per feed, and `is answering again`.
 - Each feed going live or delayed, and `went offline` once per outage, only

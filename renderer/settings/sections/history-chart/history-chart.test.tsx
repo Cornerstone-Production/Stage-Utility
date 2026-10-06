@@ -905,6 +905,18 @@ describe("item peak markers", () => {
     assert.ok(!(stripEl().textContent ?? "").includes("When"));
   });
 
+  test("a pointer on the plot answers for itself while a triangle still holds focus", () => {
+    // A click on the triangle focuses it and leaves it focused; the readout
+    // must follow the pointer again once it is on the plot, not stay on the peak.
+    render(peakChart());
+    fireEvent.focus(document.querySelector("[data-peak-mark]") as SVGGElement);
+    assert.ok((stripEl().textContent ?? "").includes("When"), "focus shows the peak's readout");
+    fireEvent.pointerMove(svgEl(), svgPoint(560));
+    assert.ok(!(stripEl().textContent ?? "").includes("When"), "the readout is stuck on the focused peak");
+    assert.equal(document.querySelectorAll("[data-crosshair]").length, 1, "the crosshair follows the pointer");
+    assert.equal(document.querySelectorAll("[data-peak-line]").length, 0);
+  });
+
   test("Item peaks off hides the triangle, the row and the legend entry", () => {
     render(peakChart());
     const on = svgH();

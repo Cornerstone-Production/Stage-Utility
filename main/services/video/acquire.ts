@@ -26,7 +26,57 @@ const execFileAsync = promisify(execFile);
 // actually received, never the (spoofable, sometimes absent) declared
 // Content-Length, which is a progress hint only.
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 300_000;
+
+/** A download is abandoned when no bytes arrive for this long (the connect and
+ *  the response headers count too), so a slow but steady link still finishes. */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+/** The outright ceiling, for a host that trickles just fast enough never to
+ *  idle: MAX_DOWNLOAD_BYTES bounds the size, this bounds the time. */
+const DOWNLOAD_TOTAL_TIMEOUT_MS = 60 * 60 * 1000;
+
+/** The timer functions the watchdog uses, injectable so a test can see which
+ *  timers are live. */
+interface WatchdogTimers {
+  setTimeout: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeout: (timer: NodeJS.Timeout) => void;
+}
+
+interface DownloadTimeouts {
+  idleMs: number;
+  totalMs: number;
+  /** Replaces the global timer functions; for tests. */
+  timers?: WatchdogTimers;
+}
+
+const DEFAULT_DOWNLOAD_TIMEOUTS: DownloadTimeouts = { idleMs: DOWNLOAD_IDLE_TIMEOUT_MS, totalMs: DOWNLOAD_TOTAL_TIMEOUT_MS };
+
+/** An abort signal that fires after `idleMs` without a `touch()`, or after
+ *  `totalMs` outright, carrying the reason as its Error. `stop()` clears both
+ *  timers. Both are unref'd as well, so a `stop()` that was missed can never
+ *  hold the process open for the length of the ceiling (an hour). */
+function downloadWatchdog({ idleMs, totalMs, timers }: DownloadTimeouts): { signal: AbortSignal; touch: () => void; stop: () => void } {
+  const t = timers ?? { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer) };
+  const controller = new AbortController();
+  const abort = (why: string): void => controller.abort(new Error(why));
+  const totalTimer = t.setTimeout(() => abort(`still going after ${totalMs / 1000} s`), totalMs);
+  totalTimer.unref();
+  let idleTimer: NodeJS.Timeout | null = null;
+  const clearIdle = (): void => {
+    if (idleTimer) t.clearTimeout(idleTimer);
+    idleTimer = null;
+  };
+  const touch = (): void => {
+    clearIdle();
+    idleTimer = t.setTimeout(() => abort(`no data for ${idleMs / 1000} s`), idleMs);
+    idleTimer.unref();
+  };
+  const stop = (): void => {
+    t.clearTimeout(totalTimer);
+    clearIdle();
+  };
+  touch();
+  return { signal: controller.signal, touch, stop };
+}
 
 export function relayDir(): string {
   return path.join(getUserDataPath(), "video-relay");
@@ -91,21 +141,39 @@ async function sha256OfFile(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
-type DownloadResult = { ok: true; sha256: string } | { ok: false; reason: string };
+type DownloadResult = { ok: true } | { ok: false; reason: string };
 
-/** Streams the response to `<archive>.part`, hashing as it goes, and refuses
- *  past MAX_DOWNLOAD_BYTES of ACTUAL received bytes — not the declared
- *  Content-Length, which a chunked response may omit entirely. */
+/** Streams the response to `<archive>.part` and refuses past
+ *  MAX_DOWNLOAD_BYTES of ACTUAL received bytes — not the declared
+ *  Content-Length, which a chunked response may omit entirely. The caller
+ *  hashes the file itself, so what is verified is what reached the disk. */
 async function downloadToPart(
   url: string,
   partPath: string,
   fetchImpl: typeof fetch,
   onProgress: ((received: number, total: number) => void) | undefined,
   totalHint: number,
+  timeouts: DownloadTimeouts,
+): Promise<DownloadResult> {
+  const watchdog = downloadWatchdog(timeouts);
+  try {
+    return await streamToPart(url, partPath, fetchImpl, onProgress, totalHint, watchdog);
+  } finally {
+    watchdog.stop();
+  }
+}
+
+async function streamToPart(
+  url: string,
+  partPath: string,
+  fetchImpl: typeof fetch,
+  onProgress: ((received: number, total: number) => void) | undefined,
+  totalHint: number,
+  watchdog: { signal: AbortSignal; touch: () => void },
 ): Promise<DownloadResult> {
   let response: Response;
   try {
-    response = await fetchImpl(url, { redirect: "follow", signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    response = await fetchImpl(url, { redirect: "follow", signal: watchdog.signal });
   } catch (err) {
     return { ok: false, reason: `could not reach ${url}: ${errorMessage(err)}` };
   }
@@ -115,7 +183,6 @@ async function downloadToPart(
   const declared = Number(response.headers.get("content-length"));
   const total = Number.isFinite(declared) && declared > 0 ? declared : totalHint;
 
-  const hash = createHash("sha256");
   const file = await fsp.open(partPath, "w");
   const reader = response.body.getReader();
   let received = 0;
@@ -130,11 +197,11 @@ async function downloadToPart(
         await reader.cancel().catch(() => {});
         return { ok: false, reason: `download of ${url} exceeded ${MAX_DOWNLOAD_BYTES} bytes; refused` };
       }
-      hash.update(value);
       await file.write(value);
+      watchdog.touch();
       onProgress?.(received, total);
     }
-    return { ok: true, sha256: hash.digest("hex") };
+    return { ok: true };
   } catch (err) {
     return { ok: false, reason: `download of ${url} failed: ${errorMessage(err)}` };
   } finally {
@@ -161,6 +228,8 @@ export interface EnsureBinaryOptions {
    *  extractor; a test replaces it with a spy to prove a failed verification
    *  never reaches extraction. */
   extract?: ExtractFn;
+  /** Test seam: small timeouts, so a test need not wait real seconds. */
+  downloadTimeouts?: DownloadTimeouts;
 }
 
 /**
@@ -305,19 +374,21 @@ async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: Ens
     opts.fetchImpl ?? fetch,
     opts.onProgress,
     MEDIAMTX_DOWNLOAD_BYTES,
+    opts.downloadTimeouts ?? DEFAULT_DOWNLOAD_TIMEOUTS,
   );
   if (!downloaded.ok) {
     await fsp.unlink(partPath).catch(() => {});
     return { ok: false, reason: downloaded.reason, placeArchiveAt: downloadsDir, assetName: asset.name };
   }
-  if (downloaded.sha256 !== asset.sha256) {
+  const got = await sha256OfFile(partPath);
+  if (got !== asset.sha256) {
     await fsp.unlink(partPath).catch(() => {});
     // Same reasoning as the hand-placed check above — no logging here; the
     // caller logs once per outage from the returned `reason`, not once per
     // retry from this call.
     return {
       ok: false,
-      reason: `checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${downloaded.sha256}`,
+      reason: `checksum mismatch for ${asset.name}: expected ${asset.sha256}, got ${got}`,
       placeArchiveAt: downloadsDir,
       assetName: asset.name,
     };

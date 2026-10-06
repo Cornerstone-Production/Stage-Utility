@@ -238,6 +238,33 @@ describe("RelaySupervisor", () => {
     assert.equal(children.length, 2, "the next attempt rewrites and spawns");
   });
 
+  it("a spawn that throws on a respawn is a failed attempt: failing with why, and retried", async (t) => {
+    enableClock(t);
+    const { spawnImpl: realFake, children } = fakeSpawn();
+    let calls = 0;
+    const spawnImpl: SpawnImpl = (binary, args) => {
+      calls++;
+      if (calls === 2) throw new Error("spawn ENOMEM");
+      return realFake(binary, args);
+    };
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+    children[0]!.emit("exit", 1, null);
+    t.mock.timers.tick(1000);
+    await settle();
+    assert.deepEqual(sup.status(), {
+      state: "failing",
+      reason: "could not start: spawn ENOMEM",
+      retryAt: START + 1000 + 2000,
+      neverStarted: true,
+    } satisfies SupervisorStatus);
+
+    t.mock.timers.tick(2000);
+    await settle();
+    assert.equal(children.length, 2, "the next attempt spawns");
+    assert.equal(sup.status().state, "running");
+  });
+
   it("stop() while a respawn's rewrite is in flight spawns nothing", async (t) => {
     enableClock(t);
     const { spawnImpl, children } = fakeSpawn();
@@ -447,6 +474,21 @@ describe("RelaySupervisor", () => {
     assert.deepEqual(sup.status(), { state: "off" } satisfies SupervisorStatus);
     t.mock.timers.tick(120_000);
     assert.equal(children.length, 1, "stop() must schedule no restart, however long we wait afterward");
+  });
+
+  it("a second stop() before the exit leaves no SIGKILL timer behind to fire after it", async (t) => {
+    enableClock(t);
+    const { spawnImpl, children } = fakeSpawn();
+    const sup = new RelaySupervisor({ spawnImpl, psImpl: neverLeftover });
+    await sup.start("mediamtx", "config.yml");
+
+    const first = sup.stop();
+    const second = sup.stop();
+    children[0]!.emit("exit", 0, null);
+    await Promise.all([first, second]);
+
+    t.mock.timers.tick(10_000);
+    assert.ok(!children[0]!.killCalls.includes("SIGKILL"), "a timer from the first stop() outlived the exit and signalled it");
   });
 
   it("stop() resolves immediately, with no kill, when nothing is running (a mid-backoff wait)", async (t) => {

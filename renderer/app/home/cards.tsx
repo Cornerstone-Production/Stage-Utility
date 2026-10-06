@@ -627,6 +627,32 @@ export function LiveStatusCard({
   );
 }
 
+/** Whether every recorder this card speaks for has answered: "any" reads both. */
+function recordersKnown(recorder: string, obsKnown: boolean, reaperKnown: boolean): boolean {
+  switch (recorder) {
+    case "OBS":
+      return obsKnown;
+    case "REAPER":
+      return reaperKnown;
+    default:
+      return obsKnown && reaperKnown;
+  }
+}
+
+/** Whether every platform this card speaks for has answered: "any" folds in all three. */
+function streamersKnown(platform: string, resiKnown: boolean, youtubeKnown: boolean, obsKnown: boolean): boolean {
+  switch (platform) {
+    case "Resi":
+      return resiKnown;
+    case "YouTube":
+      return youtubeKnown;
+    case "OBS":
+      return obsKnown;
+    default:
+      return resiKnown && youtubeKnown && obsKnown;
+  }
+}
+
 /**
  * Are we getting this?
  *
@@ -653,15 +679,10 @@ export function RecordingCard({
 }) {
   const { value: obs, known: obsKnown } = useObsStatus();
   const { value: reaper, known: reaperKnown } = useReaperStatus();
-  // Whether EVERY recorder this card speaks for has answered. "any" reads both
-  // sources at once, so it must wait for both — answering from whichever
-  // landed first would say "no recorder connected" on the strength of OBS
-  // alone while REAPER's own read is still in flight.
-  const known =
-    recorder === "OBS" ? obsKnown
-    : recorder === "REAPER" ? reaperKnown
-    : obsKnown && reaperKnown;
-  if (!known) return <Stat label={recorder === "any" ? "Recording" : recorder} value="—" />;
+  // "any" reads both sources at once, so it must wait for both — answering from
+  // whichever landed first would say "no recorder connected" on the strength of
+  // OBS alone while REAPER's own read is still in flight.
+  if (!recordersKnown(recorder, obsKnown, reaperKnown)) return <Stat label={recorder === "any" ? "Recording" : recorder} value="—" />;
   const list = recorders(obs, reaper, now);
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
@@ -700,15 +721,10 @@ export function StreamingCard({
   const { value: resi, known: resiKnown } = useResiStatus();
   const { value: youtube, known: youtubeKnown } = useYouTubeStatus();
   const { value: obs, known: obsKnown } = useObsStatus();
-  // Whether EVERY platform this card speaks for has answered. "any" folds all
-  // three sources into one reading, so it must wait for all three — see
-  // RecordingCard's own note above for why "whichever landed first" is wrong.
-  const known =
-    platform === "Resi" ? resiKnown
-    : platform === "YouTube" ? youtubeKnown
-    : platform === "OBS" ? obsKnown
-    : resiKnown && youtubeKnown && obsKnown;
-  if (!known) return <Stat label={platform === "any" ? "Streaming" : platform} value="—" />;
+  // "any" folds all three sources into one reading, so it must wait for all
+  // three — see RecordingCard's own note above for why "whichever landed first"
+  // is wrong.
+  if (!streamersKnown(platform, resiKnown, youtubeKnown, obsKnown)) return <Stat label={platform === "any" ? "Streaming" : platform} value="—" />;
   const list = streamers(resi, youtube, obs);
   // The clock comes DOWN, from the one tick the page already runs. A card that
   // started its own interval would be a second clock per streaming widget, all

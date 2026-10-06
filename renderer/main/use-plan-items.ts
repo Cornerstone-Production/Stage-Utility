@@ -20,6 +20,10 @@ export interface PlanItemsStatus {
 
 const UNKNOWN: PlanItemsStatus = { value: null, known: false, failed: false };
 
+/** How long a failed read waits before it is tried again: the pace the ServiceCue
+ *  pages poll at. */
+const RETRY_AFTER_FAILURE_MS = 60_000;
+
 /**
  * The active plan's full rundown (items + note-category columns) for the script
  * and SPL-rundown dashboards, plus whether it has answered and whether the last
@@ -39,8 +43,13 @@ const UNKNOWN: PlanItemsStatus = { value: null, known: false, failed: false };
  *   stage state channel is held open by every surface that renders a layout,
  *   and keeping the listener tracks the plan while off, so switching back on
  *   reads once rather than again for a plan it has already seen.
+ *
+ * @param retryMs how long a failed read waits before it is tried again. Nothing
+ *   else would: the plan changes weekly, so a Planning Center that was
+ *   unreachable when a wall booted would otherwise leave "Couldn't load the
+ *   plan" up until the next plan change. Overridable for tests.
  */
-export function usePlanItemsStatus(enabled = true): PlanItemsStatus {
+export function usePlanItemsStatus(enabled = true, retryMs = RETRY_AFTER_FAILURE_MS): PlanItemsStatus {
   const [answer, setAnswer] = useState<{ value: PlanItemsDTO | null; failed: boolean } | null>(null);
   const planRef = useRef<string | null | undefined>(undefined);
   const latest = useRef(0);
@@ -60,6 +69,14 @@ export function usePlanItemsStatus(enabled = true): PlanItemsStatus {
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  // Every failure is a new `answer`, so a retry that fails again re-arms this.
+  // Switched off, the timer still fires but `fetchItems` reads nothing.
+  useEffect(() => {
+    if (!answer?.failed) return;
+    const t = setTimeout(fetchItems, retryMs);
+    return () => clearTimeout(t);
+  }, [answer, fetchItems, retryMs]);
 
   useEffect(() => {
     // `stage:state-changed` is a hydrated channel (sse-channels.ts), so every

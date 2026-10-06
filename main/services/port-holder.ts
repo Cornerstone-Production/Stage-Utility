@@ -101,13 +101,8 @@ export function pickHolderLine(output: string, port: number): string | null {
  *  LAN client reads. */
 export function holderPhrase(holder: PortHolder, audience: "log" | "lan"): string {
   switch (holder.kind) {
-    case "stage-utility": {
-      if (audience === "lan") return "another Stage Utility";
-      const parts = [`version ${holder.version}`];
-      if (holder.pid !== null) parts.push(`pid ${holder.pid}`);
-      if (holder.dataDir !== null) parts.push(`data directory ${holder.dataDir}`);
-      return `another Stage Utility (${parts.join(", ")})`;
-    }
+    case "stage-utility":
+      return audience === "lan" ? "another Stage Utility" : `another Stage Utility (${stageUtilityFacts(holder)})`;
     case "process":
       if (audience === "lan") return holder.program ?? "another program";
       if (holder.program !== null && holder.pid !== null) return `${holder.program} (pid ${holder.pid})`;
@@ -193,19 +188,33 @@ function probeVersion(port: number): Promise<ProbedVersion | null> {
   });
 }
 
+type StageUtilityHolder = Extract<PortHolder, { kind: "stage-utility" }>;
+
+/** The probed /api/version body as a holder, or null when it is not one. */
+function asStageUtility(body: ProbedVersion | null): StageUtilityHolder | null {
+  if (!body || typeof body.version !== "string") return null;
+  return {
+    kind: "stage-utility",
+    version: body.version,
+    pid: typeof body.pid === "number" ? body.pid : null,
+    dataDir: typeof body.dataDir === "string" ? body.dataDir : null,
+  };
+}
+
+/** "version 1.2.3, pid 42, data directory /var/lib/stage-utility", for a log line. */
+function stageUtilityFacts(holder: StageUtilityHolder): string {
+  const parts = [`version ${holder.version}`];
+  if (holder.pid !== null) parts.push(`pid ${holder.pid}`);
+  if (holder.dataDir !== null) parts.push(`data directory ${holder.dataDir}`);
+  return parts.join(", ");
+}
+
 /** Who holds `port`, as parts: another Stage Utility if it answers
  *  /api/version on it (TCP only — there is no HTTP to ask over UDP), else
  *  whatever lsof, ss or netstat names. */
 export async function portHolder(port: number, proto: "tcp" | "udp"): Promise<PortHolder> {
-  const body = proto === "tcp" ? await probeVersion(port) : null;
-  if (body && typeof body.version === "string") {
-    return {
-      kind: "stage-utility",
-      version: body.version,
-      pid: typeof body.pid === "number" ? body.pid : null,
-      dataDir: typeof body.dataDir === "string" ? body.dataDir : null,
-    };
-  }
+  const stageUtility = asStageUtility(proto === "tcp" ? await probeVersion(port) : null);
+  if (stageUtility) return stageUtility;
   const line = holderLine(port, proto);
   return line ? parseHolderLine(line) : { kind: "unknown" };
 }
@@ -218,13 +227,10 @@ export async function portHolder(port: number, proto: "tcp" | "udp"): Promise<Po
  * version probe for a UDP port: there is no HTTP to ask over it.
  */
 export async function describePortHolder(port: number, proto: "tcp" | "udp" = "tcp"): Promise<string> {
-  const body = proto === "tcp" ? await probeVersion(port) : null;
-  if (body && typeof body.version === "string") {
-    const parts = [`version ${body.version}`];
-    if (typeof body.pid === "number") parts.push(`pid ${body.pid}`);
-    if (typeof body.dataDir === "string") parts.push(`data directory ${body.dataDir}`);
+  const stageUtility = asStageUtility(proto === "tcp" ? await probeVersion(port) : null);
+  if (stageUtility) {
     return (
-      `another Stage Utility is already serving :${port} — ${parts.join(", ")}. ` +
+      `another Stage Utility is already serving :${port} — ${stageUtilityFacts(stageUtility)}. ` +
       `If that is not the service you expect, find what started it: ` +
       `systemctl list-unit-files --state=enabled (Linux) or launchctl list (macOS).`
     );

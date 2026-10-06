@@ -429,8 +429,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       const hasSlotsLayout = "slotsLayout" in body
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
-      const hasServiceCueLayout = "serviceCueLayoutId" in body
-        && (body.serviceCueLayoutId === null || typeof body.serviceCueLayoutId === "string");
+      // `scriptViewLayoutId` is what this field was called before ServiceCue was
+      // renamed, and what the API reference told a script to send; it is still
+      // read, with the current name winning when both are present.
+      const serviceCueLayoutId = "serviceCueLayoutId" in body ? body.serviceCueLayoutId : body.scriptViewLayoutId;
+      const hasServiceCueLayout = serviceCueLayoutId === null || typeof serviceCueLayoutId === "string";
       const hasHideChrome = typeof body.hideChrome === "boolean";
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
@@ -483,7 +486,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         }
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
-      if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, body.serviceCueLayoutId as string | null);
+      if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
@@ -627,81 +630,25 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       let state = stageController.getState();
-      // Same catch-and-400 shape as every other field below: an unknown id
-      // is a 400 with the reason, not a 500 stack trace.
-      if (hasName) {
-        try {
-          state = await stageController.renameOutput(id, body.name as string);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      // Mode BEFORE viewId, so a single request can turn a screen into a panel
-      // and point it at a console. The other order refuses its own second half.
-      if (hasMode) {
-        try {
-          state = await stageController.setOutputMode(id, mode);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      // A refused binding is a 400 with the reason, not a 500 stack trace: the
-      // operator has to see WHY a console will not go on a wall screen.
-      if (hasViewId) {
-        try {
-          state = await stageController.setOutputView(id, body.viewId as string | null);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      // Each of the four below refuses only on an id that names no output, so
-      // the same catch-and-400 shape as setOutputView/setOutputMode/setOutputSlug
-      // above applies to all: an unknown id is a 400 with the reason, not a 500
-      // an operator would read as the server itself being broken.
-      if (hasBlackout) {
-        try {
-          state = await stageController.setOutputBlackout(id, body.blackout as boolean);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      if (hasLocked) {
-        try {
-          state = await stageController.setOutputLocked(id, body.locked as boolean);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      if (hasHideTopBar) {
-        try {
-          state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      if (hasAllowHls) {
-        try {
-          state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      // A rejected slug is a 400 with the reason, not a silent no-op — the operator
-      // has to see WHY "/history" cannot be used.
-      if (hasSlug) {
-        try {
-          state = await stageController.setOutputSlug(id, body.slug as string);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
+      // One try for every field: each setter refuses by throwing (an id that names
+      // no output, a console bound to a wall screen, a slug that is reserved), and
+      // the answer is a 400 with the reason, not a 500 an operator would read as
+      // the server itself being broken. Fields applied before the refusal stay
+      // applied, as they always did.
+      try {
+        if (hasName) state = await stageController.renameOutput(id, body.name as string);
+        // Mode BEFORE viewId, so a single request can turn a screen into a panel
+        // and point it at a console. The other order refuses its own second half.
+        if (hasMode) state = await stageController.setOutputMode(id, mode);
+        if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+        if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
+        if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
+        if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
+        if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
+      } catch (err) {
+        error(res, errorMessage(err));
+        return;
       }
       json(res, state);
       return;

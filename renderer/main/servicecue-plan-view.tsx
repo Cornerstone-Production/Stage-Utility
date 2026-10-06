@@ -230,6 +230,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         appLogo={state?.appLogo}
         appLogoMonochrome={state?.appLogoMonochrome}
         now={now}
+        timeZone={state?.timezone}
         afterIdentity={
           resolvedTypeId && pcoConfigured ? (
             <ServiceCuePlanNav
@@ -244,7 +245,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               timeZone={rundown?.timeZone ?? state?.timezone ?? null}
               onSelect={(id) => setPlanParam(id)}
               onOpenElsewhere={(typeId, typeName, planId) =>
-                navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout?.name), { plan: planId })
+                navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout?.name), { plan: planId }, { keepSearch: true })
               }
             />
           ) : null

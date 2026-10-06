@@ -335,6 +335,83 @@ test("logs a feed's live/offline transitions on the poll, once each — never on
   }
 });
 
+// What "went offline" is measured against is the feed's last logged state and
+// its last-seen time. A feed that now comes from somewhere else has neither.
+async function liveThenEdited(
+  t: import("node:test").TestContext,
+  name: string,
+  body: unknown,
+  afterEdit: RelayPath[] | ((id: string) => RelayPath[]),
+): Promise<string[]> {
+  const made = await videoService.addFeed({ name, source: { kind: "pull", url: "rtsp://192.0.2.80/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let answer: RelayPath[] = [readyPath({ name: id })];
+  videoPollDeps.inDemand = () => false;
+  attach(fakeRelay({ status: async () => answer }), new FakeSupervisor());
+  const lines = captureConsole(t, "log");
+  try {
+    await pollOnce();
+    assert.deepEqual(lines.filter((l) => l.includes(name)), [`[video] ${name} is live (1920×1080 H264)`]);
+    answer = typeof afterEdit === "function" ? afterEdit(id) : afterEdit;
+    assert.ok((await videoService.updateFeed(id, body)).ok);
+    await pollOnce();
+    return lines.filter((l) => l.includes(name));
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+}
+
+test("a feed changed to another kind forgets the picture it logged for the old one: no \"went offline\" for a feed that never sent", async (t) => {
+  const lines = await liveThenEdited(t, "Gym cam", { source: { kind: "push", protocol: "rtmp" } }, (id) => [notReadyPath({ name: id })]);
+  assert.deepEqual(lines, ["[video] Gym cam is live (1920×1080 H264)"], "the pull feed's picture was reported gone as if the push feed had lost it");
+});
+
+test("a feed given a new address forgets the picture it logged for the old one", async (t) => {
+  const lines = await liveThenEdited(t, "Atrium cam", { source: { kind: "pull", url: "rtsp://192.0.2.81/s", username: "" } }, []);
+  assert.deepEqual(lines, ["[video] Atrium cam is live (1920×1080 H264)"], "the old address's picture was reported gone as if the new address had lost it");
+});
+
+test("a new login at the same address keeps what the feed logged: a picture lost afterwards is still news", async (t) => {
+  const lines = await liveThenEdited(t, "Hall cam", { source: { kind: "pull", url: "rtsp://192.0.2.80/s", username: "admin" } }, []);
+  assert.deepEqual(lines, ["[video] Hall cam is live (1920×1080 H264)", "[video] Hall cam went offline"]);
+});
+
+test("an import that replaces a feed with one from another address forgets the old picture, as an edit does", async (t) => {
+  const made = await videoService.addFeed({ name: "Porch cam", source: { kind: "pull", url: "rtsp://192.0.2.80/s", username: "" } });
+  assert.ok(made.ok);
+  const id = (made as { feed: { id: string } }).feed.id;
+  let answer: RelayPath[] = [readyPath({ name: id })];
+  videoPollDeps.inDemand = () => false;
+  attach(fakeRelay({ status: async () => answer }), new FakeSupervisor());
+  const lines = captureConsole(t, "log");
+  try {
+    await pollOnce();
+    answer = [];
+    const bundle = {
+      kind: "stage-utility-video-feeds",
+      version: 1,
+      feeds: [{ id, name: "Porch cam", source: { kind: "pull", url: "rtsp://192.0.2.81/s", username: "" } }],
+    };
+    const reviewed = await videoService.previewImport(bundle);
+    assert.ok(reviewed.ok);
+    const here = reviewed.preview.feeds.find((f) => f.id === id)?.here;
+    assert.ok(here, "the preview gave no fingerprint for the feed");
+    const result = await videoService.importFeeds({ bundle, choices: { [id]: "replace" }, expect: { [id]: here } });
+    assert.ok(result.ok && result.report.replaced.length === 1, JSON.stringify(result));
+    await pollOnce();
+    assert.deepEqual(
+      lines.filter((l) => l.includes("Porch cam")),
+      ["[video] Porch cam is live (1920×1080 H264)"],
+      "the old address's picture was reported gone as if the imported address had lost it",
+    );
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(id);
+  }
+});
+
 // "went offline" is news once per outage, and only for a feed that was
 // showing a picture: live or delayed, then offline.
 
@@ -861,6 +938,46 @@ test("a pull feed whose device never answers is one warning per outage, naming t
   }
 });
 
+test("a pull feed removed mid-outage and added again under the same name logs its first failure afresh", async (t) => {
+  const body = { name: "Rerun cam", source: { kind: "pull", url: "rtsp://192.0.2.57/s", username: "" } };
+  const first = await videoService.addFeed(body);
+  assert.ok(first.ok);
+  const id = (first as { feed: { id: string } }).feed.id;
+  let current = id;
+  const relay = fakeRelay({ status: async () => [notReadyPath({ name: current })] });
+  videoPollDeps.inDemand = () => false;
+  attach(relay, new FakeSupervisor());
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const lines = captureConsole(t, "warn", "log");
+  const dial = () => lines.filter((l) => l.includes("Rerun cam:"));
+  const dialOnce = async (): Promise<void> => {
+    await pollOnce();
+    videoService.markRequested(current);
+    t.mock.timers.tick(PULL_START_TIMEOUT_MS);
+    await pollOnce();
+  };
+  try {
+    await dialOnce();
+    assert.equal(dial().length, 1, "sanity: the first feed's dial failure is logged");
+
+    await videoService.removeFeed(id);
+    const second = await videoService.addFeed(body);
+    assert.ok(second.ok);
+    current = (second as { feed: { id: string } }).feed.id;
+    assert.equal(current, id, "sanity: the same name mints the same id");
+    // The add reconciled the relay, which starts a poll of its own; one still in
+    // flight would swallow the poll below.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+
+    t.mock.timers.tick(RECENT_REQUEST_MS);
+    await dialOnce();
+    assert.equal(dial().length, 2, "the re-added feed's first failure was swallowed as a repeat of the deleted feed's");
+  } finally {
+    await videoService.detachRelay();
+    await videoService.removeFeed(current);
+  }
+});
+
 // Driven on the real binary: after a respawn the first poll finds no paths,
 // and a pull feed read offline (so a screen did not ask for it) until the
 // poll after the reconcile, up to STATUS_POLL_MS later.
@@ -1120,6 +1237,48 @@ test("relayTarget keeps answering 503 for a feed the last reconcile failed to ha
     assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN);
   } finally {
     fail = false;
+    await videoService.detachRelay();
+    await videoService.removeFeed(firstId);
+    await videoService.removeFeed(secondId);
+  }
+});
+
+test("a reconcile that rejects one feed's path still hands the relay the others, and is retried", async (t) => {
+  const { RelayReconcileError } = await import("./relay.js");
+  // The id a feed named "Foyer" mints. The relay rejects its path from the very
+  // first reconcile, so nothing has ever marked either feed as given.
+  let failId: string | null = "foyer";
+  const relay = fakeRelay({
+    reconcile: async () => {
+      if (failId !== null) {
+        throw new RelayReconcileError(`could not set up relay paths (${failId}: MediaMTX answered 500)`, [failId]);
+      }
+    },
+  });
+  const supervisor = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  attach(relay, supervisor);
+  const lines = captureConsole(t, "warn"); // before the adds: the first failed reconcile is the one logged
+  const first = await videoService.addFeed({ name: "Narthex", source: { kind: "pull", url: "rtsp://192.0.2.66/s", username: "" } });
+  const second = await videoService.addFeed({ name: "Foyer", source: { kind: "pull", url: "rtsp://192.0.2.67/s", username: "" } });
+  assert.ok(first.ok && second.ok);
+  const firstId = (first as { feed: { id: string } }).feed.id;
+  const secondId = (second as { feed: { id: string } }).feed.id;
+  assert.equal(secondId, "foyer", "the test's rejected path is the second feed's id");
+  try {
+    assert.equal(await videoService.reconcileRelay(), false, "a partial failure is still a failed reconcile, so the readiness poll retries");
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` }, "the feed whose path was set up must play");
+    assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN, "the feed whose path was rejected stays refused");
+    assert.ok(
+      lines.some((line) => line.includes("[video] could not reconcile the relay") && line.includes(secondId)),
+      `the failure must be logged on a [video] line: ${JSON.stringify(lines)}`,
+    );
+
+    failId = null;
+    assert.equal(await videoService.reconcileRelay(), true);
+    assert.notDeepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN, "the retry hands the relay the feed");
+  } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(firstId);
     await videoService.removeFeed(secondId);

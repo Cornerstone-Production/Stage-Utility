@@ -7,7 +7,7 @@
 // order; the server's order is the one the arrows walk.
 
 import { formatClock } from "../lib/clock-format";
-import { switcherSequence, stepTarget } from "../settings/sections/plan-switcher-step";
+import { switcherSequence, stepTarget, type SwitcherEntry } from "../settings/sections/plan-switcher-step";
 
 /** The plans of one service type, in the order the server sent them. */
 export function plansOfType(plans: UpcomingPlan[], serviceTypeId: string | null): UpcomingPlan[] {
@@ -30,8 +30,8 @@ export function stepPlan(typePlans: UpcomingPlan[], serviceTypeId: string, curre
 }
 
 /** The stops of the dropdown: every plan of the type, nothing else. */
-export function dropdownPlans(typePlans: UpcomingPlan[], serviceTypeId: string) {
-  return switcherSequence(typePlans, "upcoming", serviceTypeId);
+export function dropdownPlans(typePlans: UpcomingPlan[]): SwitcherEntry[] {
+  return switcherSequence(typePlans, "upcoming", null);
 }
 
 export interface PlanLink {

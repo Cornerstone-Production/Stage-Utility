@@ -676,6 +676,39 @@ describe("an unreachable relay", () => {
     assert.equal(relayFailureLines.length, 1, `expected exactly one line for two failures of the same outage; got: ${JSON.stringify(relayFailureLines)}`);
   });
 
+  test("a feed removed mid-outage and added again logs its first relay failure afresh", async (t) => {
+    proxyOutage.forget();
+    const warns = captureConsole(t, "warn");
+    const failures = () => warns.filter((l) => l.includes("proxy to relay failed for gonecam"));
+    const addGone = async (): Promise<string> => {
+      const made = await videoService.addFeed({ name: "gonecam", source: { kind: "push", protocol: "whip" } });
+      assert.ok(made.ok, "the feed must be added for this to mean anything");
+      // A feed change tells relay-lifecycle, which (the Video switch being off here) detaches the relay.
+      videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+      await videoService.reconcileRelay();
+      await publish();
+      return (made as { feed: { id: string } }).feed.id;
+    };
+    const offer = () => fetchSu("/video/gonecam/whep", { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" });
+
+    const id = await addGone();
+    try {
+      await offer();
+      assert.equal(failures().length, 1, "sanity: the first feed's failure is logged");
+
+      await videoService.removeFeed(id);
+      await addGone();
+      await offer();
+      assert.equal(failures().length, 2, "the re-added feed's first failure was swallowed as a repeat of the deleted feed's");
+    } finally {
+      await videoService.removeFeed(id);
+      // Removing it detached the relay again; the tests after this one expect it attached.
+      videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+      await videoService.reconcileRelay();
+      await publish();
+    }
+  });
+
   test("recovery logs once, after settling, once the relay answers again", async (t) => {
     proxyOutage.forget();
     proxyOutage.settleAfter(1); // the default is 2 minutes; this test cannot wait that long

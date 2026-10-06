@@ -329,6 +329,9 @@ export class RelaySupervisor extends EventEmitter {
     const child = this.child;
     const done = new Promise<void>((resolve) => this.stopWaiters.push(resolve));
     child.kill("SIGTERM");
+    // A second stop() before the exit replaces the first one's timer, which
+    // onExit() could then never clear.
+    this.killTimer = cleared(this.killTimer);
     this.killTimer = setTimeout(() => {
       child.kill("SIGKILL");
     }, STOP_KILL_AFTER_MS);
@@ -442,9 +445,9 @@ export class RelaySupervisor extends EventEmitter {
     // and reports it ONLY through 'error'. An EventEmitter with no 'error'
     // listener THROWS on that event by Node's own special case, crashing
     // this entire server over one bad path. 'exit' may still fire
-    // afterward (code null, signal null, per Node's docs); handledBySpawnError
-    // skips it so the same failure is not reported, and restarted, twice.
-    let handledBySpawnError = false;
+    // afterward (code null, signal null, per Node's docs); onExit() has
+    // already forgotten this child by then, so the exit handler below skips
+    // it and the same failure is not reported, and restarted, twice.
     // `on`, not `once`: a kill can fail more than once (stop() escalating
     // SIGTERM to SIGKILL), and an 'error' with no listener left throws,
     // taking the server down with it.
@@ -456,7 +459,6 @@ export class RelaySupervisor extends EventEmitter {
       // spawn() never actually created a process; that is the one case
       // this is a spawn failure at all.
       if (child.pid === undefined) {
-        handledBySpawnError = true;
         this.onExit(null, `could not start: ${errorMessage(err)}`);
         return;
       }
@@ -469,7 +471,6 @@ export class RelaySupervisor extends EventEmitter {
       // exit is stale and must not touch the newer child's timers, pid
       // file or status.
       if (this.child !== child) return;
-      if (handledBySpawnError) return;
       this.onExit(code, undefined, signal ?? null);
     });
     this.armHealthyTimer();
@@ -545,7 +546,7 @@ export class RelaySupervisor extends EventEmitter {
     this.restartTimer = null;
     const rewrite = this.beforeRespawn;
     if (!rewrite) {
-      this.spawnChild();
+      this.spawnOrFail();
       return;
     }
     const run = this.run;
@@ -555,6 +556,18 @@ export class RelaySupervisor extends EventEmitter {
       if (run === this.run) this.onExit(null, `could not rewrite its config: ${errorMessage(err)}`);
       return;
     }
-    if (run === this.run) this.spawnChild();
+    if (run === this.run) this.spawnOrFail();
+  }
+
+  /** spawnChild() for a respawn, which no caller awaits: a spawn() that throws
+   *  (ENOMEM, ENOEXEC) is a failed attempt like any other, backed off and
+   *  retried. Left to escape, it would be an unhandled rejection that ends
+   *  the retry loop with the status stuck on "failing" and no timer behind it. */
+  private spawnOrFail(): void {
+    try {
+      this.spawnChild();
+    } catch (err) {
+      this.onExit(null, `could not start: ${errorMessage(err)}`);
+    }
   }
 }

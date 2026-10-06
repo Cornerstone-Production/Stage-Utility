@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { onNotification } from "../lib/api";
+import { useResyncOn } from "../lib/use-resync-on";
 
 /**
  * Hydrate a change-driven status channel and keep it live, without the older
@@ -76,7 +77,9 @@ import { onNotification } from "../lib/api";
  *   dashboard's own channel. A caller that renders a negative claim from
  *   `value` (recorders() calling a `null` OBS "not connected", `null` display
  *   presence "no screens online") must gate on `known` first: unknown is its
- *   own state, not a false claim of the state's absence.
+ *   own state, not a false claim of the state's absence. While `enabled` is
+ *   false it is `{ value: null, known: false }`, including after an enabled
+ *   window that had answered.
  */
 /**
  * The frame's `rev`, or null when it carries none.
@@ -118,6 +121,15 @@ export function useStatusChannel<T extends object>(
   // The rev-less stand-in for `pushedRev` — see the header.
   const pushedLive = useRef(false);
 
+  // A new window forgets what the last one knew, in the render that opens it.
+  // `known` used to be cleared by a microtask after the effect, so the first
+  // render of a re-enabled hook (or one pointed at another channel) reported the
+  // previous window's answer as known until that microtask ran: a frame of a
+  // claim made on a read that had not happened. The two refs below are reset in
+  // the effect because only the effect reads them. Every caller memoises `read`,
+  // so this does not resync on every render.
+  useResyncOn([enabled, pushChannel, read, clearOnReadFailure], () => setKnown(false));
+
   useEffect(() => {
     if (!enabled) return;
     // A fresh window: a rev left over from a previous `enabled` cycle, or from a
@@ -125,16 +137,6 @@ export function useStatusChannel<T extends object>(
     pushedRev.current = null;
     pushedLive.current = false;
     let cancelled = false;
-    // Deferred a tick: setState called synchronously in an effect body is a
-    // lint violation (cascading renders), and `known` starting false on a
-    // genuine first mount makes the call a no-op anyway. What it must still do
-    // is clear a `true` left over from a PREVIOUS window before this one's own
-    // read or subscribe can set it again — same reasoning as the two refs
-    // above, just state instead of a ref because a render has to see it.
-    queueMicrotask(() => {
-      if (!cancelled) setKnown(false);
-    });
-
     // Subscribe FIRST, so a push that lands while the read is in flight is seen
     // rather than silently lost between the two.
     const off = onNotification(pushChannel, (p, replayed) => {
@@ -211,5 +213,9 @@ export function useStatusChannel<T extends object>(
     // fresh window resets the counter above.
   }, [enabled, pushChannel, read, clearOnReadFailure]);
 
+  // A disabled hook neither reads nor subscribes, so what it holds from an
+  // earlier enabled window is a snapshot nothing is keeping current. Reporting
+  // it would be a claim about the present: unknown is the honest answer.
+  if (!enabled) return { value: null, known: false };
   return { value, known };
 }
