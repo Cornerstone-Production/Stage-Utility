@@ -148,6 +148,9 @@ const REQUEST_FACING = [
   "routes/legacy-page-routes.ts",
   "routes/log-paths.ts",
   "routes/log-routes.ts",
+  // Logs nothing itself; the lines for a send, a refusal and a cleared alert are
+  // messages-service.ts's, above. Listed because every routes/ file is.
+  "routes/messages-routes.ts",
   "routes/operator-paths.ts",
   "routes/plan-routes.ts",
   "routes/preset-routes.ts",
