@@ -3620,14 +3620,13 @@ export class StageController {
       throw new Error("outputs:setGroups — groups must be an array of group ids");
     }
     await messagingStore.init();
-    const known = new Map(messagingStore.get().groups.map((g) => [g.id, g]));
-    for (const g of groups as string[]) {
-      if (!known.has(g)) {
-        throw new Error(`outputs:setGroups — no message group has the id ${g}`);
-      }
+    const config = messagingStore.get().groups;
+    const known = new Set(config.map((g) => g.id));
+    const missing = groups.find((g) => !known.has(g));
+    if (missing !== undefined) {
+      throw new Error(`outputs:setGroups — no message group has the id ${missing}`);
     }
-    const wanted = new Set(groups as string[]);
-    const chosen = [...known.values()].filter((g) => wanted.has(g.id));
+    const chosen = config.filter((g) => groups.includes(g.id));
     return this.commitOutputPatch(
       id,
       { groups: chosen.map((g) => g.id) },
