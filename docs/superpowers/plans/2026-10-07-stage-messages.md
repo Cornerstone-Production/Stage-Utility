@@ -15,6 +15,14 @@ named symbol, not the line.
 
 ## PR 1 — Groups and messages (`feat/stage-messages-groups`)
 
+**As built, where it differs from the text below.** The state carries
+`alerts: StageMessage[]` (every running alert, newest first), not `alert`; the
+expiry timer aims at whichever ends first. The messaging config carries a
+`version` and PUT answers 409 on a stale one. Deleted groups are stripped by
+`stripUnknownOutputGroups`, derived from the outputs, on every PUT and at start;
+a strip that fails after the config saved answers 500 `groups-not-cleared`.
+Validation lives in `main/services/message-rules.ts`.
+
 What lands: groups and quick lists as operator config with a Settings page; each
 screen's group membership on the Screens page; a messages service that sends,
 ends alerts, keeps the day's thread, clears nightly and caps at 200; the
@@ -241,7 +249,8 @@ composer** widget (control; groups, quick messages, text, Alert, Send, the threa
 with replies, Clear alert) and the **Messages** widget (readout plus reply
 buttons on panel/shell, its own Groups setting); `POST /api/messages/:id/replies`
 authorised from the widget's stored layout and the output's groups; the alert
-overlay as a sibling of `StageView`'s body, after blackout's early return so a
+overlay, drawing each entry of `alerts` sent to the screen's groups, as a
+sibling of `StageView`'s body, after blackout's early return so a
 blacked-out screen stays black, timed with `useServerNow`; every per-type
 table the new widget types touch; docs (widgets, display URLs, operator app,
 stage-messages).

@@ -75,14 +75,21 @@ name; Companion and automation rules sign as themselves.
 - **Clear alert** ends an alert early; the message stays in the thread.
 
 Groups, quick messages and quick replies are the operator's work: a **config**
-store (`messaging.json`), so they travel in config snapshots. Deleting a group
-removes it from every screen that had it, after a confirm that names how many.
-Messages already sent to it keep its id and show "(deleted group)".
+store (`messaging.json`), so they travel in config snapshots. The config carries
+a `version`; a save built from an older version is refused (409) and the
+Settings page reloads, so a window opened earlier cannot delete a group another
+window added. Deleting a group removes it from every screen that had it, after a
+confirm that names how many. The removal is worked out from what the screens
+hold, so it runs on every save and at start-up, and a removal that failed is
+finished by the next save. Messages already sent to a deleted group keep its id
+and show "(deleted group)".
 
 ## How it reaches screens
 
 - One **hydrated state channel**, `messages:state`:
-  `{ rev, groups, messages, alert }` where `alert` is the live alert or null.
+  `{ rev, groups, messages, alerts }` where `alerts` is every running alert,
+  newest first. Two can run at once, to different groups; each one's end goes
+  out as its own frame.
   Written in the hello burst and listed in `HYDRATED_CHANNELS`, so a screen that
   reconnects, and an Ultritouch panel on the poll transport that fell past its
   60-second buffer, both recover the current state. Not inside `StageState`:
@@ -108,7 +115,7 @@ Messages already sent to it keep its id and show "(deleted group)".
 | POST | `/api/messages/:id/replies` | Answer: `{ text, outputId?, viewId, objectId }`; 403 when that widget does not follow a group the message went to |
 | POST | `/api/messages/:id/clear-alert` | End an alert early |
 | GET | `/api/messages` | The `messages:state` snapshot |
-| GET/PUT | `/api/messaging` | Groups, quick messages, quick replies |
+| GET/PUT | `/api/messaging` | Groups, quick messages, quick replies, and `version`; PUT answers 409 when the version is stale |
 | PATCH | `/api/outputs/:id` | Gains `{ groups: string[] }` |
 
 Ids that come off the wire (group, message) are validated the way
