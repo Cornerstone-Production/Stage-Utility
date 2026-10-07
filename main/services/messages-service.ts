@@ -224,7 +224,7 @@ export class MessagesService {
     // Nothing to protect, so nothing to say: a new install, or screens in no group.
     if (held.size === 0) return;
     console.warn(
-      `[messages] taking unknown groups off the screens was skipped at start-up: messaging.json did not read cleanly (missing, unreadable or short of entries), so ${plural(held.size, "group")} on the screens ${held.size === 1 ? "was" : "were"} left alone. Fix or restore messaging.json, or save the groups in Settings -> Messages`,
+      `[messages] taking unknown groups off the screens was skipped at start-up: messaging.json did not read cleanly (missing, unreadable or short of entries), so ${scrub(plural(held.size, "group"))} on the screens ${scrub(held.size === 1 ? "was" : "were")} left alone. Fix or restore messaging.json, or save the groups in Settings -> Messages`,
     );
   }
 
