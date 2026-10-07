@@ -32,7 +32,6 @@ import {
   FROM_MAX,
   GROUP_ID,
   GROUPS_MAX,
-  MESSAGE_ID,
   MESSAGE_MAX,
   MESSAGES_CAP,
   MESSAGES_CHANNEL,
@@ -132,7 +131,6 @@ export class MessagesService {
   private lastClearedDate: string | null = null;
   private rev = 0;
   private running = false;
-  private loading: Promise<void> | null = null;
   private loaded = false;
   private alertTimer: ReturnType<typeof setTimeout> | null = null;
   /** The `alertUntil` the timer is aimed at. */
@@ -156,9 +154,18 @@ export class MessagesService {
 
   /** The snapshot `messages:state` carries and GET /api/messages answers. */
   state(): MessagesState {
-    const now = Date.now();
-    const alerts = this.messages.filter((m) => alertRunning(m, now)).reverse();
-    return { rev: this.rev, groups: messagingStore.get().groups, messages: this.messages, alerts };
+    return { rev: this.rev, groups: messagingStore.get().groups, messages: this.messages, alerts: this.runningAlerts(Date.now()) };
+  }
+
+  /** The messages whose alert is still holding the screens at `now`, newest first. */
+  private runningAlerts(now: number): StageMessage[] {
+    return this.messages.filter((m) => alertRunning(m, now)).reverse();
+  }
+
+  /** The messaging config, loaded: the groups, quick messages and quick replies. */
+  async config(): Promise<MessagingConfig> {
+    await messagingStore.init();
+    return messagingStore.get();
   }
 
   // ── Life cycle ─────────────────────────────────────────────────────────
@@ -257,7 +264,6 @@ export class MessagesService {
   async clearAlert(id: string, from?: unknown): Promise<"cleared" | "not-running" | "not-found"> {
     await this.ensureLoaded();
     const by = checkedFrom(from);
-    if (!MESSAGE_ID.test(id)) return "not-found";
     return this.writes.enqueue(async () => {
       const found = this.messages.find((m) => m.id === id);
       if (!found) return "not-found";
@@ -306,20 +312,13 @@ export class MessagesService {
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    // The load in flight, shared: two callers arriving cold must not each assign
-    // the list over the other's send.
-    this.loading ??= (async () => {
-      await messagingStore.init();
-      const file = await messagesStore.load();
-      this.messages = file.messages;
-      this.lastClearedDate = file.lastClearedDate;
-      this.loaded = true;
-    })();
-    try {
-      await this.loading;
-    } finally {
-      this.loading = null;
-    }
+    const [, file] = await Promise.all([messagingStore.init(), messagesStore.load()]);
+    // Checked again after the await: two callers arriving cold both load, and the
+    // second must not assign the list over a send the first one's caller made.
+    if (this.loaded) return;
+    this.messages = file.messages;
+    this.lastClearedDate = file.lastClearedDate;
+    this.loaded = true;
   }
 
   /**
@@ -376,7 +375,7 @@ export class MessagesService {
     this.alertTimer = null;
     this.alertTimerFor = null;
     if (!this.running) return;
-    const ends = this.state().alerts.map((m) => m.alertUntil).filter((t): t is number => t !== null);
+    const ends = this.runningAlerts(Date.now()).map((m) => m.alertUntil).filter((t): t is number => t !== null);
     if (ends.length === 0) return;
     const soonest = Math.min(...ends);
     this.alertTimerFor = soonest;

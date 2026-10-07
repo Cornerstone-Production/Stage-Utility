@@ -23,7 +23,7 @@
 import { MESSAGE_ID } from "../../types/messages.js";
 import { MessageRefused } from "../message-rules.js";
 import { GroupsNotCleared, messagesService } from "../messages-service.js";
-import { MessagingConflict, messagingStore } from "../messaging-store.js";
+import { MessagingConflict } from "../messaging-store.js";
 import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 import type http from "node:http";
 
@@ -97,8 +97,7 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "GET" && pathname === "/api/messaging") {
-    await messagingStore.init();
-    json(res, messagingStore.get());
+    json(res, await messagesService.config());
     return;
   }
 
