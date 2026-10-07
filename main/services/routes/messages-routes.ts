@@ -1,0 +1,91 @@
+// messages-routes.ts — stage messages and the messaging config.
+//
+// Every route must finish responding before it returns (see RouteCtx).
+//
+//   GET  /api/messages                   the messages:state snapshot
+//   POST /api/messages                   send: { to, text, alert?, from? }
+//   POST /api/messages/:id/clear-alert   end a running alert early
+//   GET  /api/messaging                  groups, quick messages, quick replies
+//   PUT  /api/messaging                  replace them
+//
+// A rule a body breaks is a 400 that says which (MessageRefused, MessagingRefused).
+// Anything else that throws is a failed write and is left to the server's own
+// handler, which answers 500: a send that did not save must not read as a refusal.
+//
+// Ids in a path are checked against the shape the server issues them in before
+// anything is looked up, so what reaches the lookup is always sixteen hex digits.
+
+import { MESSAGE_ID } from "../../types/messages.js";
+import { MessageRefused, messagesService } from "../messages-service.js";
+import { MessagingRefused, messagingStore } from "../messaging-store.js";
+import { type RouteCtx, error, json, readBody, readBodyOrEmpty } from "./context.js";
+
+/** A body that must be a JSON object. `readBody` answers `null` for the JSON
+ *  `null`, and an array or a string for those, none of which a route can read
+ *  fields off. */
+function objectBody(body: unknown): Record<string, unknown> | null {
+  return body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+}
+
+export async function messagesRoutes(c: RouteCtx): Promise<void> {
+  const { req, res, pathname, method } = c;
+
+  if (method === "GET" && pathname === "/api/messages") {
+    json(res, messagesService.state());
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/messages") {
+    const body = objectBody(await readBody(req));
+    if (!body) {
+      error(res, "body must be { to, text, alert?, from? }");
+      return;
+    }
+    try {
+      const message = await messagesService.send({ to: body.to, text: body.text, alert: body.alert, from: body.from });
+      json(res, message, 201);
+    } catch (err) {
+      if (!(err instanceof MessageRefused)) throw err;
+      error(res, err.message);
+    }
+    return;
+  }
+
+  const clearMatch = pathname.match(/^\/api\/messages\/([^/]+)\/clear-alert$/);
+  if (method === "POST" && clearMatch) {
+    const id = clearMatch[1];
+    if (!MESSAGE_ID.test(id)) {
+      error(res, "that is not a message id");
+      return;
+    }
+    const body = await readBodyOrEmpty(req);
+    try {
+      if ((await messagesService.clearAlert(id, body.from)) === "not-found") {
+        error(res, "no message has that id", 404);
+        return;
+      }
+    } catch (err) {
+      if (!(err instanceof MessageRefused)) throw err;
+      error(res, err.message);
+      return;
+    }
+    json(res, messagesService.state());
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/messaging") {
+    await messagingStore.init();
+    json(res, messagingStore.get());
+    return;
+  }
+
+  if (method === "PUT" && pathname === "/api/messaging") {
+    try {
+      json(res, await messagesService.updateConfig(await readBody(req)));
+    } catch (err) {
+      if (!(err instanceof MessagingRefused)) throw err;
+      error(res, err.message);
+    }
+    return;
+  }
+}

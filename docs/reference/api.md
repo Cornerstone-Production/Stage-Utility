@@ -102,6 +102,10 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |
 | POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
+| GET | `/api/messages` | The [stage messages](../features/stage-messages.md) state, the snapshot `messages:state` also carries: `{rev, groups, messages, alert}`. `messages` is today's, oldest first; `alert` is the newest message whose alert is still running, else `null` |
+| POST | `/api/messages` | Send a message: `{to, text, alert?, from?}`. `to` is group ids from `/api/messaging`, or exactly `["everyone"]`; `text` is 1–280 characters once trimmed; `alert` (default `false`) holds the screens for 30 seconds; `from` (default `"Operator"`) is 1–60 characters. `201` with the message; the server stamps `id`, `at` and `alertUntil`, and a body cannot choose them. A body that breaks a rule is `400` with the reason |
+| POST | `/api/messages/:id/clear-alert` | End a running alert early (`{from?}` names who did). `200` with the state, also for an alert that is already over; `404` for an id nobody issued, `400` for one that is not a message id |
+| GET / PUT | `/api/messaging` | The groups (`{id, name}`), quick messages and quick replies. `PUT` replaces all three — `{groups, quickMessages, quickReplies}`, a new group carrying no `id` — answers `200` with what is stored, and `400` with the reason for a body past a limit: 20 groups of 1–40 characters, names unique without regard to case and never `Everyone`; 24 quick messages of 1–280; 12 quick replies of 1–60; a group `id` the server never issued. A group left out of the body is deleted and comes off every screen that held it |
 | POST | `/api/bar-items` | Set the context bar's items and order. `{items}` for the desktop bar, `{mobileItems}` for the phone's own set (empty = follow the desktop bar). Either may be omitted and is then left as it stands |
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
 | PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
@@ -614,7 +618,7 @@ something to change:
 `pvp:status` · `scores:status` · `resi:status` · `youtube:status` ·
 `update:status` · `companion:signals` · `osc:feedback` · `people:count` ·
 `wireless:channels` · `calendar:grid` · `displays:presence` · `video:state` ·
-`video:probe`
+`video:probe` · `messages:state`
 
 **Pushed only when something happens:**
 

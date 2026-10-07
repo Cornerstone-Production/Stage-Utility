@@ -90,6 +90,8 @@ import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
 import { videoRoutes } from "./routes/video-routes.js";
 import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
+import { messagesRoutes } from "./routes/messages-routes.js";
+import { messagesService } from "./messages-service.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
@@ -124,6 +126,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   presetRoutes,
   calendarRoutes,
   videoRoutes,
+  messagesRoutes,
 ] as const;
 
 /**
@@ -470,6 +473,11 @@ export function writeHelloBurst(res: EventSink): void {
   // The camera checks' results: empty until the Video feeds page has been
   // open for a moment, and cleared again when the last one closes.
   sseWrite(res, "video:probe", videoService.probeState());
+  // The day's stage messages and the groups they went to. Changes only when
+  // somebody sends, clears an alert or edits a group, which on a quiet Sunday
+  // morning is never — so a screen that connects after the last one would
+  // otherwise miss a running alert until the next message.
+  sseWrite(res, "messages:state", messagesService.state());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

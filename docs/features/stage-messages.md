@@ -55,3 +55,16 @@ service keeps them.
 - **Not restored from a backup.** A message is an observation about one day; the
   groups, quick messages and quick replies are the operator's work and are carried
   by every backup.
+
+### How screens receive them
+
+One channel, `messages:state`, carries `{ rev, groups, messages, alert }`. It is
+sent once when a client connects and again on every change. See
+[Network traffic](../ops/network-traffic.md#stage-messages).
+
+### Deleting a group
+
+`PUT /api/messaging` replaces the groups, quick messages and quick replies. A
+group whose id is gone comes off every screen that held it, in one write, and the
+log says how many: `[messages] group "Green room" deleted; removed from 2
+screen(s)`. Messages already sent to it keep its id.

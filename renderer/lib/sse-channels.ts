@@ -60,6 +60,10 @@ export const HYDRATED_CHANNELS = [
   // Camera checks for pulled feeds: results, not events, so a page opened
   // after the last answer is served the latest one at once.
   "video:probe",
+  // The day's stage messages and their groups. State, not an event: a screen
+  // that connects while an alert is running must show it, and a thread that
+  // changes only when somebody sends would otherwise leave it blank until then.
+  "messages:state",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);
