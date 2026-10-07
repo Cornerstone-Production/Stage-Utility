@@ -77,7 +77,7 @@ function card(over: {
     onSetAllowHls: noop,
     messageGroups: over.messageGroups ?? { groups: ALL, known: true, failed: false },
     onSetGroups: over.onSetGroups ?? noop,
-    onOpenMessagingSettings: over.onOpenMessagingSettings,
+    onOpenMessagingSettings: over.onOpenMessagingSettings ?? noop,
     onSetMode: asyncNoop,
     onRefresh: noop,
     onRemove: noop,
@@ -151,6 +151,22 @@ describe("the Groups submenu", () => {
       await settle();
     });
     assert.deepEqual(sent, [[GREEN.id, BOOTH.id]]);
+  });
+
+  test("the menu stays open across a tick, so several groups can be set in one visit", async () => {
+    const sent: string[][] = [];
+    card({ groups: [], onSetGroups: (ids) => sent.push(ids) });
+    await openGroups();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Green room" }));
+      await settle();
+    });
+    // No reopening: the second tick is made on the same open menu.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Booth" }));
+      await settle();
+    });
+    assert.deepEqual(sent, [[GREEN.id], [BOOTH.id]], "the menu closed after the first tick (each call is built from the card's own groups, which this stub does not update)");
   });
 
   test("unticking removes only that group", async () => {

@@ -87,6 +87,7 @@ function cardFor(kind: ViewKind | null, overrides: Partial<OutputRowProps["outpu
     onSetAllowHls,
     messageGroups: { groups: [], known: true, failed: false },
     onSetGroups: noop,
+    onOpenMessagingSettings: noop,
     onSetMode: asyncNoop,
     onRefresh: noop,
     onRemove: noop,
