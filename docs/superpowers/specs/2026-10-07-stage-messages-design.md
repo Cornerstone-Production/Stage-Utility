@@ -81,7 +81,8 @@ Settings page reloads, so a window opened earlier cannot delete a group another
 window added. Deleting a group removes it from every screen that had it, after a
 confirm that names how many. The removal is worked out from what the screens
 hold, so it runs on every save and at start-up, and a removal that failed is
-finished by the next save. Messages already sent to a deleted group keep its id
+finished by the next save. At start-up it runs only when `messaging.json` read cleanly:
+a corrupt or missing file must not take every group off every screen. Messages already sent to a deleted group keep its id
 and show "(deleted group)".
 
 ## How it reaches screens
